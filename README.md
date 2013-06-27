@@ -1,4 +1,4 @@
-neon-codebase
-=============
+neon-api
+========
 
-central neon codebase repository
+Neon API code
