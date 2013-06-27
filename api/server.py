@@ -271,7 +271,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
 
 
             #Verify API Key
-            if self.parsed_params[properties.API_KEY] not in properties.API_DATA.values():
+            if not self.verify_api_key(self.parsed_params[properties.API_KEY]):
                 raise Exception("API key invalid")
             
             #compare with supported api methods
@@ -384,6 +384,15 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
         else:
             raise Exception("parmas not set")
 
+    def verify_api_key(selfi,key):
+        with open(properties.API_KEY_FILE, 'r') as f:
+            json = f.readline()
+        
+        keys = tornado.escape.json_decode(json)
+        if key not in keys.values():
+            return False
+        
+        return True
 
 
 ###########################################

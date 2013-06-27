@@ -30,6 +30,7 @@ MAX_SAMPLING_RATE = 0.25
 SAVE_DATA_TO_S3 = True
 DELETE_TEMP_TAR = True
 YOUTUBE = False
+API_KEY_FILE = 'apikeys.json'
 
 #=========== S3 Config ===============#
 S3_KEY_PREFIX = 'internal_test_'
@@ -42,16 +43,3 @@ S3_SECRET_KEY = 'd9Q9abhaUh625uXpSrKElvQ/DrbKsCUAYAPaeVLU'
 S3_BUCKET_NAME = 'neon-beta-test' 
 S3_IMAGE_HOST_BUCKET_NAME = 'host-thumbnails' 
 
-#=========== API KEY MAPPING ==========#
-
-API_DATA = {}
-API_DATA['brightcove'] = 'd08f9ecc747ea16712f86fd192b9c574'
-API_DATA['neon'] = 'a63728c09cda459c3caaa158f4adff49'
-API_DATA['sophie'] = '6988ec3aba1eaddf2435141bf10487ca'
-API_DATA['deborah'] = '51977f38bb3afdf634dd8162c7a33691'
-API_DATA['mike'] = '18126e7bd3f84b3f3e4df094def5b7de'
-API_DATA['david']= '172522ec1028ab781d9dfd17eaca4427'
-API_DATA['expotv']= 'a7a86a763e97ce7276c40138733f5e68'
-API_DATA['postgazette']= '1a1887842e4da19de2980538b1ae72d4'
-API_DATA['danceon']= '190407db22daa11c454ea70139513b28'
-API_DATA['bigframe']= '3926403a2163233129fe59bccbcbbf53'
