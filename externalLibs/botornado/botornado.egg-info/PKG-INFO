@@ -1,0 +1,16 @@
+Metadata-Version: 1.0
+Name: botornado
+Version: 0.0.4git
+Summary: boto on tornado - an asynchronous Amazon Web Service (AWS) client
+Home-page: https://github.com/yyuu/botornado
+Author: Yamashita, Yuu
+Author-email: yamashita@geishatokyo.com
+License: MIT
+Description: UNKNOWN
+Platform: Posix; MacOS X; Windows
+Classifier: Development Status :: 3 - Alpha
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Internet
