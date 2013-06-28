@@ -210,7 +210,7 @@ class BrightcoveApi(object):
         req = tornado.httpclient.HTTPRequest(url = url, method = "GET", request_timeout = 60.0, connect_timeout = 10.0)
         response = http_client.fetch(req)
         resp = tornado.escape.json_decode(response.body)
-        self.format_neon_api_request(resp['id'] ,resp['FLVURL'])
+        print url #self.format_neon_api_request(resp['id'] ,resp['FLVURL'])
 
 
 if __name__ == "__main__" :
