@@ -12,7 +12,7 @@ import poster.encode
 import urllib
 
 class BrightcoveApi(object):
-    def __init__(self,neon_api_key,publisher_id=None,read_token=None,write_token=None):
+    def __init__(self,neon_api_key,publisher_id=0,read_token=None,write_token=None):
         self.publisher_id = publisher_id
         self.neon_api_key = neon_api_key
         self.read_token = read_token
@@ -30,12 +30,38 @@ class BrightcoveApi(object):
                 url += '?%s' % data
         return url
 
-    def add_image(self,video_id,im, **kwargs):
+    ###### Brightcove media api update method ##########
+    ''' add thumbnail and videostill in to brightcove account '''
+    def update_thumbnail_and_videostill(self,video_id,image):
+        rt = self.add_image(video_id,image,atype='thumbnail')
+        rv = self.add_image(video_id,image,atype='videostill')
+        
+        if rt and rv:
+            return True
+        return False
+
+    def add_image(self,video_id,im,atype='thumbnail', **kwargs):
         #http://help.brightcove.com/developer/docs/mediaapi/add_image.cfm
+        #http://support.brightcove.com/en/video-cloud/docs/adding-images-videos-media-api#upload
+
+        ''' helper method to send request to brightcove'''
+        def send_add_image_request(headers,body):
+            client_url = "http://api.brightcove.com/services/post"
+            http_client = tornado.httpclient.HTTPClient()
+            retries = 5
+            ret = False
+            for i in range(retries):
+                try:
+                    req = tornado.httpclient.HTTPRequest(url = client_url, method = "POST",headers =headers, body = body, request_timeout = 60.0, connect_timeout = 10.0)
+                    response = http_client.fetch(req)
+                    ret = True
+                    break
+                except tornado.httpclient.HTTPError, e:
+                    continue
+            return ret
         
         reference_id = kwargs.get('reference_id', None)
         remote_url = kwargs.get('remote_url', None)
-        display_name = kwargs.get('display_name', None)
         
         outer = {}
         params = {}
@@ -44,9 +70,14 @@ class BrightcoveApi(object):
         image = {} 
         if reference_id is not None:
             image["referenceId"] = reference_id
-        if display_name is not None:
-            image["displayName"] = display_name 
-        image["type"] = "THUMBNAIL"
+        
+        if atype == 'thumbnail':    
+            image["type"] = "THUMBNAIL"
+            image["displayName"] = str(self.publisher_id) + '-neon-thumbnail-for-video-' + str(video_id)
+        else:
+            image["type"] = "VIDEO_STILL"
+            image["displayName"] = str(self.publisher_id) + '-neon-video-still-for-video-' + str(video_id) 
+
         params["image"] = image
         outer["params"] = params
         outer["method"] = "add_image"
@@ -55,23 +86,66 @@ class BrightcoveApi(object):
         
         #save image
         filestream = StringIO()
-        im.save(filestream, 'png')
+        im.save(filestream, 'jpeg')
         filestream.seek(0)
         image_data = filestream.getvalue()
         post_param = []
-        fileparam = poster.encode.MultipartParam("filePath",value= image_data,filetype='image/png',filename='thumb.png')
+        fileparam = poster.encode.MultipartParam("filePath",value= image_data,filetype='image/jpeg',filename='thumbnail-' + str(video_id) + '.jpeg')
         args = poster.encode.MultipartParam("JSONRPC", value=body)
         post_param.append(args)
         post_param.append(fileparam)
         datagen, headers = multipart_encode(post_param)
         body = "".join([data for data in datagen])
+        
+        #send request
+        ret = send_add_image_request(headers,body)
+        return ret 
 
+    ''' update_video implementation '''
+    def update_brightcove_thumbnail(self,video_id, **kwargs):
+        reference_id = kwargs.get('reference_id', None)
+        display_name = kwargs.get('name', None)
+        thumbnail_url = 'https://neon-lab-blog-content.s3.amazonaws.com/uploads/neonglogogreen2.png'
+
+        outer = {}
+        params = {}
+        params["token"] = self.write_token 
+        video = {}
+        video["id"] = video_id
+        video["thumbnailURL"] = thumbnail_url 
+        video["videostillURL"] = thumbnail_url 
+        
+        if display_name is not None:
+            video["name"] = display_name 
+        
+        params["video"] = video
+        
+        image = {}
+        image["type"] = "THUMBNAIL"
+        display_name = 'thumbnail-' + str(video_id)  #kwargs.get('display_name', None)
+        params["image"] = image
+        
+        outer["params"] = params
+        outer["method"] = "update_video"
+
+        body = tornado.escape.json_encode(outer)
+        post_param = []
+        args = poster.encode.MultipartParam("JSONRPC", value=body)
+        post_param.append(args)
+        datagen, headers = multipart_encode(post_param)
+        body = "".join([data for data in datagen])
+        
         client_url = "http://api.brightcove.com/services/post"
         http_client = tornado.httpclient.HTTPClient()
-        req = tornado.httpclient.HTTPRequest(url = client_url, method = "POST",headers =headers, body = body, request_timeout = 60.0, connect_timeout = 10.0)
+        req = tornado.httpclient.HTTPRequest(url = client_url, method = "POST", headers = headers, body = body, request_timeout = 600.0, connect_timeout = 20.0)
         response = http_client.fetch(req)
-        #print response.body
-    
+        
+        #TODO Retry
+        print response.body
+        return
+
+
+    ############# Brightcove media api feed method ####################
     def update_abtest_custom_thumbnail_video(self,video_id,neona,neonb,neonc, **kwargs):
         
         reference_id = kwargs.get('reference_id', None)
@@ -122,7 +196,7 @@ class BrightcoveApi(object):
         data['token'] = self.read_token
         data['media_delivery'] = 'http'
         data['output'] = output
-        data['video_fields'] = 'customFields,id,tags,FLVURL'
+        data['video_fields'] = 'customFields,id,tags,FLVURL,thumbnailURL,videostillURL'
         data['any'] = 'tag:neon'
 
         url = self.format_get(self.read_url,data)
@@ -131,13 +205,59 @@ class BrightcoveApi(object):
         response = http_client.fetch(req)
         return response.body
 
-    def process_publisher_feed(self,result):
+    ''' process publisher feed for neon tags '''
+    def process_publisher_feed(self,feed):
+        json = tornado.escape.json_decode(feed)
+        try:
+            items = json['items']
+        except:
+            print json
+            return
+        
+        #parse and get video ids to process
+        for item in items:
+            tags = item['tags']
+            to_process = False
+            
+            #check if neon tagged
+            if "neon" in tags or "Neon" in tags:
+                
+                #if video has been processed for abtest <-- ppg
+                if item.has_key("customFields"):
+                    #check if the custom field data is set 
+                    if item["customFields"] is not None and item["customFields"].has_key("neona"):
+                        neonthumbnail = item["customFields"]["neona"]
+                        #check if the field is empty
+                        if neonthumbnail is not None and len(neonthumbnail) > 0:
+                            #print item['id'],neonthumbnail
+                            continue
+
+                #Check if neon has selected thumbnail/ videoStill
+                thumb = item['thumbnailURL'] 
+                still = item['videoStillURL']
+                if 'neon' in thumb and 'neon' in still:
+                    pass #the video has already been processed
+                else:
+                    vid = item['id']
+                    if item.has_key('FLVURL') == False:
+                        print "ERROR http delivery not enabled", vid
+                        return
+                    d_url = item['FLVURL']
+                    print "creating request for video [topn] ", vid
+                    self.format_neon_api_request(vid,d_url,request_type='topn') 
+
+
+    ''' Process publisher feed and generate abtest requests'''
+    def process_publisher_feed_for_abtest(self,result):
         #   http://api.brightcove.com/services/library?command=search_videos&token=XnqvEfjmnharPqj9Ob_sLFtkkoltcoGmd4pvMSsyq8qXOscO0MoouA..&any=tag:neon&media_delivery=http&output=json&video_fields=customFields,id,tags,FLVURL
 
         vids_to_process = [] 
         json = tornado.escape.json_decode(result)
-        items = json['items']
-
+        try:
+            items = json['items']
+        except:
+            print json
+            return
         #parse and get video ids to process
         for item in items:
             tags = item['tags']
@@ -166,10 +286,10 @@ class BrightcoveApi(object):
                     
                     d_url = item['FLVURL']
                     print "processing ", vid
-                    self.format_neon_api_request(vid,d_url) 
+                    self.format_neon_api_request(vid,d_url,request_type='abtest') 
 
 
-    def format_neon_api_request(self,id,download_url):
+    def format_neon_api_request(self,id,video_download_url,request_type='topn'):
         request_body = {}
         
         #brightcove tokens
@@ -180,11 +300,21 @@ class BrightcoveApi(object):
         request_body["api_key"] = self.neon_api_key 
         request_body["video_id"] = str(id)
         request_body["video_title"] = str(id) 
-        request_body["video_url"] = download_url
+        request_body["video_url"] = video_download_url
         request_body["callback_url"] = "http://thumbnails.neon-lab.com/testcallback"
-        client_url = "http://thumbnails.neon-lab.com/api/v1/submitvideo/abtest"
+
+        if request_type == 'topn':
+            client_url = "http://thumbnails.neon-lab.com/api/v1/submitvideo/brightcove"
+            #client_url = "http://localhost:8081/api/v1/submitvideo/brightcove"
+            request_body["brightcove"] =1
+
+        elif request_type == 'abtest':
+            client_url = "http://thumbnails.neon-lab.com/api/v1/submitvideo/abtest"
+            request_body["abtest"] = 1
+        else:
+            return
+        
         #client_url = "http://localhost:8081/api/v1/submitvideo/abtest"
-        request_body["abtest"] = 1
 
         body = tornado.escape.json_encode(request_body)
         h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
@@ -193,14 +323,17 @@ class BrightcoveApi(object):
         response = http_client.fetch(req)
         #verify response 200 OK
 
-    def create_neon_api_requests(self):
+    def create_neon_api_requests(self,request_type='default'):
         
         #Get publisher feed
         response = self.get_publisher_feed(command='search_videos')
 
-        #Parse publisher feed
-        self.process_publisher_feed(response)
-
+        #Parse publisher feed and create requests
+        if request_type == 'abtest':
+            self.process_publisher_feed_for_abtest(response)
+        else:
+            self.process_publisher_feed(response)
+            
         return
 
     def create_request_by_video_id(self,video_id):
@@ -214,11 +347,14 @@ class BrightcoveApi(object):
 
 
 if __name__ == "__main__" :
-
+    print 'test'
     #Test publisher feed with neon api key
-    #bc = BrightcoveApi('a63728c09cda459c3caaa158f4adff49',read_token='cLo_SzrziHEZixU-8hOxKslzxPtlt7ZLTN6RSA7B3aLZsXXF8ZfsmA..',write_token='cLo_SzrziHEZixU-8hOxKslzxPtlt7ZLC1siJaM9THyqC2wMlIuBJg..')
+    bc = BrightcoveApi('a63728c09cda459c3caaa158f4adff49',read_token='cLo_SzrziHEZixU-8hOxKslzxPtlt7ZLTN6RSA7B3aLZsXXF8ZfsmA..',write_token='vlBj_kvwXu7r1jPAzr8wYvNkHOU0ZydFKUDrm2fnmVuZyDqEGVfsEg..')
+
+    #Get videos to abtest
+    #bc.create_neon_api_requests(request_type='abtest')
     
-    #post gazette
-    bc = BrightcoveApi('1a1887842e4da19de2980538b1ae72d4',read_token='hLGCV_uw2wWjyVxq6wgMMPHhLf3RjQbjeBWFnRgfxBFGsCaSAPYepg..',write_token='XnqvEfjmnhbg62iUQn_fBIgJK4HJpzrdYIqnz9KdzV49IzVEKY7EGg..')
-    bc.create_neon_api_requests()
-    #bc.create_request_by_video_id('2472092942001')
+    #Test replacing default thumbnail and still for the video
+    #im = Image.open('test.jpg')
+    #bc.add_image('2369368872001',im,atype='thumbnail')
+    #bc.add_image('2369368872001',im,atype='videostill')

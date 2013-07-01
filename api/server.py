@@ -288,6 +288,11 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 #verify read and write tokens are specified in the request
                 self.parsed_params[properties.BCOVE_READ_TOKEN] = params[properties.BCOVE_READ_TOKEN]
                 self.parsed_params[properties.BCOVE_WRITE_TOKEN] = params[properties.BCOVE_WRITE_TOKEN]
+            elif params.has_key(properties.BRIGHTCOVE_THUMBNAILS):
+                self.parsed_params[properties.BRIGHTCOVE_THUMBNAILS]  = params[properties.BRIGHTCOVE_THUMBNAILS]
+                #verify read and write tokens are specified in the request
+                self.parsed_params[properties.BCOVE_READ_TOKEN] = params[properties.BCOVE_READ_TOKEN]
+                self.parsed_params[properties.BCOVE_WRITE_TOKEN] = params[properties.BCOVE_WRITE_TOKEN]
             
             else:
                 #DEFAULT

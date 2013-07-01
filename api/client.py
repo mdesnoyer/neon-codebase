@@ -539,7 +539,8 @@ class ProcessVideo(object):
         except Exception,e:
             log.error("key=save_result_to_s3 msg=general exception " + e.__str__() )
 
-    def save_request_data(self, result):
+    ''' if complete, store response else store status are requeued '''
+    def save_request_data(self, result=None):
         k = Key(self.s3bucket)
 
         #save request data 
@@ -597,6 +598,18 @@ class ProcessVideo(object):
         neonb = s3_url_prefix + "/" + self.base_filename + "/" + "neonb.jpeg"
         neonc = s3_url_prefix + "/" + self.base_filename + "/" + "neonc.jpeg"
         bcove.update_abtest_custom_thumbnail_video(video_id,neona,neonb,neonc)
+
+    def update_brightcove_thumbnail(self):
+        api_key = self.request_map[properties.API_KEY]  
+        rtoken  = self.request_map[properties.BCOVE_READ_TOKEN]
+        wtoken  = self.request_map[properties.BCOVE_WRITE_TOKEN]
+        video_id = self.request_map[properties.VIDEO_ID]
+        
+        res = self.get_topn_thumbnails(1) # Get the top thumbnai # Get the top thumbnail
+        fno = res[0][0]
+        image = self.data_map[fno][1]
+        bcove   = brightcove_api.BrightcoveApi(neon_api_key=api_key,read_token=rtoken,write_token=wtoken)
+        bcove.update_thumbnail_and_videostill(video_id,image)
 
 
 #############################################################################################
@@ -729,7 +742,8 @@ class HttpDownload(object):
                 cr.send_response()  
                 self.pv.save_request_data(cr.response)
                 return 
-    
+
+        ## On Success 
         else:
             #Send client response
             client_response = self.send_client_response()
@@ -768,15 +782,16 @@ class HttpDownload(object):
     def send_client_response(self):
 
         # API Specific client response
-
+        
+        ''' Neon API section '''
         if self.job_params.has_key(properties.TOP_THUMBNAILS):
             n = int(self.job_params[properties.TOP_THUMBNAILS])
             res = self.pv.get_topn_thumbnails(n)
             data = [x[0] for x in res]
             timecodes = self.pv.get_timecodes(data)
-            ####### For testing only ################
+            
+            #save ranked thumbnails
             self.pv.save_result_data_to_s3(data)
-            #########################################
 
         elif self.job_params.has_key(properties.THUMBNAIL_RATE):
             rate = float(self.job_params[properties.THUMBNAIL_RATE])
@@ -784,14 +799,14 @@ class HttpDownload(object):
             res = self.pv.get_thumbnail_at_rate(rate)
             data = [x[0] for x in res]   
 
-            ####### For testing only ################
+            #save ranked thumbnails
             self.pv.save_result_data_to_s3(data)
-            #########################################       
 
         elif self.job_params.has_key(properties.THUMBNAIL_INTERVAL):
             data = self.pv.get_topn_thumbnails(5) #DUMMY
-
-        ## AB Test
+       
+        ############# Brightcove secion ###########################
+        ## AB Test - Upload to Brightcove
         elif self.job_params.has_key(properties.ABTEST_THUMBNAILS):
             # host the images to AB test on S3
             self.pv.host_abtest_images()
@@ -801,13 +816,23 @@ class HttpDownload(object):
             
             # save request data
             return
+       
+        ## Upload thumbnails in to Brightcove account 
+        elif self.job_params.has_key(properties.BRIGHTCOVE_THUMBNAILS):
+            #push thumbnail to brightcove account
+            self.pv.update_brightcove_thumbnail()
         
+            #TODO Save the top thumbnail 
+            #self.pv.save_top_thumbnail()
+            return
+
         else:
             #Default
             data = []
             log.error("key=client_response msg=api not supported")
             return
 
+        #Finalize
         #Format data based on the api request
         if self.error is None:
             if len(data) == 0:
@@ -1051,20 +1076,21 @@ if __name__ == "__main__":
                       help='Directory containing the model')
 
     options, args = parser.parse_args()
-
+    
     signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGINT, sig_handler)
 
     num_processes= options.n_workers
     
-    if options.local:
-        import localproperties as properties
-    else:
-        import properties
-
     #Logger
     global log
     log = errorlog.FileLogger("client")
+    
+    if options.local:
+        log.info("Running locally")
+        import localproperties as properties
+    else:
+        import properties
 
     #code version file
     code_version_file = "code.version"

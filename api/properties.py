@@ -31,6 +31,7 @@ SAVE_DATA_TO_S3 = True
 DELETE_TEMP_TAR = True
 YOUTUBE = False
 API_KEY_FILE = 'apikeys.json'
+BRIGHTCOVE_THUMBNAILS = "brightcove"
 
 #=========== S3 Config ===============#
 S3_KEY_PREFIX = 'internal_test_'

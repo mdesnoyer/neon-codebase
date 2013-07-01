@@ -23,4 +23,5 @@ for customer_id in customer_data.keys():
     print "Retreiveing feed for " , customer_id
 
     bc = BrightcoveApi(neon_api_key =napi,read_token =rtoken, write_token =wtoken)
+    #bc.create_neon_api_requests(request_type='abtest')
     bc.create_neon_api_requests()
