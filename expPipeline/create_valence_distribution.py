@@ -17,7 +17,7 @@ outfile = "vscore.txt"
 #fname <net valence score>
 with open(infile) as f:
     for f in f.readlines():
-        vals = f.split('\t')
+        vals = f.strip().split(', ')
         fname = vals[0]
         score = float(vals[1].rstrip('\n'))
         map[fname] = score

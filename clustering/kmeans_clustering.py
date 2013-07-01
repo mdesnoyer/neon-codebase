@@ -6,6 +6,7 @@ import sys
 import os 
 import numpy
 import shutil
+from optparse import OptionParser
 
 def cluster_data(data,cluster_cnt,iter=20,thresh=1e-5):
     """ Group data into a number of common clusters
@@ -24,24 +25,34 @@ def cluster_data(data,cluster_cnt,iter=20,thresh=1e-5):
  
 if __name__ == "__main__":
 
-    path = os.getcwd()
-    dir = sys.argv[1]
-    path = path + "/" + dir + "/" 
-    dirList=os.listdir(path)
-    dirList.sort()
+    parser = OptionParser()
+    
+    parser.add_option('-i', '--input', default=None,
+                      help='Input file, with valence scores. Format is <filname> <score>')
+    parser.add_option('--in_dir', default=None,
+                      help='Input directory')
+    parser.add_option('-n', type='int', default=40,
+                      help='Number of clusters')
 
-    nclusters = int(sys.argv[2])
+    options, args = parser.parse_args()
+
+    # Parse the valence score file to get the filenames to use
+    descriptor_files = []
+    for line in open(options.input):
+        descriptor_files.append(line.strip().split()[0])
+
+    nclusters = options.n
     arrays = []
     data_map = []
 
     f = open('clustering_output_' + str(nclusters) ,"w")
 
     i=0
-    for infile in dirList:
-        if infile.endswith('.npy'):
-            smarray = numpy.load(path+infile)
-            arrays.append(smarray)
-            data_map.append(infile)
+    for inFile in descriptor_files:
+        full_file = os.path.join(options.in_dir, '%s.npy' % inFile)
+        smarray = numpy.load(full_file)
+        arrays.append(smarray)
+        data_map.append('%s.npy' % inFile)
 
     data = numpy.array(arrays)
     clusters,code_ids = cluster_data(data,nclusters)
@@ -56,16 +67,18 @@ if __name__ == "__main__":
         i += 1
 
     # Make the directories and copy the files to those directory
-    d = dir + "_" + str(nclusters)
-    os.mkdir(d)
+    d = options.in_dir + "_" + str(nclusters)
+    if not os.path.exists(d):
+        os.mkdir(d)
     
     for i in range(len(clusters)):
-        subd =  d + '/' + str(i) 
+        subd =  os.path.join(d,str(i)) 
         os.mkdir(subd) 
         for fname in result_fnames[i]:
             f.write(fname + " " + str(i)  + '\n')
             #copy the file to the subdirectory
-            shutil.copy( path + '/' + fname, subd + '/' + fname) 
+            shutil.copy( os.path.join(options.in_dir, fname),
+                         os.path.join(subd,fname)) 
 
     f.close()
 

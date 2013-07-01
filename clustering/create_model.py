@@ -37,14 +37,15 @@ class BinarySVM(object):
       for i,name in irange(os.listdir(model_directory)):
         if modelExt not in name:
             continue
-        self.img.append( svmlight.read_model( model_directory + "/" + name))
+        self.img.append( svmlight.read_model( os.path.join(model_directory,
+							   name)))
 
-    def create_feature_vectors(self,dir,loadFeatures = 0):
+    def create_feature_vectors(self,basedir,loadFeatures = 0):
       path = os.getcwd()
       size = 256, 256
       if loadFeatures == 1 :
         for i,dirname in irange(dirList):
-            for imgFile in glob.glob( os.path.join(path + "/" + dir + "/" +dirname+"/", '*.npy')):
+            for imgFile in glob.glob( os.path.join(path, basedir, dirname, '*.npy')):
                 descriptors = numpy.load(imgFile) 
                 loadArray = descriptors.tolist()
                 tup_list=[]
@@ -58,7 +59,7 @@ class BinarySVM(object):
 
       elif loadFeatures == 0:
         for i,dirname in irange(dirList):
-            image_files = glob.glob( os.path.join(path + "/" + dir + "/" +dirname+"/", '*.jpg'))
+            image_files = glob.glob( os.path.join(path, dir, dirname, '*.jpg'))
             for imgFile in image_files:
                 im = Image.open(imgFile)
                 im.thumbnail(size,Image.ANTIALIAS)
@@ -96,7 +97,7 @@ class BinarySVM(object):
         #model_data = svmlight.learn(self.image_train_data[i], type='classification', verbosity=1,kernel='polynomial',poly_degree=2)
         #model_data = svmlight.learn(self.image_train_data[i], type='ranking', verbosity=1,kernel_param=1)
         self.image_model_data.append(model_data)
-        svmlight.write_model(model_data, modelDir + "/" + dev + modelExt)
+        svmlight.write_model(model_data, os.path.join(modelDir, dev + modelExt))
 
     def create_model_nonbinary(self):
       if not os.path.exists(modelDir):
@@ -114,7 +115,7 @@ class BinarySVM(object):
         model_data = svmlight.learn(self.image_train_data[i], type='classification', verbosity=1,kernel_param=1)
         #model_data = svmlight.learn(self.image_train_data[i], type='ranking', verbosity=1,kernel_param=1)
         self.image_model_data.append(model_data)
-        svmlight.write_model(model_data, modelDir + "/" + dev + modelExt)
+        svmlight.write_model(model_data, os.path.join(modelDir, dev + modelExt))
     
     def predictions(self,image,size=(256,256)):
       image.thumbnail(size,Image.ANTIALIAS)
@@ -167,7 +168,7 @@ if __name__ == "__main__":
         print "BinarySVM <Train data directory name> <binary>"
         exit(1)
 
-    modelDir = "model_" + dir
+    modelDir = dir + "_model"
     dirList = os.listdir(dir) #glob.glob(os.path.join(os.getcwd() + "/" + dir, '*'))
     try:
         dirList.remove('.DS_Store')
@@ -186,13 +187,13 @@ if __name__ == "__main__":
         b.create_model()
 
     # Generate the expected list
-    f = open( modelDir + "/expected.txt" ,"w")
+    f = open( os.path.join(modelDir, "expected.txt") ,"w")
     dirs = os.listdir(dir)
     for dirname in os.listdir(dir):
         if dirname.startswith('.'):
             continue
 
-        for files in os.listdir(dir + "/" + dirname):
+        for files in os.listdir(os.path.join(dir, dirname)):
             if files.endswith(".npy"):
                 f.write(files + " " + dirname + "\n")
 

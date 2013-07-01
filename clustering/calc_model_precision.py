@@ -2,6 +2,7 @@ from PIL import Image
 import svmlight
 import sys
 import os
+import os.path
 import glob
 import leargist
 import numpy
@@ -38,7 +39,8 @@ class BinarySVM(object):
       for i,name in irange(dirList):
         if modelExt not in name:
             continue
-        self.img.append( svmlight.read_model( model_directory + "/" + name))
+        self.img.append( svmlight.read_model(
+	    os.path.join(model_directory,name)))
 
     def predictions(self,image=None,size=(256,256),descriptors=None):
         if descriptors is None:
@@ -112,13 +114,17 @@ if __name__ == "__main__":
         if not file.endswith('.npy'):
             continue
 
-        res = b.run(test_dir +"/" + file,descriptors=True)
+        res = b.run(os.path.join(test_dir,file),descriptors=True)
+
         predicted_scores[file] = res
 
         pred = dirList[int(res)].split(".")   #Split the model extension
 
         if test_expected == 1:
-            exp = expected_scores[file]
+            try:
+                exp = expected_scores[file]
+            except KeyError as e:
+                continue
             predicted = pred[0]
             
             pairs.append((exp,predicted))
