@@ -610,7 +610,7 @@ class ProcessVideo(object):
         res   = self.get_topn_thumbnails(1) # Get the top thumbnai # Get the top thumbnail
         fno   = res[0][0]
         image = self.data_map[fno][1]
-        bcove   = brightcove_api.BrightcoveApi(neon_api_key=api_key,publisher_id=pid,ead_token=rtoken,write_token=wtoken)
+        bcove   = brightcove_api.BrightcoveApi(neon_api_key=api_key,publisher_id=pid,read_token=rtoken,write_token=wtoken)
         vids    = [] 
         vids.append(video_id)
         
@@ -622,11 +622,11 @@ class ProcessVideo(object):
             if ret:
                 #success
                 bcove.update_customer_video_inbox(vids,status=1)
+                return fno #return the frameno
             else:
                 #on update error
                 bcove.update_customer_video_inbox(vids,status=-1)
-
-
+        return
 #############################################################################################
 # HTTP Downloader client
 #############################################################################################
@@ -843,11 +843,11 @@ class HttpDownload(object):
         ## Upload thumbnails in to Brightcove account 
         elif self.job_params.has_key(properties.BRIGHTCOVE_THUMBNAILS):
             #push thumbnail to brightcove account
-            self.pv.update_brightcove_thumbnail()
-        
             #TODO Save the top thumbnail 
-            #self.pv.save_top_thumbnail()
-            return
+            data = self.pv.update_brightcove_thumbnail()
+            cr = ClientResponse(self.job_params,data)
+            resp = cr.build_request()
+            return resp
 
         else:
             #Default
@@ -873,8 +873,8 @@ class HttpDownload(object):
 
 
 class ClientResponse(object):
-    """ Http response to the callback url """
-    def __init__(self,job_params,response_data,error,timecodes=None):
+    """ Http response to the callback url -- This is the final response to the client """
+    def __init__(self,job_params,response_data,error=None,timecodes=None):
         self.data = response_data
         self.timecodes = timecodes 
         self.job_params = job_params
@@ -902,7 +902,7 @@ class ClientResponse(object):
                 data = urlencode(data)
         return data
 
-    def __create_request(self):
+    def build_request(self):
         response_body = {}
         response_body["job_id"] = self.job_params[properties.REQUEST_UUID_KEY] 
         response_body["video_id"] = self.job_params[properties.VIDEO_ID]
@@ -922,10 +922,10 @@ class ClientResponse(object):
         h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
         self.client_request = tornado.httpclient.HTTPRequest(url = self.client_url, method = "POST",
                 headers = h,body = body, request_timeout = 60.0, connect_timeout = 10.0)
-        return
+        return self.response
 
     def send_response(self):
-        self.__create_request()
+        self.build_request()
 
         for i in range(self.retries):
             try:

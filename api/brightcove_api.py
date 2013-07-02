@@ -370,6 +370,7 @@ class BrightcoveApi(object):
             client_url = "http://thumbnails.neon-lab.com/api/v1/submitvideo/brightcove"
             #client_url = "http://localhost:8081/api/v1/submitvideo/brightcove"
             request_body["brightcove"] =1
+            request_body["publisher_id"] = self.publisher_id
 
         elif request_type == 'abtest':
             client_url = "http://thumbnails.neon-lab.com/api/v1/submitvideo/abtest"
