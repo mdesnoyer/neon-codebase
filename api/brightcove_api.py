@@ -10,16 +10,29 @@ from poster.encode import multipart_encode
 from PIL import Image
 import poster.encode
 import urllib
+import properties
+
+from boto.s3.connection import S3Connection
+from boto.exception import S3ResponseError
+from boto.s3.key import Key
+from boto.s3.bucket import Bucket
 
 class BrightcoveApi(object):
-    def __init__(self,neon_api_key,publisher_id=0,read_token=None,write_token=None):
+    def __init__(self,neon_api_key,publisher_id=0,read_token=None,write_token=None,s3init=True):
         self.publisher_id = publisher_id
         self.neon_api_key = neon_api_key
         self.read_token = read_token
         self.write_token = write_token 
         self.read_url = "http://api.brightcove.com/services/library"
         self.write_url = "http://api.brightcove.com/services/post"
-    
+
+        if s3init:
+            self.s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
+            s3bucket_name = properties.S3_CUSTOMER_ACCOUNT_BUCKET_NAME
+            self.s3bucket = Bucket(name = s3bucket_name, connection = self.s3conn)
+            self.video_inbox = {}
+            self.get_customer_video_inbox()
+
     def format_get(self, url, data=None):
         if data is not None:
             if isinstance(data, dict):
@@ -29,6 +42,47 @@ class BrightcoveApi(object):
             else:
                 url += '?%s' % data
         return url
+   
+    ''' Get the customer inbox from s3 
+        the inbox is organized as follows  map of video_id with 3 possible status
+        Queued (0) , Failed (-1) , Success (1)
+    '''
+    def get_customer_video_inbox(self):
+        k = Key(self.s3bucket)
+        k.key = str(self.publisher_id) + '_inbox.json'
+        try:
+            data = k.get_contents_as_string()
+            self.video_inbox = tornado.escape.json_decode(data)
+        except S3ResponseError,e:
+            pass
+
+    ''' check video has been processed already '''
+    def should_process(self,vid):
+        ret = True
+        if self.video_inbox.has_key(vid):
+            status = self.video_inbox[vid]
+            if status == 1 or status ==0 : #Success or Queued
+                ret = False
+        return ret
+
+    def update_customer_video_inbox(self,vids,status=0):
+        for vid in vids:
+            self.video_inbox[vid] = status
+        
+        k = Key(self.s3bucket)
+        k.key = str(self.publisher_id) + '_inbox.json'
+
+        data = tornado.escape.json_encode(self.video_inbox)
+        
+        #TODO Retries
+        try:
+            data = k.set_contents_from_string(data)
+        except S3ResponseError,e:
+            print "failed to save customer inbox",self.publisher_id
+            return False
+
+        return True
+
 
     ###### Brightcove media api update method ##########
     ''' add thumbnail and videostill in to brightcove account '''
@@ -205,9 +259,11 @@ class BrightcoveApi(object):
         response = http_client.fetch(req)
         return response.body
 
-    ''' process publisher feed for neon tags '''
+    ''' process publisher feed for neon tags and generate brightcove thumbnail/still requests '''
     def process_publisher_feed(self,feed):
         json = tornado.escape.json_decode(feed)
+        vids_to_process = [] 
+        
         try:
             items = json['items']
         except:
@@ -221,6 +277,8 @@ class BrightcoveApi(object):
             
             #check if neon tagged
             if "neon" in tags or "Neon" in tags:
+                #video id
+                vid = str(item['id'])
                 
                 #if video has been processed for abtest <-- ppg
                 if item.has_key("customFields"):
@@ -233,19 +291,24 @@ class BrightcoveApi(object):
                             continue
 
                 #Check if neon has selected thumbnail/ videoStill
-                thumb = item['thumbnailURL'] 
-                still = item['videoStillURL']
-                if 'neon' in thumb and 'neon' in still:
-                    pass #the video has already been processed
-                else:
-                    vid = item['id']
+                #thumb = item['thumbnailURL'] 
+                #still = item['videoStillURL']
+                #if 'neon' in thumb and 'neon' in still:
+                #    pass #the video has already been processed
+                
+                if self.should_process(vid):
                     if item.has_key('FLVURL') == False:
                         print "ERROR http delivery not enabled", vid
                         return
                     d_url = item['FLVURL']
                     print "creating request for video [topn] ", vid
-                    self.format_neon_api_request(vid,d_url,request_type='topn') 
+                    self.format_neon_api_request(vid,d_url,request_type='topn')
 
+                    #add to process list   
+                    vids_to_process.append(vid)
+
+        #Update all the videos in customer inbox
+        self.update_customer_video_inbox(vids_to_process)
 
     ''' Process publisher feed and generate abtest requests'''
     def process_publisher_feed_for_abtest(self,result):
@@ -319,9 +382,16 @@ class BrightcoveApi(object):
         body = tornado.escape.json_encode(request_body)
         h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
         http_client = tornado.httpclient.HTTPClient()
-        req = tornado.httpclient.HTTPRequest(url = client_url, method = "POST",headers = h,body = body, request_timeout = 60.0, connect_timeout = 10.0)
-        response = http_client.fetch(req)
-        #verify response 200 OK
+        
+        retries = 1
+        for i in range(retries):
+            try:
+                req = tornado.httpclient.HTTPRequest(url = client_url, method = "POST",headers = h,body = body, request_timeout = 60.0, connect_timeout = 10.0)
+                response = http_client.fetch(req)
+                #verify response 200 OK
+                break
+            except tornado.httpclient.HTTPError, e:
+                continue
 
     def create_neon_api_requests(self,request_type='default'):
         
@@ -349,7 +419,7 @@ class BrightcoveApi(object):
 if __name__ == "__main__" :
     print 'test'
     #Test publisher feed with neon api key
-    bc = BrightcoveApi('a63728c09cda459c3caaa158f4adff49',read_token='cLo_SzrziHEZixU-8hOxKslzxPtlt7ZLTN6RSA7B3aLZsXXF8ZfsmA..',write_token='vlBj_kvwXu7r1jPAzr8wYvNkHOU0ZydFKUDrm2fnmVuZyDqEGVfsEg..')
+    #bc = BrightcoveApi('a63728c09cda459c3caaa158f4adff49',read_token='cLo_SzrziHEZixU-8hOxKslzxPtlt7ZLTN6RSA7B3aLZsXXF8ZfsmA..',write_token='vlBj_kvwXu7r1jPAzr8wYvNkHOU0ZydFKUDrm2fnmVuZyDqEGVfsEg..')
 
     #Get videos to abtest
     #bc.create_neon_api_requests(request_type='abtest')

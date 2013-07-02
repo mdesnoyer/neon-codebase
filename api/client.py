@@ -272,10 +272,12 @@ class ProcessVideo(object):
     def finalize(self,video_file):
         ### AB test stuff
         if os.path.exists(video_file): 
-            self.get_mid_thumbnail(video_file)
-            self.get_filtered_thumbnail()
-            self.get_neon_thumbnail()
-
+            try:
+                self.get_mid_thumbnail(video_file)
+                self.get_filtered_thumbnail()
+                self.get_neon_thumbnail()
+            except Exception, e:
+                log.error("key=finalize msg=error msg=" + e.__str__())
         return
 
     ############# THUMBNAIL METHODS ##################
@@ -592,24 +594,37 @@ class ProcessVideo(object):
         wtoken  = self.request_map[properties.BCOVE_WRITE_TOKEN]
         video_id = self.request_map[properties.VIDEO_ID]
         request_id = self.request_map[properties.REQUEST_UUID_KEY]
-        bcove   = brightcove_api.BrightcoveApi(neon_api_key=api_key,read_token=rtoken,write_token=wtoken)
+        bcove   = brightcove_api.BrightcoveApi(neon_api_key=api_key,read_token=rtoken,write_token=wtoken,s3init=False)
         
         neona = s3_url_prefix + "/" + self.base_filename + "/" + "neona.jpeg"
         neonb = s3_url_prefix + "/" + self.base_filename + "/" + "neonb.jpeg"
         neonc = s3_url_prefix + "/" + self.base_filename + "/" + "neonc.jpeg"
         bcove.update_abtest_custom_thumbnail_video(video_id,neona,neonb,neonc)
 
-    def update_brightcove_thumbnail(self):
+    def update_brightcove_thumbnail(self,error=False):
         api_key = self.request_map[properties.API_KEY]  
         rtoken  = self.request_map[properties.BCOVE_READ_TOKEN]
         wtoken  = self.request_map[properties.BCOVE_WRITE_TOKEN]
         video_id = self.request_map[properties.VIDEO_ID]
-        
-        res = self.get_topn_thumbnails(1) # Get the top thumbnai # Get the top thumbnail
-        fno = res[0][0]
+        pid   = self.request_map[properties.PUBLISHER_ID] 
+        res   = self.get_topn_thumbnails(1) # Get the top thumbnai # Get the top thumbnail
+        fno   = res[0][0]
         image = self.data_map[fno][1]
-        bcove   = brightcove_api.BrightcoveApi(neon_api_key=api_key,read_token=rtoken,write_token=wtoken)
-        bcove.update_thumbnail_and_videostill(video_id,image)
+        bcove   = brightcove_api.BrightcoveApi(neon_api_key=api_key,publisher_id=pid,ead_token=rtoken,write_token=wtoken)
+        vids    = [] 
+        vids.append(video_id)
+        
+        #if there was an error processing the video
+        if error:
+            bcove.update_customer_video_inbox(vids,status=-1)
+        else:
+            ret = bcove.update_thumbnail_and_videostill(video_id,image)
+            if ret:
+                #success
+                bcove.update_customer_video_inbox(vids,status=1)
+            else:
+                #on update error
+                bcove.update_customer_video_inbox(vids,status=-1)
 
 
 #############################################################################################
@@ -724,27 +739,16 @@ class HttpDownload(object):
         self.pv.finalize(self.tempfile.name)
 
         #Delete the temp video file which was downloaded
-        #if os.path.exists(self.tempfile.name):
-        #    os.unlink(self.tempfile.name)
-        print "downloaded to " , self.tempfile.name
+        if os.path.exists(self.tempfile.name):
+            os.unlink(self.tempfile.name)
+        #print "downloaded to " , self.tempfile.name
 
         ######### Final Phase - send client response to callback url, save images & request data to s3 ########
         if self.error == INTERNAL_PROCESSING_ERROR:
-            #If Internal error, requeue and dont send response to client yet
-            #Send response to client that job failed due to the last reason
-            #And Log the response we send to the client
-
-            res = self.requeue_job()
-            if res == False:
-                error_msg = response.error.message
-                self.error = error_msg
-                cr = ClientResponse(self.job_params,None,error_msg)
-                cr.send_response()  
-                self.pv.save_request_data(cr.response)
-                return 
-
-        ## On Success 
+            client_response = self.send_client_response(error=True)
+        
         else:
+            ## On Success 
             #Send client response
             client_response = self.send_client_response()
             self.pv.save_data_to_s3()
@@ -779,7 +783,26 @@ class HttpDownload(object):
 
         return True
 
-    def send_client_response(self):
+    def send_client_response(self,error=False):
+   
+        #There was an error with processing the video
+        if error:
+            #If Internal error, requeue and dont send response to client yet
+            #Send response to client that job failed due to the last reason
+            #And Log the response we send to the client
+            res = self.requeue_job()
+            if res == False:
+                error_msg = response.error.message
+                self.error = error_msg
+                cr = ClientResponse(self.job_params,None,error_msg)
+                cr.send_response()  
+                self.pv.save_request_data(cr.response)
+                
+                #if brightcove request
+                if self.job_params.has_key(properties.BRIGHTCOVE_THUMBNAILS):
+                    self.pv.update_brightcove_thumbnail(error=True)
+                return 
+
 
         # API Specific client response
         
@@ -1104,7 +1127,7 @@ if __name__ == "__main__":
     '''Model swaping without code release
        Race condition is possible here for model_version number update, but it's acceptable
        given that we could have the new version replace itself twice. Mutex is the right approach,
-       but support has been depricated, hence this is a simple valid workaround.
+    :  but support has been depricated, hence this is a simple valid workaround.
     '''
 
     try:

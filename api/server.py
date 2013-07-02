@@ -281,6 +281,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 self.parsed_params[properties.THUMBNAIL_RATE] = params[properties.THUMBNAIL_RATE]
             elif params.has_key(properties.THUMBNAIL_INTERVAL):
                 self.parsed_params[properties.THUMBNAIL_INTERVAL] = params[properties.THUMBNAIL_INTERVAL]
+            
             elif params.has_key(properties.ABTEST_THUMBNAILS):
                 #AB Test thumbnail request
                 self.parsed_params[properties.ABTEST_THUMBNAILS]  = params[properties.ABTEST_THUMBNAILS]
@@ -288,8 +289,10 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 #verify read and write tokens are specified in the request
                 self.parsed_params[properties.BCOVE_READ_TOKEN] = params[properties.BCOVE_READ_TOKEN]
                 self.parsed_params[properties.BCOVE_WRITE_TOKEN] = params[properties.BCOVE_WRITE_TOKEN]
+            
             elif params.has_key(properties.BRIGHTCOVE_THUMBNAILS):
                 self.parsed_params[properties.BRIGHTCOVE_THUMBNAILS]  = params[properties.BRIGHTCOVE_THUMBNAILS]
+                self.parsed_params[properties.PUBLISHER_ID]  = params[properties.PUBLISHER_ID] #publisher id
                 #verify read and write tokens are specified in the request
                 self.parsed_params[properties.BCOVE_READ_TOKEN] = params[properties.BCOVE_READ_TOKEN]
                 self.parsed_params[properties.BCOVE_WRITE_TOKEN] = params[properties.BCOVE_WRITE_TOKEN]

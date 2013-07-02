@@ -32,6 +32,7 @@ DELETE_TEMP_TAR = True
 YOUTUBE = False
 API_KEY_FILE = 'apikeys.json'
 BRIGHTCOVE_THUMBNAILS = "brightcove"
+PUBLISHER_ID = "publisher_id"
 
 #=========== S3 Config ===============#
 S3_KEY_PREFIX = 'internal_test_'
@@ -43,4 +44,4 @@ S3_ACCESS_KEY = 'AKIAJ5G2RZ6BDNBZ2VBA'
 S3_SECRET_KEY = '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'
 S3_BUCKET_NAME = 'neon-beta-test' 
 S3_IMAGE_HOST_BUCKET_NAME = 'host-thumbnails' 
-
+S3_CUSTOMER_ACCOUNT_BUCKET_NAME = 'neon-customer-accounts'

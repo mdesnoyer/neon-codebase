@@ -19,9 +19,10 @@ for customer_id in customer_data.keys():
     rtoken = customer['read_token']
     wtoken = customer['write_token']
     napi   = customer['neon_api_key']
+    pid   = customer['publisher_id']
 
     print "Retreiveing feed for " , customer_id
 
-    bc = BrightcoveApi(neon_api_key =napi,read_token =rtoken, write_token =wtoken)
+    bc = BrightcoveApi(publisher_id=pid, neon_api_key=napi, read_token=rtoken, write_token=wtoken)
     #bc.create_neon_api_requests(request_type='abtest')
     bc.create_neon_api_requests()
