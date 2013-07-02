@@ -243,7 +243,7 @@ class VideoDownload(object):
         except tornado.httpclient.HTTPError as e:
             if e.code in [400, 403]: # YouTube wants to display an ad
                 log.info('Got a %i error code. So YouTube probably wanted to show an ad' % e.code)
-            elif e.code == 599: # A timeout
+            elif e.code == 599: # A closed connection
                 log.error("key=async_request_timeout msg=" +
                           e.message)
                 ## Verify content length & total size to see if video
@@ -277,7 +277,7 @@ class Worker(multiprocessing.Process):
 
         # job management stuff
         self.kill_received = False
-        self.SLEEP_INTERVAL = 10
+        self.SLEEP_INTERVAL = 300
 
     def run(self):
         while not self.kill_received:
@@ -286,7 +286,7 @@ class Worker(multiprocessing.Process):
                 print job
                 #compare n retries 
                 retries = work_queue_map[job]
-                if retries > 10:
+                if retries > 5:
                     continue
                 #extra delay
                 if retries >3:
@@ -335,7 +335,7 @@ if __name__ == "__main__":
     image_db = config_parser.get('params','image_db')
 
     if not os.path.exists(image_directory):
-        os.makedir(image_directory)
+        os.makedirs(image_directory)
 
     #List of links that haven't been processed
     global unprocessed_links

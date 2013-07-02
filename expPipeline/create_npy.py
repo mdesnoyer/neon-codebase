@@ -8,7 +8,7 @@ import Image
 import numpy
 
 dir = sys.argv[1]
-savedir = dir + "_npy"
+savedir = sys.argv[2]
 
 cwd = os.getcwd()
 path = os.getcwd()
