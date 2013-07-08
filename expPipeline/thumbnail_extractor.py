@@ -16,6 +16,7 @@ import errorlog
 import youtube
 from subprocess import call
 from optparse import OptionParser
+import leargist
 
 import tornado.web
 import tornado.gen
@@ -102,7 +103,14 @@ class ProcessVideo(object):
                     uid = shortuuid.uuid()
                     tup = (uid,frame.frameno)
                     self.thumbnail_ids.append(tup)
-                    image.save(self.thumbnails_dir + "/" + str(uid) + '.jpg')
+                    imgFile = os.path.join(self.thumbnails_dir,
+                                           str(uid) + '.jpg')
+                    image.save(imgFile)
+
+                    # calculate the gist features for the image
+                    image.thumbnail((256,256), Image.ANTIALIAS)
+                    descriptors = leargist.color_gist(image)
+                    numpy.save(imgFile + ".npy",descriptors.tolist())
 
                 except ffvideo.NoMoreData:
                     return
