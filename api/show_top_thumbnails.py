@@ -99,6 +99,6 @@ if __name__ == '__main__':
     results = sorted(results, key=lambda x: x[0], reverse=True)
 
     for i in range(options.n):
-        print '%i: %f' % (i, results[i][0])
+        #print '%i: %f' % (i, results[i][0])
         cur_file = options.output % i
         results[i][1].save(cur_file)

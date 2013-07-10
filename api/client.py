@@ -552,15 +552,26 @@ class ProcessVideo(object):
         #save response result
         k = Key(self.s3bucket)
         k.key = self.base_filename + "/"+ 'response.txt'
-        
+         
         #change the status to requeued, and don't store a response 
         if result is None:
-            #result = "{\"status\":\"requeued\"}"
-            k.key = self.base_filename + "/"+ 'status.txt'
-            ts = str(time.time())
-            result = format_status_json("requeued",ts)
-        k.set_contents_from_string(result)
+            status = "requeued"
+        else:
+            k.key = self.base_filename + "/"+ 'response.txt'
+            try:
+                k.set_contents_from_string(result)
+            except S3ResponseError,e:
+                pass
 
+            status = "completed"
+        
+        k.key = self.base_filename + "/"+ 'status.txt'
+        ts = str(time.time())
+        result = format_status_json("requeued",ts)
+        try:
+            k.set_contents_from_string(result)
+        except S3ResponseError,e:
+            pass
 
     def host_abtest_images(self):
        
