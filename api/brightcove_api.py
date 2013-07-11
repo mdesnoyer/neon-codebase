@@ -291,8 +291,8 @@ class BrightcoveApi(object):
                             continue
 
                 #Check if neon has selected thumbnail/ videoStill
-                #thumb = item['thumbnailURL'] 
-                #still = item['videoStillURL']
+                thumb = item['thumbnailURL'] 
+                still = item['videoStillURL']
                 #if 'neon' in thumb and 'neon' in still:
                 #    pass #the video has already been processed
                 
@@ -302,7 +302,7 @@ class BrightcoveApi(object):
                         return
                     d_url = item['FLVURL']
                     print "creating request for video [topn] ", vid
-                    self.format_neon_api_request(vid,d_url,request_type='topn')
+                    self.format_neon_api_request(vid,d_url,prev_thumbnail=still,request_type='topn')
 
                     #add to process list   
                     vids_to_process.append(vid)
@@ -352,7 +352,7 @@ class BrightcoveApi(object):
                     self.format_neon_api_request(vid,d_url,request_type='abtest') 
 
 
-    def format_neon_api_request(self,id,video_download_url,request_type='topn'):
+    def format_neon_api_request(self,id,video_download_url,prev_thumbnail=None,request_type='topn'):
         request_body = {}
         
         #brightcove tokens
@@ -371,6 +371,8 @@ class BrightcoveApi(object):
             #client_url = "http://localhost:8081/api/v1/submitvideo/brightcove"
             request_body["brightcove"] =1
             request_body["publisher_id"] = self.publisher_id
+            if prev_thumbnail is not None:
+                request_body[properties.PREV_THUMBNAIL] = prev_thumbnail
 
         elif request_type == 'abtest':
             client_url = "http://thumbnails.neon-lab.com/api/v1/submitvideo/abtest"
@@ -414,7 +416,9 @@ class BrightcoveApi(object):
         req = tornado.httpclient.HTTPRequest(url = url, method = "GET", request_timeout = 60.0, connect_timeout = 10.0)
         response = http_client.fetch(req)
         resp = tornado.escape.json_decode(response.body)
-        print url #self.format_neon_api_request(resp['id'] ,resp['FLVURL'])
+        print url
+        print resp
+        #self.format_neon_api_request(resp['id'] ,resp['FLVURL'])
 
 
 if __name__ == "__main__" :
@@ -429,3 +433,7 @@ if __name__ == "__main__" :
     #im = Image.open('test.jpg')
     #bc.add_image('2369368872001',im,atype='thumbnail')
     #bc.add_image('2369368872001',im,atype='videostill')
+
+    #sutter
+    bc = BrightcoveApi('7f61cc2b1dead42fc05a0c87cc04eff4' ,publisher_id=817826402001,read_token='mDhucGOjGVIKggOnmbWqSOGeea1Xn08HQZfg3c1HRdu9fg5PvhLZWg..',write_token='rn-NufCTuxvQguygktpFtFEaro4tOYIp0rhSRUue1yujogl3HNtVlw..')
+    bc.create_request_by_video_id('819903089001')

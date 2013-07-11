@@ -485,8 +485,44 @@ class ProcessVideo(object):
             log.error("key=save_to_s3 msg=s3 response error " + e.__str__() )
         except Exception,e:
             log.error("key=save_to_s3 msg=general exception " + e.__str__() )
+  
+    ''' save previous thumbnail in the account to s3 ''' 
+    def save_previous_thumbnail_to_s3(self):
+        try:
+            if self.request_map.has_key(properties.PREV_THUMBNAIL):
+                url = self.request_map[properties.PREV_THUMBNAIL]
+                http_client = tornado.httpclient.HTTPClient()
+                req = tornado.httpclient.HTTPRequest(url = url, method = "GET", request_timeout = 60.0, connect_timeout = 10.0)
+                response = http_client.fetch(req)
+                data = response.body 
+                k = Key(self.s3bucket)
+                k.key = self.base_filename + "/"+ 'previous' + "." + self.format
+                k.set_contents_from_string(data)
+        
+        except S3ResponseError,e:
+            log.error("key=save_top_thumb_to_s3 msg=s3 response error " + e.__str__() )
+        except Exception,e:
+            log.error("key=save_top_thumb_to_s3 msg=general exception " + e.__str__() )
+        return
 
+    ''' Save the top thumnail to s3'''
+    def save_top_thumbnail_to_s3(self,frame):
+        try:
+            image = self.data_map[frame][1]
+            imgdata = StringIO()
+            image.save(imgdata, format='jpeg')
+            k = Key(self.s3bucket)
+            k.key = self.base_filename + "/"+ 'result' + "." + self.format
+            imgdata.seek(0)
+            data = imgdata.read()
+            k.set_contents_from_string(data)
+        
+        except S3ResponseError,e:
+            log.error("key=save_top_thumb_to_s3 msg=s3 response error " + e.__str__() )
+        except Exception,e:
+            log.error("key=save_top_thumb_to_s3 msg=general exception " + e.__str__() )
 
+    ''' Save the top thumbnails to s3 as tar.gz file '''
     def save_result_data_to_s3(self,frames):
         try:
             # Save Ranked images to S3 
@@ -853,11 +889,18 @@ class HttpDownload(object):
        
         ## Upload thumbnails in to Brightcove account 
         elif self.job_params.has_key(properties.BRIGHTCOVE_THUMBNAILS):
+            # Save previous brightcove thumbnail
+            self.pv.save_previous_thumbnail_to_s3()
+
             #push thumbnail to brightcove account
-            #TODO Save the top thumbnail 
             data = self.pv.update_brightcove_thumbnail()
             cr = ClientResponse(self.job_params,data)
             resp = cr.build_request()
+        
+            # Save the top thumbnail
+            if len(data) == 1:
+                self.pv.save_top_thumbnail_to_s3(data[0])
+            
             return resp
 
         else:

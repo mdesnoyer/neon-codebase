@@ -33,6 +33,7 @@ YOUTUBE = True
 API_KEY_FILE = 'apikeys.json'
 BRIGHTCOVE_THUMBNAILS = "brightcove"
 PUBLISHER_ID = "publisher_id"
+PREV_THUMBNAIL = "previous_thumbnail"
 
 #=========== S3 Config ===============#
 
