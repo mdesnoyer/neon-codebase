@@ -25,6 +25,12 @@ import tornado.httpclient
 import tornado.httputil
 import tornado.ioloop
 import StringIO
+import signal
+
+def sig_handler(sig, frame):
+    log.debug('Caught signal: ' + str(sig) )
+    sys.exit(0)
+
 
 class ProcessVideo(object):
     """ class provides methods to process a given video """
@@ -307,10 +313,14 @@ class Worker(multiprocessing.Process):
                 exit(0)
             except Exception,e:
                 log.exception("worker error" + e.__str__())
-                continue
+            
+            self.kill_received = True
 
 #Video downloader (Youtube, vimeo, general)
 if __name__ == "__main__":
+
+    signal.signal(signal.SIGTERM, sig_handler)
+    signal.signal(signal.SIGINT, sig_handler)
 
     parser = OptionParser()
 
@@ -363,9 +373,15 @@ if __name__ == "__main__":
         work_queue_map[url] = 1
 
     workers = []
+    delay = 5 #secs
 
-    #spawn workers
-    for i in range(options.n_process):
-        worker = Worker()
-        workers.append(worker)
-        worker.start()
+    #Run Loop
+    while True:
+        nproc_to_fork = options.n_process - len(multiprocessing.active_children())
+        #spawn workers
+        for i in range(nproc_to_fork):
+            worker = Worker()
+            workers.append(worker)
+            worker.start()
+
+        time.sleep(delay)        

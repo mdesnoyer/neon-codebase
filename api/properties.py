@@ -33,6 +33,7 @@ YOUTUBE = False
 API_KEY_FILE = 'apikeys.json'
 BRIGHTCOVE_THUMBNAILS = "brightcove"
 PUBLISHER_ID = "publisher_id"
+PREV_THUMBNAIL = "previous_thumbnail"
 
 #=========== S3 Config ===============#
 S3_KEY_PREFIX = 'internal_test_'

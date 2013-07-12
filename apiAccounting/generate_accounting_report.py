@@ -1,6 +1,7 @@
 #!/usr/bin/python
 import os 
 import tornado.escape
+from datetime import datetime
 
 try:
     #base_directory = sys.argv[1]
@@ -10,10 +11,11 @@ except:
     exit(0)
 
 
-customer_accounts = ['a63728c09cda459c3caaa158f4adff49']  #os.listdir(base_directory)
+customer_accounts = ['1a1887842e4da19de2980538b1ae72d4']  #os.listdir(base_directory)
 metadata_fname = "video_metadata.txt" 
 status_fname   = "status.txt"
 response_fname  = "response.txt"
+request_fname  = "request.txt"
 
 job_status = { 'submitted' : [] , 'processing': [], 'requeued': [], 'completed' : [], 'error' : [] } 
 counters = { 'duration': [] , 'bitrate': [], 'video_valence' :  [] } 
@@ -44,6 +46,10 @@ for account in customer_accounts:
         if ".DS_Store" in job_id:
             continue
 
+        # request data
+        fname = base_directory + "/" + account + "/" + job_id + "/" + request_fname
+        request_data = read_file_contents(fname)
+
         # response data
         fname = base_directory + "/" + account + "/" + job_id + "/" + response_fname
         response_data  = read_file_contents(fname)
@@ -69,5 +75,10 @@ for account in customer_accounts:
             job_status[state].remove(job_id)
             job_status['error'].append(job_id)
 
+        try:
+            s = '%s,%s,%s' %(request_data['video_id'], datetime.fromtimestamp(float(metadata['end_time'])), metadata['duration']) 
+            print s
+        except:
+            pass
 print counters
 print job_status

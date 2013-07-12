@@ -95,10 +95,33 @@ def check_remote_ip(request):
 # Logging
 
 
+from neon_apikey import APIKey
+from brightcove_metadata import BrightcoveMetadata
 ## ===================== API ===========================================#
 ## Internal Handlers and not be exposed externally
 ## ===================== API ===========================================#
 
+class RegisterBrightcove(tornado.web.RequestHandler):
+    def post(self, *args, **kwargs):
+        try:
+            json_data = self.get_argument('JSONRPC')
+            data = tornado.escape.json_decode(json_data)
+            uri = self.request.uri
+            publisher_name = data['publisherName'].strip()
+            read_token   = data['rtoken'] 
+            write_token  = data['wtoken']
+            publisher_id = data['publisherID']
+            ak = APIKey()
+            neon_api_key = ak.add_key(publisher_name) 
+            bm = BrightcoveMetadata(publisher_name,read_token,write_token,neon_api_key,publisher_id)
+            bm.save()
+        
+        except Exception,e:
+            log.error("key=RegisterBrightcove msg=exception " + e.__str__())
+            raise tornado.web.HTTPError(400)
+
+        self.write("Success")
+        self.finish()
 
 class StatsHandler(tornado.web.RequestHandler):
     def get(self, *args, **kwargs):
@@ -435,6 +458,7 @@ application = tornado.web.Application([
     (r'/api/v1/jobstatus',JobStatusHandler),
     (r'/api/v1/videometadata',MetaDataHandler),    
     (r'/api/v1/getresults',GetResultsHandler),    
+    (r'/registerbrightcove',RegisterBrightcove),    
 ])
 
 def main():
