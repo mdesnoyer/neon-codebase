@@ -26,3 +26,4 @@ tar -xzf opencv-2.4.6.tar.gz
 mkdir opencv-2.4.6/release
 cd opencv-2.4.6/release
 cmake -D CMAKE_BUILD_TYPE=RELEASE -D WITH_QT=ON -D BUILD_PYTHON_SUPPORT=ON -D CMAKE_INSTALL_PREFIX=/usr/local -D WITH_CUDA=ON -D WITH_CUBLAS=ON  ..
+sudo make install
