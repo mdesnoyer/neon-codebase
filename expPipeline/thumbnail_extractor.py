@@ -281,6 +281,9 @@ class VideoDownload(object):
              #temp job mgmt stuff, insert into Q
             work_queue.put(self.url)
             work_queue_map[self.url] += 1
+            failed_count += 1
+
+        failed_count = 0
 
 class Worker(multiprocessing.Process):
 
@@ -291,7 +294,7 @@ class Worker(multiprocessing.Process):
 
         # job management stuff
         self.kill_received = False
-        self.SLEEP_INTERVAL = 300
+        self.SLEEP_INTERVAL = 20
 
     def run(self):
         while not self.kill_received:
@@ -301,10 +304,15 @@ class Worker(multiprocessing.Process):
                 #compare n retries 
                 retries = work_queue_map[job]
                 if retries > 5:
+                    log.error("key=worker msg=Could not download %s" % job)
                     continue
-                #extra delay
-                if retries >3:
-                    time.sleep(self.SLEEP_INTERVAL)
+
+                # See if we should wait a little bit because we're
+                # hitting the server too hard. We try to use
+                # exponential backoff here
+                if failed_count > 0:
+                    time.sleep(self.SLEEP_INTERVAL * (1 << failed_count) + 
+                               random.random())
 
                 #Download Video
                 vd = VideoDownload(job)
@@ -365,7 +373,9 @@ if __name__ == "__main__":
 
     global work_queue
     global work_queue_map
-
+    global failed_count
+    
+    failed_count = 0
     work_queue_map ={}
     work_queue = multiprocessing.Queue()
     for url in url_list:
