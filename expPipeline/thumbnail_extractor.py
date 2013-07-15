@@ -27,16 +27,18 @@ import tornado.ioloop
 import StringIO
 import signal
 
+import youtube_dl
+
 def sig_handler(sig, frame):
     log.debug('Caught signal: ' + str(sig) )
     sys.exit(0)
 
 
-class ProcessVideo(object):
+class ProcessVideo(youtube_dl.PostProcessor):
     """ class provides methods to process a given video """
-    def __init__(self,url,vid_file,img_directory,nthumbnails,thumbnail_location,category,image_db):
-        self.video_url = url 
-        self.video_file = vid_file
+    def __init__(self,url,img_directory,nthumbnails,thumbnail_location,category,image_db):
+        super(ProcessVideo, self).__init__()
+        self.video_url = url
         self.sec_to_extract = 1 
         self.sec_to_extract_offset = 1
         self.thumbnail_size = 720 # either 16:9 or 4:3  
@@ -47,15 +49,6 @@ class ProcessVideo(object):
         self.video_category = category
         self.image_db = image_db
         self.aspect_ratio = 0
-
-        #Video Meta data
-        self.video_metadata = {}
-        self.video_metadata['codec_name'] =  None
-        self.video_metadata['duration'] = None
-        self.video_metadata['framerate'] = None
-        self.video_metadata['bitrate'] = None
-        self.video_metadata['frame_size'] = None
-        self.video_size = 0  # Calulated from bitrate and duration
 
     def get_locations(self,duration):
         locations = []
@@ -83,13 +76,12 @@ class ProcessVideo(object):
             return range(dur)
 
     ''' process all the frames from the partial video downloaded '''
-    def process_all(self):
-        
+    def run(self, information):
         try:
-            mov = ffvideo.VideoStream(self.video_file)
+            mov = ffvideo.VideoStream(information['filepath'])
         except Exception, e:
             log.error("key=process_video msg=movie file not found")
-            return
+            raise PostProcessingError()
         
         duration = mov.duration
         self.aspect_ratio = float(mov.frame_size[0]) / mov.frame_size[1]
@@ -119,28 +111,15 @@ class ProcessVideo(object):
                     numpy.save(imgFile + ".npy",descriptors.tolist())
 
                 except ffvideo.NoMoreData:
-                    return
+                    break
 
                 except Exception,e:
                     log.exception("key=process_video msg=processing error msg=" + e.__str__())
-                    return
-        return
+                    raise PostProcessingError()
 
-    def get_video_metadata(self,video_file):
-        try:
-            mov = ffvideo.VideoStream(video_file)
-
-        except Exception, e:
-            log.error("key=process_video subkey=get_video_metadata msg=" + e.__str__())
-            return False
-
-        self.video_metadata['codec_name'] =  mov.codec_name
-        self.video_metadata['duration'] = mov.duration
-        self.video_metadata['framerate'] = mov.framerate
-        self.video_metadata['bitrate'] = mov.bitrate
-        self.video_metadata['frame_size'] = mov.frame_size
-        self.video_size = mov.duration * mov.bitrate / 8 # in bytes
-        return True
+        self.save_to_db()
+        
+        return information
 
     ''' save thumbnail meta data to the DB '''
     def save_to_db(self):
@@ -173,11 +152,10 @@ class VideoDownload(object):
     def process(self):
         #Process Video and save thumbnails to image library
         directory = image_directory 
-        vid_file = self.tempfile_path
         log.info("Processing : " + self.url)
-        pv = ProcessVideo(self.url,vid_file,directory,nthumbnails,location,category,image_db)
-        pv.process_all()
-        pv.save_to_db()
+        pv = ProcessVideo(self.url,directory,nthumbnails,location,category,
+                          image_db)
+        pv.run({'filepath': self.tempfile_path})
         log.info("Done processing: " + self.url)
 
     def cleanup(self):
@@ -190,21 +168,51 @@ class VideoDownload(object):
         with open(unprocessed_links,'a') as f:
             f.write(self.url + '\n')
 
+        failed_count += 1
+
     def start(self):
         #Download the video
         log.info('Starting ' + self.url)
+
+        try:
+            self.youtube_dl()
+            failed_count = 0
+        except Exception, e:
+            self.log_failed_url()
+
+            log.error("key=async_callback_error  msg=" +
+                          e.message) 
+                
+            #temp job mgmt stuff, insert into Q
+            work_queue.put(self.url)
+            work_queue_map[self.url] += 1
         
         #If youtube url
-        if "youtube" in self.url:
-            self.youtube_downloder()
+        #if "youtube" in self.url:
+        #    self.youtube_downloder()
 
         #If vimeo
-        elif "vimeo" in self.url:
-            self.vimeo_downloader()
+        #elif "vimeo" in self.url:
+        #    self.vimeo_downloader()
 
         #If other
-        else:
-            self.generic_downloader()
+        #else:
+        #    self.generic_downloader()
+
+    def youtube_dl(self):
+        fd = youtube_dl.FileDownloader({'outtmpl':unicode(self.tempfile_path),
+                                       'noprogress':True,
+                                       })
+        fd.add_post_processor(ProcessVideo(self.url,
+                                           image_directory,
+                                           nthumbnails,
+                                           location,
+                                           category,
+                                           image_db))
+
+        for extractor in youtube_dl.gen_extractors():
+            fd.add_info_extractor(extractor)
+        retcode = fd.download([self.url])
 
     def youtube_downloder(self):
         yt = youtube.YouTube()
@@ -309,7 +317,7 @@ class Worker(multiprocessing.Process):
                 # See if we should wait a little bit because we're
                 # hitting the server too hard. We try to use
                 # exponential backoff here
-                if failed_count.value > 0:
+                if failed_count.value >= 0:
                     sleep_time = (self.SLEEP_INTERVAL * 
                         (1 << failed_count.value) + 
                         random.random())
@@ -396,5 +404,6 @@ if __name__ == "__main__":
             worker = Worker()
             workers.append(worker)
             worker.start()
+            #worker.run()
 
         time.sleep(delay)        
