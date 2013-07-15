@@ -254,6 +254,7 @@ class VideoDownload(object):
             self.tempfile.write(response.body)
             self.error = None
             self.process()
+            failed_count.value = 0
         except tornado.httpclient.HTTPError as e:
             if e.code in [400, 403]: # YouTube wants to display an ad
                 log.info('Got a %i error code. So YouTube probably wanted to show an ad' % e.code)
@@ -281,9 +282,7 @@ class VideoDownload(object):
              #temp job mgmt stuff, insert into Q
             work_queue.put(self.url)
             work_queue_map[self.url] += 1
-            failed_count += 1
-
-        failed_count = 0
+            failed_count.value += 1
 
 class Worker(multiprocessing.Process):
 
@@ -294,7 +293,7 @@ class Worker(multiprocessing.Process):
 
         # job management stuff
         self.kill_received = False
-        self.SLEEP_INTERVAL = 20
+        self.SLEEP_INTERVAL = 5
 
     def run(self):
         while not self.kill_received:
@@ -310,9 +309,13 @@ class Worker(multiprocessing.Process):
                 # See if we should wait a little bit because we're
                 # hitting the server too hard. We try to use
                 # exponential backoff here
-                if failed_count > 0:
-                    time.sleep(self.SLEEP_INTERVAL * (1 << failed_count) + 
-                               random.random())
+                if failed_count.value > 0:
+                    sleep_time = (self.SLEEP_INTERVAL * 
+                        (1 << failed_count.value) + 
+                        random.random())
+                    sleep_time = min(sleep_time, 600)
+                    log.info('We failed, so sleeping for %fs' % sleep_time)
+                    time.sleep(sleep_time)
 
                 #Download Video
                 vd = VideoDownload(job)
@@ -375,7 +378,7 @@ if __name__ == "__main__":
     global work_queue_map
     global failed_count
     
-    failed_count = 0
+    failed_count = multiprocessing.Value('i', 0)
     work_queue_map ={}
     work_queue = multiprocessing.Queue()
     for url in url_list:
