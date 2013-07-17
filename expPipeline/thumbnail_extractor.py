@@ -168,7 +168,7 @@ class VideoDownload(object):
         with open(unprocessed_links,'a') as f:
             f.write(self.url + '\n')
 
-        failed_count += 1
+        failed_count.value += 1
 
     def start(self):
         #Download the video
@@ -176,7 +176,7 @@ class VideoDownload(object):
 
         try:
             self.youtube_dl()
-            failed_count = 0
+            failed_count.value = 0
         except Exception, e:
             self.log_failed_url()
 
@@ -185,7 +185,7 @@ class VideoDownload(object):
                 
             #temp job mgmt stuff, insert into Q
             work_queue.put(self.url)
-            work_queue_map[self.url] += 1
+            work_queue_map[self.url].value += 1
         
         #If youtube url
         #if "youtube" in self.url:
@@ -289,7 +289,7 @@ class VideoDownload(object):
                 
              #temp job mgmt stuff, insert into Q
             work_queue.put(self.url)
-            work_queue_map[self.url] += 1
+            work_queue_map[self.url].value += 1
             failed_count.value += 1
 
 class Worker(multiprocessing.Process):
@@ -309,8 +309,8 @@ class Worker(multiprocessing.Process):
                 job = work_queue.get_nowait()
                 print job
                 #compare n retries 
-                retries = work_queue_map[job]
-                if retries > 5:
+                retries = work_queue_map[job].value
+                if retries > 3:
                     log.error("key=worker msg=Could not download %s" % job)
                     continue
 
@@ -391,7 +391,7 @@ if __name__ == "__main__":
     work_queue = multiprocessing.Queue()
     for url in url_list:
         work_queue.put(url)
-        work_queue_map[url] = 1
+        work_queue_map[url] = multiprocessing.Value('i', 1)
 
     workers = []
     delay = 5 #secs
