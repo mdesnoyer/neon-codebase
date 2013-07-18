@@ -310,7 +310,7 @@ class Worker(multiprocessing.Process):
                 print job
                 #compare n retries 
                 retries = work_queue_map[job].value
-                if retries > 3:
+                if retries > 1:
                     log.error("key=worker msg=Could not download %s" % job)
                     continue
 

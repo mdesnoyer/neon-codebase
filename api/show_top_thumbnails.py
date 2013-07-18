@@ -9,6 +9,27 @@ import ffvideo
 from PIL import Image
 import sys
 import os.path
+import cv2
+import numpy as np
+import time
+
+def load_new_model(options):
+    sys.path.insert(0, options.model_dir)
+    import model as mod2
+    return mod2.load_model(os.path.join(options.model_dir,
+                                       '071013_trained.model'))
+
+def run_new_model(model, options):
+    # Output the model rewrite results    
+    mov = ffvideo.VideoStream(options.input)
+    start_time = time.time()
+    chosen_thumbs = mod.choose_thumbnails(mov, options.n)
+    print 'Processing time %f' % (time.time() - start_time)
+    for i in range(len(chosen_thumbs)):
+        print 'new %i: %f' % (i, chosen_thumbs[i][1])
+        cur_file = 'mod2_' + options.output % i
+        cv2.imwrite(cur_file, chosen_thumbs[i][0])
+    
 
 if __name__ == '__main__':
     parser = OptionParser(usage=USAGE)
@@ -23,6 +44,9 @@ if __name__ == '__main__':
                       help='Directory containing the model')
 
     options, args = parser.parse_args()
+
+    mod = load_new_model(options)
+    run_new_model(mod, options)
 
     # Load the model
     sys.path.insert(0, options.model_dir)
@@ -52,6 +76,7 @@ if __name__ == '__main__':
         sec_to_extract_offset = 4
 
     #Sequentially extract key frame every sec_to_extract_offset
+    start_time = time.time()
     sec_to_extract = 1
     valence_scores = [[],[]]
     results = []
@@ -98,7 +123,9 @@ if __name__ == '__main__':
 
     results = sorted(results, key=lambda x: x[0], reverse=True)
 
+    print 'Processing time %f' % (time.time() - start_time)
     for i in range(options.n):
-        #print '%i: %f' % (i, results[i][0])
+        print 'orig %i: %f' % (i, results[i][0])
         cur_file = options.output % i
         results[i][1].save(cur_file)
+
