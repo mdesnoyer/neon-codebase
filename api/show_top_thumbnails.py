@@ -23,7 +23,7 @@ def run_new_model(model, options):
     # Output the model rewrite results    
     mov = ffvideo.VideoStream(options.input)
     start_time = time.time()
-    chosen_thumbs = mod.choose_thumbnails(mov, options.n)
+    chosen_thumbs = mod.choose_thumbnails(mov, options.n, sample_step=0.5)
     print 'Processing time %f' % (time.time() - start_time)
     for i in range(len(chosen_thumbs)):
         print 'new %i: %f' % (i, chosen_thumbs[i][1])
