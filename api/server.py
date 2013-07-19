@@ -2,6 +2,7 @@ import tornado.httpserver
 import tornado.ioloop
 import tornado.web
 import tornado.escape
+import tornado.httpclient
 import json
 import multiprocessing
 import Queue
@@ -116,6 +117,16 @@ class RegisterBrightcove(tornado.web.RequestHandler):
             bm = BrightcoveMetadata(publisher_name,read_token,write_token,neon_api_key,publisher_id)
             bm.save()
         
+            s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
+            s3bucket_name = properties.S3_CUSTOMER_ACCOUNT_BUCKET_NAME
+            s3bucket = Bucket(name = s3bucket_name, connection = s3conn)
+            k = Key(s3bucket)
+            k.key = 'brightcoveCustomerTokens.json'
+            k.set_contents_from_filename('brightcoveCustomerTokens.json')
+
+            #api key
+            k.key = 'apikeys.json'
+            k.set_contents_from_filename('apikeys.json')
         except Exception,e:
             log.error("key=RegisterBrightcove msg=exception " + e.__str__())
             raise tornado.web.HTTPError(400)
@@ -316,6 +327,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             elif params.has_key(properties.BRIGHTCOVE_THUMBNAILS):
                 self.parsed_params[properties.BRIGHTCOVE_THUMBNAILS]  = params[properties.BRIGHTCOVE_THUMBNAILS]
                 self.parsed_params[properties.PUBLISHER_ID]  = params[properties.PUBLISHER_ID] #publisher id
+                self.parsed_params[properties.PREV_THUMBNAIL]  = params[properties.PREV_THUMBNAIL] 
                 #verify read and write tokens are specified in the request
                 self.parsed_params[properties.BCOVE_READ_TOKEN] = params[properties.BCOVE_READ_TOKEN]
                 self.parsed_params[properties.BCOVE_WRITE_TOKEN] = params[properties.BCOVE_WRITE_TOKEN]
@@ -441,7 +453,6 @@ class TestCallback(tornado.web.RequestHandler):
             log.error("key=testcallback msg=error recieving message")
         
         self.finish()
-
 
 ###########################################
 # Create Tornado server application

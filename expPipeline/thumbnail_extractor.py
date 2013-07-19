@@ -131,7 +131,7 @@ class ProcessVideo(youtube_dl.PostProcessor):
             #schema
             #img_id #origin #frameno #semantic #aspect ratio 
             for id,fno in self.thumbnail_ids:
-                data = str(id) + " " + self.video_url + " " + str(fno) + " " + aspect_ratio + " " + self.video_category + " null" #valence score =null
+                data = str(id) + " " + self.video_url + " " + str(fno) + " " + aspect_ratio + " " + self.video_category + " null null" #valence score =null
                 f.write(data + "\n" )
 
 

@@ -1,6 +1,8 @@
 #!/usr/bin python
 '''
 Find untagged images of given aspect ratio and generate stimuli set (directories or text file with filenames)
+ex: python   generate_stimuli_set.py -d /users/sunilmallya/workspace/valence_image_library/ndesc -m /users/sunilmallya/workspace/model -i /users/sunilmallya/Dropbox/image_library -s 47 -f /users/sunilmallya/workspace/valence_image_library/output.db -a 1.78 -o txt
+
 '''
 
 import os
@@ -15,6 +17,7 @@ import time
 import scikits.ann as ann
 from optparse import OptionParser
 from Queue import PriorityQueue
+from PIL import Image
 
 USAGE = '%prog [options]'
 def cluster_data(data,cluster_cnt,iter=20,thresh=1e-5):
@@ -42,6 +45,34 @@ def select_image(imdb,id,ar=1.78):
         pass
 
     return False
+
+def update_image_db(imdb,fname_map):
+    
+    out = open('out','w')
+    with open(imdb) as f:
+        for line in f.readlines():
+            parts = line.split(' ')
+            id = parts[0]
+            stim = parts[-1].rstrip("\n")
+            if fname_map.has_key(id):
+                for i in range( len(parts) - 1):
+                    out.write( parts[i] + " ")
+                out.write( str(fname_map[id])  + "\n") 
+            else:
+                out.write(line)
+
+def create_kdtree(descriptors):
+    return ann.kdtree(numpy.array(descriptors))
+
+''' get mean distance for untagged images '''
+def calc_kdtree_distance(kdtree,descriptors,data_map):
+    kdistance_map = {}
+    for desc,fname in zip(descriptors,data_map):
+        idx,dist = kdtree.knn(desc,k)
+        mean = numpy.mean(dist[0])
+        kdistance_map[fname] = mean
+
+    return kdistance_map
 
 if __name__ == '__main__':
     parser = OptionParser(usage=USAGE)
@@ -83,6 +114,7 @@ if __name__ == '__main__':
     descriptors = []
     kdistance_map = {}
     imdb = {}
+    fname_stimset_map = {}
 
     # Load image database in to a map
     with open(image_db,'r') as f:
@@ -106,8 +138,8 @@ if __name__ == '__main__':
                 descriptors.append(smarray)
                 data_map.append(infile)
 
-    data = numpy.array(descriptors)
-    clusters,code_ids = cluster_data(data,nclusters)
+    #data = numpy.array(descriptors)
+    #clusters,code_ids = cluster_data(data,nclusters)
     
     result = [ PriorityQueue() for _ in range(nclusters)] #populated list of filenames in each cluster
     result_fnames = [ [] for _ in range(nclusters)]
@@ -127,11 +159,39 @@ if __name__ == '__main__':
 
     # Populate the distance metric for each of the descriptors
     k = 3
-    kdtree = ann.kdtree(numpy.array(model_descriptors))
-    for desc,fname in zip(descriptors,data_map):
-        idx,dist = kdtree.knn(desc,k)
-        kdistance_map[fname] = dist[0]
+    stimsets = []
+    i = 0 
+    #temp generate 5 stim sets
+    while i < 5:
+        kdtree = create_kdtree(model_descriptors) 
+        kdistance_map = calc_kdtree_distance(kdtree,descriptors,data_map)
+        sorted_map = sorted(kdistance_map.iteritems(), key=lambda (k,v): (v,k))
+        stimset = sorted_map[-1]
+        stimsets.append(stimset)
+        fname = stimset[0]
+        desc = numpy.load(source + "/" + fname)
+        model_descriptors.append(desc)
+        idx = data_map.index(fname)
+        data_map.pop(idx)
+        descriptors.pop(idx)
 
+        if len(stimsets) == 108:
+            for item in stimsets:
+                fname = item[0]
+                if output == 'dir':
+                    target = "stimuli_" + str(start_index + i)
+                    if not os.path.exists(target):
+                        os.mkdir(target)
+                    fname = fname.split('.npy')[0]
+                    target_fname = target + '/' + fname
+                    shutil.copy(image_dir + '/' + fname,target_fname) 
+                    im = Image.open( target_fname)
+                    size = 256,144
+                    im.thumbnail(size,Image.ANTIALIAS)
+                    im.save(target_fname)
+            stimsets = []
+            i +=1
+    ''' 
     # Format cluster result
     i = 0 
     for id in code_ids:
@@ -142,9 +202,7 @@ if __name__ == '__main__':
         #Create fname,distance tuple
         for fname in result_fnames[i]:
             dist = kdistance_map[fname] 
-            mean = numpy.mean(dist)
-            var = numpy.var(dist)
-            result[i].put(fname, -1 * mean) #insert into pq, -ve of dist
+            result[i].put(fname, -1 * dist) #insert into pq, -ve of dist
 
     # cluster with least number of files
     min_cluster = 999
@@ -172,12 +230,17 @@ if __name__ == '__main__':
             if pq.qsize() <= 0:
                 break
             fname = pq.get()
-            fname = fname.split('.')[0]  + '.jpg'
+            fname = fname.split('.')[0]
+            fname_stimset_map[fname] = start_index + i #save fname to stimset mapping        
+            fname = fname + '.jpg' 
             f.write(fname + " s" + str(start_index + i)  + '\n')
-            
             if output == 'dir':
-                shutil.copy(image_dir + '/' + fname, target + '/' + fname) 
-    
+                target_fname = target + '/' + fname
+                shutil.copy(image_dir + '/' + fname,target_fname) 
+                im = Image.open( target_fname)
+                size = 256,144
+                im.thumbnail(size,Image.ANTIALIAS)
+                im.save(target_fname )
     f.close() 
-
+    '''
     #TODO : Update the image DB with the stimuli set it was associated with 

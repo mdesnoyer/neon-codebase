@@ -301,6 +301,10 @@ class BrightcoveApi(object):
                         print "ERROR http delivery not enabled", vid
                         return
                     d_url = item['FLVURL']
+                    if d_url is None:
+                        print "FLV URL Missing", vid
+                        continue
+
                     print "creating request for video [topn] ", vid
                     self.format_neon_api_request(vid,d_url,prev_thumbnail=still,request_type='topn')
 

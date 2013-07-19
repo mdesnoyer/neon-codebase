@@ -673,7 +673,7 @@ class ProcessVideo(object):
             else:
                 #on update error
                 bcove.update_customer_video_inbox(vids,status=-1)
-        return
+        return None
 #############################################################################################
 # HTTP Downloader client
 #############################################################################################
@@ -898,8 +898,8 @@ class HttpDownload(object):
             resp = cr.build_request()
         
             # Save the top thumbnail
-            if len(data) == 1:
-                self.pv.save_top_thumbnail_to_s3(data[0])
+            if data is not None:
+                self.pv.save_top_thumbnail_to_s3(data)
             
             return resp
 
