@@ -68,7 +68,11 @@ def process_one_query(query, n_images, out_file, qpm=55):
     for data in query_results:
         time.sleep(60.0 / qpm)
         url = shorturl.url(data.get('id'))
-        features = get_features(url)
+        try:
+            features = get_features(url)
+        except urllib2.HTTPError as e:
+            _log.error('Error getting image %s: %s' (url, e))
+            continue
         results.append((url, features))            
 
         if cur_image >= n_images:
@@ -108,7 +112,12 @@ if __name__ == '__main__':
     i = 0
     for line in in_stream:
         query = line.strip()
-        process_one_query(query,
-                          options.n,
-                          options.output % i,
-                          options.qpm)
+        try:
+            process_one_query(query,
+                              options.n,
+                              options.output % i,
+                              options.qpm)
+        except Exception as e:
+            _log.error('Error getting results for query: %s: %s' % (query,
+                                                                    e))
+            continue
