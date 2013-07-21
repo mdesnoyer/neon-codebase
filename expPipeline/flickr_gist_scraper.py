@@ -64,27 +64,31 @@ def process_one_query(query, n_images, out_file, qpm=55):
         per_page=min(MAX_PER_QUERY, n_images),
         media='photos')
 
-    cur_image = 0
-    for data in query_results:
-        time.sleep(60.0 / qpm)
-        url = shorturl.url(data.get('id'))
-        try:
-            features = get_features(url)
-        except urllib2.HTTPError as e:
-            _log.error('Error getting image %s: %s' (url, e))
-            continue
-        results.append((url, features))            
+    try:
+        cur_image = 0
+        for data in query_results:
+            time.sleep(60.0 / qpm)
+            url = shorturl.url(data.get('id'))
+            try:
+                features = get_features(url)
+            except IOError as e:
+                _log.error('Error getting image %s: %s' % (url, e))
+                continue
+            results.append((url, features))            
 
-        if cur_image >= n_images:
-            break
-        cur_image += 1
+            if cur_image >= n_images:
+                break
+            cur_image += 1
 
-        if cur_image % 50 == 0:
-            _log.info('Processed %i images' % cur_image)
+            if cur_image % 50 == 0:
+                _log.info('Processed %i images' % cur_image)
 
-    _log.info('Writing gist features to: %s' % out_file)
-    with open(out_file, 'wb') as f:
-        pickle.dump(results, f, 2)
+    finally:
+        if len(results) > 0:
+            _log.info('Writing %i gist features to: %s' %
+                      (len(results), out_file))
+            with open(out_file, 'wb') as f:
+                pickle.dump(results, f, 2)
 
 
 if __name__ == '__main__':
@@ -100,6 +104,8 @@ if __name__ == '__main__':
                       help='Number of queries per minute to hit Flikr with')
     parser.add_option('--log', default='flickr.log',
                       help='Log file')
+    parser.add_option('--start_index', type='int', default=0,
+                      help='Query to start with')
 
     options, args = parser.parse_args()
 
@@ -109,9 +115,12 @@ if __name__ == '__main__':
     if options.input is not None:
         in_stream = open(options.input, 'r')
 
-    i = 0
+    i = -1
     for line in in_stream:
         query = line.strip()
+        i += 1
+        if i < options.start_index:
+            continue
         try:
             process_one_query(query,
                               options.n,
