@@ -21,6 +21,7 @@ import sys
 import time
 import urllib2
 import re
+import youtube_video_id_scraper as youtube
 
 API_KEY = '3c8ecd709d9b6b933e679b6aa5128727'
 API_SECRET = '80b54fa4f78056fb'
@@ -41,8 +42,7 @@ def streamurl2imgurl(stream_url):
 def get_features(url):
     '''Gets the features of an image at a given url.'''
     # First retrieve the image
-    url_stream = urllib2.urlopen(
-        streamurl2imgurl('%s/sizes/z/in/photostream/' % url))
+    url_stream = urllib2.urlopen(url)
     im_stream = StringIO(url_stream.read())
     image = Image.open(im_stream)
 
@@ -50,6 +50,13 @@ def get_features(url):
     image.thumbnail((256,256), Image.ANTIALIAS)
 
     return leargist.color_gist(image)
+
+def output_results(results, out_file):
+    if len(results) > 0:
+        _log.info('Writing %i gist features to: %s' %
+                  (len(results), out_file))
+        with open(out_file, 'wb') as f:
+            pickle.dump(results, f, 2)
     
 
 def process_one_query(query, n_images, out_file, qpm=55):
@@ -70,7 +77,8 @@ def process_one_query(query, n_images, out_file, qpm=55):
             time.sleep(60.0 / qpm)
             url = shorturl.url(data.get('id'))
             try:
-                features = get_features(url)
+                features = get_features(
+                    streamurl2imgurl('%s/sizes/z/in/photostream/' % url))
             except IOError as e:
                 _log.error('Error getting image %s: %s' % (url, e))
                 continue
@@ -84,12 +92,32 @@ def process_one_query(query, n_images, out_file, qpm=55):
                 _log.info('Processed %i images' % cur_image)
 
     finally:
-        if len(results) > 0:
-            _log.info('Writing %i gist features to: %s' %
-                      (len(results), out_file))
-            with open(out_file, 'wb') as f:
-                pickle.dump(results, f, 2)
+        output_results(results, out_file)
+        
+def process_youtube_query(query, n_images, out_file, qpm=55):
+    _log.info('Finding %i youtube thumbnails with query: %s' %
+              (n_images, query))
 
+    results = []
+    cur_image = 0
+    try:
+        for video_id in youtube.generate_video_ids(query, n_images, 3600):
+            time.sleep(60.0 / qpm)
+            url = 'http://i.ytimg.com/vi/%s/hqdefault.jpg' % video_id
+            try: 
+                features = get_features(url)
+            except IOError as e:
+                _log.error('Error getting image %s: %s' % (url, e))
+                continue
+            results.append((url, features))
+
+            cur_image += 1
+
+            if cur_image % 50 == 0:
+                _log.info('Processed %i images' % cur_image)
+            
+    finally:
+        output_results(results, out_file)
 
 if __name__ == '__main__':
     parser = OptionParser(usage=USAGE)
@@ -106,6 +134,8 @@ if __name__ == '__main__':
                       help='Log file')
     parser.add_option('--start_index', type='int', default=0,
                       help='Query to start with')
+    parser.add_option('--youtube', action='store_true', default=False,
+                      help='Get youtube thumbnails instead of flickr ones?')
 
     options, args = parser.parse_args()
 
@@ -122,10 +152,14 @@ if __name__ == '__main__':
         if i < options.start_index:
             continue
         try:
-            process_one_query(query,
-                              options.n,
-                              options.output % i,
-                              options.qpm)
+            process_func = process_one_query
+            if options.youtube:
+                process_func = process_youtube_query
+                
+            process_func(query,
+                         options.n,
+                         options.output % i,
+                         options.qpm)
         except Exception as e:
             _log.error('Error getting results for query: %s: %s' % (query,
                                                                     e))

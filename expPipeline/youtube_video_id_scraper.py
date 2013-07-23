@@ -19,11 +19,14 @@ def generate_url(query, cur_idx):
        'max-results': '%i' % 50})
 
 def get_video_ids(query, n_videos=25, max_duration=600):
-    idRegex = re.compile('(http://www.youtube.com/watch\?v=[\-_0-9a-zA-Z]+)')
+    return [x for x in generate_video_ids(query, n_videos, max_duration)]
 
-    video_ids = []
+def generate_video_ids(query, n_videos=25, max_duration=600):
+    idRegex = re.compile('http://www.youtube.com/watch\?v=([\-_0-9a-zA-Z]+)')
+
+    videos_found = 0
     cur_idx = 1
-    while len(video_ids) < n_videos:
+    while videos_found < n_videos:
     
         url = generate_url(query, cur_idx)
         cur_idx += 50
@@ -40,15 +43,13 @@ def get_video_ids(query, n_videos=25, max_duration=600):
                 if duration < max_duration:
                     player = media_group.find(
                         '{http://search.yahoo.com/mrss/}player')
-                    video_ids.append(
-                      idRegex.search(player.attrib['url']).groups()[0])
-                    if len(video_ids) == n_videos:
+                    yield idRegex.search(player.attrib['url']).groups()[0]
+                    videos_found += 1
+                    if videos_found == n_videos:
                         break
         
         finally:
             xmlStream.close()
-
-    return video_ids
 
 
 if __name__ == '__main__':
@@ -71,9 +72,10 @@ if __name__ == '__main__':
 
     video_ids = []
     for line in inStream:
-        video_ids.extend(get_video_ids(line,
-                                       n_videos=options.n,
-                                       max_duration=options.max_duration))
+        video_ids.extend(['http://www.youtube.com/watch/?v=%s' % x for x in
+                          get_video_ids(line,
+                                        n_videos=options.n,
+                                        max_duration=options.max_duration)])
 
     outStream = sys.stdout
     if options.output is not None:
