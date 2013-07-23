@@ -15,6 +15,7 @@ import youtube
 import hashlib
 import re
 import properties
+import os
 
 from boto.s3.connection import S3Connection
 from boto.exception import S3ResponseError
@@ -34,6 +35,7 @@ MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
 global log
 log = errorlog.FileLogger("server")
 
+dir = os.path.dirname(__file__)
 
 #=============== Global Handlers ======================================#
 
@@ -428,7 +430,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             raise Exception("parmas not set")
 
     def verify_api_key(selfi,key):
-        with open(properties.API_KEY_FILE, 'r') as f:
+        fname = os.path.join(dir,properties.API_KEY_FILE) 
+        with open(fname, 'r') as f:
             json = f.readline()
         
         keys = tornado.escape.json_decode(json)

@@ -1169,8 +1169,10 @@ if __name__ == "__main__":
     else:
         import properties
 
+    
     #code version file
-    code_version_file = "code.version"
+    cdir = os.path.dirname(__file__)   
+    code_version_file = os.path.join(cdir,"code.version")
     
     #Load the model 
     model_file = os.path.join(options.model_dir,"model.version")
