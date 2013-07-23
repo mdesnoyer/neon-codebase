@@ -92,21 +92,22 @@ def format_status_json(state,timestamp,data=None):
 
 #=============== Global Handlers =======================#
 
-#################################################################################################
+############################################################################
 # STATE ENUM
-#################################################################################################
+############################################################################
 class State(object):
     start,get_video_metadata,dequeue_master,process_video,rank_thumbnails,api_callback,insert_image_library,mark_inbox,complete,error  = range(10)
 
-#################################################################################################
+###########################################################################
 # Process Video File
-#################################################################################################
+###########################################################################
 
 class ProcessVideo(object):
     """ class provides methods to process a given video """
-    def __init__(self,request_map,request):
+    def __init__(self, request_map, request, model):
         self.request_map = request_map
         self.request = request
+        self.model = model
         self.frames = []
         self.data_map = {}
         self.attr_map = {}
@@ -133,9 +134,11 @@ class ProcessVideo(object):
         self.video_size = 0  # Calulated from bitrate and duration
 
         #S3 Stuff
-        self.s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
+        self.s3conn = S3Connection(properties.S3_ACCESS_KEY,
+                                   properties.S3_SECRET_KEY)
         self.s3bucket_name = properties.S3_BUCKET_NAME
-        self.s3bucket = Bucket(name = self.s3bucket_name,connection = self.s3conn)
+        self.s3bucket = Bucket(name = self.s3bucket_name,
+                               connection = self.s3conn)
         self.format = "JPEG" #"PNG"
 
         #AB Test Data
@@ -145,7 +148,7 @@ class ProcessVideo(object):
         self.bad_image_filter = BadImageFilter(30, 0.95)
 
     ''' process all the frames from the partial video downloaded '''
-    def process_all(self,video_file):
+    def process_all(self, video_file, n_thumbs=1):
         try:
             mov = ffvideo.VideoStream(video_file)
 
@@ -161,63 +164,28 @@ class ProcessVideo(object):
 
         # >1 hr
         if duration > 3600:
-            self.sec_to_extract_offset = 4 
-        
-        
-        #Sequentially extract key frame every sec_to_extract_offset
-        while self.sec_to_extract < duration :
-            try:
-                frame = mov.get_frame_at_sec(self.sec_to_extract)
-                image = frame.image()
-                timecode = self.sec_to_extract
-                self.valence_scores[0].append(self.sec_to_extract)
-                self.sec_to_extract += self.sec_to_extract_offset
-                score = 0 
+            self.sec_to_extract_offset = 4
 
-                ''' If image not dominated by blackish pixels'''
-                size = 256,256
-                image.thumbnail(size,Image.ANTIALIAS)
-                width, height = image.size
-                pixels = image.load()
-                
-                ''' Check if image is too uniform a color'''
-                is_too_uniform = self.bad_image_filter.should_filter(image)
-                    
-                if is_too_uniform:  
-                    score = 0
-                    attr = 'uniform_color'
-                else:
-                    ''' Check if image is blur '''
-                    blur = model.image_blur_score(frame.image())
-                    score,attr = model.euc_distance_valence(image) #calc model score using euc distance
-                    if blur == True:
-                        score = 0.5 * score 
-                        attr = 'blur'
+        results, self.sec_to_extract = \
+          self.model.choose_thumbnails(mov,
+                                       n=n_thumbs,
+                                       sample_step=self.sec_to_extract_offset,
+                                       start_time=self.sec_to_extract)
 
-                self.valence_scores[1].append(score)
-                image = frame.image()
-                frame_no = frame.frameno
-                self.timecodes[frame_no] = timecode
-                self.data_map[frame_no] = (score,image)
-                self.attr_map[frame_no] = attr
-
-            #No more key frames to process
-            except ffvideo.NoMoreData:
-                return
-
-            except Exception,e:
-                log.exception("key=process_video msg=processing error msg=" + e.__str__())
-                #No more key frames to process
-                return
- 
-        return
+        for image, score, frame_no, timecode, attribute in results:
+            self.valence_scores[0].append(timecode)
+            self.valence_scores[1].append(score)
+            self.timecodes[frame_no] = timecode
+            self.data_map[frame_no] = (score, image)
+            self.attr_map[frame_no] = attribute
 
     def get_video_metadata(self,video_file):
         try:
             mov = ffvideo.VideoStream(video_file)
 
         except Exception, e:
-            log.error("key=process_video subkey=get_video_metadata msg=" + e.__str__())
+            log.error("key=process_video subkey=get_video_metadata msg=" + 
+                      e.__str__())
             return False
 
         self.video_metadata['codec_name'] =  mov.codec_name
@@ -236,7 +204,8 @@ class ProcessVideo(object):
             self.abtest_thumbnails["neonb"] = frame.image();
             
         except Exception, e:
-            log.error("key=process_video subkey=get_mid_thumbnail msg=" + e.__str__())
+            log.error("key=process_video subkey=get_mid_thumbnail msg=" + 
+                      e.__str__())
         return
 
     def get_filtered_thumbnail(self):
@@ -245,8 +214,12 @@ class ProcessVideo(object):
         # TODO pick quality controlled frame which is not max
        
         data_slice = self.data_map.items()
-        secondary_sorted_list = sorted(data_slice, key=lambda tup: hashlib.md5(str(tup[0])).hexdigest(), reverse=True)
-        result = sorted(secondary_sorted_list, key=lambda tup: tup[1][0], reverse=True)
+        secondary_sorted_list = sorted(data_slice,
+                                       key=lambda tup: hashlib.md5(str(tup[0])).hexdigest(),
+                                       reverse=True)
+        result = sorted(secondary_sorted_list, 
+                        key=lambda tup: tup[1][0],
+                        reverse=True)
         
         #Pick the mid element, which most likely isn't a high scored thumbnail
         mid  = len(result) / 2
@@ -306,7 +279,9 @@ class ProcessVideo(object):
         res = []
         
         #Generate intervals to extract best thumbnail from
-        intervals = list(get_intervals(interval, int( len(self.data_map) * self.sec_to_extract_offset)))
+        intervals = list(get_intervals(interval, 
+                                       int( len(self.data_map) * 
+                                            self.sec_to_extract_offset)))
 
         # Sort according to frame numbers
         frames = sorted(data, key=lambda tup: tup[0], reverse=False) 
@@ -316,7 +291,9 @@ class ProcessVideo(object):
             intv = int(intv / self.sec_to_extract_offset)
             if i > 0:
                 data_slice = frames[prev_intv :intv]
-                result = sorted(data_slice, key=lambda tup: tup[1], reverse=True)
+                result = sorted(data_slice, 
+                                key=lambda tup: tup[1], 
+                                reverse=True)
                 res.append(result[0])
             prev_intv = intv
         return res
@@ -353,9 +330,15 @@ class ProcessVideo(object):
             data_slice = self.data_map.items()  #TODO slice the interval
 
         #result = sorted(data_slice, key=lambda tup: tup[1], reverse=True)
-        #Randomize if the scores are the same, generate hash to use as the secondary key
-        secondary_sorted_list = sorted(data_slice, key=lambda tup: hashlib.md5(str(tup[0])).hexdigest(), reverse=True)
-        result = sorted(secondary_sorted_list, key=lambda tup: tup[1][0], reverse=True)
+        
+        #Randomize if the scores are the same, generate hash to use as
+        #the secondary key
+        secondary_sorted_list = sorted(data_slice, 
+                                       key=lambda tup: hashlib.md5(str(tup[0])).hexdigest(),
+                                       reverse=True)
+        result = sorted(secondary_sorted_list,
+                        key=lambda tup: tup[1][0],
+                        reverse=True)
         #log.debug("key=thumbnails msg=" + str(len(result)) + " -- " + str(nthumbnails) ) 
       
         if len(result) < nthumbnails: 
@@ -423,7 +406,8 @@ class ProcessVideo(object):
                 tar_file.addfile(tarinfo=info, fileobj=filestream)
             tar_file.close()
 
-            gzip_file = tempfile.NamedTemporaryFile(delete = properties.DELETE_TEMP_TAR)
+            gzip_file = tempfile.NamedTemporaryFile(
+                delete = properties.DELETE_TEMP_TAR)
             gz = gzip.GzipFile(filename=gzip_file.name, mode='wb')
             tmp_tar_file.seek(0)
             gz.write(tmp_tar_file.read())
@@ -492,7 +476,10 @@ class ProcessVideo(object):
             if self.request_map.has_key(properties.PREV_THUMBNAIL):
                 url = self.request_map[properties.PREV_THUMBNAIL]
                 http_client = tornado.httpclient.HTTPClient()
-                req = tornado.httpclient.HTTPRequest(url = url, method = "GET", request_timeout = 60.0, connect_timeout = 10.0)
+                req = tornado.httpclient.HTTPRequest(url = url,
+                                                     method = "GET",
+                                                     request_timeout = 60.0,
+                                                     connect_timeout = 10.0)
                 response = http_client.fetch(req)
                 data = response.body 
                 k = Key(self.s3bucket)
@@ -500,9 +487,11 @@ class ProcessVideo(object):
                 k.set_contents_from_string(data)
         
         except S3ResponseError,e:
-            log.error("key=save_top_thumb_to_s3 msg=s3 response error " + e.__str__() )
+            log.error("key=save_top_thumb_to_s3 msg=s3 response error " +
+                      e.__str__() )
         except Exception,e:
-            log.error("key=save_top_thumb_to_s3 msg=general exception " + e.__str__() )
+            log.error("key=save_top_thumb_to_s3 msg=general exception " +
+                      e.__str__() )
         return
 
     ''' Save the top thumnail to s3'''
@@ -518,9 +507,11 @@ class ProcessVideo(object):
             k.set_contents_from_string(data)
         
         except S3ResponseError,e:
-            log.error("key=save_top_thumb_to_s3 msg=s3 response error " + e.__str__() )
+            log.error("key=save_top_thumb_to_s3 msg=s3 response error " +
+                      e.__str__() )
         except Exception,e:
-            log.error("key=save_top_thumb_to_s3 msg=general exception " + e.__str__() )
+            log.error("key=save_top_thumb_to_s3 msg=general exception " +
+                      e.__str__() )
 
     ''' Save the top thumbnails to s3 as tar.gz file '''
     def save_result_data_to_s3(self,frames):
@@ -573,9 +564,11 @@ class ProcessVideo(object):
             gzip_file.close()
 
         except S3ResponseError,e:
-            log.error("key=save_result_to_s3 msg=s3 response error " + e.__str__() )
+            log.error("key=save_result_to_s3 msg=s3 response error " + 
+                      e.__str__() )
         except Exception,e:
-            log.error("key=save_result_to_s3 msg=general exception " + e.__str__() )
+            log.error("key=save_result_to_s3 msg=general exception " + 
+                      e.__str__() )
 
     ''' if complete, store response else store status are requeued '''
     def save_request_data(self, result=None):
@@ -681,7 +674,7 @@ class ProcessVideo(object):
 class HttpDownload(object):
     retry_codes = [403,500,502,503,504]
 
-    def __init__(self, json_params, ioloop):
+    def __init__(self, json_params, ioloop, model):
         #TODO Make chunk size configurable
         #TODO GZIP vs non gzip video download? 
 
@@ -702,7 +695,7 @@ class HttpDownload(object):
         self.http_client = tornado.httpclient.AsyncHTTPClient()
         self.http_client.fetch(self.req, self.async_callback)
         self.size_so_far = 0
-        self.pv = ProcessVideo(params,json_params)
+        self.pv = ProcessVideo(params, json_params, model)
         self.error = None
         self.init_callback_data_size = 4096 *100 #40KB ##init size to gather video metadata
         self.callback_data_size = 4096 * 1024 #4MB  --- TUNE 
@@ -739,14 +732,22 @@ class HttpDownload(object):
         if self.size_so_far > self.callback_data_size:
             self.size_so_far = 0
             #self.pv.process_sequentially(self.tempfile.name)
-            self.pv.process_all(self.tempfile.name)
+            n_thumbs = 5 # Dummy
+            if self.job_params.has_key(properties.TOP_THUMBNAILS):
+                n_thumbs = int(self.job_params[properties.TOP_THUMBNAILS])
+                
+            self.pv.process_all(self.tempfile.name, n_thumbs=n_thumbs)
 
     # After the request ends
     def async_callback(self, response):
         # if video size < the chunk size
         try:
             if int(response.headers['Content-Length']) < self.callback_data_size:
-                self.pv.process_all(self.tempfile.name)
+                n_thumbs = 5 # Dummy
+                if self.job_params.has_key(properties.TOP_THUMBNAILS):
+                    n_thumbs = int(self.job_params[properties.TOP_THUMBNAILS])
+                    
+                self.pv.process_all(self.tempfile.name, n_thumbs=n_thumbs)
         except:
             pass
 
@@ -1008,15 +1009,19 @@ class Worker(multiprocessing.Process):
 
     """
 
-    def __init__(self):
+    def __init__(self, model_file, model_version_file):
         # base class initialization
         multiprocessing.Process.__init__(self)
+        self.model_file = model_file
+        self.model_version_file = model_version_file
         self.SLEEP_INTERVAL = 10
         self.kill_received = False
         self.dequeue_url = properties.BASE_SERVER_URL + "/dequeue"
         self.state = State.start
-        self.model_version = self.read_version_from_file(model_file)
+        self.model_version = -1
         self.code_version = self.read_version_from_file(code_version_file)
+        self.model = None
+        self.check_model()
 
     def read_version_from_file(self,fname):
         with open(fname,'r') as f:
@@ -1081,20 +1086,19 @@ class Worker(multiprocessing.Process):
             self.kill_received = True
 
     def check_model(self):
-        with open(model_file,'r') as f:
+        with open(self.model_version_file,'r') as f:
             try:
                 version = int(f.readline())
             except:
-                #log
+                log.error('Model version file not present: %s' %
+                          self.model_version_file)
                 return
 
         # Change the model
         if self.model_version < version:
             self.model_version = version
-            model2 = BinarySVM.BinarySVM()
-            model2.load_model()
-            model2.load_valence_scores()
-            model = model2
+            log.info('Loading model from %s' % self.model_file)
+            self.model = load_model(self.model_file)
 
     def run(self):
         while not self.kill_received:
@@ -1109,11 +1113,13 @@ class Worker(multiprocessing.Process):
 
                 ## ===== ASYNC Code Starts ===== ##
                 ioloop = tornado.ioloop.IOLoop.instance()
-                dl = HttpDownload(job,ioloop)
+                dl = HttpDownload(job, ioloop, self.model)
 
                 try:
-                    s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
-                    s3bucket = Bucket(name = properties.S3_BUCKET_NAME,connection = s3conn)
+                    s3conn = S3Connection(properties.S3_ACCESS_KEY,
+                                          properties.S3_SECRET_KEY)
+                    s3bucket = Bucket(name = properties.S3_BUCKET_NAME,
+                                      connection = s3conn)
                   
                     #Save state to s3, then start the ioloop
                     k = Key(s3bucket)
@@ -1151,6 +1157,8 @@ if __name__ == "__main__":
                       help='Number of workers to spawn')
     parser.add_option('--model_dir', default='.',
                       help='Directory containing the model')
+    parser.add_option('--model_file', default=None,
+                      help='File that contains the model')
 
     options, args = parser.parse_args()
     
@@ -1174,36 +1182,17 @@ if __name__ == "__main__":
     cdir = os.path.dirname(__file__)   
     code_version_file = os.path.join(cdir,"code.version")
     
-    #Load the model 
-    model_file = os.path.join(options.model_dir,"model.version")
+    #Load the path to the model
+    model_version_file = os.path.join(options.model_dir,"model.version")
     sys.path.insert(0, options.model_dir)
-    import BinarySVM
-    global model_version
-    
-    '''Model swaping without code release
-       Race condition is possible here for model_version number update, but it's acceptable
-       given that we could have the new version replace itself twice. Mutex is the right approach,
-    :  but support has been depricated, hence this is a simple valid workaround.
-    '''
-
-    try:
-        with open(model_file,'r') as f:
-            version = f.readline()
-            model_version = int(version)
-    except:
-        print "model version file not present"
-        sys.exit(1)
-
-    model = BinarySVM.BinarySVM(model_dir=options.model_dir)
-    model.load_model()
-    model.load_valence_scores()
+    import model
 
     workers = []
     
     #spawn workers
     for i in range(num_processes):
         log.info("start worker "+ str(i))
-        worker = Worker()
+        worker = Worker(options.model_file, model_version_file)
         workers.append(worker)
         worker.start()
     

@@ -1,246 +1,237 @@
-#!/usr/bin python
+#!/usr/bin/env python
 '''
-Find untagged images of given aspect ratio and generate stimuli set (directories or text file with filenames)
-ex: python   generate_stimuli_set.py -d /users/sunilmallya/workspace/valence_image_library/ndesc -m /users/sunilmallya/workspace/model -i /users/sunilmallya/Dropbox/image_library -s 47 -f /users/sunilmallya/workspace/valence_image_library/output.db -a 1.78 -o txt
+Script that generates new stimuli sets from images that haven't been labeled yet. 
 
+The stimuli set is created by identifying N regions in image space and 
+placing all candidate images into those regions. Then, one image is taken 
+from each region to create a set. The image chosen in each region is 
+prioritized by the average distance to the nearest K examples that have been 
+labeled (larger distance is better). These images are then added to those
+that will be labeled and the priority queues are recalculated. We stop when
+one of the queues is empty.
+
+TODO When a queue is empty try to intelligently find videos that are
+likely to have a frame in that region in image space.
+
+Copyright: 2013 Neon Labs
+Author: Sunil Mallya (mallaya@neon-lab.com)
+        Mark Desnoyer (desnoyer@neon-lab.com)
 '''
+USAGE = '%prog [options]'
 
+import cv2
+import heapq
+import logging
 import os
 import sys
 import shutil
-from scipy import *
-from pylab import *
-from scipy.cluster import vq
-import scipy.spatial.distance as DIST
-import numpy
-import time
-import scikits.ann as ann
+import numpy as np
 from optparse import OptionParser
-from Queue import PriorityQueue
-from PIL import Image
+import cPickle as pickle
+import pyflann
+import scipy.spatial.distance
 
-USAGE = '%prog [options]'
-def cluster_data(data,cluster_cnt,iter=20,thresh=1e-5):
-    """ Group data into a number of common clusters
-        data -- 2D array of data points ( vectors).  Each point is a row in the array.
-        cluster_cnt -- The number of clusters to use
-    """
-    wh_data = vq.whiten(data)
-    code_book,dist = vq.kmeans(wh_data,cluster_cnt,iter,thresh)
-    #code_books - centroids
-    code_ids, distortion = vq.vq(wh_data,code_book)
-    clusters = []
-    for i in range(len(code_book)):
-        cluster = compress(code_ids == i,data,0)
-        clusters.append(cluster)
-    return clusters,code_ids
+_log = logging.getLogger(__name__)
 
-''' Check if image is not already in a stimuli set, conforms to aspect ratio '''
-def select_image(imdb,id,ar=1.78):
-    try:
-        tup = imdb[id] #(ar,stimset)
-        if tup[0] == ar and tup[1] == 'null':
-            return True
-    except:
-        pass
+def load_gist_generator(model_dir, cache_dir=None):
+    _log.info('Loading model from %s' % model_dir)
+    sys.path.insert(0, model_dir)
+    import model
 
-    return False
+    generator = model.GistGenerator()
+    if cache_dir is not None:
+        generator = model.DiskCachedFeatures(generator, cache_dir)
 
-def update_image_db(imdb,fname_map):
-    
-    out = open('out','w')
-    with open(imdb) as f:
-        for line in f.readlines():
-            parts = line.split(' ')
-            id = parts[0]
-            stim = parts[-1].rstrip("\n")
-            if fname_map.has_key(id):
-                for i in range( len(parts) - 1):
-                    out.write( parts[i] + " ")
-                out.write( str(fname_map[id])  + "\n") 
+    return generator
+
+def parse_image_db(imdb_file, aspect_ratio, image_dir):
+    _log.info('Loading the image database file: %s' % imdb_file)
+    image_files = []
+    with open(imdb_file) as f:
+        for line in f:
+            fields = line.split()
+            if float(fields[3]) == aspect_ratio:
+                cur_file = '%s.jpg' % fields[0]
+                if not os.path.exists(os.path.join(image_dir, cur_file)):
+                    _log.error(
+                        'Image is in the database but cannot be found: %s' %
+                        cur_file)
+                else:
+                    image_files.append('%s.jpg' % fields[0])
+
+    return image_files
+
+def find_labeled_files(stimuli_dir, image_dir):
+    '''Find all the images that are already in a stimuli set.'''
+    labeled = set()
+    for root, dirs, files in os.walk(stimuli_dir):
+        for name in files:
+            if os.path.exists(os.path.join(image_dir)):
+                labeled.add(name)
             else:
-                out.write(line)
+                _log.error('Image is in a stimuli set, but cannot be found: %s'
+                           % name)
 
-def create_kdtree(descriptors):
-    return ann.kdtree(numpy.array(descriptors))
+    return labeled
 
-''' get mean distance for untagged images '''
-def calc_kdtree_distance(kdtree,descriptors,data_map):
-    kdistance_map = {}
-    for desc,fname in zip(descriptors,data_map):
-        idx,dist = kdtree.knn(desc,k)
-        mean = numpy.mean(dist[0])
-        kdistance_map[fname] = mean
+def load_codebook(codebook):
+    '''Returns (example_urls, centers, whitening_vector) from the codebook.'''
+    with open(codebook, 'rb') as f:
+        return pickle.load(f)
 
-    return kdistance_map
+def generate_features(image_files, image_dir, white_vector, generator):
+    '''Creates a matrix of features.
+
+    The matrix is one image per row and the features a divided by the
+    whitening vector.
+
+    '''
+    features = []
+    _log.info('Loading features from %i images' % len(image_files))
+    for cur_file in image_files:
+        vec = generator.generate(cv2.imread(os.path.join(image_dir, cur_file)))
+        features.append(vec / white_vector)
+
+    return np.array(features)
+
+
+def create_cluster_queues(n_clusters):
+    '''Create a list of heaps. One for each cluster.'''
+    return [[] for x in range(n_clusters)]
+
+def calc_mean_dist(knn_index, example, k=5):
+    '''Calculates the mean distance^2 to the k nearest neighbours of the example.'''
+    garb, dists = knn_index.nn_index(example, 5, checks=3)
+    return np.mean(dists)
+
+def assign_examples_to_clusters(examples, clusters, codebook, priority_func):
+    '''Places examples in their cluster with a priority.
+
+    The clusters are a list of heaps where the entries are (p_val, example_idx)
+    '''
+    _log.info('Assigning %i examples to %i clusters' % (len(examples),
+                                                        len(clusters)))
+
+    dists = scipy.spatial.distance.cdist(examples, codebook)
+    chosen_clusters = np.argmin(dists, axis=1)
+    for i in range(examples.shape[0]):
+        p_val = priority_func(examples[i])
+        if p_val > -0.7:
+            # Image is the same as one in the index, so skip
+            continue
+        heapq.heappush(clusters[chosen_clusters[i]],
+                       (p_val, i))
+
+    cluster_sizes = [len(x) for x in clusters]
+    _log.info('The smallest cluster has %i examples. The largest has %i' %
+              (min(cluster_sizes), max(cluster_sizes)))
+    return clusters
+
+def recalculate_priorities(examples, clusters, priority_func):
+    _log.info('Recalculating priorities')
+    for cluster in clusters:
+        last_update = None
+        while len(cluster) > 0 and cluster[0][1] <> last_update:
+            last_update = cluster[0][1]
+            new_pval = priority_func(examples(last_update))
+            heapq.replace(cluster, (new_pval, last_update))
+            
+    return clusters   
+
+def build_knn_index(examples):
+    _log.info('Building the flann index of labeled examples')
+    flann = pyflann.FLANN()
+    flann.build_index(examples, algorithm = 'kdtree', trees=5,
+                      log_level='info')
+
+    return flann
 
 if __name__ == '__main__':
     parser = OptionParser(usage=USAGE)
+    
+    parser.add_option('-i', '--image_db', default=None,
+                      help='Image database file')
+    parser.add_option('--stimuli_dir', default=None,
+                      help='Directory containing previous stimuli sets')
+    parser.add_option('-o','--output', default='stimuli_set%i',
+                      help='Format of the directory name to output a stimuli set')
+    parser.add_option('--image_dir', default=None,
+                      help='Image directory')
+    parser.add_option('--codebook', default=None,
+                      help=('File containing the codebook definition. '
+                            'Created using the divide_visual_space.py script.'))
 
-    parser.add_option('-d', '--descriptor_dir', default=None,
-                      help='Directory with image descriptors')
     parser.add_option('-m', '--model_dir', default=None,
                       help='Model root directory')
-    parser.add_option('-i', '--image_dir', default=None,
-                      help='Image directory')
+    parser.add_option('--cache_dir', default=None,
+                      help='Directory for cached feature files.')
     parser.add_option('-s', '--start_index',type='int', default=None,
                       help='start index of the stimuli set')
-    parser.add_option('-c', '--csize',type='int', default=108,
-                      help='cluster size')
-    parser.add_option('-n', '--nset',type='int', default=1,
-                      help='max number of stimuli set to generate')
-    parser.add_option('-f', '--image_db', default=None,
-                      help='Image database file')
     parser.add_option('-a', '--aspect_ratio',type='float', default=1.78,
                       help='aspect ratio to select')
-    parser.add_option('-o','--output', default='txt',
-                      help='dir|txt - stimuli set with images | text file with filenames')
 
     options, args = parser.parse_args()
-    source = options.descriptor_dir
-    start_index = options.start_index
-    nclusters = options.csize
-    nsets = options.nset
-    image_db = options.image_db
-    aspect_ratio = options.aspect_ratio
-    output = options.output
-    model_source = options.model_dir
-    image_dir = options.image_dir
 
-    map = {}
-    all_files = []
-    file_map  = {}
-    data_map  = [] 
-    descriptors = []
-    kdistance_map = {}
-    imdb = {}
-    fname_stimset_map = {}
+    logging.basicConfig(level=logging.INFO)
 
-    # Load image database in to a map
-    with open(image_db,'r') as f:
-        lines = f.readlines()
-    
-    for line in lines:
-        parts = line.split(' ')
-        id = parts[0]
-        ar = float(parts[3])
-        stim = parts[-1].rstrip('\n')
-        imdb[id] = (ar,stim)
+    generator = load_gist_generator(options.model_dir, options.cache_dir)
+    example_urls, codebook, white_vector = load_codebook(options.codebook)
 
-    # Create a map of each cluster and associate the distance or distribution with each element
-    # Get only new images that arent' tagged yet !
-    dirList = os.listdir(source)
-    for infile in dirList:
-        if infile.endswith('.npy'):
-            id = infile.split('.')[0]
-            if select_image(imdb,id,aspect_ratio):
-                smarray = numpy.load( source + "/" + infile)
-                descriptors.append(smarray)
-                data_map.append(infile)
+    image_files = parse_image_db(options.image_db, options.aspect_ratio,
+                                 options.image_dir)
 
-    #data = numpy.array(descriptors)
-    #clusters,code_ids = cluster_data(data,nclusters)
-    
-    result = [ PriorityQueue() for _ in range(nclusters)] #populated list of filenames in each cluster
-    result_fnames = [ [] for _ in range(nclusters)]
+    labeled_files = find_labeled_files(options.stimuli_dir,
+                                       options.image_dir)
+    unlabeled_files = [x for x in image_files if x not in labeled_files]
+    labeled_files = [x for x in labeled_files]
+    _log.info('Found %i labeled images and %i unlabeled images' % 
+              (len(labeled_files), len(unlabeled_files)))
 
-    # Create a KD Tree for ANN
-    model_descriptors = []
-   
-    #load descriptors from the current model ( valence_descriptors/ folder)
-    src = model_source + "/valence_descriptors"
-    dirList = os.listdir(src)
-    for dir in dirList:
-        s_src = src + "/" + dir
-        for infile in os.listdir(s_src):
-            if infile.endswith('.npy'):
-                smarray = numpy.load( s_src + "/" + infile)
-                model_descriptors.append(smarray)
+    labeled = generate_features(labeled_files, options.image_dir,
+                                white_vector, generator)
+    knn_index = build_knn_index(labeled)
 
-    # Populate the distance metric for each of the descriptors
-    k = 3
-    stimsets = []
-    i = 0 
-    #temp generate 5 stim sets
-    while i < 5:
-        kdtree = create_kdtree(model_descriptors) 
-        kdistance_map = calc_kdtree_distance(kdtree,descriptors,data_map)
-        sorted_map = sorted(kdistance_map.iteritems(), key=lambda (k,v): (v,k))
-        stimset = sorted_map[-1]
-        stimsets.append(stimset)
-        fname = stimset[0]
-        desc = numpy.load(source + "/" + fname)
-        model_descriptors.append(desc)
-        idx = data_map.index(fname)
-        data_map.pop(idx)
-        descriptors.pop(idx)
+    unlabeled = generate_features(unlabeled_files, options.image_dir,
+                                  white_vector, generator)
+    cluster_qs = create_cluster_queues(codebook.shape[0])
+    cluster_qs = assign_examples_to_clusters(
+        unlabeled,
+        cluster_qs,
+        codebook,
+        lambda x: -calc_mean_dist(knn_index, x))
 
-        if len(stimsets) == 108:
-            for item in stimsets:
-                fname = item[0]
-                if output == 'dir':
-                    target = "stimuli_" + str(start_index + i)
-                    if not os.path.exists(target):
-                        os.mkdir(target)
-                    fname = fname.split('.npy')[0]
-                    target_fname = target + '/' + fname
-                    shutil.copy(image_dir + '/' + fname,target_fname) 
-                    im = Image.open( target_fname)
-                    size = 256,144
-                    im.thumbnail(size,Image.ANTIALIAS)
-                    im.save(target_fname)
-            stimsets = []
-            i +=1
-    ''' 
-    # Format cluster result
-    i = 0 
-    for id in code_ids:
-        result_fnames[id].append(data_map[i])
-        i += 1
-    
-    for i in range(nclusters): 
-        #Create fname,distance tuple
-        for fname in result_fnames[i]:
-            dist = kdistance_map[fname] 
-            result[i].put(fname, -1 * dist) #insert into pq, -ve of dist
+    cur_stimuli_index = options.start_index
+    found_empty_cluster = False
+    while not found_empty_cluster:
+        _log.info('Building stimuli set %i' % cur_stimuli_index)
 
-    # cluster with least number of files
-    min_cluster = 999
-    for i in range(nclusters):
-        l = len(result_fnames[i]) 
-        if l < min_cluster:
-            min_cluster = l  
-
-    if min_cluster == 0:
-        print "Not enough images in each cluster to create even a single stimuli set"
-        sys.exit(0)
-
-    # For min # of clusters, create stimuli sets
-    output_file = 'stimset_output.' + str(int(time.time()))
-    f = open(output_file,'w') 
-    for i in range(min_cluster):
-        if output == 'dir': 
-            target = "stimuli_" + str(start_index + i)
-            if not os.path.exists(target):
-                os.mkdir(target)
-         
-        for j in range(nclusters):
-            pq = result[j]
-            #pq.get() blocks if size =0
-            if pq.qsize() <= 0:
+        stimuli_files = []
+        chosen_examples = []
+        for clusterq in cluster_qs:
+            if len(clusterq) == 0:
+                _log.warning('There are no more examples in a cluster,'
+                 'so we are done')
+                found_empty_cluster = True
                 break
-            fname = pq.get()
-            fname = fname.split('.')[0]
-            fname_stimset_map[fname] = start_index + i #save fname to stimset mapping        
-            fname = fname + '.jpg' 
-            f.write(fname + " s" + str(start_index + i)  + '\n')
-            if output == 'dir':
-                target_fname = target + '/' + fname
-                shutil.copy(image_dir + '/' + fname,target_fname) 
-                im = Image.open( target_fname)
-                size = 256,144
-                im.thumbnail(size,Image.ANTIALIAS)
-                im.save(target_fname )
-    f.close() 
-    '''
-    #TODO : Update the image DB with the stimuli set it was associated with 
+
+            p_dist, idx = heapq.heappop(clusterq)
+            stimuli_files.append(unlabeled_files[idx])
+            chosen_examples.append(unlabeled[idx])
+
+        if not found_empty_cluster:
+            dest_dir = options.output % cur_stimuli_index
+            _log.info('Writing stimuli set to %s' % dest_dir)
+            for image_file in stimuli_files:
+                shutil.copy(os.path.join(options.image_dir, image_file),
+                            os.path.join(dest_dir, image_file))
+
+
+            _log.info('Adding the chosen examples to the kdtree.')
+            labeled = np.vstack(labeled, chosen_examples)
+            knn_index = build_knn_index(labeled)
+
+            cluster_qs = recalculate_priorities(
+                unlabeled, cluster_qs,
+                lambda x: -calc_mean_dist(knn_index, x))
+
+        cur_stimuli_index += 1
