@@ -12,8 +12,8 @@ USAGE = '%prog [options]'
 
 import cPickle as pickle
 from flickrapi import FlickrAPI, shorturl
-import leargist
 import errorlog
+import numpy as np
 from optparse import OptionParser
 from PIL import Image
 from cStringIO import StringIO
@@ -22,6 +22,7 @@ import time
 import urllib2
 import re
 import youtube_video_id_scraper as youtube
+
 
 API_KEY = '3c8ecd709d9b6b933e679b6aa5128727'
 API_SECRET = '80b54fa4f78056fb'
@@ -39,17 +40,14 @@ def streamurl2imgurl(stream_url):
     search = small_re.match(small_url)
     return '%s.%s' % (search.group(1), search.group(2))
 
-def get_features(url):
+def get_features(url, generator):
     '''Gets the features of an image at a given url.'''
     # First retrieve the image
     url_stream = urllib2.urlopen(url)
     im_stream = StringIO(url_stream.read())
     image = Image.open(im_stream)
 
-    # Resize the image
-    image.thumbnail((256,256), Image.ANTIALIAS)
-
-    return leargist.color_gist(image)
+    return generator.generate(np.array(image)[:,:,::-1])
 
 def output_results(results, out_file):
     if len(results) > 0:
@@ -59,7 +57,7 @@ def output_results(results, out_file):
             pickle.dump(results, f, 2)
     
 
-def process_one_query(query, n_images, out_file, qpm=55):
+def process_one_query(query, n_images, out_file, generator, qpm=55):
     MAX_PER_QUERY = 500 # Flickr limitation
     flickr = FlickrAPI(API_KEY)
 
@@ -78,7 +76,8 @@ def process_one_query(query, n_images, out_file, qpm=55):
             url = shorturl.url(data.get('id'))
             try:
                 features = get_features(
-                    streamurl2imgurl('%s/sizes/z/in/photostream/' % url))
+                    streamurl2imgurl('%s/sizes/z/in/photostream/' % url),
+                    generator)
             except IOError as e:
                 _log.error('Error getting image %s: %s' % (url, e))
                 continue
@@ -94,7 +93,7 @@ def process_one_query(query, n_images, out_file, qpm=55):
     finally:
         output_results(results, out_file)
         
-def process_youtube_query(query, n_images, out_file, qpm=55):
+def process_youtube_query(query, n_images, out_file, generator, qpm=55):
     _log.info('Finding %i youtube thumbnails with query: %s' %
               (n_images, query))
 
@@ -105,7 +104,7 @@ def process_youtube_query(query, n_images, out_file, qpm=55):
             time.sleep(60.0 / qpm)
             url = 'http://i.ytimg.com/vi/%s/hqdefault.jpg' % video_id
             try: 
-                features = get_features(url)
+                features = get_features(url, generator)
             except IOError as e:
                 _log.error('Error getting image %s: %s' % (url, e))
                 continue
@@ -136,6 +135,8 @@ if __name__ == '__main__':
                       help='Query to start with')
     parser.add_option('--youtube', action='store_true', default=False,
                       help='Get youtube thumbnails instead of flickr ones?')
+    parser.add_option('--model_dir', default='../../model',
+                      help='Directory with the model')
 
     options, args = parser.parse_args()
 
@@ -144,6 +145,12 @@ if __name__ == '__main__':
     in_stream = sys.stdin
     if options.input is not None:
         in_stream = open(options.input, 'r')
+
+    _log.info('Loading model from %s' % options.model_dir)
+    sys.path.insert(0, options.model_dir)
+    import model
+
+    generator = model.GistGenerator()
 
     i = -1
     for line in in_stream:
@@ -159,6 +166,7 @@ if __name__ == '__main__':
             process_func(query,
                          options.n,
                          options.output % i,
+                         generator,
                          options.qpm)
         except Exception as e:
             _log.error('Error getting results for query: %s: %s' % (query,
