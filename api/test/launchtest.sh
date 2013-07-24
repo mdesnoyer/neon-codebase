@@ -1,3 +1,9 @@
+model_dir=$1
+if [ $# -ne 1 ] ; then
+	echo "sh launchtest.sh <model_dir_abs_path>"
+	exit
+fi
+
 #start neon api server
 echo "starting neon api server"
 nohup python ../server.py &
@@ -13,7 +19,7 @@ sleep 5
 curl localhost:8082/integrationtest?test=neon
 
 #start clients
-nohup python ../client.py --model_dir=../model --local=True &
+nohup python ../client.py --model_dir=$model_dir --local=True &
 cpid=$!
 
 #poll for status 
@@ -32,5 +38,5 @@ while true; do
 done
 
 #shutdown all
-kill -9 $spid $tpid $cpid
+kill -9 $cpid $spid $tpid
 

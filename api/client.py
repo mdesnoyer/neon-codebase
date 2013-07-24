@@ -1098,7 +1098,7 @@ class Worker(multiprocessing.Process):
         if self.model_version < version:
             self.model_version = version
             log.info('Loading model from %s' % self.model_file)
-            self.model = load_model(self.model_file)
+            self.model = model.load_model(self.model_file)
 
     def run(self):
         while not self.kill_received:
