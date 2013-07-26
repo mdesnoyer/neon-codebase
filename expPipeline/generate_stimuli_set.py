@@ -19,11 +19,16 @@ Author: Sunil Mallya (mallaya@neon-lab.com)
 '''
 USAGE = '%prog [options]'
 
+import os.path
+import sys
+sys.path.insert(0,os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..')))
+import model.model
+
 import cv2
 import heapq
 import logging
 import os
-import sys
 import shutil
 import numpy as np
 from optparse import OptionParser
@@ -33,14 +38,10 @@ import scipy.spatial.distance
 
 _log = logging.getLogger(__name__)
 
-def load_gist_generator(model_dir, cache_dir=None):
-    _log.info('Loading model from %s' % model_dir)
-    sys.path.insert(0, model_dir)
-    import model
-
-    generator = model.GistGenerator()
+def load_gist_generator(cache_dir=None):
+    generator = model.model.GistGenerator()
     if cache_dir is not None:
-        generator = model.DiskCachedFeatures(generator, cache_dir)
+        generator = model.model.DiskCachedFeatures(generator, cache_dir)
 
     return generator
 
@@ -76,6 +77,8 @@ def find_labeled_files(stimuli_dir, image_dir):
 
 def load_codebook(codebook):
     '''Returns (example_urls, centers, whitening_vector) from the codebook.'''
+    if codebook is None:
+        return (None, None, 1.0)
     with open(codebook, 'rb') as f:
         return pickle.load(f)
 
@@ -95,25 +98,33 @@ def generate_features(image_files, image_dir, white_vector, generator):
     return np.array(features)
 
 
-def create_cluster_queues(n_clusters):
+def create_cluster_queues(codebook):
     '''Create a list of heaps. One for each cluster.'''
-    return [[] for x in range(n_clusters)]
+    if codebook is None:
+        return [[]]
+    return [[] for x in range(codebook.shape[0])]
 
 def calc_mean_dist(knn_index, example, k=5):
     '''Calculates the mean distance^2 to the k nearest neighbours of the example.'''
     garb, dists = knn_index.nn_index(example, 5, checks=3)
     return np.mean(dists)
 
-def assign_examples_to_clusters(examples, clusters, codebook, priority_func):
+def assign_examples_to_clusters(examples, clusters, priority_func,
+                                codebook=None):
     '''Places examples in their cluster with a priority.
 
     The clusters are a list of heaps where the entries are (p_val, example_idx)
+
+    If codebook is None, only use a single heap with (p_val, example_idx)
     '''
     _log.info('Assigning %i examples to %i clusters' % (len(examples),
                                                         len(clusters)))
 
-    dists = scipy.spatial.distance.cdist(examples, codebook)
-    chosen_clusters = np.argmin(dists, axis=1)
+    if codebook is None:
+        chosen_clusters = [0 for x in range(examples.shape[0])]
+    else:
+        dists = scipy.spatial.distance.cdist(examples, codebook)
+        chosen_clusters = np.argmin(dists, axis=1)
     for i in range(examples.shape[0]):
         p_val = priority_func(examples[i])
         if p_val > -0.7:
@@ -128,23 +139,51 @@ def assign_examples_to_clusters(examples, clusters, codebook, priority_func):
     return clusters
 
 def recalculate_priorities(examples, clusters, priority_func):
-    _log.info('Recalculating priorities')
+    '''Recalculates the priorities so that the top entry is on each cluster'''
     for cluster in clusters:
         last_update = None
         while len(cluster) > 0 and cluster[0][1] <> last_update:
             last_update = cluster[0][1]
-            new_pval = priority_func(examples(last_update))
-            heapq.replace(cluster, (new_pval, last_update))
+            new_pval = priority_func(examples[last_update])
+            heapq.heapreplace(cluster, (new_pval, last_update))
             
     return clusters   
 
 def build_knn_index(examples):
     _log.info('Building the flann index of labeled examples')
     flann = pyflann.FLANN()
-    flann.build_index(examples, algorithm = 'kdtree', trees=5,
-                      log_level='info')
+    sample_fraction = 0.20
+    if examples.shape[0] > 10000:
+        sample_fraction = 0.05
+    flann.build_index(examples, algorithm = 'autotuned',
+                      target_precision=0.95,
+                      build_weight=0.01,
+                      memory_weight=0.7,
+                      sample_fraction=sample_fraction,
+                      log_level='info',
+                      random_seed=184369)
 
     return flann
+
+def is_duplicate(feature, feature_set, d_thresh=0.7):
+    '''Is the feature a duplicate of one in the feature_set?'''
+    if len(feature_set) == 0:
+        return False
+    dists = scipy.spatial.distance.cdist([feature], feature_set)
+    return np.min(dists) < d_thresh
+
+def choose_examples(queue, examples, n, priority_func):
+    '''Choose n examples at the top of the priority queue, ignoring dups.'''
+    chosen = []
+    chosen_idx = []
+    while len(chosen) < n and len(queue) > 0:
+        recalculate_priorities(examples, [queue], priority_func)
+        p_dist, idx = heapq.heappop(queue)
+        if not is_duplicate(examples[idx], chosen):
+            chosen.append(examples[idx])
+            chosen_idx.append(idx)
+
+    return chosen_idx
 
 if __name__ == '__main__':
     parser = OptionParser(usage=USAGE)
@@ -161,20 +200,22 @@ if __name__ == '__main__':
                       help=('File containing the codebook definition. '
                             'Created using the divide_visual_space.py script.'))
 
-    parser.add_option('-m', '--model_dir', default=None,
-                      help='Model root directory')
     parser.add_option('--cache_dir', default=None,
                       help='Directory for cached feature files.')
     parser.add_option('-s', '--start_index',type='int', default=None,
                       help='start index of the stimuli set')
     parser.add_option('-a', '--aspect_ratio',type='float', default=1.78,
                       help='aspect ratio to select')
+    parser.add_option('-n', '--n_sets', type='int', default=5,
+                      help='Number of stimuli sets to create')
+    parser.add_option('--n_img', type='int', default=108,
+                      help='Number of images per set')
 
     options, args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
 
-    generator = load_gist_generator(options.model_dir, options.cache_dir)
+    generator = load_gist_generator(options.cache_dir)
     example_urls, codebook, white_vector = load_codebook(options.codebook)
 
     image_files = parse_image_db(options.image_db, options.aspect_ratio,
@@ -193,41 +234,57 @@ if __name__ == '__main__':
 
     unlabeled = generate_features(unlabeled_files, options.image_dir,
                                   white_vector, generator)
-    cluster_qs = create_cluster_queues(codebook.shape[0])
+    cluster_qs = create_cluster_queues(codebook)
     cluster_qs = assign_examples_to_clusters(
         unlabeled,
         cluster_qs,
-        codebook,
-        lambda x: -calc_mean_dist(knn_index, x))
+        lambda x: -calc_mean_dist(knn_index, x),
+        codebook)
 
     cur_stimuli_index = options.start_index
     found_empty_cluster = False
-    while not found_empty_cluster:
+    while (not found_empty_cluster and 
+           cur_stimuli_index < (options.start_index + options.n_sets)):
         _log.info('Building stimuli set %i' % cur_stimuli_index)
 
         stimuli_files = []
         chosen_examples = []
-        for clusterq in cluster_qs:
-            if len(clusterq) == 0:
-                _log.warning('There are no more examples in a cluster,'
-                 'so we are done')
-                found_empty_cluster = True
-                break
+        if codebook is None:
+            chosen_idx = choose_examples(
+                cluster_qs[0],
+                unlabeled,
+                options.n_img,
+                lambda x: -calc_mean_dist(knn_index, x))
+            for idx in chosen_idx:
+                stimuli_files.append(unlabeled_files[idx])
+                chosen_examples.append(unlabeled[idx])
+                
+        else:
+            for clusterq in cluster_qs:
+                if len(clusterq) == 0:
+                    _log.warning('There are no more examples in a cluster,'
+                    'so we are done')
+                    found_empty_cluster = True
+                    break
 
-            p_dist, idx = heapq.heappop(clusterq)
-            stimuli_files.append(unlabeled_files[idx])
-            chosen_examples.append(unlabeled[idx])
+                p_dist, idx = heapq.heappop(clusterq)
+                stimuli_files.append(unlabeled_files[idx])
+                chosen_examples.append(unlabeled[idx])
 
-        if not found_empty_cluster:
+        if not found_empty_cluster and len(chosen_examples) == options.n_img:
             dest_dir = options.output % cur_stimuli_index
             _log.info('Writing stimuli set to %s' % dest_dir)
+            if os.path.exists(dest_dir):
+                _log.error('Stimuli set %s already exists' % dest_dir)
+                continue
+            os.makedirs(dest_dir)
             for image_file in stimuli_files:
                 shutil.copy(os.path.join(options.image_dir, image_file),
                             os.path.join(dest_dir, image_file))
 
 
-            _log.info('Adding the chosen examples to the kdtree.')
-            labeled = np.vstack(labeled, chosen_examples)
+            _log.info('Adding the chosen examples to the knn index.')
+            labeled = np.vstack((labeled, chosen_examples))
             knn_index = build_knn_index(labeled)
 
             cluster_qs = recalculate_priorities(

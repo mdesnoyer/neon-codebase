@@ -12,10 +12,13 @@ USAGE='%prog [options] <workers> <local properties>'
 #TODO: Benchmark streaming download - processing and prediction
 #TODO: build a throttle mode for controlling number of clients based on mem/ cpu
 #==============       =======================
-
 import os
 import os.path
 import sys
+sys.path.insert(0,os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..')))
+
+import model.model
 import tempfile
 import tornado.web
 import tornado.gen
@@ -1098,7 +1101,7 @@ class Worker(multiprocessing.Process):
         if self.model_version < version:
             self.model_version = version
             log.info('Loading model from %s' % self.model_file)
-            self.model = model.load_model(self.model_file)
+            self.model = model.model.load_model(self.model_file)
 
     def run(self):
         while not self.kill_received:
@@ -1155,8 +1158,6 @@ if __name__ == "__main__":
                       help='If set, use the localproperties file for config')
     parser.add_option('--n_workers', default=1, type='int',
                       help='Number of workers to spawn')
-    parser.add_option('--model_dir', default='.',
-                      help='Directory containing the model')
     parser.add_option('--model_file', default=None,
                       help='File that contains the model')
 
@@ -1183,9 +1184,8 @@ if __name__ == "__main__":
     code_version_file = os.path.join(cdir,"code.version")
     
     #Load the path to the model
-    model_version_file = os.path.join(options.model_dir,"model.version")
-    sys.path.insert(0, options.model_dir)
-    import model
+    model_version_file = os.path.join(__file__, '..', 'model', 
+                                      "model.version")
 
     workers = []
     

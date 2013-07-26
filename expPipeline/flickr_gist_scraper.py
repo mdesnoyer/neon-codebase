@@ -10,6 +10,12 @@ Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
 USAGE = '%prog [options]'
 
+import os.path
+import sys
+sys.path.insert(0,os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..')))
+import model.model
+
 import cPickle as pickle
 from flickrapi import FlickrAPI, shorturl
 import errorlog
@@ -17,7 +23,6 @@ import numpy as np
 from optparse import OptionParser
 from PIL import Image
 from cStringIO import StringIO
-import sys
 import time
 import urllib2
 import re
@@ -135,8 +140,6 @@ if __name__ == '__main__':
                       help='Query to start with')
     parser.add_option('--youtube', action='store_true', default=False,
                       help='Get youtube thumbnails instead of flickr ones?')
-    parser.add_option('--model_dir', default='../../model',
-                      help='Directory with the model')
 
     options, args = parser.parse_args()
 
@@ -146,11 +149,7 @@ if __name__ == '__main__':
     if options.input is not None:
         in_stream = open(options.input, 'r')
 
-    _log.info('Loading model from %s' % options.model_dir)
-    sys.path.insert(0, options.model_dir)
-    import model
-
-    generator = model.GistGenerator()
+    generator = model.model.GistGenerator()
 
     i = -1
     for line in in_stream:

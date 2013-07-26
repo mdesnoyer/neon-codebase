@@ -3,12 +3,16 @@
 '''
 USAGE = '%prog [options]'
 
+import os.path
+import sys
+sys.path.insert(0,os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..')))
+import model.model as mod2
+
 from optparse import OptionParser
 from BadImageFilter import BadImageFilter
 import ffvideo
 from PIL import Image
-import sys
-import os.path
 import cv2
 import numpy as np
 import time
@@ -16,8 +20,7 @@ import time
 def load_new_model(options):
     sys.path.insert(0, options.model_dir)
     import model as mod2
-    return mod2.load_model(os.path.join(options.model_dir,
-                                       '071013_trained.model'))
+    return mod2.load_model(options.model_file)
 
 def run_new_model(model, options):
     # Output the model rewrite results    
@@ -40,8 +43,8 @@ if __name__ == '__main__':
                       help='Input video.')
     parser.add_option('-n', default=1, type='int',
                       help='Number of thumbnails to show')
-    parser.add_option('--model_dir', default='.',
-                      help='Directory containing the model')
+    parser.add_option('--model_file', default=None,
+                      help='The model file')
 
     options, args = parser.parse_args()
 
@@ -49,8 +52,7 @@ if __name__ == '__main__':
     run_new_model(mod, options)
 
     # Load the model
-    sys.path.insert(0, options.model_dir)
-    import BinarySVM
+    import model.BinarySVM as BinarySVM
     model = BinarySVM.BinarySVM(model_dir=options.model_dir)
     model.load_model()
     model.load_valence_scores()
