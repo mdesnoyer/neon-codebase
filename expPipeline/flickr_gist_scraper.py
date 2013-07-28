@@ -161,10 +161,15 @@ if __name__ == '__main__':
             process_func = process_one_query
             if options.youtube:
                 process_func = process_youtube_query
+
+            output_fn = options.output % i
+            if os.path.exists(output_fn):
+                _log.info('File %s already exists. Skipping.' % output_fn)
+                continue
                 
             process_func(query,
                          options.n,
-                         options.output % i,
+                         output_fn,
                          generator,
                          options.qpm)
         except Exception as e:
