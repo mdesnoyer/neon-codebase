@@ -21,7 +21,7 @@ log = errorlog.FileLogger("server")
 global result_map
 result_map = {} 
 
-random.seed(2)
+random.seed(6984)
 test_status = 0 ; # 0- in progress, 1 - pass , -1 - fail
 
 def sig_handler(sig, frame):

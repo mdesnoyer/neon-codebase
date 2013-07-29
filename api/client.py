@@ -112,7 +112,7 @@ class ProcessVideo(object):
         self.request = request
         self.model = model
         self.frames = []
-        self.data_map = {}
+        self.data_map = {} # frameNo -> (score, image_rgb)
         self.attr_map = {}
         self.timecodes = {}
         self.frame_size_width = 256
@@ -182,7 +182,7 @@ class ProcessVideo(object):
             self.valence_scores[0].append(timecode)
             self.valence_scores[1].append(score)
             self.timecodes[frame_no] = timecode
-            self.data_map[frame_no] = (score, image)
+            self.data_map[frame_no] = (score, image[:,:,::-1])
             self.attr_map[frame_no] = attribute
 
     def get_video_metadata(self,video_file):
