@@ -3,7 +3,6 @@
 USAGE='%prog [options] <workers> <local properties>'
 
 #============ Future Items ================
-#TODO: IOLoop timeouts
 #TODO: IOLoop logging on blocking ops
 #TODO: Send a signal to blocked threads ?
 #TODO: IOLoop.handle_callback_exception
