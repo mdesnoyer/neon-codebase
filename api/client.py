@@ -335,11 +335,30 @@ class ProcessVideo(object):
             nthumbnails = min(len(result),nthumbnails)
             return result[:nthumbnails]
         else:
-            #Fiter duplicates
+            # Fiter duplicates
+            # TODO(mdesnoyer): Specify the number of thumbnails to return.
             filtered = self.model.filter_duplicates(
-                ((x[1][1], x) for x in result),
-                n=nthumbnails)
-            return [x[1] for x in filtered]
+                [(x[1][1], x) for x in result],
+                n=None)
+            filt_result = [x[1] for x in filtered]
+
+            # TODO(mdesnoyer): Remove this hack. This forces the
+            # thumbnails to be at least 5s apart in the video in
+            # order to avoid duplicates.
+            spread_result = []
+            filt_result.reverse()
+            while len(spread_result) < nthumbnails and len(filt_result) > 0:
+                too_close = False
+                cur_entry = filt_result.pop()
+                cur_frameno = cur_entry[0]
+                for chosen in spread_result:
+                    if abs(cur_frameno - chosen[0]) < 150:
+                        too_close = True
+                        break
+                if not too_close:
+                    spread_result.append(cur_entry)
+                    
+            return spread_result
 
     def save_data_to_s3(self):
         
@@ -489,7 +508,7 @@ class ProcessVideo(object):
             k = Key(self.s3bucket)
             for rank,frame_no in zip(range(len(frames)),frames):
                 score = self.data_map[frame_no][0]
-                image = Image.fromarray(self.data_map[frame_no][1][:,:,::-1])
+                image = Image.fromarray(self.data_map[frame_no][1])
                 size = properties.THUMBNAIL_IMAGE_SIZE
 
                 # Image size requested is different set it
@@ -703,9 +722,13 @@ class HttpDownload(object):
         if self.size_so_far > self.callback_data_size:
             self.size_so_far = 0
             #self.pv.process_sequentially(self.tempfile.name)
-            n_thumbs = 5 # Dummy
+
+            # TODO(mdesnoyer): Remove this hack. Right now we capture
+            # twice as many thubnails because later, we want to filter
+            # based on the thumbs being too close in the video
+            n_thumbs = 10 # Dummy
             if self.job_params.has_key(properties.TOP_THUMBNAILS):
-                n_thumbs = int(self.job_params[properties.TOP_THUMBNAILS])
+                n_thumbs = 2*int(self.job_params[properties.TOP_THUMBNAILS])
                 
             self.pv.process_all(self.tempfile.name, n_thumbs=n_thumbs)
 
@@ -714,9 +737,12 @@ class HttpDownload(object):
         # if video size < the chunk size
         try:
             if int(response.headers['Content-Length']) < self.callback_data_size:
-                n_thumbs = 5 # Dummy
+                # TODO(mdesnoyer): Remove this hack. Right now we capture
+                # twice as many thubnails because later, we want to filter
+                # based on the thumbs being too close in the video
+                n_thumbs = 10 # Dummy
                 if self.job_params.has_key(properties.TOP_THUMBNAILS):
-                    n_thumbs = int(self.job_params[properties.TOP_THUMBNAILS])
+                    n_thumbs = 2*int(self.job_params[properties.TOP_THUMBNAILS])
                     
                 self.pv.process_all(self.tempfile.name, n_thumbs=n_thumbs)
         except Exception as e:
