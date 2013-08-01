@@ -23,6 +23,7 @@ import logging
 import numpy as np
 from optparse import OptionParser
 import cPickle as pickle
+import random
 import scipy.cluster.vq
 import sys
 
@@ -93,7 +94,9 @@ if __name__ == '__main__':
     example_urls = []
     for i in range(centers.shape[0]):
         cur = [urls[j] for j in range(len(urls)) if best_labels[j] == i]
-        example_urls.append(cur[:options.n_examples])
+        
+        example_urls.append(random.sample(cur, min(options.n_examples,
+                                                   len(cur))))
 
     _log.info('Writing cluster centers to: %s' % options.output)
     with open(options.output, 'wb') as f:

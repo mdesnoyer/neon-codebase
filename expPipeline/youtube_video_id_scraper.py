@@ -15,7 +15,7 @@ import sys
 
 from apiclient.discovery import build as api_build
 
-YOUTUBE_KEY = None
+__YOUTUBE_KEY = 'AIzaSyCI1sGIS5svU8FO6cd7S4XG-Z9EvN0DYHE'
 _log = logging.getLogger(__name__)
 
 def generate_url(query, cur_idx):
@@ -68,7 +68,7 @@ def find_similar_videos(video_id, n_videos=100):
     returns:
     A generator that spits out youtube video_ids of similar videos.
     '''
-    yt_service = api_build('youtube', 'v3', developerKey=YOUTUBE_KEY)
+    yt_service = api_build('youtube', 'v3', developerKey=__YOUTUBE_KEY)
     videos_found = 0
 
     try:
@@ -81,9 +81,11 @@ def find_similar_videos(video_id, n_videos=100):
         _log.error('Error querying youtube: %s' % e)
         return
     while cur_response:
-        for result in cur_response.get("items", [])
-            videos_founds += 1
+        for result in cur_response.get("items", []):
+            videos_found += 1
             yield result["id"]["videoId"]
+            if videos_found >= n_videos:
+                return
         
         nextPage = cur_response.get("nextPageToken", None)
         if nextPage is None:
@@ -101,23 +103,32 @@ def find_similar_videos(video_id, n_videos=100):
 
 def get_video_duration(video_id):
     '''Retrieves the duration of the video.'''
-    yt_service = api_build('youtube', 'v3', developerKey=YOUTUBE_KEY)
+    yt_service = api_build('youtube', 'v3', developerKey=__YOUTUBE_KEY)
 
     try:
-        response = yt_service.videos.list(
+        response = yt_service.videos().list(
             id=video_id,
-            part='contentDetails')
+            part='contentDetails').execute()
     except IOError as e:
         _log.error('Error getting the video length: %s' % e)
-        return 0
+        return float('inf')
 
-    timeRe = re.compile('PT([0-9]+)M([0-9]+)S')
-    
-    parse = timeRe.search(response["items"][0]["contentDetails"]["duration"])
-    return 60 * int(parse.groups()[1]) + int(parse.groups()[2])
+    time_str = response["items"][0]["contentDetails"]["duration"]
+    minRe = re.compile('([0-9]+)M')
+    secRe = re.compile('([0-9]+)S')
+    timeval = 0
+    minParse = minRe.search(time_str)
+    if minParse:
+        timeval += 60 * int(minParse.groups()[0])
 
-def get_new_videos(video_ids, old_video_ids, max_duration=600,
-                   n_videos=25):
+    secParse = secRe.search(time_str)
+    if secParse:
+        timeval += int(secParse.groups()[0])
+
+    return timeval
+
+def get_new_videos(video_ids, old_video_ids=[], max_duration=600,
+                        n_videos=25):
     '''Retrieves videos similar to video_ids, skipping old ones.
 
     Inputs:
@@ -131,18 +142,23 @@ def get_new_videos(video_ids, old_video_ids, max_duration=600,
     '''
     retval = []
     q = []
-    q.update(video_ids)
+    q.extend(video_ids)
     n_found = 0
     while len(q) > 0 and n_found < n_videos:
         random.shuffle(q)
         video_id = q.pop()
-        for candidate in find_similar_videos(video_id):
+        for candidate in find_similar_videos(video_id, 10):
             if candidate in old_video_ids:
                 q.append(candidate)
             else:
                 if get_video_duration(candidate) < max_duration:
                     retval.append(candidate)
                     n_found += 1
+                else:
+                    q.append(candidate)
+
+            if n_found >= n_videos:
+                break
 
     return retval
 
@@ -162,10 +178,14 @@ if __name__ == '__main__':
                       help='YouTube API key')
     parser.add_option('--seed', type='int', default=19987,
                       help='Seed for the random number generator')
+    parser.add_option('--find_similar', action='store_true', default=False,
+                      help='Finds videos similar to a set of input ids')
+    parser.add_option('--use_queries', action='store_true', default=False,
+                      help='Finds videos using text search queries')
 
     options, args = parser.parse_args()
 
-    YOUTUBE_KEY = options.yt_key
+    __YOUTUBE_KEY = options.yt_key
     random.seed(options.seed)
     logging.basicConfig(level=logging.INFO)
 
@@ -174,11 +194,19 @@ if __name__ == '__main__':
         inStream = open(options.input, 'r')
 
     video_ids = []
-    for line in inStream:
-        video_ids.extend(['http://www.youtube.com/watch/?v=%s' % x for x in
-                          get_video_ids(line,
-                                        n_videos=options.n,
-                                        max_duration=options.max_duration)])
+
+    if options.use_queries:
+        for line in inStream:
+            video_ids.extend(['http://www.youtube.com/watch/?v=%s' % x for x in
+                              get_video_ids(line,
+                                            n_videos=options.n,
+                                            max_duration=options.max_duration)])
+    elif options.find_similar:
+        seed_ids = [x.strip() for x in inStream]
+        video_ids = get_new_videos(seed_ids,
+                                   max_duration = options.max_duration,
+                                   n_videos=(len(seed_ids)*options.n))
+                                        
 
     outStream = sys.stdout
     if options.output is not None:

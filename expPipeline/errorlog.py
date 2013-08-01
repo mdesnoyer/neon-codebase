@@ -3,69 +3,63 @@
 import logging
 import logging.handlers
 import SocketServer
+import sys
 
+def createLogger(name=None,
+                 stream=None,
+                 logfile=None,
+                 socket_info=None,
+                 fmt='%(asctime)s %(levelname)s %(message)s',
+                 level=logging.INFO):
+    '''Adds handlers to the named logger and returns it.
 
-class FileLogger(object):
+    Inputs:
+    name - Name of the logger. If None, does the root
+    stream - If set, a handler is created for a stream. eg. sys.stdout
+    logfile - If set, a handler is created that logs to a file
+    socket_info - If (host, port), then a socket handler is added
+    fmt - The format of the log
+    level - The level for the root logger
 
-	logformat =  '%(asctime)s %(levelname)s %(message)s'
-	logport = 8020
-	logfile = "error.log"
+    Returns:
+    the logger
+    '''
+    if name is None:
+        logger = logging.getLogger()
+    else:
+        logger = logging.getLogger(name)
+    logger.setLevel(level)
+    formatter = logging.Formatter(fmt)
 
-	def __init__(self,type,logfile = None):
-		if logfile is not None:
-			self.logfile = logfile
-			
-		self.logger = logging.getLogger(type)
-		formatter = logging.Formatter(self.logformat)
-		fileHandler = logging.FileHandler(self.logfile)
-		fileHandler.setFormatter(formatter)
-		self.logger.addHandler(fileHandler)
+    # For a stream output
+    if stream is not None:
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
 
-	def debug(self,message):
-		self.logger.setLevel(logging.DEBUG)
-		self.logger.debug(message)
-		return
+    # For a file output
+    if logfile is not None:
+        handler = logging.FileHandler(logfile)
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
 
-	def info(self,message):
-		self.logger.setLevel(logging.INFO)
-		self.logger.info(message)
-		return
+    # For a socket output
+    if socket_info is not None:
+        handler = logging.handlers.SocketHandler(socket_info[0],
+                                                 socket_info[1])
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
 
-	def error(self,message):
-		self.logger.setLevel(logging.ERROR)
-		self.logger.error(message)
-		return
+    return logger
 
-	def exception(self,message):
-		self.logger.exception(message)
-		return	
+def FileLogger(name, logfile='error.log'):
+    return createLogger(name, logfile=logfile)
 
-class SocketLogger(object):
+def SocketLogger(name, host='localhost', port=8020):
+    return createLogger(name, socket_info=(host, port))
 
-	logformat =  '%(asctime)s %(levelname)s %(message)s'
-	logport = 8020
-
-	def __init__(self,type):
-		self.logger = logging.getLogger(type)
-		formatter = logging.Formatter(self.logformat)
-		socketHandler = logging.handlers.SocketHandler('localhost',self.logport)
-		socketHandler.setFormatter(formatter)
-		self.logger.addHandler(socketHandler)
-
-	def debug(self,message):
-		self.logger.setLevel(logging.DEBUG)
-		self.logger.debug(message)
-		return
-
-	def info(self,message):
-		self.logger.setLevel(logging.INFO)
-		self.logger.info(message)
-		return
-
-	def error(self,message):
-		self.logger.setLevel(logging.ERROR)
-		self.logger.error(message)
-		return
+def StreamLogger(name, stream=sys.stdout):
+    return createLogger(name, stream=stream)
 
 class LogServer(SocketServer.BaseRequestHandler):
 

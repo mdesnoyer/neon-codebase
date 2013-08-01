@@ -8,29 +8,28 @@ import ffvideo
 import random
 import tempfile
 import time
-import ConfigParser
 import shortuuid
 import multiprocessing
 import Queue
-import errorlog
-import youtube
-from subprocess import call
+import subprocess
 from optparse import OptionParser
-import leargist
+import logging
+import logging.handlers
 
-import tornado.web
-import tornado.gen
-import tornado.escape
-import tornado.httpclient
-import tornado.httputil
-import tornado.ioloop
 import StringIO
 import signal
 
 import youtube_dl
 
+_log = logging.getLogger(__name__)
+
 def sig_handler(sig, frame):
-    log.debug('Caught signal: ' + str(sig) )
+    _log.info('Shutting Down')
+    for proc in multiprocessing.active_children():
+        proc.terminate()
+        proc.join(10)
+    for proc in multiprocessing.active_children():
+        os.kill(proc.pid, signal.SIGKILL)
     sys.exit(0)
 
 
@@ -72,7 +71,7 @@ class ProcessVideo(youtube_dl.PostProcessor):
             locations = random.sample(range(dur),self.nthumbnails)
             return locations
         else:
-            log.error("Duration smaller than nthumbnails dur = " + str(dur))
+            _log.error("Duration smaller than nthumbnails dur = " + str(dur))
             return range(dur)
 
     ''' process all the frames from the partial video downloaded '''
@@ -80,8 +79,8 @@ class ProcessVideo(youtube_dl.PostProcessor):
         try:
             mov = ffvideo.VideoStream(information['filepath'])
         except Exception, e:
-            log.error("key=process_video msg=movie file not found")
-            raise PostProcessingError()
+            _log.error("key=process_video msg=movie file not found")
+            raise youtube_dl.PostProcessingError()
         
         duration = mov.duration
         self.aspect_ratio = float(mov.frame_size[0]) / mov.frame_size[1]
@@ -105,17 +104,12 @@ class ProcessVideo(youtube_dl.PostProcessor):
                                            str(uid) + '.jpg')
                     image.save(imgFile)
 
-                    # calculate the gist features for the image
-                    image.thumbnail((256,256), Image.ANTIALIAS)
-                    descriptors = leargist.color_gist(image)
-                    numpy.save(imgFile + ".npy",descriptors.tolist())
-
                 except ffvideo.NoMoreData:
                     break
 
                 except Exception,e:
-                    log.exception("key=process_video msg=processing error msg=" + e.__str__())
-                    raise PostProcessingError()
+                    _log.exception("key=process_video msg=processing error msg=" + e.__str__())
+                    raise youtube_dl.PostProcessingError()
 
         self.save_to_db()
         
@@ -123,7 +117,7 @@ class ProcessVideo(youtube_dl.PostProcessor):
 
     ''' save thumbnail meta data to the DB '''
     def save_to_db(self):
-        dbfile = self.image_db #'image.db'
+        dbfile = self.image_db 
         aspect_ratio  = '%.2f' %self.aspect_ratio
 
         #append to a flat file
@@ -138,202 +132,179 @@ class ProcessVideo(youtube_dl.PostProcessor):
 class VideoDownload(object):
     ''' class that downloads the video asynchronously'''
 
-    def __init__(self,url):
-        self.timeout = 300000.0
+    def __init__(self, url, image_dir, nthumbs, location, image_db):
         self.tempfile = tempfile.NamedTemporaryFile(delete=False)
         self.tempfile_path = self.tempfile.name
-        self.total_size_so_far = 0
         self.url = url
-        self.download_url = url
+        self.image_dir = image_dir
+        self.nthumbs = nthumbs
+        self.location = location
+        self.image_db = image_db
 
     def __del__(self):
         self.cleanup()
-
-    def process(self):
-        #Process Video and save thumbnails to image library
-        directory = image_directory 
-        log.info("Processing : " + self.url)
-        pv = ProcessVideo(self.url,directory,nthumbnails,location,category,
-                          image_db)
-        pv.run({'filepath': self.tempfile_path})
-        log.info("Done processing: " + self.url)
 
     def cleanup(self):
         #Delete the downloaded video file
         if os.path.exists(self.tempfile.name):
             os.unlink(self.tempfile.name)
 
-    def log_failed_url(self):
-        #TODO make sure the file has no duplicates
-        with open(unprocessed_links,'a') as f:
-            f.write(self.url + '\n')
+    def run(self):
+        '''Download and process the video.
 
-        failed_count.value += 1
-
-    def start(self):
+        Returns True if suceeded
+        '''
         #Download the video
-        log.info('Starting ' + self.url)
+        _log.info('Starting ' + self.url)
 
         try:
-            self.youtube_dl()
-            failed_count.value = 0
+            return self.youtube_dl() == 0
         except Exception, e:
-            self.log_failed_url()
-
-            log.error("key=async_callback_error  msg=" +
-                          e.message) 
+            _log.exception("key=youtube_dl  msg=%s" % e) 
+        return False
                 
-            #temp job mgmt stuff, insert into Q
-            work_queue.put(self.url)
-            work_queue_map[self.url].value += 1
-        
-        #If youtube url
-        #if "youtube" in self.url:
-        #    self.youtube_downloder()
-
-        #If vimeo
-        #elif "vimeo" in self.url:
-        #    self.vimeo_downloader()
-
-        #If other
-        #else:
-        #    self.generic_downloader()
+            
 
     def youtube_dl(self):
         fd = youtube_dl.FileDownloader({'outtmpl':unicode(self.tempfile_path),
                                        'noprogress':True,
                                        })
         fd.add_post_processor(ProcessVideo(self.url,
-                                           image_directory,
-                                           nthumbnails,
-                                           location,
-                                           category,
-                                           image_db))
+                                           self.image_dir,
+                                           self.nthumbs,
+                                           self.location,
+                                           'null', # category
+                                           self.image_db))
 
         for extractor in youtube_dl.gen_extractors():
             fd.add_info_extractor(extractor)
-        retcode = fd.download([self.url])
-
-    def youtube_downloder(self):
-        yt = youtube.YouTube()
-        for attempts in range(3):
-            try:
-                yt.url = self.url
-            except:
-                time.sleep(3)
-                continue
-            break
-       
-        #Try downloading the highest resoultion
-        video = yt.get('mp4','1080p')
-        if video is None:
-            video = yt.get('mp4','720p')
-        if video is None:
-            video = yt.get('mp4','520p')
-        if video is None:
-            video = yt.get('flv','480p')
-        if video is None:
-            video = yt.get('flv','360p')
-
-        if video is not None:
-            log.info("Downloading " + self.url)
-            self.download_url = video.url
-            return self.generic_downloader()
-
-        else:
-            self.log_failed_url()
-            log.error("Youtube error")
-
-    def vimeo_downloader(self):
-        video_id = self.url.split('/')[-1]
-        call(["./download_vimeo.sh",video_id])
-        #video gets saved to /tmp/{video_id}
-        self.tempfile_path = '/tmp/'+ video_id 
-        
-        # Now process the video and extract thumbnails.
-        self.process()
-
-    def generic_downloader(self):
-        self.req = tornado.httpclient.HTTPRequest(url = self.download_url ,method = 'GET',
-                 use_gzip =False, request_timeout = self.timeout)
-        self.http_client = tornado.httpclient.HTTPClient()
-        try:
-            response = self.http_client.fetch(self.req)
-            self.tempfile.write(response.body)
-            self.error = None
-            self.process()
-            failed_count.value = 0
-        except tornado.httpclient.HTTPError as e:
-            if e.code in [400, 403]: # YouTube wants to display an ad
-                log.info('Got a %i error code. So YouTube probably wanted to show an ad' % e.code)
-            elif e.code == 599: # A closed connection
-                log.error("key=async_request_timeout msg=" +
-                          e.message)
-                ## Verify content length & total size to see if video
-                ## has been downloaded == If request times out and we
-                ## have 75% of data, then process the video and send
-                ## data to client
-                try:
-                    self.content_length = e.response.headers['Content-Length']
-                    if (self.total_size_so_far /float(self.content_length)) > 0.75:
-                        self.process()
-                        return                    
-                except:
-                    pass
-            else:
-                log.error("key=async_callback_error  msg=" +
-                          e.message) 
-                #print response.headers['Location']
-                #log the link that wasn't downloaded
-                self.log_failed_url()
-                
-             #temp job mgmt stuff, insert into Q
-            work_queue.put(self.url)
-            work_queue_map[self.url].value += 1
-            failed_count.value += 1
+        return fd.download([self.url])
 
 class Worker(multiprocessing.Process):
 
-    def __init__(self):
+    def __init__(self, work_queue, failed_count, image_db,
+                 image_dir, failed_links, nthumbs, thumb_location):
 
         # base class initialization
         multiprocessing.Process.__init__(self)
 
         # job management stuff
-        self.kill_received = False
         self.SLEEP_INTERVAL = 5
 
+        self.work_queue = work_queue
+        self.failed_count = failed_count
+        self.image_db = image_db
+        self.image_dir = image_dir
+        self.failed_links = failed_links
+        self.nthumbs = nthumbs
+        self.thumb_location = thumb_location
+
     def run(self):
-        while not self.kill_received:
+        try:
+            url = work_queue.get()
+
+            # See if we should wait a little bit because we're
+            # hitting the server too hard. We try to use
+            # exponential backoff here
+            if self.failed_count.value > 0:
+                sleep_time = (self.SLEEP_INTERVAL * 
+                              (1 << failed_count.value) + 
+                              random.random())
+                sleep_time = min(sleep_time, 600)
+                _log.info('We failed, so sleeping for %fs' % sleep_time)
+                time.sleep(sleep_time)
+
+            #Download Video
+            vd = VideoDownload(url,
+                               self.image_dir,
+                               self.nthumbs,
+                               self.thumb_location,
+                               self.image_db)
+            if not vd.run():
+                self.failed_count.value += 1
+                if self.failed_links is not None:
+                    with open(self.failed_links,'a') as f:
+                        f.write(url + '\n')
+            else:
+                self.failed_count.value = 0
+                
+        except Queue.Empty:
+            exit(0)
+        except Exception,e:
+            _log.exception("worker error" + e.__str__())
+
+class LinkLoader(multiprocessing.Process):
+    '''Process that identifies when new links to download are requested and quese them.
+
+    '''
+    def __init__(self, link_file, image_db, failed_links, q,
+                 sleep_interval=60):
+        # base class initialization
+        multiprocessing.Process.__init__(self)
+        
+        self.link_file = link_file
+        self.q = q
+        self.known_links = set([])
+        self.sleep_interval = sleep_interval
+        self.generate_proc = None
+
+        # Load the known links from those that failed and the image db
+        if os.path.exists(image_db):
+            with open(image_db) as f:
+                for line in f:
+                    fields = line.split()
+                    self.known_links.add(fields[1])
+
+        if failed_links is not None and os.path.exists(failed_links):
+            with open(failed_links) as f:
+                for line in f:
+                    self.known_links.add(line.strip())
+
+    def run(self):
+        while True:
+            new_links = 0
+
+            link_stream = sys.stdin
+            if self.link_file is not None:
+                link_stream = open(self.link_file)
             try:
-                job = work_queue.get_nowait()
-                print job
-                #compare n retries 
-                retries = work_queue_map[job].value
-                if retries > 1:
-                    log.error("key=worker msg=Could not download %s" % job)
-                    continue
+                for line in link_stream:
+                    url = line.strip()
+                    if url not in self.known_links:
+                        self.known_links.add(url)
+                        self.q.put(url)
+                        new_links +=1
 
-                # See if we should wait a little bit because we're
-                # hitting the server too hard. We try to use
-                # exponential backoff here
-                if failed_count.value >= 0:
-                    sleep_time = (self.SLEEP_INTERVAL * 
-                        (1 << failed_count.value) + 
-                        random.random())
-                    sleep_time = min(sleep_time, 600)
-                    log.info('We failed, so sleeping for %fs' % sleep_time)
-                    time.sleep(sleep_time)
+                if new_links > 0:
+                    _log.info('Added %i new links to the queue for downloading'
+                              % new_links)
 
-                #Download Video
-                vd = VideoDownload(job)
-                vd.start()
-            except Queue.Empty:
-                exit(0)
-            except Exception,e:
-                log.exception("worker error" + e.__str__())
-            
-            self.kill_received = True
+            finally:
+                if self.link_file is not None:
+                    link_stream.close()
+
+            if self.generate_proc is not None:
+                self.generate_proc.poll()
+                retcode = self.generate_proc.returncode
+                if retcode is not None:
+                    if retcode > 0:
+                        _log.error('Generate process exited with error '
+                                   'code: %i' % retcode)
+                    self.generate_proc = None
+
+            if self.q.empty() and self.generate_proc is None:
+                _log.info('The queue is empty. '
+                          'Trying to generate new stimuli sets.')
+                # Generate a new stimuli set (and will add more
+                # candidates to the queue file if setup properly.
+                self.generate_proc = subprocess.Popen(
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 'settings',
+                                 'generate_new_stimuli_sets.sh'))
+                                 
+                                 
+
+            time.sleep(self.sleep_interval)
 
 #Video downloader (Youtube, vimeo, general)
 if __name__ == "__main__":
@@ -343,67 +314,76 @@ if __name__ == "__main__":
 
     parser = OptionParser()
 
-    parser.add_option("-n", "--n_process", type='int',
-                      default=1,
-                      help='Number of processes to spawn')
-    parser.add_option("-c","--config",default='',
-                      help='Config file to use that specifies what to download')
+    parser.add_option('--nthumbs', type='int', default=6,
+                      help='Number of thumbnails to extract per video')
+    parser.add_option('--image_db', default=None,
+                      help='Image database file. Will be appended to')
+    parser.add_option('--image_dir', default=None,
+                      help='Directory to output the images to')
+    parser.add_option('-i', '--input', default=None,
+                      help=('File that contains the list of links to '
+                            'download. If None, stdin is used.'))
+    parser.add_option('--location', default='random',
+                      help=('Where to extract the thumbnails from. '
+                            'start, middle, end or random'))
+    parser.add_option('--nprocess', type='int', default=1,
+                      help='Number of download processes to spawn')
+    parser.add_option('--failed_links', default=None,
+                      help='File to list the failed links')
+    parser.add_option('--log', default=None,
+                      help='Log file. If none, dumps to stdout')
     
     options,args = parser.parse_args()
-  
 
-    log = errorlog.FileLogger("video")
-
-    config_parser = ConfigParser.SafeConfigParser()
-    config_parser.read(options.config)
-    sections = config_parser.sections()
+    # Set the logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    if options.log:
+        handler = logging.handlers.RotatingFileHandler(options.log,
+                                                       maxBytes=(64*1024*1024),
+                                                       backupCount=5)
+    else:
+        handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s %(message)s'))
+    logger.addHandler(handler)
     
-    #Global parameters
-    global category
-    global location
-    global image_directory
-    global image_db
+    if not os.path.exists(options.image_dir):
+        os.makedirs(options.image_dir)
 
-    url_fname = config_parser.get('video links','filename')
-    category = config_parser.get('video links','category')
-    nthumbnails = config_parser.get('params','thumbnails') 
-    location = config_parser.get('params','location')
-    image_directory = config_parser.get('params','image_directory')
-    image_db = config_parser.get('params','image_db')
-
-    if not os.path.exists(image_directory):
-        os.makedirs(image_directory)
-
-    #List of links that haven't been processed
-    global unprocessed_links
-    unprocessed_links = 'failed_links.txt'
-    
-    url_list = [] 
-    with open(url_fname) as f:
-        url_list = [url.rstrip('\n') for url in f.readlines()]
-
-    global work_queue
-    global work_queue_map
-    global failed_count
-    
+    # Define the shared data
     failed_count = multiprocessing.Value('i', 0)
-    work_queue_map ={}
     work_queue = multiprocessing.Queue()
-    for url in url_list:
-        work_queue.put(url)
-        work_queue_map[url] = multiprocessing.Value('i', 1)
 
-    workers = []
+    # Start adding entries to the queue
+    queue_loader = LinkLoader(options.input, options.image_db,
+                              options.failed_links, work_queue)
+    queue_loader.start()
+
     delay = 5 #secs
 
     #Run Loop
-    while True:
-        nproc_to_fork = options.n_process - len(multiprocessing.active_children())
-        #spawn workers
-        for i in range(nproc_to_fork):
-            worker = Worker()
-            workers.append(worker)
-            worker.start()
-            #worker.run()
+    try:
+        while True:
+            nproc_to_fork = (options.nprocess + 1 -
+                             len(multiprocessing.active_children()))
+            #spawn workers
+            for i in range(nproc_to_fork):
+                worker = Worker(work_queue,
+                                failed_count,
+                                options.image_db,
+                                options.image_dir,
+                                options.failed_links,
+                                options.nthumbs,
+                                options.location)
+                #worker.start()
+                worker.run()
 
-        time.sleep(delay)        
+            time.sleep(delay)
+    finally:
+        for proc in multiprocessing.active_children():
+            proc.terminate()
+            proc.join(10)
+        for proc in multiprocessing.active_children():
+            os.kill(proc.pid, signal.SIGKILL)
+        

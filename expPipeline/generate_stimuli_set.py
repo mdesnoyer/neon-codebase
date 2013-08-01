@@ -27,7 +27,9 @@ import model.model
 
 import cv2
 import heapq
+import errorlog
 import logging
+import re
 import os
 import shutil
 import numpy as np
@@ -35,6 +37,7 @@ from optparse import OptionParser
 import cPickle as pickle
 import pyflann
 import scipy.spatial.distance
+import youtube_video_id_scraper as yt_scraper
 
 _log = logging.getLogger(__name__)
 
@@ -46,31 +49,41 @@ def load_gist_generator(cache_dir=None):
     return generator
 
 def parse_image_db(imdb_file, aspect_ratio, image_dir):
+    '''Parses the image database file.
+
+    Inputs:
+    imgdb_file: file that contains the image database
+    aspect_ratio: string specifying the aspect ratio to accept
+    image_dir: directory that contains the images
+
+    Outputs: [(image_file, video_url)]
+
+    '''
     _log.info('Loading the image database file: %s' % imdb_file)
-    image_files = []
+    retval = []
     with open(imdb_file) as f:
         for line in f:
             fields = line.split()
             if float(fields[3]) == aspect_ratio:
                 cur_file = '%s.jpg' % fields[0]
                 if not os.path.exists(os.path.join(image_dir, cur_file)):
-                    _log.error(
+                    _log.warn(
                         'Image is in the database but cannot be found: %s' %
                         cur_file)
                 else:
-                    image_files.append('%s.jpg' % fields[0])
+                    retval.append(('%s.jpg' % fields[0], fields[1]))
 
-    return image_files
+    return retval
 
 def find_labeled_files(stimuli_dir, image_dir):
     '''Find all the images that are already in a stimuli set.'''
     labeled = set()
     for root, dirs, files in os.walk(stimuli_dir):
         for name in files:
-            if os.path.exists(os.path.join(image_dir)):
+            if os.path.exists(os.path.join(image_dir, name)):
                 labeled.add(name)
             else:
-                _log.error('Image is in a stimuli set, but cannot be found: %s'
+                _log.warn('Image is in a stimuli set, but cannot be found: %s'
                            % name)
 
     return labeled
@@ -127,7 +140,7 @@ def assign_examples_to_clusters(examples, clusters, priority_func,
         chosen_clusters = np.argmin(dists, axis=1)
     for i in range(examples.shape[0]):
         p_val = priority_func(examples[i])
-        if p_val > -0.7:
+        if p_val > -0.5:
             # Image is the same as one in the index, so skip
             continue
         heapq.heappush(clusters[chosen_clusters[i]],
@@ -165,7 +178,7 @@ def build_knn_index(examples):
 
     return flann
 
-def is_duplicate(feature, feature_set, d_thresh=0.7):
+def is_duplicate(feature, feature_set, d_thresh=0.5):
     '''Is the feature a duplicate of one in the feature_set?'''
     if len(feature_set) == 0:
         return False
@@ -185,45 +198,61 @@ def choose_examples(queue, examples, n, priority_func):
 
     return chosen_idx
 
-if __name__ == '__main__':
-    parser = OptionParser(usage=USAGE)
+def videoid_from_url(url, regex='v=([0-9a-zA-Z_-]+)'):
+    '''Finds the video id in the url.
+
+    The regex must produce a group which is the video id.
+    '''
+    reg = re.compile(regex)
+    parse = reg.search(url)
+    if parse:
+        return parse.groups()[0]
+    else:
+        return None
+
+def find_new_urls(seed_ids, output_file, n_videos=100, known_ids=[]):
+    '''Outputs a list of new videos to download.
+
+    Videos are those that are similar to the seed. We will walk around
+    the youtube graph to find them.
+
+    Inputs:
+    seed_ids - List of youtube video ids that we will start looking from
+    output_file - File that will have new urls appended to it
+    n_videos - Number of videos to grab
+    known_ids - set of known video ids that we skip
+
+    Returns:
+    list of ids added to the file
+    '''
+    new_ids = yt_scraper.get_new_videos(seed_ids, known_ids,
+                                        n_videos=n_videos)
     
-    parser.add_option('-i', '--image_db', default=None,
-                      help='Image database file')
-    parser.add_option('--stimuli_dir', default=None,
-                      help='Directory containing previous stimuli sets')
-    parser.add_option('-o','--output', default='stimuli_set%i',
-                      help='Format of the directory name to output a stimuli set')
-    parser.add_option('--image_dir', default=None,
-                      help='Image directory')
-    parser.add_option('--codebook', default=None,
-                      help=('File containing the codebook definition. '
-                            'Created using the divide_visual_space.py script.'))
+    
+    dir_path = os.path.dirname(output_file)
+    if dir_path == '':
+        dir_path = '.'
+    if not os.path.exists(dir_path):
+        os.makedirs(os.path.dirname(output_file))
+    with open(output_file, 'a') as f:
+        _log.info('Appending %i new urls to %s' % (len(new_ids), output_file))
+        f.write('\n'.join(['http://www.youtube.com/watch?v=%s' % x for
+                      x in new_ids]))
 
-    parser.add_option('--cache_dir', default=None,
-                      help='Directory for cached feature files.')
-    parser.add_option('-s', '--start_index',type='int', default=None,
-                      help='start index of the stimuli set')
-    parser.add_option('-a', '--aspect_ratio',type='float', default=1.78,
-                      help='aspect ratio to select')
-    parser.add_option('-n', '--n_sets', type='int', default=5,
-                      help='Number of stimuli sets to create')
-    parser.add_option('--n_img', type='int', default=108,
-                      help='Number of images per set')
+    return new_ids
 
-    options, args = parser.parse_args()
-
-    logging.basicConfig(level=logging.INFO)
-
+def main(options):
     generator = load_gist_generator(options.cache_dir)
     example_urls, codebook, white_vector = load_codebook(options.codebook)
 
-    image_files = parse_image_db(options.image_db, options.aspect_ratio,
+    db_parse = parse_image_db(options.image_db, options.aspect_ratio,
                                  options.image_dir)
+    known_videoids = set(filter(lambda x: x is not None,
+                                [videoid_from_url(x[1]) for x in db_parse]))
 
     labeled_files = find_labeled_files(options.stimuli_dir,
                                        options.image_dir)
-    unlabeled_files = [x for x in image_files if x not in labeled_files]
+    unlabeled_files = [x[0] for x in db_parse if x[0] not in labeled_files]
     labeled_files = [x for x in labeled_files]
     _log.info('Found %i labeled images and %i unlabeled images' % 
               (len(labeled_files), len(unlabeled_files)))
@@ -260,12 +289,23 @@ if __name__ == '__main__':
                 chosen_examples.append(unlabeled[idx])
                 
         else:
-            for clusterq in cluster_qs:
+            for clusterq, cluster_idx in zip(cluster_qs,
+                                             range(len(cluster_qs))):
                 if len(clusterq) == 0:
                     _log.warning('There are no more examples in a cluster,'
                     'so we are done')
                     found_empty_cluster = True
-                    break
+                    if options.new_urls is not None:
+                        known_videoids = known_videoids.union(
+                            find_new_urls(
+                                filter(lambda x: x is not None,
+                                       [videoid_from_url(
+                                           x, 'vi/([0-9a-zA-Z_-]+)/.+\.jpg')
+                                           for x in example_urls[cluster_idx]]),
+                                options.new_urls,
+                                100,
+                                known_videoids))
+                    continue
 
                 p_dist, idx = heapq.heappop(clusterq)
                 stimuli_files.append(unlabeled_files[idx])
@@ -292,3 +332,47 @@ if __name__ == '__main__':
                 lambda x: -calc_mean_dist(knn_index, x))
 
         cur_stimuli_index += 1
+
+    
+
+if __name__ == '__main__':
+    parser = OptionParser(usage=USAGE)
+    
+    parser.add_option('-i', '--image_db', default=None,
+                      help='Image database file')
+    parser.add_option('--stimuli_dir', default=None,
+                      help='Directory containing previous stimuli sets')
+    parser.add_option('-o','--output', default='stimuli_set%i',
+                      help='Format of the directory name to output a stimuli set')
+    parser.add_option('--new_urls', default=None,
+                      help=('Output file that will where new urls to try '
+                            'downloading to fill out the clusters will be '
+                            'appended. One url per line.'))
+    
+    parser.add_option('--image_dir', default=None,
+                      help='Image directory')
+    parser.add_option('--codebook', default=None,
+                      help=('File containing the codebook definition. '
+                            'Created using the divide_visual_space.py script.'))
+
+    parser.add_option('--cache_dir', default=None,
+                      help='Directory for cached feature files.')
+    parser.add_option('-s', '--start_index',type='int', default=None,
+                      help='start index of the stimuli set')
+    parser.add_option('-a', '--aspect_ratio',type='float', default=1.78,
+                      help='aspect ratio to select')
+    parser.add_option('-n', '--n_sets', type='int', default=5,
+                      help='Number of stimuli sets to create')
+    parser.add_option('--n_img', type='int', default=108,
+                      help='Number of images per set')
+    parser.add_option('--log', default=None,
+                      help='Log file. If none, dumps to stdout')
+
+    options, args = parser.parse_args()
+
+    if options.log is None:
+        errorlog.StreamLogger()
+    else:
+        errorlog.FileLogger(None, options.log)
+
+    main(options)
