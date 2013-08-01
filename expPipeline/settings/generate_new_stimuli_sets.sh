@@ -21,7 +21,7 @@ ${THIS_DIR}/../generate_stimuli_set.py \
     --start_index ${NEXT_SET} \
     --image_dir ${STAGING_DIR}/images \
     --stimuli_dir ${OUTPUT_DIR} \
-    --output ${OUTPUT_DIR} \
+    --output ${OUTPUT_DIR}/stimuli_%i \
     --image_db ${STAGING_DIR}/image.db \
     --codebook /data/neon/gist/07222013/gist_codebook.db \
     --new_urls ${STAGING_DIR}/requests.links \

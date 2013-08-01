@@ -83,7 +83,7 @@ def find_labeled_files(stimuli_dir, image_dir):
             if os.path.exists(os.path.join(image_dir, name)):
                 labeled.add(name)
             else:
-                _log.warn('Image is in a stimuli set, but cannot be found: %s'
+                _log.debug('Image is in a stimuli set, but cannot be found: %s'
                            % name)
 
     return labeled
