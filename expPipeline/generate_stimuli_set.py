@@ -31,11 +31,11 @@ import errorlog
 import logging
 import re
 import os
-import shutil
 import numpy as np
 from optparse import OptionParser
 import cPickle as pickle
 import pyflann
+from PIL import Image
 import scipy.spatial.distance
 import youtube_video_id_scraper as yt_scraper
 
@@ -319,8 +319,10 @@ def main(options):
                 continue
             os.makedirs(dest_dir)
             for image_file in stimuli_files:
-                shutil.copy(os.path.join(options.image_dir, image_file),
-                            os.path.join(dest_dir, image_file))
+                cur_image = Image.open(os.path.join(options.image_dir,
+                                                    image_file))
+                cur_image.thumbnail((256,256), Image.ANTIALIAS)
+                cur_image.save(os.path.join(dest_dir, image_file))
 
 
             _log.info('Adding the chosen examples to the knn index.')
