@@ -78,7 +78,7 @@ def parse_image_db(imdb_file, aspect_ratio, image_dir):
 def find_labeled_files(stimuli_dir, image_dir):
     '''Find all the images that are already in a stimuli set.'''
     labeled = set()
-    for root, dirs, files in os.walk(stimuli_dir):
+    for root, dirs, files in os.walk(stimuli_dir, followlinks=True):
         for name in files:
             if os.path.exists(os.path.join(image_dir, name)):
                 labeled.add(name)
@@ -373,7 +373,7 @@ if __name__ == '__main__':
     options, args = parser.parse_args()
 
     if options.log is None:
-        errorlog.StreamLogger()
+        errorlog.StreamLogger(None)
     else:
         errorlog.FileLogger(None, options.log)
 
