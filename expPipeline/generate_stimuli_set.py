@@ -129,9 +129,16 @@ def assign_examples_to_clusters(examples, clusters, priority_func,
     The clusters are a list of heaps where the entries are (p_val, example_idx)
 
     If codebook is None, only use a single heap with (p_val, example_idx)
+
+    The id of the cluster corresponding to black frames is also returned
+    (if found) so that the cluster doesn't limit stimuli sets from being
+    generated.
+
+    returns: (clusters, black_cluster)
     '''
     _log.info('Assigning %i examples to %i clusters' % (len(examples),
                                                         len(clusters)))
+    black_cluster = None
 
     if codebook is None:
         chosen_clusters = [0 for x in range(examples.shape[0])]
@@ -139,6 +146,11 @@ def assign_examples_to_clusters(examples, clusters, priority_func,
         dists = scipy.spatial.distance.cdist(examples, codebook)
         chosen_clusters = np.argmin(dists, axis=1)
     for i in range(examples.shape[0]):
+        if np.sqrt(np.sum(np.square(examples[i]))) < 1e-6:
+            # This is the black cluster (or uniform color cluster)
+            # because the gist features will all be zero.
+            black_cluster = chosen_clusters[i]
+            continue
         p_val = priority_func(examples[i])
         if p_val > -0.5:
             # Image is the same as one in the index, so skip
@@ -149,7 +161,7 @@ def assign_examples_to_clusters(examples, clusters, priority_func,
     cluster_sizes = [len(x) for x in clusters]
     _log.info('The smallest cluster has %i examples. The largest has %i' %
               (min(cluster_sizes), max(cluster_sizes)))
-    return clusters
+    return clusters, black_cluster
 
 def recalculate_priorities(examples, clusters, priority_func):
     '''Recalculates the priorities so that the top entry is on each cluster'''
@@ -264,7 +276,7 @@ def main(options):
     unlabeled = generate_features(unlabeled_files, options.image_dir,
                                   white_vector, generator)
     cluster_qs = create_cluster_queues(codebook)
-    cluster_qs = assign_examples_to_clusters(
+    cluster_qs, black_cluster = assign_examples_to_clusters(
         unlabeled,
         cluster_qs,
         lambda x: -calc_mean_dist(knn_index, x),
@@ -292,6 +304,10 @@ def main(options):
             for clusterq, cluster_idx in zip(cluster_qs,
                                              range(len(cluster_qs))):
                 if len(clusterq) == 0:
+                    if cluster_idx == black_cluster:
+                        stimuli_files.append(None)
+                        continue
+                    
                     _log.warning('There are no more examples in a cluster,'
                     'so we are done')
                     found_empty_cluster = True
@@ -311,7 +327,8 @@ def main(options):
                 stimuli_files.append(unlabeled_files[idx])
                 chosen_examples.append(unlabeled[idx])
 
-        if not found_empty_cluster and len(chosen_examples) == options.n_img:
+        if not found_empty_cluster and (
+                len(chosen_examples) >= (options.n_img-1)):
             dest_dir = options.output % cur_stimuli_index
             _log.info('Writing stimuli set to %s' % dest_dir)
             if os.path.exists(dest_dir):
@@ -319,10 +336,15 @@ def main(options):
                 continue
             os.makedirs(dest_dir)
             for image_file in stimuli_files:
-                cur_image = Image.open(os.path.join(options.image_dir,
-                                                    image_file))
-                cur_image.thumbnail((256,256), Image.ANTIALIAS)
-                cur_image.save(os.path.join(dest_dir, image_file))
+                if image_file is None:
+                    # Insert a black image into the stimuli set
+                    cur_image = Image.new("RGB", (256,144))
+                    cur_image.save(os.path.join(dest_dir, 'black.jpg'))
+                else:
+                    cur_image = Image.open(os.path.join(options.image_dir,
+                                                        image_file))
+                    cur_image.thumbnail((256,256), Image.ANTIALIAS)
+                    cur_image.save(os.path.join(dest_dir, image_file))
 
 
             _log.info('Adding the chosen examples to the knn index.')
