@@ -424,7 +424,6 @@ class BrightcoveApi(object):
         print resp
         #self.format_neon_api_request(resp['id'] ,resp['FLVURL'])
 
-
 if __name__ == "__main__" :
     print 'test'
     #Test publisher feed with neon api key

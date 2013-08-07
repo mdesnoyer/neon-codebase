@@ -3,6 +3,7 @@
 USAGE='%prog [options] <workers> <local properties>'
 
 #============ Future Items ================
+#TODO: IOLoop timeouts
 #TODO: IOLoop logging on blocking ops
 #TODO: Send a signal to blocked threads ?
 #TODO: IOLoop.handle_callback_exception
@@ -599,12 +600,11 @@ class ProcessVideo(object):
         fmt = 'jpeg'
         s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
         s3_urls = []
-
+        size = 480,270
         #upload the images to s3
         for i in range(len(frames)):
             filestream = StringIO()
             image = Image.fromarray(self.data_map[frames[i]][1])
-            #image.thumbnail(size,Image.ANTIALIAS)
             image.save(filestream, fmt, quality=100) 
             filestream.seek(0)
             imgdata = filestream.read()
@@ -614,10 +614,8 @@ class ProcessVideo(object):
             s3bucket.set_acl('public-read',k.key)
             s3fname = s3_url_prefix + "/" + self.base_filename + "/" + fname_prefix + str(i) + ".jpeg"
             s3_urls.append(s3fname)
-
         return s3_urls
 
-    ''' Host AB Test images for experiment '''
     def host_abtest_images(self):
        
         s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
@@ -698,7 +696,7 @@ class HttpDownload(object):
         ### curl async client used 1 per ioloop here as we do compute work
         ### Ideally this is perfect for making multiple http requests in parallel
 
-        tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
+        #tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
         params = tornado.escape.json_decode(json_params)
 
         self.timeout = 300000.0 #long running tasks ##TODO - is this necessary ??? ###
@@ -706,10 +704,12 @@ class HttpDownload(object):
         self.tempfile = tempfile.NamedTemporaryFile(delete=False)
         self.job_params = params
         url = params[properties.VIDEO_DOWNLOAD_URL]
-        self.req = tornado.httpclient.HTTPRequest(url = url,streaming_callback 
-                =self.streaming_callback, use_gzip =False, request_timeout = self.timeout)
-        self.http_client = tornado.httpclient.AsyncHTTPClient()
-        self.http_client.fetch(self.req, self.async_callback)
+        h = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
+            (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
+        #self.req = tornado.httpclient.HTTPRequest(url = url,streaming_callback 
+        #        =self.streaming_callback, use_gzip =False, request_timeout = self.timeout)
+        self.req = tornado.httpclient.HTTPRequest(url = url, headers =h, use_gzip =False, request_timeout = self.timeout)
+        self.http_client = tornado.httpclient.HTTPClient()
         self.size_so_far = 0
         self.pv = ProcessVideo(params, json_params, model, debug)
         self.error = None
@@ -724,8 +724,9 @@ class HttpDownload(object):
         self.pv.video_metadata["process_time"] = str(time.time())
 
         self.debug = debug
-        return
-    
+        response = self.http_client.fetch(self.req)
+        self.async_callback(response)
+
         
     def streaming_callback(self, data):
         self.size_so_far += len(data)
@@ -762,6 +763,14 @@ class HttpDownload(object):
 
     # After the request ends
     def async_callback(self, response):
+        data = response.body
+        self.tempfile.write(data)
+        self.tempfile.flush()
+        self.tempfile.close()
+        if self.job_params.has_key(properties.TOP_THUMBNAILS):
+            n_thumbs = 2*int(self.job_params[properties.TOP_THUMBNAILS])
+        self.pv.process_all(self.tempfile.name,n_thumbs=n_thumbs)
+
         # if video size < the chunk size
         try:
             if int(response.headers['Content-Length']) < self.callback_data_size:
@@ -860,7 +869,7 @@ class HttpDownload(object):
         return True
 
     def send_client_response(self,error=False):
-        s3_urls = None   
+        s3_urls = None 
         #There was an error with processing the video
         if error:
             #If Internal error, requeue and dont send response to client yet
@@ -891,8 +900,6 @@ class HttpDownload(object):
             
             #save ranked thumbnails
             self.pv.save_result_data_to_s3(data)
-
-            #host images on s3
             s3_urls = self.pv.host_images_s3(data)
 
         elif self.job_params.has_key(properties.THUMBNAIL_RATE):
@@ -995,8 +1002,8 @@ class ClientResponse(object):
         response_body["video_id"] = self.job_params[properties.VIDEO_ID]
         response_body["data"] = self.data
         response_body["timecodes"] = self.timecodes
-        response_body["thumbnails"] = self.thumbnails
         response_body["timestamp"] = str(time.time())
+        response_body["thumbnails"] = self.thumbnails
 
         if self.error is None:
             response_body["error"] = ""
