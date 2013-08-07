@@ -1,0 +1,96 @@
+
+<html> 
+<head>
+	<title> NEON DEMO v0.1 </title>
+</head>
+<script type="text/javascript">
+
+// Service call
+function JSONscriptRequest(fullUrl) {
+	this.fullUrl = fullUrl; 
+	this.noCacheIE = '&noCacheIE=' + (new Date()).getTime();
+	this.headLoc = document.getElementsByTagName("head").item(0);
+	this.scriptId = 'JscriptId' + JSONscriptRequest.scriptCounter++;
+}
+JSONscriptRequest.scriptCounter = 1;
+JSONscriptRequest.prototype.buildScriptTag = function () {
+	this.scriptObj = document.createElement("script");
+	this.scriptObj.setAttribute("type", "text/javascript");
+	this.scriptObj.setAttribute("charset", "utf-8");
+	this.scriptObj.setAttribute("src", this.fullUrl + this.noCacheIE);
+	this.scriptObj.setAttribute("id", this.scriptId);
+}
+JSONscriptRequest.prototype.removeScriptTag = function () {
+	this.headLoc.removeChild(this.scriptObj);  
+}
+JSONscriptRequest.prototype.addScriptTag = function () {
+	this.headLoc.appendChild(this.scriptObj);
+}
+// end of section ///
+
+/// Neon Tracker /// 
+
+function sendRequest(){
+	vidURL = document.getElementById('vidURL').value
+	topn = document.getElementById('topn').value
+	curl = "http://localhost:8082/demo"
+	var req = curl + "?topn=" + topn + "&url=" + encodeURIComponent(vidURL) + "&callback=responseCallback" ;
+	try { bObj = new JSONscriptRequest(req); bObj.buildScriptTag(); bObj.addScriptTag();  } catch(err) {  }
+	console.log("request created");
+	// Display error on the screen	
+}
+function sendXMLRequest(){
+	var request = new XMLHttpRequest();
+	request.onreadystatechange = function() 
+	{
+        if (request.readyState == 4 && request.status == 200)
+        {
+            responseCallback(request.responseText); // Another callback here
+        }
+	
+	}
+
+		var vidURL = document.getElementById('vidURL').value
+		var topn = document.getElementById('topn').value
+		var ts = new Date().getTime(); 
+		var curl = "http://localhost:8082/demo"
+		var req = curl + "?topn=" + topn + "&url=" + vidURL + "&callback=responseCallback&ts=" + ts ; 
+    	request.open('GET', req, true);
+    	request.send(null);
+}
+
+
+function responseCallback(jsonData){
+	var jd = JSON.parse(jsonData);
+	var thumbnails = jd["thumbnails"]
+	for (var i=0;i<thumbnails.length;i++)
+	{ 
+		var img = new Image();
+		img.src = thumbnails[i];
+		document.body.appendChild(img);	
+		var br = document.createElement('br');
+		document.body.appendChild(br);		
+		var br = document.createElement('br');
+		document.body.appendChild(br);		
+	}
+
+}
+
+</script>
+
+<div style="font-weight:bold;font-size:24"> Neon DEMO v0.1 <div>
+<br/>
+
+<table style="width:50%">
+	<tr><td>VideoURL: </td><td><input id="vidURL" size="55" type="text"/></td></tr>
+	<tr><td>TOP N: </td><td><input id="topn" size="55" value="" /></td></tr>
+</td></tr> 
+</table>
+<!-- <button id="submitButton" onclick="sendRequest()">Submit</button> <br/ -->
+<button id="submitButton" onclick="sendXMLRequest()">Submit</button> <br/>
+<br/>
+<br/><br/>
+
+
+</html>
+

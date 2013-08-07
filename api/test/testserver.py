@@ -1,4 +1,3 @@
-#!/usr/bin/python
 import tornado.httpserver
 import tornado.ioloop
 import tornado.web
@@ -11,9 +10,15 @@ sys.path.insert(0, "../")
 import errorlog
 import shortuuid
 import signal
+import re
+import multiprocessing
+import Queue
 
 from tornado.options import define, options
 define("port", default=8082, help="run on the given port", type=int)
+
+#global global_api_work_queue
+#global_api_work_queue = multiprocessing.Queue()
 
 global log
 log = errorlog.FileLogger("server")
@@ -21,7 +26,7 @@ log = errorlog.FileLogger("server")
 global result_map
 result_map = {} 
 
-random.seed(6984)
+random.seed(2)
 test_status = 0 ; # 0- in progress, 1 - pass , -1 - fail
 
 def sig_handler(sig, frame):
@@ -29,15 +34,89 @@ def sig_handler(sig, frame):
     tornado.ioloop.IOLoop.instance().stop()
     sys.exit(0)
 
-class MetaIntegrationTestHandler(tornado.web.RequestHandler):
+''' 
+Handler for web based testing and product demo
+Takes in vimeo or direct download links
+'''
+class DemoHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
-        pass
+        print self.request.headers
+        url = self.get_argument('url')
+        topn = self.get_argument('topn')
+        if "vimeo" in url:
+            self.vimeo_request(topn,url)
+        else:
+            self.create_neon_requests(topn,url)
+
+    def vimeo_request(self,topn,url):
+        def vimeo_callback(response):
+            if response.error:
+                self.set_status(500)
+                self.finish()
+
+            site = response.body
+            requestSig = re.findall('signature":"(.*?)"', site)
+            expireSig = re.findall('timestamp":([0-9]*)', site)
+            vid = url.split('/')[-1]
+            d_url = "http://player.vimeo.com/play_redirect?clip_id=" + vid +"&sig=" + requestSig[0] + "&time=" + expireSig[1] + "&quality=sd&codecs=H264,VP8i,VP6&type=moogaloop_local&embed_location="
+            self.create_neon_requests(topn,d_url)
+            return
+
+        tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
+        h = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/28.0.1500.71 Safari/537.36'})
+        http_client = tornado.httpclient.AsyncHTTPClient()
+        req = tornado.httpclient.HTTPRequest(url = url,headers =h , request_timeout = 60.0, connect_timeout = 10.0)
+        response = http_client.fetch(req,vimeo_callback)
+        return
 
     def finish_callback(self):
         self.finish()
         shutdown()
 
+    def create_neon_requests(self,topn,url):
+        vid = shortuuid.uuid()  
+        request_body = {}
+        request_body["api_key"] = 'a63728c09cda459c3caaa158f4adff49' #neon user key 
+        request_body["video_title"] = 'test-' + vid 
+        request_body["video_id"] =  vid
+        request_body["video_url"] = url 
+        request_body["callback_url"] = "http://thumbnails.neon-lab.com/testcallback"
+        request_body["topn"] = topn 
+        client_url = "http://thumbnails.neon-lab.com/api/v1/submitvideo/topn"
+        client_url = "http://localhost:8081/api/v1/submitvideo/topn"
+        body = tornado.escape.json_encode(request_body)
+        tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
+        http_client = tornado.httpclient.AsyncHTTPClient()
+        req = tornado.httpclient.HTTPRequest(url = client_url, method = "POST",body = body, request_timeout = 60.0, connect_timeout = 10.0)
+        response = http_client.fetch(req,self.submit_req_callback)
+
+    def submit_req_callback(self,response):
+        data = tornado.escape.json_decode(response.body)
+        job_id = data['job_id']
+        
+        def job_finish_callback(resp):
+            jresponse = tornado.escape.json_decode(resp.body)
+            result = jresponse['result']
+            print result, len(result)
+            if len(result) >1:
+                r = tornado.escape.json_encode(result)
+                self.set_header("Access-Control-Allow-Origin","*")
+                self.set_header("Content-Type", "application/json")
+                self.write(r)
+                self.finish()
+            else:
+                time.sleep(5)
+                check_status(job_id)
+
+        def check_status(job_id):
+            client_url = 'http://thumbnails.neon-lab.com/api/v1/jobstatus?api_key=a63728c09cda459c3caaa158f4adff49&job_id=' + job_id
+            tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
+            http_client = tornado.httpclient.AsyncHTTPClient()
+            req = tornado.httpclient.HTTPRequest(url = client_url, method = "GET",request_timeout = 60.0, connect_timeout = 10.0)
+            response = http_client.fetch(req,job_finish_callback)
+
+        check_status(job_id)
 
 class IntegrationTestHandler(tornado.web.RequestHandler):
     def initialize(self):
@@ -115,6 +194,7 @@ class StatusHandler(tornado.web.RequestHandler):
 if __name__ == "__main__":
     application = tornado.web.Application([
         (r'/integrationtest(.*)', IntegrationTestHandler),
+        (r'/demo(.*)', DemoHandler),
         (r'/teststatus(.*)', StatusHandler)])
     
     global server

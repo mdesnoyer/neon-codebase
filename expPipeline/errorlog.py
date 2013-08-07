@@ -9,7 +9,7 @@ def createLogger(name=None,
                  stream=None,
                  logfile=None,
                  socket_info=None,
-                 fmt='%(asctime)s %(levelname)s %(message)s',
+                 fmt='%(asctime)s %(levelname)s:%(name)s %(message)s',
                  level=logging.INFO):
     '''Adds handlers to the named logger and returns it.
 
