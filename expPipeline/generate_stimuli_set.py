@@ -328,7 +328,7 @@ def main(options):
                 chosen_examples.append(unlabeled[idx])
 
         if not found_empty_cluster and (
-                len(chosen_examples) >= (options.n_img-1)):
+                len(stimuli_files) == (options.n_img)):
             dest_dir = options.output % cur_stimuli_index
             _log.info('Writing stimuli set to %s' % dest_dir)
             if os.path.exists(dest_dir):
