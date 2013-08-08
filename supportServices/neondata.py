@@ -254,7 +254,7 @@ class BrightcoveAccount(AbstractRedisBlob):
         key = "BrightcoveAccount".lower() + '_' + api_key
         if result_callback:
             BrightcoveAccount.conn.get(key,result_callback) 
-        else
+        else:
             return BrightcoveAccount.blocking_conn.get(key)
 
     @staticmethod
@@ -310,7 +310,7 @@ class NeonApiRequest(object):
         self.video_url = url
         self.request_type = request_type
         self.callback_url = http_callback
-        self.state = "submit" # submit / in_progress / success / fail 
+        self.state = "submit" # submit / processing / success / fail 
         self.integration_type = "neon"
 
         #Meta data to be filled by the consumer client
@@ -364,7 +364,7 @@ class NeonApiRequest(object):
         if callback:
             NeonApiRequest.conn.set(self.key,value,callback)
         else:
-            return NeonApiRequest.blocking_conn.set(self.key.value)
+            return NeonApiRequest.blocking_conn.set(self.key,value)
 
     @staticmethod
     def get_request(api_key,job_id,result_callback=None):
@@ -378,8 +378,18 @@ class NeonApiRequest(object):
     def multiget(keys,external_callback):
         RedisMultiKeyHandler.conn.mget(keys,external_callback)
 
-    def save_request_blob(self,save_callback):
-        pass
+    @staticmethod
+    def create(json_data):
+        data_dict = json.loads(json_data)
+
+        #create basic object
+        obj = NeonApiRequest("dummy","dummy",None,None,None,None,None) 
+
+        #populate the object dictionary
+        for key in data_dict.keys():
+            obj.__dict__[key] = data_dict[key]
+
+        return obj
 
 class BrightcoveApiRequest(NeonApiRequest):
     def __init__(self,job_id,api_key,vid,title,url,rtoken,wtoken,pid,callback=None):
@@ -387,7 +397,9 @@ class BrightcoveApiRequest(NeonApiRequest):
         self.write_token = wtoken
         self.publisher_id = pid
         self.integration_type = "brightcove"
-        request_type = "topn"
+        self.previous_thumbnail = None
+        self.autosync = False
+        request_type = "brightcove"
         super(BrightcoveApiRequest,self).__init__(job_id,api_key,vid,title,url,request_type,callback)
 
 class YoutubeApiRequest(NeonApiRequest):
@@ -395,5 +407,6 @@ class YoutubeApiRequest(NeonApiRequest):
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.integration_type = "youtube"
-        request_type = "topn"
+        self.previous_thumbnail = None
+        request_type = "youtube"
         super(BrightcoveApiRequest,self).__init__(job_id,api_key,vid,title,url,request_type,callback)

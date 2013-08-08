@@ -32,10 +32,6 @@ sys.path.insert(0,os.path.abspath(
     os.path.join(os.path.dirname(__file__), '../supportServices')))
 from neondata import *
 
-#String constants
-REQUEST_UUID_KEY = 'uuid'
-JOB_ID = "job_id"
-
 #Tornado options
 from tornado.options import define, options
 define("port", default=8081, help="run on the given port", type=int)
@@ -300,16 +296,21 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             #Use Params that can change to generate UUID -- #TEMP 
             intermediate = api_key + str(vid) + api_method + str(api_param)
             job_id = hashlib.md5(intermediate).hexdigest()
-            
+           
+
+            #Identify Request Type
             if "brightcove" in self.request.uri:
                 pub_id  = params[properties.PUBLISHER_ID] #publisher id
-                prev_thumb = params[properties.PREV_THUMBNAIL] 
+                p_thumb = params[properties.PREV_THUMBNAIL]
                 rtoken = params[properties.BCOVE_READ_TOKEN]
                 wtoken = params[properties.BCOVE_WRITE_TOKEN]
+                autosync = params["autosync"]
                 request_type = "brightcove"
 
                 api_request = BrightcoveApiRequest(job_id,api_key,vid,title,url,
                         rtoken,wtoken,pub_id,http_callback)
+                api_request.previous_thumbnail = p_thumb 
+                api_request.autosync = autosync
 
             elif "youtube" in self.request.uri:
                 request_type = "youtube"
@@ -378,7 +379,6 @@ application = tornado.web.Application([
     (r"/requeue",RequeueHandler),
     (r"/testcallback",TestCallback),
     (r'/api/v1/jobstatus',JobStatusHandler),
-    (r'/api/v1/videometadata',MetaDataHandler),    
     (r'/api/v1/getresults',GetResultsHandler),    
     (r'/registerbrightcove',RegisterBrightcove),    
 ])

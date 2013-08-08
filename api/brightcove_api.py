@@ -87,14 +87,18 @@ class BrightcoveApi(object):
     ###### Brightcove media api update method ##########
     ''' add thumbnail and videostill in to brightcove account '''
     def update_thumbnail_and_videostill(self,video_id,image):
-        rt = self.add_image(video_id,image,atype='thumbnail')
-        rv = self.add_image(video_id,image,atype='videostill')
+        if isinstance(image,basestring):
+            rt = self.add_image(video_id,remote_url = image,atype='thumbnail')
+            rv = self.add_image(video_id,remote_url = image,atype='videostill')
+        else:
+            rt = self.add_image(video_id,image,atype='thumbnail')
+            rv = self.add_image(video_id,image,atype='videostill')
         
         if rt and rv:
             return True
         return False
 
-    def add_image(self,video_id,im,atype='thumbnail', **kwargs):
+    def add_image(self,video_id,im=None,atype='thumbnail', **kwargs):
         #http://help.brightcove.com/developer/docs/mediaapi/add_image.cfm
         #http://support.brightcove.com/en/video-cloud/docs/adding-images-videos-media-api#upload
 
@@ -111,6 +115,7 @@ class BrightcoveApi(object):
                     ret = True
                     break
                 except tornado.httpclient.HTTPError, e:
+                    log.error("type=add_image msg=" + e.message)
                     continue
             return ret
         
@@ -131,6 +136,9 @@ class BrightcoveApi(object):
         else:
             image["type"] = "VIDEO_STILL"
             image["displayName"] = str(self.publisher_id) + '-neon-video-still-for-video-' + str(video_id) 
+        
+        if remote_url:
+            image["remoteUrl"] = remote_url
 
         params["image"] = image
         outer["params"] = params
@@ -138,32 +146,40 @@ class BrightcoveApi(object):
 
         body = tornado.escape.json_encode(outer)
         
-        #save image
-        filestream = StringIO()
-        im.save(filestream, 'jpeg')
-        filestream.seek(0)
-        image_data = filestream.getvalue()
-        post_param = []
-        fileparam = poster.encode.MultipartParam("filePath",value= image_data,filetype='image/jpeg',filename='thumbnail-' + str(video_id) + '.jpeg')
-        args = poster.encode.MultipartParam("JSONRPC", value=body)
-        post_param.append(args)
-        post_param.append(fileparam)
-        datagen, headers = multipart_encode(post_param)
-        body = "".join([data for data in datagen])
+        if remote_url:
+            post_param = []
+            args = poster.encode.MultipartParam("JSONRPC", value=body)
+            post_param.append(args)
+            datagen, headers = multipart_encode(post_param)
+            body = "".join([data for data in datagen])
+
+        else:
+            #save image
+            filestream = StringIO()
+            im.save(filestream, 'jpeg')
+            filestream.seek(0)
+            image_data = filestream.getvalue()
+            post_param = []
+            fileparam = poster.encode.MultipartParam("filePath",value= image_data,filetype='image/jpeg',filename='thumbnail-' + str(video_id) + '.jpeg')
+            args = poster.encode.MultipartParam("JSONRPC", value=body)
+            post_param.append(args)
+            post_param.append(fileparam)
+            datagen, headers = multipart_encode(post_param)
+            body = "".join([data for data in datagen])
         
         #send request
         ret = send_add_image_request(headers,body)
         return ret 
 
     ''' update_video implementation '''
-    def update_brightcove_thumbnail(self,video_id, **kwargs):
+    def update_brightcove_thumbnail_and_videostill_from_url(self,video_id,thumbnail_url, **kwargs):
         reference_id = kwargs.get('reference_id', None)
         display_name = kwargs.get('name', None)
-        thumbnail_url = 'https://neon-lab-blog-content.s3.amazonaws.com/uploads/neonglogogreen2.png'
 
         outer = {}
         params = {}
         params["token"] = self.write_token 
+        
         video = {}
         video["id"] = video_id
         video["thumbnailURL"] = thumbnail_url 
@@ -176,7 +192,7 @@ class BrightcoveApi(object):
         
         image = {}
         image["type"] = "THUMBNAIL"
-        display_name = 'thumbnail-' + str(video_id)  #kwargs.get('display_name', None)
+        display_name = str(self.publisher_id) + '-neon-thumbnail-for-video-' + str(video_id)
         params["image"] = image
         
         outer["params"] = params
@@ -194,7 +210,6 @@ class BrightcoveApi(object):
         req = tornado.httpclient.HTTPRequest(url = client_url, method = "POST", headers = headers, body = body, request_timeout = 600.0, connect_timeout = 20.0)
         response = http_client.fetch(req)
         
-        #TODO Retry
         print response.body
         return
 

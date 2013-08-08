@@ -36,11 +36,12 @@ import hashlib
 import numpy
 import signal
 import shutil
+import datetime
 import matplotlib
 matplotlib.use('Agg') #To use without the $DISPLAY var on aws
 import matplotlib.pyplot as plt
-from PIL import Image
 
+from PIL import Image
 from optparse import OptionParser
 
 import leargist
@@ -60,6 +61,10 @@ import gzip
 import copy
 
 import brightcove_api
+
+sys.path.insert(0,os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '../supportServices')))
+from neondata import *
 
 #Tester
 import youtube
@@ -151,7 +156,10 @@ class ProcessVideo(object):
 
         # Settings for the bad image filter
         self.bad_image_filter = BadImageFilter(30, 0.95)
-
+        
+        #thumbnail list of maps
+        self.thumbnails = [] # thumbnail_id, url, created, enabled, width, height, type 
+        
         self.debug = debug
 
     ''' process all the frames from the partial video downloaded '''
@@ -478,7 +486,7 @@ class ProcessVideo(object):
                       e.__str__() )
             if self.debug:
                 raise
-        return
+        return k.key
 
     ''' Save the top thumnail to s3'''
     def save_top_thumbnail_to_s3(self,frame):
@@ -560,38 +568,7 @@ class ProcessVideo(object):
             if self.debug:
                 raise
 
-    ''' if complete, store response else store status are requeued '''
-    def save_request_data(self, result=None):
-        k = Key(self.s3bucket)
-
-        #save request data 
-        #k.key = self.base_filename + "/"+ 'request.txt'
-        #k.set_contents_from_string(self.request)
-
-        #save response result
-        k = Key(self.s3bucket)
-        k.key = self.base_filename + "/"+ 'response.txt'
-         
-        #change the status to requeued, and don't store a response 
-        if result is None:
-            status = "requeued"
-        else:
-            k.key = self.base_filename + "/"+ 'response.txt'
-            try:
-                k.set_contents_from_string(result)
-            except S3ResponseError,e:
-                pass
-
-            status = "completed"
-        
-        k.key = self.base_filename + "/"+ 'status.txt'
-        ts = str(time.time())
-        result = format_status_json("requeued",ts)
-        try:
-            k.set_contents_from_string(result)
-        except S3ResponseError,e:
-            pass
-
+    
     ''' Host images on s3 which is available publicly '''
     def host_images_s3(self, frames):
         s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
@@ -617,6 +594,17 @@ class ProcessVideo(object):
             s3bucket.set_acl('public-read',k.key)
             s3fname = s3_url_prefix + "/" + self.base_filename + "/" + fname_prefix + str(i) + ".jpeg"
             s3_urls.append(s3fname)
+            
+            #populate thumbnail
+            thumb = {} 
+            thumb['thumbnail_id'] = i
+            thumb['url'] = s3fname
+            thumb['created'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            thumb['enabled'] = None 
+            thumb['width']   = image.size[0]
+            thumb['height']  = image.size[1] 
+            thumb['type']    = "neon" + str(i)
+            self.thumbnails.append(thumb)
 
         return s3_urls
 
@@ -660,32 +648,102 @@ class ProcessVideo(object):
         neonc = s3_url_prefix + "/" + self.base_filename + "/" + "neonc.jpeg"
         bcove.update_abtest_custom_thumbnail_video(video_id,neona,neonb,neonc)
 
-    def update_brightcove_thumbnail(self,error=False):
-        api_key = self.request_map[properties.API_KEY]  
-        rtoken  = self.request_map[properties.BCOVE_READ_TOKEN]
-        wtoken  = self.request_map[properties.BCOVE_WRITE_TOKEN]
-        video_id = self.request_map[properties.VIDEO_ID]
-        pid   = self.request_map[properties.PUBLISHER_ID] 
-        res   = self.get_topn_thumbnails(1) # Get the top thumbnai # Get the top thumbnail
-        fno   = res[0][0]
-        image = self.data_map[fno][1]
-        bcove   = brightcove_api.BrightcoveApi(neon_api_key=api_key,publisher_id=pid,read_token=rtoken,write_token=wtoken)
-        vids    = [] 
-        vids.append(video_id)
+    ############# Request Finalizers ##############
+
+    ''' Update the request state for Neon API Request '''
+    def finalize_neon_request(self, result=None):
         
-        #if there was an error processing the video
-        if error:
-            bcove.update_customer_video_inbox(vids,status=-1)
+        api_key = self.request_map[properties.API_KEY] 
+        job_id  = self.request_map[properties.REQUEST_UUID_KEY]
+        json_request = NeonApiRequest.get_request(api_key,job_id)
+        api_request = NeonApiRequest.create(json_request)
+        
+        #change the status to requeued, and don't store a response 
+        if result is None:
+            api_request.state = "requeued" 
         else:
-            ret = bcove.update_thumbnail_and_videostill(video_id,image)
+            api_request.response = tornado.escape.json_decode(result)
+            api_request.state = "finished"
+            api_request.thumbnails = self.thumbnails
+        
+        api_request.save()
+        return
+
+
+    '''
+    Brightcove handler
+
+    - host neon thumbs and also save bcove previous thumbnail in s3
+    - Get Account settings and replace default thumbnail if enabled 
+    - update request object with the thumbnails
+    '''
+    def finalize_brightcove_request(self,result,error=False):
+       
+        api_key = self.request_map[properties.API_KEY]  
+        job_id  = self.request_map[properties.REQUEST_UUID_KEY]
+        json_request = BrightcoveApiRequest.get_request(api_key,job_id)
+        bc_request  = BrightcoveApiRequest.create(json_request)
+        bc_request.response = tornado.escape.json_decode(result)
+        
+        if error:
+            bc_request.save()
+            return
+
+        
+        #Save previous thumbnail to s3
+        p_url = bc_request.previous_thumbnail
+        http_client = tornado.httpclient.HTTPClient()
+        req = tornado.httpclient.HTTPRequest(url = p_url,
+                                                method = "GET",
+                                                request_timeout = 60.0,
+                                                connect_timeout = 10.0)
+
+        response = http_client.fetch(req)
+        imgdata = response.body 
+        s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
+        s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
+        s3bucket = Bucket(name = s3bucket_name,connection = s3conn)
+        s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
+        k = Key(s3bucket)
+        k.key = self.base_filename + "/brightcove.jpeg" 
+        k.set_contents_from_string(imgdata)
+        s3bucket.set_acl('public-read',k.key)
+        s3fname = s3_url_prefix + "/" + k.key 
+        bc_request.previous_thumbnail = s3fname
+        
+        #populate thumbnail
+        thumb = {} 
+        thumb['thumbnail_id'] = 5
+        thumb['url'] = s3fname
+        thumb['created'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        thumb['enabled'] = None 
+        thumb['width']   = 480
+        thumb['height']  = 360
+        thumb['type']    = "brightcove"
+        self.thumbnails.append(thumb)
+
+        #2 Push thumbnail in to brightcove account
+        if bc_request.autosync:
+            rtoken  = self.request_map[properties.BCOVE_READ_TOKEN]
+            wtoken  = self.request_map[properties.BCOVE_WRITE_TOKEN]
+            video_id = self.request_map[properties.VIDEO_ID]
+            pid = self.request_map[properties.PUBLISHER_ID]
+            fno = bc_request.response["data"][0]
+            img = Image.fromarray(self.data_map[fno][1])
+            #img_url = self.thumbnails[0]["url"]
+            bcove   = brightcove_api.BrightcoveApi(neon_api_key=api_key,publisher_id=pid,read_token=rtoken,write_token=wtoken)
+            ret = bcove.update_thumbnail_and_videostill(video_id,img)
+
             if ret:
-                #success
-                bcove.update_customer_video_inbox(vids,status=1)
-                return fno #return the frameno
-            else:
-                #on update error
-                bcove.update_customer_video_inbox(vids,status=-1)
-        return None
+                self.thumbnails[0]["enabled"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+        #3 Add thumbnails to the request object and save
+        bc_request.thumbnails = self.thumbnails
+        bc_request.state = "finished"
+        bc_request.save()
+
+
 #############################################################################################
 # HTTP Downloader client
 #############################################################################################
@@ -815,12 +873,11 @@ class HttpDownload(object):
         self.pv.video_metadata[properties.JOB_END_TIME] = str(end_time)
 
         #cleanup or misc methods to be run before the video is deleted
-        self.pv.finalize(self.tempfile.name)
+        #self.pv.finalize(self.tempfile.name)
 
         #Delete the temp video file which was downloaded
         if os.path.exists(self.tempfile.name):
             os.unlink(self.tempfile.name)
-        #print "downloaded to " , self.tempfile.name
 
         ######### Final Phase - send client response to callback url, save images & request data to s3 ########
         if self.error == INTERNAL_PROCESSING_ERROR:
@@ -831,7 +888,6 @@ class HttpDownload(object):
             #Send client response
             client_response = self.send_client_response()
             self.pv.save_data_to_s3()
-            self.pv.save_request_data(client_response)
         return
 
     def requeue_job(self):
@@ -864,6 +920,7 @@ class HttpDownload(object):
 
     def send_client_response(self,error=False):
         s3_urls = None   
+        
         #There was an error with processing the video
         if error:
             #If Internal error, requeue and dont send response to client yet
@@ -880,85 +937,66 @@ class HttpDownload(object):
                 #if brightcove request
                 if self.job_params.has_key(properties.BRIGHTCOVE_THUMBNAILS):
                     self.pv.update_brightcove_thumbnail(error=True)
-                return 
-
+            return
 
         # API Specific client response
-        
-        ''' Neon API section '''
-        if self.job_params.has_key(properties.TOP_THUMBNAILS):
-            n = int(self.job_params[properties.TOP_THUMBNAILS])
+      
+        request_type = self.job_params['request_type']
+        api_method = self.job_params['api_method'] 
+        api_param =  self.job_params['api_param']
+        MAX_T = 5
+
+        ''' Neon API section 
+        '''
+        if  api_method == properties.TOP_THUMBNAILS:
+            n = topn = int(api_param)
+            '''
+            Always save 5 thumbnails for any request and host them on s3 
+            '''
+            if topn < MAX_T:
+                n = MAX_T
+
             res = self.pv.get_topn_thumbnails(n)
-            data = [x[0] for x in res]
+            ranked_frames = [x[0] for x in res]
+            data = ranked_frames[:topn]
             timecodes = self.pv.get_timecodes(data)
             
-            #save ranked thumbnails
-            self.pv.save_result_data_to_s3(data)
-
-            #host images on s3
-            s3_urls = self.pv.host_images_s3(data)
-
-        elif self.job_params.has_key(properties.THUMBNAIL_RATE):
-            rate = float(self.job_params[properties.THUMBNAIL_RATE])
-            rate = max(rate,1) #Rate should at least be 1
-            res = self.pv.get_thumbnail_at_rate(rate)
-            data = [x[0] for x in res]   
-
-            #save ranked thumbnails
-            self.pv.save_result_data_to_s3(data)
-
-        elif self.job_params.has_key(properties.THUMBNAIL_INTERVAL):
-            data = self.pv.get_topn_thumbnails(5) #DUMMY
-       
-        ############# Brightcove secion ###########################
-        ## AB Test - Upload to Brightcove
-        elif self.job_params.has_key(properties.ABTEST_THUMBNAILS):
-            # host the images to AB test on S3
-            self.pv.host_abtest_images()
+            #host top 5 images on s3
+            s3_urls = self.pv.host_images_s3(ranked_frames[:MAX_T])
+            cr = ClientResponse(self.job_params,data,self.error,urls=s3_urls[:topn])
+            cr.send_response()  
             
-            # save image data to s3
-            self.pv.save_data_to_s3()
-            
-            # save request data
-            return
-       
-        ## Upload thumbnails in to Brightcove account 
-        elif self.job_params.has_key(properties.BRIGHTCOVE_THUMBNAILS):
-            # Save previous brightcove thumbnail
-            self.pv.save_previous_thumbnail_to_s3()
-
-            #push thumbnail to brightcove account
-            data = self.pv.update_brightcove_thumbnail()
-            cr = ClientResponse(self.job_params,data)
-            resp = cr.build_request()
-        
-            # Save the top thumbnail
-            if data is not None:
-                self.pv.save_top_thumbnail_to_s3(data)
-            
-            return resp
-
-        else:
-            #Default
-            data = []
-            log.error("key=client_response msg=api not supported")
-            return
-
-        #Finalize
-        #Format data based on the api request
-        if self.error is None:
-            if len(data) == 0:
-                log.error("key=process_error  msg=response data empty")
-                self.requeue_job()
+            ## Neon section
+            if request_type == "neon":
+                
+                #Save response that was created for the callback to client 
+                self.pv.finalize_neon_request(cr.response)
                 return
-            else:
-                cr = ClientResponse(self.job_params,data,self.error,urls=s3_urls)
-                cr.send_response()  
-                return cr.response  #Return response that was created for the callback to client         
-        else:
-            self.requeue_job()
-            return
 
+            ## Brightcove secion 
+            elif request_type == "brightcove":
+                #Update Brightcove
+                self.pv.finalize_brightcove_request(cr.response,error)
+            
+            elif request_type == "youtube":
+                pass
+            else:
+                if debug:
+                    raise Exception("Request Type not Supported")
+                log.exception("type=Client Response msg=Request Type not Supported")
+
+            #TO BE Implemented 
+            #elif self.job_params.has_key(properties.THUMBNAIL_RATE):
+            #rate = float(self.job_params[properties.THUMBNAIL_RATE])
+            #rate = max(rate,1) #Rate should at least be 1
+            #res = self.pv.get_thumbnail_at_rate(rate)
+            #data = [x[0] for x in res]   
+            #save ranked thumbnails
+            #self.pv.save_result_data_to_s3(data)
+       
+        else:
+            raise
+            #TO BE Implemented
 
 
 class ClientResponse(object):
@@ -1144,36 +1182,32 @@ class Worker(multiprocessing.Process):
                 job = self.dequeue_job()
                 if job == "{}": #string match
                       raise Queue.Empty
-                ## == youtube tester == ##
-                if properties.YOUTUBE == True:
-                    job = self.youtube_url_converter(job)
 
                 ## ===== ASYNC Code Starts ===== ##
                 ioloop = tornado.ioloop.IOLoop.instance()
                 dl = HttpDownload(job, ioloop, self.model, self.debug)
 
                 try:
-                    s3conn = S3Connection(properties.S3_ACCESS_KEY,
-                                          properties.S3_SECRET_KEY)
-                    s3bucket = Bucket(name = properties.S3_BUCKET_NAME,
-                                      connection = s3conn)
-                  
-                    #Save state to s3, then start the ioloop
-                    k = Key(s3bucket)
-                    k.key = dl.job_params[properties.API_KEY] + "/" + dl.job_params[properties.REQUEST_UUID_KEY] + "/" + "status.txt"
+                    #Change Job State
+                    api_key = dl.job_params[properties.API_KEY] 
+                    job_id = dl.job_params[properties.REQUEST_UUID_KEY]
+                    json_request = NeonApiRequest.get_request(api_key,job_id)
+                    api_request = NeonApiRequest.create(json_request)
+                    if api_request.state == "submit":
+                        api_request.state = "processing" 
+                        api_request.save()
+                    print NeonApiRequest.get_request(api_key,job_id) 
                     ts = str(time.time())
-                    data = format_status_json("processing",ts)
-                    k.set_contents_from_string(data)
                     log.info("key=worker msg=processing request " + dl.job_params[properties.REQUEST_UUID_KEY])
 
-                except:
-                    log.error("key=worker msg=s3 error")
+                except Exception,e:
+                    log.error("key=worker msg=db error " + e.message)
 
                 ioloop.start()
 
           except Queue.Empty:
                 print "Q,Empty"
-                time.sleep(self.SLEEP_INTERVAL * random.random())  ### TODO Randomize worker sleep times
+                time.sleep(self.SLEEP_INTERVAL * random.random())  
 
           except Exception,e:
                 log.error("key=worker msg=exception " + e.__str__())
