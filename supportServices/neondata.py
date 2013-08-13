@@ -1,11 +1,16 @@
 #/usr/bin/env python
+import redis as blockingRedis
 import brukva as redis
 import tornado.gen
 import hashlib
 import json
 import shortuuid
 import tornado.httpclient
-import redis as blockingRedis
+import sys
+import os
+sys.path.insert(0,os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '../api')))
+import brightcove_api
 
 ''' 
 Neon Data Model Classes
@@ -132,11 +137,12 @@ class AbstractRedisBlob(object):
         if callback:
             return self._get(callback)
         else:
-            return AbstractRedisBlob.blocking_client.get(self.key)
+            return AbstractRedisBlob.blocking_conn.get(self.key)
 
-    def save(self,callback):
+    def save(self,callback=None):
         value = self.to_json()
-        self._save(value,callback)
+        if callback:
+            self._save(value,callback)
 
     def lget_callback(self,result):
         #lock unsuccessful, lock exists: 
@@ -179,10 +185,15 @@ class AbstractRedisBlob(object):
         pipe.delete(lkey)
         pipe.execute(self.external_callback)
 
+    #exists
+    def exists(self,callback):
+        self.external_callback = callback
+        AbstractRedisBlob.conn.exists(self.key,callback)
+
 ''' Neon User Class '''
-class NeonUser(AbstractRedisBlob):
+class NeonUserAccount(AbstractRedisBlob):
     def __init__(self,a_id,plan_start=None,processing_mins=None):
-        super(NeonUser,self).__init__()
+        super(NeonUserAccount,self).__init__()
         self.account_id = a_id
         self.neon_api_key = NeonApiKey.generate(a_id)
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
@@ -202,9 +213,10 @@ class NeonUser(AbstractRedisBlob):
        
 ''' Brightcove Account '''
 class BrightcoveAccount(AbstractRedisBlob):
-    def __init__(self,a_id,i_id,p_id=None,rtoken=None,wtoken=None,auto_update=False):
+    def __init__(self,a_id,i_id,p_id=None,rtoken=None,wtoken=None,auto_update=False,last_process_date=None):
         super(BrightcoveAccount,self).__init__()
-        self.key = self.__class__.__name__.lower()  + '_' + NeonApiKey.generate(a_id)
+        self.neon_api_key = NeonApiKey.generate(a_id)
+        self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.account_id = a_id
         self.integration_id = i_id
         self.publisher_id = p_id
@@ -217,22 +229,42 @@ class BrightcoveAccount(AbstractRedisBlob):
         videos[video_id] = job_id 
         '''
         self.videos = {} 
+        self.last_process_date = last_process_date 
 
-    def add_video(vid,job_id):
+    def add_video(self,vid,job_id):
         self.videos[str(vid)] = job_id
+    
+    def get_videos(self):
+        if len(self.videos) > 0:
+            return self.videos.keys()
 
     def get(self,callback=None):
         if callback:
             self.lget(callback)
         else:
-            return AbstractRedisBlob.blocking_client.get(self.key)
+            return AbstractRedisBlob.blocking_conn.get(self.key)
 
-    def save(self,callback,create=False):
+    def save(self,callback=None,create=False):
         # if create, then set directly
-        if create:
-            self.save(callback)
+        if callback:
+            if create:
+                self._save(callback)
+            else:
+                self._unlock_set(callback)
         else:
-            self._unlock_set(callback)
+            value = self.to_json()
+            return AbstractRedisBlob.blocking_conn.set(self.key,value)
+
+    def update_thumbnail(self,vid,tid,update_callback=None):
+        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,True,self.auto_update)
+        return bc.enable_thumbnail_from_url(vid,tid)
+
+    '''
+    Use this only after you retreive the object from DB
+    '''
+    def check_feed_and_create_api_requests(self):
+        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,True,self.auto_update)
+        bc.create_neon_api_requests()    
 
     @staticmethod
     def create(json_data):
