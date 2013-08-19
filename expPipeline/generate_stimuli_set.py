@@ -10,9 +10,6 @@ labeled (larger distance is better). These images are then added to those
 that will be labeled and the priority queues are recalculated. We stop when
 one of the queues is empty.
 
-TODO When a queue is empty try to intelligently find videos that are
-likely to have a frame in that region in image space.
-
 Copyright: 2013 Neon Labs
 Author: Sunil Mallya (mallaya@neon-lab.com)
         Mark Desnoyer (desnoyer@neon-lab.com)
