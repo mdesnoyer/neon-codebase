@@ -25,6 +25,9 @@ _log = logging.getLogger(__name__)
 
 _status_file = 'stimuli.posted'
 
+_PROD_APP = 'gentle-escarpment-8454'
+_SANDBOX_APP = 'gentle-escarpment-8454-staging'
+
 def get_last_posted(directory):
     '''Returns the index of the last stimuli set posted.'''
     status_file = os.path.join(directory, _status_file)
@@ -83,7 +86,27 @@ def post_new_sets(mturk_dir, sets, pay, assignments, sandbox):
         _log.exception('Error posting new sets: %s' % e)
         raise
 
+def dynos_running(sandbox):
+    '''Returns the number of dynos currently running.'''
+    app = _PROD_APP
+    if sandbox:
+        app = _SANDBOX_APP
+
+    output = subprocess.check_output('heroku ps --app %s' % app, shell=True)
+
+    dynoRe = re.compile('web\.[0-9]+: up')
+    dynos_found = 0
+    for line in output.split('\n'):
+        if dynoRe.search(line):
+            dynos_found += 1
+
+    return dynos_found
+
 def main(options):
+    if ((options.max_dynos_allowed is not None) and
+        (dynos_running(options.sandbox) >= options.max_dynos_allowed)):
+        _log.info('Server is too busy. Not posting new jobs.')
+        return
 
     last_posted = get_last_posted(options.stimuli_dir)
 
@@ -112,6 +135,8 @@ if __name__ == '__main__':
                       help='Number of assingments for each job')
     parser.add_option('--max_hits', default=None, type='int',
                       help='Maximum number of hits to post at once')
+    parser.add_option('--max_dynos_allowed', default=None, type='int',
+                      help='If set, new jobs will not be added unless there are less dynos currently running compared to this setting.')
     parser.add_option('--sandbox', default=False, action='store_true',
                       help='If set, uses the sandbox settings')
     parser.add_option('--log', default=None,
