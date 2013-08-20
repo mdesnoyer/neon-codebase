@@ -70,8 +70,11 @@ class ProcessVideo(youtube_dl.PostProcessor):
         if dur > self.nthumbnails:
             locations = random.sample(range(dur),self.nthumbnails)
             return locations
+        elif dur == 0:
+            _log.warn("Duration is less than a second. Taking middle frame.")
+            return [duration / 2.0]
         else:
-            _log.error("Duration smaller than nthumbnails dur = " + str(dur))
+            _log.warn("Duration smaller than nthumbnails dur = " + str(dur))
             return range(dur)
 
     ''' process all the frames from the partial video downloaded '''
@@ -332,6 +335,8 @@ if __name__ == "__main__":
                       help='File to list the failed links')
     parser.add_option('--log', default=None,
                       help='Log file. If none, dumps to stdout')
+    parser.add_option('--debug', action='store_true', default=False,
+                      help='If true, allows you to debug the worker')
     
     options,args = parser.parse_args()
 
@@ -376,8 +381,10 @@ if __name__ == "__main__":
                                 options.failed_links,
                                 options.nthumbs,
                                 options.location)
-                #worker.start()
-                worker.run()
+                if options.debug:
+                    worker.start()
+                else:
+                    worker.run()
 
             time.sleep(delay)
     finally:

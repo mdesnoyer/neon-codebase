@@ -202,7 +202,7 @@ if __name__ == '__main__':
 
     if options.use_queries:
         for line in inStream:
-            video_ids.extend(['http://www.youtube.com/watch/?v=%s' % x for x in
+            video_ids.extend(['http://www.youtube.com/watch?v=%s' % x for x in
                               get_video_ids(line,
                                             n_videos=options.n,
                                             max_duration=options.max_duration)])

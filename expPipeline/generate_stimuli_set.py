@@ -247,6 +247,7 @@ def find_new_urls(seed_ids, output_file, n_videos=100, known_ids=[]):
         _log.info('Appending %i new urls to %s' % (len(new_ids), output_file))
         f.write('\n'.join(['http://www.youtube.com/watch?v=%s' % x for
                       x in new_ids]))
+        f.write('\n')
 
     return new_ids
 
