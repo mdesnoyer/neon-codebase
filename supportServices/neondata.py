@@ -6,11 +6,14 @@ import hashlib
 import json
 import shortuuid
 import tornado.httpclient
+import datetime
+import time
 import sys
 import os
 sys.path.insert(0,os.path.abspath(
     os.path.join(os.path.dirname(__file__), '../api')))
 import brightcove_api
+import youtube_api
 
 ''' 
 Neon Data Model Classes
@@ -230,6 +233,7 @@ class BrightcoveAccount(AbstractRedisBlob):
         '''
         self.videos = {} 
         self.last_process_date = last_process_date 
+        self.linked_youtube_account = False
 
     def add_video(self,vid,job_id):
         self.videos[str(vid)] = job_id
@@ -255,15 +259,37 @@ class BrightcoveAccount(AbstractRedisBlob):
             value = self.to_json()
             return AbstractRedisBlob.blocking_conn.set(self.key,value)
 
-    def update_thumbnail(self,vid,tid,update_callback=None):
-        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,True,self.auto_update)
-        return bc.enable_thumbnail_from_url(vid,tid)
+    def update_thumbnail(self,vid,t_url,update_callback=None):
+        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update)
+        if update_callback:
+            return bc.async_enable_thumbnail_from_url(vid,t_url,update_callback)
+        else:
+            return bc.enable_thumbnail_from_url(vid,t_url)
+
+    ''' 
+    Create neon job for particular video
+    '''
+    def create_job(self,vid,callback):
+        def created_job(result):
+            if not result.error:
+                try:
+                    job_id = tornado.escape.json_decode(result.body)["job_id"]
+                    self.add_video(vid,job_id)
+                    self.save(callback)
+                except Exception,e:
+                    #log.exception("key=create_job msg=" + e.message) 
+                    callback(False)
+            else:
+                callback(False)
+
+        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update)
+        bc.create_video_request(vid,created_job)
 
     '''
     Use this only after you retreive the object from DB
     '''
     def check_feed_and_create_api_requests(self):
-        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,True,self.auto_update)
+        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update)
         bc.create_neon_api_requests()    
 
     @staticmethod
@@ -278,6 +304,11 @@ class BrightcoveAccount(AbstractRedisBlob):
          
         ba = BrightcoveAccount(a_id,i_id,p_id,rtoken,wtoken,auto_update)
         ba.videos = params['videos']
+        ba.last_process_date = params['last_process_date'] 
+        ba.linked_youtube_account = params['linked_youtube_account']
+        
+        #for key in params:
+        #    ba.__dict__[key] = params[key]
         return ba
 
     @staticmethod
@@ -309,11 +340,101 @@ class YoutubeAccount(AbstractRedisBlob):
         self.expires = expires
         self.generation_time = None
         self.videos = {} 
-        
+        self.valid_until = 0  
+
         #if blob is being created save the time when access token was generated
         if access_token:
-            self.generation_time = str(time.time())
+            self.valid_until = time.time() + float(expires) - 50
         self.auto_update = auto_update
+    
+        self.channels = None
+
+    '''
+    Get a valid access token, if not valid -- get new one and set expiry
+    '''
+    def get_access_token(self,callback):
+        def access_callback(result):
+            if result:
+                self.access_token = result
+                self.valid_until = time.time() + 3550
+                callback(self.access_token)
+            else:
+                callback(False)
+
+        #If access token has expired
+        if time.time() > self.valid_until:
+            yt = youtube_api.YoutubeApi(self.refresh_token)
+            yt.get_access_token(access_callback)
+        else:
+            #return current token
+            callback(self.access_token)
+   
+    '''
+    Add a list of channels that the user has
+    '''
+    def add_channels(self,ch_callback):
+        def save_channel(result):
+            if result:
+                self.channels = result
+                ch_callback(True)
+            else:
+                ch_callback(False)
+
+        def atoken_exec(atoken):
+            if atoken:
+                yt = youtube_api.YoutubeApi(self.refresh_token)
+                yt.get_channels(atoken,save_channel)
+            else:
+                ch_callback(False)
+
+        self.get_access_token(atoken_exec)
+
+
+    '''
+    get list of videos from youtube
+    '''
+    def get_videos(self,callback,channel_id=None):
+
+        def atoken_exec(atoken):
+            if atoken:
+                yt = youtube_api.YoutubeApi(self.refresh_token)
+                yt.get_videos(atoken,playlist_id,callback)
+            else:
+                callback(False)
+
+        if channel_id is None:
+            playlist_id = self.channels[0]["contentDetails"]["relatedPlaylists"]["uploads"] 
+            self.get_access_token(atoken_exec)
+        else:
+            # Not yet supported
+            callback(None)
+    
+    '''
+    Create youtube api request
+    '''
+
+    def create_job(self):
+        pass
+
+    @staticmethod
+    def get_account(api_key,result_callback=None,lock=False):
+        key = "YoutubeAccount".lower() + '_' + api_key
+        if result_callback:
+            YoutubeAccount.conn.get(key,result_callback) 
+        else:
+            return YoutubeAccount.blocking_conn.get(key)
+    
+    @staticmethod
+    def create(json_data):
+        params = json.loads(json_data)
+        a_id = params['account_id']
+        i_id = params['integration_id'] 
+        yt = YoutubeAccount(a_id,i_id)
+       
+        for key in params:
+            yt.__dict__[key] = params[key]
+
+        return yt
 
 
 #######################
@@ -372,7 +493,21 @@ class NeonApiRequest(object):
         self.response['timecodes'] = timecodes 
         self.response['urls'] = urls 
         self.response['error'] = error
-   
+  
+    '''
+    Enable thumbnail given the id
+    iterate and set the given thumbnail and disable the previous
+    '''
+    def enable_thumbnail(self,tid):
+        t_url = None
+        for t in thumbnails:
+            if t['thumbnail_id'] == tid:
+                t['enabled'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") 
+                t_url = t['url']
+            else:
+                t['enabled'] = None
+        return t_url
+
     def add_thumbnail(self,tid,url,created,enabled,width,height,ttype):
         thumb = {}
         thumb['thumbnail_id'] = tid
@@ -435,10 +570,13 @@ class BrightcoveApiRequest(NeonApiRequest):
         super(BrightcoveApiRequest,self).__init__(job_id,api_key,vid,title,url,request_type,callback)
 
 class YoutubeApiRequest(NeonApiRequest):
-    def __init__(self,job_id,api_key,vid,title,url,access_token,refresh_token,pid,callback=None):
+    def __init__(self,job_id,api_key,vid,title,url,access_token,refresh_token,expiry,callback=None):
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.integration_type = "youtube"
         self.previous_thumbnail = None
+        self.expiry = expiry
         request_type = "youtube"
-        super(BrightcoveApiRequest,self).__init__(job_id,api_key,vid,title,url,request_type,callback)
+        super(YoutubeApiRequest,self).__init__(job_id,api_key,vid,title,url,request_type,callback)
+
+

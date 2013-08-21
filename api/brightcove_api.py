@@ -23,7 +23,7 @@ sys.path.insert(0,os.path.abspath(os.path.join(os.path.dirname(__file__), '../su
 from neondata import *
 
 class BrightcoveApi(object):
-    def __init__(self,neon_api_key,publisher_id=0,read_token=None,write_token=None,s3init=True,autosync=False,publish_date=None):
+    def __init__(self,neon_api_key,publisher_id=0,read_token=None,write_token=None,autosync=False,publish_date=None):
         self.publisher_id = publisher_id
         self.neon_api_key = neon_api_key
         self.read_token = read_token
@@ -32,6 +32,7 @@ class BrightcoveApi(object):
         self.write_url = "http://api.brightcove.com/services/post"
         self.autosync = autosync
         self.last_publish_date = publish_date if publish_date else (time.time() - 10000000) 
+        self.neon_uri = "http://thumbnails.neon-lab.com/api/v1/submitvideo/abtest" 
 
     def format_get(self, url, data=None):
         if data is not None:
@@ -63,19 +64,27 @@ class BrightcoveApi(object):
     : remote_url sets the url to 3rd party url 
     : image creates a new asset and the url is on brightcove servers
     '''
-    def add_image(self,video_id,im=None,atype='thumbnail', **kwargs):
+    def add_image(self,video_id,im=None,atype='thumbnail',async_callback=None, **kwargs):
         #http://help.brightcove.com/developer/docs/mediaapi/add_image.cfm
         #http://support.brightcove.com/en/video-cloud/docs/adding-images-videos-media-api#upload
 
         ''' helper method to send request to brightcove'''
         def send_add_image_request(headers,body):
             client_url = "http://api.brightcove.com/services/post"
+            req = tornado.httpclient.HTTPRequest(url = client_url, method = "POST",headers =headers, 
+                            body = body, request_timeout = 60.0, connect_timeout = 10.0)
+            
+            # If Async call requested  
+            if async_callback:
+                http_client = tornado.httpclient.AsyncHTTPClient()
+                response = http_client.fetch(req,async_callback)
+                return
+            
             http_client = tornado.httpclient.HTTPClient()
             retries = 5
             ret = False
             for i in range(retries):
                 try:
-                    req = tornado.httpclient.HTTPRequest(url = client_url, method = "POST",headers =headers, body = body, request_timeout = 60.0, connect_timeout = 10.0)
                     response = http_client.fetch(req)
                     ret = True
                     break
@@ -151,12 +160,50 @@ class BrightcoveApi(object):
         rt = self.add_image(video_id,image,atype='thumbnail')
         rv = self.add_image(video_id,image,atype='videostill')
         return (rt and rv)
+    
+    '''
+    Enable thumbnail async
+    '''
+
+    def async_enable_thumbnail_from_url(self,video_id,img_url,callback):
+        self.img_result = []  
+        def add_image_callback(result):
+            if not result.error and len(result.body) > 0:
+                self.img_result.append(tornado.escape.json_decode(result.body))
+            else:
+                self.img_result.append({})
+
+            if len(self.img_result) == 2:
+                callback_value = False
+                try:
+                    if not self.img_result[0]["error"] and not self.img_result[1]["error"]:
+                        callback_value = True
+                except:
+                    pass
+
+                callback(callback_value)
+
+        def image_data_callback(image_response):
+            if not image_response.error:
+                imfile = StringIO(image_response.body)
+                image =  Image.open(imfile)
+                self.add_image(video_id,image,atype='thumbnail', async_callback = add_image_callback)
+                self.add_image(video_id,image,atype='videostill',async_callback = add_image_callback)
+            else:
+                callback(False)
+
+        http_client = tornado.httpclient.AsyncHTTPClient()
+        req = tornado.httpclient.HTTPRequest(url = url,
+                                                method = "GET",
+                                                request_timeout = 60.0,
+                                                connect_timeout = 10.0)
+        http_client.fetch(req,image_data_callback)
+
 
     ##################################################################################
 
-    def get_publisher_feed(self,command='find_all_videos',output='json',page_no=0):
+    def get_publisher_feed(self,command='find_all_videos',output='json',page_no=0,page_size=100,async_callback=None):
     
-        #TODO
         '''Get videos after the signup date, Iterate until you hit video the publish date
         optimize with the latest video processed which is stored in the account
         '''
@@ -166,13 +213,19 @@ class BrightcoveApi(object):
         data['token'] = self.read_token
         data['media_delivery'] = 'http'
         data['output'] = output
-        data['video_fields'] = 'customFields,id,tags,FLVURL,thumbnailURL,videostillURL,publishedDate'
+        data['video_fields'] = 'customFields,id,tags,FLVURL,thumbnailURL,videostillURL,publishedDate,name,videoFullLength'
         data['page_number'] = page_no 
-        data['page_size'] = 100
+        data['page_size'] = page_size
         data['sort_by'] = 'publish_date'
         data['get_item_count'] = "true"
 
         url = self.format_get(self.read_url,data)
+        if async_callback:
+            http_client = tornado.httpclient.AsyncHTTPClient()
+            req = tornado.httpclient.HTTPRequest(url = url, method = "GET", request_timeout = 60.0, connect_timeout = 10.0)
+            response = http_client.fetch(req,async_callback)
+            return
+
         http_client = tornado.httpclient.HTTPClient()
         req = tornado.httpclient.HTTPRequest(url = url, method = "GET", request_timeout = 60.0, connect_timeout = 10.0)
         response = http_client.fetch(req)
@@ -216,13 +269,12 @@ class BrightcoveApi(object):
                     bc.last_process_date = int(item['publishedDate']) / 1000
                     bc.save()
 
-    def format_neon_api_request(self,id,video_download_url,prev_thumbnail=None,request_type='topn'):
+    def format_neon_api_request(self,id,video_download_url,prev_thumbnail=None,request_type='topn',callback=None):
         request_body = {}
     
         #brightcove tokens
         request_body["write_token"] = self.write_token
         request_body["read_token"] = self.read_token
-        
         request_body["api_key"] = self.neon_api_key 
         request_body["video_id"] = str(id)
         request_body["video_title"] = str(id) 
@@ -249,19 +301,25 @@ class BrightcoveApi(object):
 
         body = tornado.escape.json_encode(request_body)
         h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
-        http_client = tornado.httpclient.HTTPClient()
+        req = tornado.httpclient.HTTPRequest(url = client_url, method = "POST",headers = h,
+                body = body, request_timeout = 60.0, connect_timeout = 10.0)
         
+        #async
+        if callback:
+            http_client = tornado.httpclient.AsyncHTTPClient()
+            http_client.fetch(req,callback) 
+            return
+
+        http_client = tornado.httpclient.HTTPClient()
         retries = 1
         for i in range(retries):
             try:
-                req = tornado.httpclient.HTTPRequest(url = client_url, method = "POST",headers = h,body = body, request_timeout = 60.0, connect_timeout = 10.0)
                 response = http_client.fetch(req)
                 #verify response 200 OK
                 return response
 
             except tornado.httpclient.HTTPError, e:
                 continue
-
         return
 
     '''
@@ -305,6 +363,31 @@ class BrightcoveApi(object):
         self.process_publisher_feed(items_to_process)
         return
 
+    ''' Brightcove api request to get info about a videoid '''
+    def find_video_by_id(self,video_id,find_vid_callback):
+        url = 'http://api.brightcove.com/services/library?command=find_video_by_id&token='+ self.read_token + '&media_delivery=http&output=json&video_id=' + video_id
+        http_client = tornado.httpclient.AsyncHTTPClient()
+        req = tornado.httpclient.HTTPRequest(url = url, method = "GET", request_timeout = 60.0, connect_timeout = 10.0)
+        http_client.fetch(req,find_vid_callback)
+        
+    '''
+    Create neon api request for the particular video
+    '''
+
+    def create_video_request(self,video_id,create_callback):
+
+        def get_vid_info(response):
+            if not response.error and "error" not in response.body:
+                data = tornado.escape.json_decode(response.body)
+                v_url = data["FLVURL"]
+                still = data['videoStillURL']
+                vid = str(data["id"])
+                self.format_neon_api_request(vid,v_url,still,request_type='topn',callback =create_callback)
+            else:
+                create_callback(False)
+
+        self.find_video_by_id(video_id,get_vid_info)
+
     def create_request_by_video_id(self,video_id):
         
         url = 'http://api.brightcove.com/services/library?command=find_video_by_id&token='+ self.read_token +'&media_delivery=http&output=json&video_id=' + video_id + '&video_fields=FLVURL,id'
@@ -315,6 +398,10 @@ class BrightcoveApi(object):
         print url
         print resp
         #self.format_neon_api_request(resp['id'] ,resp['FLVURL'])
+
+    def async_get_n_videos(self,n,async_callback):
+        self.get_publisher_feed(command='find_all_videos',page_size = n, async_callback = async_callback)
+        return
 
 if __name__ == "__main__" :
     print 'test'

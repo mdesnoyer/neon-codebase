@@ -78,7 +78,8 @@ class DemoHandler(tornado.web.RequestHandler):
     def create_neon_requests(self,topn,url):
         vid = shortuuid.uuid()  
         request_body = {}
-        request_body["api_key"] = 'a63728c09cda459c3caaa158f4adff49' #neon user key 
+        #request_body["api_key"] = 'a63728c09cda459c3caaa158f4adff49' #neon user key 
+        request_body["api_key"] = '4a6715e07dfbc6a56487bf4eceba0dba'
         request_body["video_title"] = 'test-' + vid 
         request_body["video_id"] =  vid
         request_body["video_url"] = url 

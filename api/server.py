@@ -193,7 +193,7 @@ class GetResultsHandler(tornado.web.RequestHandler):
             params = urlparse.parse_qs(query)
             uri = self.request.uri
             api_key = params[properties.API_KEY][0]
-            request_id = params[JOB_ID][0]
+            request_id = params[properties.REQUEST_UUID_KEY][0]
             s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
             s3bucket_name = properties.S3_BUCKET_NAME
             s3bucket = Bucket(name = s3bucket_name, connection = s3conn)
@@ -217,9 +217,10 @@ class JobStatusHandler(tornado.web.RequestHandler):
        
         def db_callback(results):
             result = results[0]
+            self.set_header("Content-Type", "application/json")
             if not result:
                 self.set_status(400)
-                resp = "{\"status\":\"no such job\"}"
+                resp = '{"status":"no such job"}'
                 self.finish()
                 return
 
@@ -227,11 +228,8 @@ class JobStatusHandler(tornado.web.RequestHandler):
             self.finish()
 
         try:
-            query = self.request.query
-            params = urlparse.parse_qs(query)
-            uri = self.request.uri
-            api_key = params[properties.API_KEY][0]
-            job_id = params[JOB_ID][0]
+            api_key = self.get_argument(properties.API_KEY)
+            job_id  = self.get_argument(properties.REQUEST_UUID_KEY)
             keys = []
             keys.append(generate_request_key(api_key,job_id))
             NeonApiRequest.multiget(keys,db_callback)
@@ -293,11 +291,10 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 raise Exception("api method not supported")
            
             #Generate JOB ID  
-            #Use Params that can change to generate UUID -- #TEMP 
-            intermediate = api_key + str(vid) + api_method + str(api_param)
+            #Use Params that can change to generate UUID, support same video to be processed with diff params
+            intermediate = api_key + str(vid) + api_method + str(api_param) + url
             job_id = hashlib.md5(intermediate).hexdigest()
            
-
             #Identify Request Type
             if "brightcove" in self.request.uri:
                 pub_id  = params[properties.PUBLISHER_ID] #publisher id
@@ -306,15 +303,21 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 wtoken = params[properties.BCOVE_WRITE_TOKEN]
                 autosync = params["autosync"]
                 request_type = "brightcove"
-
                 api_request = BrightcoveApiRequest(job_id,api_key,vid,title,url,
-                        rtoken,wtoken,pub_id,http_callback)
+                                        rtoken,wtoken,pub_id,http_callback)
                 api_request.previous_thumbnail = p_thumb 
                 api_request.autosync = autosync
 
             elif "youtube" in self.request.uri:
                 request_type = "youtube"
-            
+                access_token = params["access_token"]
+                refresh_token = params["refresh_token"]
+                expiry = params["token_expiry"]
+                autosync = params["autosync"]
+                api_request = YoutubeApiRequest(job_id,api_key,vid,title,url,
+                                        access_token,refresh_token,expiry,http_callback)
+                api_request.previous_thumbnail = "http://img.youtube.com/vi/" + vid + "maxresdefault.jpg"
+
             else:
                 request_type = "neon"
                 api_request = NeonApiRequest(job_id,api_key,vid,title,url,

@@ -648,7 +648,7 @@ class ProcessVideo(object):
         wtoken  = self.request_map[properties.BCOVE_WRITE_TOKEN]
         video_id = self.request_map[properties.VIDEO_ID]
         request_id = self.request_map[properties.REQUEST_UUID_KEY]
-        bcove   = brightcove_api.BrightcoveApi(neon_api_key=api_key,read_token=rtoken,write_token=wtoken,s3init=False)
+        bcove   = brightcove_api.BrightcoveApi(neon_api_key=api_key,read_token=rtoken,write_token=wtoken)
         
         neona = s3_url_prefix + "/" + self.base_filename + "/" + "neona.jpeg"
         neonb = s3_url_prefix + "/" + self.base_filename + "/" + "neonb.jpeg"
