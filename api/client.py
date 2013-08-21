@@ -1251,7 +1251,7 @@ class Worker(multiprocessing.Process):
                 ## ===== ASYNC Code Starts ===== ##
                 ioloop = tornado.ioloop.IOLoop.instance()
                 dl = HttpDownload(job, ioloop, self.model, self.debug, self.pid)
-
+                log.info("ioloop %r" %ioloop)  
                 try:
                     #Change Job State
                     api_key = dl.job_params[properties.API_KEY] 
@@ -1334,12 +1334,14 @@ if __name__ == "__main__":
     for i in range(num_processes):
         worker = Worker(options.model_file, model_version_file,options.debug)
         workers.append(worker)
-        if options.debug:
+        if options.debug or num_processes ==1:
             worker.run()
         else:
             worker.start()
     
     #join workers
     if not options.debug:
+        if num_processes ==1:
+            exit(0)
         for w in workers:
             w.join()

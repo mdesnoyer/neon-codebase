@@ -4,6 +4,8 @@ import subprocess
 import sys
 import time
 import signal
+from optparse import OptionParser
+
 
 def sig_handler(sig, frame):
     kill = True
@@ -16,7 +18,13 @@ def read_version_from_file(fname):
         return int(f.readline())
 
 def launch_clients():
-    p = subprocess.Popen("nohup python client.py " + num_clients + " " + local + " &", shell=True, stdout=subprocess.PIPE)
+
+    for i in range(nclients):
+        if local:
+            print "start"
+            p = subprocess.Popen("nohup python client.py --model_file=" + model  + " --local &", shell=True, stdout=subprocess.PIPE)
+        else:
+            p = subprocess.Popen("nohup python client.py --model_file=" + model  + " &", shell=True, stdout=subprocess.PIPE)
 
 if __name__ == "__main__":
 
@@ -29,12 +37,25 @@ if __name__ == "__main__":
     global client_pids
 
     kill = False
-    try:
-        num_clients = sys.argv[1]
-        local = sys.argv[2]
-    except:
-        print "./script <nclients> <local properties 0/1>"
-        sys.exit(0)
+    parser = OptionParser()
+
+    parser.add_option('--local', default=False, action='store_true',
+                      help='If set, use the localproperties file for config')
+    parser.add_option('--n_workers', default=1, type='int',
+                      help='Number of workers to spawn')
+    parser.add_option('--model_file', default=None,
+                      help='File that contains the model')
+    parser.add_option('--debug', default=False, action='store_true',
+                      help='If true, runs in debug mode')
+    options, args = parser.parse_args()
+    
+    nclients = options.n_workers
+    model = options.model_file
+    local = options.local
+    
+    #if len(options) <2:
+    #    print "missing args"
+    #    sys.exit(0)
 
     sleep_interval = 5
     code_version_file = "code.version"
