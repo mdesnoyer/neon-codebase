@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 ''' usage for multiple files -  for i in {1..10} ; do python create_valence_distribution.py stimuli_set$i; done '''
 
 ''' Creates a distribution from the input file values of net keep -return scores and assign valence scores to each image ''' 
@@ -17,7 +18,7 @@ outfile = "vscore.txt"
 #fname <net valence score>
 with open(infile) as f:
     for f in f.readlines():
-        vals = f.strip().split(', ')
+        vals = f.strip().split(';')
         fname = vals[0]
         score = float(vals[1].rstrip('\n'))
         map[fname] = score
