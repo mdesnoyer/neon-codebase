@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 '''Script that aggregates CTR stats across videos.
 
+Using random effects model assumption and meta analysis math from:
+http://www.meta-analysis.com/downloads/Intro_Models.pdf
+
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright Neon Labs 2013
 '''
@@ -69,9 +72,14 @@ def main(options):
     _log.info('''With %i entries:
     Mean: %3.2f %%
     P_Value: %3.2f
-    Lower 95%% confidence interval: %3.2f %%
-    Upper 95%% confidence interval: %3.2f %%
-    ''' % (len(data), (mn - 1)*100, p_value, (low-1)*100, (up-1)*100))
+    95%% confidence interval: (%3.2f %%, %3.2f %%)
+    Percent of error from random effects: %3.2f %%
+    ''' % (len(data),
+           (mn - 1)*100,
+           p_value,
+           (low-1)*100,
+           (up-1)*100,
+           (1 - np.sqrt(1/w_sum) / standard_error)*100))
 
 if __name__ == '__main__':
     parser = OptionParser()
