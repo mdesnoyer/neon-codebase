@@ -237,7 +237,7 @@ class AccountHandler(tornado.web.RequestHandler):
             
             #GET /accounts/:account_id/status
             if method == "status":
-                return
+                self.get_account_status()
             
             #GET /accounts/:account_id/videos
             if method == "videos":
@@ -315,6 +315,57 @@ class AccountHandler(tornado.web.RequestHandler):
             self.finish()
     
     ############## User defined methods ###########
+
+    '''
+    Get account status for the neon account
+    '''
+    def get_account_status(self):
+        
+        client_response = {}
+        client_response["queued"] = 0
+        client_response["in_progress"] = 0
+        client_response["finished"] = 0
+        client_response["failed"] = 0
+        client_response["minutes_used"] = 0
+
+        def get_videos(result)
+            if result and len(result) == 0:
+                self.send_json_response('',500)
+                return
+
+            total_duration = 0 
+            for r in result:
+                req = NeonApiRequest.create(r)
+                client_response["minutes_used"] += req.duration
+
+                if req.state == "submit" or req.state == "requeued" :
+                    client_response["queued"] += 1 
+
+                if req.state == "processing":
+                    client_response["in_progress"] += 1 
+
+                if req.state == "finished":
+                    client_response["finished"] += 1 
+                
+                if req.state == "failed":
+                    client_response["failed"] += 1 
+                
+                data = tornado.escape.json_encode(client_response)
+                self.send_json_response(data,200)
+
+        def account_callback(account_data):
+            if account_data:
+                account = NeonUserAccount.create(account_data)
+                keys = [ generate_request_key(api_key,j_id) for j_id in account.videos.values()] 
+                NeonApiRequest.multiget(keys,get_videos)
+            else:
+                log.error("key=get_account_status msg=account not found for %s" %self.api_key)
+                data = '{"error": "no account found"}'
+                self.send_json_response(data,400)
+
+        #get brightcove tokens and video info from neondb 
+        BrightcoveAccount.get_account(self.api_key,account_callback)
+
 
     ''' Get brightcove video to populate in the web account
      Get account details from db, including videos that have been
@@ -505,7 +556,7 @@ class AccountHandler(tornado.web.RequestHandler):
             if r_result:
                 self.vid_request = BrightcoveApiRequest.create(r_result) 
                 thumbnail_url = self.vid_request.enable_thumbnail(tid)
-                self.bc.enable_thumbnail(vid,thumbnail_url,update_thumbnail)
+                self.bc.update_thumbnail(vid,thumbnail_url,update_thumbnail)
             else:
                 data = '{"error": "thumbnail not updated"}'
                 self.send_json_response(data,500)
@@ -653,7 +704,7 @@ class AccountHandler(tornado.web.RequestHandler):
         except Exception,e:
             log.error("key=create brightcove account msg=" + e.message)
             data = '{"error": "API Params missing" }'
-            self.send_json_response(400)
+            self.send_json_response(data,400)
             return
 
         BrightcoveAccount.get_account(self.api_key,update_account)
@@ -871,6 +922,52 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.send_json_response(data,500)
 
         YoutubeAccount.get_account(self.api_key,account_callback)
+
+    ''' Update the thumbnail for a particular video '''
+    def update_youtube_video(self):
+        
+        def update_thumbnail(t_result):
+            if t_result:
+                data = '{"error" :""}'
+                self.send_json_response(data,200)
+            else:
+                data = '{"error": "thumbnail not updated"}'
+                self.send_json_response(data,500)
+
+        def get_request(r_result):
+            if r_result:
+                self.vid_request = YoutubeApiRequest.create(r_result) 
+                thumbnail_url = self.vid_request.enable_thumbnail(tid)
+                self.yt.update_thumbnail(vid,thumbnail_url,update_thumbnail)
+            else:
+                data = '{"error": "thumbnail not updated"}'
+                self.send_json_response(data,500)
+
+        def get_account_callback(result):
+            if result:
+                self.yt = YoutubeAccount.create(result)
+                job_id = self.yt.videos[vid] 
+                yt_request = YoutubeApiRequest.get_request(self.api_key,job_id,get_request) 
+            else:
+                data = '{"error": "no such account"}'
+                self.send_json_response(data,500)
+
+        try:
+            uri_parts = self.request.uri.split('/')
+            vid = uri_parts[6]
+            thumbnail_id = self.get_argument('thumbnail_id')
+
+        except Exception,e:
+            log.exception('type=update brightcove thumbnail' + e.message)
+            self.set_status(400)
+            self.finish()
+            return
+
+        YoutubeAccount.get_account(self.api_key,get_account_callback)
+
+###########################################################
+## Job Handler
+###########################################################
 
 class JobHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous

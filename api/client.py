@@ -67,12 +67,17 @@ sys.path.insert(0,os.path.abspath(
     os.path.join(os.path.dirname(__file__), '../supportServices')))
 from neondata import *
 
-#Tester
-import youtube
+import gc
+import pprint
 
 import logging
 logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s')
 
+from pympler import summary
+from pympler import muppy
+from pympler import tracker
+from pympler.classtracker import ClassTracker
+import pickle
 
 # ======== API String constants  =======================#
 
@@ -85,7 +90,7 @@ def sig_handler(sig, frame):
 
     try:
         for worker in workers:
-            worker.kill_received = True
+            worker.kill_received = TrueQQQA
     except:
         sys.exit(0)
 
@@ -842,11 +847,11 @@ class HttpDownload(object):
         headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
 
-        self.req = tornado.httpclient.HTTPRequest(url = url, headers = headers,
+        req = tornado.httpclient.HTTPRequest(url = url, headers = headers,
                         streaming_callback = self.streaming_callback, 
                         use_gzip =False, request_timeout = self.timeout)
-        self.http_client = tornado.httpclient.AsyncHTTPClient()
-        self.http_client.fetch(self.req, self.async_callback)
+        http_client = tornado.httpclient.AsyncHTTPClient()
+        http_client.fetch(req, self.async_callback)
         self.size_so_far = 0
         self.pv = ProcessVideo(params, json_params, model, debug, cur_pid)
         self.error = None
@@ -988,7 +993,10 @@ class HttpDownload(object):
             #Send client response
             client_response = self.send_client_response()
             self.pv.save_data_to_s3()
-        return
+      
+        #delete process video object
+        del self.pv
+        del self.tempfile
 
     def requeue_job(self):
         """ Requeue the api request on failure """ 
@@ -1247,6 +1255,7 @@ class Worker(multiprocessing.Process):
                 job = self.dequeue_job()
                 if job == "{}": #string match
                       raise Queue.Empty
+                
 
                 ## ===== ASYNC Code Starts ===== ##
                 ioloop = tornado.ioloop.IOLoop.instance()
@@ -1268,10 +1277,35 @@ class Worker(multiprocessing.Process):
                 except Exception,e:
                     log.error("key=worker [%s] msg=db error %s" %(self.pid,e.message))
 
+                #profile
+                if options.profile:
+                    mem_tracker1 = summary.summarize(muppy.get_objects())
+                    ctracker = ClassTracker()
+                    ctracker.track_object(dl)
+                    ctracker.track_class(HttpDownload)
+                    ctracker.create_snapshot()
+                
                 ioloop.start()
+                
+                #delete http download object
+                del dl
+
+                if self.debug:
+                    un_objs = gc.collect()
+                    print 'Unreachable objects:', un_objs
+                    print "Remaining Garbage:"
+                    pprint.pprint(gc.garbage)
+
+                if options.profile:    
+                    mem_tracker2 = summary.summarize(muppy.get_objects())
+                    mem_diff =  summary.get_diff(mem_tracker1,mem_tracker2)
+                    pr_ts = job_id #int(time.time())
+                    pickle.dump(mem_diff, open("muppy_profile."+str(pr_ts),"wb"))
+                    ctracker.create_snapshot()
+                    ctracker.stats.dump_stats('ctrackerprofile.'+str(pr_ts))
 
           except Queue.Empty:
-                log.info("Q,Empty")
+                #log.info("Q,Empty")
                 time.sleep(self.SLEEP_INTERVAL * random.random())  
 
           except Exception,e:
@@ -1296,6 +1330,8 @@ if __name__ == "__main__":
     parser.add_option('--model_file', default=None,
                       help='File that contains the model')
     parser.add_option('--debug', default=False, action='store_true',
+                      help='If true, runs in debug mode')
+    parser.add_option('--profile', default=False, action='store_true',
                       help='If true, runs in debug mode')
 
     options, args = parser.parse_args()

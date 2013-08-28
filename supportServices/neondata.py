@@ -92,7 +92,7 @@ class RedisMultiKeyHandler(object):
     Use only one operation at a time, since only a
     single external callback can be registered
 '''
-class AbstractRedisBlob(object):
+class AbstractRedisUserBlob(object):
     conn,blocking_conn = RedisClient.get_client()
 
     def __init__(self,keyname=None):
@@ -124,13 +124,13 @@ class AbstractRedisBlob(object):
         if self.key is None:
             raise Exception("key not set")
         self.external_callback = callback
-        AbstractRedisBlob.conn.get(self.key,self.add_callback)
+        AbstractRedisUserBlob.conn.get(self.key,self.add_callback)
 
     def _save(self,value,callback=None):
         if self.key is None:
             raise Exception("key not set")
         self.external_callback = callback
-        AbstractRedisBlob.conn.set(self.key,value,self.external_callback)
+        AbstractRedisUserBlob.conn.set(self.key,value,self.external_callback)
 
     def to_json(self):
         #TODO : don't save all the class specific params ( keyname,callback,ttl )
@@ -140,7 +140,7 @@ class AbstractRedisBlob(object):
         if callback:
             return self._get(callback)
         else:
-            return AbstractRedisBlob.blocking_conn.get(self.key)
+            return AbstractRedisUserBlob.blocking_conn.get(self.key)
 
     def save(self,callback=None):
         value = self.to_json()
@@ -164,7 +164,7 @@ class AbstractRedisBlob(object):
         #save with TTL
         lkey = self.key + "_lock"
         value = shortuuid.uuid() 
-        pipe = AbstractRedisBlob.conn.pipeline()
+        pipe = AbstractRedisUserBlob.conn.pipeline()
         pipe.setex(lkey,self.lock_ttl,value)
         pipe.get(self.key)
         pipe.get(lkey)
@@ -175,7 +175,7 @@ class AbstractRedisBlob(object):
         ttl = self.lock_ttl
         self.external_callback = callback
         lkey = self.key + "_lock"
-        AbstractRedisBlob.conn.exists(lkey,self.lget_callback)
+        AbstractRedisUserBlob.conn.exists(lkey,self.lget_callback)
         
     def _unlock_set(self,callback):
         self.external_callback = callback
@@ -183,7 +183,7 @@ class AbstractRedisBlob(object):
         lkey = self.key + "_lock"
         
         #pipeline set, delete lock 
-        pipe = AbstractRedisBlob.conn.pipeline()
+        pipe = AbstractRedisUserBlob.conn.pipeline()
         pipe.set(self.key,value)
         pipe.delete(lkey)
         pipe.execute(self.external_callback)
@@ -191,10 +191,10 @@ class AbstractRedisBlob(object):
     #exists
     def exists(self,callback):
         self.external_callback = callback
-        AbstractRedisBlob.conn.exists(self.key,callback)
+        AbstractRedisUserBlob.conn.exists(self.key,callback)
 
 ''' Neon User Class '''
-class NeonUserAccount(AbstractRedisBlob):
+class NeonUserAccount(AbstractRedisUserBlob):
     def __init__(self,a_id,plan_start=None,processing_mins=None):
         super(NeonUserAccount,self).__init__()
         self.account_id = a_id
@@ -202,6 +202,7 @@ class NeonUserAccount(AbstractRedisBlob):
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.plan_start_date = plan_start
         self.processing_minutes = processing_mins
+        self.videos = {} 
 
     def add_callback(self,result):
         try:
@@ -215,7 +216,7 @@ class NeonUserAccount(AbstractRedisBlob):
             self.external_callback(self)
        
 ''' Brightcove Account '''
-class BrightcoveAccount(AbstractRedisBlob):
+class BrightcoveAccount(AbstractRedisUserBlob):
     def __init__(self,a_id,i_id,p_id=None,rtoken=None,wtoken=None,auto_update=False,last_process_date=None):
         super(BrightcoveAccount,self).__init__()
         self.neon_api_key = NeonApiKey.generate(a_id)
@@ -246,7 +247,7 @@ class BrightcoveAccount(AbstractRedisBlob):
         if callback:
             self.lget(callback)
         else:
-            return AbstractRedisBlob.blocking_conn.get(self.key)
+            return AbstractRedisUserBlob.blocking_conn.get(self.key)
 
     def save(self,callback=None,create=False):
         # if create, then set directly
@@ -257,7 +258,7 @@ class BrightcoveAccount(AbstractRedisBlob):
                 self._unlock_set(callback)
         else:
             value = self.to_json()
-            return AbstractRedisBlob.blocking_conn.set(self.key,value)
+            return AbstractRedisUserBlob.blocking_conn.set(self.key,value)
 
     def update_thumbnail(self,vid,t_url,update_callback=None):
         bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update)
@@ -330,7 +331,7 @@ class BrightcoveAccount(AbstractRedisBlob):
         http_client.fetch(req,result_callback)
 
 
-class YoutubeAccount(AbstractRedisBlob):
+class YoutubeAccount(AbstractRedisUserBlob):
     def __init__(self,a_id,i_id,access_token=None,refresh_token=None,expires=None,auto_update=False):
         self.key = self.__class__.__name__.lower()  + '_' + NeonApiKey.generate(a_id)
         self.account_id = a_id
@@ -408,7 +409,21 @@ class YoutubeAccount(AbstractRedisBlob):
         else:
             # Not yet supported
             callback(None)
-    
+
+    '''
+    Update thumbnail for the given video
+    '''
+
+    def update_thumbnail(self,vid,thumb_url,callback):
+
+        def atoken_exec(atoken):
+            if atoken:
+                yt = youtube_api.YoutubeApi(self.refresh_token)
+                yt.async_set_youtube_thumbnail(vid,thumb_url,atoken,callback)
+            else:
+                callback(False)
+        self.get_access_token(atoken_exec)
+
     '''
     Create youtube api request
     '''
@@ -543,7 +558,10 @@ class NeonApiRequest(object):
 
     @staticmethod
     def multiget(keys,external_callback):
-        RedisMultiKeyHandler.conn.mget(keys,external_callback)
+        if external_callback:
+            NeonApiRequest.conn.mget(keys,external_callback)
+        else:
+            return NeonApiRequest.blocking_conn.mget(keys)
 
     @staticmethod
     def create(json_data):
