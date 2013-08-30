@@ -245,18 +245,50 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
 
     @tornado.web.asynchronous
     def post(self, *args, **kwargs):
-        
+
+        #insert job in to user account
+        def update_account(result):
+            if not result:
+                log.error("key=thumbnail_handler update account  msg=video not added to account")
+                self.write(response_data)
+                self.set_status(201)
+                self.finish()
+            else:
+                self.set_status(201)
+                self.write(response_data)
+                self.finish()
+
+        def get_account(result):
+            if result:
+                if "neonuseraccount" in result:
+                    na = NeonUserAccount.create(result)
+                    na.add_video(vid,job_id)
+                    na.save(update_account)
+                elif "youtubeaccount" in result:
+                    yt = Youtube.create(result)
+                    yt.add_video(vid,job_id)
+                    yt.save(update_account)
+            else:
+                log.error("key=thumbnail_handler update account  msg=account not found or api key error")
+                self.set_status(502)
+                self.finish()
+                
+
         #DB Callback
         def saved_request(result):
             if not result:
                 log.error("key=thumbnail_handler  msg=request save failed: ")
                 self.set_status(502)
                 self.finish()
-                return
-            self.set_status(201)
-            self.write(response_data)
-            self.finish()
-        
+            else:
+                if request_type == 'youtube':
+                    YoutubeAccount.get_account(api_key,get_account) 
+                elif request_type == 'neon':
+                    NeonUserAccount.get_account(api_key,get_account) 
+                else:
+                    self.set_status(201)
+                    self.write(response_data)
+                    self.finish()
         
         try:
             params = tornado.escape.json_decode(self.request.body)
@@ -328,6 +360,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             api_request.submit_time = str(time.time())
 
             #Validate Request & Insert in to Queue (serialized/json)
+            
+            #TODO: insert in to work queue after saving request in db
+            #TODO (2): keep a video id queue in db for hot swapping the Q
             json_data = api_request.to_json()
             global_api_work_queue.put(json_data)
             

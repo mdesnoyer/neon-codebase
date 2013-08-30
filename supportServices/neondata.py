@@ -86,6 +86,14 @@ class RedisMultiKeyHandler(object):
         for o in objects:
             keys.append(o.key)
         return keys
+    
+    @staticmethod
+    def multi_set(items,callback):
+        pairs = {}
+        for item in items:
+            pairs[item.key] = item.to_json()
+        
+        RedisMultiKeyHandler.conn.mset(pairs,callback)
 
 
 ''' Abstract Redis interface and operations
@@ -193,7 +201,18 @@ class AbstractRedisUserBlob(object):
         self.external_callback = callback
         AbstractRedisUserBlob.conn.exists(self.key,callback)
 
-''' Neon User Class '''
+''' NeonUserAccount
+
+Every user in the system has a neon account and all other integrations are 
+associated with this account. 
+
+Account usage aggregation, Billing information is computed here
+
+@videos: video id / jobid map of requests made directly through neon api
+@integrations: all the integrations associated with this acccount (brightcove,youtube, ... ) 
+
+'''
+
 class NeonUserAccount(AbstractRedisUserBlob):
     def __init__(self,a_id,plan_start=None,processing_mins=None):
         super(NeonUserAccount,self).__init__()
@@ -203,7 +222,14 @@ class NeonUserAccount(AbstractRedisUserBlob):
         self.plan_start_date = plan_start
         self.processing_minutes = processing_mins
         self.videos = {} 
+        self.integrations = {} 
 
+    def add_integration(self,integration_id, accntkey):
+        self.integrations[integration_id] = accntkey
+
+    def add_video(self,vid,job_id):
+        self.videos[str(vid)] = job_id
+    
     def add_callback(self,result):
         try:
             items = json.loads(result)
@@ -214,13 +240,41 @@ class NeonUserAccount(AbstractRedisUserBlob):
 
         if self.external_callback:
             self.external_callback(self)
+   
+    '''
+    Save Neon User account and corresponding integration
+    '''
+    def save_integration(self,new_integration,callback):
+        pipe = AbstractRedisUserBlob.conn.pipeline()
+        pipe.set(self.key,self.to_json())
+        pipe.set(new_integration.key,new_integration.to_json()) 
+        pipe.execute(callback)
+
+    @staticmethod
+    def get_account(api_key,result_callback=None,lock=False):
+        key = "NeonUserAccount".lower() + '_' + api_key
+        if result_callback:
+            NeonUserAccount.conn.get(key,result_callback) 
+        else:
+            return NeonUserAccount.blocking_conn.get(key)
+    
+    @staticmethod
+    def create(json_data):
+        params = json.loads(json_data)
+        a_id = params['account_id']
+        na = NeonUserAccount(a_id)
        
+        for key in params:
+            na.__dict__[key] = params[key]
+        
+        return na
+
 ''' Brightcove Account '''
 class BrightcoveAccount(AbstractRedisUserBlob):
     def __init__(self,a_id,i_id,p_id=None,rtoken=None,wtoken=None,auto_update=False,last_process_date=None):
         super(BrightcoveAccount,self).__init__()
         self.neon_api_key = NeonApiKey.generate(a_id)
-        self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
+        self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
         self.account_id = a_id
         self.integration_id = i_id
         self.publisher_id = p_id
@@ -333,7 +387,7 @@ class BrightcoveAccount(AbstractRedisUserBlob):
 
 class YoutubeAccount(AbstractRedisUserBlob):
     def __init__(self,a_id,i_id,access_token=None,refresh_token=None,expires=None,auto_update=False):
-        self.key = self.__class__.__name__.lower()  + '_' + NeonApiKey.generate(a_id)
+        self.key = self.__class__.__name__.lower()  + '_' + NeonApiKey.generate(a_id ) + '_' + i_id
         self.account_id = a_id
         self.integration_id = i_id
         self.access_token = access_token
@@ -350,6 +404,9 @@ class YoutubeAccount(AbstractRedisUserBlob):
     
         self.channels = None
 
+    def add_video(self,vid,job_id):
+        self.videos[str(vid)] = job_id
+    
     '''
     Get a valid access token, if not valid -- get new one and set expiry
     '''
@@ -596,5 +653,4 @@ class YoutubeApiRequest(NeonApiRequest):
         self.expiry = expiry
         request_type = "youtube"
         super(YoutubeApiRequest,self).__init__(job_id,api_key,vid,title,url,request_type,callback)
-
 
