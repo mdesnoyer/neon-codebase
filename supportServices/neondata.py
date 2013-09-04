@@ -225,6 +225,9 @@ class NeonUserAccount(AbstractRedisUserBlob):
         self.integrations = {} 
 
     def add_integration(self,integration_id, accntkey):
+        if len(self.integrations) ==0 :
+            self.integrations = {}
+
         self.integrations[integration_id] = accntkey
 
     def add_video(self,vid,job_id):
@@ -367,9 +370,8 @@ class BrightcoveAccount(AbstractRedisUserBlob):
         return ba
 
     @staticmethod
-    def get_account(api_key,result_callback=None,lock=False):
-        #key = BrightcoveAccount.__class__.__name__.lower()  + '_' + api_key
-        key = "BrightcoveAccount".lower() + '_' + api_key
+    def get_account(api_key,i_id,result_callback=None,lock=False):
+        key = "BrightcoveAccount".lower() + '_' + api_key + '_' + i_id
         if result_callback:
             BrightcoveAccount.conn.get(key,result_callback) 
         else:
@@ -489,8 +491,8 @@ class YoutubeAccount(AbstractRedisUserBlob):
         pass
 
     @staticmethod
-    def get_account(api_key,result_callback=None,lock=False):
-        key = "YoutubeAccount".lower() + '_' + api_key
+    def get_account(api_key,i_id,result_callback=None,lock=False):
+        key = "YoutubeAccount".lower() + '_' + api_key + '_' + i_id
         if result_callback:
             YoutubeAccount.conn.get(key,result_callback) 
         else:
@@ -572,7 +574,7 @@ class NeonApiRequest(object):
     '''
     def enable_thumbnail(self,tid):
         t_url = None
-        for t in thumbnails:
+        for t in self.thumbnails:
             if t['thumbnail_id'] == tid:
                 t['enabled'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") 
                 t_url = t['url']
@@ -591,6 +593,13 @@ class NeonApiRequest(object):
         thumb['type'] = ttype #neon1../ brightcove / youtube
         self.thumbnails.append(thumb)
    
+    def get_current_thumbnail(self):
+        tid = None
+        for t in self.thumbnails:
+            if t['enabled'] is not None:
+                tid = t['thumbnail_id']
+                return tid
+    
     def set_api_method(self,method,param):
         #TODO Verify
         self.api_method = method

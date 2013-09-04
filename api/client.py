@@ -1260,7 +1260,7 @@ class Worker(multiprocessing.Process):
                 ## ===== ASYNC Code Starts ===== ##
                 ioloop = tornado.ioloop.IOLoop.instance()
                 dl = HttpDownload(job, ioloop, self.model, self.debug, self.pid)
-                log.info("ioloop %r" %ioloop)  
+                #log.info("ioloop %r" %ioloop)  
                 try:
                     #Change Job State
                     api_key = dl.job_params[properties.API_KEY] 
@@ -1271,8 +1271,8 @@ class Worker(multiprocessing.Process):
                         api_request.state = "processing" 
                         api_request.save()
                     ts = str(time.time())
-                    log.info("key=worker [%s] msg=request %s" % (self.pid,NeonApiRequest.get_request(api_key,job_id)) ) 
-                    log.info("key=worker [%s] msg=processing request %s" %(self.pid,dl.job_params[properties.REQUEST_UUID_KEY]))
+                    #log.info("key=worker [%s] msg=request %s" % (self.pid,NeonApiRequest.get_request(api_key,job_id)) ) 
+                    log.info("key=worker [%s] msg=processing request %s %s" %(self.pid,dl.job_params[properties.REQUEST_UUID_KEY],str(time.time())))
 
                 except Exception,e:
                     log.error("key=worker [%s] msg=db error %s" %(self.pid,e.message))
@@ -1289,6 +1289,7 @@ class Worker(multiprocessing.Process):
                 
                 #delete http download object
                 del dl
+                gc.collect()
 
                 if self.debug:
                     un_objs = gc.collect()
