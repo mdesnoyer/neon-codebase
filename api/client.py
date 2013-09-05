@@ -14,10 +14,11 @@ USAGE='%prog [options] <workers> <local properties>'
 import os
 import os.path
 import sys
-sys.path.insert(0,os.path.abspath(
-    os.path.join(os.path.dirname(__file__), '..')))
+if __name__ == '__main__':
+    sys.path.insert(0,os.path.abspath(
+        os.path.join(os.path.dirname(__file__), '..')))
 
-import model.model
+import model
 import tempfile
 import tornado.web
 import tornado.gen
@@ -1132,7 +1133,7 @@ class Worker(multiprocessing.Process):
         if self.model_version < version:
             self.model_version = version
             log.info('Loading model from %s' % self.model_file)
-            self.model = model.model.load_model(self.model_file)
+            self.model = model.load_model(self.model_file)
 
     def run(self):
         while not self.kill_received:

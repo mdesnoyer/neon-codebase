@@ -12,9 +12,10 @@ USAGE = '%prog [options]'
 
 import os.path
 import sys
-sys.path.insert(0,os.path.abspath(
-    os.path.join(os.path.dirname(__file__), '..')))
-import model.model
+if __name__ == '__main__':
+    sys.path.insert(0,os.path.abspath(
+        os.path.join(os.path.dirname(__file__), '..')))
+import model
 
 import cPickle as pickle
 from flickrapi import FlickrAPI, shorturl
@@ -149,7 +150,7 @@ if __name__ == '__main__':
     if options.input is not None:
         in_stream = open(options.input, 'r')
 
-    generator = model.model.GistGenerator()
+    generator = model.GistGenerator()
 
     i = -1
     for line in in_stream:

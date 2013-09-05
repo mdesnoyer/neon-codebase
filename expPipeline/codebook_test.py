@@ -7,9 +7,10 @@ to those clusters. Also, we can check what cluster an image is in.
 '''
 import os.path
 import sys
-sys.path.insert(0,os.path.abspath(
-    os.path.join(os.path.dirname(__file__), '..')))
-import model.model
+if __name__ == '__main__':
+    sys.path.insert(0,os.path.abspath(
+        os.path.join(os.path.dirname(__file__), '..')))
+import model
 
 import cv2
 import errorlog
@@ -26,7 +27,7 @@ import urllib2
 _log = logging.getLogger(__name__)
 
 def assign_cluster(codebook, image, white_vector):
-    gist = model.model.GistGenerator()
+    gist = model.GistGenerator()
     features = gist.generate(image)
     dists = scipy.spatial.distance.cdist([features / white_vector], codebook)
     return np.argmin(dists, axis=1)
