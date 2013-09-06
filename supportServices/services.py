@@ -1,3 +1,7 @@
+'''
+Services that neon web account use
+'''
+
 import tornado.httpserver
 import tornado.ioloop
 import tornado.web
@@ -193,9 +197,9 @@ class AccountHandler(tornado.web.RequestHandler):
         #Create a new API request 
         if method == 'create_video_request':
             if "brightcove_integrations" == itype:
-                self.create_brightcove_video_request()
-            elif "youtube_integrations" == itype :
-                self.create_youtube_video_request()
+                self.create_brightcove_video_request(i_id)
+            elif "youtube_integrations" == itype:
+                self.create_youtube_video_request(i_id)
             else:
                 self.method_not_supported()
 
@@ -313,7 +317,7 @@ class AccountHandler(tornado.web.RequestHandler):
      Aggregrate results and format for the client
     '''
     
-    def get_brightcove_videos(self,i_id,limit):
+    def get_brightcove_videos(self,i_id,limit=1):
         self.bc_aggr = 0 
         self.video_results = {}
         self.brightcove_results = {}
@@ -432,6 +436,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 data = '{"error":"no such account"}'
                 self.send_json_response(data,400)
 
+        limit = self.get_argument('limit')
         #get brightcove tokens and video info from neondb 
         BrightcoveAccount.get_account(self.api_key,i_id,account_callback)
 
@@ -480,14 +485,13 @@ class AccountHandler(tornado.web.RequestHandler):
                 data = '{"error": "no such account"}'
                 self.send_json_response(data,400)
 
-        #i_id = self.request.get_argument('integration_ids')
         NeonUserAccount.get_account(self.api_key,get_neon_account)
 
     
     ''' Create request for brightcove video 
         submit a job on neon server, update video in the brightcove account
     '''
-    def create_brightcove_video_request(self):
+    def create_brightcove_video_request(self,i_id):
         def job_created(result):
             if not result.error:
                 data = result.body
@@ -512,9 +516,6 @@ class AccountHandler(tornado.web.RequestHandler):
             data = '{"error": "video_id not set"}'
             self.send_json_response(data,400)
             
-        #get brightcove account
-        uri_parts = self.request.uri.split('/')
-        i_id = uri_parts[4]
         BrightcoveAccount.get_account(self.api_key,i_id,get_account_callback)
         
 
@@ -781,7 +782,7 @@ class AccountHandler(tornado.web.RequestHandler):
     '''
     Create a youtube video request 
     '''
-    def create_youtube_video_request(self):
+    def create_youtube_video_request(self,i_id):
         def job_created(response):
             if not response.error:
                 data = response.body 
@@ -822,8 +823,6 @@ class AccountHandler(tornado.web.RequestHandler):
                 data = '{"error" : "no such youtube account" }'
                 self.send_json_response(data,400)
 
-        uri_parts = self.request.uri.split('/')
-        i_id = uri_parts[5]
         YoutubeAccount.get_account(self.api_key,i_id,get_account)
 
 

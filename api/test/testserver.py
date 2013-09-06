@@ -78,8 +78,8 @@ class DemoHandler(tornado.web.RequestHandler):
     def create_neon_requests(self,topn,url):
         vid = shortuuid.uuid()  
         request_body = {}
-        #request_body["api_key"] = 'a63728c09cda459c3caaa158f4adff49' #neon user key 
-        request_body["api_key"] = '4a6715e07dfbc6a56487bf4eceba0dba'
+        request_body["api_key"] = 'a63728c09cda459c3caaa158f4adff49' #neon user key 
+        #request_body["api_key"] = '4a6715e07dfbc6a56487bf4eceba0dba'
         request_body["video_title"] = 'test-' + vid 
         request_body["video_id"] =  vid
         request_body["video_url"] = url 
@@ -113,6 +113,7 @@ class DemoHandler(tornado.web.RequestHandler):
 
         def check_status(job_id):
             client_url = 'http://thumbnails.neon-lab.com/api/v1/jobstatus?api_key=a63728c09cda459c3caaa158f4adff49&job_id=' + job_id
+            client_url = 'http://localhost:8081/jobstatus?api_key=a63728c09cda459c3caaa158f4adff49&job_id=' + job_id
             tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
             http_client = tornado.httpclient.AsyncHTTPClient()
             req = tornado.httpclient.HTTPRequest(url = client_url, method = "GET",request_timeout = 60.0, connect_timeout = 10.0)

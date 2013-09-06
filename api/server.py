@@ -215,8 +215,7 @@ class JobStatusHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
        
-        def db_callback(results):
-            result = results[0]
+        def db_callback(result):
             self.set_header("Content-Type", "application/json")
             if not result:
                 self.set_status(400)
@@ -230,9 +229,7 @@ class JobStatusHandler(tornado.web.RequestHandler):
         try:
             api_key = self.get_argument(properties.API_KEY)
             job_id  = self.get_argument(properties.REQUEST_UUID_KEY)
-            keys = []
-            keys.append(generate_request_key(api_key,job_id))
-            NeonApiRequest.multiget(keys,db_callback)
+            NeonApiRequest.get_request(api_key,job_id,db_callback)
 
         except Exception,e:
             log.error("key=jobstatus_handler msg=exception " + e.__str__())

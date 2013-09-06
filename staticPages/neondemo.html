@@ -39,6 +39,7 @@ function sendRequest(){
 	// Display error on the screen	
 }
 function sendXMLRequest(){
+	//Clear the images on the page
 	var request = new XMLHttpRequest();
 	request.onreadystatechange = function() 
 	{
@@ -81,8 +82,9 @@ function responseCallback(jsonData){
 <br/>
 
 <table style="width:50%">
-	<tr><td>VideoURL: </td><td><input id="vidURL" size="55" type="text"/></td></tr>
+	<tr><td>VideoURL(ex: https://vimeo.com/4862670): </td><td><input id="vidURL" size="55" type="text"/></td></tr>
 	<tr><td>TOP N: </td><td><input id="topn" size="55" value="" /></td></tr>
+	<tr><td> <i>* Usually takes about the length of the video for thumbnails to showup, i.e 5 mins for 5 min video</i> </td><td>
 </td></tr> 
 </table>
 <!-- <button id="submitButton" onclick="sendRequest()">Submit</button> <br/ -->
