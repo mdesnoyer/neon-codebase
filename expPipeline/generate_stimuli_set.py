@@ -93,6 +93,20 @@ def load_codebook(codebook):
     with open(codebook, 'rb') as f:
         return pickle.load(f)
 
+def merge_example_urls(codebook_urls, examples_file):
+    if examples_file is not None:
+        _log.info('Loading example urls from %s' % examples_file)
+        with open(examples_file, 'rb') as f:
+            new_examples = pickle.load(f)
+
+        if len(codebook_urls) <> len(new_examples):
+            _log.error('Wrong number of clusters')
+            return codebook_urls
+
+        for cluster_id in range(len(new_examples)):
+            codebook_urls[cluster_id].extend(new_examples[cluster_id])
+    return codebook_urls
+
 def generate_features(image_files, image_dir, white_vector, generator):
     '''Creates a matrix of features.
 
@@ -255,6 +269,7 @@ def find_new_urls(seed_ids, output_file, n_videos=100, known_ids=[]):
 def main(options):
     generator = load_gist_generator(options.cache_dir)
     example_urls, codebook, white_vector = load_codebook(options.codebook)
+    example_urls = merge_example_urls(example_urls, options.example_urls)
 
     db_parse = parse_image_db(options.image_db, options.aspect_ratio,
                                  options.image_dir)
@@ -377,6 +392,9 @@ if __name__ == '__main__':
     parser.add_option('--codebook', default=None,
                       help=('File containing the codebook definition. '
                             'Created using the divide_visual_space.py script.'))
+    parser.add_option('--example_urls', default=None,
+                      help=('File of example urls for each cluster '
+                            'generated using generate_example_urls.py'))
 
     parser.add_option('--cache_dir', default=None,
                       help='Directory for cached feature files.')

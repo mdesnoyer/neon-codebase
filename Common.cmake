@@ -68,7 +68,6 @@ execute_process(COMMAND ln -s -f ${CMAKE_LIBRARY_OUTPUT_DIRECTORY} ${PROJECT_SOU
 macro(enable_python)
   find_package(PythonLibs REQUIRED)
   include_directories(${PYTHON_INCLUDE_PATH})
-  link_libraries(${PYTHON_LIBRARIES})
   SET(PYTHON_EXECUTABLE /usr/bin/python)
   find_package(Numpy REQUIRED)
   include_directories(${PYTHON_NUMARRAY_INCLUDE_DIR})
@@ -82,6 +81,7 @@ endmacro(enable_python)
 macro(add_py_library name)
   add_library(${name} ${ARGN})
   set_target_properties(${name} PROPERTIES PREFIX "")
+  target_link_libraries(${name} ${PYTHON_LIBRARIES})
 
   # Add this library to __init__.py so that it can be imported
   file(APPEND ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/__init__.py

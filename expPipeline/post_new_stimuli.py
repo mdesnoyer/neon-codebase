@@ -17,6 +17,7 @@ import errorlog
 import logging
 from optparse import OptionParser
 import os
+import psycopg2 as db
 import re
 import subprocess
 import sys
@@ -28,18 +29,20 @@ _status_file = 'stimuli.posted'
 _PROD_APP = 'gentle-escarpment-8454'
 _SANDBOX_APP = 'gentle-escarpment-8454-staging'
 
-def get_last_posted(directory):
-    '''Returns the index of the last stimuli set posted.'''
-    status_file = os.path.join(directory, _status_file)
-    try:
-        with open(status_file) as f:
-            last_posted = int(f.readline().strip())
-        _log.info('Last set posted is: %i' % last_posted)
-        return last_posted
-    except IOError as e:
-        _log.warn(('Could not find %s, so we will assume that no sets have '
-                  'been posted') % status_file)
-        return -1
+def get_last_posted(db_connection):
+    cursor = db_connection.cursor()
+    stimsetRe = re.compile('stimuli_([0-9]+)')
+
+    cursor.execute('select distinct stimset_id from image_choices')
+    latest = 0
+    for stimset_id in cursor:
+        match = stimsetRe.search(stimset_id[0])
+        if match:
+            cur_count = int(match.groups()[0])
+            if cur_count > latest:
+                latest = cur_count
+
+    return latest
 
 def update_last_posted(directory, new_id):
     '''Writes the last posted id to file'''
@@ -108,7 +111,16 @@ def main(options):
         _log.info('Server is too busy. Not posting new jobs.')
         return
 
-    last_posted = get_last_posted(options.stimuli_dir)
+    
+    db_connection = db.connect(database = options.database,
+                               user = options.db_user,
+                               password = options.db_pass,
+                               host = options.db_host,
+                               port = options.db_port)
+    try:
+        last_posted = get_last_posted(db_connection)
+    finally:
+        db_connection.close()
 
     to_post, max_id = get_new_sets(options.stimuli_dir, last_posted,
                                    options.max_hits)
@@ -141,6 +153,20 @@ if __name__ == '__main__':
                       help='If set, uses the sandbox settings')
     parser.add_option('--log', default=None,
                       help='Log file. If none, dumps to stdout')
+
+    # Database options
+    parser.add_option('--db_host',
+                      default='ec2-23-23-234-207.compute-1.amazonaws.com',
+                      help='Database host')
+    parser.add_option('--database',
+                      default='d818kso4dkedro',
+                      help='Database to connect to')
+    parser.add_option('--db_user', default='ypqkdxvnyynxtc',
+                      help='Database user')
+    parser.add_option('--db_port', default=5432, type='int',
+                      help='Database port')
+    parser.add_option('--db_pass', default='Kr3_R6gYvLqGk_WnYc9dclK6sF',
+                      help='Database password')
 
     options, args = parser.parse_args()
 

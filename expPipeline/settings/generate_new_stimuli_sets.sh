@@ -24,6 +24,7 @@ ${THIS_DIR}/../generate_stimuli_set.py \
     --output ${OUTPUT_DIR}/stimuli_%i \
     --image_db ${STAGING_DIR}/image.db \
     --codebook /data/neon/gist/07222013/gist_codebook.db \
+    --example_urls /data/neon/imdb/staging/examples.urls \
     --new_urls ${STAGING_DIR}/requests.links \
     --log ${STAGING_DIR}/generate_stimuli.log \
     > ${STAGING_DIR}/generate_stimuli_stdout.log 2> ${STAGING_DIR}/generate_stimuli_stderr.log

@@ -18,6 +18,7 @@ import logging.handlers
 
 import StringIO
 import signal
+import traceback
 
 import youtube_dl
 
@@ -25,6 +26,7 @@ _log = logging.getLogger(__name__)
 
 def sig_handler(sig, frame):
     _log.info('Shutting Down')
+    _log.info('Traceback:\n%s' % traceback.format_stack(frame))
     for proc in multiprocessing.active_children():
         proc.terminate()
         proc.join(10)
