@@ -54,14 +54,18 @@ def parse_image_db(imdb_file, aspect_ratio, image_dir):
     aspect_ratio: string specifying the aspect ratio to accept
     image_dir: directory that contains the images
 
-    Outputs: [(image_file, video_url)]
+    Outputs: [(image_file, video_url)], [known_ids]
 
     '''
     _log.info('Loading the image database file: %s' % imdb_file)
     retval = []
+    known_ids = []
     with open(imdb_file) as f:
         for line in f:
             fields = line.split()
+            if len(fields) < 2:
+                continue
+            known_ids.append(videoid_from_url(fields[1]))
             if float(fields[3]) == aspect_ratio:
                 cur_file = '%s.jpg' % fields[0]
                 if not os.path.exists(os.path.join(image_dir, cur_file)):
@@ -71,7 +75,7 @@ def parse_image_db(imdb_file, aspect_ratio, image_dir):
                 else:
                     retval.append(('%s.jpg' % fields[0], fields[1]))
 
-    return retval
+    return (retval, set(known_ids))
 
 def find_labeled_files(stimuli_dir, image_dir):
     '''Find all the images that are already in a stimuli set.'''
@@ -271,10 +275,9 @@ def main(options):
     example_urls, codebook, white_vector = load_codebook(options.codebook)
     example_urls = merge_example_urls(example_urls, options.example_urls)
 
-    db_parse = parse_image_db(options.image_db, options.aspect_ratio,
-                                 options.image_dir)
-    known_videoids = set(filter(lambda x: x is not None,
-                                [videoid_from_url(x[1]) for x in db_parse]))
+    db_parse, known_videoids = parse_image_db(options.image_db,
+                                              options.aspect_ratio,
+                                              options.image_dir)
 
     labeled_files = find_labeled_files(options.stimuli_dir,
                                        options.image_dir)
