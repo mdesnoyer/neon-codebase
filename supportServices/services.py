@@ -135,7 +135,7 @@ class AccountHandler(tornado.web.RequestHandler):
             
             elif method == "videos":
                 #videoid requested
-                if len(uri_parts) == 8:
+                if len(uri_parts) == 9:
                     self.get_video(a_id,vid,i_id)
                     return
 
@@ -308,6 +308,12 @@ class AccountHandler(tornado.web.RequestHandler):
         else:
             pass
 
+
+    ''' Get Videos which were called from the Neon API '''
+
+    def get_neon_videos(self):
+        self.send_json_response('',200)
+
     ''' Get brightcove video to populate in the web account
      Get account details from db, including videos that have been
      processed so far.
@@ -348,7 +354,7 @@ class AccountHandler(tornado.web.RequestHandler):
             }
             status : not_processed, processing, finished, failed
         '''
-        
+       
         def process_video_results(res):
             for r in res:
                 rd = tornado.escape.json_decode(r)
@@ -493,8 +499,8 @@ class AccountHandler(tornado.web.RequestHandler):
     '''
     def create_brightcove_video_request(self,i_id):
         def job_created(result):
-            if not result.error:
-                data = result.body
+            if not result: 
+                data = '{"error": ""}'
                 self.send_json_response(data,200)  
             else:
                 data = '{"error": "failed to create job, bad request"}'
@@ -507,7 +513,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 bc.create_job(vid,job_created)
             else:
                 data = '{"error": "no such account"}'
-                self.send_json_response(data,500)
+                self.send_json_response(data,400)
 
         #check video id
         try:

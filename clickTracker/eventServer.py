@@ -1,6 +1,6 @@
-import tornado.httpserver
 import tornado.ioloop
 import tornado.web
+import tornado.httpserver
 import tornado.escape
 import multiprocessing
 import Queue
@@ -13,7 +13,7 @@ import random
 
 #Tornado options
 from tornado.options import define, options
-define("port", default=8081, help="run on the given port", type=int)
+define("port", default=9081, help="run on the given port", type=int)
 MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
     
 global log
@@ -121,6 +121,7 @@ def main():
         os.mkdir(log_dir)
     
 
+    #TODO : Start server with multiple ports 
     tornado.options.parse_command_line()
     signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGINT, sig_handler)

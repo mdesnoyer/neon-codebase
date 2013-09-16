@@ -598,7 +598,7 @@ class ProcessVideo(object):
             imgdata = filestream.read()
             k = Key(s3bucket)
             k.key = self.base_filename + "/" + fname_prefix + str(i) + "." + fmt 
-            k.set_contents_from_string(imgdata)
+            k.set_contents_from_string(imgdata,{"Content-Type":"image/jpeg"})
             s3bucket.set_acl('public-read',k.key)
             s3fname = s3_url_prefix + "/" + self.base_filename + "/" + fname_prefix + str(i) + ".jpeg"
             s3_urls.append(s3fname)

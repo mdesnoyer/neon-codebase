@@ -60,6 +60,39 @@ class BrightcoveApi(object):
         return False
 
     '''
+    Update the thumbnail for a given video given the ReferenceID an existing image asset 
+    '''
+
+    def update_image_with_refid(self,video_id,refid,videostill=False):
+        outer = {}
+        params = {}
+        params["token"] = self.write_token 
+        params["video_id"] = video_id 
+        image = {} 
+        image["referenceId"] = refid
+        if videostill:
+            image["type"] = "VIDEO_STILL"
+        params["image"] = image
+        outer["params"] = params
+        outer["method"] = "add_image"
+        body = tornado.escape.json_encode(outer)
+        
+        post_param = []
+        args = poster.encode.MultipartParam("JSONRPC", value=body)
+        post_param.append(args)
+        datagen, headers = multipart_encode(post_param)
+        body = "".join([data for data in datagen])
+
+        client_url = "http://api.brightcove.com/services/post"
+        req = tornado.httpclient.HTTPRequest(url = client_url, method = "POST",headers =headers,
+                body = body, request_timeout = 60.0, connect_timeout = 10.0)
+
+        http_client = tornado.httpclient.HTTPClient()
+        response = http_client.fetch(req)
+        if not response.error:
+            return True
+
+    '''
     Add Image brightcove api call
     : remote_url sets the url to 3rd party url 
     : image creates a new asset and the url is on brightcove servers
@@ -86,7 +119,8 @@ class BrightcoveApi(object):
             for i in range(retries):
                 try:
                     response = http_client.fetch(req)
-                    ret = True
+                    #ret = True
+                    ret = response.body
                     break
                 except tornado.httpclient.HTTPError, e:
                     log.error("type=add_image msg=" + e.message)
@@ -148,7 +182,7 @@ class BrightcoveApi(object):
     '''
     Enable a particular thumbnail in the brightcove account
     '''
-    def enable_thumbnail_from_url(self,video_id,url):
+    def enable_thumbnail_from_url(self,video_id,url,**kwargs):
         http_client = tornado.httpclient.HTTPClient()
         req = tornado.httpclient.HTTPRequest(url = url,
                                                 method = "GET",
@@ -157,9 +191,20 @@ class BrightcoveApi(object):
         response = http_client.fetch(req)
         imfile = StringIO(response.body)
         image =  Image.open(imfile)
-        rt = self.add_image(video_id,image,atype='thumbnail')
-        rv = self.add_image(video_id,image,atype='videostill')
-        return (rt and rv)
+        reference_id = kwargs.get('reference_id', None)
+        rt = self.add_image(video_id,image,atype='thumbnail',reference_id = reference_id)
+        rv = self.add_image(video_id,image,atype='videostill',reference_id = "still-" + reference_id)
+       
+        tref_id = None ; vref_id = None
+        #Get thumbnail name, referenceId params
+        if rt:
+            add_image_val = tornado.escape.json_decode(rt)
+            tref_id = add_image_val["result"]["referenceId"]
+        if rv:
+            add_image_val = tornado.escape.json_decode(rv)
+            vref_id = add_image_val["result"]["referenceId"]
+
+        return ((rt is not None and rv is not None),tref_id,vref_id)
     
     '''
     Enable thumbnail async
@@ -364,12 +409,18 @@ class BrightcoveApi(object):
         return
 
     ''' Brightcove api request to get info about a videoid '''
-    def find_video_by_id(self,video_id,find_vid_callback):
+    def find_video_by_id(self,video_id,find_vid_callback=None):
         url = 'http://api.brightcove.com/services/library?command=find_video_by_id&token='+ self.read_token + '&media_delivery=http&output=json&video_id=' + video_id
-        http_client = tornado.httpclient.AsyncHTTPClient()
         req = tornado.httpclient.HTTPRequest(url = url, method = "GET", request_timeout = 60.0, connect_timeout = 10.0)
-        http_client.fetch(req,find_vid_callback)
         
+        if find_vid_callback:
+            http_client = tornado.httpclient.AsyncHTTPClient()
+            http_client.fetch(req,find_vid_callback)
+        else:
+            http_client = tornado.httpclient.HTTPClient()
+            response = http_client.fetch(req)
+            return response.body
+
     '''
     Create neon api request for the particular video
     '''
@@ -417,5 +468,5 @@ if __name__ == "__main__" :
     #bc.add_image('2369368872001',im,atype='videostill')
 
     #sutter
-    bc = BrightcoveApi('7f61cc2b1dead42fc05a0c87cc04eff4' ,publisher_id=817826402001,read_token='mDhucGOjGVIKggOnmbWqSOGeea1Xn08HQZfg3c1HRdu9fg5PvhLZWg..',write_token='rn-NufCTuxvQguygktpFtFEaro4tOYIp0rhSRUue1yujogl3HNtVlw..')
-    bc.create_request_by_video_id('819903089001')
+    #bc = BrightcoveApi('7f61cc2b1dead42fc05a0c87cc04eff4' ,publisher_id=817826402001,read_token='mDhucGOjGVIKggOnmbWqSOGeea1Xn08HQZfg3c1HRdu9fg5PvhLZWg..',write_token='rn-NufCTuxvQguygktpFtFEaro4tOYIp0rhSRUue1yujogl3HNtVlw..')
+    #bc.create_request_by_video_id('819903089001')
