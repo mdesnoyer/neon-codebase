@@ -5,3 +5,4 @@ include(Top.cmake)
 
 add_subdirectory(model)
 add_subdirectory(externalLibs)
+add_subdirectory(utils)
