@@ -41,9 +41,9 @@ SET( CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING
 SET(CMAKE_INCLUDE_CURRENT_DIR ON)
 LINK_DIRECTORIES(/usr/local/lib)
 
-if(COMMAND cmake_policy)
-  cmake_policy(SET CMP0003 NEW)
-endif(COMMAND cmake_policy)
+#if(COMMAND cmake_policy)
+#  cmake_policy(SET CMP0003 NEW)
+#endif(COMMAND cmake_policy)
 
 # if -D CMAKE_BUILD_TYPE=<blah> is not set, make it default.
 IF((NOT DEFINED CMAKE_BUILD_TYPE) OR (CMAKE_BUILD_TYPE STREQUAL ""))
