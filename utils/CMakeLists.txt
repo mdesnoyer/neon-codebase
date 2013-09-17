@@ -10,3 +10,10 @@ target_link_libraries(cvutils
   opencv_highgui
   opencv_core
 )
+
+add_library(connectedcomponents STATIC
+  connectedcomponents.cpp
+)
+target_link_libraries(connectedcomponents
+  opencv_core
+)
