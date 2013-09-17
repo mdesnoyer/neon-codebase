@@ -74,7 +74,6 @@ function(add_cc_test name)
   add_executable(${name} ${ARGN})
   target_link_libraries(${name} gtest_main gtest)
   add_test(${name}_test
-    WORKING_DIR ${PROJECT_SOURCE_DIR}/test
     ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${name}
   )
 endfunction(add_cc_test)
