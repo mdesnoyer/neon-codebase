@@ -1268,7 +1268,8 @@ class Worker(multiprocessing.Process):
                     json_request = NeonApiRequest.get_request(api_key,job_id)
                     api_request = NeonApiRequest.create(json_request)
                     if api_request.state == "submit":
-                        api_request.state = "processing" 
+                        api_request.state = "processing"
+                        api_request.model_version = self.model_version 
                         api_request.save()
                     ts = str(time.time())
                     #log.info("key=worker [%s] msg=request %s" % (self.pid,NeonApiRequest.get_request(api_key,job_id)) ) 
@@ -1306,7 +1307,7 @@ class Worker(multiprocessing.Process):
                     ctracker.stats.dump_stats('ctrackerprofile.'+str(pr_ts))
 
           except Queue.Empty:
-                #log.info("Q,Empty")
+                log.debug("Q,Empty")
                 time.sleep(self.SLEEP_INTERVAL * random.random())  
 
           except Exception,e:

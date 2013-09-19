@@ -614,6 +614,7 @@ class AccountHandler(tornado.web.RequestHandler):
     
     def create_brightcove_account(self):
 
+        rcount = 5
         def verify_brightcove_tokens(result):
             if "error" not in result.body:
                 vitems = tornado.escape.json_decode(result.body)
@@ -627,6 +628,13 @@ class AccountHandler(tornado.web.RequestHandler):
                     pdate = int(item['publishedDate'])
                     video['publish_date'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(pdate/1000))
                     video['thumbnail_url'] = item['videoStillURL']
+                   
+                    if video['duration'] < 0: ## skip live stream video
+                        continue
+
+                    if len(videos) > rcount:
+                        break
+
                     videos.append(video)
                 data = tornado.escape.json_encode(videos)
                 self.send_json_response(data,201)
@@ -638,7 +646,7 @@ class AccountHandler(tornado.web.RequestHandler):
             if result:
                 #create bcove api request
                 bapi = brightcove_api.BrightcoveApi(self.api_key,p_id,rtoken,wtoken)
-                bapi.async_get_n_videos(5,verify_brightcove_tokens) 
+                bapi.async_get_n_videos(10,verify_brightcove_tokens) 
             else:
                 data = '{"error": "integration was not added, account creation issue"}'
                 self.send_json_response(data,500)
@@ -651,7 +659,8 @@ class AccountHandler(tornado.web.RequestHandler):
                     data = '{"error": "integration already exists" }'
                     self.send_json_response(data,409)
                 else:
-                    bc = BrightcoveAccount(a_id,i_id,p_id,rtoken,wtoken,autosync)
+                    curtime = time.time() #account creation time
+                    bc = BrightcoveAccount(a_id,i_id,p_id,rtoken,wtoken,autosync,curtime)
                     na.add_integration(bc.integration_id,bc.key)
                     na.save_integration(bc,saved_account)
             else:
@@ -709,6 +718,27 @@ class AccountHandler(tornado.web.RequestHandler):
         uri_parts = self.request.uri.split('/')
         BrightcoveAccount.get_account(self.api_key,i_id,update_account)
 
+
+    '''
+    Get brightcove videos of a given state
+    '''
+
+    def get_brightcove_videos_by_state(self,i_id):
+
+        def get_account(result):
+            if result:
+                bc = BrightcoveAccount.create(result)
+                #Get all videos for this account
+                #Aggregate result based on state
+
+            else:
+                log.error("key=update_brightcove_account msg= no such account %s integration id %s" %(self.api_key,i_id))
+                data = '{"error": "Account doesnt exists" }'
+                self.send_json_response(data,400)
+
+        BrightcoveAccount.get_account(self.api_key,i_id,get_account)
+
+    #### YOUTUBE ####
 
     '''
     Cretate a Youtube Account

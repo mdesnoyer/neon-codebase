@@ -16,7 +16,8 @@ port = 6379
 rclient = blockingRedis.StrictRedis(host,port)
 accounts = rclient.keys('brightcoveaccount_*')
 for accnt in accounts:
-    api_key = accnt.split('_')[-1]
+    api_key = accnt.split('_')[-2]
+    i_id = accnt.split('_')[-1]
     #retrieve the blob and create the object
     jdata = rclient.get(accnt) 
     bc = BrightcoveAccount.create(jdata)

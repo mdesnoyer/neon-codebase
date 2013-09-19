@@ -52,12 +52,18 @@ class TempfsFile(file):
 
 class EventLogger(tornado.web.RequestHandler):
     
-    def __init__(self):
+    #def __init__(self,*args, **kwargs):
+    #    self.nlines = 0
+    #    self.maxLines = 100000 
+    #    self.flush_size = random.randint(100,200) #Randomize flush sizes so that not all clients are flusing at the same time
+    #    self.event_log_file = self.getFileName() 
+   
+    def prepare(self):
         self.nlines = 0
         self.maxLines = 100000 
         self.flush_size = random.randint(100,200) #Randomize flush sizes so that not all clients are flusing at the same time
         self.event_log_file = self.getFileName() 
-   
+    
     def getFileName(self):
         return log_dir + "/" + "neon-events-" + str(time.time()) 
     

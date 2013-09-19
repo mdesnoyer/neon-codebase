@@ -290,7 +290,7 @@ class BrightcoveAccount(AbstractRedisUserBlob):
         videos[video_id] = job_id 
         '''
         self.videos = {} 
-        self.last_process_date = last_process_date 
+        self.last_process_date = last_process_date #The publish date of the last processed video 
         self.linked_youtube_account = False
 
     def add_video(self,vid,job_id):
@@ -347,8 +347,15 @@ class BrightcoveAccount(AbstractRedisUserBlob):
     Use this only after you retreive the object from DB
     '''
     def check_feed_and_create_api_requests(self):
-        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update)
-        bc.create_neon_api_requests()    
+        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update,self.last_process_date)
+        bc.create_neon_api_requests(self.integration_id)    
+
+    '''
+    Temp method to support backward compatibility
+    '''
+    def check_feed_and_create_request_by_tag(self):
+        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update,self.last_process_date)
+        bc.create_brightcove_request_by_tag(self.integration_id)
 
     @staticmethod
     def create(json_data):
@@ -582,7 +589,7 @@ class NeonApiRequest(object):
                 t['enabled'] = None
         return t_url
 
-    def add_thumbnail(self,tid,url,created,enabled,width,height,ttype):
+    def add_thumbnail(self,tid,url,created,enabled,width,height,ttype,refid=None):
         thumb = {}
         thumb['thumbnail_id'] = tid
         thumb['url'] = url
@@ -591,6 +598,7 @@ class NeonApiRequest(object):
         thumb['width'] = width
         thumb['height'] = height
         thumb['type'] = ttype #neon1../ brightcove / youtube
+        thumb['refid'] = refid #If referenceID exists as in case of a brightcove thumbnail
         self.thumbnails.append(thumb)
    
     def get_current_thumbnail(self):

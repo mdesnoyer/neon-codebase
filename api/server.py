@@ -256,6 +256,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 self.finish()
 
         def get_account(result):
+
+            #For brightcove account, its saved
             if result:
                 if "neonuseraccount" in result:
                     na = NeonUserAccount.create(result)
@@ -279,7 +281,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 self.finish()
             else:
                 if request_type == 'youtube':
-                    YoutubeAccount.get_account(api_key,get_account) 
+                    YoutubeAccount.get_account(api_key,get_account) #i_id ?  
                 elif request_type == 'neon':
                     NeonUserAccount.get_account(api_key,get_account) 
                 else:

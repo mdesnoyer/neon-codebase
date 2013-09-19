@@ -22,6 +22,10 @@ import os
 sys.path.insert(0,os.path.abspath(os.path.join(os.path.dirname(__file__), '../supportServices')))
 from neondata import *
 
+import errorlog
+global log
+log = errorlog.FileLogger("brighcove_api")
+
 class BrightcoveApi(object):
     def __init__(self,neon_api_key,publisher_id=0,read_token=None,write_token=None,autosync=False,publish_date=None):
         self.publisher_id = publisher_id
@@ -31,7 +35,7 @@ class BrightcoveApi(object):
         self.read_url = "http://api.brightcove.com/services/library"
         self.write_url = "http://api.brightcove.com/services/post"
         self.autosync = autosync
-        self.last_publish_date = publish_date if publish_date else (time.time() - 10000000) 
+        self.last_publish_date = publish_date if publish_date else time.time()
         self.neon_uri = "http://thumbnails.neon-lab.com/api/v1/submitvideo/abtest" 
 
     def format_get(self, url, data=None):
@@ -258,7 +262,7 @@ class BrightcoveApi(object):
         data['token'] = self.read_token
         data['media_delivery'] = 'http'
         data['output'] = output
-        data['video_fields'] = 'customFields,id,tags,FLVURL,thumbnailURL,videostillURL,publishedDate,name,videoFullLength'
+        #data['video_fields'] = 'customFields,id,tags,FLVURL,thumbnailURL,videostillURL,publishedDate,name,videoFullLength' #creates api delay
         data['page_number'] = page_no 
         data['page_size'] = page_size
         data['sort_by'] = 'publish_date'
@@ -277,13 +281,13 @@ class BrightcoveApi(object):
         return response.body
 
     ''' process publisher feed for neon tags and generate brightcove thumbnail/still requests '''
-    def process_publisher_feed(self,items):
+    def process_publisher_feed(self,items,i_id):
         vids_to_process = [] 
-        bc_json = BrightcoveAccount.get_account(self.neon_api_key)
+        bc_json = BrightcoveAccount.get_account(self.neon_api_key,i_id)
         bc = BrightcoveAccount.create(bc_json)
         videos_processed = bc.get_videos() 
         if videos_processed is None:
-                videos_processed = {} 
+            videos_processed = {} 
         
         #parse and get video ids to process
         '''
@@ -299,15 +303,21 @@ class BrightcoveApi(object):
                 thumb = item['thumbnailURL'] 
                 still = item['videoStillURL']
                 d_url = item['FLVURL']
+                length = item['length']
+
+                if thumb is None or still is None or length <0:
+                    log.info("key=process_publisher_feed msg=%s is a live feed" %vid)
+                    continue
+
                 if d_url is None:
-                    print "FLV URL Missing", vid
+                    log.info("key=process_publisher_feed msg=flv url missing for %s" %vid)
                     continue
 
                 resp = self.format_neon_api_request(vid,d_url,prev_thumbnail=still,request_type='topn')
                 print "creating request for video [topn] ", vid
                 if resp is not None and not resp.error:
                     #Update the videos in customer inbox
-                    bc_json = BrightcoveAccount.get_account(self.neon_api_key)
+                    bc_json = BrightcoveAccount.get_account(self.neon_api_key,i_id)
                     bc = BrightcoveAccount.create(bc_json)
                     r = tornado.escape.json_decode(resp.body)
                     bc.videos[vid] = r['job_id']
@@ -370,7 +380,7 @@ class BrightcoveApi(object):
     '''
     Create Neon Brightcove API Requests
     '''
-    def create_neon_api_requests(self,request_type='default'):
+    def create_neon_api_requests(self,i_id,request_type='default'):
         
         #Get publisher feed
         items_to_process = []  
@@ -405,7 +415,7 @@ class BrightcoveApi(object):
         if len(items_to_process) < 1 :
             return
 
-        self.process_publisher_feed(items_to_process)
+        self.process_publisher_feed(items_to_process,i_id)
         return
 
     ''' Brightcove api request to get info about a videoid '''
@@ -454,19 +464,52 @@ class BrightcoveApi(object):
         self.get_publisher_feed(command='find_all_videos',page_size = n, async_callback = async_callback)
         return
 
+    def create_brightcove_request_by_tag(self,i_id):
+        
+        url = 'http://api.brightcove.com/services/library?command=search_videos&token=' + self.read_token + '&media_delivery=http&output=json&sort_by=publish_date:DESC&any=tag:neon'
+        http_client = tornado.httpclient.HTTPClient()
+        req = tornado.httpclient.HTTPRequest(url = url, method = "GET", request_timeout = 60.0, connect_timeout = 10.0)
+        response = http_client.fetch(req)
+
+        #Get publisher feed
+        items_to_process = []  
+        done = False
+        page_no = 0
+
+        while not done: 
+            count = 0
+            #TODO Keep requesting pages of tagged videos to iterate through, for now just look at 1 page (100 vids)
+            json = tornado.escape.json_decode(response.body)
+            page_no += 1
+            try:
+                items = json['items']
+                total = json['total_count']
+                psize = json['page_size']
+                pno   = json['page_number']
+
+            except Exception,e:
+                print json
+                return
+        
+            for item in items:
+                tags = item['tags']
+                if "neon" in tags or "Neon" in tags:
+                    items_to_process.append(item)
+                    count += 1
+
+            #if we have seen all items or if we have seen all the new videos since last pub date 
+            #if count < total or psize * (pno +1) > total:
+            #    done = True
+            done = True  #temp hack !
+
+        if len(items_to_process) < 1 :
+            return
+
+        self.process_publisher_feed(items_to_process,i_id)
+        return
+
+
 if __name__ == "__main__" :
     print 'test'
     #Test publisher feed with neon api key
     #bc = BrightcoveApi('a63728c09cda459c3caaa158f4adff49',read_token='cLo_SzrziHEZixU-8hOxKslzxPtlt7ZLTN6RSA7B3aLZsXXF8ZfsmA..',write_token='vlBj_kvwXu7r1jPAzr8wYvNkHOU0ZydFKUDrm2fnmVuZyDqEGVfsEg..')
-
-    #Get videos to abtest
-    #bc.create_neon_api_requests(request_type='abtest')
-    
-    #Test replacing default thumbnail and still for the video
-    #im = Image.open('test.jpg')
-    #bc.add_image('2369368872001',im,atype='thumbnail')
-    #bc.add_image('2369368872001',im,atype='videostill')
-
-    #sutter
-    #bc = BrightcoveApi('7f61cc2b1dead42fc05a0c87cc04eff4' ,publisher_id=817826402001,read_token='mDhucGOjGVIKggOnmbWqSOGeea1Xn08HQZfg3c1HRdu9fg5PvhLZWg..',write_token='rn-NufCTuxvQguygktpFtFEaro4tOYIp0rhSRUue1yujogl3HNtVlw..')
-    #bc.create_request_by_video_id('819903089001')
