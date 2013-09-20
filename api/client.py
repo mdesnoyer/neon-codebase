@@ -828,7 +828,7 @@ class ProcessVideo(object):
 class HttpDownload(object):
     retry_codes = [403,500,502,503,504]
 
-    def __init__(self, json_params, ioloop, model, debug=False, cur_pid=None):
+    def __init__(self, json_params, ioloop, model, debug=False, cur_pid=None, async=True):
         #TODO Make chunk size configurable
         #TODO GZIP vs non gzip video download? 
 
@@ -850,8 +850,6 @@ class HttpDownload(object):
         req = tornado.httpclient.HTTPRequest(url = url, headers = headers,
                         streaming_callback = self.streaming_callback, 
                         use_gzip =False, request_timeout = self.timeout)
-        http_client = tornado.httpclient.AsyncHTTPClient()
-        http_client.fetch(req, self.async_callback)
         self.size_so_far = 0
         self.pv = ProcessVideo(params, json_params, model, debug, cur_pid)
         self.error = None
@@ -867,8 +865,16 @@ class HttpDownload(object):
         self.debug = debug
         self.debug_timestamps = {}
         self.debug_timestamps["streaming_callback"] = time.time()
-        return
-    
+       
+        if async:
+            http_client = tornado.httpclient.AsyncHTTPClient()
+            http_client.fetch(req, self.async_callback)
+        else:
+            http_client = tornado.httpclient.HTTPClient()
+            response = http_client.fetch(req)
+            self.tempfile.write(response.body)
+            self.async_callback(response)
+        return 
         
     def streaming_callback(self, data):
         self.size_so_far += len(data)
@@ -1188,7 +1194,7 @@ class Worker(multiprocessing.Process):
 
     """
 
-    def __init__(self, model_file, model_version_file, debug=False):
+    def __init__(self, model_file, model_version_file, debug=False, async=True):
         # base class initialization
         multiprocessing.Process.__init__(self)
         self.model_file = model_file
@@ -1202,6 +1208,7 @@ class Worker(multiprocessing.Process):
         self.model = None
         self.debug = debug
         self.check_model()
+        self.async = async
 
     def read_version_from_file(self,fname):
         with open(fname,'r') as f:
@@ -1259,7 +1266,7 @@ class Worker(multiprocessing.Process):
 
                 ## ===== ASYNC Code Starts ===== ##
                 ioloop = tornado.ioloop.IOLoop.instance()
-                dl = HttpDownload(job, ioloop, self.model, self.debug, self.pid)
+                dl = HttpDownload(job, ioloop, self.model, self.debug, self.pid, self.async)
                 #log.info("ioloop %r" %ioloop)  
                 try:
                     #Change Job State
@@ -1335,6 +1342,8 @@ if __name__ == "__main__":
                       help='If true, runs in debug mode')
     parser.add_option('--profile', default=False, action='store_true',
                       help='If true, runs in debug mode')
+    parser.add_option('--async', default=True,
+                      help='If true, runs http client in async mode')
 
     options, args = parser.parse_args()
     
@@ -1367,10 +1376,11 @@ if __name__ == "__main__":
                                       "model.version")
 
     workers = []
-    
+    async = False if options.async in 'False' else True
+
     #spawn workers
     for i in range(num_processes):
-        worker = Worker(options.model_file, model_version_file,options.debug)
+        worker = Worker(options.model_file, model_version_file,options.debug,async)
         workers.append(worker)
         if options.debug or num_processes ==1:
             worker.run()

@@ -1,4 +1,5 @@
 /*
+ * For the player under test, go to publish settings and enable javascript api
  <param name="includeAPI" value="true" />
  <param name="templateLoadHandler" value="NeonFlashTracker.onTemplateLoad" />
  <param name="templateReadyHandler" value="NeonFlashTracker.onTemplateReady" />
@@ -54,7 +55,7 @@ var NeonDataSender = (function() {
 var reqGuid = NeonDataSender._NeonPageRequestUUID();
 /// Neon Tracker for Brightcove Flash Players
 var NeonFlashTracker = ( function () {
-    var player, videoPlayer, content, exp;
+    var player, videoPlayer, content, exp, initialVideo;
     return {
         onTemplateLoad: function (expID){                                           
             console.log( "template loaded " + new Date().getTime());                 
@@ -62,19 +63,19 @@ var NeonFlashTracker = ( function () {
         },
                                                        
 		hookNeonTrackerToFlashPlayer: function(expID) { 
-			console.log("Hoooked Neon Tracker");
+			console.log("Hoooked Neon Tracker!");
             player = bcPlayer.getPlayer(expID);                                      
             videoPlayer = player.getModule(APIModules.VIDEO_PLAYER);                 
             content = player.getModule(APIModules.CONTENT);                         
 			exp     = player.getModule(APIModules.EXPERIENCE); 
             videoPlayer.addEventListener(BCMediaEvent.BEGIN, NeonFlashTracker.onMediaBegin);
 			exp.addEventListener(BCExperienceEvent.CONTENT_LOAD, NeonFlashTracker.trackLoadedImageUrls);
-			setTimeout( function() { location.reload(); } , 5000);
+			//Test //setTimeout( function() { location.reload(); } , 5000);
 		 },                             
  
         onTemplateReady: function (evt) {                                         
             console.log("template ready " + new Date().getTime());
-			console.log(evt);
+			initialVideo = videoPlayer.getCurrentVideo();
 			NeonFlashTracker.trackLoadedImageUrls();
 		},
 		
@@ -84,9 +85,11 @@ var NeonFlashTracker = ( function () {
 			var mediaCollection = content.getAllMediaCollections();
 			console.log(mediaCollection);
             if (mediaCollection.length >0 && mediaCollection[0].mediaCount > 0){
-            	for(var i = 0; i < mediaCollection[0].mediaCount; i++) { 
-                	imageUrls[i] = content.getMedia(mediaCollection[0].mediaIds[i]) ["thumbnailURL"].split('?')[0]; 
-                	stillUrls[i] = content.getMedia(mediaCollection[0].mediaIds[i]) ["videoStillURL"].split('?')[0];
+            	for(var i = 0; i < mediaCollection[0].mediaCount; i++) {
+				   	if (mediaCollection[0].mediaIds[i] != initialVideo.id){	
+                		imageUrls[i] = content.getMedia(mediaCollection[0].mediaIds[i]) ["thumbnailURL"].split('?')[0]; 
+                		stillUrls[i] = content.getMedia(mediaCollection[0].mediaIds[i]) ["videoStillURL"].split('?')[0];
+					}
             	}
 			}
 			console.log(imageUrls);
@@ -96,12 +99,15 @@ var NeonFlashTracker = ( function () {
         },
                                                                                      
         onMediaBegin: function (evt) {
-            console.log( "Media Begin ! " + new Date().getTime());              
-			action = "click";
-			imgSrc = evt.media.thumbnailURL.split("?")[0]; //clean up
+            console.log( "Media Begin ! " + new Date().getTime());            
+		  	var vid    = evt.media.id;	
+			var action = "click";
+			var imgSrc = evt.media.thumbnailURL.split("?")[0]; //clean up
 			//stillSrc = evt.media.videoStillURL;
-			params = "a=" + action + "&id="+ reqGuid + "&img=" + encodeURIComponent(imgSrc); 
-			NeonDataSender.sendRequest(NeonTrackerURL,params);			            
+			params = "a=" + action + "&id="+ reqGuid + "&img=" + encodeURIComponent(imgSrc);
+		    if (vid != initialVideo.id){	
+				NeonDataSender.sendRequest(NeonTrackerURL,params);			           
+			}	
         }
     }
 }());

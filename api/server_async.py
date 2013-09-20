@@ -486,7 +486,6 @@ application = tornado.web.Application([
     (r"/dequeue",DequeueHandler),
     (r"/requeue",RequeueHandler),
     (r"/testcallback",TestCallback),
-    #(r'/api/v1/get_youtube/(.*)',GetYoutube),
     (r'/api/v1/jobstatus',JobStatusHandler),
     (r'/api/v1/videometadata',MetaDataHandler),    
     (r'/api/v1/getresults',GetResultsHandler),    
