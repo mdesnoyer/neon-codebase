@@ -7,6 +7,7 @@ endif()
 if(UNIX)
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -std=gnu++0x")
 endif()
+#SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -std=c++0x -stdlib=libc++")
 
 # Add a define so that the code can know if we're building the pure debug mode
 SET( CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DDEBUG -D_DEBUG" )
@@ -93,7 +94,7 @@ endmacro(enable_python)
 
 # Convienience macro for adding python interfaces to libraries
 function(add_py_library name)
-  add_library(${name} ${ARGN})
+  add_library(${name} MODULE ${ARGN})
   set_target_properties(${name} PROPERTIES PREFIX "")
   target_link_libraries(${name} ${PYTHON_LIBRARIES})
 
