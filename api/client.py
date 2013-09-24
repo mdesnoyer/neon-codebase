@@ -204,7 +204,7 @@ class ProcessVideo(object):
           self.model.choose_thumbnails(mov,
                                        n=n_thumbs,
                                        sample_step=self.sec_to_extract_offset,
-                                       start_time=self.sec_to_extract,debug=self.debug)
+                                       start_time=self.sec_to_extract)
         
         if self.debug:
             log.info("key=process_all current time=%s " %(self.sec_to_extract))
@@ -829,7 +829,7 @@ class ProcessVideo(object):
 class HttpDownload(object):
     retry_codes = [403,500,502,503,504]
 
-    def __init__(self, json_params, ioloop, model, debug=False, cur_pid=None, async=True):
+    def __init__(self, json_params, ioloop, model, debug=False, cur_pid=None, sync=False):
         #TODO Make chunk size configurable
         #TODO GZIP vs non gzip video download? 
 
@@ -867,7 +867,7 @@ class HttpDownload(object):
         self.debug_timestamps = {}
         self.debug_timestamps["streaming_callback"] = time.time()
        
-        if async:
+        if not sync:
             http_client = tornado.httpclient.AsyncHTTPClient()
             http_client.fetch(req, self.async_callback)
         else:
@@ -1195,7 +1195,7 @@ class Worker(multiprocessing.Process):
 
     """
 
-    def __init__(self, model_file, model_version_file, debug=False, async=True):
+    def __init__(self, model_file, model_version_file, debug=False, sync=False):
         # base class initialization
         multiprocessing.Process.__init__(self)
         self.model_file = model_file
@@ -1209,7 +1209,7 @@ class Worker(multiprocessing.Process):
         self.model = None
         self.debug = debug
         self.check_model()
-        self.async = async
+        self.sync = sync
 
     def read_version_from_file(self,fname):
         with open(fname,'r') as f:
@@ -1267,7 +1267,7 @@ class Worker(multiprocessing.Process):
 
                 ## ===== ASYNC Code Starts ===== ##
                 ioloop = tornado.ioloop.IOLoop.instance()
-                dl = HttpDownload(job, ioloop, self.model, self.debug, self.pid, self.async)
+                dl = HttpDownload(job, ioloop, self.model, self.debug, self.pid, self.sync)
                 #log.info("ioloop %r" %ioloop)  
                 try:
                     #Change Job State
@@ -1343,7 +1343,7 @@ if __name__ == "__main__":
                       help='If true, runs in debug mode')
     parser.add_option('--profile', default=False, action='store_true',
                       help='If true, runs in debug mode')
-    parser.add_option('--async', default=True,
+    parser.add_option('--sync', default=False, action='store_true',
                       help='If true, runs http client in async mode')
 
     options, args = parser.parse_args()
@@ -1377,11 +1377,10 @@ if __name__ == "__main__":
                                       "model.version")
 
     workers = []
-    async = False if options.async in 'False' else True
 
     #spawn workers
     for i in range(num_processes):
-        worker = Worker(options.model_file, model_version_file,options.debug,async)
+        worker = Worker(options.model_file, model_version_file,options.debug,options.sync)
         workers.append(worker)
         if options.debug or num_processes ==1:
             worker.run()
@@ -1394,3 +1393,4 @@ if __name__ == "__main__":
             exit(0)
         for w in workers:
             w.join()
+

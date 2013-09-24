@@ -103,6 +103,7 @@ class GetLines(tornado.web.RequestHandler):
             pass
 
         qsize = event_queue.qsize()
+        data = ''
         if qsize > count:
             for i in range(count):
                 data += event_queue.get_nowait()  
