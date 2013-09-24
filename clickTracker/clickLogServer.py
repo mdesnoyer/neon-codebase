@@ -11,9 +11,18 @@ import os
 import time
 import random
 
+from boto.exception import S3ResponseError
+#async s3 connection
+from botornado.s3.connection import AsyncS3Connection
+from botornado.s3.bucket import AsyncBucket
+from botornado.s3.key import AsyncKey
+#for more info on stack context mgmt - http://www.tornadoweb.org/en/branch2.4/_modules/tornado/stack_context.html
+import tornado.stack_context
+import contextlib
+
 #Tornado options
 from tornado.options import define, options
-define("port", default=9081, help="run on the given port", type=int)
+define("port", default=9080, help="run on the given port", type=int)
 MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
     
 global log
@@ -41,66 +50,75 @@ def shutdown():
             log.info('Shutdown')
     stop_loop()
 
-
-class EventLogger(tornado.web.RequestHandler):
+class LogLines(tornado.web.RequestHandler):
     
     def initialize(self):
+        S3_ACCESS_KEY = 'AKIAJ5G2RZ6BDNBZ2VBA'
+        S3_SECRET_KEY = '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'
         self.nlines = 0
         self.maxLines = 100000 
         self.flush_size = random.randint(100,200) #Randomize flush sizes so that not all clients are flusing at the same time
         self.event_log_file = self.getFileName() 
-    
+        #self.s3conn = AsyncS3Connection(aws_access_key_id=S3_ACCESS_KEY,aws_secret_access_key =S3_SECRET_KEY)
+        #s3bucket_name = 'neon-tracker-logs1'
+        #self.s3bucket = AsyncBucket(connection = self.s3conn, name = s3bucket_name)
+
+
     def getFileName(self):
         return log_dir + "/" + "neon-events-" + str(time.time()) 
     
-    ''' Event logger '''
-    def get(self, *args, **kwargs):
-        try:
-            data = tornado.escape.json_encode(self.request.arguments)
-            event_queue.put(data)
-            qsize = event_queue.qsize()
-            if qsize >= self.flush_size:
-                data = ""
-                for i in range(self.flush_size):
-                    try:
-                        data += event_queue.get_nowait()
-                        data += "\n"
-                    except:
-                        pass
-                self.write_to_file(data)
-        
-        except Exception,e:
-            log.exception("key=getException msg=trace" +  e.__str__() )
+    @contextlib.contextmanager
+    def exception_handler(self,typ,value,tb):
+        if isinstance(value,S3ResponseError):
+            print "error"
 
-        self.nlines +=1 
         self.finish()
-    
-    def write_to_file(self,data):
+
+    ''' Event logger '''
+    @tornado.web.asynchronous
+    def get(self, *args, **kwargs):
         
-        #get a new file
-        if self.nlines > self.maxLines:
-            self.nlines = 0
-            self.event_log_file =  self.getFileName()
+        data = tornado.escape.json_encode(self.request.arguments)
+        event_queue.put(data)
+        self.finish()
 
-        with open(self.event_log_file,'a') as f :
-            f.write(data)
+    '''
+    Method to check memory on the node
+    '''
+    def memory_check(self):
+        return True
 
-    def check_file_size(self):
-        #TODO : handle gracefully when the disk is full
-        st    = os.statvfs('/')
-        free  = st.f_bavail * st.f_frsize
-        total = st.f_blocks * st.f_frsize
-        used  = (st.f_blocks - st.f_bfree) * st.f_frsize
-        free_space = float(free) / total
-        return free_space
+'''
+Retrieve lines from the server
+'''
+class GetLines(tornado.web.RequestHandler):
+
+    @tornado.web.asynchronous
+    def get(self, *args, **kwargs):
+       
+        count = 1
+        try:
+            count = self.get_argument('count')
+        except:
+            pass
+
+        qsize = event_queue.qsize()
+        if qsize > count:
+            for i in range(count):
+                data += event_queue.get_nowait()  
+                data += '\n'
+
+        self.write(data)
+        self.finish()
 
 ###########################################
 # Create Tornado server application
 ###########################################
 
 application = tornado.web.Application([
-    (r"/",EventLogger),
-    (r"/eventlog",EventLogger),
+    (r"/",LogLines),
+    (r"/track",LogLines),
+    (r"/getlines",GetLines),
 ])
 
 def main():
@@ -119,6 +137,8 @@ def main():
     signal.signal(signal.SIGINT, sig_handler)
     server = tornado.httpserver.HTTPServer(application)
     server.listen(options.port)
+    #server.bind(options.port)
+    #server.start(0)
     tornado.ioloop.IOLoop.instance().start()
 
 # ============= MAIN ======================== #

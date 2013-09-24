@@ -4,6 +4,7 @@ import tornado.ioloop
 import tornado.web
 import tornado.escape
 import tornado.httpclient
+import tornado.gen
 import time
 import sys
 import random
@@ -79,6 +80,7 @@ class DemoHandler(tornado.web.RequestHandler):
         vid = shortuuid.uuid()  
         request_body = {}
         request_body["api_key"] = 'a63728c09cda459c3caaa158f4adff49' #neon user key 
+        #request_body["api_key"] = '4a6715e07dfbc6a56487bf4eceba0dba'
         request_body["video_title"] = 'test-' + vid 
         request_body["video_id"] =  vid
         request_body["video_url"] = url 
@@ -112,6 +114,7 @@ class DemoHandler(tornado.web.RequestHandler):
 
         def check_status(job_id):
             client_url = 'http://thumbnails.neon-lab.com/api/v1/jobstatus?api_key=a63728c09cda459c3caaa158f4adff49&job_id=' + job_id
+            client_url = 'http://localhost:8081/jobstatus?api_key=a63728c09cda459c3caaa158f4adff49&job_id=' + job_id
             tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
             http_client = tornado.httpclient.AsyncHTTPClient()
             req = tornado.httpclient.HTTPRequest(url = client_url, method = "GET",request_timeout = 60.0, connect_timeout = 10.0)
@@ -120,12 +123,25 @@ class DemoHandler(tornado.web.RequestHandler):
         check_status(job_id)
 
 class IntegrationTestHandler(tornado.web.RequestHandler):
+    
+    @tornado.gen.engine
+    def register_timeout(self,timeout):
+        yield tornado.gen.Task(tornado.ioloop.IOLoop.instance().add_timeout, time.time() + timeout)
+        log.error("Callbacks never came back, check server/client logs")
+        sys.exit(1) 
+    
     def initialize(self):
         self.test_videos = ['http://clips.vorwaerts-gmbh.de/big_buck_bunny.mp4','http://brightcove.vo.llnwd.net/pd16/media/2294876105001/2294876105001_2520426735001_PA210093.mp4?videoId=2520415927001', 'http://brightcove.vo.llnwd.net/e1/uds/pd/96980657001/96980657001_109379449001_Bird-CommonRedpoll-iStock-000006369683HD720.mp4?videoId=2296855886001'] 
         
     ''' submit a test request '''
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
+        
+        #Register a 6 min timeout
+        self.register_timeout(360)
+
+        self.finish()
+
         types = ['neon']
         nreqs = 3
         try:
