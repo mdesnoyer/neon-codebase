@@ -102,7 +102,7 @@ class GetLines(tornado.web.RequestHandler):
         except:
             pass
 
-        qsize = event_queue.qsize()
+        qsize = 200 #event_queue.qsize()
         data = ''
         if qsize > count:
             for i in range(count):
@@ -128,6 +128,8 @@ def main():
     global event_queue
 
     event_queue = multiprocessing.Queue()
+    for i in range(200):
+        event_queue.put('{"data":"val"}')
     if not os.path.exists(log_dir):
         os.mkdir(log_dir)
     

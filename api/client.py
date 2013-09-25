@@ -837,7 +837,6 @@ class HttpDownload(object):
         ### curl async client used 1 per ioloop here as we do compute work
         ### Ideally this is perfect for making multiple http requests in parallel
 
-        tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
         params = tornado.escape.json_decode(json_params)
 
         self.timeout = 300000.0 #long running tasks ##TODO - is this necessary ??? ###
@@ -849,7 +848,6 @@ class HttpDownload(object):
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
 
         req = tornado.httpclient.HTTPRequest(url = url, headers = headers,
-                        streaming_callback = self.streaming_callback, 
                         use_gzip =False, request_timeout = self.timeout)
         self.size_so_far = 0
         self.pv = ProcessVideo(params, json_params, model, debug, cur_pid)
@@ -868,6 +866,10 @@ class HttpDownload(object):
         self.debug_timestamps["streaming_callback"] = time.time()
        
         if not sync:
+            tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
+            req = tornado.httpclient.HTTPRequest(url = url, headers = headers,
+                        streaming_callback = self.streaming_callback, 
+                        use_gzip =False, request_timeout = self.timeout)
             http_client = tornado.httpclient.AsyncHTTPClient()
             http_client.fetch(req, self.async_callback)
         else:
