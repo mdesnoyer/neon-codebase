@@ -1,5 +1,8 @@
+#!/usr/bin/env python
 '''
-Services that neon web account use
+This script launches the services server which hosts Services that neon web account use.
+- Neon Account managment
+- Submit video processing request via Neon API, Brightcove, Youtube
 '''
 
 import tornado.httpserver
@@ -26,10 +29,10 @@ from neondata import *
 
 from tornado.options import define, options
 define("port", default=8083, help="run on the given port", type=int)
+define("local", default=0, help="call local service", type=int)
 
 global log
 log = errorlog.FileLogger("server")
-
 
 def sig_handler(sig, frame):
     log.debug('Caught signal: ' + str(sig) )
@@ -92,7 +95,7 @@ class AccountHandler(tornado.web.RequestHandler):
     Send response to service client
     '''
     def send_json_response(self,data,status=200):
-        #self.set_header(application/json)
+        self.set_header("Content-Type", "application/json")
         self.set_status(status)
         self.write(data)
         self.finish()
@@ -477,6 +480,8 @@ class AccountHandler(tornado.web.RequestHandler):
                 data = '{"error": "no such account"}'
                 self.send_json_response(data,400)
 
+        ## Its ok to use the neon account for all account types, since we are looking
+        ## at the video field only, todo - refactor for every account type
         def get_neon_account(result):
             if result:
                 account = NeonUserAccount.create(result)
@@ -491,7 +496,11 @@ class AccountHandler(tornado.web.RequestHandler):
                 data = '{"error": "no such account"}'
                 self.send_json_response(data,400)
 
-        NeonUserAccount.get_account(self.api_key,get_neon_account)
+        if i_id !=0:
+            NeonUserAccount.get_account(self.api_key,get_neon_account)
+        else:
+            #assume brightcove account
+            BrightcoveAccount.get_account(self.api_key,i_id,get_neon_account)
 
     
     ''' Create request for brightcove video 
@@ -527,7 +536,8 @@ class AccountHandler(tornado.web.RequestHandler):
 
     ''' Update the thumbnail for a particular video '''
     def update_brightcove_video(self,i_id,vid):
-        
+       
+        #TODO : Check for the linked youtube account 
         def update_thumbnail(t_result):
             if t_result:
                 #self.vid_request.save()
@@ -731,6 +741,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 #Get all videos for this account
                 #Aggregate result based on state
 
+                #Get unprocessed list from brightcove 
             else:
                 log.error("key=update_brightcove_account msg= no such account %s integration id %s" %(self.api_key,i_id))
                 data = '{"error": "Account doesnt exists" }'
@@ -744,6 +755,8 @@ class AccountHandler(tornado.web.RequestHandler):
     Cretate a Youtube Account
 
     if brightcove account associated with the user, link them
+
+    validate the refresh token and retreive list of channels for the acccount    
     '''
     def create_youtube_account(self):
 
@@ -1051,19 +1064,37 @@ class JobHandler(tornado.web.RequestHandler):
         NeonApiRequest.get_request(self.api_key,j_id,status_callback)
 
 
+##
+## Delete handler only for test accounts, use cautiously
+
+class DeleteHandler(tornado.web.RequestHandler):
+    @tornado.web.asynchronous
+    def get(self, *args, **kwargs):
+        a_id = self.request.uri.split('/')[-1]
+        
+        #make sure you delete only a test account
+        if "test" in a_id:
+            NeonUserAccount.remove(a_id)
+
+
 ################################################################
 ### MAIN
 ################################################################
 
 if __name__ == "__main__":
+    tornado.options.parse_command_line()
+    
     application = tornado.web.Application([
+        (r'/api/v1/removeaccount(.*)', DeleteHandler),
         (r'/api/v1/accounts(.*)', AccountHandler),
         (r'/api/v1/jobs(.*)', JobHandler)])
     
     global server
+    global BASE_URL 
+    BASE_URL = "http://thumbnails.neon-lab.com" if options.local else "http://localhost:8081" 
+    
     signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGINT, sig_handler)
-    tornado.options.parse_command_line()
     
     server = tornado.httpserver.HTTPServer(application)
     server.listen(options.port)

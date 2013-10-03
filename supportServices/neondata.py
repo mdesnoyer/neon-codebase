@@ -1,4 +1,20 @@
 #/usr/bin/env python
+'''
+Data Model classes 
+
+Blob Types available 
+
+Account Types
+- NeonUser
+- BrightcoveAccount
+- YoutubeAccount
+
+Api Request Types
+- Neon, Brightcove, youtube
+
+#TODO Connection pooling of redis connection https://github.com/leporo/tornado-redis/blob/master/demos/connection_pool/app.py
+'''
+
 import redis as blockingRedis
 import brukva as redis
 import tornado.gen
@@ -15,21 +31,9 @@ sys.path.insert(0,os.path.abspath(
 import brightcove_api
 import youtube_api
 
-''' 
-Neon Data Model Classes
-
-Apikey Generator
-Multikey Handler for Redis
-
-Blob Types available 
-- NeonUser
-- BrightcoveAccount
-- YoutubeAccount
-
-#TODO 
-#1. Connection pooling of redis connection https://github.com/leporo/tornado-redis/blob/master/demos/connection_pool/app.py
 '''
-
+Static class for REDIS configuration
+'''
 class RedisClient(object):
     #static variables
     host = '127.0.0.1'
@@ -271,6 +275,13 @@ class NeonUserAccount(AbstractRedisUserBlob):
             na.__dict__[key] = params[key]
         
         return na
+    
+    @staticmethod
+    def delete(a_id):
+        #check if test account
+        if "test" in a_id:
+            key = 'neonuseraccount' + NeonApiKey.generate(a_id)  
+            NeonUserAccount.blocking_conn.delete(key)
 
 ''' Brightcove Account '''
 class BrightcoveAccount(AbstractRedisUserBlob):
@@ -438,6 +449,7 @@ class YoutubeAccount(AbstractRedisUserBlob):
    
     '''
     Add a list of channels that the user has
+    Get a valid access token first
     '''
     def add_channels(self,ch_callback):
         def save_channel(result):

@@ -6,34 +6,26 @@ import multiprocessing
 import Queue
 import signal
 import time
-import errorlog
 import os
 import time
-import random
 
-from boto.exception import S3ResponseError
-#async s3 connection
-from botornado.s3.connection import AsyncS3Connection
-from botornado.s3.bucket import AsyncBucket
-from botornado.s3.key import AsyncKey
-#for more info on stack context mgmt - http://www.tornadoweb.org/en/branch2.4/_modules/tornado/stack_context.html
-import tornado.stack_context
-import contextlib
+#logging
+import logging
+import logging.handlers
+log = logging.getLogger(__name__)
+log.setLevel(logging.WARNING)
+formatter = logging.Formatter(
+                "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+handler = logging.FileHandler("error.log")
+log.addHandler(handler)
 
 #Tornado options
 from tornado.options import define, options
 define("port", default=9080, help="run on the given port", type=int)
 MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
     
-global log
-log = errorlog.FileLogger("server")
-
-global log_dir 
-#log_dir = "/var/log/neon"
-log_dir = os.getcwd() 
-
 def sig_handler(sig, frame):
-    log.debug('Caught signal: ' + str(sig) )
+    log.warn('Caught signal: ' + str(sig) )
     tornado.ioloop.IOLoop.instance().add_callback(shutdown)
 
 def shutdown():
@@ -52,34 +44,14 @@ def shutdown():
 
 class LogLines(tornado.web.RequestHandler):
     
-    def initialize(self):
-        S3_ACCESS_KEY = 'AKIAJ5G2RZ6BDNBZ2VBA'
-        S3_SECRET_KEY = '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'
-        self.nlines = 0
-        self.maxLines = 100000 
-        self.flush_size = random.randint(100,200) #Randomize flush sizes so that not all clients are flusing at the same time
-        self.event_log_file = self.getFileName() 
-        #self.s3conn = AsyncS3Connection(aws_access_key_id=S3_ACCESS_KEY,aws_secret_access_key =S3_SECRET_KEY)
-        #s3bucket_name = 'neon-tracker-logs1'
-        #self.s3bucket = AsyncBucket(connection = self.s3conn, name = s3bucket_name)
-
-
-    def getFileName(self):
-        return log_dir + "/" + "neon-events-" + str(time.time()) 
-    
-    @contextlib.contextmanager
-    def exception_handler(self,typ,value,tb):
-        if isinstance(value,S3ResponseError):
-            print "error"
-
-        self.finish()
-
-    ''' Event logger '''
+    ''' Track call logger '''
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
-        
         data = tornado.escape.json_encode(self.request.arguments)
-        event_queue.put(data)
+        try:
+            event_queue.put(data)
+        except Exception,e:
+            log.exception("key=loglines msg=Q error %s",e.__str__())
         self.finish()
 
     '''
@@ -102,7 +74,7 @@ class GetLines(tornado.web.RequestHandler):
         except:
             pass
 
-        qsize = 200 #event_queue.qsize()
+        qsize = event_queue.qsize()
         data = ''
         if qsize > count:
             for i in range(count):
@@ -128,13 +100,7 @@ def main():
     global event_queue
 
     event_queue = multiprocessing.Queue()
-    for i in range(200):
-        event_queue.put('{"data":"val"}')
-    if not os.path.exists(log_dir):
-        os.mkdir(log_dir)
     
-
-    #TODO : Start server with multiple ports 
     tornado.options.parse_command_line()
     signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGINT, sig_handler)
@@ -144,6 +110,12 @@ def main():
     #server.start(0)
     tornado.ioloop.IOLoop.instance().start()
 
+def test():
+    QMAX = 5000
+    tdata = '{"k1":"v1","k2":"v2"}'
+    for i in range(QMAX):
+        event_queue.put(tdata)
+
 # ============= MAIN ======================== #
 if __name__ == "__main__":
-	main()
+    main()

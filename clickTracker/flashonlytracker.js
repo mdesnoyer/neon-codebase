@@ -1,8 +1,14 @@
-/*
+/* Script Instructions:
+ *
  * For the player under test, go to publish settings and enable javascript api
+ * If javascript api is not being used, then do the following
  <param name="includeAPI" value="true" />
  <param name="templateLoadHandler" value="NeonFlashTracker.onTemplateLoad" />
  <param name="templateReadyHandler" value="NeonFlashTracker.onTemplateReady" />
+
+ * Else if <param name="templateLoadHandler" ... /> already is on the page, then open existing script file and add
+ * this line at the end of onTemplateLoad method, NeonFlashTracker.hookNeonTrackerToFlashPlayer(expID);
+ * where expID is the function argument variable name that's passed to the onTemplateLoad method.  
 */
 
 var NeonTrackerURL = "http://localhost:8888";

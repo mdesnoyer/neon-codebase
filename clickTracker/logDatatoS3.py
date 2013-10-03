@@ -3,6 +3,7 @@ Consumer client that drains the queue from the track logger and uploads data in 
 Currently uses blocking http calls to drain Qs from localhost & boto to upload to s3
 
 TODO: Integrate in to ioloop with delayed callbacks to drain Qs and upload data
+TODO: Store data in binary format
 '''
 import tornado.ioloop
 import tornado.web
@@ -12,11 +13,14 @@ import multiprocessing
 import Queue
 import signal
 import time
-import errorlog
 import os
 import time
 import random
 import sys
+import shortuuid
+import logging
+import logging.handlers
+log = logging.getLogger(__name__)
 
 from boto.exception import S3ResponseError
 from boto.s3.connection import S3Connection
@@ -33,11 +37,11 @@ import contextlib
 
 #Tornado options
 from tornado.options import define, options
-define("port", default=9080, help="run on the given port", type=int)
+define("port", default=9080, help="port to consume data from", type=int)
+define("lines", default=1000, help="lines to aggregate", type=int)
+define("fetch_count", default=100, help="# lines to fetch", type=int)
 MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
     
-global log
-log = errorlog.FileLogger("server")
 
 global log_dir 
 #log_dir = "/var/log/neon"
@@ -49,7 +53,7 @@ def sig_handler(sig, frame):
 
 class S3DataHandler(object):
     
-    def __init__(self):
+    def __init__(self,s3_line_count,port,fetch_count):
         S3_ACCESS_KEY = 'AKIAJ5G2RZ6BDNBZ2VBA'
         S3_SECRET_KEY = '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'
         s3bucket_name = 'neon-tracker-logs'
@@ -59,8 +63,11 @@ class S3DataHandler(object):
         #self.s3conn = AsyncS3Connection(aws_access_key_id=S3_ACCESS_KEY,aws_secret_access_key =S3_SECRET_KEY)
         #self.s3bucket = AsyncBucket(connection = self.s3conn, name = s3bucket_name)
         self.sleep = 1
-        self.fetch_urls = ['http://localhost:9080/getlines']
-        self.fetch_count = 1
+        self.nlines = 0
+        self.fetch_count = fetch_count
+        self.fetch_url = 'http://localhost:' + str(port) + '/getlines?count=' + str(fetch_count) #go through the loadbalancer
+        self.s3_line_count = s3_line_count
+        self.lines_to_save = ''
 
     @contextlib.contextmanager
     def exception_handler(self,typ,value,tb):
@@ -69,7 +76,8 @@ class S3DataHandler(object):
 
         self.finish()
 
-            
+    '''
+    #Async
     def upload_data_to_s3(data):
        
         def save_data(response):
@@ -81,13 +89,12 @@ class S3DataHandler(object):
             k.set_contents_as_string(data,callback=save_data)
 
     def do_work_async(self):
-        lines = ''
+        lines = "" 
         counter = 0
         def get_lines(response):
             if not response.error:
                 lines += response.body
-                print lines
-
+            
             #upload data to s3
             if counter == len(self.fetch_urls):
                 self.upload_data_to_s3(lines)
@@ -97,23 +104,28 @@ class S3DataHandler(object):
             req = tornado.httpclient.HTTPRequest(url = url,
                             method = "GET",request_timeout = 10.0, connect_timeout = 10.0)
             http_client.fetch(req,get_lines)
-    
+    '''
+
     def do_work(self):
-        lines = ''
         http_client = tornado.httpclient.HTTPClient()
-        for url in self.fetch_urls:
-            req = tornado.httpclient.HTTPRequest(url = url,
+        req = tornado.httpclient.HTTPRequest(url = self.fetch_url,
                             method = "GET",request_timeout = 10.0, connect_timeout = 10.0)
-            response = http_client.fetch(req)
-            lines += response.body
-        
-        #upload to s3
-        k = Key(self.s3bucket)
-        k.key = 'todofilescheme-' + str(time.time())
         try:
-            k.set_contents_as_string(lines)
-        except S3ResponseError,e:
-            pass
+            response = http_client.fetch(req)
+            self.lines_to_save += response.body
+            self.nlines += 1
+        except:
+            return
+
+        #upload to s3
+        if self.nlines >= self.s3_line_count: 
+            k = Key(self.s3bucket)
+            k.key = shortuuid.uuid() 
+            try:
+                k.set_contents_as_string(self.lines_to_save)
+                self.nlines = 0
+            except S3ResponseError,e:
+                pass
     
     def run(self):
         while True:
@@ -127,7 +139,7 @@ def main():
     signal.signal(signal.SIGINT, sig_handler)
     #ioloop = tornado.ioloop.IOLoop.instance()
     #ioloop.start()
-    s = S3DataHandler()
+    s = S3DataHandler(options.lines,options.port,options.fetch_count)
     s.run()
 
 
