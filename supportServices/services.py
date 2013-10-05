@@ -544,6 +544,8 @@ class AccountHandler(tornado.web.RequestHandler):
                 #self.bc.update_cache(self.vid_request)
                 #If youtube enabled, upload to youtube too
 
+                #Update the new thumbnail with the refID
+                
                 data = '{"error" :""}'
                 self.send_json_response(data,200)
             else:
@@ -554,7 +556,7 @@ class AccountHandler(tornado.web.RequestHandler):
             if r_result:
                 self.vid_request = BrightcoveApiRequest.create(r_result) 
                 thumbnail_url = self.vid_request.enable_thumbnail(tid)
-                self.bc.update_thumbnail(vid,thumbnail_url,update_thumbnail)
+                self.bc.update_thumbnail(vid,thumbnail_url,tid,update_thumbnail)
             else:
                 data = '{"error": "thumbnail not updated"}'
                 self.send_json_response(data,500)

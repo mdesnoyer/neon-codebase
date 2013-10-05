@@ -55,21 +55,38 @@ def generate_request_key(api_key,job_id):
     key = "request_" + api_key + "_" + job_id
     return key
 
-''' Static class to generate Neon API Key'''
-class NeonApiKey(object):
-    salt = 'SUNIL'
+'''
+Abstract Hash Generator
+'''
 
+class AbstractHashGenerator(object):
+    @staticmethod
+    def _api_hash_function(input):
+        return hashlib.md5(input).hexdigest()
+
+''' Static class to generate Neon API Key'''
+class NeonApiKey(AbstractHashGenerator):
+    salt = 'SUNIL'
+    
     @staticmethod
     def generate(input):
         input = NeonApiKey.salt + str(input)
         return NeonApiKey._api_hash_function(input)
 
+'''
+Static class to generate thumbnail id
+'''
+class ThumbnailID(AbstractHashGenerator):
+    salt = 'Thumbn@il'
+    
     @staticmethod
-    def _api_hash_function(input):
-        return hashlib.md5(input).hexdigest()
-
-''' Handler to retrive multiple keys from redis storage'''
+    def generate(input):
+        input = ThumbnailID.salt + str(input)
+        return AbstractHashGenerator._api_hash_function(input)
+        
 class RedisMultiKeyHandler(object):
+    ''' Handler to retrive multiple keys from redis storage'''
+    
     conn,blocking_conn = RedisClient.get_client()
     def __init__(self,objects,callback):
         self.objects = objects
@@ -100,11 +117,13 @@ class RedisMultiKeyHandler(object):
         RedisMultiKeyHandler.conn.mset(pairs,callback)
 
 
-''' Abstract Redis interface and operations
-    Use only one operation at a time, since only a
-    single external callback can be registered
-'''
 class AbstractRedisUserBlob(object):
+    ''' 
+        Abstract Redis interface and operations
+        Use only one operation at a time, since only a
+        single external callback can be registered
+    '''
+    
     conn,blocking_conn = RedisClient.get_client()
 
     def __init__(self,keyname=None):
@@ -328,10 +347,15 @@ class BrightcoveAccount(AbstractRedisUserBlob):
             value = self.to_json()
             return AbstractRedisUserBlob.blocking_conn.set(self.key,value)
 
-    def update_thumbnail(self,vid,t_url,update_callback=None):
+    '''
+    Called after getting the thumbnail url of the new thumbnail to be made 
+    the default
+    '''
+    def update_thumbnail(self,vid,t_url,tid,update_callback=None):
         bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update)
+        ref_id = tid
         if update_callback:
-            return bc.async_enable_thumbnail_from_url(vid,t_url,update_callback)
+            return bc.async_enable_thumbnail_from_url(vid,t_url,update_callback,reference_id=ref_id)
         else:
             return bc.enable_thumbnail_from_url(vid,t_url)
 
@@ -533,18 +557,42 @@ class YoutubeAccount(AbstractRedisUserBlob):
 #######################
 # Request Blobs 
 ######################
-'''
-Instance of this gets created during request creation (Neon web account, RSS Cron)
-Json representation of the class is saved in the server queue and redis  
 
-Saving request blobs : 
-    create instance of the request object and call save()
+class ThumbnailMetaData(object):
 
-Getting request blobs :
-    use static get method to get a json based response NeonApiRequest.get_request()
-'''
+    '''
+    Schema for storing thumbnail metadata
+
+    A single thumbnail id maps to all its urls [ Neon, OVP name space ones, other associated ones] 
+    '''
+    def init(self,tid,urls,created,enabled,width,height,ttype,refid=None,rank=None):
+        self.thumb = {}
+        self.thumb['thumbnail_id'] = tid
+        self.thumb['urls'] = urls  # All urls associated with single image
+        self.thumb['created'] = created
+        self.thumb['enabled'] = enabled
+        self.thumb['width'] = width
+        self.thumb['height'] = height
+        self.thumb['type'] = ttype #neon1../ brightcove / youtube
+        self.thumb['rank'] = 0 if not rank else rank
+        self.thumb['refid'] = refid #If referenceID exists as in case of a brightcove thumbnail
+
+    def to_dict(self):
+        return self.thumb
+
 
 class NeonApiRequest(object):
+    '''
+    Instance of this gets created during request creation (Neon web account, RSS Cron)
+    Json representation of the class is saved in the server queue and redis  
+    
+    Saving request blobs : 
+    create instance of the request object and call save()
+
+    Getting request blobs :
+    use static get method to get a json based response NeonApiRequest.get_request()
+    '''
+    
     conn,blocking_conn = RedisClient.get_client()
 
     def __init__(self,job_id,api_key,vid,title,url,request_type,http_callback):
@@ -596,21 +644,14 @@ class NeonApiRequest(object):
         for t in self.thumbnails:
             if t['thumbnail_id'] == tid:
                 t['enabled'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") 
-                t_url = t['url']
+                t_url = t['url'][0]
             else:
                 t['enabled'] = None
         return t_url
 
-    def add_thumbnail(self,tid,url,created,enabled,width,height,ttype,refid=None):
-        thumb = {}
-        thumb['thumbnail_id'] = tid
-        thumb['url'] = url
-        thumb['created'] = created
-        thumb['enabled'] = enabled
-        thumb['width'] = width
-        thumb['height'] = height
-        thumb['type'] = ttype #neon1../ brightcove / youtube
-        thumb['refid'] = refid #If referenceID exists as in case of a brightcove thumbnail
+    def add_thumbnail(self,tid,url,created,enabled,width,height,ttype,refid=None,rank=None):
+        tdata = ThumbnailMetaData(tid,url,created,enabled,width,height,ttype,refid,rank)
+        thumb = tdata.to_dict()
         self.thumbnails.append(thumb)
    
     def get_current_thumbnail(self):

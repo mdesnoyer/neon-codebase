@@ -51,17 +51,24 @@ class BrightcoveApi(object):
     ###### Brightcove media api update method ##########
     
     ''' add thumbnail and videostill in to brightcove account '''
-    def update_thumbnail_and_videostill(self,video_id,image):
+    def update_thumbnail_and_videostill(self,video_id,image,ref_id):
         if isinstance(image,basestring):
             rt = self.add_image(video_id,remote_url = image,atype='thumbnail')
             rv = self.add_image(video_id,remote_url = image,atype='videostill')
         else:
-            rt = self.add_image(video_id,image,atype='thumbnail')
-            rv = self.add_image(video_id,image,atype='videostill')
+            rt = self.add_image(video_id,image,atype='thumbnail',reference_id = ref_id)
+            rv = self.add_image(video_id,image,atype='videostill',reference_id = ref_id)
         
-        if rt and rv:
-            return True
-        return False
+        tref_id = None ; vref_id = None
+        #Get thumbnail name, referenceId params
+        if rt:
+            add_image_val = tornado.escape.json_decode(rt)
+            tref_id = add_image_val["result"]["referenceId"]
+        if rv:
+            add_image_val = tornado.escape.json_decode(rv)
+            vref_id = add_image_val["result"]["referenceId"]
+
+        return ((rt is not None and rv is not None),tref_id,vref_id)
 
     '''
     Update the thumbnail for a given video given the ReferenceID an existing image asset 
@@ -216,6 +223,8 @@ class BrightcoveApi(object):
 
     def async_enable_thumbnail_from_url(self,video_id,img_url,callback):
         self.img_result = []  
+        reference_id = kwargs.get('reference_id', None)
+        
         def add_image_callback(result):
             if not result.error and len(result.body) > 0:
                 self.img_result.append(tornado.escape.json_decode(result.body))
@@ -227,6 +236,7 @@ class BrightcoveApi(object):
                 try:
                     if not self.img_result[0]["error"] and not self.img_result[1]["error"]:
                         callback_value = True
+                        callback_value = (self.img_result[0]["result"]["referenceId"],self.img_result[1]["result"]["referenceId"]) 
                 except:
                     pass
 
@@ -236,8 +246,8 @@ class BrightcoveApi(object):
             if not image_response.error:
                 imfile = StringIO(image_response.body)
                 image =  Image.open(imfile)
-                self.add_image(video_id,image,atype='thumbnail', async_callback = add_image_callback)
-                self.add_image(video_id,image,atype='videostill',async_callback = add_image_callback)
+                self.add_image(video_id,image,atype='thumbnail', reference_id = reference_id, async_callback = add_image_callback)
+                self.add_image(video_id,image,atype='videostill',reference_id = "still-" + reference_id, async_callback = add_image_callback)
             else:
                 callback(False)
 

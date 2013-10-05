@@ -11,7 +11,7 @@
  * where expID is the function argument variable name that's passed to the onTemplateLoad method.  
 */
 
-var NeonTrackerURL = "http://localhost:8888";
+var NeonTrackerURL = "http://localhost:8888/track";
 var NeonTrackerType = "flashonlyplayer";
 var NeonAccountID = NeonAccountID || "accountIDNotSet";
 var NeonDataSender = (function() {

@@ -223,65 +223,9 @@ class ProcessVideo(object):
         if self.debug:
             log.info("key=streaming_callback msg=debug time_processing=%s" %(end_process - start_process))
 
-    def get_mid_thumbnail(self,video_file):
-        try:
-            mov = ffvideo.VideoStream(video_file)
-            mid = mov.duration / 2.0
-            frame = mov.get_frame_at_sec(mid)
-            self.abtest_thumbnails["neonb"] = frame.image();
-            
-        except Exception, e:
-            log.error("key=process_video subkey=get_mid_thumbnail msg=" + 
-                      e.__str__())
-            if self.debug:
-                raise
-        return
-
-    def get_filtered_thumbnail(self):
-        score = 0
-        #filter black and blur frames
-        # TODO pick quality controlled frame which is not max
-       
-        data_slice = self.data_map.items()
-        secondary_sorted_list = sorted(data_slice,
-                                       key=lambda tup: hashlib.md5(str(tup[0])).hexdigest(),
-                                       reverse=True)
-        result = sorted(secondary_sorted_list, 
-                        key=lambda tup: tup[1][0],
-                        reverse=True)
-        
-        #Pick the mid element, which most likely isn't a high scored thumbnail
-        mid  = len(result) / 2
-        fno = result[mid][0]
-        selected = self.data_map[fno]
-
-        #while score == 0: 
-        #    fno = random.choice(self.data_map.keys())
-        #    selected = self.data_map[fno]
-        #    score = selected[0]
-        
-        self.abtest_thumbnails["neonc"] = selected[1]
-        return
-
-    def get_neon_thumbnail(self):
-        res = self.get_topn_thumbnails(1)
-        fno = res[0][0]
-        self.abtest_thumbnails["neona"] = self.data_map[fno][1]  #image 
-
-
     ''' method that is run before the video is deleted after downloading '''
     ''' use this to run cleanup code or misc methods '''
     def finalize(self,video_file):
-        ### AB test stuff
-        if os.path.exists(video_file): 
-            try:
-                self.get_mid_thumbnail(video_file)
-                self.get_filtered_thumbnail()
-                self.get_neon_thumbnail()
-            except Exception, e:
-                log.error("key=finalize msg=error msg=" + e.__str__())
-                if self.debug:
-                    raise
         return
 
     ############# THUMBNAIL METHODS ##################
@@ -471,53 +415,6 @@ class ProcessVideo(object):
             if self.debug:
                 raise
   
-    ''' save previous thumbnail in the account to s3 ''' 
-    def save_previous_thumbnail_to_s3(self):
-        try:
-            if self.request_map.has_key(properties.PREV_THUMBNAIL):
-                url = self.request_map[properties.PREV_THUMBNAIL]
-                http_client = tornado.httpclient.HTTPClient()
-                req = tornado.httpclient.HTTPRequest(url = url,
-                                                     method = "GET",
-                                                     request_timeout = 60.0,
-                                                     connect_timeout = 10.0)
-                response = http_client.fetch(req)
-                data = response.body 
-                k = Key(self.s3bucket)
-                k.key = self.base_filename + "/"+ 'previous' + "." + self.format
-                k.set_contents_from_string(data)
-        
-        except S3ResponseError,e:
-            log.error("key=save_top_thumb_to_s3 msg=s3 response error " +
-                      e.__str__() )
-        except Exception,e:
-            log.error("key=save_top_thumb_to_s3 msg=general exception " +
-                      e.__str__() )
-            if self.debug:
-                raise
-        return k.key
-
-    ''' Save the top thumnail to s3'''
-    def save_top_thumbnail_to_s3(self,frame):
-        try:
-            image = self.data_map[frame][1]
-            imgdata = StringIO()
-            image.save(imgdata, format='jpeg')
-            k = Key(self.s3bucket)
-            k.key = self.base_filename + "/"+ 'result' + "." + self.format
-            imgdata.seek(0)
-            data = imgdata.read()
-            k.set_contents_from_string(data)
-        
-        except S3ResponseError,e:
-            log.error("key=save_top_thumb_to_s3 msg=s3 response error " +
-                      e.__str__() )
-        except Exception,e:
-            log.error("key=save_top_thumb_to_s3 msg=general exception " +
-                      e.__str__() )
-            if self.debug:
-                raise
-
     ''' Save the top thumbnails to s3 as tar.gz file '''
     def save_result_data_to_s3(self,frames):
         try:
@@ -604,58 +501,21 @@ class ProcessVideo(object):
             s3fname = s3_url_prefix + "/" + self.base_filename + "/" + fname_prefix + str(i) + ".jpeg"
             s3_urls.append(s3fname)
             
-            #populate thumbnail
-            thumb = {} 
-            thumb['thumbnail_id'] = i
-            thumb['url'] = s3fname
-            thumb['created'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            thumb['enabled'] = None 
-            thumb['width']   = image.size[0]
-            thumb['height']  = image.size[1] 
-            thumb['type']    = "neon" + str(i)
+            urls = []
+            tid = ThumbnailID.generate(s3fname)
+            urls.append(s3fname)
+            created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            enabled = None 
+            width   = image.size[0]
+            height  = image.size[1] 
+            ttype   = "neon" + str(i)
+            rank    = i +1 
+
+            #populate thumbnails
+            tdata = ThumbnailMetaData(tid,urls,created,enabled,width,height,ttype,None,rank)
+            thumb = tdata.to_dict()
             self.thumbnails.append(thumb)
-
         return s3_urls
-
-    ''' Host AB Test images for experiment '''
-    def host_abtest_images(self):
-       
-        s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
-        s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
-        s3bucket = Bucket(name = s3bucket_name,connection = s3conn)
-
-        fields = ["neona","neonb","neonc"] #["neonthumbnail","neonmid","neonfiltered"]
-        fmt = 'jpeg'
-        s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
-
-        if self.request_map.has_key(properties.THUMBNAIL_SIZE):
-            size = 480,268 #self.request_map.has_key(properties.THUMBNAIL_SIZE)
-
-        #upload the images to s3
-        for field in fields:
-            filestream = StringIO()
-            image = self.abtest_thumbnails[field]
-            image.thumbnail(size,Image.ANTIALIAS)
-            image.save(filestream, fmt, quality=100 ) #TODO: Jpeg with specified quality 
-            filestream.seek(0)
-            imgdata = filestream.read()
-            k = Key(s3bucket)
-            k.key = self.base_filename + "/" + field + "." + fmt 
-            k.set_contents_from_string(imgdata)
-            s3bucket.set_acl('public-read',k.key)
-
-        #update brightcove account with uploaded image urls
-        api_key = self.request_map[properties.API_KEY]  
-        rtoken  = self.request_map[properties.BCOVE_READ_TOKEN]
-        wtoken  = self.request_map[properties.BCOVE_WRITE_TOKEN]
-        video_id = self.request_map[properties.VIDEO_ID]
-        request_id = self.request_map[properties.REQUEST_UUID_KEY]
-        bcove   = brightcove_api.BrightcoveApi(neon_api_key=api_key,read_token=rtoken,write_token=wtoken)
-        
-        neona = s3_url_prefix + "/" + self.base_filename + "/" + "neona.jpeg"
-        neonb = s3_url_prefix + "/" + self.base_filename + "/" + "neonb.jpeg"
-        neonc = s3_url_prefix + "/" + self.base_filename + "/" + "neonc.jpeg"
-        bcove.update_abtest_custom_thumbnail_video(video_id,neona,neonb,neonc)
 
     ############# Request Finalizers ##############
 
@@ -703,9 +563,8 @@ class ProcessVideo(object):
             bc_request.save()
             return
 
-        
         #Save previous thumbnail to s3
-        p_url = bc_request.previous_thumbnail
+        p_url = bc_request.previous_thumbnail.split('?')[0]
         http_client = tornado.httpclient.HTTPClient()
         req = tornado.httpclient.HTTPRequest(url = p_url,
                                                 method = "GET",
@@ -726,14 +585,19 @@ class ProcessVideo(object):
         bc_request.previous_thumbnail = s3fname
         
         #populate thumbnail
-        thumb = {} 
-        thumb['thumbnail_id'] = 5
-        thumb['url'] = s3fname
-        thumb['created'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        thumb['enabled'] = None 
-        thumb['width']   = 480
-        thumb['height']  = 360
-        thumb['type']    = "brightcove"
+        urls = []
+        tid = ThumbnailID.generate(s3fname)
+        urls.append(p_url)
+        urls.append(s3fname)
+        created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        enabled = None 
+        width   = 480
+        height  = 360
+        ttype   = "brightcove" 
+        rank    = 0 
+        #populate thumbnails
+        tdata = ThumbnailMetaData(tid,urls,created,enabled,width,height,ttype,None,rank)
+        thumb = tdata.to_dict()
         self.thumbnails.append(thumb)
 
         #2 Push thumbnail in to brightcove account
@@ -744,19 +608,23 @@ class ProcessVideo(object):
             pid = self.request_map[properties.PUBLISHER_ID]
             fno = bc_request.response["data"][0]
             img = Image.fromarray(self.data_map[fno][1])
-            #img_url = self.thumbnails[0]["url"]
+            #img_url = self.thumbnails[0]["urls"][0]
             bcove   = brightcove_api.BrightcoveApi(neon_api_key=api_key,publisher_id=pid,read_token=rtoken,write_token=wtoken)
-            ret = bcove.update_thumbnail_and_videostill(video_id,img)
+            ret = bcove.update_thumbnail_and_videostill(video_id,img,tid)
 
-            if ret:
+            if ret[0]:
+                #update enabled time & reference ID
                 self.thumbnails[0]["enabled"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
+                self.thumbnails[0]["refid"] = tid
 
         #3 Add thumbnails to the request object and save
         bc_request.thumbnails = self.thumbnails
         bc_request.state = "finished"
         bc_request.save()
 
+    '''
+    Final steps for youtube request
+    '''
 
     def finalize_youtube_request(self,result,error=False):
         api_key = self.request_map[properties.API_KEY]  
@@ -792,15 +660,22 @@ class ProcessVideo(object):
         yt_request.previous_thumbnail = s3fname
         
         #populate thumbnail
-        thumb = {} 
-        thumb['thumbnail_id'] = 5
-        thumb['url'] = s3fname
-        thumb['created'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        thumb['enabled'] = None 
-        thumb['width']   = 480
-        thumb['height']  = 360
-        thumb['type']    = "youtube"
+        urls = []
+        tid = ThumbnailID.generate(s3fname)
+        urls.append(p_url)
+        urls.append(s3fname)
+        created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        enabled = None 
+        width   = 480
+        height  = 360
+        ttype   = "youtube"
+        rank    = 0 
+        tdata = ThumbnailMetaData(tid,urls,created,enabled,width,height,ttype,None,rank)
+        thumb = tdata.to_dict()
         self.thumbnails.append(thumb)
+
+        #2 Push thumbnail in to brightcove account
+        if bc_request.autosync:
         
         #2 Push thumbnail in to youtube account
         if bc_request.autosync:

@@ -74,7 +74,7 @@ class GetLines(tornado.web.RequestHandler):
         except:
             pass
 
-        qsize = event_queue.qsize()
+        qsize = 10 # event_queue.qsize()
         data = ''
         if qsize > count:
             for i in range(count):
