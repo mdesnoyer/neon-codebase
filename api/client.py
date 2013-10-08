@@ -502,7 +502,7 @@ class ProcessVideo(object):
             s3_urls.append(s3fname)
             
             urls = []
-            tid = ThumbnailID.generate(s3fname)
+            tid = ThumbnailID.generate(imgdata)
             urls.append(s3fname)
             created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             enabled = None 
@@ -586,7 +586,7 @@ class ProcessVideo(object):
         
         #populate thumbnail
         urls = []
-        tid = ThumbnailID.generate(s3fname)
+        tid = ThumbnailID.generate(imgdata)
         urls.append(p_url)
         urls.append(s3fname)
         created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -595,7 +595,7 @@ class ProcessVideo(object):
         height  = 360
         ttype   = "brightcove" 
         rank    = 0 
-        #populate thumbnails
+        
         tdata = ThumbnailMetaData(tid,urls,created,enabled,width,height,ttype,None,rank)
         thumb = tdata.to_dict()
         self.thumbnails.append(thumb)
@@ -621,6 +621,26 @@ class ProcessVideo(object):
         bc_request.thumbnails = self.thumbnails
         bc_request.state = "finished"
         bc_request.save()
+
+        #TODO: The newly uploaded thumbnail's url isn't available immidiately, what should be done ?
+
+        #4 Save the Thumbnail URL and ID to Mapper DB
+        thumbnail_mapper_list = []
+        thumbnail_url_mapper_list = []
+
+        platform = "brightcove"
+        for thumb in self.thumbnails:
+            tid = thumb["thumbnail_id"]
+            ttype = thumb["type"]
+            rank = thumb["rank"]
+            for t_url in thumb.urls:
+                uitem = ThumbnailURLMapper(t_url,tid)
+                thumbnail_url_mapper_list.append(uitem)
+                item = ThumbnailIDMapper(tid,platform,video_id,api_key,ttype,rank)
+                thumbnail_mapper_list.append(item)
+
+        ThumbnailIDMapper.save_all(thumbnail_mapper_list)
+        ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
 
     '''
     Final steps for youtube request
@@ -661,7 +681,7 @@ class ProcessVideo(object):
         
         #populate thumbnail
         urls = []
-        tid = ThumbnailID.generate(s3fname)
+        tid = ThumbnailID.generate(imgdata)
         urls.append(p_url)
         urls.append(s3fname)
         created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

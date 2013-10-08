@@ -52,6 +52,8 @@ class BrightcoveApi(object):
     
     ''' add thumbnail and videostill in to brightcove account '''
     def update_thumbnail_and_videostill(self,video_id,image,ref_id):
+        
+        #If url is passed, then set thumbnail using the remote url
         if isinstance(image,basestring):
             rt = self.add_image(video_id,remote_url = image,atype='thumbnail')
             rv = self.add_image(video_id,remote_url = image,atype='videostill')
@@ -195,16 +197,22 @@ class BrightcoveApi(object):
     '''
     def enable_thumbnail_from_url(self,video_id,url,**kwargs):
         http_client = tornado.httpclient.HTTPClient()
+        headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
+            (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
         req = tornado.httpclient.HTTPRequest(url = url,
-                                                method = "GET",
+                                                method = "GET",headers = headers,
                                                 request_timeout = 60.0,
                                                 connect_timeout = 10.0)
         response = http_client.fetch(req)
         imfile = StringIO(response.body)
-        image =  Image.open(imfile)
+        try:
+            image =  Image.open(imfile)
+        except Exception,e:
+            log.exception("Image format error %s" %e )
+
         reference_id = kwargs.get('reference_id', None)
         rt = self.add_image(video_id,image,atype='thumbnail',reference_id = reference_id)
-        rv = self.add_image(video_id,image,atype='videostill',reference_id = "still-" + reference_id)
+        rv = self.add_image(video_id,image,atype='videostill',reference_id = reference_id if not reference_id else "still-" + reference_id)
        
         tref_id = None ; vref_id = None
         #Get thumbnail name, referenceId params
@@ -246,8 +254,9 @@ class BrightcoveApi(object):
             if not image_response.error:
                 imfile = StringIO(image_response.body)
                 image =  Image.open(imfile)
+                srefid = reference_id if not reference_id else "still-" + reference_id
                 self.add_image(video_id,image,atype='thumbnail', reference_id = reference_id, async_callback = add_image_callback)
-                self.add_image(video_id,image,atype='videostill',reference_id = "still-" + reference_id, async_callback = add_image_callback)
+                self.add_image(video_id,image,atype='videostill',reference_id = srefid, async_callback = add_image_callback)
             else:
                 callback(False)
 

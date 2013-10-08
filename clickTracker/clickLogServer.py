@@ -24,6 +24,10 @@ from tornado.options import define, options
 define("port", default=9080, help="run on the given port", type=int)
 MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
     
+#############################################
+#GLOBALS
+#############################################
+
 def sig_handler(sig, frame):
     log.warn('Caught signal: ' + str(sig) )
     tornado.ioloop.IOLoop.instance().add_callback(shutdown)
@@ -42,12 +46,29 @@ def shutdown():
             log.info('Shutdown')
     stop_loop()
 
+#############################################
+#### DATA FORMAT ###
+#############################################
+
+class ClickData(object):
+    '''
+    Schema for click tracker data
+    '''
+    def __init__(self):
+        pass
+
+#############################################
+#### WEB INTERFACE #####
+#############################################
+
 class LogLines(tornado.web.RequestHandler):
     
     ''' Track call logger '''
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
+        #Add server timestamp UTC
         data = tornado.escape.json_encode(self.request.arguments)
+
         try:
             event_queue.put(data)
         except Exception,e:

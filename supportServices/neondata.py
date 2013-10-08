@@ -30,6 +30,8 @@ sys.path.insert(0,os.path.abspath(
     os.path.join(os.path.dirname(__file__), '../api')))
 import brightcove_api
 import youtube_api
+from PIL import Image
+from StringIO import StringIO
 
 '''
 Static class for REDIS configuration
@@ -73,17 +75,6 @@ class NeonApiKey(AbstractHashGenerator):
         input = NeonApiKey.salt + str(input)
         return NeonApiKey._api_hash_function(input)
 
-'''
-Static class to generate thumbnail id
-'''
-class ThumbnailID(AbstractHashGenerator):
-    salt = 'Thumbn@il'
-    
-    @staticmethod
-    def generate(input):
-        input = ThumbnailID.salt + str(input)
-        return AbstractHashGenerator._api_hash_function(input)
-        
 class RedisMultiKeyHandler(object):
     ''' Handler to retrive multiple keys from redis storage'''
     
@@ -177,6 +168,8 @@ class AbstractRedisUserBlob(object):
         value = self.to_json()
         if callback:
             self._save(value,callback)
+        else:
+            return AbstractRedisUserBlob.blocking_conn.save(self.key,value)
 
     def lget_callback(self,result):
         #lock unsuccessful, lock exists: 
@@ -558,28 +551,6 @@ class YoutubeAccount(AbstractRedisUserBlob):
 # Request Blobs 
 ######################
 
-class ThumbnailMetaData(object):
-
-    '''
-    Schema for storing thumbnail metadata
-
-    A single thumbnail id maps to all its urls [ Neon, OVP name space ones, other associated ones] 
-    '''
-    def init(self,tid,urls,created,enabled,width,height,ttype,refid=None,rank=None):
-        self.thumb = {}
-        self.thumb['thumbnail_id'] = tid
-        self.thumb['urls'] = urls  # All urls associated with single image
-        self.thumb['created'] = created
-        self.thumb['enabled'] = enabled
-        self.thumb['width'] = width
-        self.thumb['height'] = height
-        self.thumb['type'] = ttype #neon1../ brightcove / youtube
-        self.thumb['rank'] = 0 if not rank else rank
-        self.thumb['refid'] = refid #If referenceID exists as in case of a brightcove thumbnail
-
-    def to_dict(self):
-        return self.thumb
-
 
 class NeonApiRequest(object):
     '''
@@ -704,7 +675,11 @@ class NeonApiRequest(object):
         return obj
 
 class BrightcoveApiRequest(NeonApiRequest):
-    def __init__(self,job_id,api_key,vid,title,url,rtoken,wtoken,pid,callback=None):
+    '''
+    Brightcove API Request class
+    '''
+    def __init__(self,job_id,api_key,vid,title,url,rtoken,wtoken,pid,
+                callback=None):
         self.read_token = rtoken
         self.write_token = wtoken
         self.publisher_id = pid
@@ -712,15 +687,155 @@ class BrightcoveApiRequest(NeonApiRequest):
         self.previous_thumbnail = None
         self.autosync = False
         request_type = "brightcove"
-        super(BrightcoveApiRequest,self).__init__(job_id,api_key,vid,title,url,request_type,callback)
+        super(BrightcoveApiRequest,self).__init__(job_id,api_key,vid,title,url,
+                request_type,callback)
 
 class YoutubeApiRequest(NeonApiRequest):
-    def __init__(self,job_id,api_key,vid,title,url,access_token,refresh_token,expiry,callback=None):
+    '''
+    Youtube API Request class
+    '''
+    def __init__(self,job_id,api_key,vid,title,url,access_token,refresh_token,
+            expiry,callback=None):
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.integration_type = "youtube"
         self.previous_thumbnail = None
         self.expiry = expiry
         request_type = "youtube"
-        super(YoutubeApiRequest,self).__init__(job_id,api_key,vid,title,url,request_type,callback)
+        super(YoutubeApiRequest,self).__init__(job_id,api_key,vid,title,url,
+                request_type,callback)
+
+
+###############################################################################
+## Thumbnail store T_URL => TID => Metadata
+###############################################################################
+
+class ThumbnailMetaData(object):
+
+    '''
+    Schema for storing thumbnail metadata
+
+    A single thumbnail id maps to all its urls [ Neon, OVP name space ones, other associated ones] 
+    '''
+    def init(self,tid,urls,created,enabled,width,height,ttype,refid=None,rank=None):
+        self.thumb = {}
+        self.thumb['thumbnail_id'] = tid
+        self.thumb['urls'] = urls  # All urls associated with single image
+        self.thumb['created'] = created
+        self.thumb['enabled'] = enabled
+        self.thumb['width'] = width
+        self.thumb['height'] = height
+        self.thumb['type'] = ttype #neon1../ brightcove / youtube
+        self.thumb['rank'] = 0 if not rank else rank
+        self.thumb['refid'] = refid #If referenceID exists as in case of a brightcove thumbnail
+
+    def to_dict(self):
+        return self.thumb
+
+class ThumbnailID(AbstractHashGenerator):
+    '''
+    Static class to generate thumbnail id
+
+    input: String or Image stream. 
+
+    Thumbnail ID is the MD5 hash of image data
+    '''
+    salt = 'Thumbn@il'
+    
+    @staticmethod
+    def generate_from_string(input):
+        input = ThumbnailID.salt + str(input)
+        return AbstractHashGenerator._api_hash_function(input)
+
+    @staticmethod
+    def generate_from_image(imstream):   
+        filestream = StringIO()
+        imstream.save(filestream,'jpeg')
+        filestream.seek(0)
+        return ThumbnailID.generate_from_string(filestream.buf)
+
+    @staticmethod
+    def generate(input):
+        if isinstance(input,basestring):
+            return ThumbnailID.generate_from_string(input)
+        else:
+            return ThumbnailID.generate_from_image(input)
+
+
+class ThumbnailURLMapper(AbstractRedisUserBlob):
+    '''
+    Schema to map thumbnail url to thumbnail ID. 
+
+    input - thumbnail url ( key ) , tid - string/image, converted to thumbnail ID
+            if imdata given, then generate tid 
+    '''
+    def __init__(self,thumbnail_url,tid,imdata=None):
+        self.key = thumbnail_url
+        if not imdata:
+            self.value = tid
+        else:
+            self.value = ThumbnailID.generate(imdata) 
+
+    def save(self,external_callback=None):
+        if self.key is None:
+            raise Exception("key not set")
+        if external_callback:
+            AbstractRedisUserBlob.conn.set(self.key,self.value,external_callback)
+        else:
+            return AbstractRedisUserBlob.blocking_conn.set(self.key,value)
+
+    @staticmethod
+    def save_all(thumbnailMapperList,callback=None):
+        data = {}
+        for t in thumbnailMapperList:
+            data[t.key] = t.value 
+
+        if callback:
+            ThumbnailIDMapper.conn.mset(data,callback)
+        else:
+            ThumbnailIDMapper.blocking_conn.mset(data)
+
+    @staticmethod
+    def get_id(key,external_callback):
+        if external_callback:
+            AbstractRedisUserBlob.conn.get(key,external_callback)
+        else:
+            return AbstractRedisUserBlob.blocking_conn.get(key)
+
+class ThumbnailIDMapper(AbstractRedisUserBlob):
+    '''
+    Class schema for Thumbnail URL to thumbnail metadata map
+    Thumbnail url => ( id, platform, video id, account id, thumb type, rank) 
+
+    Used as a cache like store for the map reduce jobs
+    '''
+
+    #TODO: Configure the DB IP Address
+    def __init__(self,tid,ovp,vid,aid,ttype,rank):
+        super(ThumbnailIDMapper,self).__init__()
+        self.key = tid 
+        self.urls = urls
+        self.platform = ovp
+        self.video_id = vid
+        self.account_id = a_id
+        self.thumbnail_type = ttype
+        self.rank = rank
+
+    def _hash(self,input):
+        return hashlib.md5(input).hexdigest()
+    
+    def get_metdata(self):
+        pass
+        #return only specific fields
+
+    @staticmethod
+    def save_all(thumbnailMapperList,callback=None):
+        data = {}
+        for t in thumbnailMapperList:
+            data[t.key] = t.to_json()
+
+        if callback:
+            ThumbnailIDMapper.conn.mset(data,callback)
+        else:
+            ThumbnailIDMapper.blocking_conn.mset(data)
 
