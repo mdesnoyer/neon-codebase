@@ -8,19 +8,20 @@ Copyright: 2013 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
 import json
+import logging
 from mrjob.job import MRJob
+import mrjob.protocol
+import mrjob.util
 import mysql.connector as sqldb
 import time
 import urllib
 import urllib2
 
-class HourlyEventStats(MRJob):
-    INPUT_PROTOCOL = RawValueProtocol
-    INTERNAL_PROTOCOL = PickleProtocol
+_log = logging.getLogger(__name__)
 
-    def __init__(self):
-        super(HourlyEventStats, self).__init__()
-        self.statsdb = None
+class HourlyEventStats(MRJob):
+    INPUT_PROTOCOL = mrjob.protocol.RawValueProtocol
+    INTERNAL_PROTOCOL = mrjob.protocol.PickleProtocol
     
     def configure_options(self):
         super(HourlyEventStats, self).configure_options()
@@ -48,14 +49,26 @@ class HourlyEventStats(MRJob):
             
 
     def mapper_get_events(self, _, line):
-        data = json.load(line)
-        hour = data.s_ts / 3600
-        if data.a == 'load':
-            for img in data.imgs:
-                if img is not None:
-                    yield (('load', img, hour),  1)
-        elif data.a == 'click':
-            yield(('click', data.img, hour), 1)
+        try:
+            data = json.loads(line)
+            hour = data['sts'] / 3600
+            if data['a'] == 'load':
+                if isinstance(data['imgs'], basestring):
+                    raise KeyError('imgs')
+                for img in data['imgs']:
+                    if img is not None:
+                        yield (('load', img, hour),  1)
+            elif data['a'] == 'click':
+                yield(('click', data['img'], hour), 1)
+        except ValueError as e:
+            _log.error('JSON could not be parsed: %s' % line)
+            self.increment_counter('HourlyEventStatsErrors',
+                                   'JSONParseErrors', 1)
+        except KeyError as e:
+            _log.error('Input data was missing a necessary field (%s): %s' % 
+                       (e, line))
+            self.increment_counter('HourlyEventStatsErrors',
+                                   'JSONFieldMissing', 1)
 
     def reducer_count_events(self, event, counts):
         yield (event, sum(counts))
@@ -70,11 +83,26 @@ class HourlyEventStats(MRJob):
 
     def map_thumbnail_url2id(self, event, count):
         '''Maps from the external thumbnail url to our internal id.'''
-        stream = urllib2.urlopen(self.options.videodb_url,
-                                 urllib.urlencode({'url':event[1]}),
-                                 60)
-        event[1] = stream.read().strip()
-        yield event, count
+        try:
+            stream = urllib2.urlopen(self.options.videodb_url,
+                                     urllib.urlencode({'url':event[1]}),
+                                     60)
+            newId = stream.read().strip()
+            if len(newId) < 5:
+                raise IOError('Thumbnail ID is too short: %s' % newId)
+            event[1] = newId
+            yield event, count
+        except URLError as e:
+            _log.exception('Error connecting to: %s' % 
+                           self.options.videodb_url)
+            self.increment_counter('HourlyEventStatsErrors',
+                                   'VideoDBConnectionError', 1)
+        except IOError as e:
+            _log.exception(
+                'Error reading data from videodb for thumbnail url %s: %s' % 
+                (event[1], e))
+            self.increment_counter('HourlyEventStatsErrors',
+                                   'ThumbnailMapError', 1)
 
     def merge_events(self, event, count):
         yield ((event[1], event[2]), (count, event[0]))
@@ -144,4 +172,7 @@ class HourlyEventStats(MRJob):
         
 
 if __name__ == '__main__':
+    mrjob.util.log_to_stream(
+        __name__,
+        format='%(asctime)s %(levelname)s:%(name)s %(message)s')
     HourlyEventStats.run()
