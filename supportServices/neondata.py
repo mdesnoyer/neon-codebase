@@ -32,6 +32,7 @@ import brightcove_api
 import youtube_api
 from PIL import Image
 from StringIO import StringIO
+import dbsettings
 
 '''
 Static class for REDIS configuration
@@ -43,14 +44,21 @@ class RedisClient(object):
     client = redis.Client(host,port)
     client.connect()
 
+    #pool = blockingRedis.ConnectionPool(host, port, db=0)
+    #blocking_client = blockingRedis.StrictRedis(connection_pool=pool)
     blocking_client = blockingRedis.StrictRedis(host,port)
-    
+
     def __init__(self):
         pass
     
     @staticmethod
-    def get_client():
-        return RedisClient.client, RedisClient.blocking_client
+    def get_client(host=None,port=None):
+        if host is None and port is None:
+            return RedisClient.client, RedisClient.blocking_client
+        else:
+            RedisClient.c = redis.Client(host,port)
+            RedisClient.bc = blockingRedis.StrictRedis(host,port)
+            return RedisClient.c,RedisClient.bc 
 
 ''' Format request key'''
 def generate_request_key(api_key,job_id):
@@ -297,7 +305,7 @@ class NeonUserAccount(AbstractRedisUserBlob):
 
 ''' Brightcove Account '''
 class BrightcoveAccount(AbstractRedisUserBlob):
-    def __init__(self,a_id,i_id,p_id=None,rtoken=None,wtoken=None,auto_update=False,last_process_date=None):
+    def __init__(self,a_id,i_id,p_id=None,rtoken=None,wtoken=None,auto_update=False,last_process_date=None,abtest=False):
         super(BrightcoveAccount,self).__init__()
         self.neon_api_key = NeonApiKey.generate(a_id)
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
@@ -315,6 +323,7 @@ class BrightcoveAccount(AbstractRedisUserBlob):
         self.videos = {} 
         self.last_process_date = last_process_date #The publish date of the last processed video 
         self.linked_youtube_account = False
+        self.abtest = abtest 
 
     def add_video(self,vid,job_id):
         self.videos[str(vid)] = job_id
@@ -399,7 +408,8 @@ class BrightcoveAccount(AbstractRedisUserBlob):
         ba.videos = params['videos']
         ba.last_process_date = params['last_process_date'] 
         ba.linked_youtube_account = params['linked_youtube_account']
-        
+        if params.has_key('abtest'):
+            ba.abtest = params['abtest'] 
         #for key in params:
         #    ba.__dict__[key] = params[key]
         return ba
@@ -563,8 +573,8 @@ class NeonApiRequest(object):
     Getting request blobs :
     use static get method to get a json based response NeonApiRequest.get_request()
     '''
-    
-    conn,blocking_conn = RedisClient.get_client()
+    host,port = dbsettings.DBConfig.videoDB 
+    conn,blocking_conn = RedisClient.get_client(host,port)
 
     def __init__(self,job_id,api_key,vid,title,url,request_type,http_callback):
         self.key = generate_request_key(api_key,job_id) 
@@ -769,6 +779,10 @@ class ThumbnailURLMapper(AbstractRedisUserBlob):
     input - thumbnail url ( key ) , tid - string/image, converted to thumbnail ID
             if imdata given, then generate tid 
     '''
+    
+    host,port = dbsettings.DBConfig.urlMapperDB
+    conn,blocking_conn = RedisClient.get_client(host,port)
+   
     def __init__(self,thumbnail_url,tid,imdata=None):
         self.key = thumbnail_url
         if not imdata:
@@ -780,9 +794,9 @@ class ThumbnailURLMapper(AbstractRedisUserBlob):
         if self.key is None:
             raise Exception("key not set")
         if external_callback:
-            AbstractRedisUserBlob.conn.set(self.key,self.value,external_callback)
+            ThumbnailURLMapper.conn.set(self.key,self.value,external_callback)
         else:
-            return AbstractRedisUserBlob.blocking_conn.set(self.key,value)
+            return ThumbnailURLMapper.blocking_conn.set(self.key,value)
 
     @staticmethod
     def save_all(thumbnailMapperList,callback=None):
@@ -791,16 +805,16 @@ class ThumbnailURLMapper(AbstractRedisUserBlob):
             data[t.key] = t.value 
 
         if callback:
-            ThumbnailIDMapper.conn.mset(data,callback)
+            ThumbnailURLMapper.conn.mset(data,callback)
         else:
-            ThumbnailIDMapper.blocking_conn.mset(data)
+            return ThumbnailURLMapper.blocking_conn.mset(data)
 
     @staticmethod
     def get_id(key,external_callback):
         if external_callback:
-            AbstractRedisUserBlob.conn.get(key,external_callback)
+            ThumbnailURLMapper.conn.get(key,external_callback)
         else:
-            return AbstractRedisUserBlob.blocking_conn.get(key)
+            return ThumbnailURLMapper.blocking_conn.get(key)
 
 class ThumbnailIDMapper(AbstractRedisUserBlob):
     '''
@@ -809,6 +823,8 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
 
     Used as a cache like store for the map reduce jobs
     '''
+    host,port = dbsettings.DBConfig.thumbnailDB
+    conn,blocking_conn = RedisClient.get_client(host,port)
 
     #TODO: Configure the DB IP Address
     def __init__(self,tid,ovp,vid,aid,ttype,rank):
@@ -839,3 +855,42 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
         else:
             ThumbnailIDMapper.blocking_conn.mset(data)
 
+'''
+MISC DB UTILS
+'''
+
+class DBUtils(object):
+
+    def __init__(self):
+        pass
+
+    def get_all_brightcove_accounts(self,callback=None):
+        bc_prefix = 'brightcoveaccount_*'
+        host,port = dbsettings.DBConfig.accountDB
+        conn,blocking_conn = RedisClient.get_client(host,port)
+    
+        if callback:
+            conn.keys(bc_prefix,callback)
+        else:
+            accounts = blocking_conn.keys(bc_prefix)
+            data = [] 
+            for accnt in acccounts:
+                jdata = blocking_conn.get(accnt)
+                ba = BrightcoveAccount.create(jdata)
+                data.append(ba)
+            return data
+
+    #ba.neon_api_key,job_id
+    def get_video_data(self,api_key,job_id,callback=None):
+        def wrap_callback(res):
+            if res:
+                callback(nar.thumbnails)
+            else:
+                callback(None)
+
+        if callback:
+            NeonApiRequest.get_request(api_key,job_id,wrap_callback)
+        else:
+            nar = NeonApiRequest.get_request(api_key,job_id)
+            if nar:
+                return nar.thumbnails

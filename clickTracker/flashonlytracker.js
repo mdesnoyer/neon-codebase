@@ -14,6 +14,8 @@
 var NeonTrackerURL = "http://localhost:8888/track";
 var NeonTrackerType = "flashonlyplayer";
 var NeonAccountID = NeonAccountID || "accountIDNotSet";
+var PageLoadIDSeen = null; 
+var MediaPlayPageIDSeen = null;
 var NeonDataSender = (function() {
 
 	function JSONscriptRequest(fullUrl) {
@@ -89,19 +91,19 @@ var NeonFlashTracker = ( function () {
             var imageUrls = new Array();
             var stillUrls = new Array();                                            
 			var mediaCollection = content.getAllMediaCollections();
-			console.log(mediaCollection);
             if (mediaCollection.length >0 && mediaCollection[0].mediaCount > 0){
             	for(var i = 0; i < mediaCollection[0].mediaCount; i++) {
-				   	if (mediaCollection[0].mediaIds[i] != initialVideo.id){	
                 		imageUrls[i] = content.getMedia(mediaCollection[0].mediaIds[i]) ["thumbnailURL"].split('?')[0]; 
-                		stillUrls[i] = content.getMedia(mediaCollection[0].mediaIds[i]) ["videoStillURL"].split('?')[0];
-					}
+                		//stillUrls[i] = content.getMedia(mediaCollection[0].mediaIds[i]) ["videoStillURL"].split('?')[0];
             	}
 			}
-			console.log(imageUrls);
+			//console.log(imageUrls);
 			action = "load";
-			params = "a=" + action + "&id="+ reqGuid + "&imgs=" + encodeURIComponent(JSON.stringify(imageUrls));
-			NeonDataSender.sendRequest(NeonTrackerURL,params);			           
+			params = "a=" + action + "&id="+ reqGuid + "&imgs=" + encodeURIComponent(JSON.stringify(imageUrls)) + "&cvid="+initialVideo.id;
+			if (PageLoadIDSeen == null){
+				PageLoadIDSeen = reqGuid;
+				NeonDataSender.sendRequest(NeonTrackerURL,params);			           
+			}
         },
                                                                                      
         onMediaBegin: function (evt) {
@@ -111,9 +113,11 @@ var NeonFlashTracker = ( function () {
 			var imgSrc = evt.media.thumbnailURL.split("?")[0]; //clean up
 			//stillSrc = evt.media.videoStillURL;
 			params = "a=" + action + "&id="+ reqGuid + "&img=" + encodeURIComponent(imgSrc);
-		    if (vid != initialVideo.id){	
-				NeonDataSender.sendRequest(NeonTrackerURL,params);			           
-			}	
+			if(MediaPlayPageIDSeen == null){
+				MediaPlayPageIDSeen = reqGuid;
+				NeonDataSender.sendRequest(NeonTrackerURL,params);			         
+			}  
+			
         }
     }
 }());

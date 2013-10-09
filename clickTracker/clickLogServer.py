@@ -8,6 +8,7 @@ import signal
 import time
 import os
 import time
+import json
 
 #logging
 import logging
@@ -54,8 +55,23 @@ class ClickData(object):
     '''
     Schema for click tracker data
     '''
-    def __init__(self):
-        pass
+    def __init__(self,action,id,aid,ttype,cts,sts,page,cip,imgs,cvid=None):
+        self.a = action # load/ click
+        self.id = id    # page load id
+        self.aid = aid #account id
+        self.ttype = ttype #tracker type
+        self.ts = cts #client timestamp
+        self.sts = sts #server timestamp
+        self.cip = cip #client IP
+
+        if isinstance(imgs,list):        
+            self.imgs = imgs #image list
+            self.cvid = cvid #current video in the player
+        else:
+            self.img = imgs  #clicked image
+        
+    def to_json(self):
+        return json.dumps(self, default=lambda o: o.__dict__)
 
 #############################################
 #### WEB INTERFACE #####
@@ -66,13 +82,32 @@ class LogLines(tornado.web.RequestHandler):
     ''' Track call logger '''
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
-        #Add server timestamp UTC
-        data = tornado.escape.json_encode(self.request.arguments)
+        try:
+            cvid = None
+            action = self.get_argument('a')
+            id = self.get_argument('id')
+            aid = self.get_argument('aid') 
+            ttype = self.get_argument('ttype')
+            cts = self.get_argument('ts')
+            sts = int(time.time())
+            page = self.get_argument('page') #url decode
+            if action == 'load':
+                imgs = self.get_argument('imgs')
+                cvid = self.get_argument('cvid')
+            else:
+                imgs = self.get_argument('img')
+            cip = self.request.remote_ip
+
+        except Exception,e:
+            log.exception("key=get_track msg=%s" %e) 
+        
+        cd = ClickData(action,id,aid,ttype,cts,sts,page,cip,imgs,cvid)
+        data = cd.to_json()
 
         try:
             event_queue.put(data)
         except Exception,e:
-            log.exception("key=loglines msg=Q error %s",e.__str__())
+            log.exception("key=loglines msg=Q error %s" %e)
         self.finish()
 
     '''
@@ -95,7 +130,7 @@ class GetLines(tornado.web.RequestHandler):
         except:
             pass
 
-        qsize = 10 # event_queue.qsize()
+        qsize = event_queue.qsize()
         data = ''
         if qsize > count:
             for i in range(count):
