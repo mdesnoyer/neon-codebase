@@ -209,7 +209,6 @@ class HourlyEventStats(MRJob):
                     reducer_final=self.statsdb_disconnect)]
             
         
-
 if __name__ == '__main__':
     mrjob.util.log_to_stream(
         __name__,

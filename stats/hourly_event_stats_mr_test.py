@@ -5,6 +5,7 @@ from mrjob.protocol import *
 import mysql.connector
 from StringIO import StringIO
 import sqlite3
+import tempfile
 import unittest
 import urllib2
 
@@ -55,7 +56,7 @@ def run_single_step(mr, input_str, step_type='mapper', step=0,
 def hr2str(hr):
     return datetime.utcfromtimestamp(hr*3600).isoformat(' ')
 
-class TestSingleStep(unittest.TestCase):
+class TestDataParsing(unittest.TestCase):
     def setUp(self):
         self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
 
@@ -136,7 +137,6 @@ class TestIDMapping(unittest.TestCase):
         self.urlopen = urllib2.urlopen
 
     def tearDown(self):
-        super(TestIDMapping, self).tearDown()
         urllib2.urlopen = self.urlopen
 
     def test_valid_mapping(self):
@@ -227,15 +227,21 @@ class TestDatabaseWriting(unittest.TestCase):
     '''Tests database writing step.'''
     def setUp(self):
         self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
+        
         self.dbconnect = mysql.connector.connect
-        self.ramdb = sqlite3.connect('file::memory:?cache=shared')
-        mysql.connector.connect = MagicMock(
-            side_effect=(sqlite3.connect('file::memory:?cache=shared') for x in range(100)))
+        dbmock = MagicMock()
+        def connect2db(*args, **kwargs):
+            return sqlite3.connect('file::memory:?cache=shared')
+        dbmock.side_effect = connect2db
+        mysql.connector.connect = dbmock
+        self.ramdb = connect2db()
 
     def tearDown(self):
         mysql.connector.connect = self.dbconnect
         try:
-            self.ramdb.execute('drop table %s' % self.mr.options.stats_table)
+            cursor = self.ramdb.cursor()
+            cursor.execute('drop table %s' % self.mr.options.stats_table)
+            self.ramdb.commit()
         except Exception as e:
             pass
         self.ramdb.close()
@@ -334,7 +340,89 @@ class TestDatabaseWriting(unittest.TestCase):
         self.assertRaises(mysql.connector.Error, run_single_step,
            self.mr, '', 'reducer', 2)
 
-       
+
+class TestEndToEnd(unittest.TestCase):
+    '''Tests database writing step.'''
+    def setUp(self):
+        self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
+        self.urlopen = urllib2.urlopen
+        self.dbconnect = mysql.connector.connect
+
+        # For some reason, the in memory database isn't shared, so use
+        # a temporary file instead. It worked in the other test case....
+        self.tempfile = tempfile.NamedTemporaryFile()
+
+        # Replace the database with an in memory one.
+        dbmock = MagicMock()
+        def connect2db(*args, **kwargs):
+            return sqlite3.connect(self.tempfile.name)
+            #return sqlite3.connect('file::memory:?cache=shared')
+        dbmock.side_effect = connect2db
+        mysql.connector.connect = dbmock
+        self.ramdb = connect2db()
+        
+
+    def tearDown(self):
+        urllib2.urlopen = self.urlopen
+        mysql.connector.connect = self.dbconnect
+        try:
+            self.ramdb.execute('drop table %s' % self.mr.options.stats_table)
+        except Exception as e:
+            pass
+        self.ramdb.close()
+
+    def test_bunch_of_data(self):
+        # Setup the input data
+        input_data = (
+            '{"sts":19800, "a":"click", '
+            '"ttype":"flashonly", "img":"http://monkey.com"}\n'
+            '{"sts":19795, "a":"load", "ttype":"flashonly",'
+            '"imgs":["http://monkey.com","http://panda.com","pumpkin.wow"]}\n'
+            '{"sts":19805, "a":"click", '
+             '"ttype":"flashonly", "img":"http://panda.com"}\n'
+            '{"sts":19800, "a":"load", "ttype":"flashonly",'
+            '"imgs":["http://monkey.com","pumpkin.jpg"]}\n'
+            '{"sts":19810, "a":"click", '
+             '"ttype":"flashonly", "img":"http://panda.com"}\n'
+            '{"sts":19810, "a":"click", '
+             '"ttype":"flashonly", "img":"pumpkin.jpg"}')
+        stdin = StringIO(input_data)
+        self.mr.sandbox(stdin=stdin)
+
+        # Mock out the responses for converting urls to thumbnail ids
+        tid_list = [
+            ("http://monkey.com", "49a8efg1ea98"),
+            ("http://panda.com", "2348598ewsfrwe"),
+            ("pumpkin.wow", "68367sgdhs"),
+            ("pumpkin.jpg", "faefr42345dsfg")
+        ]
+        tid_map = dict([(urllib.urlencode({'url':x[0]}),
+                         json.dumps({'tid':x[1]})) 
+                        for x in tid_list])
+        tid_mock = MagicMock()
+        tid_mock.side_effect = lambda x, url, y: StringIO(tid_map[url])
+        urllib2.urlopen = tid_mock
+
+        # Run the map reduce job
+        runner = self.mr.make_runner()
+        runner.run()
+        
+        self.assertGreater(tid_mock.call_count, 0)
+        self.assertGreater(mysql.connector.connect.call_count, 0)
+
+        # Finally, check the database to make sure it says what we want
+        cursor = self.ramdb.cursor()
+        cursor.execute('select thumbnail_id, hour, loads, clicks from %s' % 
+                       self.mr.options.stats_table)
+        results = {}
+        for data in cursor.fetchall():
+            results[(data[0], data[1])] = (data[2], data[3])
+
+        self.assertEqual(len(results.items()), 4)
+        self.assertEqual(results[('49a8efg1ea98', hr2str(5))], (2, 1))
+        self.assertEqual(results[('2348598ewsfrwe', hr2str(5))], (1, 2))
+        self.assertEqual(results[('68367sgdhs', hr2str(5))], (1, 0))
+        self.assertEqual(results[('faefr42345dsfg', hr2str(5))], (1, 1))
 
 if __name__ == '__main__':
     unittest.main()
