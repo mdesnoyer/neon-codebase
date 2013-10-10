@@ -7,6 +7,7 @@ the external url to an internal thumbnail id.
 Copyright: 2013 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
+from datetime import datetime
 import json
 import logging
 from mrjob.job import MRJob
@@ -20,7 +21,7 @@ import urllib2
 _log = logging.getLogger(__name__)
 
 class HourlyEventStats(MRJob):
-    INPUT_PROTOCOL = mrjob.protocol.RawValueProtocol
+    INPUT_PROTOCOL = mrjob.protocol.RawProtocol
     INTERNAL_PROTOCOL = mrjob.protocol.PickleProtocol
     
     def configure_options(self):
@@ -38,7 +39,7 @@ class HourlyEventStats(MRJob):
         self.add_passthrough_option('--stats_db', default='stats',
                                     help='Stats database to connect to')
         self.add_passthrough_option('--increment_stats', action='store_true',
-            default='False',
+            default=False,
             help='If true, stats are incremented. Otherwise, they are overwritten')
         self.add_passthrough_option('--stats_table', default='hourly_events',
                                     help='Table in the stats database to write to')
@@ -48,9 +49,17 @@ class HourlyEventStats(MRJob):
         
             
 
-    def mapper_get_events(self, _, line):
+    def mapper_get_events(self, line, _):
         try:
             data = json.loads(line)
+            if data['ttype'] == 'html5':
+                self.increment_counter(
+                    'HourlyEventStatsErrors',
+                    'HTML5_bc_click' if data['a'] == 'click' else 
+                    'HTML5_bc_load',
+                    1)
+                return
+            
             hour = data['sts'] / 3600
             if data['a'] == 'load':
                 if isinstance(data['imgs'], basestring):
@@ -87,22 +96,36 @@ class HourlyEventStats(MRJob):
             stream = urllib2.urlopen(self.options.videodb_url,
                                      urllib.urlencode({'url':event[1]}),
                                      60)
-            newId = stream.read().strip()
-            if len(newId) < 5:
-                raise IOError('Thumbnail ID is too short: %s' % newId)
-            event[1] = newId
-            yield event, count
-        except URLError as e:
+            data = json.load(stream)
+            if data['tid'] is None:
+                _log.error('Could not find the thumbnail id for url: %s' %
+                           event[1])
+                self.increment_counter('HourlyEventStatsErrors',
+                                       'UnknownThumbnailURL', 1)
+                return
+                
+            if len(data['tid']) < 5:
+                raise ValueError('Thumbnail ID is too short: %s' % data['tid'])
+            yield (event[0], data['tid'], event[2]), count
+        except urllib2.URLError as e:
             _log.exception('Error connecting to: %s' % 
                            self.options.videodb_url)
             self.increment_counter('HourlyEventStatsErrors',
                                    'VideoDBConnectionError', 1)
+        except KeyError as e:
+            _log.error('Data format incorrect: %s' % e)
+            self.increment_counter('HourlyEventStatsErrors',
+                                   'TIDFieldMissing', 1)
+        except ValueError as e:
+            _log.error('Could not parse response')
+            self.increment_counter('HourlyEventStatsErrors',
+                                   'TIDParseError', 1)
         except IOError as e:
             _log.exception(
                 'Error reading data from videodb for thumbnail url %s: %s' % 
                 (event[1], e))
             self.increment_counter('HourlyEventStatsErrors',
-                                   'ThumbnailMapError', 1)
+                                   'TIDParseError', 1)
 
     def merge_events(self, event, count):
         yield ((event[1], event[2]), (count, event[0]))
@@ -120,39 +143,55 @@ class HourlyEventStats(MRJob):
             counts[event] = count
         loads = counts.setdefault('load', 0)
         clicks = counts.setdefault('click', 0)
-        hourdate = time.gmtime(hours * 3600)
+        hourdate = datetime.utcfromtimestamp(hours * 3600)
 
-        self.statscursor.execute(
-            'INSERT INTO ? (thumbnail_id, hour, loads, clicks) '
-            'VALUES (?, ?, ?, ?) '
-            'ON DUPLICATE KEY UPDATE loads=loads+?, clicks=clicks+?',
-            (self.options.stats_table,
-             img_id, hourdate, loads, clicks, loads, clicks))
+        if self.options.increment_stats:
+            self.statscursor.execute(
+                '''SELECT loads, clicks from %s 
+                where thumbnail_id = ? and hour = ?''' %
+              self.options.stats_table, (img_id, hourdate))
+            result = self.statscursor.fetchone()
+            if result is None:
+                self.statscursor.execute(
+                    '''INSERT INTO %s (thumbnail_id, hour, loads, clicks)
+                    VALUES (?, ?, ?, ?) ''' % self.options.stats_table,
+                    (img_id, hourdate, loads, clicks))
+            else:
+                self.statscursor.execute(
+                    '''UPDATE %s set loads=?, clicks=? where
+                    thumbnail_id = ? and hour = ?''' %
+                    self.options.stats_table,
+                    (loads + result[0], clicks + result[1], img_id, hourdate))
+        else:
+            self.statscursor.execute(
+                '''REPLACE INTO %s (thumbnail_id, hour, loads, clicks) 
+                VALUES (?, ?, ?, ?) ''' % self.options.stats_table,
+                (img_id, hourdate, loads, clicks))
 
     def statsdb_connect(self):
-        self.statsdb = sqldb.connect(
-            user=self.options.stats_user,
-            password=self.options.stats_pass,
-            host=self.options.stats_host,
-            port=self.options.stats_port,
-            database=self.options.stats_db)
+        try:
+            self.statsdb = sqldb.connect(
+                user=self.options.stats_user,
+                password=self.options.stats_pass,
+                host=self.options.stats_host,
+                port=self.options.stats_port,
+                database=self.options.stats_db)
+        except sqldb.Error as e:
+            _log.exception('Error connecting to stats db: %s' % e)
+            raise
         self.statscursor = self.statsdb.cursor()
 
-        if not self.options.increment_stats:
-            self.statscursor.execute('DROP TABLE IF EXISTS ?',
-                                     (self.options.stats_table,))
-
-        self.statscursor.execute('CREATE TABLE IF NOT EXISTS ? ('
-                                 'thumbail_id VARCHAR(32) NOT NULL,'
-                                 'hour DATETIME NOT NULL,'
-                                 'loads INT NOT NULL DEFAULT 0,'
-                                 'clicks INT NOT NULL DEFAULT 0,'
-                                 'UNIQUE KEY (thumbnail_id, hour))',
+        self.statscursor.execute('''CREATE TABLE IF NOT EXISTS %s (
+                                 thumbnail_id VARCHAR(32) NOT NULL,
+                                 hour DATETIME NOT NULL,
+                                 loads INT NOT NULL DEFAULT 0,
+                                 clicks INT NOT NULL DEFAULT 0,
+                                 UNIQUE (thumbnail_id, hour))''' %
                                  (self.options.stats_table,))
 
     def statsdb_disconnect(self):
-        self.statscursor.commit()
         self.statscursor.close()
+        self.statsdb.commit()
         self.statsdb.close()
 
     def steps(self):
