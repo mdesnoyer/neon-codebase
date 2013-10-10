@@ -254,6 +254,9 @@ class NeonUserAccount(AbstractRedisUserBlob):
 
         self.integrations[integration_id] = accntkey
 
+    def get_ovp(self):
+        return "neon"
+    
     def add_video(self,vid,job_id):
         self.videos[str(vid)] = job_id
     
@@ -325,12 +328,31 @@ class BrightcoveAccount(AbstractRedisUserBlob):
         self.linked_youtube_account = False
         self.abtest = abtest 
 
+    def get_ovp(self):
+        return "brightcove"
+
     def add_video(self,vid,job_id):
         self.videos[str(vid)] = job_id
     
     def get_videos(self):
         if len(self.videos) > 0:
             return self.videos.keys()
+    
+    def get_thumbnails(self,video_id,callback=None):
+        def wrap_callback(res):
+            if res:
+                callback(nar.thumbnails)
+            else:
+                callback(None)
+
+        job_id = self.videos[video_id]
+        if callback:
+            NeonApiRequest.get_request(self.neon_api_key,job_id,wrap_callback)
+        else:
+            nar = NeonApiRequest.get_request(api_key,job_id)
+            if nar:
+                return nar.thumbnails
+
 
     def get(self,callback=None):
         if callback:
@@ -451,6 +473,9 @@ class YoutubeAccount(AbstractRedisUserBlob):
     
         self.channels = None
 
+    def get_ovp(self):
+        return "youtube"
+    
     def add_video(self,vid,job_id):
         self.videos[str(vid)] = job_id
     
@@ -515,6 +540,21 @@ class YoutubeAccount(AbstractRedisUserBlob):
             # Not yet supported
             callback(None)
 
+    def get_thumbnails(self,video_id,callback=None):
+        def wrap_callback(res):
+            if res:
+                callback(nar.thumbnails)
+            else:
+                callback(None)
+
+        job_id = self.videos[video_id]
+        if callback:
+            NeonApiRequest.get_request(self.neon_api_key,job_id,wrap_callback)
+        else:
+            nar = NeonApiRequest.get_request(api_key,job_id)
+            if nar:
+                return nar.thumbnails
+    
     '''
     Update thumbnail for the given video
     '''
@@ -728,19 +768,18 @@ class ThumbnailMetaData(object):
     A single thumbnail id maps to all its urls [ Neon, OVP name space ones, other associated ones] 
     '''
     def init(self,tid,urls,created,enabled,width,height,ttype,refid=None,rank=None):
-        self.thumb = {}
-        self.thumb['thumbnail_id'] = tid
-        self.thumb['urls'] = urls  # All urls associated with single image
-        self.thumb['created'] = created
-        self.thumb['enabled'] = enabled
-        self.thumb['width'] = width
-        self.thumb['height'] = height
-        self.thumb['type'] = ttype #neon1../ brightcove / youtube
-        self.thumb['rank'] = 0 if not rank else rank
-        self.thumb['refid'] = refid #If referenceID exists as in case of a brightcove thumbnail
+        self.thumbnail_id = tid
+        self.urls = urls  # All urls associated with single image
+        self.created = created
+        self.enabled = enabled
+        self.width = width
+        self.height = height
+        self.type = ttype #neon1../ brightcove / youtube
+        self.rank = 0 if not rank else rank
+        self.refid = refid #If referenceID exists as in case of a brightcove thumbnail
 
     def to_dict(self):
-        return self.thumb
+        return self.__dict__
 
 class ThumbnailID(AbstractHashGenerator):
     '''
@@ -864,33 +903,44 @@ class DBUtils(object):
     def __init__(self):
         pass
 
+    def fetch_keys_from_db(host,port,key_prefix,callback=None):
+        conn,blocking_conn = RedisClient.get_client(host,port)
+        if callback:
+            conn.keys(key_prefix,callback)
+        else:
+            keys = blocking_conn.keys(key_prefix)
+            return keys
+
     def get_all_brightcove_accounts(self,callback=None):
         bc_prefix = 'brightcoveaccount_*'
         host,port = dbsettings.DBConfig.accountDB
-        conn,blocking_conn = RedisClient.get_client(host,port)
+        accounts = self.fetch_keys_from_db(host,port,bc_prefix)
+        data = [] 
+        for accnt in acccounts:
+            jdata = blocking_conn.get(accnt)
+            ba = BrightcoveAccount.create(jdata)
+            data.append(ba)
+        return data
     
-        if callback:
-            conn.keys(bc_prefix,callback)
-        else:
-            accounts = blocking_conn.keys(bc_prefix)
-            data = [] 
-            for accnt in acccounts:
-                jdata = blocking_conn.get(accnt)
-                ba = BrightcoveAccount.create(jdata)
-                data.append(ba)
-            return data
+    def get_all_youtube_accounts(self,callback=None):
+        yt_prefix = 'youtubeaccount_*'
+        host,port = dbsettings.DBConfig.accountDB
+        accounts = self.fetch_keys_from_db(host,port,yt_prefix)
+        data = [] 
+        for accnt in acccounts:
+            jdata = blocking_conn.get(accnt)
+            yt = YoutubeAccount.create(jdata)
+            data.append(yt)
+        return data
 
-    #ba.neon_api_key,job_id
-    def get_video_data(self,api_key,job_id,callback=None):
-        def wrap_callback(res):
-            if res:
-                callback(nar.thumbnails)
-            else:
-                callback(None)
+    def get_all_external_accounts(self,callback=None):
+        data = []
+        bas = self.get_all_brightcove_accounts()
+        if bas:
+            data.extend(bas)
+        yts = self.get_all_youtube_accounts()
+        if yts:
+            data.extend(yts)
 
-        if callback:
-            NeonApiRequest.get_request(api_key,job_id,wrap_callback)
-        else:
-            nar = NeonApiRequest.get_request(api_key,job_id)
-            if nar:
-                return nar.thumbnails
+        return data
+
