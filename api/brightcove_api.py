@@ -302,8 +302,8 @@ class BrightcoveApi(object):
     ''' process publisher feed for neon tags and generate brightcove thumbnail/still requests '''
     def process_publisher_feed(self,items,i_id):
         vids_to_process = [] 
-        bc_json = BrightcoveAccount.get_account(self.neon_api_key,i_id)
-        bc = BrightcoveAccount.create(bc_json)
+        bc_json = BrightcovePlatform.get_account(self.neon_api_key,i_id)
+        bc = BrightcovePlatform.create(bc_json)
         videos_processed = bc.get_videos() 
         if videos_processed is None:
             videos_processed = {} 
@@ -332,18 +332,18 @@ class BrightcoveApi(object):
                     log.info("key=process_publisher_feed msg=flv url missing for %s" %vid)
                     continue
 
-                resp = self.format_neon_api_request(vid,d_url,prev_thumbnail=still,request_type='topn')
+                resp = self.format_neon_api_request(vid,d_url,prev_thumbnail=still,request_type='topn',i_id=i_id)
                 print "creating request for video [topn] ", vid
                 if resp is not None and not resp.error:
                     #Update the videos in customer inbox
-                    bc_json = BrightcoveAccount.get_account(self.neon_api_key,i_id)
-                    bc = BrightcoveAccount.create(bc_json)
+                    bc_json = BrightcovePlatform.get_account(self.neon_api_key,i_id)
+                    bc = BrightcovePlatform.create(bc_json)
                     r = tornado.escape.json_decode(resp.body)
                     bc.videos[vid] = r['job_id']
                     bc.last_process_date = int(item['publishedDate']) / 1000
                     bc.save()
 
-    def format_neon_api_request(self,id,video_download_url,prev_thumbnail=None,request_type='topn',callback=None):
+    def format_neon_api_request(self,id,video_download_url,prev_thumbnail=None,request_type='topn',i_id=None,callback=None):
         request_body = {}
     
         #brightcove tokens
@@ -356,6 +356,7 @@ class BrightcoveApi(object):
         request_body["callback_url"] = "http://thumbnails.neon-lab.com/testcallback"
         request_body["autosync"] = self.autosync
         request_body["topn"] = 1
+        request_body["integration_id"] = i_id 
 
         if request_type == 'topn':
             client_url = "http://thumbnails.neon-lab.com/api/v1/submitvideo/brightcove"
@@ -454,7 +455,7 @@ class BrightcoveApi(object):
     Create neon api request for the particular video
     '''
 
-    def create_video_request(self,video_id,create_callback):
+    def create_video_request(self,video_id,i_id,create_callback):
 
         def get_vid_info(response):
             if not response.error and "error" not in response.body:
@@ -462,7 +463,7 @@ class BrightcoveApi(object):
                 v_url = data["FLVURL"]
                 still = data['videoStillURL']
                 vid = str(data["id"])
-                self.format_neon_api_request(vid,v_url,still,request_type='topn',callback =create_callback)
+                self.format_neon_api_request(vid,v_url,still,request_type='topn',i_id=i_id,callback = create_callback)
             else:
                 create_callback(False)
 

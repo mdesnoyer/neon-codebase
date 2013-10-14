@@ -305,9 +305,9 @@ class AccountHandler(tornado.web.RequestHandler):
         if itype == "neon_integrations":
             NeonUserAccount.get_account(self.api_key,account_callback)
         elif itype =="brightcove_integrations":
-            BrightcoveAccount.get_account(self.api_key,i_id,account_callback)
+            BrightcovePlatform.get_account(self.api_key,i_id,account_callback)
         elif itype == "youtube_integrations":
-            YoutubeAccount.get_account(self.api_key,i_id,account_callback)
+            YoutubePlatform.get_account(self.api_key,i_id,account_callback)
         else:
             pass
 
@@ -430,13 +430,13 @@ class AccountHandler(tornado.web.RequestHandler):
         def account_callback(data):
             if data: 
                 try:
-                    bc_account = BrightcoveAccount.create(data)
+                    bc_account = BrightcovePlatform.create(data)
                     token = bc_account.read_token
                     self.integration_id = bc_account.integration_id
                     if (bc_account.videos) > 0:
                         keys = [ generate_request_key(api_key,j_id) for j_id in bc_account.videos.values()] 
                         NeonApiRequest.multiget(keys,result_aggregator)
-                        BrightcoveAccount.find_all_videos(token,limit,result_aggregator)
+                        BrightcovePlatform.find_all_videos(token,limit,result_aggregator)
                     else:
                         raise Exception("NOT YET IMPL")
                 except Exception,e:
@@ -447,7 +447,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
         limit = self.get_argument('limit')
         #get brightcove tokens and video info from neondb 
-        BrightcoveAccount.get_account(self.api_key,i_id,account_callback)
+        BrightcovePlatform.get_account(self.api_key,i_id,account_callback)
 
     ''' GET Status for a particular video from any integration type
     '''
@@ -500,7 +500,7 @@ class AccountHandler(tornado.web.RequestHandler):
             NeonUserAccount.get_account(self.api_key,get_neon_account)
         else:
             #assume brightcove account
-            BrightcoveAccount.get_account(self.api_key,i_id,get_neon_account)
+            BrightcovePlatform.get_account(self.api_key,i_id,get_neon_account)
 
     
     ''' Create request for brightcove video 
@@ -517,7 +517,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
         def get_account_callback(result):
             if result:
-                bc = BrightcoveAccount.create(result)
+                bc = BrightcovePlatform.create(result)
                 #submit job for processing
                 bc.create_job(vid,job_created)
             else:
@@ -531,7 +531,7 @@ class AccountHandler(tornado.web.RequestHandler):
             data = '{"error": "video_id not set"}'
             self.send_json_response(data,400)
             
-        BrightcoveAccount.get_account(self.api_key,i_id,get_account_callback)
+        BrightcovePlatform.get_account(self.api_key,i_id,get_account_callback)
         
 
     ''' Update the thumbnail for a particular video '''
@@ -563,7 +563,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
         def get_account_callback(result):
             if result:
-                self.bc = BrightcoveAccount.create(result)
+                self.bc = BrightcovePlatform.create(result)
                 job_id = self.bc.videos[vid] 
                 bc_request = BrightcoveApiRequest.get_request(self.api_key,job_id,get_request) 
             else:
@@ -578,7 +578,7 @@ class AccountHandler(tornado.web.RequestHandler):
             self.finish()
             return
         
-        BrightcoveAccount.get_account(self.api_key,i_id,get_account_callback)
+        BrightcovePlatform.get_account(self.api_key,i_id,get_account_callback)
 
     ''' 
     Create a Neon Account
@@ -672,7 +672,7 @@ class AccountHandler(tornado.web.RequestHandler):
                     self.send_json_response(data,409)
                 else:
                     curtime = time.time() #account creation time
-                    bc = BrightcoveAccount(a_id,i_id,p_id,rtoken,wtoken,autosync,curtime)
+                    bc = BrightcovePlatform(a_id,i_id,p_id,rtoken,wtoken,autosync,curtime)
                     na.add_integration(bc.integration_id,bc.key)
                     na.save_integration(bc,saved_account)
             else:
@@ -707,7 +707,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
         def update_account(result):
             if result:
-                bc = BrightcoveAccount.create(result)
+                bc = BrightcovePlatform.create(result)
                 bc.read_token = rtoken
                 bc.write_token = wtoken
                 bc.auto_update = autosync
@@ -728,7 +728,7 @@ class AccountHandler(tornado.web.RequestHandler):
             return
 
         uri_parts = self.request.uri.split('/')
-        BrightcoveAccount.get_account(self.api_key,i_id,update_account)
+        BrightcovePlatform.get_account(self.api_key,i_id,update_account)
 
 
     '''
@@ -739,7 +739,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
         def get_account(result):
             if result:
-                bc = BrightcoveAccount.create(result)
+                bc = BrightcovePlatform.create(result)
                 #Get all videos for this account
                 #Aggregate result based on state
 
@@ -749,7 +749,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 data = '{"error": "Account doesnt exists" }'
                 self.send_json_response(data,400)
 
-        BrightcoveAccount.get_account(self.api_key,i_id,get_account)
+        BrightcovePlatform.get_account(self.api_key,i_id,get_account)
 
     #### YOUTUBE ####
 
@@ -793,7 +793,7 @@ class AccountHandler(tornado.web.RequestHandler):
         r_token = self.get_argument("refresh_token")
         expires = self.get_argument("expires")    
         autosync = self.get_argument("auto_update")
-        yt = YoutubeAccount(self.api_key,i_id,a_token,r_token,expires,autosync)
+        yt = YoutubePlatform(self.api_key,i_id,a_token,r_token,expires,autosync)
         #Add channel
         yt.add_channels(channel_callback)
 
@@ -811,7 +811,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
         def update_account(result):
             if result:
-                ya = YoutubeAccount.create(result)
+                ya = YoutubePlatform.create(result)
                 ya.access_token = access_token
                 ya.refresh_token = refresh_token
                 ya.auto_update = auto_update
@@ -825,7 +825,7 @@ class AccountHandler(tornado.web.RequestHandler):
             access_token = self.request.get_argument('access_token')
             refresh_token = self.request.get_argument('refresh_token')
             auto_update = self.request.get_argument('auto_update')
-            YoutubeAccount.get_account(self.api_key,i_id,update_account)
+            YoutubePlatform.get_account(self.api_key,i_id,update_account)
         except:
             data = '{"error": "missing arguments"}'
             self.send_json_response()
@@ -847,7 +847,7 @@ class AccountHandler(tornado.web.RequestHandler):
        
         def get_account(result):
             if result:
-                ya = YoutubeAccount.create(result)
+                ya = YoutubePlatform.create(result)
                 params = {}
                 params["api_key"] = self.api_key
                 params["video_id"] = self.get_argument("video_id")
@@ -874,7 +874,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 data = '{"error" : "no such youtube account" }'
                 self.send_json_response(data,400)
 
-        YoutubeAccount.get_account(self.api_key,i_id,get_account)
+        YoutubePlatform.get_account(self.api_key,i_id,get_account)
 
 
     '''
@@ -988,7 +988,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
         def account_callback(account_response):
             if account_response:
-                yt_account = YoutubeAccount.create(account_response)
+                yt_account = YoutubePlatform.create(account_response)
                 
                 
                 if (yt_account.videos) > 0:
@@ -1005,7 +1005,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.send_json_response(data,500)
 
         uri_parts = self.request.uri.split('/')
-        YoutubeAccount.get_account(self.api_key,i_id,account_callback)
+        YoutubePlatform.get_account(self.api_key,i_id,account_callback)
 
     ''' Update the thumbnail for a particular video '''
     def update_youtube_video(self,i_id,vid):
@@ -1029,7 +1029,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
         def get_account_callback(result):
             if result:
-                self.yt = YoutubeAccount.create(result)
+                self.yt = YoutubePlatform.create(result)
                 job_id = self.yt.videos[vid] 
                 yt_request = YoutubeApiRequest.get_request(self.api_key,job_id,get_request) 
             else:
@@ -1044,7 +1044,7 @@ class AccountHandler(tornado.web.RequestHandler):
             self.finish()
             return
 
-        YoutubeAccount.get_account(self.api_key,i_id,get_account_callback)
+        YoutubePlatform.get_account(self.api_key,i_id,get_account_callback)
 
 ###########################################################
 ## Job Handler

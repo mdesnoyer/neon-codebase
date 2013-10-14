@@ -20,6 +20,7 @@ import sys
 import shortuuid
 import logging
 import logging.handlers
+logging.basicConfig(filename= __file__.split('.')[0] + '.log', filemode='a', level=logging.DEBUG)
 log = logging.getLogger(__name__)
 
 from boto.exception import S3ResponseError

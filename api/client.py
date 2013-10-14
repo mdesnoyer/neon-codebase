@@ -1,19 +1,11 @@
 #!/usr/bin/python
 
-##import redis; r = redis.StrictRedis(host='localhost', port=6379, db=0)
-
-
 USAGE='%prog [options] <workers> <local properties>'
 
 #============ Future Items ================
-#TODO: IOLoop logging on blocking ops
-#TODO: Send a signal to blocked threads ?
-#TODO: IOLoop.handle_callback_exception
 #TODO: Tracing calls and timers on the code
-#TODO: ** Make it a state machine
-#TODO: Benchmark streaming download - processing and prediction
-#TODO: build a throttle mode for controlling number of clients based on mem/ cpu
 #==============       =======================
+
 import os
 import os.path
 import sys
@@ -519,28 +511,83 @@ class ProcessVideo(object):
 
     ############# Request Finalizers ##############
 
+    def save_video_metadata(self):
+        '''
+        Method to save video metadata in to the videoDB
+        contains list of thumbnail ids 
+        '''
+        
+        api_key = self.request_map[properties.API_KEY] 
+        vid = self.request_map[properties.VIDEO_ID]
+        i_vid = InternalVideoID.generate(api_key,vid)
+        job_id = self.request_map[properties.REQUEST_UUID_KEY]
+        duration = self.video_metadata["duration"]
+        video_valence = "%.4f" %float(numpy.mean(self.valence_scores[1])) 
+        url = self.request_map[properties.VIDEO_DOWNLOAD_URL]
+        model_version = self.model.__version__ 
+        frame_size = self.video_metadata['frame_size']
+
+        tids = []
+
+        #add thumbnail ids
+        for thumb in self.thumbnails:
+            tids.append(thumb["thumbnail_id"])
+
+        vmdata = VideoMetadata(i_vid,tids,job_id,url,duration,video_valence,model_version,frame_size)
+        ret = vmdata.save()
+        if not ret:
+            log.error("key=save_video_metatada msg=failed to save")
+
+
+    def save_thumbnail_metadata(self,platform,i_id):
+        api_key = self.request_map[properties.API_KEY] 
+        vid = self.request_map[properties.VIDEO_ID]
+        job_id = self.request_map[properties.REQUEST_UUID_KEY]
+        i_vid = InternalVideoID.generate(api_key,vid)
+
+        thumbnail_mapper_list = []
+        thumbnail_url_mapper_list = []
+        for thumb in self.thumbnails:
+            tid = thumb["thumbnail_id"]
+            ttype = thumb["type"]
+            rank = thumb["rank"]
+            for t_url in thumb.urls:
+                uitem = ThumbnailURLMapper(t_url,tid)
+                thumbnail_url_mapper_list.append(uitem)
+                item = ThumbnailIDMapper(tid,platform,i_vid,i_id,ttype,rank)
+                thumbnail_mapper_list.append(item)
+
+        retid = ThumbnailIDMapper.save_all(thumbnail_mapper_list)
+        returl = ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
+        
+        return retid and returl
+
     ''' Update the request state for Neon API Request '''
     def finalize_neon_request(self, result=None):
         
         api_key = self.request_map[properties.API_KEY] 
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
-        json_request = NeonApiRequest.get_request(api_key,job_id)
-        api_request = NeonApiRequest.create(json_request)
+        api_request = NeonApiRequest.get(api_key,job_id)
         
         #change the status to requeued, and don't store a response 
         if result is None:
-            api_request.state = "requeued" 
+            api_request.state = RequestState.REQUEUED 
         else:
             try:
                 api_request.response = tornado.escape.json_decode(result)
-                api_request.state = "finished"
+                api_request.state = RequestState.FINISHED 
             except:
                 api_request.response = result 
-                api_request.state = "falied"
+                api_request.state = RequestState.FAILED
             
             api_request.thumbnails = self.thumbnails
-        
-        api_request.save()
+       
+        ret = api_request.save()
+        if ret:
+            self.save_video_metadata()
+            #self.save_thumbnail_metadata("neon",0)
+        else:
+            log.error("key=finalize_neon_request msg=failed to save request")
         return
 
 
@@ -555,8 +602,7 @@ class ProcessVideo(object):
        
         api_key = self.request_map[properties.API_KEY]  
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
-        json_request = BrightcoveApiRequest.get_request(api_key,job_id)
-        bc_request  = BrightcoveApiRequest.create(json_request)
+        bc_request = BrightcoveApiRequest.get(api_key,job_id)
         bc_request.response = tornado.escape.json_decode(result)
         
         if error:
@@ -584,7 +630,7 @@ class ProcessVideo(object):
         s3fname = s3_url_prefix + "/" + k.key 
         bc_request.previous_thumbnail = s3fname
         
-        #populate thumbnail
+        #populate default brightcove thumbnail
         urls = []
         tid = ThumbnailID.generate(imgdata)
         urls.append(p_url)
@@ -619,28 +665,19 @@ class ProcessVideo(object):
 
         #3 Add thumbnails to the request object and save
         bc_request.thumbnails = self.thumbnails
-        bc_request.state = "finished"
-        bc_request.save()
+        bc_request.state = RequestState.FINISHED 
+        ret = bc_request.save()
 
         #TODO: The newly uploaded thumbnail's url isn't available immidiately, what should be done ?
 
         #4 Save the Thumbnail URL and ID to Mapper DB
-        thumbnail_mapper_list = []
-        thumbnail_url_mapper_list = []
+        i_id = self.request_map[properties.INTEGRATION_ID]
+        self.save_thumbnail_metadata("brightcove",i_id)
 
-        platform = "brightcove"
-        for thumb in self.thumbnails:
-            tid = thumb["thumbnail_id"]
-            ttype = thumb["type"]
-            rank = thumb["rank"]
-            for t_url in thumb.urls:
-                uitem = ThumbnailURLMapper(t_url,tid)
-                thumbnail_url_mapper_list.append(uitem)
-                item = ThumbnailIDMapper(tid,platform,video_id,api_key,ttype,rank)
-                thumbnail_mapper_list.append(item)
-
-        ThumbnailIDMapper.save_all(thumbnail_mapper_list)
-        ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
+        if ret:
+            self.save_video_metadata()
+        else:
+            log.error("key=finalize_brightcove_request msg=failed to save request")
 
     '''
     Final steps for youtube request
@@ -649,8 +686,7 @@ class ProcessVideo(object):
     def finalize_youtube_request(self,result,error=False):
         api_key = self.request_map[properties.API_KEY]  
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
-        json_request = YoutubeApiRequest.get_request(api_key,job_id)
-        yt_request  = YoutubeApiRequest.create(json_request)
+        yt_request = YoutubeApiRequest.get(api_key,job_id)
         yt_request.response = tornado.escape.json_decode(result)
        
         #save error result
@@ -694,9 +730,8 @@ class ProcessVideo(object):
         thumb = tdata.to_dict()
         self.thumbnails.append(thumb)
 
-        #2 Push thumbnail in to brightcove account
-        if bc_request.autosync:
-        
+        #TODO: Standalone youtube requests ?
+
         #2 Push thumbnail in to youtube account
         if bc_request.autosync:
             rtoken  = self.request_map["refresh_token"]
@@ -713,8 +748,15 @@ class ProcessVideo(object):
         
         #3 Add thumbnails to the request object and save
         yt_request.thumbnails = self.thumbnails
-        yt_request.state = "finished"
-        yt_request.save()
+        yt_request.state = RequestState.FINISHED
+        ret = yt_request.save()
+
+        if ret:
+            self.save_video_metadata()
+        else:
+            log.error("key=finalize_youtube_request msg=failed to save request")
+
+        #self.save_thumbnail_metadata("youtube",i_id)
 
 
 #############################################################################################
@@ -725,12 +767,6 @@ class HttpDownload(object):
     retry_codes = [403,500,502,503,504]
 
     def __init__(self, json_params, ioloop, model, debug=False, cur_pid=None, sync=False):
-        #TODO Make chunk size configurable
-        #TODO GZIP vs non gzip video download? 
-
-        ### Notes: 
-        ### curl async client used 1 per ioloop here as we do compute work
-        ### Ideally this is perfect for making multiple http requests in parallel
 
         params = tornado.escape.json_decode(json_params)
 
@@ -934,6 +970,7 @@ class HttpDownload(object):
         s3_urls = None   
         
         #There was an error with processing the video
+        #TODO: Have Error method to take care of failure
         if error:
             #If Internal error, requeue and dont send response to client yet
             #Send response to client that job failed due to the last reason
@@ -1170,10 +1207,9 @@ class Worker(multiprocessing.Process):
                     #Change Job State
                     api_key = dl.job_params[properties.API_KEY] 
                     job_id = dl.job_params[properties.REQUEST_UUID_KEY]
-                    json_request = NeonApiRequest.get_request(api_key,job_id)
-                    api_request = NeonApiRequest.create(json_request)
-                    if api_request.state == "submit":
-                        api_request.state = "processing"
+                    api_request = NeonApiRequest.get(api_key,job_id)
+                    if api_request.state == RequestState.SUBMIT:
+                        api_request.state = RequestState.PROCESSING
                         api_request.model_version = self.model_version 
                         api_request.save()
                     ts = str(time.time())

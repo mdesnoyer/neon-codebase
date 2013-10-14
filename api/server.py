@@ -241,6 +241,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
     parsed_params = {}
 
     @tornado.web.asynchronous
+    @tornado.gen.engine
     def post(self, *args, **kwargs):
 
         #insert job in to user account
@@ -275,13 +276,14 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
 
         #DB Callback
         def saved_request(result):
+            print "SAVED REQ"
             if not result:
                 log.error("key=thumbnail_handler  msg=request save failed: ")
                 self.set_status(502)
                 self.finish()
             else:
                 if request_type == 'youtube':
-                    YoutubeAccount.get_account(api_key,get_account) #i_id ?  
+                    YoutubePlatform.get_account(api_key,get_account) #i_id ?  
                 elif request_type == 'neon':
                     NeonUserAccount.get_account(api_key,get_account) 
                 else:
@@ -323,7 +325,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
            
             #Generate JOB ID  
             #Use Params that can change to generate UUID, support same video to be processed with diff params
-            intermediate = api_key + str(vid) + api_method + str(api_param) + url
+            intermediate = api_key + str(vid) + api_method + str(api_param) 
             job_id = hashlib.md5(intermediate).hexdigest()
            
             #Identify Request Type
@@ -334,8 +336,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 wtoken = params[properties.BCOVE_WRITE_TOKEN]
                 autosync = params["autosync"]
                 request_type = "brightcove"
+                i_id = params[properties.INTEGRATION_ID]
                 api_request = BrightcoveApiRequest(job_id,api_key,vid,title,url,
-                                        rtoken,wtoken,pub_id,http_callback)
+                                        rtoken,wtoken,pub_id,http_callback,i_id)
                 api_request.previous_thumbnail = p_thumb 
                 api_request.autosync = autosync
 
@@ -357,8 +360,15 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             #API Method
             api_request.set_api_method(api_method,api_param)
             api_request.submit_time = str(time.time())
+            api_request.state = RequestState.SUBMIT
 
             #Validate Request & Insert in to Queue (serialized/json)
+            job_result = yield tornado.gen.Task(NeonApiRequest.conn.get, api_request.key)
+            if False and job_result is not None:
+                response_data = '{"error":"duplicate job"}' 
+                self.write(response_data)
+                self.finish()
+                return
             
             #TODO: insert in to work queue after saving request in db
             #TODO (2): keep a video id queue in db for hot swapping the Q
@@ -368,7 +378,21 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             #Response for the submission of request
             response_data = "{\"job_id\":\"" + job_id + "\"}"
             
-            api_request.save(saved_request)
+            result = yield tornado.gen.Task(api_request.save)
+            print result
+            if not result:
+                log.error("key=thumbnail_handler  msg=request save failed: ")
+                self.set_status(502)
+            else:
+                if request_type == 'youtube':
+                    pass #YoutubePlatform.get_account(api_key,get_account) #i_id ?  
+                elif request_type == 'neon':
+                    pass #NeonUserAccount.get_account(api_key,get_account) 
+                else:
+                    self.set_status(201)
+                    self.write(response_data)
+
+            self.finish()
 
         except Exception,e:
             log.error("key=thumbnail_handler msg=" + e.__str__());

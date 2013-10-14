@@ -34,7 +34,7 @@ API_KEY_FILE = 'apikeys.json'
 BRIGHTCOVE_THUMBNAILS = "brightcove"
 PUBLISHER_ID = "publisher_id"
 PREV_THUMBNAIL = "previous_thumbnail"
-
+INTEGRATION_ID = "integration_id"
 #=========== S3 Config ===============#
 S3_KEY_PREFIX = 'internal_test_'
 

@@ -6,8 +6,8 @@ Blob Types available
 
 Account Types
 - NeonUser
-- BrightcoveAccount
-- YoutubeAccount
+- BrightcovePlatform
+- YoutubePlatform
 
 Api Request Types
 - Neon, Brightcove, youtube
@@ -16,7 +16,8 @@ Api Request Types
 '''
 
 import redis as blockingRedis
-import brukva as redis
+#import brukva as redis
+import tornadoredis as redis
 import tornado.gen
 import hashlib
 import json
@@ -44,6 +45,9 @@ class RedisClient(object):
     client = redis.Client(host,port)
     client.connect()
 
+    #exceptions thrown on connect as well as get/save 
+    #redis.exceptions.ConnectionError
+
     #pool = blockingRedis.ConnectionPool(host, port, db=0)
     #blocking_client = blockingRedis.StrictRedis(connection_pool=pool)
     blocking_client = blockingRedis.StrictRedis(host,port)
@@ -57,10 +61,10 @@ class RedisClient(object):
             return RedisClient.client, RedisClient.blocking_client
         else:
             RedisClient.c = redis.Client(host,port)
-            RedisClient.bc = blockingRedis.StrictRedis(host,port)
+            RedisClient.bc = blockingRedis.StrictRedis(host,port,socket_timeout=10)
             return RedisClient.c,RedisClient.bc 
 
-''' Format request key'''
+''' Format request key (with job_id) to find NeonApiRequest Object'''
 def generate_request_key(api_key,job_id):
     key = "request_" + api_key + "_" + job_id
     return key
@@ -83,44 +87,17 @@ class NeonApiKey(AbstractHashGenerator):
         input = NeonApiKey.salt + str(input)
         return NeonApiKey._api_hash_function(input)
 
-class RedisMultiKeyHandler(object):
-    ''' Handler to retrive multiple keys from redis storage'''
-    
-    conn,blocking_conn = RedisClient.get_client()
-    def __init__(self,objects,callback):
-        self.objects = objects
-        self.external_callbaclk = callback
-
-    def add_callack(self):
-        #Parse objects in to their constituent classes (key,object) 
-        #self.external_callback(self)
-        return
-
-    def get_all(self):
-        keys = self.get_keynames()
-        RedisMultiKeyHandler.conn.mget(keys,self.external_callback)
-    
-    # from objects, get their keynames
-    def get_keynames():
-        keys = []
-        for o in objects:
-            keys.append(o.key)
-        return keys
-    
+''' Internal Video ID Generator '''
+class InternalVideoID(object):
     @staticmethod
-    def multi_set(items,callback):
-        pairs = {}
-        for item in items:
-            pairs[item.key] = item.to_json()
-        
-        RedisMultiKeyHandler.conn.mset(pairs,callback)
-
+    def generate(api_key,vid):
+        key = api_key + "_" + vid
+        return key
 
 class AbstractRedisUserBlob(object):
     ''' 
         Abstract Redis interface and operations
-        Use only one operation at a time, since only a
-        single external callback can be registered
+        Lock and Get, unlock & set opertaions made easy
     '''
     
     conn,blocking_conn = RedisClient.get_client()
@@ -306,10 +283,17 @@ class NeonUserAccount(AbstractRedisUserBlob):
             key = 'neonuseraccount' + NeonApiKey.generate(a_id)  
             NeonUserAccount.blocking_conn.delete(key)
 
+
+class AbstractPlatform(object):
+    def __init__(self):
+        self.videos = {"t":1 } # External video id => Job ID 
+
 ''' Brightcove Account '''
-class BrightcoveAccount(AbstractRedisUserBlob):
+class BrightcovePlatform(AbstractRedisUserBlob,AbstractPlatform):
     def __init__(self,a_id,i_id,p_id=None,rtoken=None,wtoken=None,auto_update=False,last_process_date=None,abtest=False):
-        super(BrightcoveAccount,self).__init__()
+        super(BrightcovePlatform,self).__init__()
+        super(AbstractPlatform,self).__init__()
+
         self.neon_api_key = NeonApiKey.generate(a_id)
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
         self.account_id = a_id
@@ -352,7 +336,6 @@ class BrightcoveAccount(AbstractRedisUserBlob):
             nar = NeonApiRequest.get_request(api_key,job_id)
             if nar:
                 return nar.thumbnails
-
 
     def get(self,callback=None):
         if callback:
@@ -400,7 +383,7 @@ class BrightcoveAccount(AbstractRedisUserBlob):
                 callback(False)
 
         bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update)
-        bc.create_video_request(vid,created_job)
+        bc.create_video_request(vid,bc.integration_id,created_job)
 
     '''
     Use this only after you retreive the object from DB
@@ -426,7 +409,7 @@ class BrightcoveAccount(AbstractRedisUserBlob):
         wtoken = params['write_token']
         auto_update = params['auto_update']
          
-        ba = BrightcoveAccount(a_id,i_id,p_id,rtoken,wtoken,auto_update)
+        ba = BrightcovePlatform(a_id,i_id,p_id,rtoken,wtoken,auto_update)
         ba.videos = params['videos']
         ba.last_process_date = params['last_process_date'] 
         ba.linked_youtube_account = params['linked_youtube_account']
@@ -438,11 +421,11 @@ class BrightcoveAccount(AbstractRedisUserBlob):
 
     @staticmethod
     def get_account(api_key,i_id,result_callback=None,lock=False):
-        key = "BrightcoveAccount".lower() + '_' + api_key + '_' + i_id
+        key = "BrightcovePlatform".lower() + '_' + api_key + '_' + i_id
         if result_callback:
-            BrightcoveAccount.conn.get(key,result_callback) 
+            BrightcovePlatform.conn.get(key,result_callback) 
         else:
-            return BrightcoveAccount.blocking_conn.get(key)
+            return BrightcovePlatform.blocking_conn.get(key)
 
     @staticmethod
     def find_all_videos(token,limit,result_callback):
@@ -454,7 +437,7 @@ class BrightcoveAccount(AbstractRedisUserBlob):
         http_client.fetch(req,result_callback)
 
 
-class YoutubeAccount(AbstractRedisUserBlob):
+class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
     def __init__(self,a_id,i_id,access_token=None,refresh_token=None,expires=None,auto_update=False):
         self.key = self.__class__.__name__.lower()  + '_' + NeonApiKey.generate(a_id ) + '_' + i_id
         self.account_id = a_id
@@ -578,18 +561,18 @@ class YoutubeAccount(AbstractRedisUserBlob):
 
     @staticmethod
     def get_account(api_key,i_id,result_callback=None,lock=False):
-        key = "YoutubeAccount".lower() + '_' + api_key + '_' + i_id
+        key = "YoutubePlatform".lower() + '_' + api_key + '_' + i_id
         if result_callback:
-            YoutubeAccount.conn.get(key,result_callback) 
+            YoutubePlatform.conn.get(key,result_callback) 
         else:
-            return YoutubeAccount.blocking_conn.get(key)
+            return YoutubePlatform.blocking_conn.get(key)
     
     @staticmethod
     def create(json_data):
         params = json.loads(json_data)
         a_id = params['account_id']
         i_id = params['integration_id'] 
-        yt = YoutubeAccount(a_id,i_id)
+        yt = YoutubePlatform(a_id,i_id)
        
         for key in params:
             yt.__dict__[key] = params[key]
@@ -601,6 +584,14 @@ class YoutubeAccount(AbstractRedisUserBlob):
 # Request Blobs 
 ######################
 
+class RequestState(object):
+    'Request state enumeration'
+
+    SUBMIT     = "submit"
+    PROCESSING = "processing"
+    REQUEUED   = "requeued"
+    FAILED     = "failed"
+    FINISHED   = "internal_video_id"
 
 class NeonApiRequest(object):
     '''
@@ -697,6 +688,22 @@ class NeonApiRequest(object):
             return NeonApiRequest.blocking_conn.set(self.key,value)
 
     @staticmethod
+    def get(api_key,job_id,result_callback=None):
+        def package(result):
+            if result:
+                nar = NeonApiRequest.create(result)
+                result_callback(nar)
+            else:
+                result_callback(None)
+
+        key = generate_request_key(api_key,job_id)
+        if result_callback:
+            NeonApiRequest.conn.get(key,result_callback)
+        else:
+            result = NeonApiRequest.blocking_conn.get(key)
+            return NeonApiRequest.create(result)
+
+    @staticmethod
     def get_request(api_key,job_id,result_callback=None):
         key = generate_request_key(api_key,job_id)
         if result_callback:
@@ -729,11 +736,11 @@ class BrightcoveApiRequest(NeonApiRequest):
     Brightcove API Request class
     '''
     def __init__(self,job_id,api_key,vid,title,url,rtoken,wtoken,pid,
-                callback=None):
+                callback=None,i_id=None):
         self.read_token = rtoken
         self.write_token = wtoken
         self.publisher_id = pid
-        self.integration_type = "brightcove"
+        self.integration_id = i_id 
         self.previous_thumbnail = None
         self.autosync = False
         request_type = "brightcove"
@@ -767,7 +774,7 @@ class ThumbnailMetaData(object):
 
     A single thumbnail id maps to all its urls [ Neon, OVP name space ones, other associated ones] 
     '''
-    def init(self,tid,urls,created,enabled,width,height,ttype,refid=None,rank=None):
+    def __init__(self,tid,urls,created,enabled,width,height,ttype,refid=None,rank=None):
         self.thumbnail_id = tid
         self.urls = urls  # All urls associated with single image
         self.created = created
@@ -817,6 +824,8 @@ class ThumbnailURLMapper(AbstractRedisUserBlob):
 
     input - thumbnail url ( key ) , tid - string/image, converted to thumbnail ID
             if imdata given, then generate tid 
+    
+    THUMBNAIL_URL => (tid)
     '''
     
     host,port = dbsettings.DBConfig.urlMapperDB
@@ -858,23 +867,25 @@ class ThumbnailURLMapper(AbstractRedisUserBlob):
 class ThumbnailIDMapper(AbstractRedisUserBlob):
     '''
     Class schema for Thumbnail URL to thumbnail metadata map
-    Thumbnail url => ( id, platform, video id, account id, thumb type, rank) 
+    Thumbnail ID  => ( id, platform, video id, account id, thumb type, rank) 
 
     Used as a cache like store for the map reduce jobs
     '''
     host,port = dbsettings.DBConfig.thumbnailDB
     conn,blocking_conn = RedisClient.get_client(host,port)
 
-    #TODO: Configure the DB IP Address
-    def __init__(self,tid,ovp,vid,aid,ttype,rank):
+    def __init__(self,tid,ovp,internal_vid,i_id,ttype,rank):
         super(ThumbnailIDMapper,self).__init__()
         self.key = tid 
         self.urls = urls
         self.platform = ovp
-        self.video_id = vid
-        self.account_id = a_id
+        self.video_id = internal_vid #api_key + platform video id
         self.thumbnail_type = ttype
         self.rank = rank
+        self.integration_id = i_id
+
+    def get_account_id(self):
+        return self.video_id.split('_')[0]
 
     def _hash(self,input):
         return hashlib.md5(input).hexdigest()
@@ -882,6 +893,45 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
     def get_metdata(self):
         pass
         #return only specific fields
+
+    @staticmethod
+    def create(json_data):
+        data_dict = json.loads(json_data)
+        #create basic object
+        obj = ThumbnailIDMapper(None,None,None,None,None,None,None,None)
+
+        #populate the object dictionary
+        for key in data_dict.keys():
+            obj.__dict__[key] = data_dict[key]
+        
+        return obj
+
+    @staticmethod
+    def get_id(self,key,callback=None):
+        if callback:
+            ThumbnailIDMapper.get(key,callback)
+        else:
+            return ThumbnailIDMapper.blocking_conn.get(key)
+
+    @staticmethod
+    def get_ids(self,keys,callback=None):
+
+        def process(results):
+            mappings = [] 
+            for item in results:
+                obj = ThumbnailIDMapper.create(item)
+                mappings.append(obj)
+            callback(mappings)
+
+        if callback:
+            ThumbnailIDMapper.mget(keys,cb)
+        else:
+            mappings = [] 
+            items = ThumbnailIDMapper.blocking_conn.mget(keys)
+            for item in items:
+                obj = ThumbnailIDMapper.create(item)
+                mappings.append(obj)
+            return mappings
 
     @staticmethod
     def save_all(thumbnailMapperList,callback=None):
@@ -903,6 +953,11 @@ class DBUtils(object):
     def __init__(self):
         pass
 
+    def dummy(self,cb):
+        host,port = dbsettings.DBConfig.accountDB
+        conn,blocking_conn = RedisClient.get_client(host,port)
+        conn.keys('brightcoveaccount_*',cb)
+
     def fetch_keys_from_db(host,port,key_prefix,callback=None):
         conn,blocking_conn = RedisClient.get_client(host,port)
         if callback:
@@ -918,7 +973,7 @@ class DBUtils(object):
         data = [] 
         for accnt in acccounts:
             jdata = blocking_conn.get(accnt)
-            ba = BrightcoveAccount.create(jdata)
+            ba = BrightcovePlatform.create(jdata)
             data.append(ba)
         return data
     
@@ -929,7 +984,7 @@ class DBUtils(object):
         data = [] 
         for accnt in acccounts:
             jdata = blocking_conn.get(accnt)
-            yt = YoutubeAccount.create(jdata)
+            yt = YoutubePlatform.create(jdata)
             data.append(yt)
         return data
 
@@ -943,4 +998,67 @@ class DBUtils(object):
             data.extend(yts)
 
         return data
+
+class VideoMetadata(object):
+    '''
+    Schema for metadata associated with video which gets stored
+    when the video is processed
+
+    Contains list of Thumbnail IDs associated with the video
+    '''
+
+    '''  Keyed by API_KEY + VID '''
+
+    host,port = dbsettings.DBConfig.videoDB 
+    conn,blocking_conn = RedisClient.get_client(host,port)
+    
+    def __init__(self,video_id,tids,request_id,video_url,duration,vid_valence,model_version,frame_size=None):
+        self.key = video_id 
+        self.thumbnail_ids = tids 
+        self.url = video_url 
+        self.duration = duration
+        self.video_valence = vid_valence 
+        self.model_version = model_version
+        self.job_id = request_id
+
+    def get_id(self):
+        return self.key
+
+    def to_json(self):
+        return json.dumps(self, default=lambda o: o.__dict__) 
+
+    def save(self,callback=None):
+        value = self.to_json()
+        if callback:
+            VideoMetadata.conn.set(self.key,value,callback)
+        else:
+            return VideoMetadata.blocking_conn.set(self.key,value)
+
+    @staticmethod
+    def get(internal_video_id,callback=None):
+        def create(data_dict):
+            obj = VideoMetadata(None,None,None,None,None,None,None)
+            for key in data_dict.keys():
+                obj.__dict__[key] = data_dict[key]
+            return obj
+        
+        def cb(result):
+            if result:
+                obj = create(result)
+                callback(obj)
+            else:
+                callback(None)
+
+        if callback:
+            VideoMetadata.conn.get(internal_video_id,cb)
+        else:
+            jdata = VideoMetadata.blocking_conn.get(internal_video_id)
+            if jdata is None:
+                return None
+            return create(jdata)
+
+    @staticmethod
+    def get_video_metadata(internal_accnt_id,internal_video_id):
+        jdata = NeonApiRequest.get_request(internal_accnt_id,internal_video_id)
+        nreq = NeonApiRequest.create(jdata)
 
