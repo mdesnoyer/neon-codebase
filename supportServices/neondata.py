@@ -200,7 +200,7 @@ class AbstractRedisUserBlob(object):
     #exists
     def exists(self,callback):
         self.external_callback = callback
-        AbstractRedisUserBlob.conn.exists(self.key,callback)
+.        AbstractRedisUserBlob.conn.exists(self.key,callback)
 
 ''' NeonUserAccount
 
@@ -222,7 +222,7 @@ class NeonUserAccount(AbstractRedisUserBlob):
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.plan_start_date = plan_start
         self.processing_minutes = processing_mins
-        self.videos = {} 
+        self.videos = {}  # video_id -> job_id 
         self.integrations = {} 
 
     def add_integration(self,integration_id, accntkey):
