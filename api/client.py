@@ -117,10 +117,11 @@ class State(object):
 
 class ProcessVideo(object):
     """ class provides methods to process a given video """
-    def __init__(self, request_map, request, model, debug, cur_pid):
+    def __init__(self, request_map, request, model, model_version, debug, cur_pid):
         self.request_map = request_map
         self.request = request
         self.model = model
+        self.model_version = model_version
         self.frames = []
         self.data_map = {} # frameNo -> (score, image_rgb)
         self.attr_map = {}
@@ -482,6 +483,7 @@ class ProcessVideo(object):
         for i in range(len(frames)):
             filestream = StringIO()
             image = Image.fromarray(self.data_map[frames[i]][1])
+            score = self.data_map[frames[i]][0]
             #image.thumbnail(size,Image.ANTIALIAS)
             image.save(filestream, fmt, quality=100) 
             filestream.seek(0)
@@ -504,7 +506,8 @@ class ProcessVideo(object):
             rank    = i +1 
 
             #populate thumbnails
-            tdata = ThumbnailMetaData(tid,urls,created,enabled,width,height,ttype,None,rank)
+            #(self,tid,urls,created,width,height,ttype,model_score,enabled=True,chosen=False,rank=None,refid=None)
+            tdata = ThumbnailMetaData(tid,urls,created,width,height,ttype,score,self.model_version,rank=rank)
             thumb = tdata.to_dict()
             self.thumbnails.append(thumb)
         return s3_urls
@@ -520,6 +523,7 @@ class ProcessVideo(object):
         api_key = self.request_map[properties.API_KEY] 
         vid = self.request_map[properties.VIDEO_ID]
         i_vid = InternalVideoID.generate(api_key,vid)
+        i_id = self.request_map[properties.INTEGRATION_ID] if self.request_map.has_key(properties.INTEGRATION_ID) else 0 
         job_id = self.request_map[properties.REQUEST_UUID_KEY]
         duration = self.video_metadata["duration"]
         video_valence = "%.4f" %float(numpy.mean(self.valence_scores[1])) 
@@ -533,7 +537,7 @@ class ProcessVideo(object):
         for thumb in self.thumbnails:
             tids.append(thumb["thumbnail_id"])
 
-        vmdata = VideoMetadata(i_vid,tids,job_id,url,duration,video_valence,model_version,frame_size)
+        vmdata = VideoMetadata(i_vid,tids,job_id,url,duration,video_valence,model_version,i_id,frame_size)
         ret = vmdata.save()
         if not ret:
             log.error("key=save_video_metatada msg=failed to save")
@@ -766,7 +770,7 @@ class ProcessVideo(object):
 class HttpDownload(object):
     retry_codes = [403,500,502,503,504]
 
-    def __init__(self, json_params, ioloop, model, debug=False, cur_pid=None, sync=False):
+    def __init__(self, json_params, ioloop, model, model_version, debug=False, cur_pid=None, sync=False):
 
         params = tornado.escape.json_decode(json_params)
 
@@ -781,7 +785,7 @@ class HttpDownload(object):
         req = tornado.httpclient.HTTPRequest(url = url, headers = headers,
                         use_gzip =False, request_timeout = self.timeout)
         self.size_so_far = 0
-        self.pv = ProcessVideo(params, json_params, model, debug, cur_pid)
+        self.pv = ProcessVideo(params, json_params, model, debug, cur_pid, model_version)
         self.error = None
         self.callback_data_size = 4096 * 1024 #4MB  --- TUNE 
         self.global_work_queue_url = properties.BASE_SERVER_URL + "/requeue"
@@ -1142,7 +1146,6 @@ class Worker(multiprocessing.Process):
         self.code_version = self.read_version_from_file(code_version_file)
         self.model = None
         self.debug = debug
-        self.check_model()
         self.sync = sync
 
     def read_version_from_file(self,fname):
@@ -1174,23 +1177,16 @@ class Worker(multiprocessing.Process):
         if code_version > self.code_version or code_version ==0:
             self.kill_received = True
 
-    def check_model(self):
-        with open(self.model_version_file,'r') as f:
-            try:
-                version = int(f.readline())
-            except:
-                log.error('Model version file not present: %s' %
-                          self.model_version_file)
-                return
-
-        # Change the model
-        if self.model_version < version:
-            self.model_version = version
-            log.info('Loading model from %s' % self.model_file)
-            self.model = model.load_model(self.model_file)
+    def load_model(self):
+        parts = self.model_version_file.split('/')[-1]
+        version = parts.split('.model')[0]
+        self.model_version = version
+        log.info('Loading model from %s version %s' % (self.model_file,self.model_version))
+        self.model = model.load_model(self.model_file)
 
     def run(self):
         log.info("starting worker [%s] %s " %(self.pid,str(i)))
+        self.load_model()
         while not self.kill_received:
           # get a task
           try:
@@ -1201,7 +1197,7 @@ class Worker(multiprocessing.Process):
 
                 ## ===== ASYNC Code Starts ===== ##
                 ioloop = tornado.ioloop.IOLoop.instance()
-                dl = HttpDownload(job, ioloop, self.model, self.debug, self.pid, self.sync)
+                dl = HttpDownload(job, ioloop, self.model,self.model_version, self.debug, self.pid, self.sync)
                 #log.info("ioloop %r" %ioloop)  
                 try:
                     #Change Job State
@@ -1257,9 +1253,6 @@ class Worker(multiprocessing.Process):
                       raise
                 time.sleep(self.SLEEP_INTERVAL)
         
-          #check for new model release
-          self.check_model()
-
           #check for new code release
           self.check_code_release_version()
 
@@ -1304,10 +1297,7 @@ if __name__ == "__main__":
     code_version_file = os.path.join(cdir,"code.version")
     
     #Load the path to the model
-    model_version_file = os.path.join(os.path.dirname(__file__),
-                                      '..',
-                                      'model', 
-                                      "model.version")
+    model_version_file = options.model_file
 
     workers = []
 

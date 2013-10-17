@@ -1,6 +1,7 @@
+// jquery load check version
 function trackerinit() {
-	var neonEventServer = "http://tracker.neon-lab.com";
-
+	var NeonTrackerURL = "http://tracker.neon-lab.com";
+	var NeonTrackerType = "imagetracker";
 	// This section of the code attributed to
 	// Author: Jason Levitt
 	// Date: December 7th, 2005
@@ -34,27 +35,35 @@ function trackerinit() {
       .substring(1);
 	}
 	function guid() {
-		return genRandomHexChars() + genRandomHexChars() + '-' + genRandomHexChars() + genRandomHexChars(); 
+		return genRandomHexChars() + genRandomHexChars() + genRandomHexChars() + genRandomHexChars(); 
 	}
 	function sendRequest(url, params){
 		var pageURL = (document.URL).split('?')[0]; // Ignore any get params	
 		var ts = new Date().getTime(); 
-		var req = url + "?" + params + "&ts=" + ts + "&page=" + encodeURIComponent(pageURL);
+		var req = url + "?" + params + "&ts=" + ts + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + NeonTrackerType;
 		try { bObj = new JSONscriptRequest(req); bObj.buildScriptTag(); bObj.addScriptTag();  } catch(err) {}	
 	}
 	$(document).ready(function () {
 		var reqGuid = guid();
 		$(window).load(function(){
 			var action = "load";
-			params = "a=" + action + "&id="+ reqGuid;
-			sendRequest(neonEventServer,params);
+			var imgTags = document.getElementsByTagName("img");
+			if (!imgTags) {
+				imgTags = $(this).attr("img"); //use jquery
+			}
+			var imgs = new Array();
+			for (var i = 0; i < imgTags.length; i++) {
+					imgs.push(imgTags[i].src);
+			}	
+			params = "a=" + action + "&id="+ reqGuid + "&imgs=" + imgs;
+			sendRequest(NeonTrackerURL,params);
 		});
     $("img").mousedown(function(e) {
 	    var action = "click";	
 			var imgSrc = $(this).attr('src');
 			var coordinates = e.pageX  + "," + e.pageY;
 			params = "a=" + action + "&id="+ reqGuid + "&img=" + encodeURIComponent(imgSrc) + "&xy=" + coordinates; 
-			sendRequest(neonEventServer,params);
+			sendRequest(NeonTrackerURL,params);
 	  }); 
 	});
 }
