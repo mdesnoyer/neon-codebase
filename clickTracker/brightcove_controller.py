@@ -72,31 +72,126 @@ class PriorityQ(object):
         else:
             return (None,None,None) 
 
-#Threads
-import threading
-class TaskExecutor(threading.Thread):
-    def __init__(self,task_queue):
-        threading.Thread.__init__(self)
-        self.taskQ = task_queue
-        self.daemon = True
-        self.start()
-    
-    def run(self):
-        while True:
-            time.sleep(0.5)
-            priority, count, task = self.taskQ.peek_task()
-            cur_time = time.time()
-            if priority and priority <= cur_time:
-                task = self.taskQ.pop_task() 
-                self.executor(task)
+###########################################
+# Thread Workers
+###########################################
 
-    def executor(self,task):
+class TaskManager(object):
+    '''
+    Schedule and execute task (one thread per task)
+    '''
+    def thread_worker(self,task):
         print "[exec] " ,task, threading.current_thread()  
         bc = BrightcoveABController()
         bc.set_thumbnail(1,2)
 
-    def my_cb(self):
-        print "my_cb " , threading.current_thread() 
+    def check_scheduler(self):
+        priority, count, task = taskQ.peek_task()
+        cur_time = time.time()
+        if priority and priority <= cur_time:
+            task = taskQ.pop_task() 
+            t = threading.Thread(target=self.thread_worker,args=(task,))
+            t.setDaemon(True)
+            t.start()
+
+class BrightcoveThumbnailChecker(threading.Thread):
+    '''
+    Check the current thumbnail in brightcove and verify if the thumbnail has been 
+    saved in the DB.
+    If thumbnail is new, save the corresponding THUMB URL => TID mapping
+    '''
+    def __init__(self):
+        self.videos_seen = {} #video_id => thumbnails urls mapped
+
+    def brightcove_data_callback(self,response):
+        pass
+
+    def thumbnail_db_callback(self,response):
+        pass
+
+    def run(self):
+        #Query Brightcove for all the videos
+        pass
+
+
+###########################################
+# Brightcove AB Controller Logic 
+###########################################
+class BrightcoveABController(object):
+
+    service_url =  "http://localhost:8083"
+    timeslice = 71    #timeslice for experiment
+    cushion_time = 10 #cushion time for data extrapolation
+    max_update_delay = 10
+
+    def __init__(self):
+        #self.neon_service_url = "http://services.neon-lab.com"
+        self.neon_service_url = "http://localhost:8083"
+
+    def cb(self,result):
+        print "[cb]" ,time.time(), len(result.body), threading.current_thread()
+
+    @tornado.gen.engine
+    def set_thumbnail(self,video_id,tid):
+        http_client = tornado.httpclient.AsyncHTTPClient()
+        #url = self.neon_service_url + "/" + account_id + "/" + updatethumbnail + "/" + str(video_id)
+        #"http://54.221.234.42:9082"
+        url = "ogle.com"
+        print "[Make call] ", time.time(), threading.current_thread()
+        #http_client.fetch(url,self.cb)
+        result = yield tornado.gen.Task(http_client.fetch,url)
+        print "[yield]",time.time(), len(result.body), threading.current_thread()
+
+    def thumbnail_change_scheduler(self,video_metadata,distribution):
+        #Make a decision based on the current state of the video data
+        delay = random.randint(0,BrightcoveABController.max_update_delay)
+        abtest_start_time = random.randint(BrightcoveABController.cushion_time,
+                BrightcoveABController.timeslice - BrightcoveABController.cushion_time) 
+        
+        #schedule A
+        #taskmgr.add_task()
+        #schedule B
+        #schedule End of Timeslice for a particular video
+
+    def end_of_timeslice(self):
+        pass
+        #indicate which video it was
+
+###########################################
+# Create Tornado server application
+###########################################
+
+from tornado.options import define, options
+define("port", default=8888, help="run on the given port", type=int)
+define("service_url", default="http://services.neon-lab.com", help="service url", type=basestring)
+
+class GetData(tornado.web.RequestHandler):
+    
+    @tornado.web.asynchronous
+    @tornado.gen.engine
+    def post(self,*args,**kwargs):
+        
+        #input data = { video_id => [(tid,%)] }
+        print "[getdata] ", threading.current_thread()
+        controller = BrightcoveABController()
+        
+        #For the videoid, get its metadata and insert in to Q
+        data = tornado.escape.json_decode(self.request.body)
+        for vid,tids_tuple in vids.iteritems():
+            tids = [tup[0] for tup in tids_tuple] 
+            tidmappings = yield tornado.gen.Task(ThumbnailIDMapper.get_ids,tids)
+            if tidmappings is not None:
+                vmdata = yield tornado.gen.Task(VideoMetadata.get,vid)
+                if vmdata is Not None:
+                    controller.thumbnail_swap_scheduler(vmdata,tidmappings,tids_tuple)
+            
+        priority = time.time() 
+        taskQ.add_task(task,priority) 
+        self.finish()
+
+application = tornado.web.Application([
+    (r"/",GetData),
+])
 
 ###########################################
 # Initialize AB Controller  
@@ -115,73 +210,24 @@ def initialize_controller():
     for vid,tids_tuple in vids.iteritems():
         tids = [tup[0] for tup in tids_tuple] 
         tidmappings = ThumbnailIDMapper.get_ids(tids)
-        #internal_aid = tidmappings[0].account_id 
-        #internal_vid = tidmappings[0].internal_video_id
-        #video_data = VideoMetadata.get_metadata(internal_aid,internal_vid) 
         vmdata = VideoMetadata.get(vid)
-        controller.thumbnail_swap_scheduler(vmdata,thumb_probabilities)
-        #run the ab controller logic to schedule tasks
+        controller.thumbnail_swap_scheduler(vmdata,tidmappings,tids_tuple)
 
 ###########################################
-# Brightcove AB Controller Logic 
+# MAIN
 ###########################################
-class BrightcoveABController(object):
-    
-    def __init__(self):
-        #self.neon_service_url = "http://services.neon-lab.com"
-        self.neon_service_url = "http://localhost:8083"
-
-    def cb(self,result):
-        print "[cb]" ,time.time(), len(result.body), threading.current_thread()
-
-    def set_thumbnail(self,video_id,tid):
-        http_client = tornado.httpclient.AsyncHTTPClient()
-        #url = "http://54.221.234.42:9082"
-        url = "http://google.com"
-        print "[Make call] ", time.time(), threading.current_thread()
-        http_client.fetch(url,self.cb)
-
-    def thumbnail_swap_scheduler(self,video_metadata,thumb_control_data):
-        #Make a decision based on the current state of the video data
-        pass
-
-###########################################
-# Create Tornado server application
-###########################################
-
-from tornado.options import define, options
-define("port", default=8888, help="run on the given port", type=int)
-define("service_url", default="http://services.neon-lab.com", help="service url", type=basestring)
-
-def do_work(): print "DO WORK"
-class GetData(tornado.web.RequestHandler):
-    
-    @tornado.web.asynchronous
-    def post(self,*args,**kwargs):
-        
-        #input data = { video_id => [(tid,%)] }
-        print "[getdata] ", threading.current_thread()
-        task = self.request.body
-        priority = time.time() + 2
-        taskQ.add_task(task,priority) 
-        #tornado.ioloop.IOLoop.instance().add_callback(tornado.ioloop.IOLoop.instance().add_timeout,(time.time()+5, do_work))
-        self.finish()
-
-application = tornado.web.Application([
-    (r"/",GetData),
-])
 
 def main():
     global taskQ
     taskQ = PriorityQ()
     global video_map
     video_map = {}
-    #TaskExecutor(taskQ)
+    taskmgr = TaskManager()
     #initialize_controller()
     tornado.options.parse_command_line()
     server = tornado.httpserver.HTTPServer(application)
     server.listen(options.port)
-    #tornado.ioloop.PeriodicCallback(taskmgr.check_scheduler,1000).start()
+    tornado.ioloop.PeriodicCallback(taskmgr.check_scheduler,1000).start()
     tornado.ioloop.IOLoop.instance().start()
 
 # ============= MAIN ======================== #

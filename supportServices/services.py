@@ -555,7 +555,7 @@ class AccountHandler(tornado.web.RequestHandler):
         def get_request(r_result):
             if r_result:
                 self.vid_request = BrightcoveApiRequest.create(r_result) 
-                thumbnail_url = self.vid_request.enable_thumbnail(tid)
+                thumbnail_url = self.vid_request.choose_thumbnail(tid)
                 self.bc.update_thumbnail(vid,thumbnail_url,tid,update_thumbnail)
             else:
                 data = '{"error": "thumbnail not updated"}'
@@ -1078,6 +1078,38 @@ class DeleteHandler(tornado.web.RequestHandler):
         if "test" in a_id:
             NeonUserAccount.remove(a_id)
 
+class BcoveHandler(tornado.web.RequestHandler):
+    @tornado.web.asynchronous
+    @tornado.gen.engine
+    def get(self, *args, **kwargs):
+        pass
+
+    @tornado.web.asynchronous
+    @tornado.gen.engine
+    def post(self, *args, **kwargs):
+        self.video_id = self.request.uri.split('/')[-1]
+        method = self.request.uri.split('/')[-2]
+        self.a_id = self.request.uri.split('/')[-3]
+       
+        if "update" in method:
+            #update thumbnail  (vid, new tid)
+            self.update_thumbnail()
+        elif "check" in method:
+            #Check thumbnail on bcove
+            self.check_thumbnail()
+
+    def update_thumbnail(self):
+        new_tid = self.get_argument('tid')
+        vmdata = yield tornado.gen.Task(VideoMetadata.get,self.video_id)
+        ba = yield tornado.gen.Task(BrightcovePlatform.get_account,self.a_id,vmdata.integration_id)
+        bcove_video_id = InternalVideoID.to_external(self.video_id) 
+        res = yield tornado.gen.Task(ba.update_thumbnail,bcove_video_id,new_tid)
+
+    def check_thumbnail(self):
+        vmdata = yield tornado.gen.Task(VideoMetadata.get,self.video_id)
+        ba = yield tornado.gen.Task(BrightcovePlatform.get_account,self.a_id,vmdata.integration_id)
+        bcove_video_id = InternalVideoID.to_external(self.video_id) 
+        res = yield tornado.gen.Task(ba.check_current_thumbnail_in_db,bcove_video_id)
 
 ################################################################
 ### MAIN
@@ -1089,6 +1121,7 @@ if __name__ == "__main__":
     application = tornado.web.Application([
         (r'/api/v1/removeaccount(.*)', DeleteHandler),
         (r'/api/v1/accounts(.*)', AccountHandler),
+        (r'/api/v1/brightcovecontroller(.*)', BcoveHandler),
         (r'/api/v1/jobs(.*)', JobHandler)])
     
     global server

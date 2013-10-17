@@ -94,6 +94,11 @@ class InternalVideoID(object):
         key = api_key + "_" + vid
         return key
 
+    @staticmethod
+    def to_external(internal_vid):
+        vid = internal_vid.split('_')[-1]
+        return vid
+
 class AbstractRedisUserBlob(object):
     ''' 
         Abstract Redis interface and operations
@@ -200,7 +205,7 @@ class AbstractRedisUserBlob(object):
     #exists
     def exists(self,callback):
         self.external_callback = callback
-.        AbstractRedisUserBlob.conn.exists(self.key,callback)
+        AbstractRedisUserBlob.conn.exists(self.key,callback)
 
 ''' NeonUserAccount
 
@@ -222,7 +227,7 @@ class NeonUserAccount(AbstractRedisUserBlob):
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.plan_start_date = plan_start
         self.processing_minutes = processing_mins
-        self.videos = {}  # video_id -> job_id 
+        self.videos = {} 
         self.integrations = {} 
 
     def add_integration(self,integration_id, accntkey):
@@ -286,7 +291,8 @@ class NeonUserAccount(AbstractRedisUserBlob):
 
 class AbstractPlatform(object):
     def __init__(self):
-        self.videos = {"t":1 } # External video id => Job ID 
+        self.videos = {} # External video id => Job ID 
+        self.integration_id = None # Unique platform ID to 
 
 ''' Brightcove Account '''
 class BrightcovePlatform(AbstractRedisUserBlob,AbstractPlatform):
@@ -398,6 +404,16 @@ class BrightcovePlatform(AbstractRedisUserBlob,AbstractPlatform):
     def check_feed_and_create_request_by_tag(self):
         bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update,self.last_process_date)
         bc.create_brightcove_request_by_tag(self.integration_id)
+
+
+    '''
+    '''
+    def check_current_thumbnail_in_db(self,video_id,callback=None):
+        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update,self.last_process_date)
+        if callback:
+            bc.async_check_thumbnail(video_id,callback)
+        else
+            return bc.check_thumbnail(video_id)
 
     @staticmethod
     def create(json_data):
@@ -651,14 +667,14 @@ class NeonApiRequest(object):
     Enable thumbnail given the id
     iterate and set the given thumbnail and disable the previous
     '''
-    def enable_thumbnail(self,tid):
+    def choose_thumbnail(self,tid):
         t_url = None
         for t in self.thumbnails:
             if t['thumbnail_id'] == tid:
-                t['enabled'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") 
+                t['chosen'] = True #datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") 
                 t_url = t['url'][0]
             else:
-                t['enabled'] = None
+                t['chosen'] = False 
         return t_url
 
     def add_thumbnail(self,tid,url,created,enabled,width,height,ttype,refid=None,rank=None):
@@ -688,33 +704,33 @@ class NeonApiRequest(object):
             return NeonApiRequest.blocking_conn.set(self.key,value)
 
     @staticmethod
-    def get(api_key,job_id,result_callback=None):
+    def get(api_key,job_id,callback=None):
         def package(result):
             if result:
                 nar = NeonApiRequest.create(result)
-                result_callback(nar)
+                callback(nar)
             else:
-                result_callback(None)
+                callback(None)
 
         key = generate_request_key(api_key,job_id)
-        if result_callback:
-            NeonApiRequest.conn.get(key,result_callback)
+        if callback:
+            NeonApiRequest.conn.get(key,callback)
         else:
             result = NeonApiRequest.blocking_conn.get(key)
             return NeonApiRequest.create(result)
 
     @staticmethod
-    def get_request(api_key,job_id,result_callback=None):
+    def get_request(api_key,job_id,callback=None):
         key = generate_request_key(api_key,job_id)
-        if result_callback:
-            NeonApiRequest.conn.get(key,result_callback)
+        if callback:
+            NeonApiRequest.conn.get(key,callback)
         else:
             return NeonApiRequest.blocking_conn.get(key)
 
     @staticmethod
-    def multiget(keys,external_callback):
-        if external_callback:
-            NeonApiRequest.conn.mget(keys,external_callback)
+    def multiget(keys,callback):
+        if callback:
+            NeonApiRequest.conn.mget(keys,callback)
         else:
             return NeonApiRequest.blocking_conn.mget(keys)
 
@@ -772,17 +788,20 @@ class ThumbnailMetaData(object):
     '''
     Schema for storing thumbnail metadata
 
-    A single thumbnail id maps to all its urls [ Neon, OVP name space ones, other associated ones] 
+    A single thumbnail id maps to all its urls [Neon, OVP name space ones, other associated ones] 
     '''
-    def __init__(self,tid,urls,created,enabled,width,height,ttype,refid=None,rank=None):
+    def __init__(self,tid,urls,created,width,height,ttype,model_score,model_version,enabled=True,chosen=False,rank=None,refid=None):
         self.thumbnail_id = tid
         self.urls = urls  # All urls associated with single image
-        self.created = created
-        self.enabled = enabled
+        self.created_time = created #Timestamp when thumbnail was created 
+        self.enabled = enabled #boolen, indicates if this thumbnail can be displayed/ tested with 
+        self.chosen  = chosen #boolean, indicates this thumbnail is live
         self.width = width
         self.height = height
         self.type = ttype #neon1../ brightcove / youtube
-        self.rank = 0 if not rank else rank
+        self.rank = 0 if not rank else rank  #int 
+        self.model_score = model_score #float
+        self.model_version = model_version #float
         self.refid = refid #If referenceID exists as in case of a brightcove thumbnail
 
     def to_dict(self):
@@ -867,22 +886,18 @@ class ThumbnailURLMapper(AbstractRedisUserBlob):
 class ThumbnailIDMapper(AbstractRedisUserBlob):
     '''
     Class schema for Thumbnail URL to thumbnail metadata map
-    Thumbnail ID  => ( id, platform, video id, account id, thumb type, rank) 
+    Thumbnail ID  => (Internal Video ID, ThumbnailMetadata) 
 
     Used as a cache like store for the map reduce jobs
     '''
     host,port = dbsettings.DBConfig.thumbnailDB
     conn,blocking_conn = RedisClient.get_client(host,port)
 
-    def __init__(self,tid,ovp,internal_vid,i_id,ttype,rank):
+    def __init__(self,tid,internal_vid,thumbnail_metadata):
         super(ThumbnailIDMapper,self).__init__()
         self.key = tid 
-        self.urls = urls
-        self.platform = ovp
         self.video_id = internal_vid #api_key + platform video id
-        self.thumbnail_type = ttype
-        self.rank = rank
-        self.integration_id = i_id
+        self.thumbnail_metadata = thumbnail_metadata #dict of ThumbnailMetadata object
 
     def get_account_id(self):
         return self.video_id.split('_')[0]
@@ -1012,7 +1027,7 @@ class VideoMetadata(object):
     host,port = dbsettings.DBConfig.videoDB 
     conn,blocking_conn = RedisClient.get_client(host,port)
     
-    def __init__(self,video_id,tids,request_id,video_url,duration,vid_valence,model_version,frame_size=None):
+    def __init__(self,video_id,tids,request_id,video_url,duration,vid_valence,model_version,i_id,frame_size=None):
         self.key = video_id 
         self.thumbnail_ids = tids 
         self.url = video_url 
@@ -1020,6 +1035,7 @@ class VideoMetadata(object):
         self.video_valence = vid_valence 
         self.model_version = model_version
         self.job_id = request_id
+        self.integration_id = i_id
 
     def get_id(self):
         return self.key
