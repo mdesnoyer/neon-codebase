@@ -298,7 +298,7 @@ class AbstractPlatform(object):
 class BrightcovePlatform(AbstractRedisUserBlob,AbstractPlatform):
     def __init__(self,a_id,i_id,p_id=None,rtoken=None,wtoken=None,auto_update=False,last_process_date=None,abtest=False):
         super(BrightcovePlatform,self).__init__()
-        super(AbstractPlatform,self).__init__()
+        AbstractPlatform.__init__(self)
 
         self.neon_api_key = NeonApiKey.generate(a_id)
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
@@ -455,6 +455,9 @@ class BrightcovePlatform(AbstractRedisUserBlob,AbstractPlatform):
 
 class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
     def __init__(self,a_id,i_id,access_token=None,refresh_token=None,expires=None,auto_update=False):
+        super(BrightcovePlatform,self).__init__()
+        AbstractPlatform.__init__(self)
+        
         self.key = self.__class__.__name__.lower()  + '_' + NeonApiKey.generate(a_id ) + '_' + i_id
         self.account_id = a_id
         self.integration_id = i_id

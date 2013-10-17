@@ -22,6 +22,7 @@ if __name__ == '__main__':
     sys.path.insert(0,os.path.abspath(
         os.path.join(os.path.dirname(__file__), '..')))
 import model
+import model.features
 
 import cv2
 import heapq
@@ -40,9 +41,9 @@ import youtube_video_id_scraper as yt_scraper
 _log = logging.getLogger(__name__)
 
 def load_gist_generator(cache_dir=None):
-    generator = model.GistGenerator()
+    generator = model.features.GistGenerator()
     if cache_dir is not None:
-        generator = model.DiskCachedFeatures(generator, cache_dir)
+        generator = model.features.DiskCachedFeatures(generator, cache_dir)
 
     return generator
 
