@@ -55,6 +55,9 @@ class RedisClient(object):
     def __init__(self):
         pass
     
+    '''
+    return connection objects (blocking and non blocking)
+    '''
     @staticmethod
     def get_client(host=None,port=None):
         if host is None and port is None:
