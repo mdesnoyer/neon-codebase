@@ -22,6 +22,7 @@ def build_thumb(id=None, origin=None, rank=None, enabled=True, chosen=False,
     return ThumbnailInfo(id, origin, rank, enabled, chosen, score, loads,
                          clicks)
 
+#TODO(mdesnoyer) what happens when a video is removed from the db?!?
 
 class TestBadThumbCheck(unittest.TestCase):
     def setUp(self):
