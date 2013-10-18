@@ -23,6 +23,7 @@ log.addHandler(handler)
 #Tornado options
 from tornado.options import define, options
 define("port", default=9080, help="run on the given port", type=int)
+define("test", default=0, help="populate queue for test", type=int)
 MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
     
 #############################################
@@ -55,10 +56,9 @@ class ClickData(object):
     '''
     Schema for click tracker data
     '''
-    def __init__(self,action,id,aid,ttype,cts,sts,page,cip,imgs,cvid=None):
+    def __init__(self,action,id,ttype,cts,sts,page,cip,imgs,cvid=None):
         self.a = action # load/ click
         self.id = id    # page load id
-        self.aid = aid #account id
         self.ttype = ttype #tracker type
         self.ts = cts #client timestamp
         self.sts = sts #server timestamp
@@ -86,7 +86,6 @@ class LogLines(tornado.web.RequestHandler):
             cvid = None
             action = self.get_argument('a')
             id = self.get_argument('id')
-            aid = self.get_argument('aid') 
             ttype = self.get_argument('ttype')
             cts = self.get_argument('ts')
             sts = int(time.time())
@@ -101,9 +100,9 @@ class LogLines(tornado.web.RequestHandler):
         except Exception,e:
             log.exception("key=get_track msg=%s" %e) 
         
-        cd = ClickData(action,id,aid,ttype,cts,sts,page,cip,imgs,cvid)
+        cd = ClickData(action,id,ttype,cts,sts,page,cip,imgs,cvid)
         data = cd.to_json()
-
+        print data
         try:
             event_queue.put(data)
         except Exception,e:
@@ -126,7 +125,7 @@ class GetLines(tornado.web.RequestHandler):
        
         count = 1
         try:
-            count = self.get_argument('count')
+            count = int(self.get_argument('count'))
         except:
             pass
 
@@ -134,8 +133,11 @@ class GetLines(tornado.web.RequestHandler):
         data = ''
         if qsize > count:
             for i in range(count):
-                data += event_queue.get_nowait()  
-                data += '\n'
+                try:
+                    data += event_queue.get_nowait()  
+                    data += '\n'
+                except:
+                    log.error("key=GetLines msg=Q error")
 
         self.write(data)
         self.finish()
@@ -155,20 +157,21 @@ def main():
     global server
     global event_queue
 
-    event_queue = multiprocessing.Queue()
-    
+    event_queue = Queue.Queue() #multiprocessing.Queue()
     tornado.options.parse_command_line()
     signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGINT, sig_handler)
     server = tornado.httpserver.HTTPServer(application)
     server.listen(options.port)
+    if options.test:
+        test()
     #server.bind(options.port)
     #server.start(0)
     tornado.ioloop.IOLoop.instance().start()
 
 def test():
     QMAX = 5000
-    tdata = '{"k1":"v1","k2":"v2"}'
+    tdata = '{"a": "load", "img": "[\"http://brightcove.vo.llnwd.net/d21/unsecured/media/2294876105001/201310/34/2294876105001_2727914703001_thumbnail-2296855887001.jpg\",\"http://brightcove.vo.llnwd.net/d21/unsecured/media/2294876105001/201310/354/2294876105001_2727881607001_thumbnail-2369368872001.jpg\",\"http://brightcove.vo.llnwd.net/e1/pd/2294876105001/2294876105001_2660525568001_thumbnail-2296855886001.jpg\",\"http://brightcove.vo.llnwd.net/e1/pd/2294876105001/2294876105001_2617231423001_thumbnail-2323153341001.jpg\"]", "ts": "1382056097928", "cip": "::1", "sts": 1382056097, "ttype": "flashonlyplayer", "id": "2787acedddac5e1c"}' 
     for i in range(QMAX):
         event_queue.put(tdata)
 

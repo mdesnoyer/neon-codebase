@@ -18,9 +18,20 @@ Test functionality of the click log server.
 
 import subprocess
 import sys
-#import logDatatoS3
 import urllib2
 import random
+import boto
+from boto.s3.connection import S3Connection
+from moto import mock_s3
+from logDatatoS3 import *
+
+@mock_s3
+def log_to_s3():
+    conn = S3Connection('test','test')
+    bucket = conn.create_bucket('neon-tracker-logs')
+    drainer = S3DataHandler(nlines,port,fetch_count)
+    drainer.run()
+
 
 nlines = 1000
 port = 9080
@@ -41,6 +52,4 @@ for i in range(nlines):
         r = urllib2.urlopen(l_url) 
     r.read()
 
-#drainer = logDatatoS3.S3DataHandler(nlines,port,fetch_count)
-#drainer.do_work()
-
+log_to_s3()

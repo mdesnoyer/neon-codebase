@@ -54,12 +54,12 @@ def sig_handler(sig, frame):
 
 class S3DataHandler(object):
     
-    def __init__(self,s3_line_count,port,fetch_count):
-        S3_ACCESS_KEY = 'AKIAJ5G2RZ6BDNBZ2VBA'
+    def __init__(self,s3_line_count,port,fetch_count,s3bucket=None):
+        S3_ACCESS_KEY = 'AKIAJ5G2RZ6BDNBZ2VBA' 
         S3_SECRET_KEY = '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'
         s3bucket_name = 'neon-tracker-logs'
         self.s3conn = S3Connection(aws_access_key_id=S3_ACCESS_KEY,aws_secret_access_key =S3_SECRET_KEY)
-        self.s3bucket = Bucket(connection = self.s3conn, name = s3bucket_name)
+        self.s3bucket = Bucket(connection = self.s3conn, name = s3bucket_name) if not s3bucket else s3bucket
         
         #self.s3conn = AsyncS3Connection(aws_access_key_id=S3_ACCESS_KEY,aws_secret_access_key =S3_SECRET_KEY)
         #self.s3bucket = AsyncBucket(connection = self.s3conn, name = s3bucket_name)
@@ -70,6 +70,7 @@ class S3DataHandler(object):
         self.s3_line_count = s3_line_count
         self.lines_to_save = ''
 
+    '''
     @contextlib.contextmanager
     def exception_handler(self,typ,value,tb):
         if isinstance(value,S3ResponseError):
@@ -77,7 +78,6 @@ class S3DataHandler(object):
 
         self.finish()
 
-    '''
     #Async
     def upload_data_to_s3(data):
        
@@ -114,7 +114,7 @@ class S3DataHandler(object):
         try:
             response = http_client.fetch(req)
             self.lines_to_save += response.body
-            self.nlines += 1
+            self.nlines += response.body.count('\n')
         except:
             return
 
@@ -123,11 +123,12 @@ class S3DataHandler(object):
             k = Key(self.s3bucket)
             k.key = shortuuid.uuid() 
             try:
-                k.set_contents_as_string(self.lines_to_save)
+                k.set_contents_from_string(self.lines_to_save)
                 self.nlines = 0
             except S3ResponseError,e:
                 pass
-    
+            print "Saced to S3"
+
     def run(self):
         while True:
             self.do_work()

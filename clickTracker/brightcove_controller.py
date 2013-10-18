@@ -6,7 +6,6 @@ Listens for updates from mastermind
 On recieveing an update, schedules a task to be executed at time 't'
 Tasks can include -- push thumbnail X in to brightcove account A 
 
-#TODO: Try making the Task executor subscribe for tasks, have a pool of processes for exec.
 '''
 import tornado.ioloop
 import tornado.web
@@ -23,14 +22,15 @@ import sys
 sys.path.insert(0,os.path.abspath(
         os.path.join(os.path.dirname(__file__), '../api')))
 import threading
+import urllib
 import logging
 import logging.handlers
 logging.basicConfig(filename= __file__.split('.')[0] + '.log', filemode='a', level=logging.DEBUG)
 log = logging.getLogger(__name__)
 
-############################################################
+####################################################################################################
 ## Priority Q Impl
-############################################################
+####################################################################################################
 
 class PriorityQ(object):
 
@@ -72,25 +72,65 @@ class PriorityQ(object):
         else:
             return (None,None,None) 
 
-###########################################
-# Thread Workers
-###########################################
+###################################################################################
+# TASK Abstraction and Manager 
+###################################################################################
+
+class AbstractTask(object):
+    def execute(self):
+        pass
+
+class ThumbnailChangeTask(AbstractTask):
+    
+    ''' Task to change the thumbnail for a given video '''
+    
+    def __init__(self,video_id,new_tid):
+        self.video_id = video_id
+        self.tid = new_tid
+        self.service_url = self.neon_service_url + "/" + account_id + "/" + updatethumbnail + "/" + str(video_id) 
+    
+    def execute(self):
+        self.set_thumbnail()
+
+    @tornado.gen.engine
+    def set_thumbnail(self):
+        http_client = tornado.httpclient.AsyncHTTPClient()
+        body = urllib.urlencode({'thumbnail_id':self.tid})
+        req = tornado.httpclient.HTTPRequest(method = 'POST',url = self.service_url,body=body,
+                        request_timeout = 10.0)
+        http_client.fetch(req,self.cb)
+        result = yield tornado.gen.Task(http_client.fetch,url)
+        if result.error:
+            log.error("key=ThumbnailChangeTask msg=thumbnail change failed")
+        else:
+            log.debug("key=ThumbnailChangeTask msg=thumbnail for video %s is %s"
+                        %(self.video_id,self.tid))
+
+class TimesliceEndTask(AbstractTask):
+
+    ''' Task that executes at the end of time slice'''
+
+    def __init__(self,vid):
+        self.video_id = vid 
+
+    def execute(self):
+        pass
+        #based on current state of video take a decision
 
 class TaskManager(object):
     '''
     Schedule and execute task (one thread per task)
     '''
-    def thread_worker(self,task):
+    def task_worker(self,task):
         print "[exec] " ,task, threading.current_thread()  
-        bc = BrightcoveABController()
-        bc.set_thumbnail(1,2)
+        task.execute()
 
     def check_scheduler(self):
         priority, count, task = taskQ.peek_task()
         cur_time = time.time()
         if priority and priority <= cur_time:
             task = taskQ.pop_task() 
-            t = threading.Thread(target=self.thread_worker,args=(task,))
+            t = threading.Thread(target=self.task_worker,args=(task,))
             t.setDaemon(True)
             t.start()
 
@@ -114,56 +154,86 @@ class BrightcoveThumbnailChecker(threading.Thread):
         pass
 
 
-###########################################
+###################################################################################
 # Brightcove AB Controller Logic 
-###########################################
+###################################################################################
 class BrightcoveABController(object):
 
     service_url =  "http://localhost:8083"
     timeslice = 71    #timeslice for experiment
     cushion_time = 10 #cushion time for data extrapolation
-    max_update_delay = 10
 
-    def __init__(self):
+    def __init__(self,delay=0):
         #self.neon_service_url = "http://services.neon-lab.com"
         self.neon_service_url = "http://localhost:8083"
+        self.max_update_delay = delay
 
     def cb(self,result):
         print "[cb]" ,time.time(), len(result.body), threading.current_thread()
 
-    @tornado.gen.engine
-    def set_thumbnail(self,video_id,tid):
-        http_client = tornado.httpclient.AsyncHTTPClient()
-        #url = self.neon_service_url + "/" + account_id + "/" + updatethumbnail + "/" + str(video_id)
-        #"http://54.221.234.42:9082"
-        url = "ogle.com"
-        print "[Make call] ", time.time(), threading.current_thread()
-        #http_client.fetch(url,self.cb)
-        result = yield tornado.gen.Task(http_client.fetch,url)
-        print "[yield]",time.time(), len(result.body), threading.current_thread()
-
     def thumbnail_change_scheduler(self,video_metadata,distribution):
+        
+        video_id = video_metadata.get_id()
+        
         #Make a decision based on the current state of the video data
-        delay = random.randint(0,BrightcoveABController.max_update_delay)
+        delay = random.randint(0, self.max_update_delay)
         abtest_start_time = random.randint(BrightcoveABController.cushion_time,
                 BrightcoveABController.timeslice - BrightcoveABController.cushion_time) 
         
-        #schedule A
-        #taskmgr.add_task()
-        #schedule B
+        time_dist = self.convert_from_percentages(distribution)
+        thumbA = time_dist.pop(0)
+        cur_time = time.time()
+        time_to_exec_task = cur_time + delay
+
+        #TODO: Check what happens when you push same refID thumb to bcove
+       
+        #schedule A - The Majority run thumbnail 
+        taskA = ThumbnailChangeTask(video_id,thumbA[0]) 
+        taskmgr.add_task(taskA,time_to_exec_task) 
+
+        #schedule the B's - the lower % thumbnails
+        time_to_exec_task += abtest_start_time
+        for tup in time_dist:
+            task = ThumbnailChangeTask(video_id,tup[0]) 
+            taskmgr.add_task(task,time_to_exec_task)
+            time_to_exec_task += tup[1] # Add the time the thumbnail should run for 
+        
+        #schedule A - The Majority run thumbnail 
+        taskmgr.add_task(taskA,time_to_exec_task) 
+        time_to_exec_task += (BrightcoveABController.timeslice 
+                                    - sum([tup[0] for tup in time_dist])
+                                    - abtest_start_time)
+
+        task_time_slice = TimesliceEndTask(video_id) 
         #schedule End of Timeslice for a particular video
+        taskmgr.add_task(task_time_slice,time_to_exec_task)
 
-    def end_of_timeslice(self):
-        pass
-        #indicate which video it was
+    def convert_from_percentages(self,pd):
+        total_pcnt = sum([tup[0] for tup in pd])
+        time_dist = []
 
-###########################################
+        for tup in pd:
+            pcnt = float(tup[1])
+            if total_pcnt != 100:
+               tslice = (pcnt/total_pcnt) * BrightcoveABController.timeslice  
+            else:
+                tslice = (pcnt/100) * BrightcoveABController.timeslice
+
+            pair = (tup[0],tslice)
+            time_dist.append(pair)
+        
+        sorted_time_dist = sorted(time_dist, key=lambda tup: tup[1],reverse=True)
+        return sorted_time_dist 
+
+
+###################################################################################
 # Create Tornado server application
-###########################################
+###################################################################################
 
 from tornado.options import define, options
 define("port", default=8888, help="run on the given port", type=int)
-define("service_url", default="http://services.neon-lab.com", help="service url", type=basestring)
+define("service_url", default="http://services.neon-lab.com", 
+        help="service url", type=basestring)
 
 class GetData(tornado.web.RequestHandler):
     
@@ -182,7 +252,7 @@ class GetData(tornado.web.RequestHandler):
             tidmappings = yield tornado.gen.Task(ThumbnailIDMapper.get_ids,tids)
             if tidmappings is not None:
                 vmdata = yield tornado.gen.Task(VideoMetadata.get,vid)
-                if vmdata is Not None:
+                if vmdata is not None:
                     controller.thumbnail_swap_scheduler(vmdata,tidmappings,tids_tuple)
             
         priority = time.time() 
@@ -193,9 +263,9 @@ application = tornado.web.Application([
     (r"/",GetData),
 ])
 
-###########################################
+###################################################################################
 # Initialize AB Controller  
-###########################################
+###################################################################################
 
 '''
 Populate data from mastermind 
@@ -204,18 +274,18 @@ Fetch the video id => [(Tid,%)] mappings and populate the data
 '''
 def initialize_controller():
     vids = {"int_vid1": [('i1',20)('i2',80)],"int_vid2": [('ii1',30)('ii2',70)] }
-    controller = BrightcoveABController()
+    controller = BrightcoveABController(delay=10) #stagger initial videos by introducing delay
     return
 
     for vid,tids_tuple in vids.iteritems():
         tids = [tup[0] for tup in tids_tuple] 
         tidmappings = ThumbnailIDMapper.get_ids(tids)
         vmdata = VideoMetadata.get(vid)
-        controller.thumbnail_swap_scheduler(vmdata,tidmappings,tids_tuple)
+        controller.thumbnail_change_scheduler(vmdata,tidmappings,tids_tuple)
 
-###########################################
+###################################################################################
 # MAIN
-###########################################
+###################################################################################
 
 def main():
     global taskQ
