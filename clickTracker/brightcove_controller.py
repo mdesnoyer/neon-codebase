@@ -200,7 +200,8 @@ class BrightcoveABController(object):
         
         #schedule A - The Majority run thumbnail 
         taskmgr.add_task(taskA,time_to_exec_task) 
-        time_to_exec_task += (BrightcoveABController.timeslice - sum([tup[0] for tup in time_dist])
+        time_to_exec_task += (BrightcoveABController.timeslice 
+                                    - sum([tup[0] for tup in time_dist])
                                     - abtest_start_time)
 
         task_time_slice = TimesliceEndTask(video_id) 
@@ -231,7 +232,8 @@ class BrightcoveABController(object):
 
 from tornado.options import define, options
 define("port", default=8888, help="run on the given port", type=int)
-define("service_url", default="http://services.neon-lab.com", help="service url", type=basestring)
+define("service_url", default="http://services.neon-lab.com", 
+        help="service url", type=basestring)
 
 class GetData(tornado.web.RequestHandler):
     
