@@ -19,6 +19,20 @@ from utils import strutils
 
 _log = logging.getLogger(__name__)
 
+# Enum for different distribution types
+class DistributionType:
+    NEON = 0
+    BRIGHTCOVE = 1
+    YOUTUBE = 2
+
+    @classmethod
+    def fromString(cls, string):
+        d = {'neon' : cls.NEON,
+             'brightcove' : cls.BRIGHTCOVE,
+             'youtube' : cls.YOUTUBE
+             }
+        return d[string.lower()]
+
 class VideoInfo(object):
     '''Container to store information needed about each video.'''
     def __init__(self, testing_enabled, thumbnails=[]):
@@ -56,6 +70,20 @@ class ThumbnailInfo(object):
         self.clicks = other_info.clicks
         return self
 
+    @staticmethod
+    def from_db_data(data):
+        '''Returns a ThumbnailInfo object from a database object.
+
+        Inputs:
+        data - A neondata.ThumbnailMetaData object
+        '''
+        return ThumbnailInfo(data['thumbnail_id'],
+                             data['type'],
+                             data['rank'],
+                             data['enabled'],
+                             data['chosen'],
+                             data['score'])
+
 class Mastermind(object):
     '''Class that defines the core logic of how much to show each thumbnail.
 
@@ -77,6 +105,37 @@ class Mastermind(object):
 
         # For thread safety
         self.lock = threading.RLock()
+
+    def get_directives(self, video_ids):
+        '''Returns a generator for the serving directives for all the video ids
+
+        ***Warning*** The generator returned from this function cannot
+           be shared between multiple threads.
+
+        Inputs:
+        video_ids - List of video_ids to query, or returns all of them if None
+
+        Returns:
+
+        Generator that spits out (video_id, [(thumb_id, fraction)])
+        tuples.  It's thread safe as long as you keep the generator
+        that's returned in a single thread.
+        
+        '''
+        if video_ids is None:
+            with self.lock:
+                video_ids = self.video_info.keys()
+
+        for video_id in video_ids:
+            try:
+                with self.lock:
+                    directive = self._calculate_current_serving_directive(
+                        self.video_info[video_id], video_id)
+                yield directive
+            except KeyError:
+                # Some other thread changed the data so we don't have
+                # information about this video id anymore. Oh well.
+                pass
 
     def update_video_info(self, video_id, testing_enabled, thumbnails):
         '''Updates information about the video.

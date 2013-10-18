@@ -26,17 +26,17 @@ class HourlyEventStats(MRJob):
     
     def configure_options(self):
         super(HourlyEventStats, self).configure_options()
-        self.add_passthrough_option( '--stats_host',
+        self.add_passthrough_option('--stats_host',
             default='stats.cnvazyzlgq2v.us-east-1.rds.amazonaws.com',
             help='Host of the stats database')
-        self.add_passthrough_option( '--stats_port', type='int',
-                                     default=3306,
-                                     help='Port to the stats database')
+        self.add_passthrough_option('--stats_port', type='int',
+                                    default=3306,
+                                    help='Port to the stats database')
         self.add_passthrough_option('--stats_user', default='mrwriter',
                                     help='User for the stats database')
         self.add_passthrough_option('--stats_pass', default='kjge8924qm',
                                     help='Password for the stats database')
-        self.add_passthrough_option('--stats_db', default='stats',
+        self.add_passthrough_option('--stats_db', default='stats_dev',
                                     help='Stats database to connect to')
         self.add_passthrough_option('--increment_stats', action='store_true',
             default=False,
