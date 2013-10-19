@@ -230,11 +230,11 @@ class NeonUserAccount(AbstractRedisUserBlob):
         self.videos = {} 
         self.integrations = {} 
 
-    def add_integration(self,integration_id, accntkey):
+    def add_integration(self,integration_id,itype):
         if len(self.integrations) ==0 :
             self.integrations = {}
 
-        self.integrations[integration_id] = accntkey
+        self.integrations[integration_id] = itype 
 
     def get_ovp(self):
         return "neon"
@@ -415,6 +415,20 @@ class BrightcovePlatform(AbstractRedisUserBlob,AbstractPlatform):
             bc.async_check_thumbnail(video_id,callback)
         else
             return bc.check_thumbnail(video_id)
+
+    ''' Method to verify brightcove token on account creation
+        And create requests for processing
+
+        @return: Callback returns job id, along with brightcove vid metadata
+    ''' 
+    def verify_token_and_create_requests_for_video(self,n,callback=None):
+        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update,self.last_process_date)
+        if callback:
+            bc.async_verify_token_and_create_requests(n)
+        else
+            return bc.verify_token_and_create_requests(n)
+
+
 
     @staticmethod
     def create(json_data):
@@ -639,20 +653,8 @@ class NeonApiRequest(object):
         self.state = "submit" # submit / processing / success / fail 
         self.integration_type = "neon"
 
-        #Meta data to be filled by the consumer client
-        self.duration = None
-        self.submit_time = None
-        self.end_time = None
-        self.frame_rate = None
-        self.bitrate = None
-        self.video_valence = None
-        self.model_version = None
-
         #Save the request response
         self.response = {}  
-
-        #Thumbnail Data
-        self.thumbnails = []  
 
         #API Method
         self.api_method = None
@@ -680,11 +682,6 @@ class NeonApiRequest(object):
             else:
                 t['chosen'] = False 
         return t_url
-
-    def add_thumbnail(self,tid,url,created,enabled,width,height,ttype,refid=None,rank=None):
-        tdata = ThumbnailMetaData(tid,url,created,enabled,width,height,ttype,refid,rank)
-        thumb = tdata.to_dict()
-        self.thumbnails.append(thumb)
    
     def get_current_thumbnail(self):
         tid = None

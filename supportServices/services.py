@@ -51,9 +51,29 @@ class BaseHandler(tornado.web.RequestHandler):
     def get_key(self,value):
         return
 
-####################################################################
+
+################################################################################
+# Helper classes  
+################################################################################
+
+class VideoResponse(object):
+    def __init__(self,vid,status,i_type,i_id,title,duration,pub_data,cur_tid,thumb):
+        self.video_id = vid
+        self.status = status
+        self.integration_type = i_type
+        self.integration_id = i_id
+        self.title = title
+        self.duration = duration
+        self.publish_date = pub_date
+        self.current_thumbnail = cur_tid
+        self.thumbnails = thumbs #dict of ThumbnailMetdata class
+
+    def to_json(self):
+        return json.dumps(self, default=lambda o: o.__dict__)
+
+################################################################################
 # Account Handler
-####################################################################
+################################################################################
 
 class AccountHandler(tornado.web.RequestHandler):
     
@@ -161,11 +181,11 @@ class AccountHandler(tornado.web.RequestHandler):
         
         #POST /accounts/:account_id/brightcove_integrations
         if "brightcove_integrations" in self.request.uri:
-            self.create_brightcove_account()
+            self.create_brightcove_integration()
         
         #POST /accounts/:account_id/youtube_integrations
         elif "youtube_integrations" in self.request.uri:
-            self.create_youtube_account()
+            self.create_youtube_integration()
         
         #POST /accounts ##Crete neon user account
         elif "accounts" in self.request.uri.split('/')[-1]:
@@ -209,7 +229,7 @@ class AccountHandler(tornado.web.RequestHandler):
         #Update Accounts
         elif method is None or method == "update":
             if "brightcove_integrations" == itype:
-                self.update_brightcove_account(i_id)
+                self.update_brightcove_integration(i_id)
             elif "youtube_integrations" == itype:
                 self.update_youtube_account(i_id)
             elif itype is None:
@@ -624,7 +644,7 @@ class AccountHandler(tornado.web.RequestHandler):
     send top 5 videos or appropriate error to client
     '''
     
-    def create_brightcove_account(self):
+    def create_brightcove_integration(self):
 
         rcount = 5
         def verify_brightcove_tokens(result):
@@ -668,7 +688,7 @@ class AccountHandler(tornado.web.RequestHandler):
             if result:
                 na = NeonUserAccount.create(result)
                 if len(na.integrations) >0 and na.integrations.has_key(i_id):
-                    data = '{"error": "integration already exists" }'
+                    data = '{"error": "integration already exists"}'
                     self.send_json_response(data,409)
                 else:
                     curtime = time.time() #account creation time
@@ -676,7 +696,7 @@ class AccountHandler(tornado.web.RequestHandler):
                     na.add_integration(bc.integration_id,bc.key)
                     na.save_integration(bc,saved_account)
             else:
-                self.send_json_response('',400)
+                self.send_json_response('{"error":"account id error or internal error"}',400)
 
         try:
             a_id = self.request.uri.split('/')[-2]
@@ -688,14 +708,58 @@ class AccountHandler(tornado.web.RequestHandler):
             NeonUserAccount.get_account(self.api_key,create_account)
 
         except Exception,e:
-            log.error("key=create brightcove account msg=" + e.message)
+            log.error("key=create brightcove account msg= %" %e)
             data = '{"error": "API Params missing" }'
             self.send_json_response(data,400)
+       
+
+    def new_bcove_account(self):
         
+
+        try:
+            a_id = self.request.uri.split('/')[-2]
+            i_id = self.get_argument("integration_id")
+            p_id = self.get_argument("publisher_id")
+            rtoken = self.get_argument("read_token")
+            wtoken = self.get_argument("write_token")
+            autosync = self.get_argument("auto_update")
+
+        except Exception,e:
+            log.error("key=create brightcove account msg= %" %e)
+            data = '{"error": "API Params missing" }'
+            self.send_json_response(data,400)
+            return 
+
+        na_data = yield tornado.gen.Task(NeonUserAccount.get_account,self.api_key)
+        #Create and Add Platform Integration
+        if na:
+            na = NeonUserAccount.create(na_data)
+            
+            #Check if integration exists
+            if len(na.integrations) >0 and na.integrations.has_key(i_id):
+                data = '{"error": "integration already exists"}'
+                self.send_json_response(data,409)
+            else:
+                curtime = time.time() #account creation time
+                bc = BrightcovePlatform(a_id,i_id,p_id,rtoken,wtoken,autosync,curtime)
+                na.add_integration(bc.integration_id,"brightcove")
+                res = yield tornado.gen.Task(na.save_integration) #save integration & update acnt
+                
+                #Saved Integration
+                if res:
+                    bc.verify_token_and_create_requests_for_video(5)
+                else:
+                    data = '{"error": "integration was not added, account creation issue"}'
+                    self.send_json_response(data,500)
+                    return
+
+        else:
+            log.error("key=create brightcove account msg= account not found %s" %self.api_key)
+
     '''
     Update Brightcove account details
     '''
-    def update_brightcove_account(self,i_id):
+    def update_brightcove_integration(self,i_id):
         
         def saved_account(result):
             if result:
@@ -713,7 +777,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 bc.auto_update = autosync
                 bc.save(saved_account)
             else:
-                log.error("key=update_brightcove_account msg= no such account %s integration id %s" %(self.api_key,i_id))
+                log.error("key=update_brightcove_integration msg= no such account %s integration id %s" %(self.api_key,i_id))
                 data = '{"error": "Account doesnt exists" }'
                 self.send_json_response(data,400)
         
@@ -745,7 +809,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
                 #Get unprocessed list from brightcove 
             else:
-                log.error("key=update_brightcove_account msg= no such account %s integration id %s" %(self.api_key,i_id))
+                log.error("key=update_brightcove_integration msg= no such account %s integration id %s" %(self.api_key,i_id))
                 data = '{"error": "Account doesnt exists" }'
                 self.send_json_response(data,400)
 
@@ -760,7 +824,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
     validate the refresh token and retreive list of channels for the acccount    
     '''
-    def create_youtube_account(self):
+    def create_youtube_integration(self):
 
         def saved_account(result):
             if result:
@@ -777,7 +841,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 na.add_integration(yt.integration_id,yt.key) 
                 na.save_integration(yt,saved_account)
             else:
-                log.error("key=create_youtube_account msg=neon account not found")
+                log.error("key=create_youtube_integration msg=neon account not found")
                 data = '{"error": "account creation issue"}'
                 self.send_json_response(data,500)
 
