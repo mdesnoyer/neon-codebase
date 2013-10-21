@@ -380,6 +380,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             
             result = yield tornado.gen.Task(api_request.save)
             print result
+            result = api_request.save()
+            print result
             if not result:
                 log.error("key=thumbnail_handler  msg=request save failed: ")
                 self.set_status(502)

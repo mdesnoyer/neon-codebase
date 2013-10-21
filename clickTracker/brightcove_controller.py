@@ -133,7 +133,7 @@ class ThumbnailCheckTask(AbstractTask):
         http_client = tornado.httpclient.AsyncHTTPClient()
         req = tornado.httpclient.HTTPRequest(method = 'POST',url = self.service_url,body=body,
                         request_timeout = 10.0)
-        http_client.fetch(req,self.cb)
+        #http_client.fetch(req,self.cb)
         result = yield tornado.gen.Task(http_client.fetch,url)
         if result.error:
             log.error("key=ThumbnailCheckTask msg=service error for video %" %self.video_id)
@@ -145,7 +145,8 @@ class TaskManager(object):
     def task_worker(self,task):
         print "[exec] " ,task, threading.current_thread()  
         task.execute()
-    
+   
+    @tornado.gen.engine
     def check_scheduler(self):
         priority, count, task = taskQ.peek_task()
         cur_time = time.time()

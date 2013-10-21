@@ -36,6 +36,7 @@ class BrightcoveApi(object):
         self.write_url = "http://api.brightcove.com/services/post"
         self.autosync = autosync
         self.last_publish_date = publish_date if publish_date else time.time()
+        self.local = local
         if local:
             self.neon_uri = "http://localhost:8081/api/v1/submitvideo/"
         else:
@@ -529,30 +530,46 @@ class BrightcoveApi(object):
 
 
     #Verify Tokens and Create Neon requests
-    def async_verify_token_and_create_requests(i_id,n,callback):
+    def async_verify_token_and_create_requests(self,i_id,n,callback):
 
-        def submit_neon_api_request(result):
-            if not result.error:
-                #Add job_id to the intergation instance
-            else:
-                pass
-
+        @tornado.gen.engine
         def verify_brightcove_tokens(result):
             if not result.error and "error" not in result.body:
+                bc_json = yield tornado.gen.Task(BrightcovePlatform.get_account,self.neon_api_key,i_id)
+                bc = BrightcovePlatform.create(bc_json)
                 vitems = tornado.escape.json_decode(result.body)
                 items = vitems['items']
+                keys = []
                 #create request for each video 
                 for item in items:
-                    video = {}
                     vid = str(item['id'])                              
-                    video['title'] = item['name']
-                    video_download_url =
+                    title = item['name']
+                    video_download_url = item['FLVURL']
                     prev_thumbnail = item['videoStillURL'] #item['thumbnailURL']
-                    self.format_neon_api_request(self,vid,video_download_url,prev_thumbnail,
-                            request_type='topn',i_id,title,callback=submit_neon_api_request):
+                    keys.append("key"+vid)
+                    self.format_neon_api_request(vid,video_download_url,prev_thumbnail,
+                            'topn',i_id,title,
+                            callback=(yield tornado.gen.Callback("key" + vid)))
 
+                result = [] 
+                responses = yield tornado.gen.WaitAll(keys)
+                for response,item in zip(responses,items):
+                    if not response.error:
+                        vid = str(item['id'])
+                        jid = tornado.escape.json_decode(response.body)
+                        job_id = jid["job_id"]
+                        item['job_id'] = job_id 
+                        bc.videos[vid] = job_id 
+                        result.append(item)
+               
+                #Update the videos in customer inbox
+                res = yield tornado.gen.Task(bc.save)
+                print "updated inbox", res
+
+                #send result back with job_id
+                callback(result)
             else:
-                pass
+                print "ERROR"   
 
         self.async_get_n_videos(5,verify_brightcove_tokens)
 
