@@ -1,4 +1,11 @@
 #!/usr/bin/env python
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__),
+                                         '..', '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
+    
 import tornado.httpserver
 import tornado.ioloop
 import tornado.web
@@ -6,9 +13,8 @@ import tornado.escape
 import tornado.httpclient
 import tornado.gen
 import time
-import sys
+import logging
 import random
-sys.path.insert(0, "../")
 import errorlog
 import shortuuid
 import signal
@@ -16,14 +22,15 @@ import re
 import multiprocessing
 import Queue
 
-from tornado.options import define, options
+import utils.neon
+
+from utils.options import define, options
 define("port", default=8082, help="run on the given port", type=int)
 
 #global global_api_work_queue
 #global_api_work_queue = multiprocessing.Queue()
 
-global log
-log = errorlog.FileLogger("server")
+_log = logging.getLogger(__name__)
 
 global result_map
 result_map = {} 
@@ -32,7 +39,7 @@ random.seed(2)
 test_status = 0 ; # 0- in progress, 1 - pass , -1 - fail
 
 def sig_handler(sig, frame):
-    log.debug('Caught signal: ' + str(sig) )
+    _log.debug('Caught signal: ' + str(sig) )
     tornado.ioloop.IOLoop.instance().stop()
     sys.exit(0)
 
@@ -127,7 +134,7 @@ class IntegrationTestHandler(tornado.web.RequestHandler):
     @tornado.gen.engine
     def register_timeout(self,timeout):
         yield tornado.gen.Task(tornado.ioloop.IOLoop.instance().add_timeout, time.time() + timeout)
-        log.error("Callbacks never came back, check server/client logs")
+        _log.error("Callbacks never came back, check server/client logs")
         sys.exit(1) 
     
     def initialize(self):
@@ -185,7 +192,7 @@ class IntegrationTestHandler(tornado.web.RequestHandler):
         
         try:
             result = tornado.escape.json_decode(self.request.body)
-            log.info("result " + self.request.body)
+            _log.info("result " + self.request.body)
             data = result["data"]
             vid = result["video_id"]
             if len(data) != result_map[vid]:
@@ -194,7 +201,7 @@ class IntegrationTestHandler(tornado.web.RequestHandler):
 
         except Exception,e:
             raise tornado.web.HTTPError(500)  
-            log.error("key=testcallback msg=error recieving message")
+            _log.error("key=testcallback msg=error recieving message")
         self.finish()
 
 class StatusHandler(tornado.web.RequestHandler):
@@ -209,6 +216,8 @@ class StatusHandler(tornado.web.RequestHandler):
         self.finish()
 
 if __name__ == "__main__":
+    utils.neon.InitNeon()
+    
     application = tornado.web.Application([
         (r'/integrationtest(.*)', IntegrationTestHandler),
         (r'/demo(.*)', DemoHandler),
@@ -217,7 +226,6 @@ if __name__ == "__main__":
     global server
     signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGINT, sig_handler)
-    tornado.options.parse_command_line()
     server = tornado.httpserver.HTTPServer(application)
     server.listen(options.port)
     tornado.ioloop.IOLoop.instance().start()

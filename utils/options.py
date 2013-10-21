@@ -5,14 +5,15 @@ A module using this functionality would define its own options like:
 
   from utils.options import define, options
 
-  define("mysql_host", default="127.0.0.1:3306", help="Main user DB")
+  define("mysql_host", default="127.0.0.1:3306", type=str,
+         help="Main user DB")
 
   def connect():
     db = database.Connection(options.mysql_host)
 
 Then, in the main() routine the parsing command must be called:
 
-  utils.options.parse_args()
+  utils.options.parse_options()
 
 Options can be defined in the command line or in a configuration
 file. If you want the configuration to load from the configuration
@@ -48,6 +49,11 @@ import os.path
 import sys
 import yaml
 
+#TODO(mdesnoyer): Add support for booleans
+
+#TODO(mdesnoyer): Add groups so that the flags are sorted better in
+#the help message.
+
 class Error(Exception):
     """Exception raised by errors in the options module."""
     pass
@@ -81,7 +87,7 @@ class OptionParser(object):
         global_name = self._local2global(name)
         return self._options[global_name].value()
 
-    def define(self, name, default=None, type=None, help=None):
+    def define(self, name, default=None, type=None, help=None, stack_depth=2):
         '''Defines a new option.
 
         Inputs:
@@ -90,10 +96,17 @@ class OptionParser(object):
         type - The type object to expect
         help - Help string
         '''
-        global_name = self._local2global(name)
+        global_name = self._local2global(name, stack_depth=stack_depth)
 
         if global_name in self._options:
             raise Error("Option %s already defined." % global_name)
+
+        if type == bool:
+            raise TypeError('Boolean variables are not supported. Variable: %s'
+                            % global_name)
+        if isinstance(type, basestring):
+            raise TypeError('Type must be specified uisng the python type not '
+                            'a string. Variable: %s' % global_name)
 
         if type is None:
             if default is None:
@@ -111,7 +124,7 @@ class OptionParser(object):
         Inputs:
         args - Argument list. defaults to sys.argv[1:]
         config_stream - Specify a yaml stream to get arguments from. 
-                        Otherwise looks for the --config frag in the arguments.
+                        Otherwise looks for the --config flag in the arguments.
         usage - To display the usage.
         '''        
         if args is None:
@@ -125,7 +138,7 @@ class OptionParser(object):
 
         for name, option in sorted(self._options.items()):
             cmd_parser.add_option('--%s' % name,
-                                  default=option.default,
+                                  default=None,
                                   type=option.type.__name__,
                                   help=option.help)
 
@@ -134,7 +147,8 @@ class OptionParser(object):
         for name, value in cmd_options.__dict__.iteritems():
             if name == 'config':
                 continue
-            self._options[name].set(value)
+            if value is not None:
+                self._options[name].set(value)
 
         # Now, parse the configuration file if it exists
         #TODO(mdesnoyer): Enable reading from an s3 source
@@ -143,7 +157,7 @@ class OptionParser(object):
             yaml_parse = yaml.load(config_stream)
 
         elif cmd_options.config is not None:
-            with open(cmd_options) as f:
+            with open(cmd_options.config) as f:
                 yaml_parse = yaml.load(f)
 
         if yaml_parse is not None:
@@ -154,13 +168,17 @@ class OptionParser(object):
     def _parse_dict(self, d, prefix):
         '''Parses a nested dictionary and stores the variables values.'''
         for key, value in d.iteritems():
-            name = '%s.%s' % (prefix, key)
+            if prefix == '':
+                name = key
+            else:
+                name = '%s.%s' % (prefix, key)
             if type(value) == dict:
                 self._parse_dict(value, name)
+                continue
 
             try:
                 option = self._options[name]
-                if option.value() is None:
+                if option._value is None:
                     option.set(option.type(value))
             except KeyError:
                 raise AttributeError('Unknown option %s' % name)
@@ -208,10 +226,11 @@ options = OptionParser()
 '''Global options object.'''
 
 def define(name, default=None, type=None, help=None):
-    return options.define(name, default=default, type=type, help=help)
+    return options.define(name, default=default, type=type, help=help,
+                          stack_depth=3)
 
 
-def parse_options(self, args=None, config_stream=None,
-                   usage='%prog [options]'):
+def parse_options(args=None, config_stream=None,
+                  usage='%prog [options]'):
     return options.parse_options(args=args, config_stream=config_stream,
                                  usage=usage)

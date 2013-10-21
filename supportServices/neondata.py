@@ -13,6 +13,11 @@ Api Request Types
 
 #TODO Connection pooling of redis connection https://github.com/leporo/tornado-redis/blob/master/demos/connection_pool/app.py
 '''
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
 
 import redis as blockingRedis
 #import brukva as redis
@@ -26,13 +31,13 @@ import datetime
 import time
 import sys
 import os
-sys.path.insert(0,os.path.abspath(
-    os.path.join(os.path.dirname(__file__), '../api')))
-import brightcove_api
-import youtube_api
+from api import brightcove_api
+from api import youtube_api
 from PIL import Image
 from StringIO import StringIO
 import dbsettings
+
+_log = logging.getLogger(__name__)
 
 class DBConnection(object):
     '''Connection to the database.'''
@@ -447,7 +452,7 @@ class BrightcovePlatform(AbstractPlatform):
                     self.add_video(vid,job_id)
                     self.save(callback)
                 except Exception,e:
-                    #log.exception("key=create_job msg=" + e.message) 
+                    #_log.exception("key=create_job msg=" + e.message) 
                     callback(False)
             else:
                 callback(False)

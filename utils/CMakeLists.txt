@@ -17,3 +17,8 @@ add_library(connectedcomponents STATIC
 target_link_libraries(connectedcomponents
   opencv_core
 )
+
+######## All tests after this point #########
+add_test(options_test
+  ${PROJECT_SOURCE_DIR}/test/options_test.py
+)

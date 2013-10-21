@@ -18,15 +18,14 @@ USAGE = '%prog [options]'
 
 import os.path
 import sys
-if __name__ == '__main__':
-    sys.path.insert(0,os.path.abspath(
-        os.path.join(os.path.dirname(__file__), '..')))
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
 import model
 import model.features
 
 import cv2
 import heapq
-import errorlog
 import logging
 import re
 import os
@@ -36,6 +35,7 @@ import cPickle as pickle
 import pyflann
 from PIL import Image
 import scipy.spatial.distance
+import utils.logs
 import youtube_video_id_scraper as yt_scraper
 
 _log = logging.getLogger(__name__)
@@ -416,8 +416,8 @@ if __name__ == '__main__':
     options, args = parser.parse_args()
 
     if options.log is None:
-        errorlog.StreamLogger(None)
+        utils.logs.StreamLogger(None)
     else:
-        errorlog.FileLogger(None, options.log)
+        utils.logs.FileLogger(None, options.log)
 
     main(options)

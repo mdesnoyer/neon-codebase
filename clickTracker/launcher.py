@@ -1,14 +1,23 @@
 # Launch clients
 #!/usr/bin/env python
-import subprocess
+import os.path
 import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
+    
+import subprocess
 import time
 import signal
 import os
-from optparse import OptionParser
+import utils.neon
+from utils.options import define, options
+
+define('nclients', default=1, type=int, help='number of process to start')
+define('start_port', default=9080, type=int, help='port number to start')
+define('stop', default=0, type=int, help='stop processes')
 
 FNAME = 'clickLogServer.py' 
-PORT  = 9080
 
 def sig_handler(sig, frame):
     kill = True
@@ -20,12 +29,6 @@ def launch_clients(port):
     p = subprocess.Popen("nohup python " + FNAME + " --port=" + port + " &", shell=True, stdout=subprocess.PIPE)
 
 if __name__ == "__main__":
-
-    parser = OptionParser()
-    parser.add_option('--nclients', default=False,type='int',help='number of process to start')
-    parser.add_option('--start_port', default=PORT,type='int' ,help='port number to start')
-    parser.add_option('--stop', default=False,action='store_true',help='stop processes')
-    options, args = parser.parse_args()
     
     num_clients = options.nclients
     start_port  = options.start_port

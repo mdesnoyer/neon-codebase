@@ -1,4 +1,10 @@
 #!/usr/bin/python
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
+
 import tornado.httpserver
 import tornado.ioloop
 import tornado.web
@@ -11,7 +17,6 @@ import signal
 import time
 import urllib
 import urlparse
-import errorlog
 import youtube
 import hashlib
 import re
@@ -27,25 +32,22 @@ from StringIO import StringIO
 from neon_apikey import APIKey
 from brightcove_metadata import BrightcoveMetadata
 
-import sys
-sys.path.insert(0,os.path.abspath(
-    os.path.join(os.path.dirname(__file__), '../supportServices')))
-from neondata import *
+from supportServices.neondata import *
+import utils.neon
 
 #Tornado options
-from tornado.options import define, options
+from utils.options import define, options
 define("port", default=8081, help="run on the given port", type=int)
 MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
     
-global log
-log = errorlog.FileLogger("server")
+_log = logging.getLogger(__name__)
 
 dir = os.path.dirname(__file__)
 
 #=============== Global Handlers ======================================#
 
 def sig_handler(sig, frame):
-    log.debug('Caught signal: ' + str(sig) )
+    _log.debug('Caught signal: ' + str(sig) )
     tornado.ioloop.IOLoop.instance().add_callback(shutdown)
 
 def shutdown():
@@ -62,7 +64,7 @@ def shutdown():
             io_loop.add_timeout(now + 1, stop_loop)
         else:
             io_loop.stop()
-            log.info('Shutdown')
+            _log.info('Shutdown')
     stop_loop()
 
 
@@ -127,7 +129,7 @@ class RegisterBrightcove(tornado.web.RequestHandler):
             k.key = 'apikeys.json'
             k.set_contents_from_filename('apikeys.json')
         except Exception,e:
-            log.error("key=RegisterBrightcove msg=exception " + e.__str__())
+            _log.error("key=RegisterBrightcove msg=exception " + e.__str__())
             raise tornado.web.HTTPError(400)
 
         self.write("Success")
@@ -160,7 +162,7 @@ class DequeueHandler(tornado.web.RequestHandler):
             self.write("{}")
 
         except Exception,e:
-            log.error("key=dequeue_handler msg=error from work queue")
+            _log.error("key=dequeue_handler msg=error from work queue")
             raise tornado.web.HTTPError(500)
 
         self.finish()
@@ -170,13 +172,13 @@ class RequeueHandler(tornado.web.RequestHandler):
     def post(self, *args, **kwargs):
         
         try:
-            log.info("key=requeue_handler msg=requeing ")
+            _log.info("key=requeue_handler msg=requeing ")
             #data = tornado.escape.url_unescape(self.request.body, encoding='utf-8')
             data = self.request.body
             #TODO Verify data Format
             global_api_work_queue.put(data)
         except Exception,e:
-            log.error("key=requeue_handler msg=error " + e.__str__())
+            _log.error("key=requeue_handler msg=error " + e.__str__())
             raise tornado.web.HTTPError(500)
 
         self.finish()
@@ -203,12 +205,12 @@ class GetResultsHandler(tornado.web.RequestHandler):
                 data = k.get_contents_as_string()
                 self.write(data)
             except Exception,e:
-                log.exception("key=getresultshandler msg=traceback")
+                _log.exception("key=getresultshandler msg=traceback")
                 raise tornado.web.HTTPError(400)
             self.finish()
 
         except:
-            log.exception("key=getresultshandler msg=general traceback")
+            _log.exception("key=getresultshandler msg=general traceback")
 
 class JobStatusHandler(tornado.web.RequestHandler):
     """ JOB Status Handler  """
@@ -232,7 +234,7 @@ class JobStatusHandler(tornado.web.RequestHandler):
             NeonApiRequest.get_request(api_key,job_id,db_callback)
 
         except Exception,e:
-            log.error("key=jobstatus_handler msg=exception " + e.__str__())
+            _log.error("key=jobstatus_handler msg=exception " + e.__str__())
             raise tornado.web.HTTPError(400)
 
 
@@ -247,7 +249,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
         #insert job in to user account
         def update_account(result):
             if not result:
-                log.error("key=thumbnail_handler update account  msg=video not added to account")
+                _log.error("key=thumbnail_handler update account  msg=video not added to account")
                 self.write(response_data)
                 self.set_status(201)
                 self.finish()
@@ -269,7 +271,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     yt.add_video(vid,job_id)
                     yt.save(update_account)
             else:
-                log.error("key=thumbnail_handler update account  msg=account not found or api key error")
+                _log.error("key=thumbnail_handler update account  msg=account not found or api key error")
                 self.set_status(502)
                 self.finish()
                 
@@ -278,7 +280,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
         def saved_request(result):
             print "SAVED REQ"
             if not result:
-                log.error("key=thumbnail_handler  msg=request save failed: ")
+                _log.error("key=thumbnail_handler  msg=request save failed: ")
                 self.set_status(502)
                 self.finish()
             else:
@@ -381,7 +383,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             result = yield tornado.gen.Task(api_request.save)
             result = api_request.save()
             if not result:
-                log.error("key=thumbnail_handler  msg=request save failed: ")
+                _log.error("key=thumbnail_handler  msg=request save failed: ")
                 self.set_status(502)
             else:
                 if request_type == 'youtube':
@@ -395,7 +397,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             self.finish()
 
         except Exception,e:
-            log.error("key=thumbnail_handler msg=" + e.__str__());
+            _log.error("key=thumbnail_handler msg=" + e.__str__());
             self.set_status(400)
             self.finish("<html><body>Bad Request " + e.__str__() + " </body></html>")
             return
@@ -421,10 +423,10 @@ class TestCallback(tornado.web.RequestHandler):
     def post(self, *args, **kwargs):
         
         try:
-            log.info("key=testcallback msg=output: " + self.request.body)
+            _log.info("key=testcallback msg=output: " + self.request.body)
         except Exception,e:
             raise tornado.web.HTTPError(500)  
-            log.error("key=testcallback msg=error recieving message")
+            _log.error("key=testcallback msg=error recieving message")
         
         self.finish()
 
@@ -445,8 +447,8 @@ application = tornado.web.Application([
 ])
 
 def main():
+    utils.neon.InitNeon()
     global server
-    tornado.options.parse_command_line()
     signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGINT, sig_handler)
     server = tornado.httpserver.HTTPServer(application)

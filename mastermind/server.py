@@ -21,8 +21,9 @@ from supportServices import neondata
 import threading
 import tornado.httpserver
 import tornado.ioloop
-from tornado.options import define, options
 import tornado.web
+import utils.neon
+from utils.options import define, options
 
 # This server's options
 define('port', default=8080, help='Port to listen on', type=int)
@@ -46,17 +47,17 @@ define('video_db_polling_delay', default=120, type=float,
 
 # Stats database options
 # TODO(mdesnoyer): Remove the default username and password after testing
-define('--stats_host',
+define('stats_host',
        default='stats.cnvazyzlgq2v.us-east-1.rds.amazonaws.com',
        help='Host of the stats database')
-define('--stats_port', type='int',default=3306,
+define('stats_port', type='int',default=3306,
        help='Port to the stats database')
-define('--stats_user', default='mastermind',
+define('stats_user', default='mastermind',
        help='User for the stats database')
-define('--stats_pass', default='pignar4iuf434',
+define('stats_pass', default='pignar4iuf434',
        help='Password for the stats database')
-define('--stats_db', default='stats_dev', help='Stats database to connect to')
-define('--stats_table', default='hourly_events',
+define('stats_db', default='stats_dev', help='Stats database to connect to')
+define('stats_table', default='hourly_events',
        help='Table in the stats database to write to')
 define('stats_db_polling_delay', default=57, type=float,
        help='Number of seconds between polls of the video db')
@@ -257,7 +258,7 @@ class GetDirectives(tornado.web.RequestHandler):
         self.finish()
 
 def main():
-    tornado.options.parse_command_line()
+    utils.neon.InitNeon()
    
     mastermind, ab_manager = initialize()
 

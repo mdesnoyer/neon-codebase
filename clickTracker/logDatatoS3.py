@@ -5,6 +5,12 @@ Currently uses blocking http calls to drain Qs from localhost & boto to upload t
 TODO: Integrate in to ioloop with delayed callbacks to drain Qs and upload data
 TODO: Store data in binary format
 '''
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
+    
 import tornado.ioloop
 import tornado.web
 import tornado.httpserver
@@ -18,10 +24,10 @@ import time
 import random
 import sys
 import shortuuid
+import utils.neon
+
 import logging
-import logging.handlers
-logging.basicConfig(filename= __file__.split('.')[0] + '.log', filemode='a', level=logging.DEBUG)
-log = logging.getLogger(__name__)
+_log = logging.getLogger(__name__)
 
 from boto.exception import S3ResponseError
 from boto.s3.connection import S3Connection
@@ -37,7 +43,7 @@ import tornado.stack_context
 import contextlib
 
 #Tornado options
-from tornado.options import define, options
+from utils.options import define, options
 define("port", default=9080, help="port to consume data from", type=int)
 define("lines", default=1000, help="lines to aggregate", type=int)
 define("fetch_count", default=100, help="# lines to fetch", type=int)
@@ -49,7 +55,7 @@ global log_dir
 log_dir = os.getcwd() 
 
 def sig_handler(sig, frame):
-    log.debug('Caught signal: ' + str(sig) )
+    _log.debug('Caught signal: ' + str(sig) )
     sys.exit(0)
 
 class S3DataHandler(object):
@@ -136,7 +142,7 @@ class S3DataHandler(object):
 
 def main():
 
-    tornado.options.parse_command_line()
+    utils.neon.InitNeon()
     signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGINT, sig_handler)
     #ioloop = tornado.ioloop.IOLoop.instance()

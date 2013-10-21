@@ -7,13 +7,19 @@ Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
 USAGE = '%prog [options]'
 
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
+
 import cv2
 import csv
-import errorlog
 import logging
 import numpy as np
 from optparse import OptionParser
 import os.path
+import utils.logs
 
 _log = logging.getLogger(__name__)
 
@@ -70,6 +76,6 @@ if __name__ == '__main__':
 
     options, args = parser.parse_args()
 
-    errorlog.StreamLogger(None)
+    utils.logs.StreamLogger(None)
 
     main(options)
