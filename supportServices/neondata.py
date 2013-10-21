@@ -31,12 +31,13 @@ import datetime
 import time
 import sys
 import os
-from api import brightcove_api
-from api import youtube_api
+import api.brightcove_api
+import api.youtube_api
 from PIL import Image
 from StringIO import StringIO
 import dbsettings
 
+import logging
 _log = logging.getLogger(__name__)
 
 class DBConnection(object):
@@ -433,7 +434,7 @@ class BrightcovePlatform(AbstractPlatform):
     the default
     '''
     def update_thumbnail(self,vid,t_url,tid,update_callback=None):
-        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
+        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
                 self.read_token,self.write_token,self.auto_update)
         ref_id = tid
         if update_callback:
@@ -457,7 +458,7 @@ class BrightcovePlatform(AbstractPlatform):
             else:
                 callback(False)
 
-        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
+        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
                 self.read_token,self.write_token,self.auto_update)
         bc.create_video_request(vid,bc.integration_id,created_job)
 
@@ -465,7 +466,7 @@ class BrightcovePlatform(AbstractPlatform):
     Use this only after you retreive the object from DB
     '''
     def check_feed_and_create_api_requests(self):
-        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
+        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
                 self.read_token,self.write_token,self.auto_update,self.last_process_date)
         bc.create_neon_api_requests(self.integration_id)    
 
@@ -473,7 +474,7 @@ class BrightcovePlatform(AbstractPlatform):
     Temp method to support backward compatibility
     '''
     def check_feed_and_create_request_by_tag(self):
-        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
+        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
                 self.read_token,self.write_token,self.auto_update,self.last_process_date)
         bc.create_brightcove_request_by_tag(self.integration_id)
 
@@ -481,7 +482,7 @@ class BrightcovePlatform(AbstractPlatform):
     '''
     '''
     def check_current_thumbnail_in_db(self,video_id,callback=None):
-        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
+        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
                 self.read_token,self.write_token,self.auto_update,self.last_process_date)
         if callback:
             bc.async_check_thumbnail(video_id,callback)
@@ -494,7 +495,7 @@ class BrightcovePlatform(AbstractPlatform):
         @return: Callback returns job id, along with brightcove vid metadata
     '''
     def verify_token_and_create_requests_for_video(self,n,callback=None):
-        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
+        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
                 self.read_token,self.write_token,self.auto_update,self.last_process_date)
         if callback:
             bc.async_verify_token_and_create_requests(self.integration_id,n,callback)
@@ -581,7 +582,7 @@ class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
 
         #If access token has expired
         if time.time() > self.valid_until:
-            yt = youtube_api.YoutubeApi(self.refresh_token)
+            yt = api.youtube_api.YoutubeApi(self.refresh_token)
             yt.get_access_token(access_callback)
         else:
             #return current token
@@ -601,7 +602,7 @@ class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
 
         def atoken_exec(atoken):
             if atoken:
-                yt = youtube_api.YoutubeApi(self.refresh_token)
+                yt = api.youtube_api.YoutubeApi(self.refresh_token)
                 yt.get_channels(atoken,save_channel)
             else:
                 callback(False)
@@ -616,7 +617,7 @@ class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
 
         def atoken_exec(atoken):
             if atoken:
-                yt = youtube_api.YoutubeApi(self.refresh_token)
+                yt = api.youtube_api.YoutubeApi(self.refresh_token)
                 yt.get_videos(atoken,playlist_id,callback)
             else:
                 callback(False)
@@ -651,7 +652,7 @@ class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
 
         def atoken_exec(atoken):
             if atoken:
-                yt = youtube_api.YoutubeApi(self.refresh_token)
+                yt = api.youtube_api.YoutubeApi(self.refresh_token)
                 yt.async_set_youtube_thumbnail(vid,thumb_url,atoken,callback)
             else:
                 callback(False)

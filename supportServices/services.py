@@ -38,7 +38,6 @@ define("port", default=8083, help="run on the given port", type=int)
 define("local", default=0, help="call local service", type=int)
 
 _log = logging.getLogger(__name__)
-
 def sig_handler(sig, frame):
     _log.debug('Caught signal: ' + str(sig) )
     tornado.ioloop.IOLoop.instance().stop()

@@ -25,7 +25,7 @@ from boto.s3.bucket import Bucket
 import time
 import os
 
-from supportServices.neondata import neondata
+import supportServices.neondata 
 
 import utils.logs
 import utils.neon
@@ -311,8 +311,8 @@ class BrightcoveApi(object):
     ''' process publisher feed for neon tags and generate brightcove thumbnail/still requests '''
     def process_publisher_feed(self,items,i_id):
         vids_to_process = [] 
-        bc_json = neondata.BrightcovePlatform.get_account(self.neon_api_key,i_id)
-        bc = neondata.BrightcovePlatform.create(bc_json)
+        bc_json = supportServices.neondata.BrightcovePlatform.get_account(self.neon_api_key,i_id)
+        bc = supportServices.neondata.BrightcovePlatform.create(bc_json)
         videos_processed = bc.get_videos() 
         if videos_processed is None:
             videos_processed = {} 
@@ -345,8 +345,8 @@ class BrightcoveApi(object):
                 print "creating request for video [topn] ", vid
                 if resp is not None and not resp.error:
                     #Update the videos in customer inbox
-                    bc_json = neondata.BrightcovePlatform.get_account(self.neon_api_key,i_id)
-                    bc = neondata.BrightcovePlatform.create(bc_json)
+                    bc_json = supportServices.neondata.BrightcovePlatform.get_account(self.neon_api_key,i_id)
+                    bc = supportServices.neondata.BrightcovePlatform.create(bc_json)
                     r = tornado.escape.json_decode(resp.body)
                     bc.videos[vid] = r['job_id']
                     bc.last_process_date = int(item['publishedDate']) / 1000
@@ -540,13 +540,13 @@ class BrightcoveApi(object):
         @tornado.gen.engine
         def verify_brightcove_tokens(result):
             if not result.error and "error" not in result.body:
-                bc_json = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,self.neon_api_key,i_id)
+                bc_json = yield tornado.gen.Task(supportServices.neondata.BrightcovePlatform.get_account,self.neon_api_key,i_id)
                 if not bc_json:
                     log.error("key=verify_brightcove_tokens msg=account not found %s"%i_id)
                     callback(None)
                     return
 
-                bc = neondata.BrightcovePlatform.create(bc_json)
+                bc = supportServices.neondata.BrightcovePlatform.create(bc_json)
                 vitems = tornado.escape.json_decode(result.body)
                 items = vitems['items']
                 keys = []
