@@ -35,9 +35,15 @@ def post_request(url,pparams,key):
 def get_request(url,key):
     headers = {'X-Neon-API-Key' : key }
     #response = urllib2.urlopen(url,data='',headers=headers)
-    req = urllib2.Request(url,None,headers)
-    response = urllib2.urlopen(req)
-    data = response.read()
+    
+    data = None 
+    try:
+        req = urllib2.Request(url,None,headers)
+        response = urllib2.urlopen(req)
+        data = response.read()
+    except urllib2.HTTPError, error:
+        print error.read()
+
     return data
 
 def refresh_youtube_token(token):
@@ -90,7 +96,7 @@ def get_video_status(a_id,i_id,key,vid,itype='neon_integrations'):
     data = get_request(url,key)
 
 ''' query server for job status'''
-def get_video_status(key,job_id)
+def get_video_status(key,job_id):
     url = 'http://localhost:8081/api/v1/jobstatus?api_key=' + key + '&job_id=' + job_id
     data = get_request(url,key)
     return data
@@ -101,10 +107,13 @@ def create_neon_account(a_id):
     url = BASE + '/accounts'
     print "create account ",  url
     resp = post_request(url,vals,'')
+    if not resp:
+        print "Account not created"
+        exit(0)
     key = json.loads(resp)['neon_api_key']
     return key
 
-def create_youtube_account(a_id,i_id='y1234')
+def create_youtube_account(a_id,i_id='y1234'):
     url = BASE + '/accounts/' + a_id + '/youtube_integrations'
     vals = {'refresh_token' :'1/KEsExNfa6E7Je357oeC9PuaMET2KGw7D2cpZqRkqLx4', 'access_token': 'init', 'expires': '0.1' ,'integration_id': i_id, 'auto_update': False } 
     resp = post_request(url,vals,key)
@@ -114,8 +123,9 @@ def test_signup_flow(a_id,i_id='i12345'):
     
     #1. create account
     key = create_neon_account(a_id)
-    
+
     #2. update account 
+    url = BASE + '/accounts'
     url = url + '/' + a_id
     vals = {'processing_minutes' : 450 , 'plan_start_date' : time.time() }
     print "update account " , url
@@ -128,11 +138,18 @@ def test_signup_flow(a_id,i_id='i12345'):
     resp = post_request(url,vals,key)
     print resp 
 
+    #. Check for brightcove video status
+    url = BASE + '/accounts/' + a_id + '/brightcove_integrations/' + i_id +"/videos/x?video_ids=2679202484001,2640728545001"
+    data = get_request(url,key)
+    print data
+    return #test only bcove account
+    
     #4. Update brightcove account
     url = BASE + '/accounts/' + a_id +'/brightcove_integrations/' + i_id 
     vals = { 'read_token' : 'cLo_SzrziHEZixU-8hOxKslzxPtlt7ZLTN6RSA7B3aLZsXXF8ZfsmA..', 'write_token': 'vlBj_kvwXu7r1jPAzr8wYvNkHOU0ZydFKUDrm2fnmVuZyDqEGVfsEg..','auto_update': False }
     resp = put_request(url,vals,key)
     print resp 
+
 
     #create youtube account
     create_youtube_account()
@@ -241,5 +258,5 @@ def youtube_test():
 #############  TEST #############
 
 
-test_signup_flow('test_new_account6')
+test_signup_flow('test_new_account' +str(time.time()))
 

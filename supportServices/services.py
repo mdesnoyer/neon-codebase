@@ -57,7 +57,7 @@ class BaseHandler(tornado.web.RequestHandler):
 ################################################################################
 
 class VideoResponse(object):
-    def __init__(self,vid,status,i_type,i_id,title,duration,pub_data,cur_tid,thumbs):
+    def __init__(self,vid,status,i_type,i_id,title,duration,pub_date,cur_tid,thumbs):
         self.video_id = vid
         self.status = status
         self.integration_type = i_type
@@ -67,6 +67,9 @@ class VideoResponse(object):
         self.publish_date = pub_date
         self.current_thumbnail = cur_tid
         self.thumbnails = thumbs if thumbs else []  #list of ThumbnailMetdata dicts 
+    
+    def to_dict(self):
+        return self.__dict__
 
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__)
@@ -159,9 +162,16 @@ class AccountHandler(tornado.web.RequestHandler):
             elif method == "videos":
                 #videoid requested
                 if len(uri_parts) == 9:
-                    ids = self.get_arguments('video_ids')
-                    vids = ids.split(',') 
-                    self.get_brightcove_video_status(i_id,vids):
+                    try:
+                        ids = self.get_argument('video_ids')
+                        uvids = ids.split(',') 
+                        vids = [str(vid) for vid in uvids]
+
+                    except:
+                        #Get all the videos from the account
+                        self.get_brightcove_video_status(i_id,None)
+                        return
+                    self.get_brightcove_video_status(i_id,vids)
                     return
 
                 if itype  == "neon_integrations":
@@ -531,28 +541,38 @@ class AccountHandler(tornado.web.RequestHandler):
         incomplete_states = [RequestState.SUBMIT,RequestState.PROCESSING,RequestState.REQUEUED]
         
         #1 Get job ids for the videos from account, get the request status
-        jdata = tornado.gen.Task(BrightcovePlatform.get_account,self.api_key,i_id)
+        jdata = yield tornado.gen.Task(BrightcovePlatform.get_account,self.api_key,i_id)
         ba = BrightcovePlatform.create(jdata)
-        job_ids = [ba.videos[vid] for vid in vids] 
+        
+        #return all videos in the account
+        if vids is None:
+            vids = ba.get_videos()
+        job_ids = [] 
+        for vid in vids:
+            try:
+                jid = generate_request_key(self.api_key,ba.videos[vid])
+                job_ids.append(jid)
+            except:
+                pass #job id not found
 
         #2 Get Job status
         
         completed_videos = [] #jobs that have completed 
 
         #Hack for first time video requests in brightcove #TODO: cleanup
-        ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         requests = yield tornado.gen.Task(NeonApiRequest.get_requests,job_ids)  
+        ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for request,vid in zip(requests,vids):
             if not request:
                 result[vid] = None #indicate job not found
                 continue
 
-            status = "in_progress"
-            if request.status in incomplete_states:
+            status = RequestState.PROCESSING #"processing"
+            if request.state in incomplete_states:
                 t_urls = []; thumbs = []
                 t_urls.append(request.previous_thumbnail)
-                tm = ThumbnailMetadata(0,t_urls,ctime,0,0,"brightcove",0,0)
-                thumbs.append(tm)
+                tm = ThumbnailMetaData(0,t_urls,ctime,0,0,"brightcove",0,0)
+                thumbs.append(tm.to_dict())
             elif request.status is RequestState.FAILED:
                 pass
             else:
@@ -589,7 +609,13 @@ class AccountHandler(tornado.web.RequestHandler):
                     tdata = thumb.to_dict()
                     result[vid].thumbnails.append(tdata) 
 
-        data = tornado.escape.json_encode(result)
+        #convert to dict
+        vresult = []
+        for res in result:
+            vres = result[res]
+            vresult.append(vres.to_dict())
+
+        data = tornado.escape.json_encode(vresult)
         self.send_json_response(data,200)
 
 
@@ -692,7 +718,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
         user = NeonUserAccount(a_id)
         api_key = user.neon_api_key
-        NeonUserAccount.get_account(api_key,check_exists)
+        NeonUserAccount.get_account(api_key,callback=check_exists)
     
     '''
     Update a Neon account
@@ -714,7 +740,7 @@ class AccountHandler(tornado.web.RequestHandler):
     send top 5 videos or appropriate error to client
     '''
     
-    def create_brightcove_integration(self):
+    def create_brightcove_integration2(self):
 
         rcount = 5
         def verify_brightcove_tokens(result):
@@ -782,9 +808,8 @@ class AccountHandler(tornado.web.RequestHandler):
             data = '{"error": "API Params missing" }'
             self.send_json_response(data,400)
        
-
-    def new_bcove_account(self):
-        
+    @tornado.gen.engine
+    def create_brightcove_integration(self):
 
         try:
             a_id = self.request.uri.split('/')[-2]
@@ -795,14 +820,14 @@ class AccountHandler(tornado.web.RequestHandler):
             autosync = self.get_argument("auto_update")
 
         except Exception,e:
-            log.error("key=create brightcove account msg= %" %e)
+            log.error("key=create brightcove account msg= %s" %e)
             data = '{"error": "API Params missing" }'
             self.send_json_response(data,400)
             return 
 
         na_data = yield tornado.gen.Task(NeonUserAccount.get_account,self.api_key)
         #Create and Add Platform Integration
-        if na:
+        if na_data:
             na = NeonUserAccount.create(na_data)
             
             #Check if integration exists
@@ -813,17 +838,42 @@ class AccountHandler(tornado.web.RequestHandler):
                 curtime = time.time() #account creation time
                 bc = BrightcovePlatform(a_id,i_id,p_id,rtoken,wtoken,autosync,curtime)
                 na.add_integration(bc.integration_id,"brightcove")
-                res = yield tornado.gen.Task(na.save_integration) #save integration & update acnt
+                res = yield tornado.gen.Task(na.save_integration,bc) #save integration & update acnt
                 
                 #Saved Integration
                 if res:
-                    bc.verify_token_and_create_requests_for_video(5)
+                    response = yield tornado.gen.Task(bc.verify_token_and_create_requests_for_video,5)
+                    ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     #TODO : Add expected time of completion !
+                    video_response = []
+                    if not response:
+                        log.error("key=create brightcove account msg=brightcove api call failed")
+                        data = '{"error": "integration was not added, brightcove api failed"}'
+                        self.send_json_response(data,500)
+                        return
+
+                    for item in response:
+                        t_urls =[]; thumbs = []
+                        t_urls.append(item['videoStillURL'])
+                        tm = ThumbnailMetaData(0,t_urls,ctime,0,0,"brightcove",0,0)
+                        thumbs.append(tm.to_dict())
+                        vr = VideoResponse(item["id"],
+                              "processing",
+                              "brightcove",
+                              i_id,
+                              item['name'],
+                              None,
+                              None,
+                              0, #current tid,add fake tid
+                              thumbs)
+                        video_response.append(vr.to_dict())
+                        
+                    data = tornado.escape.json_encode(video_response)
+                    self.send_json_response(data,201)
                 else:
                     data = '{"error": "integration was not added, account creation issue"}'
                     self.send_json_response(data,500)
                     return
-
         else:
             log.error("key=create brightcove account msg= account not found %s" %self.api_key)
 
@@ -1227,6 +1277,9 @@ class BcoveHandler(tornado.web.RequestHandler):
 
         bc = BrightcovePlatform('t1','i1','p1',r,'w')
         bc.verify_token_and_create_requests_for_video(5,cb)
+        #res = yield tornado.gen.Task(bc.verify_token_and_create_requests_for_video,5)
+        #print res
+        #self.finish()
 
     @tornado.web.asynchronous
     @tornado.gen.engine

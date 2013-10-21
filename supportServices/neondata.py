@@ -38,10 +38,22 @@ class DBConnection(object):
     '''Connection to the database.'''
 
     #TODO(sunil): make these calls able to do callbacks properly
+    #TODO: Keep thread safe static objects for connections, don't recreate obj 
 
-    def __init__(self, host=None, port=None):
-        host = host or dbsettings.DBConfig.accountDB[0]
-        port = port or dbsettings.DBConfig.accountDB[1]
+    def __init__(self, host=None, port=None,otype=None):
+        if otype:
+            if isinstance(otype,AbstractPlatform):
+                host = host or dbsettings.DBConfig.accountDB[0]
+                port = port or dbsettings.DBConfig.accountDB[1]
+            elif isinstance(otype,VideoMetadata):
+                host = host or dbsettings.DBConfig.videoDB[0]
+                port = port or dbsettings.DBConfig.videoDB[1]
+            elif isinstance(otype,ThumbnailIDMapper) or isinstance(otype,ThumbnailURLMapper):
+                host = host or dbsettings.DBConfig.thumbnailDB[0]
+                port = port or dbsettings.DBConfig.thumbnailDB[1]
+        else:
+            host = host or dbsettings.DBConfig.accountDB[0]
+            port = port or dbsettings.DBConfig.accountDB[1]
         self.conn, self.blocking_conn = RedisClient.get_client(host, port)
 
     def fetch_keys_from_db(self, key_prefix, callback=None):
@@ -304,19 +316,19 @@ class NeonUserAccount(AbstractRedisUserBlob):
     '''
     Save Neon User account and corresponding integration
     '''
-    def save_integration(self,new_integration,callback):
-        pipe = AbstractRedisUserBlob.conn.pipeline()
+    def save_integration(self,new_integration,db_connection=DBConnection(),callback=None):
+        pipe = db_connection.conn.pipeline()
         pipe.set(self.key,self.to_json())
         pipe.set(new_integration.key,new_integration.to_json()) 
         pipe.execute(callback)
 
     @staticmethod
-    def get_account(api_key,result_callback=None,lock=False):
+    def get_account(api_key,db_connection=DBConnection(),callback=None):
         key = "NeonUserAccount".lower() + '_' + api_key
-        if result_callback:
-            NeonUserAccount.conn.get(key,result_callback) 
+        if callback:
+            db_connection.conn.get(key,callback) 
         else:
-            return NeonUserAccount.blocking_conn.get(key)
+            return db_connection.blocking_conn.get(key)
     
     @staticmethod
     def create(json_data):
@@ -330,27 +342,33 @@ class NeonUserAccount(AbstractRedisUserBlob):
         return na
     
     @staticmethod
-    def delete(a_id):
+    def delete(a_id,db_connection=DBConnection()):
         #check if test account
         if "test" in a_id:
             key = 'neonuseraccount' + NeonApiKey.generate(a_id)  
-            NeonUserAccount.blocking_conn.delete(key)
+            db_connection.blocking_conn.delete(key)
 
 
 class AbstractPlatform(object):
     def __init__(self, abtest=False):
         # TODO(sunil): Should this be an internal or external video id?!?
+        self.neon_api_key = ''
         self.videos = {} # External video id => Job ID
         self.abtest = abtest # Boolean on wether AB tests can run
         self.integration_id = None # Unique platform ID to 
+    
+    def generate_key(self,i_id):
+        return self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
+    
+    def to_json(self):
+        #TODO : don't save all the class specific params ( keyname,callback,ttl )
+        return json.dumps(self, default=lambda o: o.__dict__) #don't save keyname
 
 ''' Brightcove Account '''
-class BrightcovePlatform(AbstractRedisUserBlob,AbstractPlatform):
+class BrightcovePlatform(AbstractPlatform):
     def __init__(self, a_id, i_id, p_id=None, rtoken=None, wtoken=None,
                  auto_update=False, last_process_date=None, abtest=False):
-        super(BrightcovePlatform,self).__init__()
         AbstractPlatform.__init__(self, abtest)
-
         self.neon_api_key = NeonApiKey.generate(a_id)
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
         self.account_id = a_id
@@ -364,7 +382,7 @@ class BrightcovePlatform(AbstractRedisUserBlob,AbstractPlatform):
         On every request, the job id is saved
         videos[video_id] = job_id 
         '''
-        self.last_process_date = last_process_date #The publish date of the last processed video 
+        self.last_process_date = last_process_date #The publish date of the last processed video - UTC timestamp 
         self.linked_youtube_account = False
 
     def get_ovp(self):
@@ -392,29 +410,26 @@ class BrightcovePlatform(AbstractRedisUserBlob,AbstractPlatform):
             if nar:
                 return nar.thumbnails
 
-    def get(self,callback=None):
+    def get(self,db_connection=DBConnection(),callback=None):
         if callback:
-            self.lget(callback)
+            db_connection.conn.get(self.key,callback)
         else:
-            return AbstractRedisUserBlob.blocking_conn.get(self.key)
+            return db_connection.blocking_conn.get(self.key)
 
-    def save(self,callback=None,create=False):
-        # if create, then set directly
+    def save(self,db_connection=DBConnection(),callback=None):
         if callback:
-            if create:
-                self._save(callback)
-            else:
-                self._unlock_set(callback)
+            db_connection.conn.set(self.key,self.to_json(),callback)
         else:
             value = self.to_json()
-            return AbstractRedisUserBlob.blocking_conn.set(self.key,value)
+            return db_connection.blocking_conn.set(self.key,value)
 
     '''
     Called after getting the thumbnail url of the new thumbnail to be made 
     the default
     '''
     def update_thumbnail(self,vid,t_url,tid,update_callback=None):
-        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update)
+        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
+                self.read_token,self.write_token,self.auto_update)
         ref_id = tid
         if update_callback:
             return bc.async_enable_thumbnail_from_url(vid,t_url,update_callback,reference_id=ref_id)
@@ -437,28 +452,32 @@ class BrightcovePlatform(AbstractRedisUserBlob,AbstractPlatform):
             else:
                 callback(False)
 
-        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update)
+        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
+                self.read_token,self.write_token,self.auto_update)
         bc.create_video_request(vid,bc.integration_id,created_job)
 
     '''
     Use this only after you retreive the object from DB
     '''
     def check_feed_and_create_api_requests(self):
-        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update,self.last_process_date)
+        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
+                self.read_token,self.write_token,self.auto_update,self.last_process_date)
         bc.create_neon_api_requests(self.integration_id)    
 
     '''
     Temp method to support backward compatibility
     '''
     def check_feed_and_create_request_by_tag(self):
-        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update,self.last_process_date)
+        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
+                self.read_token,self.write_token,self.auto_update,self.last_process_date)
         bc.create_brightcove_request_by_tag(self.integration_id)
 
 
     '''
     '''
     def check_current_thumbnail_in_db(self,video_id,callback=None):
-        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update,self.last_process_date)
+        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
+                self.read_token,self.write_token,self.auto_update,self.last_process_date)
         if callback:
             bc.async_check_thumbnail(video_id,callback)
         else:
@@ -468,15 +487,14 @@ class BrightcovePlatform(AbstractRedisUserBlob,AbstractPlatform):
         And create requests for processing
 
         @return: Callback returns job id, along with brightcove vid metadata
-    ''' 
+    '''
     def verify_token_and_create_requests_for_video(self,n,callback=None):
-        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,self.read_token,self.write_token,self.auto_update,self.last_process_date)
+        bc = brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
+                self.read_token,self.write_token,self.auto_update,self.last_process_date)
         if callback:
             bc.async_verify_token_and_create_requests(self.integration_id,n,callback)
         else:
             return bc.verify_token_and_create_requests(n)
-
-
 
     @staticmethod
     def create(json_data):
@@ -499,21 +517,21 @@ class BrightcovePlatform(AbstractRedisUserBlob,AbstractPlatform):
         return ba
 
     @staticmethod
-    def get_account(api_key,i_id,result_callback=None,lock=False):
+    def get_account(api_key,i_id,db_connection=DBConnection(),callback=None):
         key = "BrightcovePlatform".lower() + '_' + api_key + '_' + i_id
-        if result_callback:
-            BrightcovePlatform.conn.get(key,result_callback) 
+        if callback:
+            db_connection.conn.get(key,callback) 
         else:
-            return BrightcovePlatform.blocking_conn.get(key)
+            return db_connection.blocking_conn.get(key)
 
     @staticmethod
-    def find_all_videos(token,limit,result_callback):
+    def find_all_videos(token,limit,callback=None):
         # Get the names and IDs of recently published videos:
         # http://api.brightcove.com/services/library?command=find_all_videos&sort_by=publish_date&video_fields=name,id&token=[token]
         url = 'http://api.brightcove.com/services/library?command=find_all_videos&sort_by=publish_date&token=' + token
         http_client = tornado.httpclient.AsyncHTTPClient()
         req = tornado.httpclient.HTTPRequest(url = url, method = "GET", request_timeout = 60.0, connect_timeout = 10.0)
-        http_client.fetch(req,result_callback)
+        http_client.fetch(req,callback)
 
 
 class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
@@ -568,20 +586,20 @@ class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
     Add a list of channels that the user has
     Get a valid access token first
     '''
-    def add_channels(self,ch_callback):
+    def add_channels(self,callback):
         def save_channel(result):
             if result:
                 self.channels = result
-                ch_callback(True)
+                callback(True)
             else:
-                ch_callback(False)
+                callback(False)
 
         def atoken_exec(atoken):
             if atoken:
                 yt = youtube_api.YoutubeApi(self.refresh_token)
                 yt.get_channels(atoken,save_channel)
             else:
-                ch_callback(False)
+                callback(False)
 
         self.get_access_token(atoken_exec)
 
@@ -642,10 +660,10 @@ class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
         pass
 
     @staticmethod
-    def get_account(api_key,i_id,result_callback=None,lock=False):
+    def get_account(api_key,i_id,callback=None,lock=False):
         key = "YoutubePlatform".lower() + '_' + api_key + '_' + i_id
-        if result_callback:
-            YoutubePlatform.conn.get(key,result_callback) 
+        if callback:
+            YoutubePlatform.conn.get(key,callback) 
         else:
             return YoutubePlatform.blocking_conn.get(key)
     
@@ -862,7 +880,8 @@ class ThumbnailMetaData(object):
 
     A single thumbnail id maps to all its urls [Neon, OVP name space ones, other associated ones] 
     '''
-    def __init__(self,tid,urls,created,width,height,ttype,model_score,model_version,enabled=True,chosen=False,rank=None,refid=None):
+    def __init__(self,tid,urls,created,width,height,ttype,model_score,
+            model_version,enabled=True,chosen=False,rank=None,refid=None):
         self.thumbnail_id = tid
         self.urls = urls  # All urls associated with single image
         self.created_time = created #Timestamp when thumbnail was created 
@@ -929,11 +948,11 @@ class ThumbnailURLMapper(AbstractRedisUserBlob):
         else:
             self.value = ThumbnailID.generate(imdata) 
 
-    def save(self,external_callback=None):
+    def save(self,callback=None):
         if self.key is None:
             raise Exception("key not set")
-        if external_callback:
-            ThumbnailURLMapper.conn.set(self.key,self.value,external_callback)
+        if callback:
+            ThumbnailURLMapper.conn.set(self.key,self.value,callback)
         else:
             return ThumbnailURLMapper.blocking_conn.set(self.key,value)
 
@@ -949,9 +968,9 @@ class ThumbnailURLMapper(AbstractRedisUserBlob):
             return ThumbnailURLMapper.blocking_conn.mset(data)
 
     @staticmethod
-    def get_id(key,external_callback):
-        if external_callback:
-            ThumbnailURLMapper.conn.get(key,external_callback)
+    def get_id(key,callback):
+        if callback:
+            ThumbnailURLMapper.conn.get(key,callback)
         else:
             return ThumbnailURLMapper.blocking_conn.get(key)
 
@@ -1029,11 +1048,6 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
             db_connection.conn.mset(data,callback)
         else:
             db_connection.blocking_conn.mset(data)
-
-'''
-MISC DB UTILS
-'''
-
 
 class VideoMetadata(object):
     '''
