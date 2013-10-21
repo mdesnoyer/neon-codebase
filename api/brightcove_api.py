@@ -1,4 +1,9 @@
 ''' Submit jobs to the server '''
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
 
 import tornado.httpclient
 import tornado.ioloop
@@ -18,13 +23,12 @@ from boto.s3.key import Key
 from boto.s3.bucket import Bucket
 
 import time
-import os
-sys.path.insert(0,os.path.abspath(os.path.join(os.path.dirname(__file__), '../supportServices')))
-from neondata import *
 
-import errorlog
-global log
-log = errorlog.FileLogger("brighcove_api")
+from supportServices.neondata import *
+
+import utils.logs
+import utils.neon
+_log = utils.logs.FileLogger("brighcove_api")
 
 class BrightcoveApi(object):
     def __init__(self,neon_api_key,publisher_id=0,read_token=None,write_token=None,autosync=False,publish_date=None,local=True):
@@ -140,7 +144,7 @@ class BrightcoveApi(object):
                     ret = response.body
                     break
                 except tornado.httpclient.HTTPError, e:
-                    log.error("type=add_image msg=" + e.message)
+                    _log.error("type=add_image msg=" + e.message)
                     continue
             return ret
         
@@ -212,7 +216,7 @@ class BrightcoveApi(object):
         try:
             image =  Image.open(imfile)
         except Exception,e:
-            log.exception("Image format error %s" %e )
+            _log.exception("Image format error %s" %e )
 
         reference_id = kwargs.get('reference_id', None)
         rt = self.add_image(video_id,image,atype='thumbnail',reference_id = reference_id)
@@ -329,11 +333,11 @@ class BrightcoveApi(object):
                 length = item['length']
 
                 if thumb is None or still is None or length <0:
-                    log.info("key=process_publisher_feed msg=%s is a live feed" %vid)
+                    _log.info("key=process_publisher_feed msg=%s is a live feed" %vid)
                     continue
 
                 if d_url is None:
-                    log.info("key=process_publisher_feed msg=flv url missing for %s" %vid)
+                    _log.info("key=process_publisher_feed msg=flv url missing for %s" %vid)
                     continue
 
                 resp = self.format_neon_api_request(vid,d_url,prev_thumbnail=still,request_type='topn',i_id=i_id)
@@ -574,6 +578,7 @@ class BrightcoveApi(object):
         self.async_get_n_videos(5,verify_brightcove_tokens)
 
 if __name__ == "__main__" :
+    utils.neon.InitNeon()
     print 'test'
     #Test publisher feed with neon api key
     #bc = BrightcoveApi('a63728c09cda459c3caaa158f4adff49',read_token='cLo_SzrziHEZixU-8hOxKslzxPtlt7ZLTN6RSA7B3aLZsXXF8ZfsmA..',write_token='vlBj_kvwXu7r1jPAzr8wYvNkHOU0ZydFKUDrm2fnmVuZyDqEGVfsEg..')

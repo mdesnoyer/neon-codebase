@@ -12,8 +12,12 @@ Copyright: 2013 Neon Labs
 Author: Sunil Mallya (mallaya@neon-lab.com)
         Mark Desnoyer (desnoyer@neon-lab.com)
 '''
-
-import errorlog
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
+    
 import logging
 from optparse import OptionParser
 import os
@@ -21,6 +25,7 @@ import psycopg2 as db
 import re
 import subprocess
 import sys
+import utils.logs
 
 _log = logging.getLogger(__name__)
 
@@ -171,8 +176,8 @@ if __name__ == '__main__':
     options, args = parser.parse_args()
 
     if options.log is None:
-        errorlog.StreamLogger(None)
+        utils.logs.StreamLogger(None)
     else:
-        errorlog.FileLogger(None, options.log)
+        utils.logs.FileLogger(None, options.log)
 
     main(options)

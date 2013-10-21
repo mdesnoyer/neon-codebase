@@ -1,3 +1,8 @@
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
 import tornado.ioloop
 import tornado.web
 import tornado.httpserver
@@ -9,19 +14,14 @@ import time
 import os
 import time
 import json
+import utils.neon
 
 #logging
 import logging
-import logging.handlers
-log = logging.getLogger(__name__)
-log.setLevel(logging.WARNING)
-formatter = logging.Formatter(
-                "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-handler = logging.FileHandler("error.log")
-log.addHandler(handler)
+_log = logging.getLogger(__name__)
 
 #Tornado options
-from tornado.options import define, options
+from utils.options import define, options
 define("port", default=9080, help="run on the given port", type=int)
 define("test", default=0, help="populate queue for test", type=int)
 MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
@@ -31,7 +31,7 @@ MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
 #############################################
 
 def sig_handler(sig, frame):
-    log.warn('Caught signal: ' + str(sig) )
+    _log.warn('Caught signal: ' + str(sig) )
     tornado.ioloop.IOLoop.instance().add_callback(shutdown)
 
 def shutdown():
@@ -45,7 +45,7 @@ def shutdown():
             io_loop.add_timeout(now + 1, stop_loop)
         else:
             io_loop.stop()
-            log.info('Shutdown')
+            _log.info('Shutdown')
     stop_loop()
 
 #############################################
@@ -98,7 +98,7 @@ class LogLines(tornado.web.RequestHandler):
             cip = self.request.remote_ip
 
         except Exception,e:
-            log.exception("key=get_track msg=%s" %e) 
+            _log.exception("key=get_track msg=%s" %e) 
             self.finish()
             return
 
@@ -108,7 +108,7 @@ class LogLines(tornado.web.RequestHandler):
         try:
             event_queue.put(data)
         except Exception,e:
-            log.exception("key=loglines msg=Q error %s" %e)
+            _log.exception("key=loglines msg=Q error %s" %e)
         self.finish()
 
     '''
@@ -139,7 +139,7 @@ class GetLines(tornado.web.RequestHandler):
                     data += event_queue.get_nowait()  
                     data += '\n'
                 except:
-                    log.error("key=GetLines msg=Q error")
+                    _log.error("key=GetLines msg=Q error")
 
         self.write(data)
         self.finish()
@@ -155,12 +155,12 @@ application = tornado.web.Application([
 ])
 
 def main():
+    utils.neon.InitNeon()
 
     global server
     global event_queue
 
     event_queue = Queue.Queue() #multiprocessing.Queue()
-    tornado.options.parse_command_line()
     signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGINT, sig_handler)
     server = tornado.httpserver.HTTPServer(application)

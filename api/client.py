@@ -9,9 +9,9 @@ USAGE='%prog [options] <workers> <local properties>'
 import os
 import os.path
 import sys
-if __name__ == '__main__':
-    sys.path.insert(0,os.path.abspath(
-        os.path.join(os.path.dirname(__file__), '..')))
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
 
 import model
 import tempfile
@@ -40,7 +40,6 @@ from optparse import OptionParser
 import leargist
 import svmlight
 import ffvideo 
-import errorlog
 from BadImageFilter import BadImageFilter
 
 from boto.exception import S3ResponseError
@@ -56,21 +55,34 @@ import copy
 import brightcove_api
 import youtube_api
 
-sys.path.insert(0,os.path.abspath(
-    os.path.join(os.path.dirname(__file__), '../supportServices')))
-from neondata import *
+from supportServices.neondata import *
 
 import gc
 import pprint
 
 import logging
-logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s')
+_log = logging.getLogger(__name__)
 
 from pympler import summary
 from pympler import muppy
 from pympler import tracker
 from pympler.classtracker import ClassTracker
 import pickle
+
+import utils.neon
+
+# ======== Parameters  =======================#
+from utils.options import define, options
+define('local', type=int, default=0,
+      help='If set, use the localproperties file for config')
+define('n_workers', default=1, type=int,
+       help='Number of workers to spawn')
+define('model_file', default=None, help='File that contains the model')
+define('debug', default=0, type=int, help='If true, runs in debug mode')
+define('profile', default=0, type=int, help='If true, runs in debug mode')
+define('sync', default=0, type=int,
+       help='If true, runs http client in async mode')
+
 
 # ======== API String constants  =======================#
 
@@ -79,7 +91,7 @@ INTERNAL_PROCESSING_ERROR = "internal error"
 
 #=============== Global Handlers =======================#
 def sig_handler(sig, frame):
-    log.debug('Caught signal: ' + str(sig) )
+    _log.debug('Caught signal: ' + str(sig) )
 
     try:
         for worker in workers:
@@ -174,7 +186,7 @@ class ProcessVideo(object):
                 self.video_metadata['frame_size'] = mov.frame_size
                 self.video_size = mov.duration * mov.bitrate / 8 # in bytes
         except Exception, e:
-            log.error("key=process_video worker[%s] msg=%s "  %(self.pid,e.message))
+            _log.error("key=process_video worker[%s] msg=%s "  %(self.pid,e.message))
             return
 
         duration = mov.duration
@@ -194,7 +206,7 @@ class ProcessVideo(object):
                                        start_time=self.sec_to_extract)
         
         if self.debug:
-            log.info("key=process_all current time=%s " %(self.sec_to_extract))
+            _log.info("key=process_all current time=%s " %(self.sec_to_extract))
 
         for image, score, frame_no, timecode, attribute in results:
             self.valence_scores[0].append(timecode)
@@ -208,7 +220,7 @@ class ProcessVideo(object):
         
         end_process = time.time()
         if self.debug:
-            log.info("key=streaming_callback msg=debug time_processing=%s" %(end_process - start_process))
+            _log.info("key=streaming_callback msg=debug time_processing=%s" %(end_process - start_process))
 
     ''' method that is run before the video is deleted after downloading '''
     ''' use this to run cleanup code or misc methods '''
@@ -279,7 +291,7 @@ class ProcessVideo(object):
         result = sorted(secondary_sorted_list,
                         key=lambda tup: tup[1][0],
                         reverse=True)
-        #log.debug("key=thumbnails msg=" + str(len(result)) + " -- " + str(nthumbnails) ) 
+        #_log.debug("key=thumbnails msg=" + str(len(result)) + " -- " + str(nthumbnails) ) 
       
         if len(result) < nthumbnails: 
             nthumbnails = min(len(result),nthumbnails)
@@ -348,7 +360,7 @@ class ProcessVideo(object):
                 k.key = self.base_filename + "/thumbnails.tar.gz"
                 k.set_contents_from_filename(gzip_file.name)
             else:
-                log.info("thumbnails saved to " + gzip_file.name)
+                _log.info("thumbnails saved to " + gzip_file.name)
                 if not os.path.exists('results'):
                     os.mkdir('results')
                 fname = "thumbnails-" + self.request_map[properties.REQUEST_UUID_KEY] + '.tar.gz'
@@ -396,9 +408,9 @@ class ProcessVideo(object):
                 fig.clear()
 
         except S3ResponseError,e:
-            log.error("key=save_to_s3 msg=s3 response error " + e.__str__() )
+            _log.error("key=save_to_s3 msg=s3 response error " + e.__str__() )
         except Exception,e:
-            log.error("key=save_to_s3 msg=general exception " + e.__str__() )
+            _log.error("key=save_to_s3 msg=general exception " + e.__str__() )
             if self.debug:
                 raise
   
@@ -443,7 +455,7 @@ class ProcessVideo(object):
                 k.set_contents_from_filename(gzip_file.name)
         
             else:
-                log.info("result saved to " + gzip_file.name)
+                _log.info("result saved to " + gzip_file.name)
                 if not os.path.exists('results'):
                     os.mkdir('results')
                 fname = self.request_map[properties.REQUEST_UUID_KEY] + '.tar.gz'
@@ -453,10 +465,10 @@ class ProcessVideo(object):
             gzip_file.close()
 
         except S3ResponseError,e:
-            log.error("key=save_result_to_s3 msg=s3 response error " + 
+            _log.error("key=save_result_to_s3 msg=s3 response error " + 
                       e.__str__() )
         except Exception,e:
-            log.error("key=save_result_to_s3 msg=general exception " + 
+            _log.error("key=save_result_to_s3 msg=general exception " + 
                       e.__str__() )
             if self.debug:
                 raise
@@ -539,7 +551,7 @@ class ProcessVideo(object):
         vmdata = VideoMetadata(i_vid,tids,job_id,url,duration,video_valence,model_version,i_id,frame_size)
         ret = vmdata.save()
         if not ret:
-            log.error("key=save_video_metatada msg=failed to save")
+            _log.error("key=save_video_metatada msg=failed to save")
 
 
     def save_thumbnail_metadata(self,platform,i_id):
@@ -590,7 +602,7 @@ class ProcessVideo(object):
             self.save_video_metadata()
             #self.save_thumbnail_metadata("neon",0)
         else:
-            log.error("key=finalize_neon_request msg=failed to save request")
+            _log.error("key=finalize_neon_request msg=failed to save request")
         return
 
 
@@ -682,7 +694,7 @@ class ProcessVideo(object):
         if ret:
             self.save_video_metadata()
         else:
-            log.error("key=finalize_brightcove_request msg=failed to save request")
+            _log.error("key=finalize_brightcove_request msg=failed to save request")
 
     '''
     Final steps for youtube request
@@ -761,7 +773,7 @@ class ProcessVideo(object):
         if ret:
             self.save_video_metadata()
         else:
-            log.error("key=finalize_youtube_request msg=failed to save request")
+            _log.error("key=finalize_youtube_request msg=failed to save request")
 
         #self.save_thumbnail_metadata("youtube",i_id)
 
@@ -825,7 +837,7 @@ class HttpDownload(object):
         if not self.tempfile.closed:
             self.tempfile.write(data)
         else:
-            log.debug("key=streaming_callback msg=file already closed")
+            _log.debug("key=streaming_callback msg=file already closed")
             self.error = INTERNAL_PROCESSING_ERROR
             #For clean shutdown incase of signals
             self.ioloop.stop()
@@ -834,7 +846,7 @@ class HttpDownload(object):
         if self.size_so_far > self.callback_data_size:
             if self.debug:
                 end_time = time.time()
-                log.info("key=streaming_callback msg=debug time_bw_callback=%s, size_so_far=%s"
+                _log.info("key=streaming_callback msg=debug time_bw_callback=%s, size_so_far=%s"
                     %(end_time - self.debug_timestamps["streaming_callback"],self.size_so_far) )
                 self.debug_timestamps["streaming_callback"] = end_time
 
@@ -879,7 +891,7 @@ class HttpDownload(object):
 
 
         except Exception as e:
-            log.exception('key=async_callback Error processing the video: %s' % e)
+            _log.exception('key=async_callback Error processing the video: %s' % e)
             if self.debug:
                 raise
 
@@ -892,9 +904,9 @@ class HttpDownload(object):
         if response.error:
             if "HTTP 599: Operation timed out after" not in response.error.message:
                 self.error = INTERNAL_PROCESSING_ERROR #response.error.message
-                log.error("key=async_callback_error  msg=" + response.error.message + " request=" + self.job_params[properties.VIDEO_DOWNLOAD_URL])
+                _log.error("key=async_callback_error  msg=" + response.error.message + " request=" + self.job_params[properties.VIDEO_DOWNLOAD_URL])
             else:
-                log.error("key=async_request_timeout msg=" +response.error.message)
+                _log.error("key=async_request_timeout msg=" +response.error.message)
                 ## Verify content length & total size to see if video has been downloaded 
                 ## == If request times out and we have 75% of data, then process the video and send data to client 
                 try:
@@ -950,7 +962,7 @@ class HttpDownload(object):
         if self.job_params.has_key("requeue_count"):
             rc = self.job_params["requeue_count"]
             if rc > 3:
-                  log.error("key=requeue_job msg=exceeded max requeue")
+                  _log.error("key=requeue_job msg=exceeded max requeue")
                   return False
 
             self.job_params["requeue_count"] = rc + 1
@@ -968,7 +980,7 @@ class HttpDownload(object):
                 response = http_client.fetch(requeue_request)
                 break
             except tornado.httpclient.HTTPError, e:
-                log.error("key=requeue  msg=requeue error " + e.__str__())
+                _log.error("key=requeue  msg=requeue error " + e.__str__())
                 continue
 
         return True
@@ -1036,7 +1048,7 @@ class HttpDownload(object):
             else:
                 if debug:
                     raise Exception("Request Type not Supported")
-                log.exception("type=Client Response msg=Request Type not Supported")
+                _log.exception("type=Client Response msg=Request Type not Supported")
 
             #TO BE Implemented 
             #elif self.job_params.has_key(properties.THUMBNAIL_RATE):
@@ -1115,7 +1127,7 @@ class ClientResponse(object):
                 #Verify HTTP 200 OK
                 break
             except tornado.httpclient.HTTPError, e:
-                log.error("type=client_response msg=response error")
+                _log.error("type=client_response msg=response error")
                 continue
 
 ##############################################
@@ -1167,7 +1179,7 @@ class Worker(multiprocessing.Process):
                 result = response.body
                 break
             except tornado.httpclient.HTTPError, e:
-                log.error("Dequeue Error " + e.__str__())
+                _log.error("Dequeue Error " + e.__str__())
                 continue
 
         return result
@@ -1184,11 +1196,11 @@ class Worker(multiprocessing.Process):
         parts = self.model_version_file.split('/')[-1]
         version = parts.split('.model')[0]
         self.model_version = version
-        log.info('Loading model from %s version %s' % (self.model_file,self.model_version))
+        _log.info('Loading model from %s version %s' % (self.model_file,self.model_version))
         self.model = model.load_model(self.model_file)
 
     def run(self):
-        log.info("starting worker [%s] %s " %(self.pid,str(i)))
+        _log.info("starting worker [%s] %s " %(self.pid,str(i)))
         self.load_model()
         while not self.kill_received:
           # get a task
@@ -1201,7 +1213,7 @@ class Worker(multiprocessing.Process):
                 ## ===== ASYNC Code Starts ===== ##
                 ioloop = tornado.ioloop.IOLoop.instance()
                 dl = HttpDownload(job, ioloop, self.model,self.model_version, self.debug, self.pid, self.sync)
-                #log.info("ioloop %r" %ioloop)  
+                #_log.info("ioloop %r" %ioloop)  
                 try:
                     #Change Job State
                     api_key = dl.job_params[properties.API_KEY] 
@@ -1212,11 +1224,11 @@ class Worker(multiprocessing.Process):
                         api_request.model_version = self.model_version 
                         api_request.save()
                     ts = str(time.time())
-                    #log.info("key=worker [%s] msg=request %s" % (self.pid,NeonApiRequest.get_request(api_key,job_id)) ) 
-                    log.info("key=worker [%s] msg=processing request %s %s" %(self.pid,dl.job_params[properties.REQUEST_UUID_KEY],str(time.time())))
+                    #_log.info("key=worker [%s] msg=request %s" % (self.pid,NeonApiRequest.get_request(api_key,job_id)) ) 
+                    _log.info("key=worker [%s] msg=processing request %s %s" %(self.pid,dl.job_params[properties.REQUEST_UUID_KEY],str(time.time())))
 
                 except Exception,e:
-                    log.error("key=worker [%s] msg=db error %s" %(self.pid,e.message))
+                    _log.error("key=worker [%s] msg=db error %s" %(self.pid,e.message))
 
                 #profile
                 if options.profile:
@@ -1247,11 +1259,11 @@ class Worker(multiprocessing.Process):
                     ctracker.stats.dump_stats('ctrackerprofile.'+str(pr_ts))
 
           except Queue.Empty:
-                log.debug("Q,Empty")
+                _log.debug("Q,Empty")
                 time.sleep(self.SLEEP_INTERVAL * random.random())  
 
           except Exception,e:
-                log.error("key=worker [%s] msg=exception %s" %(self.pid,e.message))
+                _log.error("key=worker [%s] msg=exception %s" %(self.pid,e.message))
                 if self.debug:
                       raise
                 time.sleep(self.SLEEP_INTERVAL)
@@ -1260,22 +1272,7 @@ class Worker(multiprocessing.Process):
           self.check_code_release_version()
 
 if __name__ == "__main__":
-    parser = OptionParser(usage=USAGE)
-
-    parser.add_option('--local', default=False, action='store_true',
-                      help='If set, use the localproperties file for config')
-    parser.add_option('--n_workers', default=1, type='int',
-                      help='Number of workers to spawn')
-    parser.add_option('--model_file', default=None,
-                      help='File that contains the model')
-    parser.add_option('--debug', default=False, action='store_true',
-                      help='If true, runs in debug mode')
-    parser.add_option('--profile', default=False, action='store_true',
-                      help='If true, runs in debug mode')
-    parser.add_option('--sync', default=False, action='store_true',
-                      help='If true, runs http client in async mode')
-
-    options, args = parser.parse_args()
+    utils.neon.InitNeon()
     
     signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGINT, sig_handler)
@@ -1286,10 +1283,10 @@ if __name__ == "__main__":
     
     #Logger
     global log
-    log = errorlog.FileLogger("client")
+    log = error_log.FileLogger("client")
     
     if options.local:
-        log.info("Running locally")
+        _log.info("Running locally")
         import localproperties as properties
     else:
         import properties

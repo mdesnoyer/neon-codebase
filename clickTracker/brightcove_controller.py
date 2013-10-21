@@ -7,6 +7,11 @@ On recieveing an update, schedules a task to be executed at time 't'
 Tasks can include -- push thumbnail X in to brightcove account A 
 
 '''
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
 import tornado.ioloop
 import tornado.web
 import tornado.httpserver
@@ -19,14 +24,17 @@ import random
 import itertools
 import os
 import sys
-sys.path.insert(0,os.path.abspath(
-        os.path.join(os.path.dirname(__file__), '../api')))
 import threading
 import urllib
+import utils.neon
+
+from utils.options import define, options
+define("port", default=8888, help="run on the given port", type=int)
+define("service_url", default="http://services.neon-lab.com", 
+        help="service url", type=basestring)
+
 import logging
-import logging.handlers
-logging.basicConfig(filename= __file__.split('.')[0] + '.log', filemode='a', level=logging.DEBUG)
-log = logging.getLogger(__name__)
+_log = logging.getLogger(__name__)
 
 ####################################################################################################
 ## Priority Q Impl
@@ -101,9 +109,9 @@ class ThumbnailChangeTask(AbstractTask):
         http_client.fetch(req,self.cb)
         result = yield tornado.gen.Task(http_client.fetch,url)
         if result.error:
-            log.error("key=ThumbnailChangeTask msg=thumbnail change failed")
+            _log.error("key=ThumbnailChangeTask msg=thumbnail change failed")
         else:
-            log.debug("key=ThumbnailChangeTask msg=thumbnail for video %s is %s"
+            _log.debug("key=ThumbnailChangeTask msg=thumbnail for video %s is %s"
                         %(self.video_id,self.tid))
 
 class TimesliceEndTask(AbstractTask):
@@ -136,7 +144,7 @@ class ThumbnailCheckTask(AbstractTask):
         #http_client.fetch(req,self.cb)
         result = yield tornado.gen.Task(http_client.fetch,url)
         if result.error:
-            log.error("key=ThumbnailCheckTask msg=service error for video %" %self.video_id)
+            _log.error("key=ThumbnailCheckTask msg=service error for video %" %self.video_id)
 
 class TaskManager(object):
     '''
@@ -238,11 +246,6 @@ class BrightcoveABController(object):
 # Create Tornado server application
 ###################################################################################
 
-from tornado.options import define, options
-define("port", default=8888, help="run on the given port", type=int)
-define("service_url", default="http://services.neon-lab.com", 
-        help="service url", type=basestring)
-
 class GetData(tornado.web.RequestHandler):
     
     @tornado.web.asynchronous
@@ -294,6 +297,7 @@ def initialize_controller():
 ###################################################################################
 
 def main():
+    utils.neon.InitNeon()
     SCHED_CHECK_INTERVAL = 1000 #1s
 
     global taskQ
@@ -302,7 +306,6 @@ def main():
     video_map = {}
     taskmgr = TaskManager()
     #initialize_controller()
-    tornado.options.parse_command_line()
     server = tornado.httpserver.HTTPServer(application)
     server.listen(options.port)
     tornado.ioloop.PeriodicCallback(taskmgr.check_scheduler,SCHED_CHECK_INTERVAL).start()

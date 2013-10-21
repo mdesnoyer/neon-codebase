@@ -4,6 +4,11 @@ This script launches the services server which hosts Services that neon web acco
 - Neon Account managment
 - Submit video processing request via Neon API, Brightcove, Youtube
 '''
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
 
 import tornado.httpserver
 import tornado.ioloop
@@ -16,6 +21,7 @@ import os
 import sys
 import signal
 import hashlib
+import logging
 import json
 import datetime
 import traceback
@@ -24,18 +30,17 @@ import tornado.stack_context
 import contextlib
 
 #Neon classes
-import errorlog
 from neondata import *
+import utils.neon
 
-from tornado.options import define, options
+from utils.options import define, options
 define("port", default=8083, help="run on the given port", type=int)
 define("local", default=0, help="call local service", type=int)
 
-global log
-log = errorlog.FileLogger("server")
+_log = logging.getLogger(__name__)
 
 def sig_handler(sig, frame):
-    log.debug('Caught signal: ' + str(sig) )
+    _log.debug('Caught signal: ' + str(sig) )
     tornado.ioloop.IOLoop.instance().stop()
 
 #TODO :  Implement
@@ -84,7 +89,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 #only account creation call can lack this header
                 return
             else:
-                log.exception("key=initialize msg=api header missing")
+                _log.exception("key=initialize msg=api header missing")
                 data = '{"error": "missing or invalid api key" }'
                 self.send_json_response(data,400)
 
@@ -133,7 +138,7 @@ class AccountHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
         
-        log.info("Request %r" %self.request)
+        _log.info("Request %r" %self.request)
 
         uri_parts = self.request.uri.split('/')
         if "accounts" in self.request.uri:
@@ -144,7 +149,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 i_id = uri_parts[6]
                 method = uri_parts[7]
             except Exception,e:
-                log.error("key=get request msg=  %s" %e)
+                _log.error("key=get request msg=  %s" %e)
                 self.set_status(400)
                 self.finish()
                 return
@@ -241,7 +246,7 @@ class AccountHandler(tornado.web.RequestHandler):
                     pstart = self.get_argument("plan_start_date")
                     self.update_account(a_id,pmins,pstart)
                 except Exception,e:
-                    log.error('key=update account msg=' + e.message)
+                    _log.error('key=update account msg=' + e.message)
                     self.set_status(400)
                     self.finish()
             else:
@@ -259,7 +264,7 @@ class AccountHandler(tornado.web.RequestHandler):
                     return
             self.method_not_supported()
         else:
-            log.error("Method not supported")
+            _log.error("Method not supported")
             self.set_status(400)
             self.finish()
     
@@ -289,14 +294,14 @@ class AccountHandler(tornado.web.RequestHandler):
             total_duration = 0 
             for r,key in zip(result,self.keys):
                 if r is None:
-                    log.error("key=get_account_status subkey=get_videos request not found %s" %key )
+                    _log.error("key=get_account_status subkey=get_videos request not found %s" %key )
                     continue
 
                 req = NeonApiRequest.create(r)
                 if req.duration:
                     client_response["minutes_used"] += req.duration
                 else:
-                    log.error("key=get_account_status subkey=get_videos request duration error %s" %key)
+                    _log.error("key=get_account_status subkey=get_videos request duration error %s" %key)
 
                 if req.state == "submit" or req.state == "requeued" :
                     client_response["queued"] += 1 
@@ -319,7 +324,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.keys = [ generate_request_key(self.api_key,j_id) for j_id in account.videos.values()] 
                 NeonApiRequest.multiget(self.keys,get_videos)
             else:
-                log.error("key=get_account_status msg=account not found for %s" %self.api_key)
+                _log.error("key=get_account_status msg=account not found for %s" %self.api_key)
                 data = '{"error": "no account found"}'
                 self.send_json_response(data,400)
                 return
@@ -462,7 +467,7 @@ class AccountHandler(tornado.web.RequestHandler):
                     else:
                         raise Exception("NOT YET IMPL")
                 except Exception,e:
-                    log.exception("key=account_callback %s" %e)
+                    _log.exception("key=account_callback %s" %e)
             else:
                 data = '{"error":"no such account"}'
                 self.send_json_response(data,400)
@@ -663,7 +668,7 @@ class AccountHandler(tornado.web.RequestHandler):
         try:
             thumbnail_id = self.get_argument('thumbnail_id')
         except Exception,e:
-            log.error('type=update brightcove thumbnail' + e.message)
+            _log.error('type=update brightcove thumbnail' + e.message)
             self.set_status(400)
             self.finish()
             return
@@ -685,7 +690,7 @@ class AccountHandler(tornado.web.RequestHandler):
         def check_exists(result):
             if result:
                 data = '{"error": "account already exists"}'
-                log.error("key=create_account mag=account already exists %s" %api_key)
+                _log.error("key=create_account mag=account already exists %s" %api_key)
                 self.send_json_response(data)
             else:
                 user.save(saved_user)
@@ -778,7 +783,7 @@ class AccountHandler(tornado.web.RequestHandler):
             NeonUserAccount.get_account(self.api_key,create_account)
 
         except Exception,e:
-            log.error("key=create brightcove account msg= %" %e)
+            _log.error("key=create brightcove account msg= %" %e)
             data = '{"error": "API Params missing" }'
             self.send_json_response(data,400)
        
@@ -795,7 +800,7 @@ class AccountHandler(tornado.web.RequestHandler):
             autosync = self.get_argument("auto_update")
 
         except Exception,e:
-            log.error("key=create brightcove account msg= %" %e)
+            _log.error("key=create brightcove account msg= %" %e)
             data = '{"error": "API Params missing" }'
             self.send_json_response(data,400)
             return 
@@ -825,7 +830,7 @@ class AccountHandler(tornado.web.RequestHandler):
                     return
 
         else:
-            log.error("key=create brightcove account msg= account not found %s" %self.api_key)
+            _log.error("key=create brightcove account msg= account not found %s" %self.api_key)
 
     '''
     Update Brightcove account details
@@ -848,7 +853,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 bc.auto_update = autosync
                 bc.save(saved_account)
             else:
-                log.error("key=update_brightcove_integration msg= no such account %s integration id %s" %(self.api_key,i_id))
+                _log.error("key=update_brightcove_integration msg= no such account %s integration id %s" %(self.api_key,i_id))
                 data = '{"error": "Account doesnt exists" }'
                 self.send_json_response(data,400)
         
@@ -857,7 +862,7 @@ class AccountHandler(tornado.web.RequestHandler):
             wtoken = self.get_argument("write_token")
             autosync = self.get_argument("auto_update")
         except Exception,e:
-            log.error("key=create brightcove account msg=" + e.message)
+            _log.error("key=create brightcove account msg=" + e.message)
             data = '{"error": "API Params missing" }'
             self.send_json_response(data,400)
             return
@@ -880,7 +885,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
                 #Get unprocessed list from brightcove 
             else:
-                log.error("key=update_brightcove_integration msg= no such account %s integration id %s" %(self.api_key,i_id))
+                _log.error("key=update_brightcove_integration msg= no such account %s integration id %s" %(self.api_key,i_id))
                 data = '{"error": "Account doesnt exists" }'
                 self.send_json_response(data,400)
 
@@ -912,7 +917,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 na.add_integration(yt.integration_id,yt.key) 
                 na.save_integration(yt,saved_account)
             else:
-                log.error("key=create_youtube_integration msg=neon account not found")
+                _log.error("key=create_youtube_integration msg=neon account not found")
                 data = '{"error": "account creation issue"}'
                 self.send_json_response(data,500)
 
@@ -952,7 +957,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 ya.auto_update = auto_update
                 ya.save(saved_account)
             else:
-                log.error("key=update youtube account msg= no such account %s integration id %s" %(self.api_key,i_id))
+                _log.error("key=update youtube account msg= no such account %s integration id %s" %(self.api_key,i_id))
                 data = '{"error": "Account doesnt exists" }'
                 self.send_json_response(data,400)
        
@@ -1174,7 +1179,7 @@ class AccountHandler(tornado.web.RequestHandler):
         try:
             thumbnail_id = self.get_argument('thumbnail_id')
         except Exception,e:
-            log.exception('type=update brightcove thumbnail' + e.message)
+            _log.exception('type=update brightcove thumbnail' + e.message)
             self.set_status(400)
             self.finish()
             return
@@ -1260,7 +1265,7 @@ class BcoveHandler(tornado.web.RequestHandler):
 ################################################################
 
 if __name__ == "__main__":
-    tornado.options.parse_command_line()
+    utils.neon.InitNeon()
     
     application = tornado.web.Application([
         (r'/api/v1/removeaccount(.*)', DeleteHandler),

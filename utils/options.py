@@ -13,7 +13,7 @@ A module using this functionality would define its own options like:
 
 Then, in the main() routine the parsing command must be called:
 
-  utils.options.parse_args()
+  utils.options.parse_options()
 
 Options can be defined in the command line or in a configuration
 file. If you want the configuration to load from the configuration
@@ -49,6 +49,11 @@ import os.path
 import sys
 import yaml
 
+#TODO(mdesnoyer): Add support for booleans
+
+#TODO(mdesnoyer): Add groups so that the flags are sorted better in
+#the help message.
+
 class Error(Exception):
     """Exception raised by errors in the options module."""
     pass
@@ -82,7 +87,7 @@ class OptionParser(object):
         global_name = self._local2global(name)
         return self._options[global_name].value()
 
-    def define(self, name, default=None, type=None, help=None):
+    def define(self, name, default=None, type=None, help=None, stack_depth=2):
         '''Defines a new option.
 
         Inputs:
@@ -91,7 +96,7 @@ class OptionParser(object):
         type - The type object to expect
         help - Help string
         '''
-        global_name = self._local2global(name)
+        global_name = self._local2global(name, stack_depth=stack_depth)
 
         if global_name in self._options:
             raise Error("Option %s already defined." % global_name)
@@ -221,10 +226,11 @@ options = OptionParser()
 '''Global options object.'''
 
 def define(name, default=None, type=None, help=None):
-    return options.define(name, default=default, type=type, help=help)
+    return options.define(name, default=default, type=type, help=help,
+                          stack_depth=3)
 
 
-def parse_options(self, args=None, config_stream=None,
-                   usage='%prog [options]'):
+def parse_options(args=None, config_stream=None,
+                  usage='%prog [options]'):
     return options.parse_options(args=args, config_stream=config_stream,
                                  usage=usage)

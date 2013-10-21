@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
+    
 import tornado.httpclient
 import tornado.ioloop
 import tornado.httputil
@@ -13,8 +19,7 @@ from PIL import Image
 import time
 import urllib
 import os
-sys.path.insert(0,os.path.abspath(os.path.join(os.path.dirname(__file__), '../supportServices')))
-from neondata import *
+from supportServices.neondata import *
 
 
 class YoutubeApi(object):

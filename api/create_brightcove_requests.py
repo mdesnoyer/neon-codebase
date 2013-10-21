@@ -1,13 +1,15 @@
 #!/usr/bin/python
-
 ''' Create api requests for the brightcove customers '''
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
+    
 from brightcove_api import BrightcoveApi
 import redis as blockingRedis
 import os
-import sys
-sys.path.insert(0,os.path.abspath(
-    os.path.join(os.path.dirname(__file__), '../supportServices')))
-from neondata import *
+from supportServices.neondata import *
 import json
 
 # Get all Brightcove accounts
