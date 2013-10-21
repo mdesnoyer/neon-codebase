@@ -87,7 +87,7 @@ class ThumbnailChangeTask(AbstractTask):
     def __init__(self,video_id,new_tid):
         self.video_id = video_id
         self.tid = new_tid
-        self.service_url = self.neon_service_url + "/" + account_id + "/" + updatethumbnail + "/" + str(video_id) 
+        self.service_url = self.neon_service_url + "/" + account_id + "/updatethumbnail/" + str(video_id) 
     
     def execute(self):
         self.set_thumbnail()
@@ -116,6 +116,27 @@ class TimesliceEndTask(AbstractTask):
     def execute(self):
         pass
         #based on current state of video take a decision
+        #Get thumb distribution 
+        
+
+class ThumbnailCheckTask(AbstractTask):
+    '''
+    Check the current thumbnail in brightcove and verify if the thumbnail has been 
+    saved in the DB.
+    If thumbnail is new, save the corresponding THUMB URL => TID mapping
+    '''
+    def __init__(self,video_id):
+        self.video_id = video_id
+        self.service_url = self.neon_service_url + "/" + account_id + "/checkthumbnail/" + str(video_id) 
+    
+    def execute(self):
+        http_client = tornado.httpclient.AsyncHTTPClient()
+        req = tornado.httpclient.HTTPRequest(method = 'POST',url = self.service_url,body=body,
+                        request_timeout = 10.0)
+        #http_client.fetch(req,self.cb)
+        result = yield tornado.gen.Task(http_client.fetch,url)
+        if result.error:
+            log.error("key=ThumbnailCheckTask msg=service error for video %" %self.video_id)
 
 class TaskManager(object):
     '''
@@ -124,7 +145,8 @@ class TaskManager(object):
     def task_worker(self,task):
         print "[exec] " ,task, threading.current_thread()  
         task.execute()
-
+   
+    @tornado.gen.engine
     def check_scheduler(self):
         priority, count, task = taskQ.peek_task()
         cur_time = time.time()
@@ -133,26 +155,6 @@ class TaskManager(object):
             t = threading.Thread(target=self.task_worker,args=(task,))
             t.setDaemon(True)
             t.start()
-
-class BrightcoveThumbnailChecker(threading.Thread):
-    '''
-    Check the current thumbnail in brightcove and verify if the thumbnail has been 
-    saved in the DB.
-    If thumbnail is new, save the corresponding THUMB URL => TID mapping
-    '''
-    def __init__(self):
-        self.videos_seen = {} #video_id => thumbnails urls mapped
-
-    def brightcove_data_callback(self,response):
-        pass
-
-    def thumbnail_db_callback(self,response):
-        pass
-
-    def run(self):
-        #Query Brightcove for all the videos
-        pass
-
 
 ###################################################################################
 # Brightcove AB Controller Logic 
@@ -184,9 +186,15 @@ class BrightcoveABController(object):
         thumbA = time_dist.pop(0)
         cur_time = time.time()
         time_to_exec_task = cur_time + delay
+        
+        #Thumbnail Check Task -- May need to run more than once? 
+        ctask = ThumbnailCheckTask(video_id)
+        taskmgr.add_task(ctask,cur_time)
 
         #TODO: Check what happens when you push same refID thumb to bcove
-       
+    
+        #TODO: Randomize the minority thumbnail scheduling
+
         #schedule A - The Majority run thumbnail 
         taskA = ThumbnailChangeTask(video_id,thumbA[0]) 
         taskmgr.add_task(taskA,time_to_exec_task) 
@@ -247,13 +255,10 @@ class GetData(tornado.web.RequestHandler):
         
         #For the videoid, get its metadata and insert in to Q
         data = tornado.escape.json_decode(self.request.body)
-        for vid,tids_tuple in vids.iteritems():
-            tids = [tup[0] for tup in tids_tuple] 
-            tidmappings = yield tornado.gen.Task(ThumbnailIDMapper.get_ids,tids)
-            if tidmappings is not None:
-                vmdata = yield tornado.gen.Task(VideoMetadata.get,vid)
-                if vmdata is not None:
-                    controller.thumbnail_swap_scheduler(vmdata,tidmappings,tids_tuple)
+        for vid,tid_dists in vids.iteritems():
+            vmdata = yield tornado.gen.Task(VideoMetadata.get,vid)
+            if vmdata is not None:
+                controller.thumbnail_swap_scheduler(vmdata,tid_dists)
             
         priority = time.time() 
         taskQ.add_task(task,priority) 
@@ -277,17 +282,20 @@ def initialize_controller():
     controller = BrightcoveABController(delay=10) #stagger initial videos by introducing delay
     return
 
-    for vid,tids_tuple in vids.iteritems():
-        tids = [tup[0] for tup in tids_tuple] 
-        tidmappings = ThumbnailIDMapper.get_ids(tids)
+    for vid,tid_dists in vids.iteritems():
+        tids = [tup[0] for tup in tid_dists] 
         vmdata = VideoMetadata.get(vid)
-        controller.thumbnail_change_scheduler(vmdata,tidmappings,tids_tuple)
-
+        #Insert in to video map (data cache)
+        video_map[vid] = tid_dists    
+        controller.thumbnail_change_scheduler(vmdata,tid_dists)
+    
 ###################################################################################
 # MAIN
 ###################################################################################
 
 def main():
+    SCHED_CHECK_INTERVAL = 1000 #1s
+
     global taskQ
     taskQ = PriorityQ()
     global video_map
@@ -297,9 +305,9 @@ def main():
     tornado.options.parse_command_line()
     server = tornado.httpserver.HTTPServer(application)
     server.listen(options.port)
-    tornado.ioloop.PeriodicCallback(taskmgr.check_scheduler,1000).start()
+    tornado.ioloop.PeriodicCallback(taskmgr.check_scheduler,SCHED_CHECK_INTERVAL).start()
     tornado.ioloop.IOLoop.instance().start()
 
 # ============= MAIN ======================== #
 if __name__ == "__main__":
-    main()
+   main()

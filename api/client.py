@@ -105,12 +105,6 @@ def format_status_json(state,timestamp,data=None):
 
 #=============== Global Handlers =======================#
 
-############################################################################
-# STATE ENUM
-############################################################################
-class State(object):
-    start,get_video_metadata,dequeue_master,process_video,rank_thumbnails,api_callback,insert_image_library,mark_inbox,complete,error  = range(10)
-
 ###########################################################################
 # Process Video File
 ###########################################################################
@@ -506,13 +500,18 @@ class ProcessVideo(object):
             rank    = i +1 
 
             #populate thumbnails
-            #(self,tid,urls,created,width,height,ttype,model_score,enabled=True,chosen=False,rank=None,refid=None)
             tdata = ThumbnailMetaData(tid,urls,created,width,height,ttype,score,self.model_version,rank=rank)
             thumb = tdata.to_dict()
             self.thumbnails.append(thumb)
         return s3_urls
 
     ############# Request Finalizers ##############
+    
+    def valence_score(self,image):
+        
+        im = image.ndarray()[:,:,::-1]
+        score,attr = self.model.score(im)
+        return score
 
     def save_video_metadata(self):
         '''
@@ -622,7 +621,8 @@ class ProcessVideo(object):
                                                 connect_timeout = 10.0)
 
         response = http_client.fetch(req)
-        imgdata = response.body 
+        imgdata = response.body
+        image = Image.open(StringIO(imgdata))
         s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
         s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
         s3bucket = Bucket(name = s3bucket_name,connection = s3conn)
@@ -640,13 +640,13 @@ class ProcessVideo(object):
         urls.append(p_url)
         urls.append(s3fname)
         created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        enabled = None 
+        enabled = True 
         width   = 480
         height  = 360
         ttype   = "brightcove" 
         rank    = 0 
-        
-        tdata = ThumbnailMetaData(tid,urls,created,enabled,width,height,ttype,None,rank)
+        score   = self.valence_score(imgdata) 
+        tdata = ThumbnailMetaData(tid,urls,created,width,height,ttype,score,self.model_version,enabled=enabled,rank=rank)
         thumb = tdata.to_dict()
         self.thumbnails.append(thumb)
 
@@ -664,7 +664,8 @@ class ProcessVideo(object):
 
             if ret[0]:
                 #update enabled time & reference ID
-                self.thumbnails[0]["enabled"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                #By default Neon rank 1 is always uploaded
+                self.thumbnails[0]["chosen"] = True #datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.thumbnails[0]["refid"] = tid
 
         #3 Add thumbnails to the request object and save
@@ -708,6 +709,7 @@ class ProcessVideo(object):
 
         response = http_client.fetch(req)
         imgdata = response.body 
+        image = Image.open(StringIO(imgdata))
         s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
         s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
         s3bucket = Bucket(name = s3bucket_name,connection = s3conn)
@@ -725,12 +727,13 @@ class ProcessVideo(object):
         urls.append(p_url)
         urls.append(s3fname)
         created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        enabled = None 
+        enabled = True 
         width   = 480
         height  = 360
         ttype   = "youtube"
         rank    = 0 
-        tdata = ThumbnailMetaData(tid,urls,created,enabled,width,height,ttype,None,rank)
+        score   = self.valence_score(image)
+        tdata = ThumbnailMetaData(tid,urls,created,width,height,ttype,score,self.model_version,enabled=enabled,rank=rank)
         thumb = tdata.to_dict()
         self.thumbnails.append(thumb)
 
@@ -785,11 +788,11 @@ class HttpDownload(object):
         req = tornado.httpclient.HTTPRequest(url = url, headers = headers,
                         use_gzip =False, request_timeout = self.timeout)
         self.size_so_far = 0
-        self.pv = ProcessVideo(params, json_params, model, debug, cur_pid, model_version)
+        self.pv = ProcessVideo(params, json_params, model, model_version, debug, cur_pid)
         self.error = None
         self.callback_data_size = 4096 * 1024 #4MB  --- TUNE 
         self.global_work_queue_url = properties.BASE_SERVER_URL + "/requeue"
-        self.state = State.start
+        self.state = "start"
         self.total_size_so_far = 0
         self.content_length = 0
 

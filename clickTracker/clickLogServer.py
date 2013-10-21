@@ -99,7 +99,9 @@ class LogLines(tornado.web.RequestHandler):
 
         except Exception,e:
             log.exception("key=get_track msg=%s" %e) 
-        
+            self.finish()
+            return
+
         cd = ClickData(action,id,ttype,cts,sts,page,cip,imgs,cvid)
         data = cd.to_json()
         print data
@@ -122,7 +124,7 @@ class GetLines(tornado.web.RequestHandler):
 
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
-       
+
         count = 1
         try:
             count = int(self.get_argument('count'))
