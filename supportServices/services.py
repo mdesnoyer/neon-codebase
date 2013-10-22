@@ -577,7 +577,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 t_urls.append(request.previous_thumbnail)
                 tm = ThumbnailMetaData(0,t_urls,ctime,0,0,"brightcove",0,0)
                 thumbs.append(tm.to_dict())
-            elif request.status is RequestState.FAILED:
+            elif request.state is RequestState.FAILED:
                 pass
             else:
                 #Jobs have finished
@@ -597,7 +597,7 @@ class AccountHandler(tornado.web.RequestHandler):
             result[vid] = vr
 
         #3. Populate Completed videos
-        keys = [InternalVideoID(self.api_key,vid) for vid in completed_videos] #get internal vids
+        keys = [InternalVideoID.generate(self.api_key,vid) for vid in completed_videos] #get internal vids
         if len(keys) > 0:
             video_results = yield tornado.gen.Task(VideoMetadata.multi_get,keys)
             tids = []
@@ -609,9 +609,16 @@ class AccountHandler(tornado.web.RequestHandler):
             thumbnails = yield tornado.gen.Task(ThumbnailIDMapper.get_ids,tids)
             for thumb in thumbnails:
                 if thumb:
-                    vid = thumb.video_id
-                    tdata = thumb.to_dict()
+                    vid = InternalVideoID.to_external(thumb.video_id)
+                    tdata = thumb.get_metadata() #to_dict()
                     result[vid].thumbnails.append(tdata) 
+
+        #4. Set the default thumbnail for each of the video
+        for res in result:
+            vres = result[res]
+            for thumb in vres.thumbnails:
+                if thumb["chosen"] == True:
+                    vres.current_thumbnail = thumb["thumbnail_id"]
 
         #convert to dict
         vresult = []

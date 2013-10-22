@@ -999,15 +999,18 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
     def _hash(self,input):
         return hashlib.md5(input).hexdigest()
     
-    def get_metdata(self):
-        pass
+    def get_metadata(self):
+        return self.thumbnail_metadata
         #return only specific fields
+
+    def to_dict(self):
+        return self.__dict__
 
     @staticmethod
     def create(json_data):
         data_dict = json.loads(json_data)
         #create basic object
-        obj = ThumbnailIDMapper(None,None,None,None,None,None,None,None)
+        obj = ThumbnailIDMapper(None,None,None)
 
         #populate the object dictionary
         for key in data_dict.keys():
@@ -1017,14 +1020,14 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
 
     # TODO(sunil): Decide whether these functions 
     @staticmethod
-    def get_id(self, key, callback=None, db_connection=DBConnection()):
+    def get_id(key, db_connection=DBConnection(), callback=None):
         if callback:
             ThumbnailIDMapper.get(key, callback, db_connection)
         else:
             return db_connection.blocking_conn.get(key)
 
     @staticmethod
-    def get_ids(self, keys, callback=None, db_connection=DBConnection()):
+    def get_ids(keys,callback=None,db_connection=DBConnection()):
 
         def process(results):
             mappings = [] 
@@ -1034,7 +1037,7 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
             callback(mappings)
 
         if callback:
-            db_connection.conn.mget(keys,cb)
+            db_connection.conn.mget(keys,process)
         else:
             mappings = [] 
             items = db_connection.blocking_conn.mget(keys)
@@ -1114,10 +1117,11 @@ class VideoMetadata(object):
             return create(jdata)
 
     @staticmethod
-    def multi_get(internal_video_ids,callback=None, db_connection=DBConnection()): 
+    def multi_get(internal_video_ids,db_connection=DBConnection(),callback=None): 
         
-        def create(data_dict):
-            obj = VideoMetadata(None,None,None,None,None,None,None)
+        def create(jdata):
+            data_dict = json.loads(jdata)
+            obj = VideoMetadata(None,None,None,None,None,None,None,None)
             for key in data_dict.keys():
                 obj.__dict__[key] = data_dict[key]
             return obj

@@ -670,6 +670,7 @@ class ProcessVideo(object):
             fno = bc_request.response["data"][0]
             img = Image.fromarray(self.data_map[fno][1])
             #img_url = self.thumbnails[0]["urls"][0]
+            tid = self.thumbnails[0]["thumbnail_id"] 
             bcove   = brightcove_api.BrightcoveApi(neon_api_key=api_key,publisher_id=pid,read_token=rtoken,write_token=wtoken)
             ret = bcove.update_thumbnail_and_videostill(video_id,img,tid)
 
