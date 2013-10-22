@@ -140,6 +140,7 @@ def test_signup_flow(a_id,i_id='i12345'):
 
     #. Check for brightcove video status
     url = BASE + '/accounts/' + a_id + '/brightcove_integrations/' + i_id +"/videos/x?video_ids=2679202484001,2640728545001"
+    print url
     data = get_request(url,key)
     print data
     return #test only bcove account

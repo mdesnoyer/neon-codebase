@@ -1083,12 +1083,12 @@ class VideoMetadata(object):
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__) 
 
-    def save(self,callback=None):
+    def save(self,db_connection=DBConnection(),callback=None):
         value = self.to_json()
         if callback:
-            VideoMetadata.conn.set(self.key,value,callback)
+            db_connection.conn.set(self.key,value,callback)
         else:
-            return VideoMetadata.blocking_conn.set(self.key,value)
+            return db_connection.blocking_conn.set(self.key,value)
 
     @staticmethod
     def get(internal_video_id, callback=None, db_connection=DBConnection()):

@@ -26,7 +26,7 @@ import multiprocessing
 import Queue
 import time
 import hashlib
-import numpy
+import numpy as np
 import signal
 import shutil
 import datetime
@@ -373,7 +373,7 @@ class ProcessVideo(object):
             ''' Save valence plot and video meta data '''
 
             #compute avg video valence score
-            mean_valence = numpy.mean(self.valence_scores[1])
+            mean_valence = np.mean(self.valence_scores[1])
             self.video_metadata["video_valence"] = "%.4f" %float(mean_valence)
             video_metadata = tornado.escape.json_encode(self.video_metadata)
                 
@@ -521,7 +521,8 @@ class ProcessVideo(object):
     
     def valence_score(self,image):
         
-        im = image.ndarray()[:,:,::-1]
+        im_array = np.array(image)
+        im = im_array[:,:,::-1]
         score,attr = self.model.score(im)
         return score
 
@@ -537,7 +538,7 @@ class ProcessVideo(object):
         i_id = self.request_map[properties.INTEGRATION_ID] if self.request_map.has_key(properties.INTEGRATION_ID) else 0 
         job_id = self.request_map[properties.REQUEST_UUID_KEY]
         duration = self.video_metadata["duration"]
-        video_valence = "%.4f" %float(numpy.mean(self.valence_scores[1])) 
+        video_valence = "%.4f" %float(np.mean(self.valence_scores[1])) 
         url = self.request_map[properties.VIDEO_DOWNLOAD_URL]
         model_version = self.model.__version__ 
         frame_size = self.video_metadata['frame_size']
@@ -564,12 +565,10 @@ class ProcessVideo(object):
         thumbnail_url_mapper_list = []
         for thumb in self.thumbnails:
             tid = thumb["thumbnail_id"]
-            ttype = thumb["type"]
-            rank = thumb["rank"]
-            for t_url in thumb.urls:
+            for t_url in thumb["urls"]:
                 uitem = ThumbnailURLMapper(t_url,tid)
                 thumbnail_url_mapper_list.append(uitem)
-                item = ThumbnailIDMapper(tid,platform,i_vid,i_id,ttype,rank)
+                item = ThumbnailIDMapper(tid,i_vid,thumb)
                 thumbnail_mapper_list.append(item)
 
         retid = ThumbnailIDMapper.save_all(thumbnail_mapper_list)
@@ -657,7 +656,7 @@ class ProcessVideo(object):
         height  = 360
         ttype   = "brightcove" 
         rank    = 0 
-        score   = self.valence_score(imgdata) 
+        score   = self.valence_score(image) 
         tdata = ThumbnailMetaData(tid,urls,created,width,height,ttype,score,self.model_version,enabled=enabled,rank=rank)
         thumb = tdata.to_dict()
         self.thumbnails.append(thumb)
@@ -1156,7 +1155,7 @@ class Worker(multiprocessing.Process):
         self.SLEEP_INTERVAL = 10
         self.kill_received = False
         self.dequeue_url = properties.BASE_SERVER_URL + "/dequeue"
-        self.state = State.start
+        self.state = "start"
         self.model_version = -1
         self.code_version = self.read_version_from_file(code_version_file)
         self.model = None
@@ -1280,10 +1279,6 @@ if __name__ == "__main__":
     num_processes= options.n_workers
     if options.debug:
         num_processes = 1
-    
-    #Logger
-    global log
-    log = error_log.FileLogger("client")
     
     if options.local:
         _log.info("Running locally")
