@@ -3,6 +3,7 @@ from datetime import datetime
 from mock import MagicMock
 from mrjob.protocol import *
 import mysql.connector
+import os
 from StringIO import StringIO
 import sqlite3
 import tempfile
@@ -56,6 +57,9 @@ def run_single_step(mr, input_str, step_type='mapper', step=0,
 def hr2str(hr):
     return datetime.utcfromtimestamp(hr*3600).isoformat(' ')
 
+def sec2str(sec):
+    return datetime.utcfromtimestamp(sec).isoformat(' ')
+
 class TestDataParsing(unittest.TestCase):
     def setUp(self):
         self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
@@ -67,8 +71,11 @@ class TestDataParsing(unittest.TestCase):
              '{"sts":19800, "a":"click", '
              '"ttype":"flashonly", "img":"http://panda.com"}\n'),
             protocol=RawProtocol)
-        self.assertEqual(results, [(('click', 'http://monkey.com', 5), 1),
-                                   (('click', 'http://panda.com', 5), 1)])
+        self.assertItemsEqual(results,
+                              [(('click', 'http://monkey.com', 5), 1),
+                              (('click', 'http://panda.com', 5), 1),
+                              ('latest', 19800),
+                              ('latest', 19800)])
 
     def test_valid_load(self):
         results, counters = run_single_step(self.mr,
@@ -76,10 +83,11 @@ class TestDataParsing(unittest.TestCase):
            '"imgs":["http://monkey.com","poprocks.jpg","pumpkin.wow"]}'),
             protocol=RawProtocol)
                                             
-        self.assertEqual(results,
-            [(('load', 'http://monkey.com', 5), 1),
-             (('load', 'poprocks.jpg', 5), 1),
-             (('load', 'pumpkin.wow', 5), 1)])
+        self.assertItemsEqual(results,
+                              [(('load', 'http://monkey.com', 5), 1),
+                               (('load', 'poprocks.jpg', 5), 1),
+                               (('load', 'pumpkin.wow', 5), 1),
+                               ('latest', 19800)])
 
     def test_invalid_json(self):
         results, counters = run_single_step(self.mr,
@@ -223,6 +231,13 @@ class TestIDMapping(unittest.TestCase):
         self.assertEqual(
             counters['HourlyEventStatsErrors']['VideoDBConnectionError'], 1)
 
+    def test_latest_time(self):
+        results, counters = run_single_step(self.mr,
+            encode([('latest', 19800)]),
+            step=1)
+        self.assertEqual(results[0], ('latest', 19800))
+        
+
 class TestDatabaseWriting(unittest.TestCase):
     '''Tests database writing step.'''
     def setUp(self):
@@ -241,10 +256,12 @@ class TestDatabaseWriting(unittest.TestCase):
         try:
             cursor = self.ramdb.cursor()
             cursor.execute('drop table %s' % self.mr.options.stats_table)
+            cursor.execute('drop table last_update')
             self.ramdb.commit()
         except Exception as e:
             pass
         self.ramdb.close()
+        os.remove('file::memory:?cache=shared')
 
     def test_table_creation(self):
         results, counters = run_single_step(self.mr, '', step=2,
@@ -262,7 +279,8 @@ class TestDatabaseWriting(unittest.TestCase):
             encode([(('imgA', 56),(5, 'click')),
                     (('imgA', 56),(55, 'load')),
                     (('imgB', 56),(9, 'click')),
-                    (('imgA', 54),(12, 'load'))]),
+                    (('imgA', 54),(12, 'load')),
+                    ('latest', 201600)]),
             step=2,
             step_type='reducer')
         cursor = self.ramdb.cursor()
@@ -277,20 +295,26 @@ class TestDatabaseWriting(unittest.TestCase):
         self.assertEqual(results[('imgA', hr2str(54))], (12, 0))
         self.assertEqual(results[('imgB', hr2str(56))], (0, 9))
 
+        cursor.execute('select logtime from last_update where tablename = ?',
+                       (self.mr.options.stats_table,))
+        self.assertEqual(cursor.fetchone()[0], hr2str(56))
+
     def test_replace_data(self):
         '''The default option replaces instead of increments.'''
         run_single_step(self.mr,
                         encode([(('imgA', 56),(5, 'click')),
                                 (('imgA', 56),(55, 'load')),
                                 (('imgB', 56),(9, 'click')),
-                                (('imgA', 54),(12, 'load'))]),
+                                (('imgA', 54),(12, 'load')),
+                                ('latest', 201600)]),
                                 step=2,
                                 step_type='reducer')
         run_single_step(self.mr,
                         encode([(('imgA', 56),(10, 'click')),
                                 (('imgA', 56),(75, 'load')),
                                 (('imgB', 56),(9, 'click')),
-                                (('imgA', 54),(12, 'load'))]),
+                                (('imgA', 54),(12, 'load')),
+                                ('latest', 201605)]),
                                 step=2,
                                 step_type='reducer')
         cursor = self.ramdb.cursor()
@@ -304,6 +328,10 @@ class TestDatabaseWriting(unittest.TestCase):
         self.assertEqual(results[('imgA', hr2str(56))], (75, 10))
         self.assertEqual(results[('imgA', hr2str(54))], (12, 0))
         self.assertEqual(results[('imgB', hr2str(56))], (0, 9))
+
+        cursor.execute('select logtime from last_update where tablename = ?',
+                       (self.mr.options.stats_table,))
+        self.assertEqual(cursor.fetchone()[0], sec2str(201605))
 
     def test_increment_data(self):
         '''Test when the counts are incremented.'''
@@ -423,6 +451,10 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual(results[('2348598ewsfrwe', hr2str(5))], (1, 2))
         self.assertEqual(results[('68367sgdhs', hr2str(5))], (1, 0))
         self.assertEqual(results[('faefr42345dsfg', hr2str(5))], (1, 1))
+
+        cursor.execute('select logtime from last_update where tablename = ?',
+                       (self.mr.options.stats_table,))
+        self.assertEqual(cursor.fetchone()[0], sec2str(19810))
 
 if __name__ == '__main__':
     unittest.main()

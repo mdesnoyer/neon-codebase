@@ -37,14 +37,6 @@ define('bc_controller_url', default=None,
 define('youtube_controller_url', default=None,
        help='URL to send the directives to the youtube ab controller')
 
-# Video database options
-define('video_db_host', default=None,
-       help='Host where the video database resides')
-define('video_db_port', default=None, type=int,
-       help='Port where the video database resides')
-define('video_db_polling_delay', default=120, type=float,
-       help='Number of seconds between polls of the video db')
-
 # Stats database options
 # TODO(mdesnoyer): Remove the default username and password after testing
 define('stats_host',
@@ -85,18 +77,13 @@ def initialize():
         ab_manager.register_destination(DistributionType.YOUTUBE,
                                         options.youtube_controller_url)
     
-    _log.info('Connecting to the video database at: %s:%i' %
-              (options.video_db_host,options.video_db_port))
-    conn = neondata.DBConnection(options.video_db_host,
-                                 options.video_db_port)
-    mastermind = Mastermind() 
+    mastermind = Mastermind()
+    # Get all the current information about the videos
     for platform in conn.get_all_external_platforms():
         for video_id in platform.videos.iterkeys():
-            video_metadata = neondata.VideoMetadata.get(video_id, 
-                                                        db_connection=conn)
+            video_metadata = neondata.VideoMetadata.get(video_id)
             thumbnails = [core.ThumbnailInfo.from_db_data(
                 neondata.ThumbnailIDMapper.get_id(thumb_id,
-                                                  db_connection=conn
                                                   ).thumbnail_metadata) 
                 for thumb_id in video_metadata.thumbnail_ids]
 
@@ -115,20 +102,15 @@ class VideoDBWatcher(threading.Thread):
         self.ab_manager = ab_manager
 
     def run(self):
-        _log.info('Connecting to the video db at:%s:%i' %
-                  (options.video_db_host, options.video_db_port))
-        conn = neondata.DBConnection(options.video_db_host,
-                                     options.video_db_port)
         while True:
             for platform in conn.get_all_external_platforms():
                 for video_id in platform.videos.iterkeys():
                     video_metadata = neondata.VideoMetadata.get(
-                        video_id, 
-                        db_connection=conn)
+                        video_id)
                     thumbnails = [
                         core.ThumbnailInfo.from_db_data(
                             neondata.ThumbnailIDMapper.get_id(
-                                thumb_id,db_connection=conn).thumbnail_metadata) 
+                                thumb_id).thumbnail_metadata) 
                         for thumb_id in video_metadata.thumbnail_ids]
 
                     directive = mastermind.update_video_info(video_id,
