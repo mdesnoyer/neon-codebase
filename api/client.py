@@ -524,7 +524,7 @@ class ProcessVideo(object):
         im_array = np.array(image)
         im = im_array[:,:,::-1]
         score,attr = self.model.score(im)
-        return score
+        return str(score)
 
     def save_video_metadata(self):
         '''
