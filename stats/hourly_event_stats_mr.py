@@ -50,6 +50,18 @@ class HourlyEventStats(MRJob):
             
 
     def mapper_get_events(self, line, _):
+        '''Reads the json log and outputs event data.
+
+        In particular, the output is:
+
+        ((event_type, img_url, hour), 1)
+        For counting on an hourly basis
+
+        or
+        
+        ('latest', time)
+        For tracking the last known event
+        '''
         try:
             data = json.loads(line)
             if data['ttype'] == 'html5':
@@ -69,6 +81,8 @@ class HourlyEventStats(MRJob):
                         yield (('load', img, hour),  1)
             elif data['a'] == 'click':
                 yield(('click', data['img'], hour), 1)
+
+            yield ('latest', data['sts'])
         except ValueError as e:
             _log.error('JSON could not be parsed: %s' % line)
             self.increment_counter('HourlyEventStatsErrors',
@@ -80,7 +94,10 @@ class HourlyEventStats(MRJob):
                                    'JSONFieldMissing', 1)
 
     def reducer_count_events(self, event, counts):
-        yield (event, sum(counts))
+        if event == 'latest':
+            yield (event, max(counts))
+        else:
+            yield (event, sum(counts))
 
     def videodb_connect(self):
         # We're not talking to a true database at the moment
@@ -92,6 +109,10 @@ class HourlyEventStats(MRJob):
 
     def map_thumbnail_url2id(self, event, count):
         '''Maps from the external thumbnail url to our internal id.'''
+        if event == 'latest':
+            yield (event, count)
+            return
+        
         try:
             stream = urllib2.urlopen(self.options.videodb_url,
                                      urllib.urlencode({'url':event[1]}),
@@ -128,7 +149,16 @@ class HourlyEventStats(MRJob):
                                    'TIDParseError', 1)
 
     def merge_events(self, event, count):
+        if event == 'latest':
+            yield (event, count)
+            return
         yield ((event[1], event[2]), (count, event[0]))
+
+    def write_latest2db(self, time):
+        '''Writes the latest log time to the database.'''
+        self.statscursor.execute(
+            '''REPLACE INTO last_update (tablename, logtime) VALUES (?, ?)''',
+            (self.options.stats_table, datetime.utcfromtimestamp(time)))
 
     def reducer_write2db(self, img_hr, count_events):
         '''Writes the event counts to the database.
@@ -137,6 +167,9 @@ class HourlyEventStats(MRJob):
         img_hr - (img_id, hours since epoch)
         count_events - [(count, event name)]
         '''
+        if img_hr == 'latest':
+            return self.write_latest2db(count_events.next())
+        
         img_id, hours = img_hr
         counts = {}
         for count, event in count_events:
@@ -188,6 +221,9 @@ class HourlyEventStats(MRJob):
                                  clicks INT NOT NULL DEFAULT 0,
                                  UNIQUE (thumbnail_id, hour))''' %
                                  (self.options.stats_table,))
+        self.statscursor.execute('''CREATE TABLE IF NOT EXISTS last_update (
+                                 tablename VARCHAR(256) NOT NULL UNIQUE,
+                                 logtime DATETIME)''')
 
     def statsdb_disconnect(self):
         self.statscursor.close()
