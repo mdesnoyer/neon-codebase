@@ -70,6 +70,10 @@ def _send_directive(directive, destination):
     '''Blocking call to send the directive.
 
     This should not be called directly. Use the functionality in Manager.
+
+    The directive will be sent as a json of the form:
+
+    {'d': (video_id, [(thumb_id, fraction)])}
     
     Inputs:
     directive - (video_id, [(thumb_id, fraction)])
@@ -78,7 +82,7 @@ def _send_directive(directive, destination):
 
     '''
     try:
-        urllib2.urlopen(destination, json.dumps(directive))
+        urllib2.urlopen(destination, json.dumps({'d': directive}))
     except IOError as e:
         _log.exception('Error sending directive to %s: %s' % (destination, e))
 
