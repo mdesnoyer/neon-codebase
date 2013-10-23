@@ -340,7 +340,7 @@ class AbstractPlatform(object):
         #TODO : don't save all the class specific params ( keyname,callback,ttl )
         return json.dumps(self, default=lambda o: o.__dict__) #don't save keyname
 
-    # TODO(Sunil): Implement this function.
+    # TODO(Sunil): Implement this function. Maybe returns a generator?
     @staticmethod
     def get_all_instances(callback=None):
         '''Returns a list of all the platform instances.'''
