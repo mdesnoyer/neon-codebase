@@ -471,6 +471,9 @@ class BrightcovePlatform(AbstractPlatform):
             return
 
         tref,sref = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,platform_vid,t_url,new_tid)
+        if not sref:
+            _log.error("key=update_thumbnail msg=brightcove error update video still for video %s %s" %(i_vid,new_tid))
+
         if tref:
             #Get previous thumbnail and new thumb
             modified_thumbs = ThumbnailIDMapper.enable_thumbnail(thumb_mappings,new_tid)
@@ -526,6 +529,8 @@ class BrightcovePlatform(AbstractPlatform):
 
 
     '''
+    Check if the current thumbnail for the given video on brightcove
+    has been recorded in Neon DB
     '''
     def check_current_thumbnail_in_db(self,video_id,callback=None):
         bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
@@ -1030,8 +1035,8 @@ class ImageMD5Mapper(object):
     '''
     Maps a given Image MD5 to Thumbnail ID
     '''
-    def __init__(self,im_md5,tid):
-        self.key = self.format_key(im_md5)
+    def __init__(self,imgdata,tid):
+        self.key = self.format_key(imgdata)
         self.value = tid
 
     def get_md5(self):
@@ -1058,7 +1063,7 @@ class ImageMD5Mapper(object):
         if not db_connection:
             db_connection = DBConnection()
         
-        key = self.format_key(image_md5)
+        key = "ImageMD5Mapper".lower() + '_' + image_md5
         if callback:
             db_connection.conn.get(key,callback)
         else:

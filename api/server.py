@@ -40,6 +40,12 @@ from utils.options import define, options
 define("port", default=8081, help="run on the given port", type=int)
 MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
     
+logging.basicConfig(level=logging.DEBUG,
+        format='%(asctime)s %(levelname)s %(message)s',
+        datefmt='%m-%d %H:%M',
+        filename='neonserver.log',
+        filemode='a')
+
 _log = logging.getLogger(__name__)
 
 dir = os.path.dirname(__file__)

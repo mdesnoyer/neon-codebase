@@ -61,6 +61,11 @@ import gc
 import pprint
 
 import logging
+logging.basicConfig(level=logging.DEBUG,
+        format='%(asctime)s %(levelname)s %(message)s',
+        datefmt='%m-%d %H:%M',
+        filename='neonserver.log',
+        filemode='a')
 _log = logging.getLogger(__name__)
 
 from pympler import summary
