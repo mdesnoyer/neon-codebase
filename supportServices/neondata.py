@@ -342,7 +342,7 @@ class AbstractPlatform(object):
 
     # TODO(Sunil): Implement this function.
     @staticmethod
-    def get_all_platforms(callback=None):
+    def get_all_instances(callback=None):
         '''Returns a list of all the platform instances.'''
         raise NotImplementedError()
 
