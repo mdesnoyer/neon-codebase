@@ -107,18 +107,19 @@ class RedisClient(object):
     #static variables
     host = '127.0.0.1'
     port = 6379
-    client = redis.Client(host,port)
-    client.connect()
+    client = None
 
     #exceptions thrown on connect as well as get/save 
     #redis.exceptions.ConnectionError
 
     #pool = blockingRedis.ConnectionPool(host, port, db=0)
     #blocking_client = blockingRedis.StrictRedis(connection_pool=pool)
-    blocking_client = blockingRedis.StrictRedis(host,port)
+    blocking_client = None
 
     def __init__(self):
-        pass
+        client = redis.Client(host,port)
+        client.connect()
+        blocking_client = blockingRedis.StrictRedis(host,port)
     
     '''
     return connection objects (blocking and non blocking)
@@ -987,7 +988,7 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
 
     Used as a cache like store for the map reduce jobs
     '''
-    def __init__(self,tid,internal_vid,thumbnail_metadata):
+    def __init__(self, tid, internal_vid, thumbnail_metadata):
         super(ThumbnailIDMapper,self).__init__()
         self.key = tid 
         self.video_id = internal_vid #api_key + platform video id

@@ -63,6 +63,7 @@ class Manager:
             except KeyError:
                 _log.critical('No destination for distribution type: %s' %
                               distribution_type)
+                return
             
 
 def _send_directive(directive, destination):

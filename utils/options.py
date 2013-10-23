@@ -54,6 +54,11 @@ import yaml
 #TODO(mdesnoyer): Add groups so that the flags are sorted better in
 #the help message.
 
+#TODO(mdesnoyer): Add support for S3 config files
+
+#TODO(mdesnoyer): Add support for changing the options on the fly by
+#changing the config file.
+
 class Error(Exception):
     """Exception raised by errors in the options module."""
     pass
