@@ -116,7 +116,7 @@ class VideoDBWatcher(threading.Thread):
         self.is_loaded.wait()
 
     def _process_db_data(self):
-        for platform in neondata.get_all_external_platforms():
+        for platform in neondata.AbstractPlatform.get_all_platforms():
             for video_id in platform.videos.iterkeys():
                 video_metadata = neondata.VideoMetadata.get(
                     video_id)
