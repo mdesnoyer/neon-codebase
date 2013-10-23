@@ -20,7 +20,6 @@ if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
 import redis as blockingRedis
-#import brukva as redis
 import tornadoredis as redis
 import tornado.gen
 import hashlib
@@ -434,7 +433,7 @@ class BrightcovePlatform(AbstractPlatform):
     Called after getting the thumbnail url of the new thumbnail to be made 
     the default
     '''
-    def update_thumbnail(self,vid,t_url,tid,update_callback=None):
+    def update_thumbnail2(self,vid,t_url,tid,update_callback=None):
         bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
                 self.read_token,self.write_token,self.auto_update)
         ref_id = tid
@@ -442,6 +441,53 @@ class BrightcovePlatform(AbstractPlatform):
             return bc.async_enable_thumbnail_from_url(vid,t_url,update_callback,reference_id=ref_id)
         else:
             return bc.enable_thumbnail_from_url(vid,t_url)
+
+    ''' method to keep video metadata and thumbnail data consistent '''
+    @tornado.gen.engine
+    def update_thumbnail(self,platform_vid,new_tid,callback):
+        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
+                self.read_token,self.write_token,self.auto_update)
+        
+        #Get video metadata
+        i_vid = InternalVideoID.generate(self.neon_api_key,platform_vid)
+        vmdata = yield tornado.gen.Task(VideoMetadata.get,i_vid)
+        if not vmdata:
+            _log.error("key=update_thumbnail msg=vid %s not found" %i_vid)
+            callback(None)
+            return
+
+        tids = vmdata.thumbnail_ids
+        
+        #Get all thumbnails
+        thumb_mappings = yield tornado.gen.Task(ThumbnailIDMapper.get_ids,tids)
+        t_url = None
+        
+        for thumb_mapping in thumb_mappings:
+            if thumb_mapping.thumbnail_metadata["thumbnail_id"] == new_tid:
+                t_url = thumb_mapping.thumbnail_metadata["urls"][0]
+        
+        if not t_url:
+            _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
+            callback(None)
+            return
+
+        tref,sref = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,platform_vid,t_url,new_tid)
+        if tref:
+            #Get previous thumbnail and new thumb
+            modified_thumbs = ThumbnailIDMapper.enable_thumbnail(thumb_mappings,new_tid)
+            if modified_thumbs:
+                res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,modified_thumbs)  
+                if res:
+                    callback(True)
+                else:
+                    _log.error("key=update_thumbnail msg=ThumbnailIDMapper save_all failed for %s" %new_tid)
+                    callback(False)
+            else:
+                callback(False)
+        else:
+            _log.debug("key=update_thumbnail msg=update result thumb ref %s still ref %s for video %" %(tref,sref,i_vid))
+            _log.error("key=update_thumbnail msg=failed to enable thumb %s for %s" %(new_tid,i_vid))
+            callback(False)
 
     ''' 
     Create neon job for particular video
@@ -981,12 +1027,65 @@ class ThumbnailURLMapper(AbstractRedisUserBlob):
         else:
             return ThumbnailURLMapper.blocking_conn.get(key)
 
+class ImageMD5Mapper(object):
+    '''
+    Maps a given Image MD5 to Thumbnail ID
+    '''
+    def __init__(self,im_md5,tid):
+        self.key = self.format_key(im_md5)
+        self.value = tid
+
+    def get_md5(self):
+        return self.key.split('_')[-1]
+
+    def format_key(self,imdata):
+        if imdata:
+            md5 = ThumbnailID.generate(imdata)
+            return self.__class__.__name__.lower()  + '_' + md5
+        else:
+            raise
+
+    def save(self,db_connection=None,callback=None):
+        if not db_connection:
+            db_connection = DBConnection()
+        
+        if callback:
+            db_connection.conn.set(self.key,self.value,callback)
+        else:
+            db_connection.blocking_conn.set(self.key,self.value)
+
+    @staticmethod   
+    def get_tid(image_md5,db_connection=None,callback=None):
+        if not db_connection:
+            db_connection = DBConnection()
+        
+        key = self.format_key(image_md5)
+        if callback:
+            db_connection.conn.get(key,callback)
+        else:
+            return db_connection.blocking_conn.get(key)
+    
+    @staticmethod
+    def save_all(objs,db_connection=None,callback=None):
+        if not db_connection:
+            db_connection = DBConnection()
+        data = {}
+        for obj in objs:
+            data[obj.key] = obj.value
+
+        if callback:
+            db_connection.conn.mset(data,callback)
+        else:
+            return db_connection.blocking_conn.mset(data)
+
+
 class ThumbnailIDMapper(AbstractRedisUserBlob):
     '''
     Class schema for Thumbnail URL to thumbnail metadata map
     Thumbnail ID  => (Internal Video ID, ThumbnailMetadata) 
-
-    Used as a cache like store for the map reduce jobs
+    
+    Primary source for all the data associated with the thumbnail
+    contains the dictionary of thumbnail_metadata
     '''
     def __init__(self, tid, internal_vid, thumbnail_metadata):
         super(ThumbnailIDMapper,self).__init__()
@@ -1000,15 +1099,18 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
     def _hash(self,input):
         return hashlib.md5(input).hexdigest()
     
-    def get_metdata(self):
-        pass
+    def get_metadata(self):
+        return self.thumbnail_metadata
         #return only specific fields
+
+    def to_dict(self):
+        return self.__dict__
 
     @staticmethod
     def create(json_data):
         data_dict = json.loads(json_data)
         #create basic object
-        obj = ThumbnailIDMapper(None,None,None,None,None,None,None,None)
+        obj = ThumbnailIDMapper(None,None,None)
 
         #populate the object dictionary
         for key in data_dict.keys():
@@ -1018,14 +1120,14 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
 
     # TODO(sunil): Decide whether these functions 
     @staticmethod
-    def get_id(self, key, callback=None, db_connection=DBConnection()):
+    def get_id(key, db_connection=DBConnection(), callback=None):
         if callback:
             ThumbnailIDMapper.get(key, callback, db_connection)
         else:
             return db_connection.blocking_conn.get(key)
 
     @staticmethod
-    def get_ids(self, keys, callback=None, db_connection=DBConnection()):
+    def get_ids(keys,callback=None,db_connection=DBConnection()):
 
         def process(results):
             mappings = [] 
@@ -1035,7 +1137,7 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
             callback(mappings)
 
         if callback:
-            db_connection.conn.mget(keys,cb)
+            db_connection.conn.mget(keys,process)
         else:
             mappings = [] 
             items = db_connection.blocking_conn.mget(keys)
@@ -1055,6 +1157,38 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
             db_connection.conn.mset(data,callback)
         else:
             db_connection.blocking_conn.mset(data)
+
+    @staticmethod
+    def enable_thumbnail(mapper_objs,new_tid):
+        mod_objs = [] 
+        for mapper_obj in mapper_objs:
+            #set new tid as chosen
+            if mapper_obj.thumbnail_metadata["thumbnail_id"] == new_tid: 
+                mapper_obj.thumbnail_metadata["chosen"] = True
+                mod_objs.append(mapper_obj)
+            else:
+                #set chosen=False for old tid
+                if mapper_obj.thumbnail_metadata["chosen"] == True:
+                    mapper_obj.thumbnail_metadata["chosen"] = False 
+                    mod_objs.append(mapper_obj)
+
+        #return only the modified thumbnail objs
+        return mod_objs
+
+    @staticmethod
+    def save_integration(mapper_objs,db_connection=DBConnection(),callback=None):
+        if callback:
+            pipe = db_connection.conn.pipeline()
+        else:
+            pipe = db_connection.blocking_conn.pipeline() 
+
+        for mapper_obj in mapper_objs:
+            pipe.set(mapper_obj.key,mapper_obj.to_json())
+        
+        if callback:
+            pipe.execute(callback)
+        else:
+            return pipe.execute()
 
 class VideoMetadata(object):
     '''
@@ -1093,8 +1227,9 @@ class VideoMetadata(object):
 
     @staticmethod
     def get(internal_video_id, callback=None, db_connection=DBConnection()):
-        def create(data_dict):
-            obj = VideoMetadata(None,None,None,None,None,None,None)
+        def create(jdata):
+            data_dict = json.loads(jdata) 
+            obj = VideoMetadata(None,None,None,None,None,None,None,None)
             for key in data_dict.keys():
                 obj.__dict__[key] = data_dict[key]
             return obj
@@ -1115,10 +1250,11 @@ class VideoMetadata(object):
             return create(jdata)
 
     @staticmethod
-    def multi_get(internal_video_ids,callback=None, db_connection=DBConnection()): 
+    def multi_get(internal_video_ids,db_connection=DBConnection(),callback=None): 
         
-        def create(data_dict):
-            obj = VideoMetadata(None,None,None,None,None,None,None)
+        def create(jdata):
+            data_dict = json.loads(jdata)
+            obj = VideoMetadata(None,None,None,None,None,None,None,None)
             for key in data_dict.keys():
                 obj.__dict__[key] = data_dict[key]
             return obj

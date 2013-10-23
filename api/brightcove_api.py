@@ -31,6 +31,7 @@ import utils.logs
 import utils.neon
 _log = utils.logs.FileLogger("brighcove_api")
 
+## NOTE : All video ids used in the class refer to the Brightcove platform VIDEO ID
 class BrightcoveApi(object):
     def __init__(self,neon_api_key,publisher_id=0,read_token=None,write_token=None,autosync=False,publish_date=None,local=True):
         self.publisher_id = publisher_id
@@ -46,6 +47,9 @@ class BrightcoveApi(object):
             self.neon_uri = "http://localhost:8081/api/v1/submitvideo/"
         else:
             self.neon_uri = "http://thumbnails.neon-lab.com/api/v1/submitvideo/" 
+        
+        self.THUMB_SIZE = 120,90
+        self.STILL_SIZE = 480,360
 
     def format_get(self, url, data=None):
         if data is not None:
@@ -59,16 +63,30 @@ class BrightcoveApi(object):
 
     ###### Brightcove media api update method ##########
     
-    ''' add thumbnail and videostill in to brightcove account '''
+    ''' add thumbnail and videostill in to brightcove account
+        
+        used by neon client to update thumbnail, Image gets sent to the method call
+    '''
     def update_thumbnail_and_videostill(self,video_id,image,ref_id):
         
-        #If url is passed, then set thumbnail using the remote url
+        #If url is passed, then set thumbnail using the remote url (not used currently)
         if isinstance(image,basestring):
             rt = self.add_image(video_id,remote_url = image,atype='thumbnail')
             rv = self.add_image(video_id,remote_url = image,atype='videostill')
         else:
-            rt = self.add_image(video_id,image,atype='thumbnail',reference_id = ref_id)
-            rv = self.add_image(video_id,image,atype='videostill',reference_id = ref_id)
+            bcove_thumb = image.resize(self.THUMB_SIZE)
+            bcove_still = image.resize(self.STILL_SIZE)
+
+            t_md5 = supportServices.neondata.ImageMD5Mapper(bcove_thumb,ref_id)
+            s_md5 = supportServices.neondata.ImageMD5Mapper(bcove_still,ref_id)
+            md5_objs = []
+            md5_objs.append(t_md5); md5_objs.append(s_md5)
+            res = supportServices.neondata.ImageMD5Mapper.save_all(md5_objs)
+            if not res:
+                _log.error('key=update_thumbnail msg=failed to save supportServices.neondata.ImageMD5Mapper for %s' %video_id)
+            
+            rt = self.add_image(video_id,bcove_thumb,atype='thumbnail',reference_id = ref_id)
+            rv = self.add_image(video_id,bcove_still,atype='videostill',reference_id = 'still-' + ref_id)
         
         tref_id = None ; vref_id = None
         #Get thumbnail name, referenceId params
@@ -83,6 +101,7 @@ class BrightcoveApi(object):
 
     '''
     Update the thumbnail for a given video given the ReferenceID an existing image asset 
+    
     '''
 
     def update_image_with_refid(self,video_id,refid,videostill=False):
@@ -219,6 +238,18 @@ class BrightcoveApi(object):
         except Exception,e:
             _log.exception("Image format error %s" %e )
 
+        thumbnail_id = kwargs.get('reference_id', None)
+        bcove_thumb = image.resize(self.THUMB_SIZE)
+        bcove_still = image.resize(self.STILL_SIZE)
+
+        t_md5 = supportServices.neondata.ImageMD5Mapper(bcove_thumb,thumbnail_id)
+        s_md5 = supportServices.neondata.ImageMD5Mapper(bcove_still,thumbnail_id)
+        md5_objs = []
+        md5_objs.append(t_md5); md5_objs.append(s_md5)
+        res = supportServices.neondata.ImageMD5Mapper.save_all(md5_objs)
+        if not res:
+            _log.error('key=update_thumbnail msg=failed to save supportServices.neondata.ImageMD5Mapper for %s' %video_id)
+
         reference_id = kwargs.get('reference_id', None)
         rt = self.add_image(video_id,image,atype='thumbnail',reference_id = reference_id)
         rv = self.add_image(video_id,image,atype='videostill',reference_id = reference_id if not reference_id else "still-" + reference_id)
@@ -238,45 +269,71 @@ class BrightcoveApi(object):
     Enable thumbnail async
     '''
 
-    def async_enable_thumbnail_from_url(self,video_id,img_url,callback):
+    def async_enable_thumbnail_from_url(self,video_id,img_url,thumbnail_id,callback=None):
         self.img_result = []  
-        reference_id = kwargs.get('reference_id', None)
+        #reference_id = kwargs.get('reference_id', None)
+        reference_id = thumbnail_id
         
         def add_image_callback(result):
             if not result.error and len(result.body) > 0:
                 self.img_result.append(tornado.escape.json_decode(result.body))
             else:
-                self.img_result.append({})
+                self.img_result.append(None)
 
             if len(self.img_result) == 2:
-                callback_value = False
+                thumb = False
+                still = False
                 try:
-                    if not self.img_result[0]["error"] and not self.img_result[1]["error"]:
-                        callback_value = True
-                        callback_value = (self.img_result[0]["result"]["referenceId"],self.img_result[1]["result"]["referenceId"]) 
+                    for res in self.img_result:
+                        if res and not res["error"]:
+                            if res["result"]["type"] == 'THUMBNAIL':
+                                thumb = res["result"]["referenceId"]
+                            elif res["result"]["type"] == 'VIDEO_STILL':
+                                still = res["result"]["referenceId"]
+                        else:
+                            _log.error("key=async_update_thumbnail msg=brightcove api error for %s %s" %(video_id,res["error"]))
                 except:
                     pass
 
+                callback_value = thumb,still 
                 callback(callback_value)
 
+        @tornado.gen.engine
         def image_data_callback(image_response):
             if not image_response.error:
                 imfile = StringIO(image_response.body)
                 image =  Image.open(imfile)
                 srefid = reference_id if not reference_id else "still-" + reference_id
-                self.add_image(video_id,image,atype='thumbnail', reference_id = reference_id, async_callback = add_image_callback)
-                self.add_image(video_id,image,atype='videostill',reference_id = srefid, async_callback = add_image_callback)
+                bcove_thumb = image.resize(self.THUMB_SIZE)
+                bcove_still = image.resize(self.STILL_SIZE)
+                
+                t_md5 = supportServices.neondata.ImageMD5Mapper(bcove_thumb,thumbnail_id)
+                s_md5 = supportServices.neondata.ImageMD5Mapper(bcove_still,thumbnail_id)
+                md5_objs = []
+                md5_objs.append(t_md5); md5_objs.append(s_md5)
+                res = yield tornado.gen.Task(supportServices.neondata.ImageMD5Mapper.save_all,md5_objs)
+                if not res:
+                    _log.error('key=async_update_thumbnail msg=failed to save supportServices.neondata.ImageMD5Mapper for %s' %thumbnail_id)
+                
+                #TODO : use generator task
+                self.add_image(video_id,bcove_thumb,atype='thumbnail', 
+                        reference_id = reference_id, async_callback = add_image_callback)
+                self.add_image(video_id,bcove_still,atype='videostill',
+                        reference_id = srefid, async_callback = add_image_callback)
+
             else:
-                callback(False)
+                callback((False,False))
 
         http_client = tornado.httpclient.AsyncHTTPClient()
-        req = tornado.httpclient.HTTPRequest(url = url,
+        req = tornado.httpclient.HTTPRequest(url = img_url,
                                                 method = "GET",
                                                 request_timeout = 60.0,
                                                 connect_timeout = 10.0)
         http_client.fetch(req,image_data_callback)
 
 
+    ##################################################################################
+    # Feed Processors
     ##################################################################################
 
     def get_publisher_feed(self,command='find_all_videos',output='json',page_no=0,page_size=100,async_callback=None):
