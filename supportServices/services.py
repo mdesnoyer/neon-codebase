@@ -619,52 +619,6 @@ class AccountHandler(tornado.web.RequestHandler):
         BrightcovePlatform.get_account(self.api_key,i_id,get_account_callback)
         
 
-    ''' Update the thumbnail for a particular video '''
-    def update_video_brightcove2(self,i_id,vid):
-       
-        #TODO : Check for the linked youtube account 
-        def update_thumbnail(t_result):
-            if t_result:
-                #self.vid_request.save()
-                #self.bc.update_cache(self.vid_request)
-                #If youtube enabled, upload to youtube too
-
-                #Update the new thumbnail with the refID
-                
-                data = '{"error" :""}'
-                self.send_json_response(data,200)
-            else:
-                data = '{"error": "thumbnail not updated"}'
-                self.send_json_response(data,500)
-
-        def get_request(r_result):
-            if r_result:
-                self.vid_request = BrightcoveApiRequest.create(r_result) 
-                thumbnail_url = self.vid_request.choose_thumbnail(tid)
-                self.bc.update_thumbnail(vid,thumbnail_url,tid,update_thumbnail)
-            else:
-                data = '{"error": "thumbnail not updated"}'
-                self.send_json_response(data,500)
-
-        def get_account_callback(result):
-            if result:
-                self.bc = BrightcovePlatform.create(result)
-                job_id = self.bc.videos[vid] 
-                bc_request = BrightcoveApiRequest.get_request(self.api_key,job_id,get_request) 
-            else:
-                data = '{"error": "no such account"}'
-                self.send_json_response(data,500)
-
-        try:
-            thumbnail_id = self.get_argument('thumbnail_id')
-        except Exception,e:
-            _log.error('type=update brightcove thumbnail' + e.message)
-            self.set_status(400)
-            self.finish()
-            return
-        
-        BrightcovePlatform.get_account(self.api_key,i_id,get_account_callback)
-   
     ''' update thumbnail for a brightcove video '''
     @tornado.gen.engine
     def update_video_brightcove(self,i_id,p_vid):
@@ -731,76 +685,8 @@ class AccountHandler(tornado.web.RequestHandler):
     ''' Create Brightcove Account for the Neon user
     Add the integration in to the neon user account
     Extract params from post request --> create acccount in DB --> verify tokens in brightcove -->
-    send top 5 videos or appropriate error to client
+    send top 5 videos requests or appropriate error to client
     '''
-    
-    def create_brightcove_integration2(self):
-
-        rcount = 5
-        def verify_brightcove_tokens(result):
-            if "error" not in result.body:
-                vitems = tornado.escape.json_decode(result.body)
-                items = vitems['items']
-                videos = [] 
-                for item in items:
-                    video = {}
-                    video['video_id'] = str(item['id'])
-                    video['title'] = item['name']
-                    video['duration'] =  item['videoFullLength']['videoDuration']
-                    pdate = int(item['publishedDate'])
-                    video['publish_date'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(pdate/1000))
-                    video['thumbnail_url'] = item['videoStillURL']
-                   
-                    if video['duration'] < 0: ## skip live stream video
-                        continue
-
-                    if len(videos) > rcount:
-                        break
-
-                    videos.append(video)
-                data = tornado.escape.json_encode(videos)
-                self.send_json_response(data,201)
-            else:
-                data = result.body
-                self.send_json_response(data,400)
-
-        def saved_account(result):
-            if result:
-                #create bcove api request
-                bapi = brightcove_api.BrightcoveApi(self.api_key,p_id,rtoken,wtoken)
-                bapi.async_get_n_videos(10,verify_brightcove_tokens) 
-            else:
-                data = '{"error": "integration was not added, account creation issue"}'
-                self.send_json_response(data,500)
-            return
-
-        def create_account(result):
-            if result:
-                na = NeonUserAccount.create(result)
-                if len(na.integrations) >0 and na.integrations.has_key(i_id):
-                    data = '{"error": "integration already exists"}'
-                    self.send_json_response(data,409)
-                else:
-                    curtime = time.time() #account creation time
-                    bc = BrightcovePlatform(a_id,i_id,p_id,rtoken,wtoken,autosync,curtime)
-                    na.add_integration(bc.integration_id,bc.key)
-                    na.save_integration(bc,saved_account)
-            else:
-                self.send_json_response('{"error":"account id error or internal error"}',400)
-
-        try:
-            a_id = self.request.uri.split('/')[-2]
-            i_id = self.get_argument("integration_id")
-            p_id = self.get_argument("publisher_id")
-            rtoken = self.get_argument("read_token")
-            wtoken = self.get_argument("write_token")
-            autosync = self.get_argument("auto_update")
-            NeonUserAccount.get_account(self.api_key,create_account)
-
-        except Exception,e:
-            _log.error("key=create brightcove account msg= %" %e)
-            data = '{"error": "API Params missing" }'
-            self.send_json_response(data,400)
        
     @tornado.gen.engine
     def create_brightcove_integration(self):
@@ -1278,9 +1164,9 @@ class BcoveHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous
     @tornado.gen.engine
     def post(self, *args, **kwargs):
-        self.video_id = self.request.uri.split('/')[-1]
+        self.internal_video_id = self.request.uri.split('/')[-1]
         method = self.request.uri.split('/')[-2]
-        self.a_id = self.request.uri.split('/')[-3]
+        self.a_id = self.request.uri.split('/')[-3] #internal a_id (api_key)
        
         if "update" in method:
             #update thumbnail  (vid, new tid)
@@ -1289,18 +1175,58 @@ class BcoveHandler(tornado.web.RequestHandler):
             #Check thumbnail on bcove
             self.check_thumbnail()
 
+    @tornado.gen.engine
     def update_thumbnail(self):
-        new_tid = self.get_argument('tid')
-        vmdata = yield tornado.gen.Task(VideoMetadata.get,self.video_id)
-        ba = yield tornado.gen.Task(BrightcovePlatform.get_account,self.a_id,vmdata.integration_id)
-        bcove_video_id = InternalVideoID.to_external(self.video_id) 
-        res = yield tornado.gen.Task(ba.update_thumbnail,bcove_video_id,new_tid)
+        try:
+            new_tid = self.get_argument('thumbnail_id')
+        except:
+            self.set_status(400)
+            self.finish()
+            return
 
+        vmdata = yield tornado.gen.Task(VideoMetadata.get,self.internal_video_id)
+        if vmdata:
+            i_id = vmdata.integration_id
+            jdata = yield tornado.gen.Task(BrightcovePlatform.get_account,self.a_id,i_id)
+            ba = BrightcovePlatform.create(jdata)
+            if ba:
+                bcove_vid = InternalVideoID.to_external(self.internal_video_id) 
+                result = yield tornado.gen.Task(ba.update_thumbnail,bcove_vid,new_tid)
+                if result:
+                    self.set_status(200)
+                else:
+                    _log.error('key=bcove_handler msg=failed to update thumbnail for %s %s'%(self.internal_video_id,new_tid))
+                    self.set_status(502)
+            else:
+                _log.error('key=bcove_handler msg=failed to fetch BrightcovePlatform %s i_id %s'%(self.a_id,i_id))
+                self.set_status(502)
+        else:
+            _log.error('key=bcove_handler msg=failed to fetch video metadata for %s %s'%(self.internal_video_id,new_tid))
+            self.set_status(502)
+        self.finish()
+    
+    @tornado.gen.engine   
     def check_thumbnail(self):
-        vmdata = yield tornado.gen.Task(VideoMetadata.get,self.video_id)
-        ba = yield tornado.gen.Task(BrightcovePlatform.get_account,self.a_id,vmdata.integration_id)
-        bcove_video_id = InternalVideoID.to_external(self.video_id) 
-        res = yield tornado.gen.Task(ba.check_current_thumbnail_in_db,bcove_video_id)
+        vmdata = yield tornado.gen.Task(VideoMetadata.get,self.internal_video_id)
+        if vmdata:
+            i_id = vmdata.integration_id
+            jdata = yield tornado.gen.Task(BrightcovePlatform.get_account,self.a_id,i_id)
+            ba = BrightcovePlatform.create(jdata)
+            if ba:
+                bcove_vid = InternalVideoID.to_external(self.internal_video_id) 
+                result = yield tornado.gen.Task(ba.check_current_thumbnail_in_db,bcove_vid)
+                if result:
+                    self.set_status(200)
+                else:
+                    _log.error('key=bcove_handler msg=failed to check thumbnail for %s'%self.internal_video_id)
+                    self.set_status(502)
+            else:
+                _log.error('key=bcove_handler msg=failed to fetch BrightcovePlatform %s i_id %s'%(self.a_id,i_id))
+        else:
+            _log.error('key=bcove_handler msg=failed to fetch video metadata for %s'%self.internal_video_id)
+            self.set_status(502)
+
+        self.finish()
 
 ################################################################
 ### MAIN
