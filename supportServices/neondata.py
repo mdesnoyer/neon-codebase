@@ -68,36 +68,6 @@ class DBConnection(object):
             keys = self.blocking_conn.keys(key_prefix)
             return keys
 
-    def get_all_brightcove_platforms(self,callback=None):
-        bc_prefix = 'brightcoveaccount_*'
-        accounts = self.fetch_keys_from_db(bc_prefix)
-        data = [] 
-        for accnt in acccounts:
-            jdata = blocking_conn.get(accnt)
-            ba = BrightcovePlatform.create(jdata)
-            data.append(ba)
-        return data
-    
-    def get_all_youtube_platforms(self,callback=None):
-        yt_prefix = 'youtubeaccount_*'
-        accounts = self.fetch_keys_from_db(yt_prefix)
-        data = [] 
-        for accnt in acccounts:
-            jdata = blocking_conn.get(accnt)
-            yt = YoutubePlatform.create(jdata)
-            data.append(yt)
-        return data
-
-    def get_all_external_platforms(self,callback=None):
-        data = []
-        bas = self.get_all_brightcove_accounts()
-        if bas:
-            data.extend(bas)
-        yts = self.get_all_youtube_accounts()
-        if yts:
-            data.extend(yts)
-
-        return data
 
 '''
 Static class for REDIS configuration
@@ -106,18 +76,19 @@ class RedisClient(object):
     #static variables
     host = '127.0.0.1'
     port = 6379
-    client = redis.Client(host,port)
-    client.connect()
+    client = None
 
     #exceptions thrown on connect as well as get/save 
     #redis.exceptions.ConnectionError
 
     #pool = blockingRedis.ConnectionPool(host, port, db=0)
     #blocking_client = blockingRedis.StrictRedis(connection_pool=pool)
-    blocking_client = blockingRedis.StrictRedis(host,port)
+    blocking_client = None
 
     def __init__(self):
-        pass
+        client = redis.Client(host,port)
+        client.connect()
+        blocking_client = blockingRedis.StrictRedis(host,port)
     
     '''
     return connection objects (blocking and non blocking)
@@ -368,6 +339,12 @@ class AbstractPlatform(object):
     def to_json(self):
         #TODO : don't save all the class specific params ( keyname,callback,ttl )
         return json.dumps(self, default=lambda o: o.__dict__) #don't save keyname
+
+    # TODO(Sunil): Implement this function. Maybe returns a generator?
+    @staticmethod
+    def get_all_instances(callback=None):
+        '''Returns a list of all the platform instances.'''
+        raise NotImplementedError()
 
 ''' Brightcove Account '''
 class BrightcovePlatform(AbstractPlatform):
@@ -1091,7 +1068,7 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
     Primary source for all the data associated with the thumbnail
     contains the dictionary of thumbnail_metadata
     '''
-    def __init__(self,tid,internal_vid,thumbnail_metadata):
+    def __init__(self, tid, internal_vid, thumbnail_metadata):
         super(ThumbnailIDMapper,self).__init__()
         self.key = tid 
         self.video_id = internal_vid #api_key + platform video id
