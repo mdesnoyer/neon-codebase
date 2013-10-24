@@ -22,6 +22,13 @@ line options take precendence over the config file. e.g.
 
   ./my_executable --config /path/to/config/file
 
+Paths can either be a local path, or to S3 in the form:
+
+   s3://bucket/path/to/file
+
+If you are using s3, the AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+environment variables must be set.
+
 All of the options are namespaced by module name. So, if the above was
 in the module mastermind.core, the option at the command line would
 be:
@@ -43,9 +50,12 @@ Copyright 2013 Neon Labs
 Modelled after the tornado options module with a few differences.
 
 '''
+import boto
 import inspect
+import logging
 import optparse
 import os.path
+import re
 import sys
 import yaml
 
@@ -54,10 +64,10 @@ import yaml
 #TODO(mdesnoyer): Add groups so that the flags are sorted better in
 #the help message.
 
-#TODO(mdesnoyer): Add support for S3 config files
-
 #TODO(mdesnoyer): Add support for changing the options on the fly by
 #changing the config file.
+
+_log = logging.getLogger(__name__)
 
 class Error(Exception):
     """Exception raised by errors in the options module."""
@@ -156,19 +166,50 @@ class OptionParser(object):
                 self._options[name].set(value)
 
         # Now, parse the configuration file if it exists
-        #TODO(mdesnoyer): Enable reading from an s3 source
-        yaml_parse = None
-        if config_stream is not None:
-            yaml_parse = yaml.load(config_stream)
-
-        elif cmd_options.config is not None:
-            with open(cmd_options.config) as f:
-                yaml_parse = yaml.load(f)
+        yaml_parse = self._parse_config_file(config_stream, cmd_options.config)
 
         if yaml_parse is not None:
             self._parse_dict(yaml_parse, '')
 
         return self, args
+
+    def _parse_config_file(self, stream=None, path=None):
+        '''Parses the yaml config file.
+
+        Inputs:
+        stream - Stream with the yaml data
+        path - If there is no stream, try to find the config file at this path
+
+        Outputs:
+        A dictionary of the yaml parsing or None if there was no data
+        '''
+        if stream is not None:
+            return yaml.load(stream)
+
+        s3re = re.compile('s3://([0-9a-zA-Z\.\-]+)/([0-9a-zA-Z\.\-/]+)')
+
+        if path is not None:
+            s3match = s3re.match(path)
+            if s3match:
+                # Handle reading from S3
+                bucket_name, key_name = s3match.groups()
+                _log.info('Reading config file from S3 bucket: %s key: %s' %
+                          (bucket_name, key_name))
+                s3conn = boto.connect_s3()
+                bucket = s3conn.get_bucket(bucket_name)
+                key = bucket.get_key(key_name)
+                if key is None:
+                    raise KeyError('Could not find key %s in S3 bucket %s' %
+                                   (key_name, bucket_name))
+                with key.open() as f:
+                    return yaml.load(f)
+
+            # Try opening the config file locally
+            _log.info('Reading local config file %s' % path)
+            with open(path) as f:
+                return yaml.load(f)
+
+        return None
 
     def _parse_dict(self, d, prefix):
         '''Parses a nested dictionary and stores the variables values.'''
@@ -188,8 +229,8 @@ class OptionParser(object):
             except KeyError:
                 raise AttributeError('Unknown option %s' % name)
             except ValueError:
-                raise TypeError('For option %s could not convert %s to %s' %
-                                (name, value, option.type.__name_))
+                raise TypeError('For option %s could not convert "%s" to %s' %
+                                (name, value, option.type.__name__))
 
     def _local2global(self, option, stack_depth=2):
         '''Converts the local name of the option to a global one.
