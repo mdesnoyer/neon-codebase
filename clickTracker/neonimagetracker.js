@@ -1,74 +1,89 @@
-// jquery load check version
-function trackerinit() {
-	var NeonTrackerURL = "http://tracker.neon-lab.com";
-	var NeonTrackerType = "imagetracker";
-	// This section of the code attributed to
-	// Author: Jason Levitt
-	// Date: December 7th, 2005
-	// Constructor -- pass a REST request URL to the constructor
+//var neonTrackerTestMode =1
+var NeonTrackerType = "imagetracker";
+var NeonDataSender = (function() {
+
 	function JSONscriptRequest(fullUrl) {
-    this.fullUrl = fullUrl; 
-    this.noCacheIE = '&noCacheIE=' + (new Date()).getTime();
-    this.headLoc = document.getElementsByTagName("head").item(0);
-    this.scriptId = 'JscriptId' + JSONscriptRequest.scriptCounter++;
+		this.fullUrl = fullUrl; 
+		this.noCacheIE = '&noCacheIE=' + (new Date()).getTime();
+		this.headLoc = document.getElementsByTagName("head").item(0);
+		this.scriptId = 'JscriptId' + JSONscriptRequest.scriptCounter++;
 	}
+
 	JSONscriptRequest.scriptCounter = 1;
 	JSONscriptRequest.prototype.buildScriptTag = function () {
-    this.scriptObj = document.createElement("script");
-    this.scriptObj.setAttribute("type", "text/javascript");
-    this.scriptObj.setAttribute("charset", "utf-8");
-    this.scriptObj.setAttribute("src", this.fullUrl + this.noCacheIE);
-    this.scriptObj.setAttribute("id", this.scriptId);
-	}
+		this.scriptObj = document.createElement("script");
+		this.scriptObj.setAttribute("type", "text/javascript");
+		this.scriptObj.setAttribute("charset", "utf-8");
+		this.scriptObj.setAttribute("src", this.fullUrl + this.noCacheIE);
+		this.scriptObj.setAttribute("id", this.scriptId);
+	};
+	
 	JSONscriptRequest.prototype.removeScriptTag = function () {
-	  this.headLoc.removeChild(this.scriptObj);  
-	}
+		this.headLoc.removeChild(this.scriptObj);  
+	};
+	
 	JSONscriptRequest.prototype.addScriptTag = function () {
-	  this.headLoc.appendChild(this.scriptObj);
+		this.headLoc.appendChild(this.scriptObj);
 	}
-	// end of section ///
 
-	/// Neon Tracker /// 
-	function genRandomHexChars() {
-	 	return Math.floor((1 + Math.random()) * 0x10000)
-    	.toString(16)
-      .substring(1);
-	}
-	function guid() {
-		return genRandomHexChars() + genRandomHexChars() + genRandomHexChars() + genRandomHexChars(); 
-	}
-	function sendRequest(url, params){
-		var pageURL = (document.URL).split('?')[0]; // Ignore any get params	
-		var ts = new Date().getTime(); 
-		var req = url + "?" + params + "&ts=" + ts + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + NeonTrackerType;
-		try { bObj = new JSONscriptRequest(req); bObj.buildScriptTag(); bObj.addScriptTag();  } catch(err) {}	
-	}
-	$(document).ready(function () {
-		var reqGuid = guid();
-		$(window).load(function(){
-			var action = "load";
-			var imgTags = document.getElementsByTagName("img");
-			if (!imgTags) {
-				imgTags = $(this).attr("img"); //use jquery
+	return{ 
+		sendRequest: function(url, params){
+			var pageURL = (document.URL).split('?')[0]; // Ignore any get params	
+			var ts = new Date().getTime(); 
+			var req = url + "?" + params + "&ts=" + ts + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + NeonTrackerType;
+			if ( typeof neonTrackerTestMode != 'undefined'){ 
+				req = "http://localhost:8888/test" + "?" + params + "&ts=" + ts + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + NeonTrackerType;
+				req = req+"&callback=NeonImageTracker.testJsonCallback";}
+			console.log("Send request to Neon " + req );
+			try { bObj = new JSONscriptRequest(req); bObj.buildScriptTag(); bObj.addScriptTag();  } catch(err) {}	
+		},
+
+		_NeonPageRequestUUID: function(){
+			function genRandomHexChars() {
+				return Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1); 
 			}
-			var imgs = new Array();
-			for (var i = 0; i < imgTags.length; i++) {
+			return genRandomHexChars() + genRandomHexChars() + genRandomHexChars() + genRandomHexChars();
+		}
+	}
+}());
+
+var reqGuid = NeonDataSender._NeonPageRequestUUID();
+var NeonImageTracker = ( function ()  {
+    var NeonTrackerURL = "http://localhost:8888/track";
+	
+	return {
+		testJsonCallback: function (jsonData){
+			action = jsonData["a"];
+			alert( "Image " + action + " works");
+		},
+
+	trackerInit: function () {
+		$(document).ready(function () {
+			$(window).ready(function(){
+				var action = "load";
+				var imgTags = document.getElementsByTagName("img");
+				if (!imgTags) {
+					imgTags = $(this).attr("img"); //use jquery
+				}
+				var imgs = new Array();
+				for (var i = 0; i < imgTags.length; i++) {
 					imgs.push(imgTags[i].src);
-			}	
-			params = "a=" + action + "&id="+ reqGuid + "&imgs=" + imgs;
-			sendRequest(NeonTrackerURL,params);
+				}	
+				params = "a=" + action + "&id="+ reqGuid + "&imgs=" + imgs;
+				NeonDataSender.sendRequest(NeonTrackerURL,params);
 		});
-    $("img").mousedown(function(e) {
-	    var action = "click";	
+    	$("img").mousedown(function(e) {
+	    	var action = "click";	
 			var imgSrc = $(this).attr('src');
 			var coordinates = e.pageX  + "," + e.pageY;
 			params = "a=" + action + "&id="+ reqGuid + "&img=" + encodeURIComponent(imgSrc) + "&xy=" + coordinates; 
-			sendRequest(NeonTrackerURL,params);
-	  }); 
+			NeonDataSender.sendRequest(NeonTrackerURL,params);
+	  	}); 
 	});
+	}
+   
 }
-
-
+}());
 
 // Only do anything if jQuery isn't defined
 if (typeof jQuery == 'undefined') {
@@ -104,16 +119,11 @@ if (typeof jQuery == 'undefined') {
 		} else {
 				// check if other conflicting library is present
 				// try { $.noConflict(true); } catch(err) {} 
-			if (thisPageUsingOtherJSLibrary) {
-				// Run your jQuery Code
-				trackerinit();
-			} else {
-				trackerinit();
-			}
+				NeonImageTracker.trackerInit();
 		}
 	});
 	
 } else { 
 	// jQuery was already loaded
-	trackerinit();
+	NeonImageTracker.trackerInit();
 };
