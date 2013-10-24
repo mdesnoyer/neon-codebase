@@ -11,10 +11,12 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
                                          '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
-from mastermind.core import *
+import mastermind.core
+from mastermind.core import Mastermind, ThumbnailInfo, VideoInfo
 
 import fake_filesystem
 import fake_tempfile
+from mock import patch
 import unittest
 
 def build_thumb(id=None, origin=None, rank=None, enabled=True, chosen=False,
@@ -185,10 +187,12 @@ class TestStatUpdating(unittest.TestCase):
         self.mastermind = Mastermind()
 
         # Create a fake filesystem because the deltas will get logged to disk
-        self.real_tempfile = sys.modules['tempfile']
         self.filesystem = fake_filesystem.FakeFilesystem()
-        sys.modules['tempfile'] = fake_tempfile.FakeTempfileModule(
-            self.filesystem)
+        tempfile_patcher = patch(
+            'mastermind.core.tempfile',
+            return_value=fake_tempfile.FakeTempfileModule(self.filesystem))
+        tempfile_patcher.start()
+        self.addCleanup(tempfile_patcher.stop)
 
         # Initialize mastermind with some videos
         self.mastermind.update_video_info('vidA', True, [
@@ -201,7 +205,7 @@ class TestStatUpdating(unittest.TestCase):
             build_thumb(id='bz', origin='bc')])
 
     def tearDown(self):
-        sys.modules['tempfile'] = self.real_tempfile
+        pass
 
     def test_initial_stats_update(self):
         result = dict(self.mastermind.update_stats_info(100, [
@@ -258,10 +262,12 @@ class TestVideoInfoUpdate(unittest.TestCase):
         self.mastermind = Mastermind()
 
         # Create a fake filesystem because the deltas will get logged to disk
-        self.real_tempfile = sys.modules['tempfile']
         self.filesystem = fake_filesystem.FakeFilesystem()
-        sys.modules['tempfile'] = fake_tempfile.FakeTempfileModule(
-            self.filesystem)
+        tempfile_patcher = patch(
+            'mastermind.core.tempfile',
+            return_value=fake_tempfile.FakeTempfileModule(self.filesystem))
+        tempfile_patcher.start()
+        self.addCleanup(tempfile_patcher.stop)
 
         # Insert a single video by default
         self.mastermind.update_video_info(
@@ -271,7 +277,7 @@ class TestVideoInfoUpdate(unittest.TestCase):
                 build_thumb(id='az', origin='bc')])
 
     def tearDown(self):
-        sys.modules['tempfile'] = self.real_tempfile
+        pass
 
     def test_add_first_video_info(self):
         result = self.mastermind.update_video_info(

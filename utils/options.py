@@ -29,6 +29,10 @@ Paths can either be a local path, or to S3 in the form:
 If you are using s3, the AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
 environment variables must be set.
 
+If you are using a config file, it will automatically be polled for
+changes. So, to push new parameter values, you just need to update the
+file that is specified by the --config variable
+
 All of the options are namespaced by module name. So, if the above was
 in the module mastermind.core, the option at the command line would
 be:
@@ -51,21 +55,20 @@ Modelled after the tornado options module with a few differences.
 
 '''
 import boto
+import boto.utils
 import inspect
 import logging
 import optparse
 import os.path
 import re
 import sys
+import threading
 import yaml
 
 #TODO(mdesnoyer): Add support for booleans
 
 #TODO(mdesnoyer): Add groups so that the flags are sorted better in
 #the help message.
-
-#TODO(mdesnoyer): Add support for changing the options on the fly by
-#changing the config file.
 
 _log = logging.getLogger(__name__)
 
@@ -77,6 +80,9 @@ class OptionParser(object):
     '''A collection of options.'''
     def __init__(self):
         self.__dict__['_options'] = {}
+        self.__dict__['lock'] = threading.RLock()
+        self.__dict__['cmd_options'] = None
+        self.__dict__['last_update'] = None
 
         # Find the root directory of the source tree
         cur_dir = os.path.abspath(os.path.dirname(__file__))
@@ -90,17 +96,20 @@ class OptionParser(object):
             raise Error('Could not find the NEON_ROOT file in the source tree.')
 
     def __getattr__(self, name):
-        global_name = self._local2global(name)
-        if isinstance(self._options.get(global_name), _Option):
-            return self._options[global_name].value()
-        raise AttributeError("Unrecognized option %r" % global_name)
+        with self.__dict__['lock']:
+            global_name = self._local2global(name)
+            if isinstance(self._options.get(global_name), _Option):
+                return self._options[global_name].value()
+            raise AttributeError("Unrecognized option %r" % global_name)
 
     def __setattr__(self, name, value):
-        raise NotImplementedError('Sorry you cannot set parameters at runtime.''')
+        raise NotImplementedError(
+            'Sorry, you cannot set parameters at runtime.')
 
     def __getitem__(self, name):
-        global_name = self._local2global(name)
-        return self._options[global_name].value()
+        with self.__dict__['lock']:
+            global_name = self._local2global(name)
+            return self._options[global_name].value()
 
     def define(self, name, default=None, type=None, help=None, stack_depth=2):
         '''Defines a new option.
@@ -133,7 +142,7 @@ class OptionParser(object):
                                              type=type, help=help)
 
     def parse_options(self, args=None, config_stream=None,
-                   usage='%prog [options]'):
+                      usage='%prog [options]'):
         '''Parse the options.
 
         Inputs:
@@ -141,10 +150,27 @@ class OptionParser(object):
         config_stream - Specify a yaml stream to get arguments from. 
                         Otherwise looks for the --config flag in the arguments.
         usage - To display the usage.
-        '''        
+        '''
+        with self.__dict__['lock']:
+            cmd_options, args = self._parse_command_line(args, usage)
+
+            self._register_command_line_options()
+
+            # Now, process the configuration file if it exists
+            self._process_new_config_file(config_stream,
+                                          self.cmd_options.config)
+
+            # Start the polling thread if there is a config file to read
+            if self.cmd_options.config is not None:
+                ConfigPoller(self).start()
+
+        return self, args
+
+    def _parse_command_line(self, args=None, usage='%prog [options]'):
+        '''Parse the command line.'''
         if args is None:
             args = sys.argv[1:]
-        
+
         # First parse the command line
         cmd_parser = optparse.OptionParser(usage=usage)
 
@@ -157,34 +183,47 @@ class OptionParser(object):
                                   type=option.type.__name__,
                                   help=option.help)
 
-        cmd_options, args = cmd_parser.parse_args(args)
+        self.__dict__['cmd_options'], args = cmd_parser.parse_args(args)
 
-        for name, value in cmd_options.__dict__.iteritems():
+        return self.cmd_options, args
+
+    def _process_new_config_file(self, stream=None, path=None):
+        '''Deals with a config file if present and new.'''
+        yaml_parse = self._parse_config_file(stream,
+                                             self.cmd_options.config)
+
+        if yaml_parse is not None:
+            with self.__dict__['lock']:
+                self._reset_options()
+                self._register_command_line_options()
+                self._parse_dict(yaml_parse, '')
+
+    def _reset_options(self):
+        '''Resets all the options with their default values.'''
+        for name, obj in self._options.iteritems():
+            obj.reset()
+
+    def _register_command_line_options(self):
+        '''Takes the options in self.cmd_options and registers them.'''
+        for name, value in self.cmd_options.__dict__.iteritems():
             if name == 'config':
                 continue
             if value is not None:
                 self._options[name].set(value)
 
-        # Now, parse the configuration file if it exists
-        yaml_parse = self._parse_config_file(config_stream, cmd_options.config)
-
-        if yaml_parse is not None:
-            self._parse_dict(yaml_parse, '')
-
-        return self, args
 
     def _parse_config_file(self, stream=None, path=None):
-        '''Parses the yaml config file.
+        '''Parses the yaml config file if it is new.
 
         Inputs:
         stream - Stream with the yaml data
         path - If there is no stream, try to find the config file at this path
 
         Outputs:
-        A dictionary of the yaml parsing or None if there was no data
+        A dictionary of the yaml parsing or None if there was no new data
         '''
         if stream is not None:
-            return yaml.load(stream)
+            return yaml.load(stream)        
 
         s3re = re.compile('s3://([0-9a-zA-Z\.\-]+)/([0-9a-zA-Z\.\-/]+)')
 
@@ -193,23 +232,35 @@ class OptionParser(object):
             if s3match:
                 # Handle reading from S3
                 bucket_name, key_name = s3match.groups()
-                _log.info('Reading config file from S3 bucket: %s key: %s' %
-                          (bucket_name, key_name))
                 s3conn = boto.connect_s3()
                 bucket = s3conn.get_bucket(bucket_name)
                 key = bucket.get_key(key_name)
                 if key is None:
                     raise KeyError('Could not find key %s in S3 bucket %s' %
                                    (key_name, bucket_name))
-                with key.open() as f:
-                    return yaml.load(f)
 
-            # Try opening the config file locally
-            _log.info('Reading local config file %s' % path)
-            with open(path) as f:
-                return yaml.load(f)
+                # See if the key is new
+                mod_time = boto.utils.parse_ts(key.last_modified)
+                if self.last_update is None or self.last_update < mod_time:
+                    with self.__dict__['lock']:
+                        self.__dict__['last_update'] = mod_time
+                    _log.info(
+                        'Reading new config file from S3 bucket: %s key: %s' %
+                        (bucket_name, key_name))
+                    with key.open() as f:
+                        return yaml.load(f)
 
-        return None
+            else:
+                # Try opening the config file locally
+                mod_time = os.path.getmtime(path)
+                if self.last_update is None or self.last_update < mod_time:
+                    _log.info('Reading new local config file %s' % path)
+                    with self.__dict__['lock']:
+                        self.__dict__['last_update'] = mod_time
+                    with open(path) as f:
+                        return yaml.load(f)
+
+        return None       
 
     def _parse_dict(self, d, prefix):
         '''Parses a nested dictionary and stores the variables values.'''
@@ -266,6 +317,28 @@ class _Option(object):
 
     def set(self, value):
         self._value = value
+
+    def reset(self):
+        self._value = None
+
+class ConfigPoller(threading.Thread):
+    '''A thread that polls for updates in the config file.'''
+    def __init__(self, parser):
+        super(ConfigPoller, self).__init__()
+        self.parser = parser
+        self.daemon = True
+
+    def run(self):
+        while True:
+            try:
+                if self.parser.cmd_options is not None:
+                    self.parser._process_new_config_file(
+                        path = self.parser.cmd_options.config)
+            except Exception as e:
+                _log.exception('Error processing config file: %s' % e)
+
+            # Don't poll the file too much
+            threading.Event().wait(30)
 
 
 options = OptionParser()
