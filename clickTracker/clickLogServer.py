@@ -83,10 +83,14 @@ class LogLines(tornado.web.RequestHandler):
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
         try:
+            ttype = self.get_argument('ttype')
+            if ttype == 'imagetracker':
+                self.image_tracker()
+                return
+
             cvid = None
             action = self.get_argument('a')
             id = self.get_argument('id')
-            ttype = self.get_argument('ttype')
             cts = self.get_argument('ts')
             sts = int(time.time())
             page = self.get_argument('page') #url decode
@@ -109,6 +113,9 @@ class LogLines(tornado.web.RequestHandler):
             event_queue.put(data)
         except Exception,e:
             _log.exception("key=loglines msg=Q error %s" %e)
+        self.finish()
+
+    def image_tracker(self):
         self.finish()
 
     '''
@@ -144,6 +151,39 @@ class GetLines(tornado.web.RequestHandler):
         self.write(data)
         self.finish()
 
+class TestTracker(tornado.web.RequestHandler):
+    @tornado.web.asynchronous
+    def get(self, *args, **kwargs):
+        try:
+            cvid = None
+            action = self.get_argument('a')
+            id = self.get_argument('id')
+            ttype = self.get_argument('ttype')
+            cts = self.get_argument('ts')
+            sts = int(time.time())
+            page = self.get_argument('page') #url decode
+            cb  = self.get_argument('callback') #json callback
+            if action == 'load':
+                imgs = self.get_argument('imgs')
+                try:
+                    cvid = self.get_argument('cvid')
+                except:
+                    pass
+            else:
+                imgs = self.get_argument('img')
+            cip = self.request.remote_ip
+
+        except Exception,e:
+            _log.exception("key=test msg=%s" %e) 
+            self.finish()
+            return
+
+        cd = ClickData(action,id,ttype,cts,sts,page,cip,imgs,cvid)
+        data = cd.to_json()
+        self.set_header("Content-Type", "application/json")
+        self.write(cb + "("+ data + ")") #wrap json data in callback
+        self.finish()
+
 ###########################################
 # Create Tornado server application
 ###########################################
@@ -152,6 +192,7 @@ application = tornado.web.Application([
     (r"/",LogLines),
     (r"/track",LogLines),
     (r"/getlines",GetLines),
+    (r"/test",TestTracker),
 ])
 
 def main():

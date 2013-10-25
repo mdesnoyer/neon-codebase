@@ -1,16 +1,3 @@
-/* Script Instructions:
- *
- * For the player under test, go to publish settings and enable javascript api
- * If javascript api is not being used, then do the following
- <param name="includeAPI" value="true" />
- <param name="templateLoadHandler" value="NeonPlayerTracker.onTemplateLoad" />
- <param name="templateReadyHandler" value="NeonPlayerTracker.onTemplateReady" />
-
- * Else if <param name="templateLoadHandler" ... /> already is on the page, then open existing script file and add
- * this line at the end of onTemplateLoad method, NeonPlayerTracker.hookNeonTrackerToFlashPlayer(expID);
- * where expID is the function argument variable name that's passed to the onTemplateLoad method.  
-*/
-
 var NeonTrackerType = "flashonlyplayer";
 var PageLoadIDSeen = null; 
 var MediaPlayPageIDSeen = null;
@@ -40,11 +27,13 @@ var NeonDataSender = (function() {
 		this.headLoc.appendChild(this.scriptObj);
 	}
 
+	var testMode = null;
 	return{ 
 		sendRequest: function(url, params){
 			var pageURL = (document.URL).split('?')[0]; // Ignore any get params	
 			var ts = new Date().getTime(); 
 			var req = url + "?" + params + "&ts=" + ts + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + NeonTrackerType;
+			if (testMode){ req = req+"&callback=NeonPlayerTracker.testJsonCallback";}
 			console.log("Send request to Neon " + req );
 			try { bObj = new JSONscriptRequest(req); bObj.buildScriptTag(); bObj.addScriptTag();  } catch(err) {}	
 		},
@@ -54,6 +43,9 @@ var NeonDataSender = (function() {
 				return Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1); 
 			}
 			return genRandomHexChars() + genRandomHexChars() + genRandomHexChars() + genRandomHexChars();
+		},
+		setTestMode: function(){
+			testMode = 1;
 		}
 	}
 }());
@@ -146,7 +138,20 @@ var NeonPlayerTracker = ( function () {
 				params = "a=" + action + "&id="+ reqGuid + "&img=" + encodeURIComponent(imgSrc);
 				NeonDataSender.sendRequest(NeonTrackerURL,params);
 			});
-		} 
+		},
+
+		setTestMode: function(){
+			NeonTrackerURL = "http://localhost:8888/test"
+			NeonDataSender.setTestMode()
+		},
+	
+		testJsonCallback: function(jsonData){
+			action = jsonData["a"];
+			alert( "player " + action + " works");
+		}	
 
     }
-}());
+})();
+
+//Test
+NeonPlayerTracker.setTestMode()
