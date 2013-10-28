@@ -327,7 +327,7 @@ class BrightcoveApi(object):
 
             if len(self.img_result) == 2:
                 thumb = False
-                still = False; import pdb; pdb.set_trace()
+                still = False; #import pdb; pdb.set_trace()
                 try:
                     for res in self.img_result:
                         if res and not res["error"]:
