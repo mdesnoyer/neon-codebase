@@ -727,9 +727,10 @@ class AccountHandler(tornado.web.RequestHandler):
                     #TODO : Add expected time of completion !
                     video_response = []
                     if not response:
+                        #TODO : Distinguish between api call failure and bad tokens
                         log.error("key=create brightcove account msg=brightcove api call failed")
                         data = '{"error": "integration was not added, brightcove api failed"}'
-                        self.send_json_response(data,500)
+                        self.send_json_response(data,502)
                         return
 
                     for item in response:
