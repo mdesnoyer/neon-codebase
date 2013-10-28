@@ -11,9 +11,10 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
-from .core import DistributionType, VideoInfo, ThumbnailInfo, Mastermind
+from mastermind.core import DistributionType, VideoInfo, ThumbnailInfo, \
+     Mastermind
 from datetime import datetime
-from . import directive_pusher
+from mastermind import directive_pusher
 import json
 import logging
 import mysql.connector as sqldb
@@ -100,16 +101,20 @@ class VideoDBWatcher(threading.Thread):
         super(VideoDBWatcher, self).__init__(name='VideoDBWatcher')
         self.mastermind = mastermind
         self.ab_manager = ab_manager
+        self.daemon = True
 
         # Is the initial data loaded
         self.is_loaded = threading.Event()
 
     def run(self):
         while True:
-            self._process_db_data()
+            try:
+                self._process_db_data()
 
-            # Now we wait so that we don't hit the database too much.
-            threading.Event().wait(options.video_db_polling_delay)
+                # Now we wait so that we don't hit the database too much.
+                threading.Event().wait(options.video_db_polling_delay)
+            except Exception as e:
+                _log.exception('Uncaught video DB Error: %s' % e)
 
     def wait_until_loaded(self):
         '''Blocks until the data is loaded.'''
@@ -143,6 +148,7 @@ class StatsDBWatcher(threading.Thread):
         self.ab_manager = ab_manager
         self.video_id_cache = {} # Thumb_id -> video_id
         self.last_update = None
+        self.daemon = True
 
         # Is the initial data loaded
         self.is_loaded = threading.Event()
@@ -155,10 +161,13 @@ class StatsDBWatcher(threading.Thread):
         _log.info('Statistics database is at host=%s port=%i database=%s' %
                   (options.stats_host, options.stats_port, options.stats_db))
         while True:
-            self._process_db_data()            
+            try:
+                self._process_db_data()            
 
-            # Now we wait so that we don't hit the database too much.
-            threading.Event().wait(options.stats_db_polling_delay)
+                # Now we wait so that we don't hit the database too much.
+                threading.Event().wait(options.stats_db_polling_delay)
+            except Exception as e:
+                _log.exception('Uncaught stats DB Error: %s' % e)
 
     def _process_db_data(self):
         try:
