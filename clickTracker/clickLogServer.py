@@ -52,7 +52,7 @@ def shutdown():
 #### DATA FORMAT ###
 #############################################
 
-class ClickData(object):
+class TrackerData(object):
     '''
     Schema for click tracker data
     '''
@@ -106,7 +106,7 @@ class LogLines(tornado.web.RequestHandler):
             self.finish()
             return
 
-        cd = ClickData(action,id,ttype,cts,sts,page,cip,imgs,cvid)
+        cd = TrackerData(action,id,ttype,cts,sts,page,cip,imgs,cvid)
         data = cd.to_json()
         print data
         try:
@@ -178,7 +178,7 @@ class TestTracker(tornado.web.RequestHandler):
             self.finish()
             return
 
-        cd = ClickData(action,id,ttype,cts,sts,page,cip,imgs,cvid)
+        cd = TrackerData(action,id,ttype,cts,sts,page,cip,imgs,cvid)
         data = cd.to_json()
         self.set_header("Content-Type", "application/json")
         self.write(cb + "("+ data + ")") #wrap json data in callback

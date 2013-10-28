@@ -44,8 +44,8 @@ var NeonDataSender = (function() {
 			}
 			return genRandomHexChars() + genRandomHexChars() + genRandomHexChars() + genRandomHexChars();
 		},
-		setTestMode: function(){
-			testMode = 1;
+		setTestMode: function(level){
+			testMode = level;
 		}
 	}
 }());
@@ -140,18 +140,23 @@ var NeonPlayerTracker = ( function () {
 			});
 		},
 
-		setTestMode: function(){
+		setTestMode: function(level){
 			NeonTrackerURL = "http://localhost:8888/test"
-			NeonDataSender.setTestMode()
+			NeonDataSender.setTestMode(level)
 		},
 	
 		testJsonCallback: function(jsonData){
 			action = jsonData["a"];
 			alert( "player " + action + " works");
-		}	
+		},
+
+		setStressTestMode: function(){
+			NeonTrackerURL = "http://localhost:8888/stresstest"
+			NeonDataSender.setStressTestMode(2)
+		}
 
     }
 })();
 
 //Test
-NeonPlayerTracker.setTestMode()
+NeonPlayerTracker.setTestMode(1)
