@@ -171,8 +171,8 @@ class OptionParser(object):
         local to global name conversion. In your code, you're better
         off just doing options.local_name
          ''' 
-         with self.__dict__['lock']:
-             return self._options[global_name].value()
+        with self.__dict__['lock']:
+            return self._options[global_name].value()
 
     def _parse_command_line(self, args=None, usage='%prog [options]'):
         '''Parse the command line.'''
