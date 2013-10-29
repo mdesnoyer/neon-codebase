@@ -110,8 +110,7 @@ class ThumbnailChangeTask(AbstractTask):
         body = urllib.urlencode({'thumbnail_id':self.tid})
         req = tornado.httpclient.HTTPRequest(method = 'POST',url = self.service_url,body=body,
                         request_timeout = 10.0)
-        http_client.fetch(req,self.cb)
-        result = yield tornado.gen.Task(http_client.fetch,url)
+        result = yield tornado.gen.Task(http_client.fetch,req)
         if result.error:
             _log.error("key=ThumbnailChangeTask msg=thumbnail change failed")
         else:
@@ -145,10 +144,9 @@ class ThumbnailCheckTask(AbstractTask):
     
     def execute(self):
         http_client = tornado.httpclient.AsyncHTTPClient()
-        req = tornado.httpclient.HTTPRequest(method = 'POST',url = self.service_url,body=body,
+        req = tornado.httpclient.HTTPRequest(method = 'POST',url = self.service_url,
                         request_timeout = 10.0)
-        #http_client.fetch(req,self.cb)
-        result = yield tornado.gen.Task(http_client.fetch,url)
+        result = yield tornado.gen.Task(http_client.fetch,req)
         if result.error:
             _log.error("key=ThumbnailCheckTask msg=service error for video %" %self.video_id)
 
@@ -165,8 +163,8 @@ class VideoTaskInfo(object):
     def remove_task(self,task):
         try:
             self.tasks.remove(task)
-        except:
-            pass
+        except Exception,e:
+            _log.exception('key=VideoTaskInfo msg=remove task exception %s' %e)
 
     def add_task(self,task):
         self.tasks.append(task)
@@ -188,7 +186,12 @@ class TaskManager(object):
             vminfo.add_task(task)
 
     def pop_task(self):
-        task = self.taskQ.pop_task()
+        try:
+            task = self.taskQ.pop_task()
+        except:
+            _log.error("key=TaskManager msg=trying to pop from empty Q")
+            return
+
         vid = task.video_id
         if self.video_map.has_key(vid):
             vminfo = self.video_map[vid]
@@ -218,7 +221,7 @@ class TaskManager(object):
     Schedule and execute task (one thread per task)
     '''
     def task_worker(self,task):
-        print "[exec] " ,task, threading.current_thread()  
+        #_log.info("[exec] %s %s" %(task, threading.current_thread() )) 
         task.execute()
    
     @tornado.gen.engine
@@ -244,9 +247,6 @@ class BrightcoveABController(object):
         #self.neon_service_url = "http://services.neon-lab.com"
         self.neon_service_url = "http://localhost:8083"
         self.max_update_delay = delay
-
-    def cb(self,result):
-        print "[cb]" ,time.time(), len(result.body), threading.current_thread()
 
     def thumbnail_change_scheduler(self,video_id,distribution):
         
@@ -322,7 +322,7 @@ class GetData(tornado.web.RequestHandler):
     def post(self,*args,**kwargs):
         
         #input data = { video_id => [(tid,%)] }
-        print "[getdata] ", threading.current_thread()
+        #print "[getdata] ", threading.current_thread()
         controller = BrightcoveABController()
         
         #For the videoid, get its metadata and insert in to Q
@@ -349,20 +349,11 @@ Populate data from mastermind
 Fetch the video id => [(Tid,%)] mappings and populate the data
 '''
 def initialize_controller():
-    vids = {"int_vid1": [('i1',20)('i2',80)],"int_vid2": [('ii1',30)('ii2',70)] }
-    controller = BrightcoveABController(delay=10) #stagger initial videos by introducing delay
-    return
-
-    for vid,tid_dists in vids.iteritems():
-        tids = [tup[0] for tup in tid_dists] 
-        vmdata = VideoMetadata.get(vid)
-        #Insert in to video map (data cache)
-        #if already exists, then cancel all the tasks scheduled
-
-        video_map[vid] = tid_dists
-
-        controller.thumbnail_change_scheduler(vmdata,tid_dists)
+    pass
     
+    #Send Push request to Mastermind
+    #Set alerts on Mastermind
+
 ###################################################################################
 # MAIN
 ###################################################################################
