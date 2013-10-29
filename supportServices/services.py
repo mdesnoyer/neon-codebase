@@ -1233,7 +1233,11 @@ class BcoveHandler(tornado.web.RequestHandler):
 ### MAIN
 ################################################################
 
+def main():
+    pass
+
 if __name__ == "__main__":
+    main()
     utils.neon.InitNeon()
     
     application = tornado.web.Application([

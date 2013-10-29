@@ -11,17 +11,17 @@ from supportServices.neondata import *
 class TestSingleton(unittest.TestCase):
     def setUp(self):
         bp = BrightcovePlatform('2','3',4)
-        self.bp_conn = DBConnection.instance(bp)
+        self.bp_conn = DBConnection(bp)
 
         bp2 = BrightcovePlatform('12','13',4)
-        self.bp_conn2 = DBConnection.instance(bp2)
+        self.bp_conn2 = DBConnection(bp2)
 
 
         vm = VideoMetadata('test1',None,None,None,None,None,None,None)
-        self.vm_conn = DBConnection.instance(vm)
+        self.vm_conn = DBConnection(vm)
 
         vm2 = VideoMetadata('test2',None,None,None,None,None,None,None)
-        self.vm_conn2 = DBConnection.instance(vm2)
+        self.vm_conn2 = DBConnection(vm2)
 
     def test_instance(self):
         self.assertEqual(self.bp_conn,self.bp_conn2)

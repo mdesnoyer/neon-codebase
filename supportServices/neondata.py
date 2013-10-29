@@ -55,22 +55,25 @@ class DBConnection(object):
     __singleton_lock = threading.Lock() #TODO: Lock for each instance
     _singleton_instance = {} 
 
-    def __init__(self, host=None, port=None,cname=None):
+    def __init__(self,otype=None):
+        cname = None
+        if otype:
+            cname = otype.__class__.__name__ if otype.__class__.__name__ != "type" else otype.__name__
+
         #TODO : Read from the options file
-        import pdb; pdb.set_trace()
         if cname:
             if cname in ["AbstractPlatform","BrightcovePlatform","YoutubePlatform","NeonUserAccount"]:
-                host = host or options.accountDB 
-                port = port or options.dbPort 
+                host = options.accountDB 
+                port = options.dbPort 
             elif cname == "VideoMetadata":
-                host = host or options.videoDB
-                port = port or options.dbPort 
+                host = options.videoDB
+                port = options.dbPort 
             elif cname in ["ThumbnailIDMapper","ThumbnailURLMapper"]:
-                host = host or options.thumbnailDB 
-                port = port or options.dbPort 
+                host = options.thumbnailDB 
+                port = options.dbPort 
         else:
-            host = host or options.accountDB 
-            port = port or options.dbPort 
+            host = options.accountDB 
+            port = options.dbPort 
         self.conn, self.blocking_conn = RedisClient.get_client(host, port)
 
     def fetch_keys_from_db(self, key_prefix, callback=None):
@@ -80,18 +83,18 @@ class DBConnection(object):
             keys = self.blocking_conn.keys(key_prefix)
             return keys
 
-    @classmethod
-    def instance(cls,otype=None):
-        class_name = None
-        if otype:
-            #handle the case for classmethod
-            class_name = otype.__class__.__name__ if otype.__class__.__name__ != "type" else otype.__name__
-        
-        if not cls._singleton_instance.has_key(class_name):
-            with cls.__singleton_lock:
-                if not cls._singleton_instance.has_key(class_name):
-                    cls._singleton_instance[class_name] = cls(cname = class_name)
-        return cls._singleton_instance[class_name]
+    #@classmethod
+    #def instance(cls,otype=None):
+    #    class_name = None
+    #    if otype:
+    #        #handle the case for classmethod
+    #        class_name = otype.__class__.__name__ if otype.__class__.__name__ != "type" else otype.__name__
+    #    
+    #    if not cls._singleton_instance.has_key(class_name):
+    #        with cls.__singleton_lock:
+    #            if not cls._singleton_instance.has_key(class_name):
+    #                cls._singleton_instance[class_name] = cls(cname = class_name)
+    #    return cls._singleton_instance[class_name]
 
     ''' Method to update the connection object in case of db config update '''
     @classmethod
@@ -101,12 +104,26 @@ class DBConnection(object):
                 if cls._singleton_instance.has_key:
                     cls._singleton_instance[cname] = cls(cname = cname)
 
+    def __new__(cls, *args, **kwargs):
+        otype = args[0]
+        cname = None
+        if otype:
+            #handle the case for classmethod
+            cname = otype.__class__.__name__ if otype.__class__.__name__ != "type" else otype.__name__
+        
+        if not cls._singleton_instance.has_key(cname):
+            with cls.__singleton_lock:
+                if not cls._singleton_instance.has_key(cname):
+                    cls._singleton_instance[cname] = object.__new__(cls,*args,**kwargs)
+        return cls._singleton_instance[cname]
+
+
 class DBConnectionCheck(threading.Thread):
 
     ''' Watchdog thread class to check the DB connection objects '''
     def __init__(self,tid=None):
         super(DBConnectionCheck, self).__init__()
-        self.interval = 100
+        self.interval = 10
         self.daemon = True
 
     def run(self):
@@ -355,7 +372,7 @@ class NeonUserAccount(object):
     Save Neon User account and corresponding integration
     '''
     def save_integration(self,new_integration,callback=None):
-        db_connection = DBConnection.instance(self)
+        db_connection = DBConnection(self)
         pipe = db_connection.conn.pipeline()
         pipe.set(self.key,self.to_json())
         pipe.set(new_integration.key,new_integration.to_json()) 
@@ -363,7 +380,7 @@ class NeonUserAccount(object):
 
     @classmethod
     def get_account(cls,api_key,callback=None):
-        db_connection=DBConnection.instance(cls)
+        db_connection=DBConnection(cls)
         key = "NeonUserAccount".lower() + '_' + api_key
         if callback:
             db_connection.conn.get(key,callback) 
@@ -383,7 +400,7 @@ class NeonUserAccount(object):
     
     @classmethod
     def delete(cls,a_id):
-        db_connection=DBConnection.instance(cls)
+        db_connection=DBConnection(cls)
         #check if test account
         if "test" in a_id:
             key = 'neonuseraccount' + NeonApiKey.generate(a_id)  
@@ -476,14 +493,14 @@ class BrightcovePlatform(AbstractPlatform):
                 return nar.thumbnails
 
     def get(self,callback=None):
-        db_connection=DBConnection.instance(self)
+        db_connection=DBConnection(self)
         if callback:
             db_connection.conn.get(self.key,callback)
         else:
             return db_connection.blocking_conn.get(self.key)
 
     def save(self,callback=None):
-        db_connection=DBConnection.instance(self)
+        db_connection=DBConnection(self)
         if callback:
             db_connection.conn.set(self.key,self.to_json(),callback)
         else:
@@ -637,7 +654,7 @@ class BrightcovePlatform(AbstractPlatform):
 
     @classmethod
     def get_account(cls,api_key,i_id,callback=None):
-        db_connection = DBConnection.instance(cls)
+        db_connection = DBConnection(cls)
         key = "BrightcovePlatform".lower() + '_' + api_key + '_' + i_id
         if callback:
             db_connection.conn.get(key,callback) 
@@ -781,7 +798,7 @@ class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
 
     @classmethod
     def get_account(cls,api_key,i_id,callback=None,lock=False):
-        db_connection = DBConnection.instance(cls)
+        db_connection = DBConnection(cls)
         key = "YoutubePlatform".lower() + '_' + api_key + '_' + i_id
         if callback:
             YoutubePlatform.conn.get(key,callback) 
@@ -1114,7 +1131,7 @@ class ImageMD5Mapper(object):
             raise
 
     def save(self,callback=None):
-        db_connection = DBConnection.instance(self)
+        db_connection = DBConnection(self)
         
         if callback:
             db_connection.conn.set(self.key,self.value,callback)
@@ -1123,7 +1140,7 @@ class ImageMD5Mapper(object):
 
     @classmethod   
     def get_tid(cls,image_md5,callback=None):
-        db_connection = DBConnection.instance(cls)
+        db_connection = DBConnection(cls)
         
         key = "ImageMD5Mapper".lower() + '_' + image_md5
         if callback:
@@ -1133,7 +1150,7 @@ class ImageMD5Mapper(object):
     
     @classmethod
     def save_all(cls,objs,callback=None):
-        db_connection = DBConnection.instance(cls)
+        db_connection = DBConnection(cls)
         data = {}
         for obj in objs:
             data[obj.key] = obj.value
@@ -1186,7 +1203,7 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
     # TODO(sunil): Decide whether these functions 
     @classmethod
     def get_id(cls,key,callback=None):
-        db_connection = DBConnection.instance(cls)
+        db_connection = DBConnection(cls)
         if callback:
             ThumbnailIDMapper.get(key, callback, db_connection)
         else:
@@ -1194,7 +1211,7 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
 
     @classmethod
     def get_ids(cls,keys,callback=None):
-        db_connection = DBConnection.instance(cls)
+        db_connection = DBConnection(cls)
 
         def process(results):
             mappings = [] 
@@ -1216,7 +1233,7 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
     @classmethod
     def save_all(cls,thumbnailMapperList,
                  callback=None):
-        db_connection = DBConnection.instance(cls)
+        db_connection = DBConnection(cls)
         data = {}
         for t in thumbnailMapperList:
             data[t.key] = t.to_json()
@@ -1245,7 +1262,7 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
 
     @classmethod
     def save_integration(cls,mapper_objs,callback=None):
-        db_connection = DBConnection.instance(cls)
+        db_connection = DBConnection(cls)
         if callback:
             pipe = db_connection.conn.pipeline()
         else:
@@ -1288,7 +1305,7 @@ class VideoMetadata(object):
         return json.dumps(self, default=lambda o: o.__dict__) 
 
     def save(self,callback=None):
-        db_connection=DBConnection.instance(self)
+        db_connection=DBConnection(self)
         value = self.to_json()
         if callback:
             db_connection.conn.set(self.key,value,callback)
@@ -1297,7 +1314,7 @@ class VideoMetadata(object):
 
     @classmethod
     def get(cls,internal_video_id, callback=None):
-        db_connection=DBConnection.instance(cls)
+        db_connection=DBConnection(cls)
         def create(jdata):
             data_dict = json.loads(jdata) 
             obj = VideoMetadata(None,None,None,None,None,None,None,None)
@@ -1322,7 +1339,7 @@ class VideoMetadata(object):
 
     @classmethod
     def multi_get(cls,internal_video_ids,callback):
-        db_connection=DBConnection.instance(cls) 
+        db_connection=DBConnection(cls) 
         def create(jdata):
             data_dict = json.loads(jdata)
             obj = VideoMetadata(None,None,None,None,None,None,None,None)
