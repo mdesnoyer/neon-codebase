@@ -67,8 +67,6 @@ import yaml
 
 #TODO(mdesnoyer): Add support for booleans
 
-#TODO(mdesnoyer): Add groups so that the flags are sorted better in
-#the help message.
 
 _log = logging.getLogger(__name__)
 
@@ -166,6 +164,16 @@ class OptionParser(object):
 
         return self, args
 
+    def get(self, global_name):
+        '''Retrieve the value of the options with a given global name.
+
+        This is mostly a helper for debugging since pdb breaks the
+        local to global name conversion. In your code, you're better
+        off just doing options.local_name
+         ''' 
+         with self.__dict__['lock']:
+             return self._options[global_name].value()
+
     def _parse_command_line(self, args=None, usage='%prog [options]'):
         '''Parse the command line.'''
         if args is None:
@@ -177,11 +185,26 @@ class OptionParser(object):
         cmd_parser.add_option('--config', '-c', default=None,
                               help='Path to the config file')
 
+        groups = {}
+        groupRe = re.compile('(.+)\\.[a-zA-Z0-9-_]+$')
+
         for name, option in sorted(self._options.items()):
-            cmd_parser.add_option('--%s' % name,
-                                  default=None,
-                                  type=option.type.__name__,
-                                  help=option.help)
+            # We group by the module name to make the help message
+            # easier to read.
+            groupMatch = groupRe.match(name)
+            if groupMatch:
+                group_name = groupMatch.groups()[0]
+                group = groups.setdefault(group_name, optparse.OptionGroup(
+                    cmd_parser, group_name))
+            else:
+                group = cmd_parser
+            group.add_option('--%s' % name,
+                             default=None,
+                             type=option.type.__name__,
+                             help=option.help)
+
+        for group in groups.itervalues():
+            cmd_parser.add_option_group(group)
 
         self.__dict__['cmd_options'], args = cmd_parser.parse_args(args)
 
