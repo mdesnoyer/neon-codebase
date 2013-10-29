@@ -37,8 +37,15 @@ from StringIO import StringIO
 import dbsettings
 import threading
 
+from utils.options import define, options
+
 import logging
 _log = logging.getLogger(__name__)
+
+define("accountDB", default="127.0.0.1", type=str,help="")
+define("videoDB", default="127.0.0.1", type=str,help="")
+define("thumbnailDB", default="127.0.0.1", type=str,help="")
+define("dbPort",default=6379,type=int,help="redis port")
 
 class DBConnection(object):
     '''Connection to the database.'''
@@ -46,22 +53,24 @@ class DBConnection(object):
     #TODO(sunil): make these calls able to do callbacks properly
 
     __singleton_lock = threading.Lock() #TODO: Lock for each instance
-    __singleton_instance = {} 
+    _singleton_instance = {} 
 
     def __init__(self, host=None, port=None,cname=None):
+        #TODO : Read from the options file
+        import pdb; pdb.set_trace()
         if cname:
             if cname in ["AbstractPlatform","BrightcovePlatform","YoutubePlatform","NeonUserAccount"]:
-                host = host or dbsettings.DBConfig.accountDB[0]
-                port = port or dbsettings.DBConfig.accountDB[1]
+                host = host or options.accountDB 
+                port = port or options.dbPort 
             elif cname == "VideoMetadata":
-                host = host or dbsettings.DBConfig.videoDB[0]
-                port = port or dbsettings.DBConfig.videoDB[1]
+                host = host or options.videoDB
+                port = port or options.dbPort 
             elif cname in ["ThumbnailIDMapper","ThumbnailURLMapper"]:
-                host = host or dbsettings.DBConfig.thumbnailDB[0]
-                port = port or dbsettings.DBConfig.thumbnailDB[1]
+                host = host or options.thumbnailDB 
+                port = port or options.dbPort 
         else:
-            host = host or dbsettings.DBConfig.accountDB[0]
-            port = port or dbsettings.DBConfig.accountDB[1]
+            host = host or options.accountDB 
+            port = port or options.dbPort 
         self.conn, self.blocking_conn = RedisClient.get_client(host, port)
 
     def fetch_keys_from_db(self, key_prefix, callback=None):
@@ -73,13 +82,47 @@ class DBConnection(object):
 
     @classmethod
     def instance(cls,otype=None):
-        #handle the case for classmethod
-        class_name = otype.__class__.__name__ if otype.__class__.__name__ != "type" else otype.__name__
-        if not cls.__singleton_instance.has_key(class_name):
+        class_name = None
+        if otype:
+            #handle the case for classmethod
+            class_name = otype.__class__.__name__ if otype.__class__.__name__ != "type" else otype.__name__
+        
+        if not cls._singleton_instance.has_key(class_name):
             with cls.__singleton_lock:
-                if not cls.__singleton_instance.has_key(class_name):
-                    cls.__singleton_instance[class_name] = cls(cname = class_name)
-        return cls.__singleton_instance[class_name]
+                if not cls._singleton_instance.has_key(class_name):
+                    cls._singleton_instance[class_name] = cls(cname = class_name)
+        return cls._singleton_instance[class_name]
+
+    ''' Method to update the connection object in case of db config update '''
+    @classmethod
+    def update_instance(cls,cname):
+        if cls._singleton_instance.has_key:
+            with cls.__singleton_lock:
+                if cls._singleton_instance.has_key:
+                    cls._singleton_instance[cname] = cls(cname = cname)
+
+class DBConnectionCheck(threading.Thread):
+
+    ''' Watchdog thread class to check the DB connection objects '''
+    def __init__(self,tid=None):
+        super(DBConnectionCheck, self).__init__()
+        self.interval = 100
+        self.daemon = True
+
+    def run(self):
+        
+        while True:
+            try:
+                for key,value in DBConnection._singleton_instance.iteritems():
+                    DBConnection.update_instance(key)
+                    value.blocking_conn.get("dummy")
+                time.sleep(self.interval)
+            except Exception,e:
+                _log.exception("key=DBConnection msg=%s"%e)
+
+#start watchdog thread for the DB connection
+t = DBConnectionCheck()
+t.start()
 
 '''
 Static class for REDIS configuration
@@ -275,15 +318,14 @@ Account usage aggregation, Billing information is computed here
 
 '''
 
-class NeonUserAccount(AbstractRedisUserBlob):
+class NeonUserAccount(object):
     def __init__(self,a_id,plan_start=None,processing_mins=None):
-        super(NeonUserAccount,self).__init__()
         self.account_id = a_id
         self.neon_api_key = NeonApiKey.generate(a_id)
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.plan_start_date = plan_start
         self.processing_minutes = processing_mins
-        self.videos = {} 
+        self.videos = {} #phase out 
         self.integrations = {} 
 
     def add_integration(self,integration_id,itype):
@@ -369,8 +411,26 @@ class AbstractPlatform(object):
         '''Returns a list of all the platform instances.'''
         raise NotImplementedError()
 
-''' Brightcove Account '''
+
+class NeonPlatform(AbstractPlatform):
+    '''
+    Neon Integration ; stores all info about calls via Neon API
+    '''
+    def __init__(self,a_id):
+        AbstractPlatform.__init__(self)
+        self.neon_api_key = NeonApiKey.generate(a_id)
+        self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
+        self.account_id = a_id
+        
+        #By default integration ID 0 represents Neon Platform Integration (via neon api)
+        self.integration_id = 0 
+    
+    def add_video(self,vid,job_id):
+        self.videos[str(vid)] = job_id
+
 class BrightcovePlatform(AbstractPlatform):
+    ''' Brightcove Platform/ Integration class '''
+    
     def __init__(self, a_id, i_id, p_id=None, rtoken=None, wtoken=None,
                  auto_update=False, last_process_date=None, abtest=False):
         AbstractPlatform.__init__(self, abtest)
@@ -1261,7 +1321,7 @@ class VideoMetadata(object):
             return create(jdata)
 
     @classmethod
-    def multi_get(internal_video_ids,callback=None): 
+    def multi_get(cls,internal_video_ids,callback):
         db_connection=DBConnection.instance(cls) 
         def create(jdata):
             data_dict = json.loads(jdata)

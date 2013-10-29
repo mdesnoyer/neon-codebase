@@ -1,6 +1,6 @@
 //var neonTrackerTestMode =1
 var NeonTrackerType = "imagetracker";
-var NeonDataSender = (function() {
+var imtrackerNeonDataSender = (function() {
 
 	function JSONscriptRequest(fullUrl) {
 		this.fullUrl = fullUrl; 
@@ -47,7 +47,7 @@ var NeonDataSender = (function() {
 	}
 }());
 
-var reqGuid = NeonDataSender._NeonPageRequestUUID();
+var reqGuid = imtrackerNeonDataSender._NeonPageRequestUUID();
 var NeonImageTracker = ( function ()  {
     var NeonTrackerURL = "http://localhost:8888/track";
 	
@@ -70,14 +70,14 @@ var NeonImageTracker = ( function ()  {
 					imgs.push(imgTags[i].src);
 				}	
 				params = "a=" + action + "&id="+ reqGuid + "&imgs=" + imgs;
-				NeonDataSender.sendRequest(NeonTrackerURL,params);
+				imtrackerNeonDataSender.sendRequest(NeonTrackerURL,params);
 		});
     	$("img").mousedown(function(e) {
 	    	var action = "click";	
 			var imgSrc = $(this).attr('src');
 			var coordinates = e.pageX  + "," + e.pageY;
 			params = "a=" + action + "&id="+ reqGuid + "&img=" + encodeURIComponent(imgSrc) + "&xy=" + coordinates; 
-			NeonDataSender.sendRequest(NeonTrackerURL,params);
+			imtrackerNeonDataSender.sendRequest(NeonTrackerURL,params);
 	  	}); 
 	});
 	}
