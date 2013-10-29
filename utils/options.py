@@ -168,10 +168,11 @@ class OptionParser(object):
         '''Retrieve the value of the options with a given global name.
 
         This is mostly a helper for debugging since pdb breaks the
-        local to global name conversion.
-        '''
-        with self.__dict__['lock']:
-            return self._options[global_name].value()
+        local to global name conversion. In your code, you're better
+        off just doing options.local_name
+         ''' 
+         with self.__dict__['lock']:
+             return self._options[global_name].value()
 
     def _parse_command_line(self, args=None, usage='%prog [options]'):
         '''Parse the command line.'''
