@@ -695,7 +695,7 @@ class AccountHandler(tornado.web.RequestHandler):
             user.add_integration(nplatform.integration_id,"neon")
             res = yield tornado.gen.Task(user.save_integration,nplatform)
             if res:
-                data = ''
+                data = '{ "neon_api_key": "' + user.neon_api_key + '" }'
                 self.send_json_response(data,200)
             else:
                 data = '{"error": "account not created"}'
