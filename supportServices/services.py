@@ -1192,7 +1192,7 @@ class BcoveHandler(tornado.web.RequestHandler):
             ba = neondata.BrightcovePlatform.create(jdata)
             if ba:
                 bcove_vid = neondata.InternalVideoID.to_external(self.internal_video_id) 
-                result = yield tornado.gen.Task(ba.update_thumbnail,bcove_vid,new_tid)
+                result = yield tornado.gen.Task(ba.update_thumbnail,bcove_vid,new_tid,True)
                 if result:
                     self.set_status(200)
                 else:
@@ -1234,10 +1234,6 @@ class BcoveHandler(tornado.web.RequestHandler):
 ################################################################
 
 def main():
-    pass
-
-if __name__ == "__main__":
-    main()
     utils.neon.InitNeon()
     
     application = tornado.web.Application([
@@ -1256,3 +1252,6 @@ if __name__ == "__main__":
     server = tornado.httpserver.HTTPServer(application)
     server.listen(options.port)
     tornado.ioloop.IOLoop.instance().start()
+
+if __name__ == "__main__":
+    main()
