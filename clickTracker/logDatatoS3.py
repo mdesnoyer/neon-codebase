@@ -47,6 +47,8 @@ from utils.options import define, options
 define("port", default=9080, help="port to consume data from", type=int)
 define("lines", default=1000, help="lines to aggregate", type=int)
 define("fetch_count", default=100, help="# lines to fetch", type=int)
+define("bucket_name", default='neon-tracker-logs',
+       help='Bucket to store the logs on')
 MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
     
 
@@ -64,8 +66,10 @@ class S3DataHandler(object):
         S3_ACCESS_KEY = 'AKIAJ5G2RZ6BDNBZ2VBA' 
         S3_SECRET_KEY = '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'
         s3bucket_name = 'neon-tracker-logs'
-        self.s3conn = S3Connection(aws_access_key_id=S3_ACCESS_KEY,aws_secret_access_key =S3_SECRET_KEY)
-        self.s3bucket = Bucket(connection = self.s3conn, name = s3bucket_name) if not s3bucket else s3bucket
+        self.s3conn = S3Connection(aws_access_key_id=S3_ACCESS_KEY,
+                                   aws_secret_access_key =S3_SECRET_KEY)
+        self.s3bucket = s3bucket or Bucket(connection=self.s3conn,
+                                           name=options.bucket_name)
         
         #self.s3conn = AsyncS3Connection(aws_access_key_id=S3_ACCESS_KEY,aws_secret_access_key =S3_SECRET_KEY)
         #self.s3bucket = AsyncBucket(connection = self.s3conn, name = s3bucket_name)

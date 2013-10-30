@@ -1234,12 +1234,6 @@ class BcoveHandler(tornado.web.RequestHandler):
 ################################################################
 
 def main():
-    pass
-
-if __name__ == "__main__":
-    main()
-    utils.neon.InitNeon()
-    
     application = tornado.web.Application([
         (r'/api/v1/removeaccount(.*)', DeleteHandler),
         (r'/api/v1/accounts(.*)', AccountHandler),
@@ -1256,3 +1250,7 @@ if __name__ == "__main__":
     server = tornado.httpserver.HTTPServer(application)
     server.listen(options.port)
     tornado.ioloop.IOLoop.instance().start()
+
+if __name__ == "__main__":
+    utils.neon.InitNeon()
+    main()

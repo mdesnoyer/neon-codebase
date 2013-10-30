@@ -19,6 +19,7 @@ import json
 import logging
 import mysql.connector as sqldb
 from supportServices import neondata
+import time
 import threading
 import tornado.httpserver
 import tornado.ioloop
@@ -112,7 +113,7 @@ class VideoDBWatcher(threading.Thread):
                 self._process_db_data()
 
                 # Now we wait so that we don't hit the database too much.
-                threading.Event().wait(options.video_db_polling_delay)
+                time.sleep(options.video_db_polling_delay)
             except Exception as e:
                 _log.exception('Uncaught video DB Error: %s' % e)
 
@@ -165,7 +166,7 @@ class StatsDBWatcher(threading.Thread):
                 self._process_db_data()            
 
                 # Now we wait so that we don't hit the database too much.
-                threading.Event().wait(options.stats_db_polling_delay)
+                time.sleep(options.stats_db_polling_delay)
             except Exception as e:
                 _log.exception('Uncaught stats DB Error: %s' % e)
 
@@ -291,9 +292,7 @@ class GetDirectives(tornado.web.RequestHandler):
             self.flush()
         self.finish()
 
-def main():
-    utils.neon.InitNeon()
-   
+def main():   
     mastermind, ab_manager = initialize()
 
     videoDbThread = VideoDBWatcher()
@@ -315,4 +314,5 @@ def main():
     tornado.ioloop.IOLoop.instance().start()
     
 if __name__ == "__main__":
+    utils.neon.InitNeon()
 	main()

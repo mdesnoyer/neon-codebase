@@ -16,7 +16,7 @@ for name in ${OUTPUT_DIR}/stimuli_* ; do
 done
 NEXT_SET=`expr ${MAX_SET} + 1`
 
-python -m pdb ${THIS_DIR}/../generate_stimuli_set.py \
+${THIS_DIR}/../generate_stimuli_set.py \
     --cache_dir /data/neon/cache/ \
     --start_index ${NEXT_SET} \
     --image_dir ${STAGING_DIR}/images \
@@ -27,4 +27,4 @@ python -m pdb ${THIS_DIR}/../generate_stimuli_set.py \
     --example_urls /data/neon/imdb/staging/examples.urls \
     --new_urls ${STAGING_DIR}/requests.links \
     --log ${STAGING_DIR}/generate_stimuli.log \
-    #> ${STAGING_DIR}/generate_stimuli_stdout.log 2> ${STAGING_DIR}/generate_stimuli_stderr.log
+    > ${STAGING_DIR}/generate_stimuli_stdout.log 2> ${STAGING_DIR}/generate_stimuli_stderr.log

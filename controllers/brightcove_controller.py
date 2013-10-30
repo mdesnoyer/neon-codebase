@@ -32,7 +32,7 @@ from supportServices.neondata import *
 from utils.options import define, options
 define("port", default=8888, help="run on the given port", type=int)
 define("service_url", default="http://localhost:8083/", 
-        help="service url", type=basestring)
+        help="service url")
 
 import logging
 _log = logging.getLogger(__name__)
@@ -359,7 +359,6 @@ def initialize_controller():
 ###################################################################################
 
 def main():
-    utils.neon.InitNeon()
     SCHED_CHECK_INTERVAL = 1000 #1s
     global taskQ
     taskQ = PriorityQ()
@@ -374,4 +373,5 @@ def main():
 
 # ============= MAIN ======================== #
 if __name__ == "__main__":
-   main()
+    utils.neon.InitNeon()
+    main()
