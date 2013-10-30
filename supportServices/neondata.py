@@ -375,6 +375,9 @@ class NeonUserAccount(object):
         if self.external_callback:
             self.external_callback(self)
    
+    def to_json(self):
+        return json.dumps(self, default=lambda o: o.__dict__)
+    
     '''
     Save Neon User account and corresponding integration
     '''
@@ -443,14 +446,51 @@ class NeonPlatform(AbstractPlatform):
     def __init__(self,a_id):
         AbstractPlatform.__init__(self)
         self.neon_api_key = NeonApiKey.generate(a_id)
-        self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
+        self.integration_id = '0'
+        self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + self.integration_id
         self.account_id = a_id
         
         #By default integration ID 0 represents Neon Platform Integration (via neon api)
-        self.integration_id = 0 
-    
+   
     def add_video(self,vid,job_id):
         self.videos[str(vid)] = job_id
+
+    def save(self,callback=None):
+        db_connection=DBConnection(self)
+        if callback:
+            db_connection.conn.set(self.key,self.to_json(),callback)
+        else:
+            value = self.to_json()
+            return db_connection.blocking_conn.set(self.key,value)
+    
+    @classmethod
+    def get_account(cls,api_key,callback=None):
+        def create_account(data):
+            if not data:
+                callback(None)
+            else:
+                obj = NeonPlatform.create(data)
+                callback(obj)
+
+        key = cls.__name__.lower() + + '_' + self.neon_api_key + '_' + '0' 
+        db_connection=DBConnection(cls)
+        if callback:
+            db_connection.conn.get(key,create_account) 
+        else:
+            data = db_connection.blocking_conn.get(key)
+            if data:
+                return NeonPlatform.create(data)
+
+    @staticmethod
+    def create(json_data):
+        data_dict = json.loads(json_data)
+        obj = NeonPlatform("dummy")
+
+        #populate the object dictionary
+        for key in data_dict.keys():
+            obj.__dict__[key] = data_dict[key]
+        
+        return obj
 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
@@ -514,22 +554,9 @@ class BrightcovePlatform(AbstractPlatform):
             value = self.to_json()
             return db_connection.blocking_conn.set(self.key,value)
 
-    '''
-    Called after getting the thumbnail url of the new thumbnail to be made 
-    the default
-    '''
-    def update_thumbnail2(self,vid,t_url,tid,update_callback=None):
-        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
-                self.read_token,self.write_token,self.auto_update)
-        ref_id = tid
-        if update_callback:
-            return bc.async_enable_thumbnail_from_url(vid,t_url,update_callback,reference_id=ref_id)
-        else:
-            return bc.enable_thumbnail_from_url(vid,t_url)
-
     ''' method to keep video metadata and thumbnail data consistent '''
     @tornado.gen.engine
-    def update_thumbnail(self,platform_vid,new_tid,callback):
+    def update_thumbnail(self,platform_vid,new_tid,nosave=False,callback=None):
         bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
                 self.read_token,self.write_token,self.auto_update)
         
@@ -559,6 +586,10 @@ class BrightcovePlatform(AbstractPlatform):
         tref,sref = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,platform_vid,t_url,new_tid)
         if not sref:
             _log.error("key=update_thumbnail msg=brightcove error update video still for video %s %s" %(i_vid,new_tid))
+
+        if nosave:
+            callback(tref)
+            return
 
         if tref:
             #Get previous thumbnail and new thumb

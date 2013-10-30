@@ -32,7 +32,7 @@ from supportServices.neondata import *
 from utils.options import define, options
 define("port", default=8888, help="run on the given port", type=int)
 define("service_url", default="http://localhost:8083/", 
-        help="service url")
+        help="service url", type=str)
 
 import logging
 _log = logging.getLogger(__name__)
@@ -239,13 +239,11 @@ class TaskManager(object):
 ###################################################################################
 class BrightcoveABController(object):
 
-    service_url =  "http://localhost:8083"
     timeslice = 71 *60    #timeslice for experiment
     cushion_time = 10 *60 #cushion time for data extrapolation
 
     def __init__(self,delay=0):
-        #self.neon_service_url = "http://services.neon-lab.com"
-        self.neon_service_url = "http://localhost:8083"
+        self.neon_service_url = options.service_url 
         self.max_update_delay = delay
 
     def thumbnail_change_scheduler(self,video_id,distribution):
@@ -360,12 +358,9 @@ def initialize_controller():
 
 def main():
     SCHED_CHECK_INTERVAL = 1000 #1s
-    global taskQ
     taskQ = PriorityQ()
-    global video_map
-    video_map = {}
-    taskmgr = TaskManager()
-    #initialize_controller()
+    taskmgr = TaskManager(taskQ)
+    initialize_controller()
     server = tornado.httpserver.HTTPServer(application)
     server.listen(options.port)
     tornado.ioloop.PeriodicCallback(taskmgr.check_scheduler,SCHED_CHECK_INTERVAL).start()

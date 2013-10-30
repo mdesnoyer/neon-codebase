@@ -7,6 +7,8 @@ import json
 import time
 import random
 
+#TODO: UNIT TEST
+
 #constants
 BASE = 'http://localhost:8083/api/v1'
 a_id = 'test12345'

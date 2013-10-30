@@ -7,7 +7,7 @@ if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
 import unittest
-import brightcove_controller
+from controllers import brightcove_controller
 from supportServices.neondata import *
 
 #ab controller testing ( Schedule 10 videos, check if network calls made. And then scheduled again)

@@ -37,7 +37,14 @@ from utils.options import define, options
 define("port", default=8083, help="run on the given port", type=int)
 define("local", default=0, help="call local service", type=int)
 
+import logging
+logging.basicConfig(level=logging.DEBUG,
+            format='%(asctime)s %(levelname)s %(message)s',
+            datefmt='%m-%d %H:%M',
+            filename='services.log',
+            filemode='a')
 _log = logging.getLogger(__name__)
+
 def sig_handler(sig, frame):
     _log.debug('Caught signal: ' + str(sig) )
     tornado.ioloop.IOLoop.instance().stop()
@@ -47,14 +54,6 @@ def sig_handler(sig, frame):
 # From storage in to cache
 def CachePrimer():
     pass
-
-class BaseHandler(tornado.web.RequestHandler):
-    def save_key(self,key,value):
-        return
-
-    def get_key(self,value):
-        return
-
 
 ################################################################################
 # Helper classes  
@@ -217,7 +216,8 @@ class AccountHandler(tornado.web.RequestHandler):
         elif "accounts" in self.request.uri.split('/')[-1]:
             try:
                 a_id = self.get_argument("account_id") 
-                self.create_account(a_id)
+                #self.create_account(a_id)
+                self.create_account_and_neon_integration(a_id)
             except:
                 data = '{"error":"account id not specified"}'
                 self.send_json_response(data,400)                
@@ -681,6 +681,31 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.finish()
         ua = neondata.NeonUserAccount(account_id,pstart,pmins)
         ua.save(updated_account)
+
+    '''
+    Create Neon user account and add neon integration
+    '''
+    @tornado.gen.engine
+    def create_account_and_neon_integration(self,a_id):
+        user = neondata.NeonUserAccount(a_id)
+        api_key = user.neon_api_key
+        nuser_data = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,a_id)
+        if not nuser_data:
+            nplatform = neondata.NeonPlatform(a_id)
+            user.add_integration(nplatform.integration_id,"neon")
+            res = yield tornado.gen.Task(user.save_integration,nplatform)
+            if res:
+                data = '{ "neon_api_key": "' + user.neon_api_key + '" }'
+                self.send_json_response(data,200)
+            else:
+                data = '{"error": "account not created"}'
+                self.send_json_response(data,500)
+
+        else:
+            data = '{"error": "integration/ account already exists"}'
+            self.send_json_response(data,409)
+
+
 
     ''' Create Brightcove Account for the Neon user
     Add the integration in to the neon user account
@@ -1192,7 +1217,7 @@ class BcoveHandler(tornado.web.RequestHandler):
             ba = neondata.BrightcovePlatform.create(jdata)
             if ba:
                 bcove_vid = neondata.InternalVideoID.to_external(self.internal_video_id) 
-                result = yield tornado.gen.Task(ba.update_thumbnail,bcove_vid,new_tid)
+                result = yield tornado.gen.Task(ba.update_thumbnail,bcove_vid,new_tid,True)
                 if result:
                     self.set_status(200)
                 else:
