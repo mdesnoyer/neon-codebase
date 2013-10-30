@@ -1,4 +1,3 @@
-//var neonTrackerTestMode =1
 var NeonTrackerType = "imagetracker";
 var imtrackerNeonDataSender = (function() {
 
@@ -31,7 +30,7 @@ var imtrackerNeonDataSender = (function() {
 			var pageURL = (document.URL).split('?')[0]; // Ignore any get params	
 			var ts = new Date().getTime(); 
 			var req = url + "?" + params + "&ts=" + ts + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + NeonTrackerType;
-			if ( typeof neonTrackerTestMode != 'undefined'){ 
+			if ( NeonImageTracker.neonTrackerTestMode){ 
 				req = "http://localhost:8888/test" + "?" + params + "&ts=" + ts + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + NeonTrackerType;
 				req = req+"&callback=NeonImageTracker.testJsonCallback";}
 			console.log("Send request to Neon " + req );
@@ -50,12 +49,17 @@ var imtrackerNeonDataSender = (function() {
 var reqGuid = imtrackerNeonDataSender._NeonPageRequestUUID();
 var NeonImageTracker = ( function ()  {
     var NeonTrackerURL = "http://localhost:8888/track";
-	
+	var neonTrackerTestMode = false;
+
 	return {
 		testJsonCallback: function (jsonData){
 			action = jsonData["a"];
 			alert( "Image " + action + " works");
 		},
+	setTestMode: function(){
+		console.log("set test mode");
+		NeonImageTracker = true;
+	},
 
 	trackerInit: function () {
 		$(document).ready(function () {

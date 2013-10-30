@@ -40,7 +40,6 @@ from optparse import OptionParser
 import leargist
 import svmlight
 import ffvideo 
-from BadImageFilter import BadImageFilter
 
 from boto.exception import S3ResponseError
 from boto.s3.connection import S3Connection
@@ -169,9 +168,6 @@ class ProcessVideo(object):
         #AB Test Data
         self.abtest_thumbnails= {}
 
-        # Settings for the bad image filter
-        self.bad_image_filter = BadImageFilter(30, 0.95)
-        
         #thumbnail list of maps
         self.thumbnails = [] # thumbnail_id, url, created, enabled, width, height, type 
         
@@ -1205,7 +1201,7 @@ class Worker(multiprocessing.Process):
         self.model = model.load_model(self.model_file)
 
     def run(self):
-        _log.info("starting worker [%s] %s " %(self.pid,str(i)))
+        _log.info("starting worker [%s] " %(self.pid))
         self.load_model()
         while not self.kill_received:
           # get a task
@@ -1276,7 +1272,7 @@ class Worker(multiprocessing.Process):
           #check for new code release
           self.check_code_release_version()
 
-if __name__ == "__main__":
+def main():
     utils.neon.InitNeon()
     
     signal.signal(signal.SIGTERM, sig_handler)
@@ -1285,7 +1281,9 @@ if __name__ == "__main__":
     num_processes= options.n_workers
     if options.debug:
         num_processes = 1
-    
+   
+    global properties
+
     if options.local:
         _log.info("Running locally")
         import localproperties as properties
@@ -1294,7 +1292,8 @@ if __name__ == "__main__":
 
     
     #code version file
-    cdir = os.path.dirname(__file__)   
+    cdir = os.path.dirname(__file__)  
+    global code_version_file
     code_version_file = os.path.join(cdir,"code.version")
     
     #Load the path to the model
@@ -1318,3 +1317,6 @@ if __name__ == "__main__":
         for w in workers:
             w.join()
 
+
+if __name__ == "__main__":
+    main()

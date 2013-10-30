@@ -30,7 +30,7 @@ import json
 class TestLogger(unittest.TestCase):
 
     @mock_s3
-    def log_to_s3():
+    def test_log_to_s3():
         conn = S3Connection('test','test')
         bucket = conn.create_bucket('neon-tracker-logs')
         drainer = S3DataHandler(nlines,port,fetch_count)

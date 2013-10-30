@@ -84,19 +84,19 @@ class LogLines(tornado.web.RequestHandler):
     def get(self, *args, **kwargs):
         try:
             ttype = self.get_argument('ttype')
-            if ttype == 'imagetracker':
-                self.image_tracker()
-                return
-
-            cvid = None
             action = self.get_argument('a')
             id = self.get_argument('id')
             cts = self.get_argument('ts')
             sts = int(time.time())
             page = self.get_argument('page') #url decode
+            
+            cvid = None
+
+            #On load the current video loaded in the player is logged
             if action == 'load':
                 imgs = self.get_argument('imgs')
-                cvid = self.get_argument('cvid')
+                if ttype != 'imagetracker':
+                    cvid = self.get_argument('cvid')
             else:
                 imgs = self.get_argument('img')
             cip = self.request.remote_ip
@@ -108,14 +108,10 @@ class LogLines(tornado.web.RequestHandler):
 
         cd = TrackerData(action,id,ttype,cts,sts,page,cip,imgs,cvid)
         data = cd.to_json()
-        print data
         try:
             event_queue.put(data)
         except Exception,e:
             _log.exception("key=loglines msg=Q error %s" %e)
-        self.finish()
-
-    def image_tracker(self):
         self.finish()
 
     '''
@@ -171,7 +167,6 @@ class TestTracker(tornado.web.RequestHandler):
                     pass
             else:
                 imgs = self.get_argument('img')
-            cip = self.request.remote_ip
 
         except Exception,e:
             _log.exception("key=test msg=%s" %e) 

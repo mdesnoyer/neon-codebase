@@ -37,7 +37,14 @@ from utils.options import define, options
 define("port", default=8083, help="run on the given port", type=int)
 define("local", default=0, help="call local service", type=int)
 
+import logging
+logging.basicConfig(level=logging.DEBUG,
+            format='%(asctime)s %(levelname)s %(message)s',
+            datefmt='%m-%d %H:%M',
+            filename='services.log',
+            filemode='a')
 _log = logging.getLogger(__name__)
+
 def sig_handler(sig, frame):
     _log.debug('Caught signal: ' + str(sig) )
     tornado.ioloop.IOLoop.instance().stop()
@@ -47,14 +54,6 @@ def sig_handler(sig, frame):
 # From storage in to cache
 def CachePrimer():
     pass
-
-class BaseHandler(tornado.web.RequestHandler):
-    def save_key(self,key,value):
-        return
-
-    def get_key(self,value):
-        return
-
 
 ################################################################################
 # Helper classes  
