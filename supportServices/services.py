@@ -217,7 +217,8 @@ class AccountHandler(tornado.web.RequestHandler):
         elif "accounts" in self.request.uri.split('/')[-1]:
             try:
                 a_id = self.get_argument("account_id") 
-                self.create_account(a_id)
+                #self.create_account(a_id)
+                self.create_account_and_neon_integration(a_id)
             except:
                 data = '{"error":"account id not specified"}'
                 self.send_json_response(data,400)                
@@ -681,6 +682,31 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.finish()
         ua = neondata.NeonUserAccount(account_id,pstart,pmins)
         ua.save(updated_account)
+
+    '''
+    Create Neon user account and add neon integration
+    '''
+    @tornado.gen.engine
+    def create_account_and_neon_integration(self,a_id):
+        user = neondata.NeonUserAccount(a_id)
+        api_key = user.neon_api_key
+        nuser_data = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,a_id)
+        if not nuser_data:
+            nplatform = neondata.NeonPlatform(a_id)
+            user.add_integration(nplatform.integration_id,"neon")
+            res = yield tornado.gen.Task(user.save_integration,nplatform)
+            if res:
+                data = ''
+                self.send_json_response(data,200)
+            else:
+                data = '{"error": "account not created"}'
+                self.send_json_response(data,500)
+
+        else:
+            data = '{"error": "integration/ account already exists"}'
+            self.send_json_response(data,409)
+
+
 
     ''' Create Brightcove Account for the Neon user
     Add the integration in to the neon user account

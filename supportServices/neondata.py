@@ -375,6 +375,9 @@ class NeonUserAccount(object):
         if self.external_callback:
             self.external_callback(self)
    
+    def to_json(self):
+        return json.dumps(self, default=lambda o: o.__dict__)
+    
     '''
     Save Neon User account and corresponding integration
     '''
@@ -443,14 +446,51 @@ class NeonPlatform(AbstractPlatform):
     def __init__(self,a_id):
         AbstractPlatform.__init__(self)
         self.neon_api_key = NeonApiKey.generate(a_id)
-        self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
+        self.integration_id = '0'
+        self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + self.integration_id
         self.account_id = a_id
         
         #By default integration ID 0 represents Neon Platform Integration (via neon api)
-        self.integration_id = 0 
-    
+   
     def add_video(self,vid,job_id):
         self.videos[str(vid)] = job_id
+
+    def save(self,callback=None):
+        db_connection=DBConnection(self)
+        if callback:
+            db_connection.conn.set(self.key,self.to_json(),callback)
+        else:
+            value = self.to_json()
+            return db_connection.blocking_conn.set(self.key,value)
+    
+    @classmethod
+    def get_account(cls,api_key,callback=None):
+        def create_account(data):
+            if not data:
+                callback(None)
+            else:
+                obj = NeonPlatform.create(data)
+                callback(obj)
+
+        key = cls.__name__.lower() + + '_' + self.neon_api_key + '_' + '0' 
+        db_connection=DBConnection(cls)
+        if callback:
+            db_connection.conn.get(key,create_account) 
+        else:
+            data = db_connection.blocking_conn.get(key)
+            if data:
+                return NeonPlatform.create(data)
+
+    @staticmethod
+    def create(json_data):
+        data_dict = json.loads(json_data)
+        obj = NeonPlatform("dummy")
+
+        #populate the object dictionary
+        for key in data_dict.keys():
+            obj.__dict__[key] = data_dict[key]
+        
+        return obj
 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''

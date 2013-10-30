@@ -264,15 +264,11 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 self.write(response_data)
                 self.finish()
 
-        def get_account(result):
+        def get_yt_account(result):
 
             #For brightcove account, its saved
             if result:
-                if "neonuseraccount" in result:
-                    na = NeonUserAccount.create(result)
-                    na.add_video(vid,job_id)
-                    na.save(update_account)
-                elif "youtubeaccount" in result:
+                if "youtubeaccount" in result:
                     yt = Youtube.create(result)
                     yt.add_video(vid,job_id)
                     yt.save(update_account)
@@ -280,20 +276,25 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 _log.error("key=thumbnail_handler update account  msg=account not found or api key error")
                 self.set_status(502)
                 self.finish()
-                
+               
+        def get_platform(nplatform):
+            if nplatform:
+                nplatform.add_video(vid,job_id)
+                nplatform.save(update_account)
+            else:
+                _log.error("key=thumbnail_handler update account  msg=account not found or api key error")
 
         #DB Callback
         def saved_request(result):
-            print "SAVED REQ"
             if not result:
                 _log.error("key=thumbnail_handler  msg=request save failed: ")
                 self.set_status(502)
                 self.finish()
             else:
                 if request_type == 'youtube':
-                    YoutubePlatform.get_account(api_key,get_account) #i_id ?  
+                    YoutubePlatform.get_account(api_key,get_yt_account) #i_id ?  
                 elif request_type == 'neon':
-                    NeonUserAccount.get_account(api_key,get_account) 
+                    NeonPlatform.get_account(api_key,get_platform) 
                 else:
                     self.set_status(201)
                     self.write(response_data)
