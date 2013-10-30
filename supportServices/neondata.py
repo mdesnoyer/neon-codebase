@@ -55,12 +55,18 @@ class DBConnection(object):
     __singleton_lock = threading.Lock() #TODO: Lock for each instance
     _singleton_instance = {} 
 
-    def __init__(self,otype=None):
+    def __init__(self,*args,**kwargs):
+        otype = args[0]
         cname = None
         if otype:
-            cname = otype.__class__.__name__ if otype.__class__.__name__ != "type" else otype.__name__
-
-        #TODO : Read from the options file
+            if isinstance(otype,basestring):
+                cname = otype
+            else:
+                cname = otype.__class__.__name__ if otype.__class__.__name__ != "type" else otype.__name__
+        
+        host = options.accountDB 
+        port = options.dbPort 
+        
         if cname:
             if cname in ["AbstractPlatform","BrightcovePlatform","YoutubePlatform","NeonUserAccount"]:
                 host = options.accountDB 
@@ -71,9 +77,7 @@ class DBConnection(object):
             elif cname in ["ThumbnailIDMapper","ThumbnailURLMapper"]:
                 host = options.thumbnailDB 
                 port = options.dbPort 
-        else:
-            host = options.accountDB 
-            port = options.dbPort 
+        
         self.conn, self.blocking_conn = RedisClient.get_client(host, port)
 
     def fetch_keys_from_db(self, key_prefix, callback=None):
@@ -99,17 +103,20 @@ class DBConnection(object):
     ''' Method to update the connection object in case of db config update '''
     @classmethod
     def update_instance(cls,cname):
-        if cls._singleton_instance.has_key:
+        if cls._singleton_instance.has_key(cname):
             with cls.__singleton_lock:
-                if cls._singleton_instance.has_key:
-                    cls._singleton_instance[cname] = cls(cname = cname)
+                if cls._singleton_instance.has_key(cname):
+                    cls._singleton_instance[cname] = cls(cname)
 
     def __new__(cls, *args, **kwargs):
-        otype = args[0]
+        otype = args[0] #Arg pass can either be class name or class instance
         cname = None
         if otype:
-            #handle the case for classmethod
-            cname = otype.__class__.__name__ if otype.__class__.__name__ != "type" else otype.__name__
+            if isinstance(otype,basestring):
+                cname = otype
+            else:
+                #handle the case for classmethod
+                cname = otype.__class__.__name__ if otype.__class__.__name__ != "type" else otype.__name__
         
         if not cls._singleton_instance.has_key(cname):
             with cls.__singleton_lock:

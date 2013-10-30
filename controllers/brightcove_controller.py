@@ -31,7 +31,7 @@ from supportServices.neondata import *
 
 from utils.options import define, options
 define("port", default=8888, help="run on the given port", type=int)
-define("service_url", default="http://services.neon-lab.com", 
+define("service_url", default="http://localhost:8083/", 
         help="service url", type=basestring)
 
 import logging
@@ -99,7 +99,7 @@ class ThumbnailChangeTask(AbstractTask):
     def __init__(self,account_id,video_id,new_tid):
         self.video_id = video_id
         self.tid = new_tid
-        self.service_url = SERVICE_URL + "/" + account_id + "/updatethumbnail/" + str(video_id) 
+        self.service_url = options.service_url + "/" + account_id + "/updatethumbnail/" + str(video_id) 
     
     def execute(self):
         self.set_thumbnail()
@@ -140,7 +140,7 @@ class ThumbnailCheckTask(AbstractTask):
     def __init__(self,account_id,video_id):
 
         self.video_id = video_id
-        self.service_url = SERVICE_URL + "/" + account_id + "/checkthumbnail/" + str(video_id) 
+        self.service_url = options.service_url + "/" + account_id + "/checkthumbnail/" + str(video_id) 
     
     def execute(self):
         http_client = tornado.httpclient.AsyncHTTPClient()
@@ -361,7 +361,6 @@ def initialize_controller():
 def main():
     utils.neon.InitNeon()
     SCHED_CHECK_INTERVAL = 1000 #1s
-    global SERVICE_URL; SERVICE_URL = "http://localhost:8083"
     global taskQ
     taskQ = PriorityQ()
     global video_map
