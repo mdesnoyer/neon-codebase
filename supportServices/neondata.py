@@ -664,7 +664,7 @@ class BrightcovePlatform(AbstractPlatform):
     '''
     def verify_token_and_create_requests_for_video(self,n,callback=None):
         bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
-                self.read_token,self.write_token,self.auto_update,self.last_process_date)
+                self.read_token,self.write_token,False,self.last_process_date)
         if callback:
             bc.async_verify_token_and_create_requests(self.integration_id,n,callback)
         else:
