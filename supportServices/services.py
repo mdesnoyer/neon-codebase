@@ -4,6 +4,7 @@ This script launches the services server which hosts Services that neon web acco
 - Neon Account managment
 - Submit video processing request via Neon API, Brightcove, Youtube
 '''
+import daemon
 import os.path
 import sys
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -1265,6 +1266,7 @@ class BcoveHandler(tornado.web.RequestHandler):
 ################################################################
 
 def main():
+    utils.neon.InitNeon()
     application = tornado.web.Application([
         (r'/api/v1/removeaccount(.*)', DeleteHandler),
         (r'/api/v1/accounts(.*)', AccountHandler),
@@ -1283,5 +1285,5 @@ def main():
     tornado.ioloop.IOLoop.instance().start()
 
 if __name__ == "__main__":
-    utils.neon.InitNeon()
+    #with daemon.DaemonContext():
     main()
