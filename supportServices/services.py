@@ -500,7 +500,8 @@ class AccountHandler(tornado.web.RequestHandler):
     @tornado.gen.engine
     def get_video_status_brightcove(self,i_id,vids):
         result = {}
-        incomplete_states = [neondata.RequestState.SUBMIT,neondata.RequestState.PROCESSING,neondata.RequestState.REQUEUED]
+        incomplete_states = [neondata.RequestState.SUBMIT,neondata.RequestState.PROCESSING,
+                                neondata.RequestState.REQUEUED,neondata.RequestState.INT_ERROR]
         
         #1 Get job ids for the videos from account, get the request status
         jdata = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,self.api_key,i_id)

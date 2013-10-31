@@ -15,7 +15,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG,
         format='%(asctime)s %(levelname)s %(message)s',
         datefmt='%m-%d %H:%M',
-        filename='/mnt/logs/neon/brightcovepoll.log',
+        filename='/mnt/logs/neon/brightcovecron.log',
         filemode='a')
 _log = logging.getLogger(__name__)
 
