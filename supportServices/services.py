@@ -577,6 +577,8 @@ class AccountHandler(tornado.web.RequestHandler):
             for thumb in vres.thumbnails:
                 if thumb["chosen"] == True:
                     vres.current_thumbnail = thumb["thumbnail_id"]
+                    if "neon" in thumb["type"]:
+                        vres.status = "active"
 
         #convert to dict
         vresult = []
