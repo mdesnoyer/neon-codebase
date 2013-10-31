@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
+
 from datetime import datetime
 from mock import MagicMock
 from mrjob.protocol import *
@@ -9,6 +15,8 @@ import sqlite3
 import tempfile
 import unittest
 import urllib2
+import utils.neon
+from utils.options import define, options
 
 from hourly_event_stats_mr import *
 
@@ -255,7 +263,7 @@ class TestDatabaseWriting(unittest.TestCase):
         mysql.connector.connect = self.dbconnect
         try:
             cursor = self.ramdb.cursor()
-            cursor.execute('drop table %s' % self.mr.options.stats_table)
+            cursor.execute('drop table hourly_events')
             cursor.execute('drop table last_update')
             self.ramdb.commit()
         except Exception as e:
@@ -267,7 +275,7 @@ class TestDatabaseWriting(unittest.TestCase):
         results, counters = run_single_step(self.mr, '', step=2,
                                             step_type='reducer')
         cursor = self.ramdb.cursor()
-        cursor.execute('select * from %s' % self.mr.options.stats_table)
+        cursor.execute('select * from hourly_events')
         self.assertEqual(len(cursor.fetchall()), 0)
         self.assertEqual(len(cursor.description), 4)
         self.assertEqual([x[0] for x in cursor.description],
@@ -284,8 +292,8 @@ class TestDatabaseWriting(unittest.TestCase):
             step=2,
             step_type='reducer')
         cursor = self.ramdb.cursor()
-        cursor.execute('select thumbnail_id, hour, loads, clicks from %s' % 
-                       self.mr.options.stats_table)
+        cursor.execute('select thumbnail_id, hour, loads, clicks '
+                       'from hourly_events')
         results = {}
         for data in cursor.fetchall():
             results[(data[0], data[1])] = (data[2], data[3])
@@ -295,8 +303,8 @@ class TestDatabaseWriting(unittest.TestCase):
         self.assertEqual(results[('imgA', hr2str(54))], (12, 0))
         self.assertEqual(results[('imgB', hr2str(56))], (0, 9))
 
-        cursor.execute('select logtime from last_update where tablename = ?',
-                       (self.mr.options.stats_table,))
+        cursor.execute('select logtime from last_update where '
+                       'tablename = "hourly_events"')
         self.assertEqual(cursor.fetchone()[0], hr2str(56))
 
     def test_replace_data(self):
@@ -318,8 +326,8 @@ class TestDatabaseWriting(unittest.TestCase):
                                 step=2,
                                 step_type='reducer')
         cursor = self.ramdb.cursor()
-        cursor.execute('select thumbnail_id, hour, loads, clicks from %s' % 
-                       self.mr.options.stats_table)
+        cursor.execute('select thumbnail_id, hour, loads, clicks from '
+                       'hourly_events')
         results = {}
         for data in cursor.fetchall():
             results[(data[0], data[1])] = (data[2], data[3])
@@ -329,38 +337,40 @@ class TestDatabaseWriting(unittest.TestCase):
         self.assertEqual(results[('imgA', hr2str(54))], (12, 0))
         self.assertEqual(results[('imgB', hr2str(56))], (0, 9))
 
-        cursor.execute('select logtime from last_update where tablename = ?',
-                       (self.mr.options.stats_table,))
+        cursor.execute('select logtime from last_update where '
+                       'tablename = "hourly_events"')
         self.assertEqual(cursor.fetchone()[0], sec2str(201605))
 
     def test_increment_data(self):
         '''Test when the counts are incremented.'''
-        self.mr.options.increment_stats = True
-        run_single_step(self.mr,
-                        encode([(('imgA', 56),(5, 'click')),
-                                (('imgA', 56),(55, 'load')),
-                                (('imgB', 56),(9, 'click')),
-                                (('imgA', 54),(12, 'load'))]),
-                                step=2,
-                                step_type='reducer')
-        run_single_step(self.mr,
-                        encode([(('imgA', 56),(2, 'click')),
-                                (('imgA', 56),(10, 'load')),
-                                (('imgA', 59),(16, 'load'))]),
-                                step=2,
-                                step_type='reducer')
-        cursor = self.ramdb.cursor()
-        cursor.execute('select thumbnail_id, hour, loads, clicks from %s' % 
-                       self.mr.options.stats_table)
-        results = {}
-        for data in cursor.fetchall():
-            results[(data[0], data[1])] = (data[2], data[3])
+        with options._set_bounded(
+                'stats.hourly_event_stats_mr.increment_stats', 1):
+            
+            run_single_step(self.mr,
+                            encode([(('imgA', 56),(5, 'click')),
+                                    (('imgA', 56),(55, 'load')),
+                                    (('imgB', 56),(9, 'click')),
+                                    (('imgA', 54),(12, 'load'))]),
+                                    step=2,
+                                    step_type='reducer')
+            run_single_step(self.mr,
+                            encode([(('imgA', 56),(2, 'click')),
+                                    (('imgA', 56),(10, 'load')),
+                                    (('imgA', 59),(16, 'load'))]),
+                                    step=2,
+                                    step_type='reducer')
+            cursor = self.ramdb.cursor()
+            cursor.execute('select thumbnail_id, hour, loads, clicks from '
+                           'hourly_events')
+            results = {}
+            for data in cursor.fetchall():
+                results[(data[0], data[1])] = (data[2], data[3])
 
-        self.assertEqual(len(results.items()), 4)
-        self.assertEqual(results[('imgA', hr2str(56))], (65, 7))
-        self.assertEqual(results[('imgA', hr2str(54))], (12, 0))
-        self.assertEqual(results[('imgB', hr2str(56))], (0, 9))
-        self.assertEqual(results[('imgA', hr2str(59))], (16, 0))
+            self.assertEqual(len(results.items()), 4)
+            self.assertEqual(results[('imgA', hr2str(56))], (65, 7))
+            self.assertEqual(results[('imgA', hr2str(54))], (12, 0))
+            self.assertEqual(results[('imgB', hr2str(56))], (0, 9))
+            self.assertEqual(results[('imgA', hr2str(59))], (16, 0))
 
     def test_connection_error(self):
         mysql.connector.connect = MagicMock(
@@ -394,7 +404,7 @@ class TestEndToEnd(unittest.TestCase):
         urllib2.urlopen = self.urlopen
         mysql.connector.connect = self.dbconnect
         try:
-            self.ramdb.execute('drop table %s' % self.mr.options.stats_table)
+            self.ramdb.execute('drop table hourly_events')
         except Exception as e:
             pass
         self.ramdb.close()
@@ -440,8 +450,8 @@ class TestEndToEnd(unittest.TestCase):
 
         # Finally, check the database to make sure it says what we want
         cursor = self.ramdb.cursor()
-        cursor.execute('select thumbnail_id, hour, loads, clicks from %s' % 
-                       self.mr.options.stats_table)
+        cursor.execute('select thumbnail_id, hour, loads, clicks from '
+                       'hourly_events')
         results = {}
         for data in cursor.fetchall():
             results[(data[0], data[1])] = (data[2], data[3])
@@ -452,9 +462,10 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual(results[('68367sgdhs', hr2str(5))], (1, 0))
         self.assertEqual(results[('faefr42345dsfg', hr2str(5))], (1, 1))
 
-        cursor.execute('select logtime from last_update where tablename = ?',
-                       (self.mr.options.stats_table,))
+        cursor.execute('select logtime from last_update where '
+                       'tablename = "hourly_events"')
         self.assertEqual(cursor.fetchone()[0], sec2str(19810))
 
 if __name__ == '__main__':
+    utils.neon.InitNeonTest()
     unittest.main()

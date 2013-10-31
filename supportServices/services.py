@@ -1259,8 +1259,6 @@ class BcoveHandler(tornado.web.RequestHandler):
 ################################################################
 
 def main():
-    utils.neon.InitNeon()
-    
     application = tornado.web.Application([
         (r'/api/v1/removeaccount(.*)', DeleteHandler),
         (r'/api/v1/accounts(.*)', AccountHandler),
@@ -1279,4 +1277,5 @@ def main():
     tornado.ioloop.IOLoop.instance().start()
 
 if __name__ == "__main__":
+    utils.neon.InitNeon()
     main()

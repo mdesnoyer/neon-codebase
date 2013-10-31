@@ -357,7 +357,6 @@ def initialize_controller():
 ###################################################################################
 
 def main():
-    utils.neon.InitNeon()
     SCHED_CHECK_INTERVAL = 1000 #1s
     taskQ = PriorityQ()
     taskmgr = TaskManager(taskQ)
@@ -369,4 +368,5 @@ def main():
 
 # ============= MAIN ======================== #
 if __name__ == "__main__":
-   main()
+    utils.neon.InitNeon()
+    main()

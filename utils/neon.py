@@ -12,6 +12,15 @@ from . import logs
 from . import options
 
 def InitNeon():
-    '''Perform the initialization for the Neon environment.'''
-    options.parse_options()
+    '''Perform the initialization for the Neon environment.
+
+    Returns the leftover arguments
+    '''
+    garb, args = options.parse_options()
     logs.AddConfiguredLogger()
+
+    return args
+
+def InitNeonTest():
+    '''Perform the initialization for the Neon unittest environment.'''
+    options.parse_options()

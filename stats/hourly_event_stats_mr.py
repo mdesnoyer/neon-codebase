@@ -7,6 +7,12 @@ the external url to an internal thumbnail id.
 Copyright: 2013 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
+    
 from datetime import datetime
 import json
 import logging
@@ -17,37 +23,31 @@ import mysql.connector as sqldb
 import time
 import urllib
 import urllib2
+import utils.neon
 
 _log = logging.getLogger(__name__)
 
+from utils.options import define, options
+
+define('stats_host', default='stats.cnvazyzlgq2v.us-east-1.rds.amazonaws.com',
+       help='Host of the stats database')
+define('stats_port', type=int, default=3306,
+       help='Port to the stats database')
+define('stats_user', default='mrwriter', help='User for the stats database')
+define('stats_pass', default='kjge8924qm',
+       help='Password for the stats database')
+define('stats_db', default='stats_dev', help='Stats database to connect to')
+define('increment_stats', type=int, default=0,
+       help='If true, stats are incremented. Otherwise, they are overwritten')
+define('stats_table', default='hourly_events',
+       help='Table in the stats database to write to')
+define('videodb_url', default='http://localhost:8080',
+       help='url for the video database call')
+
+
 class HourlyEventStats(MRJob):
     INPUT_PROTOCOL = mrjob.protocol.RawProtocol
-    INTERNAL_PROTOCOL = mrjob.protocol.PickleProtocol
-    
-    def configure_options(self):
-        super(HourlyEventStats, self).configure_options()
-        self.add_passthrough_option('--stats_host',
-            default='stats.cnvazyzlgq2v.us-east-1.rds.amazonaws.com',
-            help='Host of the stats database')
-        self.add_passthrough_option('--stats_port', type='int',
-                                    default=3306,
-                                    help='Port to the stats database')
-        self.add_passthrough_option('--stats_user', default='mrwriter',
-                                    help='User for the stats database')
-        self.add_passthrough_option('--stats_pass', default='kjge8924qm',
-                                    help='Password for the stats database')
-        self.add_passthrough_option('--stats_db', default='stats_dev',
-                                    help='Stats database to connect to')
-        self.add_passthrough_option('--increment_stats', action='store_true',
-            default=False,
-            help='If true, stats are incremented. Otherwise, they are overwritten')
-        self.add_passthrough_option('--stats_table', default='hourly_events',
-                                    help='Table in the stats database to write to')
-        self.add_passthrough_option('--videodb_url',
-                                    default='http://localhost:8080',
-                                    help='url for the video database call')
-        
-            
+    INTERNAL_PROTOCOL = mrjob.protocol.PickleProtocol            
 
     def mapper_get_events(self, line, _):
         '''Reads the json log and outputs event data.
@@ -114,7 +114,7 @@ class HourlyEventStats(MRJob):
             return
         
         try:
-            stream = urllib2.urlopen(self.options.videodb_url,
+            stream = urllib2.urlopen(options.videodb_url,
                                      urllib.urlencode({'url':event[1]}),
                                      60)
             data = json.load(stream)
@@ -130,7 +130,7 @@ class HourlyEventStats(MRJob):
             yield (event[0], data['tid'], event[2]), count
         except urllib2.URLError as e:
             _log.exception('Error connecting to: %s' % 
-                           self.options.videodb_url)
+                           options.videodb_url)
             self.increment_counter('HourlyEventStatsErrors',
                                    'VideoDBConnectionError', 1)
         except KeyError as e:
@@ -158,7 +158,7 @@ class HourlyEventStats(MRJob):
         '''Writes the latest log time to the database.'''
         self.statscursor.execute(
             '''REPLACE INTO last_update (tablename, logtime) VALUES (?, ?)''',
-            (self.options.stats_table, datetime.utcfromtimestamp(time)))
+            (options.stats_table, datetime.utcfromtimestamp(time)))
 
     def reducer_write2db(self, img_hr, count_events):
         '''Writes the event counts to the database.
@@ -178,37 +178,37 @@ class HourlyEventStats(MRJob):
         clicks = counts.setdefault('click', 0)
         hourdate = datetime.utcfromtimestamp(hours * 3600)
 
-        if self.options.increment_stats:
+        if options.increment_stats:
             self.statscursor.execute(
                 '''SELECT loads, clicks from %s 
                 where thumbnail_id = ? and hour = ?''' %
-              self.options.stats_table, (img_id, hourdate))
+              options.stats_table, (img_id, hourdate))
             result = self.statscursor.fetchone()
             if result is None:
                 self.statscursor.execute(
                     '''INSERT INTO %s (thumbnail_id, hour, loads, clicks)
-                    VALUES (?, ?, ?, ?) ''' % self.options.stats_table,
+                    VALUES (?, ?, ?, ?) ''' % options.stats_table,
                     (img_id, hourdate, loads, clicks))
             else:
                 self.statscursor.execute(
                     '''UPDATE %s set loads=?, clicks=? where
                     thumbnail_id = ? and hour = ?''' %
-                    self.options.stats_table,
+                    options.stats_table,
                     (loads + result[0], clicks + result[1], img_id, hourdate))
         else:
             self.statscursor.execute(
                 '''REPLACE INTO %s (thumbnail_id, hour, loads, clicks) 
-                VALUES (?, ?, ?, ?) ''' % self.options.stats_table,
+                VALUES (?, ?, ?, ?) ''' % options.stats_table,
                 (img_id, hourdate, loads, clicks))
 
     def statsdb_connect(self):
         try:
             self.statsdb = sqldb.connect(
-                user=self.options.stats_user,
-                password=self.options.stats_pass,
-                host=self.options.stats_host,
-                port=self.options.stats_port,
-                database=self.options.stats_db)
+                user=options.stats_user,
+                password=options.stats_pass,
+                host=options.stats_host,
+                port=options.stats_port,
+                database=options.stats_db)
         except sqldb.Error as e:
             _log.exception('Error connecting to stats db: %s' % e)
             raise
@@ -220,7 +220,7 @@ class HourlyEventStats(MRJob):
                                  loads INT NOT NULL DEFAULT 0,
                                  clicks INT NOT NULL DEFAULT 0,
                                  UNIQUE (thumbnail_id, hour))''' %
-                                 (self.options.stats_table,))
+                                 (options.stats_table,))
         self.statscursor.execute('''CREATE TABLE IF NOT EXISTS last_update (
                                  tablename VARCHAR(256) NOT NULL UNIQUE,
                                  logtime DATETIME)''')
@@ -243,10 +243,3 @@ class HourlyEventStats(MRJob):
                     reducer_init=self.statsdb_connect,
                     reducer=self.reducer_write2db,
                     reducer_final=self.statsdb_disconnect)]
-            
-        
-if __name__ == '__main__':
-    mrjob.util.log_to_stream(
-        __name__,
-        format='%(asctime)s %(levelname)s:%(name)s %(message)s')
-    HourlyEventStats.run()

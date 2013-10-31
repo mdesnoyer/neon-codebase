@@ -56,6 +56,7 @@ Modelled after the tornado options module with a few differences.
 '''
 import boto
 import boto.utils
+import contextlib
 import inspect
 import logging
 import optparse
@@ -174,6 +175,24 @@ class OptionParser(object):
         with self.__dict__['lock']:
             return self._options[global_name].value()
 
+    @contextlib.contextmanager
+    def _set_bounded(self, global_name, value):
+        '''Sets the value of an option in a bounded region.
+
+        This should only be used in testing setups and lets you do:
+        with options._set_bounded('my.var', 95):
+          do_stuff()
+        '''
+        old_val = self._options[global_name]._value
+        with self.__dict__['lock']:
+            self._options[global_name].set(value)
+
+        try:
+            yield
+        finally:
+            with self.__dict__['lock']:
+                self._options[global_name].set(old_val)
+
     def _parse_command_line(self, args=None, usage='%prog [options]'):
         '''Parse the command line.'''
         if args is None:
@@ -200,8 +219,10 @@ class OptionParser(object):
                 group = cmd_parser
             group.add_option('--%s' % name,
                              default=None,
+                             metavar=name.split('.')[-1].upper(),
                              type=option.type.__name__,
-                             help=option.help)
+                             help='%s [default: %s]' % (option.help,
+                                                       option.default))
 
         for group in groups.itervalues():
             cmd_parser.add_option_group(group)
