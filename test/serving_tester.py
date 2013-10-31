@@ -20,7 +20,6 @@ if sys.path[0] <> base_path:
 import atexit
 import clickTracker.clickLogServer
 import clickTracker.logDatatoS3
-import controllers.brightcove_controller
 import logging
 import mastermind.server
 import mysql.connector as sqldb
@@ -31,8 +30,10 @@ import signal
 import stats.stats_processor
 import subprocess
 import supportServices.services
+from supportServices import neondata
 import tempfile
 import time
+import unittest
 import utils.neon
 
 from utils.options import define, options
@@ -46,30 +47,53 @@ define('stats_db_pass', help='Password for the stats db connection',
 
 _log = logging.getLogger(__name__)
 
-_subprocs = []
-@atexit.register
-def shutdown():
-    _log.warn('Shutting down now')
-    for proc in _subprocs:
-        proc.terminate()
+class TestServingSystem(unittest.TestCase):
 
-    still_running = True
-    count = 0
-    while still_running and count < 20:
-        still_running = False
-        for proc in _subprocs:
-            if proc.poll() is None:
-                still_running = True
-        time.sleep(1)
-        count += 1
+    def setUp(self):
+        #TODO: Clear the databases
 
-    if still_running:
-        for proc in _subprocs:
-            if proc.poll() is None:
-                _log.error('Process %i not down. Killing' % proc.pid)
-                proc.kill()
-    _log.info('Done shutting down')
-    sys.exit(0)
+        #TODO: Add a couple of bare bones entries to the video db?
+
+        #TODO: Setup endpoint to capture directives from mastermind
+        pass
+
+    def tearDown(self):
+        pass
+
+    def simulateLoads(self, n_loads, thumbs, target_ctr):
+        '''Simulate a set of loads and clicks
+
+        n_loads - Number of player-like loads to generate
+        thumbs - List of thumbnail urls
+        target_str - List of target CTR for each thumb.
+        '''
+        pass
+
+    def assertDirectiveCaptured(self, directive, timeout=30):
+        '''Verifies that a given directive is received.
+
+        Inputs:
+        directive - (video_id, [(thumb_id, frac)])
+        timeout - How long to wait for the directive
+        '''
+        pass
+
+    def getStats(self, video_id, thumb_id):
+        '''Retrieves the statistics about a given thumb.
+
+        Inputs:
+        video_id - Video id
+        thumb_id - Thumbnail id
+
+        Outputs:
+        (loads, clicks)
+        '''
+        pass
+        
+
+    #TODO: Add helper functions to add stuff to the video database?
+
+    #TODO: Write the actual tests
 
 def MultiprocWrapper(object):
     '''A wrapper to make a multiprocess.Process look like a subprocess.Process.
@@ -143,13 +167,6 @@ def LaunchMastermind():
     proc.daemon = True
     proc.start()
 
-def LaunchABControllers():
-    _log.info('Launching brightcove controller')
-    proc = multiprocessing.Process(
-        target=controllers.brightcove_controller.main)
-    proc.daemon = True
-    proc.start()
-
 def LaunchClickLogServer():
     _log.info('Launching click log server')
     proc = multiprocessing.Process(
@@ -162,24 +179,55 @@ def LaunchStatsProcessor():
     proc = multiprocessing.Process(
         target=stats.stats_processor.main)
     _subprocs.append(MultiprocWrapper(proc))
-    proc.start()    
+    proc.start()
+
+_subprocs = []
+def shutdown(subprocs):
+    import logging
+    import time
+    _log = logging.getLogger(__name__)
+    _log.warn('Shutting down now')
+    for proc in subprocs:
+        try:
+            proc.terminate()
+        except OSError as e:
+            if e.errno <> 3:
+                raise
+
+    still_running = True
+    count = 0
+    while still_running and count < 20:
+        still_running = False
+        for proc in subprocs:
+            if proc.poll() is None:
+                still_running = True
+        time.sleep(1)
+        count += 1
+
+    if still_running:
+        for proc in subprocs:
+            if proc.poll() is None:
+                _log.error('Process %i not down. Killing' % proc.pid)
+                proc.kill()
+    _log.info('Done shutting down')
+    sys.exit(0)
 
 def main():    
     signal.signal(signal.SIGTERM, sys.exit)
+    atexit.register(shutdown, _subprocs)
 
     LaunchStatsDb()
     LaunchVideoDb()
     LaunchSupportServices()
     LaunchMastermind()
-    LaunchABControllers()
     LaunchClickLogServer()
     LaunchStatsProcessor()
 
     time.sleep(100000)
-    RunTests()
+    unittest.main()
     
 
 if __name__ == "__main__":
     utils.neon.InitNeonTest()
-	main()
+    main()
 

@@ -38,11 +38,6 @@ define("port", default=8083, help="run on the given port", type=int)
 define("local", default=0, help="call local service", type=int)
 
 import logging
-logging.basicConfig(level=logging.DEBUG,
-            format='%(asctime)s %(levelname)s %(message)s',
-            datefmt='%m-%d %H:%M',
-            filename='/mnt/logs/neon/services.log',
-            filemode='a')
 _log = logging.getLogger(__name__)
 
 def sig_handler(sig, frame):

@@ -65,7 +65,6 @@ class S3DataHandler(object):
     def __init__(self,s3_line_count,port,fetch_count,s3bucket=None):
         S3_ACCESS_KEY = 'AKIAJ5G2RZ6BDNBZ2VBA' 
         S3_SECRET_KEY = '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'
-        s3bucket_name = 'neon-tracker-logs'
         self.s3conn = S3Connection(aws_access_key_id=S3_ACCESS_KEY,
                                    aws_secret_access_key =S3_SECRET_KEY)
         self.s3bucket = s3bucket or Bucket(connection=self.s3conn,
@@ -76,7 +75,8 @@ class S3DataHandler(object):
         self.sleep = 1
         self.nlines = 0
         self.fetch_count = fetch_count
-        self.fetch_url = 'http://localhost:' + str(port) + '/getlines?count=' + str(fetch_count) #go through the loadbalancer
+        self.fetch_url = ('http://localhost:%i/getlines?count=%i' 
+                          % (port, fetch_count)) #go through the loadbalancer
         self.s3_line_count = s3_line_count
         self.lines_to_save = ''
 
