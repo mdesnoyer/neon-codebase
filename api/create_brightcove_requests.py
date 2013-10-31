@@ -16,12 +16,12 @@ import json
 host = '127.0.0.1'
 port = 6379
 rclient = blockingRedis.StrictRedis(host,port)
-accounts = rclient.keys('brightcoveaccount_*')
+accounts = rclient.keys('brightcoveplatform*')
 for accnt in accounts:
     api_key = accnt.split('_')[-2]
     i_id = accnt.split('_')[-1]
     #retrieve the blob and create the object
     jdata = rclient.get(accnt) 
-    bc = BrightcoveAccount.create(jdata)
+    bc = BrightcovePlatform.create(jdata)
     bc.check_feed_and_create_api_requests()
 

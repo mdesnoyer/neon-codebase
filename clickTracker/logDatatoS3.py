@@ -135,9 +135,10 @@ class S3DataHandler(object):
             try:
                 k.set_contents_from_string(self.lines_to_save)
                 self.nlines = 0
+                self.lines_to_save = ''
+                _log.info("key=do_work msg=saved to s3")
             except S3ResponseError,e:
                 pass
-            print "Saced to S3"
 
     def run(self):
         while True:
