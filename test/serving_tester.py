@@ -20,7 +20,6 @@ if sys.path[0] <> base_path:
 import atexit
 import clickTracker.clickLogServer
 import clickTracker.logDatatoS3
-import controllers.brightcove_controller
 import logging
 import mastermind.server
 import mysql.connector as sqldb
@@ -168,13 +167,6 @@ def LaunchMastermind():
     proc.daemon = True
     proc.start()
 
-def LaunchABControllers():
-    _log.info('Launching brightcove controller')
-    proc = multiprocessing.Process(
-        target=controllers.brightcove_controller.main)
-    proc.daemon = True
-    proc.start()
-
 def LaunchClickLogServer():
     _log.info('Launching click log server')
     proc = multiprocessing.Process(
@@ -228,7 +220,6 @@ def main():
     LaunchVideoDb()
     LaunchSupportServices()
     LaunchMastermind()
-    LaunchABControllers()
     LaunchClickLogServer()
     LaunchStatsProcessor()
 
