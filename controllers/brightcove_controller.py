@@ -241,10 +241,12 @@ class BrightcoveABController(object):
 
     timeslice = 71 *60    #timeslice for experiment
     cushion_time = 10 *60 #cushion time for data extrapolation
+    seed = 10
 
     def __init__(self,delay=0):
         self.neon_service_url = options.service_url 
         self.max_update_delay = delay
+        random.seed(BrightcoveABController.seed)
 
     def thumbnail_change_scheduler(self,video_id,distribution):
         

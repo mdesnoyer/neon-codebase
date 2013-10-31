@@ -43,7 +43,7 @@ MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
 logging.basicConfig(level=logging.DEBUG,
         format='%(asctime)s %(levelname)s %(message)s',
         datefmt='%m-%d %H:%M',
-        filename='neonserver.log',
+        filename='/mnt/logs/neon/neonserver.log',
         filemode='a')
 
 _log = logging.getLogger(__name__)

@@ -30,7 +30,8 @@ import datetime
 import time
 import sys
 import os
-import api.brightcove_api
+#import api.brightcove_api
+from api import brightcove_api
 import api.youtube_api
 from PIL import Image
 from StringIO import StringIO

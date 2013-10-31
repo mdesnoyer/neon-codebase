@@ -17,11 +17,6 @@ import urllib
 import properties
 from PIL import Image
 
-from boto.s3.connection import S3Connection
-from boto.exception import S3ResponseError
-from boto.s3.key import Key
-from boto.s3.bucket import Bucket
-
 import time
 import os
 
@@ -30,6 +25,9 @@ import supportServices.neondata
 import utils.logs
 import utils.neon
 _log = utils.logs.FileLogger("brighcove_api")
+
+#from utils.options import define, options
+#define("local", default=1, help="create neon requests locally", type=int)
 
 ## NOTE : All video ids used in the class refer to the Brightcove platform VIDEO ID
 class BrightcoveApi(object):
@@ -42,8 +40,8 @@ class BrightcoveApi(object):
         self.write_url = "http://api.brightcove.com/services/post"
         self.autosync = autosync
         self.last_publish_date = publish_date if publish_date else time.time()
-        self.local = local
-        if local:
+        self.local = local 
+        if self.local:
             self.neon_uri = "http://localhost:8081/api/v1/submitvideo/"
         else:
             self.neon_uri = "http://thumbnails.neon-lab.com/api/v1/submitvideo/" 

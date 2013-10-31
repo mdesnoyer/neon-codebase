@@ -41,7 +41,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG,
             format='%(asctime)s %(levelname)s %(message)s',
             datefmt='%m-%d %H:%M',
-            filename='services.log',
+            filename='/mnt/logs/neon/services.log',
             filemode='a')
 _log = logging.getLogger(__name__)
 
@@ -533,6 +533,7 @@ class AccountHandler(tornado.web.RequestHandler):
             if request.state in incomplete_states:
                 t_urls = []; thumbs = []
                 t_urls.append(request.previous_thumbnail)
+                #Create TID 0 as a temp place holder for previous thumbnail during processing stage
                 tm = neondata.ThumbnailMetaData(0,t_urls,ctime,0,0,"brightcove",0,0)
                 thumbs.append(tm.to_dict())
             elif request.state is neondata.RequestState.FAILED:
@@ -574,9 +575,18 @@ class AccountHandler(tornado.web.RequestHandler):
         #4. Set the default thumbnail for each of the video
         for res in result:
             vres = result[res]
+            bcove_thumb_id = None
             for thumb in vres.thumbnails:
                 if thumb["chosen"] == True:
                     vres.current_thumbnail = thumb["thumbnail_id"]
+                    if "neon" in thumb["type"]:
+                        vres.status = "active"
+
+                if thumb["type"] == "brightcove":
+                    bcove_thumb_id = thumb["thumbnail_id"]
+
+            if vres.status == "finished" and vres.current_thumbnail == 0:
+                vres.current_thumbnail = bcove_thumb_id
 
         #convert to dict
         vresult = []
