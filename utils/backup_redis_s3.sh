@@ -128,15 +128,16 @@ for instance in `ls $REDIS_CONF/redis-prod*.conf`; do
 	RDB=`cat ${CONFIGFILE} | grep dbfilename | awk '{print $2}'`
 	AOF=`echo ${REDIS_BASE}/${AOF}`
 	RDB=`echo ${REDIS_BASE}/${RDB}`
-
+	AOFEXT=`echo ${AOF}|awk -F . '{print $NF}'`
 	## build tarball
 	f_INFO "${INSTANCENAME}  Begin Tarball"
-	tar cvzf ${REDIS_BASE}/${TS}_${INSTANCENAME}.tar.gz ${RDB} ${AOF} > /dev/null
+	cd ${REDIS_BASE}
+	tar cvzf ${TS}_${INSTANCENAME}.tar.gz -C ${REDIS_BASE} *.${AOFEXT} > /dev/null
 	f_INFO "${INSTANCENAME}  Complete Tarball"
 
 	## upload tarball to s3
 	f_INFO "${INSTANCENAME}  Begin S3 Upload"
-	s3cmd --no-progress put ${REDIS_BASE}/${TS}_${INSTANCENAME}.tar.gz $DESTINATION/${TS}_${INSTANCENAME}.tar.gz
+	s3cmd --no-progress put ${TS}_${INSTANCENAME}.tar.gz $DESTINATION/${TS}_${INSTANCENAME}.tar.gz
 	f_INFO "${INSTANCENAME}  Complete S3 Upload"
 
 	## check that the tarball exists on S3
@@ -150,7 +151,7 @@ for instance in `ls $REDIS_CONF/redis-prod*.conf`; do
 
 	## cleanup local zip file
 	f_INFO "${INSTANCENAME}  Begin Removing Local Tarball"
-	rm -f ${REDIS_BASE}/${TS}_${INSTANCENAME}.tar.gz
+	rm -f ${TS}_${INSTANCENAME}.tar.gz
 	f_INFO "${INSTANCENAME}  Complete Removing Local Tarball"
 done
 
