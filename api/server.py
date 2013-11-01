@@ -394,8 +394,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 else:
                     self.set_status(201)
                     self.write(response_data)
-
-            self.finish()
+                    self.finish()
 
         except Exception,e:
             _log.error("key=thumbnail_handler msg=" + e.__str__());

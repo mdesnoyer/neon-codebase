@@ -473,7 +473,7 @@ class NeonPlatform(AbstractPlatform):
                 obj = NeonPlatform.create(data)
                 callback(obj)
 
-        key = cls.__name__.lower() + + '_' + self.neon_api_key + '_' + '0' 
+        key = cls.__name__.lower()  + '_' + api_key + '_' + '0' 
         db_connection=DBConnection(cls)
         if callback:
             db_connection.conn.get(key,create_account) 

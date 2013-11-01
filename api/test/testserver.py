@@ -146,7 +146,7 @@ class DemoHandler(tornado.web.RequestHandler):
                 check_status(job_id)
 
         def check_status(job_id):
-            client_url = 'http://localhost:8081/jobstatus?api_key=' +API_KEY + '&job_id=' + job_id
+            client_url = 'http://localhost:8081/api/v1/jobstatus?api_key=' +API_KEY + '&job_id=' + job_id
             tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
             http_client = tornado.httpclient.AsyncHTTPClient()
             req = tornado.httpclient.HTTPRequest(url = client_url, method = "GET",request_timeout = 60.0, connect_timeout = 10.0)
