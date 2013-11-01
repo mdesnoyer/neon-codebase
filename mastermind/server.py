@@ -17,7 +17,8 @@ from datetime import datetime
 from mastermind import directive_pusher
 import json
 import logging
-import mysql.connector as sqldb
+import MySQLdb as sqldb
+import stats.db
 from supportServices import neondata
 import time
 import threading
@@ -54,6 +55,10 @@ define('stats_db', default='stats_dev', help='Stats database to connect to')
 define('stats_table', default='hourly_events',
        help='Table in the stats database to write to')
 define('stats_db_polling_delay', default=57, type=float,
+       help='Number of seconds between polls of the video db')
+
+# Video db options
+define('video_db_polling_delay', default=300, type=float,
        help='Number of seconds between polls of the video db')
 
 _log = logging.getLogger(__name__)
@@ -174,10 +179,10 @@ class StatsDBWatcher(threading.Thread):
         try:
             conn = sqldb.connect(
                 user=options.stats_user,
-                password=options.stats_pass,
+                passwd=options.stats_pass,
                 host=options.stats_host,
                 port=options.stats_port,
-                database=options.stats_db)
+                db=options.stats_db)
         except sqldb.Error as e:
             _log.exception('Error connecting to stats db: %s' % e)
             return
@@ -185,12 +190,14 @@ class StatsDBWatcher(threading.Thread):
         cursor = conn.cursor()
 
         # See if there are any new entries
-        cursor.execute('''SELECT logtime FROM 
-                       last_update WHERE tablename = ?''',
-                       (options.stats_table,))
+        stats.db.execute(
+            cursor,
+            '''SELECT logtime FROM last_update WHERE tablename = %s''',
+            (options.stats_table,))
         result = cursor.fetchall()
         if len(result) == 0:
             _log.error('Cannot determine when the database was last updated')
+            self.is_loaded.set()
             return
         cur_update = datetime.strptime(result[0][0], '%Y-%m-%d %H:%M:%S')
         if self.last_update is None or cur_update > self.last_update:
@@ -295,10 +302,10 @@ class GetDirectives(tornado.web.RequestHandler):
 def main():   
     mastermind, ab_manager = initialize()
 
-    videoDbThread = VideoDBWatcher()
+    videoDbThread = VideoDBWatcher(mastermind, ab_manager)
     videoDbThread.start()
     videoDbThread.wait_until_loaded()
-    statsDbThread = StatsDBWatcher()
+    statsDbThread = StatsDBWatcher(mastermind, ab_manager)
     statsDbThread.start()
     statsDbThread.wait_until_loaded()
 
@@ -309,6 +316,7 @@ def main():
         (r'/get_directives', GetDirectives,
          dict(mastermind=mastermind, ab_manager=ab_manager))])
     server = tornado.httpserver.HTTPServer(application)
+    utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)
     
     tornado.ioloop.IOLoop.instance().start()

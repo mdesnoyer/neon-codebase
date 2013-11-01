@@ -8,7 +8,7 @@ if sys.path[0] <> base_path:
 from datetime import datetime
 from mock import MagicMock
 from mrjob.protocol import *
-import mysql.connector
+import MySQLdb
 import os
 from StringIO import StringIO
 import sqlite3
@@ -251,16 +251,16 @@ class TestDatabaseWriting(unittest.TestCase):
     def setUp(self):
         self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
         
-        self.dbconnect = mysql.connector.connect
+        self.dbconnect = MySQLdb.connect
         dbmock = MagicMock()
         def connect2db(*args, **kwargs):
             return sqlite3.connect('file::memory:?cache=shared')
         dbmock.side_effect = connect2db
-        mysql.connector.connect = dbmock
+        MySQLdb.connect = dbmock
         self.ramdb = connect2db()
 
     def tearDown(self):
-        mysql.connector.connect = self.dbconnect
+        MySQLdb.connect = self.dbconnect
         try:
             cursor = self.ramdb.cursor()
             cursor.execute('drop table hourly_events')
@@ -373,9 +373,9 @@ class TestDatabaseWriting(unittest.TestCase):
             self.assertEqual(results[('imgA', hr2str(59))], (16, 0))
 
     def test_connection_error(self):
-        mysql.connector.connect = MagicMock(
-            side_effect=[mysql.connector.Error('yikes')])
-        self.assertRaises(mysql.connector.Error, run_single_step,
+        MySQLdb.connect = MagicMock(
+            side_effect=[MySQLdb.Error('yikes')])
+        self.assertRaises(MySQLdb.Error, run_single_step,
            self.mr, '', 'reducer', 2)
 
 
@@ -384,7 +384,7 @@ class TestEndToEnd(unittest.TestCase):
     def setUp(self):
         self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
         self.urlopen = urllib2.urlopen
-        self.dbconnect = mysql.connector.connect
+        self.dbconnect = MySQLdb.connect
 
         # For some reason, the in memory database isn't shared, so use
         # a temporary file instead. It worked in the other test case....
@@ -396,13 +396,13 @@ class TestEndToEnd(unittest.TestCase):
             return sqlite3.connect(self.tempfile.name)
             #return sqlite3.connect('file::memory:?cache=shared')
         dbmock.side_effect = connect2db
-        mysql.connector.connect = dbmock
+        MySQLdb.connect = dbmock
         self.ramdb = connect2db()
         
 
     def tearDown(self):
         urllib2.urlopen = self.urlopen
-        mysql.connector.connect = self.dbconnect
+        MySQLdb.connect = self.dbconnect
         try:
             self.ramdb.execute('drop table hourly_events')
         except Exception as e:
@@ -446,7 +446,7 @@ class TestEndToEnd(unittest.TestCase):
         runner.run()
         
         self.assertGreater(tid_mock.call_count, 0)
-        self.assertGreater(mysql.connector.connect.call_count, 0)
+        self.assertGreater(MySQLdb.connect.call_count, 0)
 
         # Finally, check the database to make sure it says what we want
         cursor = self.ramdb.cursor()

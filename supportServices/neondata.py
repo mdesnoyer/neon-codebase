@@ -431,9 +431,12 @@ class AbstractPlatform(object):
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__) 
 
+    def get_ovp(self):
+        raise NotImplementedError
+
     @classmethod
     def get_all_instances(cls,callback=None):
-        '''Returns a list of all the platform instances.'''
+        '''Returns a list of all the platform instances from the db.'''
         instances = []
         instances.extend(NeonPlatform.get_all_instances())
         instances.extend(BrightcovePlatform.get_all_instances())
@@ -478,6 +481,9 @@ class NeonPlatform(AbstractPlatform):
         else:
             value = self.to_json()
             return db_connection.blocking_conn.set(self.key,value)
+
+    def get_ovp(self):
+        return "neon"
     
     @classmethod
     def get_account(cls,api_key,callback=None):

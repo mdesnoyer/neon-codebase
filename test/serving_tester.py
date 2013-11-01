@@ -27,6 +27,7 @@ import multiprocessing
 import os
 import re
 import signal
+import stats.db
 import stats.stats_processor
 import subprocess
 import supportServices.services
@@ -37,6 +38,8 @@ import unittest
 import utils.neon
 import utils.ps
 import random
+import urllib
+import urllib2
 from clickTracker.clickLogServer import TrackerData
 
 from utils.options import define, options
@@ -63,6 +66,14 @@ class TestServingSystem(unittest.TestCase):
     def tearDown(self):
         pass
 
+    def temp_test_load(self):
+        l = 10
+        t = {}
+        t['ur1'] = 0.1
+        t['ur2'] = 0.2
+        t['ur3'] = 0.3
+
+        self.simulateLoads(l,t)
     def simulateLoads(self, n_loads, thumbs_ctr):
         '''Simulate a set of loads and clicks
 
@@ -72,24 +83,35 @@ class TestServingSystem(unittest.TestCase):
         '''
         random.seed(1)
         def format_get_request(vals):
-            base_url = "http://localhost:%s?track=" %clickTracker.clickLogServer.port
-            
+            base_url = "http://localhost:%s/track?" %9080 #clickTracker.clickLogServer.port
+            base_url += urllib.urlencode(vals)
+            return base_url
+
         data = []    
         thumbs = thumbs_ctr.keys()
         for thumb,ctr in thumbs_ctr.iteritems():     
             ts = time.time()
-            clicks = [x for x in range(ctr*n_loads)]
+            clicks = [x for x in range(int(ctr*n_loads))]
             random.shuffle(clicks)
             for i in range(n_loads):
+                params = {}
                 action = "load"
                 if i in clicks:
                     action = "click"
-                 
-                cts = ts + i
-                td = TrackData(action,0,"flashonlyplayer",cts,'',"neontestsite","127.0.0.1",thumbs)
-                td_dict = td.__dict__()
-                td_dict.pop('sts')
-                data.append(td_dict)
+                    params['img'] = thumb
+                else:
+                    params['imgs'] = thumbs
+
+                params['a'] = action
+                params['ttype'] = 'flashonlyplayer'
+                params['id'] = 0
+                params['ts'] = ts + i 
+                params['page'] = "http://neontest"
+                params['cvid'] = 0
+                
+                req = format_get_request(params)
+                #make request 
+                response = urllib2.urlopen(req)
 
     def assertDirectiveCaptured(self, directive, timeout=30):
         '''Verifies that a given directive is received.
@@ -135,6 +157,10 @@ def LaunchStatsDb():
                     % (options.stats_db, options.stats_db_user,
                        options.stats_db_pass))
         raise
+
+    cursor = conn.cursor()
+    stats.db.create_tables(cursor)
+    
     _log.info('Connection to stats db is good')
 
 def LaunchVideoDb():
@@ -162,29 +188,34 @@ def LaunchVideoDb():
     _log.info('Video db is up')
 
 def LaunchSupportServices():
-    _log.info('Launching Support Services')
     proc = multiprocessing.Process(target=supportServices.services.main)
     proc.start()
+    _log.info('Launching Support Services with pid %i' % proc.pid)
 
 def LaunchMastermind():
-    _log.info('Launching Mastermind')
     proc = multiprocessing.Process(target=mastermind.server.main)
     proc.start()
+    _log.info('Launching Mastermind with pid %i' % proc.pid)
 
 def LaunchClickLogServer():
-    _log.info('Launching click log server')
     proc = multiprocessing.Process(
         target=clickTracker.clickLogServer.main)
     proc.start()
+    _log.info('Launching click log server with pid %i' % proc.pid)
+
+    proc = multiprocessing.Process(
+        target=clickTracker.logDatatoS3.main)
+    proc.start()
+    _log.info('Launching s3 data pusher with pid %i' % proc.pid)
 
 def LaunchStatsProcessor():
-    _log.info('Launching stats processor')
     proc = multiprocessing.Process(
         target=stats.stats_processor.main)
     proc.start()
+    _log.info('Launching stats processor with pid %i' % proc.pid)
 
 def main():
-    signal.signal(signal.SIGTERM, sys.exit)
+    signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
     atexit.register(utils.ps.shutdown_children)
 
     LaunchStatsDb()
@@ -194,11 +225,17 @@ def main():
     LaunchClickLogServer()
     LaunchStatsProcessor()
 
-    time.sleep(100000)
-    unittest.main()
+    time.sleep(1)
+
+    suite = unittest.TestLoader().loadTestsFromTestCase(TestServingSystem)
+    result = unittest.TextTestRunner().run(suite)
+
+    if result.wasSuccessful():
+        sys.exit(0)
+    else:
+        sys.exit(1)
     
 
 if __name__ == "__main__":
     utils.neon.InitNeonTest()
-    #main()
-    t = TestServingSystem()
+    main()

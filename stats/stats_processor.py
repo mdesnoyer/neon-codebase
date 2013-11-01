@@ -16,6 +16,7 @@ import logging
 from stats.hourly_event_stats_mr import HourlyEventStats
 import signal
 import time
+import utils.ps
 
 from utils.options import define, options
 
@@ -36,7 +37,7 @@ _log = logging.getLogger(__name__)
 
 def main():
     atexit.register(utils.ps.shutdown_children)
-    signal.signal(signal.SIGTERM, sys.exit)
+    signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
 
     job = HourlyEventStats(args=['--conf-path', options.mr_conf,
                                  '-r', options.runner,
@@ -53,7 +54,7 @@ def main():
                 runner.run()
                 known_input_files = n_files
 
-        time.sleep(60 * options.run_period)
+        time.sleep(60.0 * options.run_period)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

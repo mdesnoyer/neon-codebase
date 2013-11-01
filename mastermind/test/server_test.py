@@ -17,8 +17,9 @@ from datetime import datetime
 import mastermind.core
 from mock import MagicMock
 import mock
-import mysql.connector
+import MySQLdb
 import sqlite3
+import stats.db
 from StringIO import StringIO
 from supportServices import neondata
 import tornado.web
@@ -181,30 +182,22 @@ class TestStatsDBWatcher(unittest.TestCase):
         self.server_log = mastermind.server._log
         mastermind.server._log = MagicMock()
 
-        self.dbconnect = mysql.connector.connect
+        self.dbconnect = MySQLdb.connect
         dbmock = MagicMock()
         def connect2db(*args, **kwargs):
             return sqlite3.connect('file::memory:?cache=shared')
         dbmock.side_effect = connect2db
-        mysql.connector.connect = dbmock
+        MySQLdb.connect = dbmock
         self.ramdb = connect2db()
 
         cursor = self.ramdb.cursor()
-        cursor.execute('''CREATE TABLE hourly_events (
-                       thumbnail_id VARCHAR(32) NOT NULL,
-                       hour DATETIME NOT NULL,
-                       loads INT NOT NULL DEFAULT 0,
-                       clicks INT NOT NULL DEFAULT 0,
-                       UNIQUE (thumbnail_id, hour))''')
-        cursor.execute('''CREATE TABLE last_update (
-                       tablename VARCHAR(256) NOT NULL UNIQUE,
-                       logtime DATETIME)''')
+        stats.db.create_tables(cursor)
         self.ramdb.commit()
 
     def tearDown(self):
         neondata.ThumbnailIDMapper.get_id = self.mod_get_id
         mastermind.server._log = self.server_log
-        mysql.connector.connect = self.dbconnect
+        MySQLdb.connect = self.dbconnect
         try:
             cursor = self.ramdb.cursor()
             cursor.execute('drop table hourly_events')
@@ -286,8 +279,8 @@ class TestStatsDBWatcher(unittest.TestCase):
         self.assertEqual(self.ab_manager.send.call_count, 0)
 
     def test_stat_db_connection_error(self):
-        mysql.connector.connect = MagicMock(
-            side_effect=mysql.connector.Error('some error'))
+        MySQLdb.connect = MagicMock(
+            side_effect=MySQLdb.Error('some error'))
 
         self.watcher._process_db_data()
 

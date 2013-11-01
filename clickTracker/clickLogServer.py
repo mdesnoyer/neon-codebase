@@ -15,6 +15,7 @@ import os
 import time
 import json
 import utils.neon
+import utils.ps
 
 #logging
 import logging
@@ -25,28 +26,6 @@ from utils.options import define, options
 define("port", default=9080, help="run on the given port", type=int)
 define("test", default=0, help="populate queue for test", type=int)
 MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
-    
-#############################################
-#GLOBALS
-#############################################
-
-def sig_handler(sig, frame):
-    _log.warn('Caught signal: ' + str(sig) )
-    tornado.ioloop.IOLoop.instance().add_callback(shutdown)
-
-def shutdown():
-    server.stop()
-    io_loop = tornado.ioloop.IOLoop.instance()
-    deadline = time.time() + MAX_WAIT_SECONDS_BEFORE_SHUTDOWN
-
-    def stop_loop():
-        now = time.time()
-        if now < deadline and (io_loop._callbacks or io_loop._timeouts):
-            io_loop.add_timeout(now + 1, stop_loop)
-        else:
-            io_loop.stop()
-            _log.info('Shutdown')
-    stop_loop()
 
 #############################################
 #### DATA FORMAT ###
@@ -197,9 +176,8 @@ def main():
     global event_queue
 
     event_queue = Queue.Queue() #multiprocessing.Queue()
-    signal.signal(signal.SIGTERM, sig_handler)
-    signal.signal(signal.SIGINT, sig_handler)
     server = tornado.httpserver.HTTPServer(application)
+    utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)
     #server.bind(options.port)
     #server.start(0)
