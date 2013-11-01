@@ -36,6 +36,8 @@ import time
 import unittest
 import utils.neon
 import utils.ps
+import random
+from clickTracker.clickLogServer import TrackerData
 
 from utils.options import define, options
 
@@ -61,14 +63,33 @@ class TestServingSystem(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def simulateLoads(self, n_loads, thumbs, target_ctr):
+    def simulateLoads(self, n_loads, thumbs_ctr):
         '''Simulate a set of loads and clicks
 
         n_loads - Number of player-like loads to generate
-        thumbs - List of thumbnail urls
-        target_str - List of target CTR for each thumb.
+        thumbs_ctr - Dict of thumbnail urls => target CTR for each thumb.
+        randomize the click order
         '''
-        pass
+        random.seed(1)
+        def format_get_request(vals):
+            base_url = "http://localhost:%s?track=" %clickTracker.clickLogServer.port
+            
+        data = []    
+        thumbs = thumbs_ctr.keys()
+        for thumb,ctr in thumbs_ctr.iteritems():     
+            ts = time.time()
+            clicks = [x for x in range(ctr*n_loads)]
+            random.shuffle(clicks)
+            for i in range(n_loads):
+                action = "load"
+                if i in clicks:
+                    action = "click"
+                 
+                cts = ts + i
+                td = TrackData(action,0,"flashonlyplayer",cts,'',"neontestsite","127.0.0.1",thumbs)
+                td_dict = td.__dict__()
+                td_dict.pop('sts')
+                data.append(td_dict)
 
     def assertDirectiveCaptured(self, directive, timeout=30):
         '''Verifies that a given directive is received.
@@ -179,5 +200,5 @@ def main():
 
 if __name__ == "__main__":
     utils.neon.InitNeonTest()
-    main()
-
+    #main()
+    t = TestServingSystem()

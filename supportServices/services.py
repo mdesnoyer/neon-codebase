@@ -820,7 +820,7 @@ class AccountHandler(tornado.web.RequestHandler):
             wtoken = self.get_argument("write_token")
             autosync = self.get_argument("auto_update")
         except Exception,e:
-            _log.error("key=create brightcove account msg=" + e.message)
+            _log.error("key=create brightcove account msg= %s" %e)
             data = '{"error": "API Params missing" }'
             self.send_json_response(data,400)
             return
