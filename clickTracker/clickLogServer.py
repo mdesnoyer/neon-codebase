@@ -176,8 +176,6 @@ def main():
     global event_queue
 
     event_queue = Queue.Queue() #multiprocessing.Queue()
-    signal.signal(signal.SIGTERM, sig_handler)
-    signal.signal(signal.SIGINT, sig_handler)
     utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)
     #server.bind(options.port)
