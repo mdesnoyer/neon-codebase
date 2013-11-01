@@ -436,8 +436,8 @@ class AbstractPlatform(object):
     # TODO(Sunil): Implement this function. Maybe returns a generator?
     @classmethod
     def get_all_instances(cls,callback=None):
-        '''Returns a list of all the platform instances.'''
-        raise NotImplementedError()
+        '''Returns a list of all the platform instances in the db.'''
+        raise NotImplementedError
 
     @classmethod
     def get_all_platform_data(cls):
