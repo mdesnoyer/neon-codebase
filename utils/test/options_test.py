@@ -101,9 +101,10 @@ class TestCommandLineParsing(unittest.TestCase):
         self.parser.define('a_float', default=6.5, type=float)
 
         config_stream = StringIO('a_floaty: 10.8')
-        self.assertRaises(AttributeError,
-                          self.parser.parse_options, [],
-                          config_stream=config_stream)
+        self.parser.parse_options(config_stream = config_stream)
+
+        # TODO(mdesnoyer): Test that a warning was logged
+        self.assertEqual(self.parser.a_float, 6.5)
 
     def test_bad_type_in_config(self):
         '''Testing variables defined in __main__ that are set in the config file.'''
@@ -113,6 +114,14 @@ class TestCommandLineParsing(unittest.TestCase):
         self.assertRaises(TypeError,
                           self.parser.parse_options, [],
                           config_stream=config_stream)
+
+    def test_unknown_var_in_config(self):
+        self.parser.define('a_float', default=6.5, type=float)
+
+        config_stream = StringIO('a_float2: 3.0')
+        self.parser.parse_options(config_stream = config_stream)
+
+        self.assertEqual(self.parser.a_float, 6.5)
 
     def test_module_namespace_config_stream(self):
         test_mod.define(self.parser, 'an_int', default=6, type=int)

@@ -322,7 +322,7 @@ class OptionParser(object):
                 if option._value is None:
                     option.set(option.type(value))
             except KeyError:
-                raise AttributeError('Unknown option %s' % name)
+                _log.warn('Unknown option %s. Ignored' % name)
             except ValueError:
                 raise TypeError('For option %s could not convert "%s" to %s' %
                                 (name, value, option.type.__name__))

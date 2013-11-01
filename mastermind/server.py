@@ -81,7 +81,7 @@ def initialize():
     
     mastermind = Mastermind()
     # Get all the current information about the videos
-    for platform in neondata.get_all_external_platforms():
+    for platform in neondata.AbstractPlatform.get_all_instances():
         for video_id in platform.videos.iterkeys():
             video_metadata = neondata.VideoMetadata.get(video_id)
             thumbnails = [core.ThumbnailInfo.from_db_data(

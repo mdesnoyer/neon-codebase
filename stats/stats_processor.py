@@ -14,8 +14,8 @@ if sys.path[0] <> base_path:
 import atexit
 import logging
 from stats.hourly_event_stats_mr import HourlyEventStats
+import signal
 import time
-import utils.ps
 
 from utils.options import define, options
 
@@ -34,11 +34,8 @@ define('min_new_files', default=1, type=int,
 
 _log = logging.getLogger(__name__)
 
-@atexit.register
-def shutdown():
-    utils.ps.shutdown_children()
-
 def main():
+    atexit.register(utils.ps.shutdown_children)
     signal.signal(signal.SIGTERM, sys.exit)
 
     job = HourlyEventStats(args=['--conf-path', options.mr_conf,
@@ -50,7 +47,7 @@ def main():
         _log.info('Looking for new log files to process from %s' % 
                   options.input)
         with job.make_runner() as runner:
-            n_files = len(runner.fs.ls(options.input))
+            n_files = len([x for x in runner.fs.ls(options.input)])
             if (n_files - known_input_files) >= options.min_new_files:
                 _log.info('Running stats processing job')
                 runner.run()
