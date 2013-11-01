@@ -15,12 +15,12 @@ import tornado.gen
 import time
 import logging
 import random
-import errorlog
 import shortuuid
 import signal
 import re
 import multiprocessing
 import Queue
+from bs4 import BeautifulSoup
 
 import utils.neon
 
@@ -37,6 +37,7 @@ result_map = {}
 
 random.seed(2)
 test_status = 0 ; # 0- in progress, 1 - pass , -1 - fail
+API_KEY = '57e8fdeaacffc0e35ad0e36f70ffd698'
 
 def sig_handler(sig, frame):
     _log.debug('Caught signal: ' + str(sig) )
@@ -50,7 +51,6 @@ Takes in vimeo or direct download links
 class DemoHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
-        print self.request.headers
         url = self.get_argument('url')
         topn = self.get_argument('topn')
         if "vimeo" in url:
@@ -58,22 +58,50 @@ class DemoHandler(tornado.web.RequestHandler):
         else:
             self.create_neon_requests(topn,url)
 
-    def vimeo_request(self,topn,url):
+    def vimeo_request(self,topn,vid_url):
         def vimeo_callback(response):
             if response.error:
                 self.set_status(500)
                 self.finish()
-
+                return
+            
             site = response.body
-            requestSig = re.findall('signature":"(.*?)"', site)
-            expireSig = re.findall('timestamp":([0-9]*)', site)
-            vid = url.split('/')[-1]
-            d_url = "http://player.vimeo.com/play_redirect?clip_id=" + vid +"&sig=" + requestSig[0] + "&time=" + expireSig[1] + "&quality=sd&codecs=H264,VP8i,VP6&type=moogaloop_local&embed_location="
+            print site
+            parser = BeautifulSoup(site)
+            links = {}
+            for a in parser.find_all('a'):
+                k = a.next_element
+                if k:
+                    if "HD" in k: 
+                        links["HD"] = a.attrs['href']
+                    elif "SD" in k:
+                        links["SD"] = a.attrs['href']
+                    elif "Mobile" in k:
+                        links["MB"] = a.attrs['href']
+               
+            d_url = ''
+            if "HD" in links.keys():
+                d_url = links["HD"]
+            elif "SD" in links.keys():
+                d_url = links["SD"]
+            elif "MB" in links.Keys():
+                d_url = links["MB"]
+
+            if d_url == '':
+                self.set_status(400)
+                self.finish()
+                return
+
             self.create_neon_requests(topn,d_url)
             return
 
+        vimeo_vid = vid_url.split('/')[-1]
         tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
-        h = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/28.0.1500.71 Safari/537.36'})
+        h = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/28.0.1500.71 Safari/537.36', 'Referer': 'https://vimeo.com/'+ vimeo_vid, 'X-Requested-With':'XMLHttpRequest'})
+        #TODO ADD all headers
+        # -H 'Host: vimeo.com' -H 'Accept-Language: en-US,en;q=0.8' -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.69 Safari/537.36' -H 'Accept: text/html, application/xml, text/xml, */*' -H 'Referer: https://vimeo.com/4862839' -H 'X-Requested-With: XMLHttpRequest' -H 'Connection: keep-alive' --compressed
+
+        url = 'https://vimeo.com/' + vimeo_vid + '?action=download' 
         http_client = tornado.httpclient.AsyncHTTPClient()
         req = tornado.httpclient.HTTPRequest(url = url,headers =h , request_timeout = 60.0, connect_timeout = 10.0)
         response = http_client.fetch(req,vimeo_callback)
@@ -86,14 +114,12 @@ class DemoHandler(tornado.web.RequestHandler):
     def create_neon_requests(self,topn,url):
         vid = shortuuid.uuid()  
         request_body = {}
-        request_body["api_key"] = 'a63728c09cda459c3caaa158f4adff49' #neon user key 
-        #request_body["api_key"] = '4a6715e07dfbc6a56487bf4eceba0dba'
+        request_body["api_key"] = API_KEY 
         request_body["video_title"] = 'test-' + vid 
         request_body["video_id"] =  vid
         request_body["video_url"] = url 
-        request_body["callback_url"] = "http://thumbnails.neon-lab.com/testcallback"
+        request_body["callback_url"] = "http://localhost:8081/testcallback"
         request_body["topn"] = topn 
-        client_url = "http://thumbnails.neon-lab.com/api/v1/submitvideo/topn"
         client_url = "http://localhost:8081/api/v1/submitvideo/topn"
         body = tornado.escape.json_encode(request_body)
         tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
@@ -120,8 +146,7 @@ class DemoHandler(tornado.web.RequestHandler):
                 check_status(job_id)
 
         def check_status(job_id):
-            client_url = 'http://thumbnails.neon-lab.com/api/v1/jobstatus?api_key=a63728c09cda459c3caaa158f4adff49&job_id=' + job_id
-            client_url = 'http://localhost:8081/jobstatus?api_key=a63728c09cda459c3caaa158f4adff49&job_id=' + job_id
+            client_url = 'http://localhost:8081/jobstatus?api_key=' +API_KEY + '&job_id=' + job_id
             tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
             http_client = tornado.httpclient.AsyncHTTPClient()
             req = tornado.httpclient.HTTPRequest(url = client_url, method = "GET",request_timeout = 60.0, connect_timeout = 10.0)
