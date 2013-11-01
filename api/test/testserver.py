@@ -132,8 +132,13 @@ class DemoHandler(tornado.web.RequestHandler):
         job_id = data['job_id']
         
         def job_finish_callback(resp):
+            if resp.error:
+                self.set_status(500)
+                self.finish()
+                return
+
             jresponse = tornado.escape.json_decode(resp.body)
-            result = jresponse['result']
+            result = jresponse['response']
             print result, len(result)
             if len(result) >1:
                 r = tornado.escape.json_encode(result)

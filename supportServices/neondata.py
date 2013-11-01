@@ -434,11 +434,23 @@ class AbstractPlatform(object):
         return json.dumps(self, default=lambda o: o.__dict__) #don't save keyname
 
     # TODO(Sunil): Implement this function. Maybe returns a generator?
-    @staticmethod
-    def get_all_instances(callback=None):
+    @classmethod
+    def get_all_instances(cls,callback=None):
         '''Returns a list of all the platform instances.'''
         raise NotImplementedError()
 
+    @classmethod
+    def get_all_platform_data(cls):
+        db_connection=DBConnection(cls)
+        accounts = db_connection.blocking_conn.keys(cls.__name__.lower() + "*")
+        platform_data = []
+        for accnt in accounts:
+            api_key = accnt.split('_')[-2]
+            i_id = accnt.split('_')[-1]
+            jdata = db_connection.blocking_conn.get(accnt) 
+            platform_data.append(jdata)
+        
+        return platform_data
 
 class NeonPlatform(AbstractPlatform):
     '''
@@ -492,6 +504,16 @@ class NeonPlatform(AbstractPlatform):
             obj.__dict__[key] = data_dict[key]
         
         return obj
+
+    @classmethod
+    def get_all_instances(cls,callback=None):
+        platforms = NeonPlatform.get_all_platform_data()
+        instances = [] 
+        for pdata in platforms:
+            platform = NeonPlatform.create(pdata)
+            instances.append(platform)
+
+        return instances
 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
@@ -709,6 +731,16 @@ class BrightcovePlatform(AbstractPlatform):
         req = tornado.httpclient.HTTPRequest(url = url, method = "GET", request_timeout = 60.0, connect_timeout = 10.0)
         http_client.fetch(req,callback)
 
+    @classmethod
+    def get_all_instances(cls,callback=None):
+        platforms = BrightcovePlatform.get_all_platform_data()
+        instances = [] 
+        for pdata in platforms:
+            platform = BrightcovePlatform.create(pdata)
+            instances.append(platform)
+
+        return instances
+
 
 class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
     def __init__(self, a_id, i_id, access_token=None, refresh_token=None,
@@ -855,6 +887,17 @@ class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
             yt.__dict__[key] = params[key]
 
         return yt
+    
+    @classmethod
+    def get_all_instances(cls,callback=None):
+        platforms = YoutubePlatform.get_all_platform_data()
+        instances = [] 
+        for pdata in platforms:
+            platform = YoutubePlatform.create(pdata)
+            instances.append(platform)
+
+        return instances
+
 
 
 #######################
