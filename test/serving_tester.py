@@ -141,29 +141,34 @@ def LaunchVideoDb():
     _log.info('Video db is up')
 
 def LaunchSupportServices():
-    _log.info('Launching Support Services')
     proc = multiprocessing.Process(target=supportServices.services.main)
     proc.start()
+    _log.info('Launching Support Services with pid %i' % proc.pid)
 
 def LaunchMastermind():
-    _log.info('Launching Mastermind')
     proc = multiprocessing.Process(target=mastermind.server.main)
     proc.start()
+    _log.info('Launching Mastermind with pid %i' % proc.pid)
 
 def LaunchClickLogServer():
-    _log.info('Launching click log server')
     proc = multiprocessing.Process(
         target=clickTracker.clickLogServer.main)
     proc.start()
+    _log.info('Launching click log server with pid %i' % proc.pid)
+
+    proc = multiprocessing.Process(
+        target=clickTracker.logDatatoS3.main)
+    proc.start()
+    _log.info('Launching s3 data pusher with pid %i' % proc.pid)
 
 def LaunchStatsProcessor():
-    _log.info('Launching stats processor')
     proc = multiprocessing.Process(
         target=stats.stats_processor.main)
     proc.start()
+    _log.info('Launching stats processor with pid %i' % proc.pid)
 
 def main():
-    signal.signal(signal.SIGTERM, sys.exit)
+    signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
     atexit.register(utils.ps.shutdown_children)
 
     LaunchStatsDb()
@@ -173,11 +178,16 @@ def main():
     LaunchClickLogServer()
     LaunchStatsProcessor()
 
-    time.sleep(100000)
-    unittest.main()
+    suite = unittest.TestLoader().loadTestsFromTestCase(TestServingSystem)
+    result = unittest.TextTestRunner().run(suite)
+
+    if result.wasSuccessful():
+        sys.exit(0)
+    else:
+        sys.exit(1)
     
 
 if __name__ == "__main__":
-    utils.neon.InitNeonTest()
+    utils.neon.InitNeon()
     main()
 

@@ -58,7 +58,8 @@ log_dir = os.getcwd()
 
 def sig_handler(sig, frame):
     _log.debug('Caught signal: ' + str(sig) )
-    sys.exit(0)
+    # Need to do this because tornado will catch a system exit exception
+    os._exit(0)
 
 class S3DataHandler(object):
     
@@ -147,7 +148,6 @@ class S3DataHandler(object):
 
 def main():
 
-    utils.neon.InitNeon()
     signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGINT, sig_handler)
     #ioloop = tornado.ioloop.IOLoop.instance()
@@ -158,4 +158,5 @@ def main():
 
 # ============= MAIN ======================== #
 if __name__ == "__main__":
-	main()
+    utils.neon.InitNeon()
+    main()

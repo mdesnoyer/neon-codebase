@@ -56,6 +56,10 @@ define('stats_table', default='hourly_events',
 define('stats_db_polling_delay', default=57, type=float,
        help='Number of seconds between polls of the video db')
 
+# Video db options
+define('video_db_polling_delay', default=300, type=float,
+       help='Number of seconds between polls of the video db')
+
 _log = logging.getLogger(__name__)
 
 def initialize():
@@ -295,10 +299,10 @@ class GetDirectives(tornado.web.RequestHandler):
 def main():   
     mastermind, ab_manager = initialize()
 
-    videoDbThread = VideoDBWatcher()
+    videoDbThread = VideoDBWatcher(mastermind, ab_manager)
     videoDbThread.start()
     videoDbThread.wait_until_loaded()
-    statsDbThread = StatsDBWatcher()
+    statsDbThread = StatsDBWatcher(mastermind, ab_manager)
     statsDbThread.start()
     statsDbThread.wait_until_loaded()
 

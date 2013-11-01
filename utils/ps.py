@@ -49,10 +49,18 @@ def get_child_pids():
 
 def pid_running(pid):
     '''Returns true if the pid is running in unix.'''
-    return os.waitpid(pid, os.WNOHANG) == (0,0)    
+    try:
+        return os.waitpid(pid, os.WNOHANG) == (0,0)    
+    except OSError:
+        return False
 
 def shutdown_children():
     '''Shuts down the children of the current process.
+
+    The easiest way to use is to just register it to run at exit like:
+    
+    atexit.register(utils.ps.shutdown_children)
+    signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
     '''
     import os
     import time
@@ -68,7 +76,7 @@ def shutdown_children():
 
     still_running = True
     count = 0
-    while still_running and count < 10:
+    while still_running and count < 20:
         still_running = False
         for pid in child_pids:
             if pid_running(pid):

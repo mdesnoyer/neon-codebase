@@ -481,7 +481,7 @@ class NeonPlatform(AbstractPlatform):
             value = self.to_json()
             return db_connection.blocking_conn.set(self.key,value)
 
-    def get_ovp(self)
+    def get_ovp(self):
         return "neon"
     
     @classmethod
