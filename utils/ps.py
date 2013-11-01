@@ -13,6 +13,9 @@ import time
 
 _log = logging.getLogger(__name__)
 
+def reap_child(signal, frame):
+    print 'reaping'
+
 def get_child_pids():
     '''Returns a list of pids for child processes.'''
     if platform.system() == 'Linux':
@@ -46,18 +49,16 @@ def get_child_pids():
 
 def pid_running(pid):
     '''Returns true if the pid is running in unix.'''
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
-    
+    return os.waitpid(pid, os.WNOHANG) == (0,0)    
 
 def shutdown_children():
     '''Shuts down the children of the current process.
     '''
-    _log.info('Shutting down children')
-    child_pids = get_child_pids()
+    import os
+    import time
+    
+    print 'Shutting down children of pid %i' % os.getpid()
+    child_pids = get_child_pids()    
     for pid in child_pids:
         try:
             os.kill(pid, signal.SIGTERM)
@@ -67,7 +68,7 @@ def shutdown_children():
 
     still_running = True
     count = 0
-    while still_running and count < 20:
+    while still_running and count < 10:
         still_running = False
         for pid in child_pids:
             if pid_running(pid):
@@ -78,9 +79,9 @@ def shutdown_children():
     if still_running:
         for pid in child_pids:
             if pid_running(pid):
-                _log.error('Process %i not down. Killing' % pid)
+                print 'Process %i not down. Killing' % pid
                 try:
                     os.kill(pid, signal.SIGKILL)
                 except OSError:
                     pass
-    _log.info('Done killing children')
+    print 'Done killing children'

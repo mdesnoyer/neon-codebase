@@ -35,6 +35,7 @@ import tempfile
 import time
 import unittest
 import utils.neon
+import utils.ps
 
 from utils.options import define, options
 
@@ -95,22 +96,6 @@ class TestServingSystem(unittest.TestCase):
 
     #TODO: Write the actual tests
 
-def MultiprocWrapper(object):
-    '''A wrapper to make a multiprocess.Process look like a subprocess.Process.
-
-    '''
-    def __init__(self, proc):
-        self.proc = proc
-
-    def __getattr__(self, name):
-        return self.proc.__getattr__(name)
-
-    def poll(self):
-        return self.proc.exitcode
-
-    def kill(self):
-        os.kill(self.proc.pid, signal.SIGKILL)
-
 def LaunchStatsDb():
     '''Launches the stats db, which is a mysql interface.
 
@@ -139,12 +124,12 @@ def LaunchVideoDb():
         '/usr/bin/env', 'redis-server',
         os.path.join(os.path.dirname(__file__), 'test_video_db.conf')],
         stdout=subprocess.PIPE)
-    _subprocs.append(proc)
 
     # Wait until the db is up correctly
     upRe = re.compile('The server is now ready to accept connections on port')
     video_db_log = []
-    for line in proc.stdout:
+    while proc.poll() is None:
+        line = proc.stdout.readline()
         video_db_log.append(line)
         if upRe.search(line):
             break
@@ -158,63 +143,28 @@ def LaunchVideoDb():
 def LaunchSupportServices():
     _log.info('Launching Support Services')
     proc = multiprocessing.Process(target=supportServices.services.main)
-    proc.daemon = True
     proc.start()
 
 def LaunchMastermind():
     _log.info('Launching Mastermind')
     proc = multiprocessing.Process(target=mastermind.server.main)
-    proc.daemon = True
     proc.start()
 
 def LaunchClickLogServer():
     _log.info('Launching click log server')
     proc = multiprocessing.Process(
         target=clickTracker.clickLogServer.main)
-    proc.daemon = True
     proc.start()
 
 def LaunchStatsProcessor():
     _log.info('Launching stats processor')
     proc = multiprocessing.Process(
         target=stats.stats_processor.main)
-    _subprocs.append(MultiprocWrapper(proc))
     proc.start()
 
-_subprocs = []
-def shutdown(subprocs):
-    import logging
-    import time
-    _log = logging.getLogger(__name__)
-    _log.warn('Shutting down now')
-    for proc in subprocs:
-        try:
-            proc.terminate()
-        except OSError as e:
-            if e.errno <> 3:
-                raise
-
-    still_running = True
-    count = 0
-    while still_running and count < 20:
-        still_running = False
-        for proc in subprocs:
-            if proc.poll() is None:
-                still_running = True
-        time.sleep(1)
-        count += 1
-
-    if still_running:
-        for proc in subprocs:
-            if proc.poll() is None:
-                _log.error('Process %i not down. Killing' % proc.pid)
-                proc.kill()
-    _log.info('Done shutting down')
-    sys.exit(0)
-
-def main():    
+def main():
     signal.signal(signal.SIGTERM, sys.exit)
-    atexit.register(shutdown, _subprocs)
+    atexit.register(utils.ps.shutdown_children)
 
     LaunchStatsDb()
     LaunchVideoDb()
