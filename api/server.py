@@ -388,9 +388,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 self.set_status(502)
             else:
                 if request_type == 'youtube':
-                    pass #YoutubePlatform.get_account(api_key,get_account) #i_id ?  
+                    YoutubePlatform.get_account(api_key,get_yt_account) #i_id ?  
                 elif request_type == 'neon':
-                    pass #NeonUserAccount.get_account(api_key,get_account) 
+                    NeonPlatform.get_account(api_key,get_platform) 
                 else:
                     self.set_status(201)
                     self.write(response_data)

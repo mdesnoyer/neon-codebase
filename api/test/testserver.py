@@ -66,7 +66,6 @@ class DemoHandler(tornado.web.RequestHandler):
                 return
             
             site = response.body
-            print site
             parser = BeautifulSoup(site)
             links = {}
             for a in parser.find_all('a'):
@@ -92,6 +91,7 @@ class DemoHandler(tornado.web.RequestHandler):
                 self.finish()
                 return
 
+            _log.debug("download %s" %d_url)
             self.create_neon_requests(topn,d_url)
             return
 
