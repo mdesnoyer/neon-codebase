@@ -10,6 +10,7 @@ import platform
 import signal
 import subprocess
 import time
+import tornado.ioloop
 
 _log = logging.getLogger(__name__)
 
@@ -93,3 +94,37 @@ def shutdown_children():
                 except OSError:
                     pass
     print 'Done killing children'
+
+def register_tornado_shutdown(server):
+    '''Registers a clean shutdown proceedure for a tornado server.
+
+    Hooks onto SIGINT and SIGTERM.
+
+    Inputs:
+    server - http server instance
+    '''
+    def shutdown():
+        server.stop()
+
+        io_loop = tornado.ioloop.IOLoop.instance()
+
+        deadline = time.time() + 3
+
+        def stop_loop():
+            now = time.time()
+            if now < deadline and (io_loop._callbacks or io_loop._timeouts):
+                io_loop.add_timeout(now + 1, stop_loop)
+                
+            else:
+                io_loop.stop()
+                _log.info('Shutdown')
+        stop_loop()
+        
+    def sighandler(sig, frame):
+        _log.warn('Received signal %s. Shutting down pid %i' % (sig,
+                                                                os.getpid()))
+        tornado.ioloop.IOLoop.instance().add_callback(shutdown)
+
+    signal.signal(signal.SIGINT, sighandler)
+    signal.signal(signal.SIGTERM, sighandler)
+        

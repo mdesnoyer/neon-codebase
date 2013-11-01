@@ -22,6 +22,7 @@ import hashlib
 import re
 import properties
 import os
+import utils.ps
 
 from boto.s3.connection import S3Connection
 from boto.exception import S3ResponseError
@@ -45,28 +46,6 @@ _log = logging.getLogger(__name__)
 dir = os.path.dirname(__file__)
 
 #=============== Global Handlers ======================================#
-
-def sig_handler(sig, frame):
-    _log.debug('Caught signal: ' + str(sig) )
-    tornado.ioloop.IOLoop.instance().add_callback(shutdown)
-
-def shutdown():
-    server.stop()
-
-    #logging.info('Will shutdown in %s seconds ...', MAX_WAIT_SECONDS_BEFORE_SHUTDOWN)
-    io_loop = tornado.ioloop.IOLoop.instance()
-
-    deadline = time.time() + MAX_WAIT_SECONDS_BEFORE_SHUTDOWN
-
-    def stop_loop():
-        now = time.time()
-        if now < deadline and (io_loop._callbacks or io_loop._timeouts):
-            io_loop.add_timeout(now + 1, stop_loop)
-        else:
-            io_loop.stop()
-            _log.info('Shutdown')
-    stop_loop()
-
 
 def format_status_json(state,timestamp,data=None):
 
@@ -449,9 +428,8 @@ application = tornado.web.Application([
 def main():
     utils.neon.InitNeon()
     global server
-    signal.signal(signal.SIGTERM, sig_handler)
-    signal.signal(signal.SIGINT, sig_handler)
     server = tornado.httpserver.HTTPServer(application)
+    os.ps.utils.register_tornado_shutdown(server)
     server.listen(options.port)
     tornado.ioloop.IOLoop.instance().start()
 

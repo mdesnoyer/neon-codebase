@@ -17,7 +17,8 @@ from datetime import datetime
 from mastermind import directive_pusher
 import json
 import logging
-import mysql.connector as sqldb
+import MySQLdb as sqldb
+import stats.db
 from supportServices import neondata
 import time
 import threading
@@ -178,10 +179,10 @@ class StatsDBWatcher(threading.Thread):
         try:
             conn = sqldb.connect(
                 user=options.stats_user,
-                password=options.stats_pass,
+                passwd=options.stats_pass,
                 host=options.stats_host,
                 port=options.stats_port,
-                database=options.stats_db)
+                db=options.stats_db)
         except sqldb.Error as e:
             _log.exception('Error connecting to stats db: %s' % e)
             return
@@ -189,12 +190,14 @@ class StatsDBWatcher(threading.Thread):
         cursor = conn.cursor()
 
         # See if there are any new entries
-        cursor.execute('''SELECT logtime FROM 
-                       last_update WHERE tablename = ?''',
-                       (options.stats_table,))
+        stats.db.execute(
+            cursor,
+            '''SELECT logtime FROM last_update WHERE tablename = %s''',
+            (options.stats_table,))
         result = cursor.fetchall()
         if len(result) == 0:
             _log.error('Cannot determine when the database was last updated')
+            self.is_loaded.set()
             return
         cur_update = datetime.strptime(result[0][0], '%Y-%m-%d %H:%M:%S')
         if self.last_update is None or cur_update > self.last_update:
@@ -313,6 +316,7 @@ def main():
         (r'/get_directives', GetDirectives,
          dict(mastermind=mastermind, ab_manager=ab_manager))])
     server = tornado.httpserver.HTTPServer(application)
+    utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)
     
     tornado.ioloop.IOLoop.instance().start()

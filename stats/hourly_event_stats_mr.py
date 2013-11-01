@@ -19,7 +19,8 @@ import logging
 from mrjob.job import MRJob
 import mrjob.protocol
 import mrjob.util
-import mysql.connector as sqldb
+import MySQLdb as sqldb
+import stats.db
 import time
 import urllib
 import urllib2
@@ -205,25 +206,16 @@ class HourlyEventStats(MRJob):
         try:
             self.statsdb = sqldb.connect(
                 user=options.stats_user,
-                password=options.stats_pass,
+                passwd=options.stats_pass,
                 host=options.stats_host,
                 port=options.stats_port,
-                database=options.stats_db)
+                db=options.stats_db)
         except sqldb.Error as e:
             _log.exception('Error connecting to stats db: %s' % e)
             raise
         self.statscursor = self.statsdb.cursor()
 
-        self.statscursor.execute('''CREATE TABLE IF NOT EXISTS %s (
-                                 thumbnail_id VARCHAR(32) NOT NULL,
-                                 hour DATETIME NOT NULL,
-                                 loads INT NOT NULL DEFAULT 0,
-                                 clicks INT NOT NULL DEFAULT 0,
-                                 UNIQUE (thumbnail_id, hour))''' %
-                                 (options.stats_table,))
-        self.statscursor.execute('''CREATE TABLE IF NOT EXISTS last_update (
-                                 tablename VARCHAR(256) NOT NULL UNIQUE,
-                                 logtime DATETIME)''')
+        stats.db.create_tables(self.statscursor)
 
     def statsdb_disconnect(self):
         self.statscursor.close()

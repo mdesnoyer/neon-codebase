@@ -27,6 +27,7 @@ import multiprocessing
 import os
 import re
 import signal
+import stats.db
 import stats.stats_processor
 import subprocess
 import supportServices.services
@@ -114,6 +115,10 @@ def LaunchStatsDb():
                     % (options.stats_db, options.stats_db_user,
                        options.stats_db_pass))
         raise
+
+    cursor = conn.cursor()
+    stats.db.create_tables(cursor)
+    
     _log.info('Connection to stats db is good')
 
 def LaunchVideoDb():
@@ -177,6 +182,8 @@ def main():
     LaunchMastermind()
     LaunchClickLogServer()
     LaunchStatsProcessor()
+
+    time.sleep(1)
 
     suite = unittest.TestLoader().loadTestsFromTestCase(TestServingSystem)
     result = unittest.TextTestRunner().run(suite)
