@@ -433,11 +433,13 @@ class AbstractPlatform(object):
         #TODO : don't save all the class specific params ( keyname,callback,ttl )
         return json.dumps(self, default=lambda o: o.__dict__) #don't save keyname
 
-    # TODO(Sunil): Implement this function. Maybe returns a generator?
     @classmethod
     def get_all_instances(cls,callback=None):
         '''Returns a list of all the platform instances.'''
-        raise NotImplementedError()
+        instances = []
+        instances.extend(NeonPlatform.get_all_instances())
+        instances.extend(BrightcovePlatform.get_all_instances())
+        return instances
 
     @classmethod
     def get_all_platform_data(cls):
