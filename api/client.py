@@ -60,11 +60,6 @@ import gc
 import pprint
 
 import logging
-logging.basicConfig(level=logging.DEBUG,
-        format='%(asctime)s %(levelname)s %(message)s',
-        datefmt='%m-%d %H:%M',
-        filename='/mnt/logs/neon/neonserver.log',
-        filemode='a')
 _log = logging.getLogger(__name__)
 
 from pympler import summary
@@ -596,7 +591,11 @@ class ProcessVideo(object):
                 api_request.state = RequestState.FAILED
             
             api_request.thumbnails = self.thumbnails
-       
+      
+        #If Thumbnails are empty, something went wrong internally
+        if len(api_request.thumbnails) == 0:
+            api_request.state = RequestState.INT_ERROR
+
         ret = api_request.save()
         if ret:
             self.save_video_metadata()
@@ -623,6 +622,10 @@ class ProcessVideo(object):
         if error:
             bc_request.save()
             return
+        
+        if len(self.thumbnails) == 0 :
+            bc_request.state = RequestState.INT_ERROR
+            bc_request.save()
 
         #Save previous thumbnail to s3
         p_url = bc_request.previous_thumbnail.split('?')[0]
@@ -711,6 +714,10 @@ class ProcessVideo(object):
         if error:
             yt_request.save()
             return
+        
+        if len(self.thumbnails) == 0 :
+            yt_request.state = RequestState.INT_ERROR
+            yt_request.save()
         
         #Save previous thumbnail to s3
         p_url = yt_request.previous_thumbnail

@@ -201,17 +201,9 @@ def main():
     signal.signal(signal.SIGINT, sig_handler)
     server = tornado.httpserver.HTTPServer(application)
     server.listen(options.port)
-    if options.test:
-        test()
     #server.bind(options.port)
     #server.start(0)
     tornado.ioloop.IOLoop.instance().start()
-
-def test():
-    QMAX = 5000
-    tdata = '{"a": "load", "img": "[\"http://brightcove.vo.llnwd.net/d21/unsecured/media/2294876105001/201310/34/2294876105001_2727914703001_thumbnail-2296855887001.jpg\",\"http://brightcove.vo.llnwd.net/d21/unsecured/media/2294876105001/201310/354/2294876105001_2727881607001_thumbnail-2369368872001.jpg\",\"http://brightcove.vo.llnwd.net/e1/pd/2294876105001/2294876105001_2660525568001_thumbnail-2296855886001.jpg\",\"http://brightcove.vo.llnwd.net/e1/pd/2294876105001/2294876105001_2617231423001_thumbnail-2323153341001.jpg\"]", "ts": "1382056097928", "cip": "::1", "sts": 1382056097, "ttype": "flashonlyplayer", "id": "2787acedddac5e1c"}' 
-    for i in range(QMAX):
-        event_queue.put(tdata)
 
 # ============= MAIN ======================== #
 if __name__ == "__main__":
