@@ -420,9 +420,8 @@ class NeonUserAccount(object):
 
 class AbstractPlatform(object):
     def __init__(self, abtest=False):
-        # TODO(sunil): Should this be an internal or external video id?!?
         self.neon_api_key = ''
-        self.videos = {} # External video id => Job ID
+        self.videos = {} # External video id (Original Platform VID) => Job ID
         self.abtest = abtest # Boolean on wether AB tests can run
         self.integration_id = None # Unique platform ID to 
     
@@ -430,8 +429,7 @@ class AbstractPlatform(object):
         return self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
     
     def to_json(self):
-        #TODO : don't save all the class specific params ( keyname,callback,ttl )
-        return json.dumps(self, default=lambda o: o.__dict__) #don't save keyname
+        return json.dumps(self, default=lambda o: o.__dict__) 
 
     def get_ovp(self):
         raise NotImplementedError
@@ -453,7 +451,10 @@ class AbstractPlatform(object):
             api_key = accnt.split('_')[-2]
             i_id = accnt.split('_')[-1]
             jdata = db_connection.blocking_conn.get(accnt) 
-            platform_data.append(jdata)
+            if jdata:
+                platform_data.append(jdata)
+            else:
+                _log.debug("key=get_all_platform data msg=no data for acc %s i_id %s" %(api_key,i_id))
         
         return platform_data
 
@@ -504,6 +505,9 @@ class NeonPlatform(AbstractPlatform):
 
     @staticmethod
     def create(json_data):
+        if not json_data:
+            return None
+
         data_dict = json.loads(json_data)
         obj = NeonPlatform("dummy")
 
@@ -703,6 +707,9 @@ class BrightcovePlatform(AbstractPlatform):
 
     @staticmethod
     def create(json_data):
+        if not json_data:
+            return None
+
         params = json.loads(json_data)
         a_id = params['account_id']
         i_id = params['integration_id'] 
@@ -745,8 +752,8 @@ class BrightcovePlatform(AbstractPlatform):
         instances = [] 
         for pdata in platforms:
             platform = BrightcovePlatform.create(pdata)
-            instances.append(platform)
-
+            if platform:
+                instances.append(platform)
         return instances
 
 

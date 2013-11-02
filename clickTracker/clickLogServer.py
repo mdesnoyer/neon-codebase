@@ -176,6 +176,7 @@ def main():
     global event_queue
 
     event_queue = Queue.Queue() #multiprocessing.Queue()
+    server = tornado.httpserver.HTTPServer(application)
     utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)
     #server.bind(options.port)

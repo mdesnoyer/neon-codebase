@@ -97,10 +97,13 @@ class DemoHandler(tornado.web.RequestHandler):
 
         vimeo_vid = vid_url.split('/')[-1]
         tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
-        h = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/28.0.1500.71 Safari/537.36', 'Referer': 'https://vimeo.com/'+ vimeo_vid, 'X-Requested-With':'XMLHttpRequest'})
-        #TODO ADD all headers
-        # -H 'Host: vimeo.com' -H 'Accept-Language: en-US,en;q=0.8' -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.69 Safari/537.36' -H 'Accept: text/html, application/xml, text/xml, */*' -H 'Referer: https://vimeo.com/4862839' -H 'X-Requested-With: XMLHttpRequest' -H 'Connection: keep-alive' --compressed
-
+        h = tornado.httputil.HTTPHeaders({
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/28.0.1500.71 Safari/537.36',
+            'Referer': 'https://vimeo.com/'+ vimeo_vid, 'X-Requested-With':'XMLHttpRequest',
+            'HOST': 'vimeo.com', 
+            'Accept': 'text/html, application/xml, text/xml',
+            'Connection': 'keep-alive'
+            })
         url = 'https://vimeo.com/' + vimeo_vid + '?action=download' 
         http_client = tornado.httpclient.AsyncHTTPClient()
         req = tornado.httpclient.HTTPRequest(url = url,headers =h , request_timeout = 60.0, connect_timeout = 10.0)

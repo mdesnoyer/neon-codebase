@@ -44,6 +44,10 @@ import tornado.web
 import unittest
 import utils.neon
 import utils.ps
+import random
+import urllib
+import urllib2
+from clickTracker.clickLogServer import TrackerData
 
 from utils.options import define, options
 
@@ -90,14 +94,52 @@ class TestServingSystem(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def simulateLoads(self, n_loads, thumbs, target_ctr):
+    def temp_test_load(self):
+        l = 10
+        t = {}
+        t['ur1'] = 0.1
+        t['ur2'] = 0.2
+        t['ur3'] = 0.3
+
+        self.simulateLoads(l,t)
+    def simulateLoads(self, n_loads, thumbs_ctr):
         '''Simulate a set of loads and clicks
 
         n_loads - Number of player-like loads to generate
-        thumbs - List of thumbnail urls
-        target_str - List of target CTR for each thumb.
+        thumbs_ctr - Dict of thumbnail urls => target CTR for each thumb.
+        randomize the click order
         '''
-        pass
+        random.seed(1)
+        def format_get_request(vals):
+            base_url = "http://localhost:%s/track?" %9080 #clickTracker.clickLogServer.port
+            base_url += urllib.urlencode(vals)
+            return base_url
+
+        data = []    
+        thumbs = thumbs_ctr.keys()
+        for thumb,ctr in thumbs_ctr.iteritems():     
+            ts = time.time()
+            clicks = [x for x in range(int(ctr*n_loads))]
+            random.shuffle(clicks)
+            for i in range(n_loads):
+                params = {}
+                action = "load"
+                if i in clicks:
+                    action = "click"
+                    params['img'] = thumb
+                else:
+                    params['imgs'] = thumbs
+
+                params['a'] = action
+                params['ttype'] = 'flashonlyplayer'
+                params['id'] = 0
+                params['ts'] = ts + i 
+                params['page'] = "http://neontest"
+                params['cvid'] = 0
+                
+                req = format_get_request(params)
+                #make request 
+                response = urllib2.urlopen(req)
 
     def assertDirectiveCaptured(self, directive, timeout=30):
         '''Verifies that a given directive is received.
@@ -255,6 +297,5 @@ def main():
     
 
 if __name__ == "__main__":
-    utils.neon.InitNeon()
+    utils.neon.InitNeonTest()
     main()
-
