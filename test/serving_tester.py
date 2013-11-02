@@ -20,13 +20,17 @@ if sys.path[0] <> base_path:
 import atexit
 import clickTracker.clickLogServer
 import clickTracker.logDatatoS3
+from datetime import datetime
+import json
 import logging
 import mastermind.server
-import mysql.connector as sqldb
+import MySQLdb as sqldb
 import multiprocessing
 import os
 import re
 import signal
+import SimpleHTTPServer
+import SocketServer
 import stats.db
 import stats.stats_processor
 import subprocess
@@ -34,6 +38,9 @@ import supportServices.services
 from supportServices import neondata
 import tempfile
 import time
+import tornado.httpserver
+import tornado.ioloop
+import tornado.web
 import unittest
 import utils.neon
 import utils.ps
@@ -46,18 +53,39 @@ define('stats_db_user', help='User for the stats db connection',
        default='neon')
 define('stats_db_pass', help='Password for the stats db connection',
        default='neon')
+define('bc_directive_port', default=7212,
+       help='Port where the brightcove directives will be output')
 
 _log = logging.getLogger(__name__)
 
 class TestServingSystem(unittest.TestCase):
 
     def setUp(self):
-        #TODO: Clear the databases
+        _log.info('Starting the directive capture server on port %i' 
+                  % options.bc_directive_port)
+        directive_cap = DirectiveCaptureProc(options.bc_directive_port)
+        self.directive_q = directive_cap.q
+        directive_cap.start()
+        directive_cap.wait_until_running()
+
+        # Clear the stats database
+        conn = sqldb.connect(user=options.stats_db_user,
+                             passwd=options.stats_db_pass,
+                             host='localhost',
+                             db=options.stats_db)
+        self.statscursor = conn.cursor()
+        stats.db.execute(self.statscursor,
+                         '''DELETE from hourly_events''')
+        stats.db.execute(self.statscursor,
+                         '''DETELE from last_update''')
+        stats.db.execute(
+            self.statscursor,
+            '''REPLACE INTO last_update (tablename, logtime) VALUES (?, ?)''',
+            ('hourly_events', datetime.utcfromtimestamp(0)))
+        
+        #TODO: Clear the video database
 
         #TODO: Add a couple of bare bones entries to the video db?
-
-        #TODO: Setup endpoint to capture directives from mastermind
-        pass
 
     def tearDown(self):
         pass
@@ -97,6 +125,38 @@ class TestServingSystem(unittest.TestCase):
 
     #TODO: Write the actual tests
 
+def DirectiveCaptureProc(multiprocessing.Process):
+    '''A mini little http server that captures mastermind directives.
+
+    The directives are shoved into a multiprocess Queue after being parsed.
+    '''
+    def __init__(self, port):
+        super(DirectiveCapture, self).__init__()
+        self.port = port
+        self.q = multiprocessing.Queue()
+        self.is_running = multiprocessing.Event()
+
+    def wait_until_running(self):
+        '''Blocks until the data is loaded.'''
+        self.is_running.wait()
+
+    def run():
+        application = tornado.web.Application([
+            (r'/', DirectiveCaptureHandler, dict(q=self.q))])
+        server = tornado.httpserver.HTTPServer(application)
+        utils.ps.register_tornado_shutdown(server)
+        server.listen(self.port)
+        self.is_running.set()
+        tornado.ioloop.IOLoop.instance().start()
+
+def DirectiveCaptureHandler(tornado.web.RequestHandler):
+    def initialize(self, q):
+        self.q = q
+
+    def post(self):
+        data = json.loads(self.request.body)
+        self.q.put(data['d'])
+
 def LaunchStatsDb():
     '''Launches the stats db, which is a mysql interface.
 
@@ -105,9 +165,9 @@ def LaunchStatsDb():
     _log.info('Connecting to stats db')
     try:
         conn = sqldb.connect(user=options.stats_db_user,
-                             password=options.stats_db_pass,
+                             passwd=options.stats_db_pass,
                              host='localhost',
-                             database=options.stats_db)
+                             db=options.stats_db)
     except sqldb.Error as e:
         _log.error(('Error connection to stats db. Make sure that you '
                     'have a mysql server running locally and that it has '
