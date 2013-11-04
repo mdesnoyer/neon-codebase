@@ -170,8 +170,6 @@ application = tornado.web.Application([
 ])
 
 def main():
-    utils.neon.InitNeon()
-
     global server
     global event_queue
 
@@ -185,4 +183,5 @@ def main():
 
 # ============= MAIN ======================== #
 if __name__ == "__main__":
+    utils.neon.InitNeon()
     main()

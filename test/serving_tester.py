@@ -64,14 +64,26 @@ _log = logging.getLogger(__name__)
 
 class TestServingSystem(unittest.TestCase):
 
-    def setUp(self):
+    @classmethod
+    def setUpClass(cls):
         _log.info('Starting the directive capture server on port %i' 
                   % options.bc_directive_port)
-        directive_cap = DirectiveCaptureProc(options.bc_directive_port)
-        self.directive_q = directive_cap.q
-        directive_cap.start()
-        directive_cap.wait_until_running()
+        cls._directive_cap = DirectiveCaptureProc(options.bc_directive_port)
+        cls.directive_q = cls._directive_cap.q
+        cls._directive_cap.start()
+        cls._directive_cap.wait_until_running()
 
+    @classmethod
+    def tearDownClass(cls):
+        cls._directive_cap.terminate()
+        cls._directive_cap.join(30)
+        if cls._directive_cap.is_alive():
+            try:
+                os.kill(cls._directive_cap.pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+    def setUp(self):
         # Clear the stats database
         conn = sqldb.connect(user=options.stats_db_user,
                              passwd=options.stats_db_pass,
@@ -81,27 +93,26 @@ class TestServingSystem(unittest.TestCase):
         stats.db.execute(self.statscursor,
                          '''DELETE from hourly_events''')
         stats.db.execute(self.statscursor,
-                         '''DETELE from last_update''')
+                         '''DELETE from last_update''')
         stats.db.execute(
             self.statscursor,
-            '''REPLACE INTO last_update (tablename, logtime) VALUES (?, ?)''',
+            'REPLACE INTO last_update (tablename, logtime) VALUES (%s, %s)',
             ('hourly_events', datetime.utcfromtimestamp(0)))
+        conn.commit()
+
+        # Empty the directives queue
+        while not self.__class__.directive_q.empty():
+            self.__class__.directive_q.get_nowait()
+        self.directives_captured = []
         
-        #TODO: Clear the video database
+        # Clear the video database
+        neondata._erase_all_data()
 
         #TODO: Add a couple of bare bones entries to the video db?
 
     def tearDown(self):
         pass
 
-    def temp_test_load(self):
-        l = 10
-        t = {}
-        t['ur1'] = 0.1
-        t['ur2'] = 0.2
-        t['ur3'] = 0.3
-
-        self.simulateLoads(l,t)
     def simulateLoads(self, n_loads, thumbs_ctr):
         '''Simulate a set of loads and clicks
 
@@ -111,7 +122,8 @@ class TestServingSystem(unittest.TestCase):
         '''
         random.seed(1)
         def format_get_request(vals):
-            base_url = "http://localhost:%s/track?" %9080 #clickTracker.clickLogServer.port
+            base_url = "http://localhost:%s/track?" % (
+                options.clickTracker.clickLogServer.port)
             base_url += urllib.urlencode(vals)
             return base_url
 
@@ -141,39 +153,59 @@ class TestServingSystem(unittest.TestCase):
                 #make request 
                 response = urllib2.urlopen(req)
 
-    def assertDirectiveCaptured(self, directive, timeout=30):
+    def assertDirectiveCaptured(self, directive, timeout=10):
         '''Verifies that a given directive is received.
 
         Inputs:
         directive - (video_id, [(thumb_id, frac)])
         timeout - How long to wait for the directive
         '''
-        pass
+        deadline = time.time() + timeout
+        
+        # Check the directives we already know about
+        if directive in self.directives_captured:
+            return
 
-    def getStats(self, video_id, thumb_id):
+        while time.time() < deadline:
+            new_directive = self.__class__.directive_q.get(
+                True, deadline-time.time())
+            self.directives_captured.append(new_directive)
+            if directive == new_directive:
+                return
+
+        self.fail('Directive %s not found. Saw %s' % 
+                  (directive, self.directives_captured))
+            
+
+    def getStats(self, thumb_id):
         '''Retrieves the statistics about a given thumb.
 
         Inputs:
-        video_id - Video id
         thumb_id - Thumbnail id
 
         Outputs:
         (loads, clicks)
         '''
-        pass
+        stats = stats.db.execute(
+            self.statscursor,
+            '''SELECT sum(loads), sum(clicks) from hourly_events
+            where thumbnail_id = %s''', (thumb_id,))
+        return (stats[0][0], stats[0][1])
         
 
     #TODO: Add helper functions to add stuff to the video database?
 
     #TODO: Write the actual tests
+    def test_initial_directives_received(self):
+        pass
 
-def DirectiveCaptureProc(multiprocessing.Process):
+class DirectiveCaptureProc(multiprocessing.Process):
     '''A mini little http server that captures mastermind directives.
 
     The directives are shoved into a multiprocess Queue after being parsed.
     '''
     def __init__(self, port):
-        super(DirectiveCapture, self).__init__()
+        super(DirectiveCaptureProc, self).__init__()
         self.port = port
         self.q = multiprocessing.Queue()
         self.is_running = multiprocessing.Event()
@@ -182,7 +214,7 @@ def DirectiveCaptureProc(multiprocessing.Process):
         '''Blocks until the data is loaded.'''
         self.is_running.wait()
 
-    def run():
+    def run(self):
         application = tornado.web.Application([
             (r'/', DirectiveCaptureHandler, dict(q=self.q))])
         server = tornado.httpserver.HTTPServer(application)
@@ -191,7 +223,7 @@ def DirectiveCaptureProc(multiprocessing.Process):
         self.is_running.set()
         tornado.ioloop.IOLoop.instance().start()
 
-def DirectiveCaptureHandler(tornado.web.RequestHandler):
+class DirectiveCaptureHandler(tornado.web.RequestHandler):
     def initialize(self, q):
         self.q = q
 
@@ -297,5 +329,5 @@ def main():
     
 
 if __name__ == "__main__":
-    utils.neon.InitNeonTest()
+    utils.neon.InitNeon()
     main()
