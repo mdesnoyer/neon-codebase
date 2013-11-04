@@ -32,7 +32,6 @@ var NeonDataSender = (function() {
 			var pageURL = (document.URL).split('?')[0]; // Ignore any get params	
 			var ts = new Date().getTime(); 
 			var req = url + "?" + params + "&ts=" + ts + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + NeonTrackerType;
-			console.log("Send request to Neon " + req );
 			try { bObj = new JSONscriptRequest(req); bObj.buildScriptTag(); bObj.addScriptTag();  } catch(err) {}	
 		},
 
@@ -46,18 +45,16 @@ var NeonDataSender = (function() {
 }());
 
 var reqGuid = NeonDataSender._NeonPageRequestUUID();
-/// Neon Tracker for Brightcove Flash Players
 var NeonPlayerTracker = ( function () {
     var player, videoPlayer, content, exp, initialVideo;
-    var NeonTrackerURL = "http://localhost:8888/track";
+    var NeonTrackerURL = "http://tracker.neon-lab.com/track";
+    //var NeonTrackerURL = "http://localhost:8888/track";
     return {
         onTemplateLoad: function (expID){                                           
-            console.log( "template loaded " + new Date().getTime());                 
 			NeonPlayerTracker.hookNeonTrackerToFlashPlayer(expID);
         },
                                                        
 		hookNeonTrackerToFlashPlayer: function(expID) { 
-			console.log("Hoooked Neon Tracker!");
 			player = brightcove.api.getExperience(expID);
 			if (player){
 				NeonTrackerType = "html5";
@@ -69,18 +66,15 @@ var NeonPlayerTracker = ( function () {
             	videoPlayer.addEventListener(BCMediaEvent.BEGIN, NeonPlayerTracker.onMediaBegin);
 				exp.addEventListener(BCExperienceEvent.CONTENT_LOAD, NeonPlayerTracker.trackLoadedImageUrls);
 			}
-			//Test //setTimeout( function() { location.reload(); } , 5000);
 		 },                             
  
         onTemplateReady: function (evt) {                                         
-            console.log("template ready " + new Date().getTime());
 			if (evt.target.experience) {
 				APIModules = brightcove.api.modules.APIModules;
 				videoPlayer = player.getModule(APIModules.VIDEO_PLAYER);
 				content = player.getModule(APIModules.CONTENT);
 				videoPlayer.addEventListener(brightcove.api.events.MediaEvent.BEGIN, NeonPlayerTracker.smartPlayerMediaBegin);
 				videoPlayer.getCurrentVideo( function(videoDTO) { initialVideo = videoDTO;});
-				console.log("smartplayer api");
 			}else{
 				initialVideo = videoPlayer.getCurrentVideo();
 				NeonPlayerTracker.trackLoadedImageUrls();
@@ -94,10 +88,8 @@ var NeonPlayerTracker = ( function () {
             if (mediaCollection.length >0 && mediaCollection[0].mediaCount > 0){
             	for(var i = 0; i < mediaCollection[0].mediaCount; i++) {
                 		imageUrls[i] = content.getMedia(mediaCollection[0].mediaIds[i]) ["thumbnailURL"].split('?')[0]; 
-                		//stillUrls[i] = content.getMedia(mediaCollection[0].mediaIds[i]) ["videoStillURL"].split('?')[0];
             	}
 			}
-			//console.log(imageUrls);
 			action = "load";
 			params = "a=" + action + "&id="+ reqGuid + "&imgs=" + encodeURIComponent(JSON.stringify(imageUrls)) + "&cvid="+initialVideo.id;
 			if (PageLoadIDSeen == null){
@@ -107,11 +99,9 @@ var NeonPlayerTracker = ( function () {
         },
                                                                                      
         onMediaBegin: function (evt) {
-            console.log( "Media Begin ! " + new Date().getTime());            
 		  	var vid    = evt.media.id;	
 			var action = "click";
 			var imgSrc = evt.media.thumbnailURL.split("?")[0]; //clean up
-			//stillSrc = evt.media.videoStillURL;
 			params = "a=" + action + "&id="+ reqGuid + "&img=" + encodeURIComponent(imgSrc);
 			if(MediaPlayPageIDSeen == null){
 				MediaPlayPageIDSeen = reqGuid;

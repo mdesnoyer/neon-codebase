@@ -66,6 +66,61 @@ class TestServingSystem(unittest.TestCase):
     def tearDown(self):
         pass
 
+    def dbsetup_helper(self):
+        a_id = 'dbtestuser'
+        i_id = 'test_integration'
+        nvids = 10
+        video_ids = [ "vid%"%i for i in range(nvids)]
+        n_thumbs = 3 #assume last image is bcove
+
+        # create neon user account
+        nu = NeonUserAccount(user)
+        api_key = nu.neon_api_key
+        nu.save()
+
+        # create brightcove platform account
+        bp = BrightcovePlatform(a_id,i_id) 
+        bp.save()
+
+        # Create Request objects  <-- not required? 
+        #TODO: ImageMD5Mapper & TID generator 
+        # Add fake video data in to DB
+        for vid in video_ids:
+            i_vid = InternalVideoID.generate(api_key,vid)
+            bp.add_video(i_vid,"dummy_request_id")
+            tids = []; thumbnail_url_mappers=[];thumbnail_id_mappers=[]  
+            # fake thumbnails for videos
+            for t in range(n_thumbs):
+                ttype = "neon" if t < (n_thumbs -1) else "brightcove"
+                tid = vid + '_thumb_%s' %t 
+                url = self.get_random_image_url() #TODO
+                urls = [] ; urls.append(url)
+                tdata = ThumbnailMetaData(tid,urls,time.time(),480,360,ttype,0,0,t)
+                tids.append(tdata.to_dict())
+                
+                # ID Mappers (ThumbIDMapper,ImageMD5Mapper,URLMapper)
+                url_mapper = ThumbnailURLMapper(url,tid)
+                id_mapper = ThumbnailIDMapper(tid,i_vid,tdata.to_dict)
+                thumbnail_url_mappers.append(url_mapper)
+                thumbnail_id_mappers.append(id_mapper)
+
+            #brightcove image
+            #bcove_url =  self.get_random_image_url()
+            #tid = vid + '_thumb_bcove'
+            #urls = []; urls.append(bcove_url)
+            #tdata = ThumbnailMetaData(tid,urls,time.time(),480,360,"brightcove",0,0,t)
+            #tids.append(tdata.to_dict())
+
+            vmdata = VideoMetadata(i_vid,tids,"job_id","http://testvideo.mp4",10,0,0,i_id)
+            retid = ThumbnailIDMapper.save_all(thumbnail_id_mappers)
+            returl = ThumbnailURLMapper.save_all(thumbnail_url_mappers)
+            if not vmdata.save():
+                _log.debug("video not saved")
+            
+        # Update Brightcove account with videos
+        bp.save()
+
+    #TODO: remove
     def temp_test_load(self):
         l = 10
         t = {}
@@ -74,6 +129,7 @@ class TestServingSystem(unittest.TestCase):
         t['ur3'] = 0.3
 
         self.simulateLoads(l,t)
+
     def simulateLoads(self, n_loads, thumbs_ctr):
         '''Simulate a set of loads and clicks
 
