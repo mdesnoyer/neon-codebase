@@ -27,6 +27,7 @@ import mastermind.server
 import MySQLdb as sqldb
 import multiprocessing
 import os
+import random
 import re
 import signal
 import SimpleHTTPServer
@@ -42,12 +43,10 @@ import tornado.httpserver
 import tornado.ioloop
 import tornado.web
 import unittest
-import utils.neon
-import utils.ps
-import random
 import urllib
 import urllib2
-from clickTracker.clickLogServer import TrackerData
+import utils.neon
+import utils.ps
 
 from utils.options import define, options
 
@@ -108,7 +107,7 @@ class TestServingSystem(unittest.TestCase):
         # Clear the video database
         neondata._erase_all_data()
 
-        #TODO: Add a couple of bare bones entries to the video db?
+        # TODO: Add a couple of bare bones entries to the video db?
 
     def tearDown(self):
         pass
@@ -120,7 +119,7 @@ class TestServingSystem(unittest.TestCase):
         thumbs_ctr - Dict of thumbnail urls => target CTR for each thumb.
         randomize the click order
         '''
-        random.seed(1)
+        random.seed(5951674)
         def format_get_request(vals):
             base_url = "http://localhost:%s/track?" % (
                 options.clickTracker.clickLogServer.port)
