@@ -35,7 +35,6 @@ from api import brightcove_api
 import api.youtube_api
 from PIL import Image
 from StringIO import StringIO
-import dbsettings
 import threading
 
 from utils.options import define, options
@@ -971,9 +970,6 @@ class NeonApiRequest(object):
     Getting request blobs :
     use static get method to get a json based response NeonApiRequest.get_request()
     '''
-    host,port = dbsettings.DBConfig.videoDB 
-    conn,blocking_conn = RedisClient.get_client(host,port)
-
     def __init__(self,job_id,api_key,vid,title,url,request_type,http_callback):
         self.key = generate_request_key(api_key,job_id) 
         self.job_id = job_id

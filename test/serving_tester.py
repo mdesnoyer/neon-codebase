@@ -207,60 +207,57 @@ class TestServingSystem(unittest.TestCase):
         
 
     #Add helper functions to add stuff to the video database
-    def setup_videodb(self,a_id='dbtestuser',
+    def setup_videodb(self, a_id='acct0',
             i_id='testintegration1',n_vids=1,n_thumbs=3):
         '''Creates a basic account in the video db.
 
         This account has account id a_id, integration id i_id, a
-        number of video ids from 0->n-1, and thumbs <vid>_thumb_<j>
-        for j in 0->m-1. Thumb m-1 is brighcove, while the rest are neon.
-        '''
-        
-        def get_random_image_url():
-            #size=10
-            #random.seed(2151)
-            #return 'http://' + ''.join(random.choice(
-            #           'abcdefghijklmnopqrstuvwxyz') for x in range(size)) + '.jpg'
+        number of video ids <a_id>_vid<i> for i in 0->n-1, and thumbs
+        vid<i>_thumb<j> for j in 0->m-1. Thumb m-1 is brighcove, while
+        the rest are neon. 
 
-        video_ids = ["vid%"%i for i in range(n_vids)]
+        '''
+
+        video_ids = ["vid%i" % i for i in range(n_vids)]
 
         # create neon user account
-        nu = NeonUserAccount(user)
+        nu = neondata.NeonUserAccount(a_id)
         api_key = nu.neon_api_key
         nu.save()
 
         # create brightcove platform account
-        bp = BrightcovePlatform(a_id,i_id) 
+        bp = neondata.BrightcovePlatform(a_id, i_id) 
         bp.save()
 
         # Create Request objects  <-- not required? 
         #TODO: ImageMD5Mapper & TID generator 
         # Add fake video data in to DB
         for vid in video_ids:
-            i_vid = InternalVideoID.generate(api_key,vid)
+            i_vid = '%s_%s' % (a_id, vid)
             bp.add_video(i_vid,"dummy_request_id")
             tids = []; thumbnail_url_mappers=[];thumbnail_id_mappers=[]  
             # fake thumbnails for videos
             for t in range(n_thumbs):
                 #Note: assume last image is bcove
                 ttype = "neon" if t < (n_thumbs -1) else "brightcove"
-                tid = vid + '_thumb_%s' %t 
-                url = 'http://%s.jpg' %tid 
+                tid = '%s_thumb%i' % (vid, t) 
+                url = 'http://%s.jpg' % tid 
                 urls = [] ; urls.append(url)
-                tdata = ThumbnailMetaData(tid,urls,
+                tdata = neondata.ThumbnailMetaData(tid,urls,
                         time.time(),480,360,ttype,0,0,True,False,rank=t)
                 tids.append(tdata.to_dict())
                 
                 # ID Mappers (ThumbIDMapper,ImageMD5Mapper,URLMapper)
-                url_mapper = ThumbnailURLMapper(url,tid)
-                id_mapper = ThumbnailIDMapper(tid,i_vid,tdata.to_dict)
+                url_mapper = neondata.ThumbnailURLMapper(url,tid)
+                id_mapper = neondata.ThumbnailIDMapper(tid,i_vid,tdata.to_dict)
                 thumbnail_url_mappers.append(url_mapper)
                 thumbnail_id_mappers.append(id_mapper)
 
-            vmdata = VideoMetadata(i_vid,tids,
+            vmdata = neondata.VideoMetadata(i_vid,tids,
                     "job_id","http://testvideo.mp4",10,0,0,i_id)
-            retid = ThumbnailIDMapper.save_all(thumbnail_id_mappers)
-            returl = ThumbnailURLMapper.save_all(thumbnail_url_mappers)
+            retid = neondata.ThumbnailIDMapper.save_all(thumbnail_id_mappers)
+            returl = neondata.ThumbnailURLMapper.save_all(
+                thumbnail_url_mappers)
             if not vmdata.save() or retid or returl:
                 _log.debug("Didnt save data to the DB, DB error")
             
@@ -270,8 +267,10 @@ class TestServingSystem(unittest.TestCase):
 
     #TODO: Write the actual tests
     def test_initial_directives_received(self):
-        self.assertDirectiveCaptured
-        pass
+        self.assertDirectiveCaptured(('acct0_vid0',
+                                      [('vid0_thumb0', 0.80),
+                                       ('vid0_thumb1', 0.00),
+                                       ('vid0_thumb2', 0.20)]))
 
 class DirectiveCaptureProc(multiprocessing.Process):
     '''A mini little http server that captures mastermind directives.
