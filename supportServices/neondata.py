@@ -637,7 +637,7 @@ class BrightcovePlatform(AbstractPlatform):
         tids = vmdata.thumbnail_ids
         
         #Get all thumbnails
-        thumb_mappings = yield tornado.gen.Task(ThumbnailIDMapper.get_ids,tids)
+        thumb_mappings = yield tornado.gen.Task(ThumbnailIDMapper.get_thumb_mappings,tids)
         t_url = None
         
         for thumb_mapping in thumb_mappings:
@@ -1166,6 +1166,13 @@ class ThumbnailMetaData(object):
     def to_dict(self):
         return self.__dict__
 
+    @staticmethod
+    def create(params_dict):
+        obj = ThumbnailMetaData(0,0,0,0,0,0,0,0)
+        for key in params_dict:
+            obj.__dict__[key] = params_dict[key]
+        return obj 
+    
     @classmethod
     def _erase_all_data(cls):
         db_connection=DBConnection(cls)
@@ -1349,7 +1356,28 @@ class ThumbnailIDMapper(object):
         return obj
 
     @classmethod
-    def get_thumb_info(cls, id, callback=None):
+    def get_video_id(cls, tid, callback=None):
+        '''Given a thumbnail id, retrieves the video id 
+            asscociated with tid'''
+
+        def get_metadata(result):
+            vid = None
+            if result:
+                obj = ThumbnailIDMapper.create(result)
+                callback(obj.video_id)
+            callback(vid)
+
+        db_connection = DBConnection(cls)
+        if callback:
+            db_connection.conn.get(tid, get_metadata)
+        else:
+            result = db_connection.blocking_conn.get(tid)
+            if result:
+                obj = ThumbnailIDMapper.create(result)
+                return obj.video_id
+
+    @classmethod
+    def get_thumb_metadata(cls, id, callback=None):
         '''Given a thumbnail id, retrieves the thumbnail metadata.
 
         Inputs:
@@ -1358,14 +1386,27 @@ class ThumbnailIDMapper(object):
         Returns:
         ThumbnailMetadata object.
         '''
+        def get_metadata(result):
+            tmdata = None
+            if result:
+                obj = ThumbnailIDMapper.create(result)
+                tmdata = ThumbnailMetaData.create(obj.thumbnail_metadata)
+            callback(tmdata)
+
         db_connection = DBConnection(cls)
         if callback:
-            ThumbnailIDMapper.get(key, callback, db_connection)
+            db_connection.conn.get(id, get_metadata)
         else:
-            return db_connection.blocking_conn.get(key)
+            result = db_connection.blocking_conn.get(id)
+            if result:
+                obj = ThumbnailIDMapper.create(result)
+                return ThumbnailMetaData.create(obj.thumbnail_metadata)
+
 
     @classmethod
-    def get_ids(cls,keys,callback=None):
+    def get_thumb_mappings(cls,keys,callback=None):
+        ''' Returns list of thumbnail mappings for give thumb ids(keys)
+        '''
         db_connection = DBConnection(cls)
 
         def process(results):

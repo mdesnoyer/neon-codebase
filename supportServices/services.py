@@ -562,7 +562,7 @@ class AccountHandler(tornado.web.RequestHandler):
                     tids.extend(vresult.thumbnail_ids)
         
             #Get all the thumbnail data for videos that are done
-            thumbnails = yield tornado.gen.Task(neondata.ThumbnailIDMapper.get_ids,tids)
+            thumbnails = yield tornado.gen.Task(neondata.ThumbnailIDMapper.get_thumb_mappings,tids)
             for thumb in thumbnails:
                 if thumb:
                     vid = neondata.InternalVideoID.to_external(thumb.video_id)
