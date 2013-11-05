@@ -85,19 +85,6 @@ def initialize():
                                         options.youtube_controller_url)
     
     mastermind = Mastermind()
-    # Get all the current information about the videos
-    for platform in neondata.AbstractPlatform.get_all_instances():
-        for video_id in platform.videos.iterkeys():
-            video_metadata = neondata.VideoMetadata.get(video_id)
-            thumbnails = [ThumbnailInfo.from_db_data(
-                neondata.ThumbnailIDMapper.get_id(thumb_id,
-                                                  ).thumbnail_metadata) 
-                for thumb_id in video_metadata.thumbnail_ids]
-
-            mastermind.update_video_info(video_id, platform.abtest,
-                                         thumbnails)
-            ab_manager.register_video_distribution(
-                video_id, DistributionType.fromString(platform.get_ovp()))
 
     return mastermind, ab_manager
 
@@ -134,13 +121,16 @@ class VideoDBWatcher(threading.Thread):
                     video_id)
                 thumbnails = [
                     ThumbnailInfo.from_db_data(
-                        neondata.ThumbnailIDMapper.get_id(
-                            thumb_id).thumbnail_metadata) 
+                        neondata.ThumbnailIDMapper.get_thumb_metadata(
+                            thumb_id)) 
                     for thumb_id in video_metadata.thumbnail_ids]
 
-                directive = mastermind.update_video_info(video_id,
-                                                         platform.abtest,
-                                                         thumbnails)
+                self.ab_manager.register_video_distribution(
+                    video_id, DistributionType.fromString(platform.get_ovp()))
+
+                directive = self.mastermind.update_video_info(video_id,
+                                                              platform.abtest,
+                                                              thumbnails)
                 if directive:
                     self.ab_manager.send(directive)
 
@@ -231,7 +221,7 @@ class StatsDBWatcher(threading.Thread):
         try:
             video_id = self.video_id_cache[thumb_id]
         except KeyError:
-            video_id = neondata.ThumbnailIDMapper.get_id(thumb_id).video_id
+            video_id = neondata.ThumbnailIDMapper.get_video_id(thumb_id)
             self.video_id_cache[thumb_id] = video_id
         return video_id
 

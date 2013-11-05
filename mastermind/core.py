@@ -77,12 +77,12 @@ class ThumbnailInfo(object):
         Inputs:
         data - A neondata.ThumbnailMetaData object
         '''
-        return ThumbnailInfo(data['thumbnail_id'],
-                             data['type'],
-                             data['rank'],
-                             data['enabled'],
-                             data['chosen'],
-                             data['score'])
+        return ThumbnailInfo(data.thumbnail_id,
+                             data.type,
+                             data.rank,
+                             data.enabled,
+                             data.chosen,
+                             data.model_score)
 
 class Mastermind(object):
     '''Class that defines the core logic of how much to show each thumbnail.

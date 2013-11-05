@@ -176,8 +176,8 @@ class TestStatsDBWatcher(unittest.TestCase):
                                                         self.ab_manager)
 
         self.tid_mapper = MagicMock()
-        self.mod_get_id = neondata.ThumbnailIDMapper.get_id
-        neondata.ThumbnailIDMapper.get_id = self.tid_mapper
+        self.mod_get_video_id = neondata.ThumbnailIDMapper.get_video_id
+        neondata.ThumbnailIDMapper.get_video_id = self.tid_mapper
 
         self.server_log = mastermind.server._log
         mastermind.server._log = MagicMock()
@@ -195,7 +195,7 @@ class TestStatsDBWatcher(unittest.TestCase):
         self.ramdb.commit()
 
     def tearDown(self):
-        neondata.ThumbnailIDMapper.get_id = self.mod_get_id
+        neondata.ThumbnailIDMapper.get_video_id = self.mod_get_video_id
         mastermind.server._log = self.server_log
         MySQLdb.connect = self.dbconnect
         try:
@@ -210,8 +210,7 @@ class TestStatsDBWatcher(unittest.TestCase):
 
     def test_working_db(self):
         # Always say that the thumbnail id is part of the same video
-        self.tid_mapper.side_effect = lambda x: neondata.ThumbnailIDMapper(
-            '', 'videoA', None)
+        self.tid_mapper.side_effect = lambda x: 'videoA'
 
         # Mastermind will first return a list of directives and then no change
         self.mastermind.update_stats_info.side_effect = [

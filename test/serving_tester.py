@@ -113,15 +113,6 @@ class TestServingSystem(unittest.TestCase):
 
     def tearDown(self):
         pass
-
-    #TODO: remove
-    #def test_load(self):
-    #    l = 10
-    #    t = {}
-    #    t['ur1'] = 0.1
-    #    t['ur2'] = 0.2
-    #    t['ur3'] = 0.3
-    #    self.simulateLoads(l,t)
     
     def simulateLoads(self, n_loads, thumbs_ctr):
         '''
