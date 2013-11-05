@@ -504,7 +504,7 @@ class ProcessVideo(object):
             enabled = None 
             width   = image.size[0]
             height  = image.size[1] 
-            ttype   = "neon" + str(i)
+            ttype   = "neon" 
             rank    = i +1 
 
             #populate thumbnails

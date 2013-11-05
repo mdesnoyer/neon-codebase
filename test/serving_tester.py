@@ -211,10 +211,10 @@ class TestServingSystem(unittest.TestCase):
             i_id='testintegration1',n_vids=1,n_thumbs=3):
         
         def get_random_image_url():
-            size=10
-            random.seed(2151)
-            return 'http://' + ''.join(random.choice(
-                        'abcdefghijklmnopqrstuvwxyz') for x in range(size)) + '.jpg'
+            #size=10
+            #random.seed(2151)
+            #return 'http://' + ''.join(random.choice(
+            #           'abcdefghijklmnopqrstuvwxyz') for x in range(size)) + '.jpg'
 
         video_ids = ["vid%"%i for i in range(n_vids)]
 
@@ -239,10 +239,10 @@ class TestServingSystem(unittest.TestCase):
                 #Note: assume last image is bcove
                 ttype = "neon" if t < (n_thumbs -1) else "brightcove"
                 tid = vid + '_thumb_%s' %t 
-                url = get_random_image_url()
+                url = 'http://%s.jpg' %tid 
                 urls = [] ; urls.append(url)
                 tdata = ThumbnailMetaData(tid,urls,
-                        time.time(),480,360,ttype,0,0,t)
+                        time.time(),480,360,ttype,0,0,True,False,rank=t)
                 tids.append(tdata.to_dict())
                 
                 # ID Mappers (ThumbIDMapper,ImageMD5Mapper,URLMapper)
