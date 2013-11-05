@@ -152,7 +152,7 @@ class TestServingSystem(unittest.TestCase):
                 #make request 
                 response = urllib2.urlopen(req)
 
-    def assertDirectiveCaptured(self, directive, timeout=10):
+    def assertDirectiveCaptured(self, directive, timeout=20):
         '''Verifies that a given directive is received.
 
         Inputs:
@@ -235,6 +235,10 @@ def LaunchStatsDb():
 
     Makes sure that the database is up.
     '''
+    if options.get('stats.hourly_event_stats_mr.stats_host') <> 'localhost':
+        raise Exception('Stats db has to be local so we do not squash '
+                        'important data')
+    
     _log.info('Connecting to stats db')
     try:
         conn = sqldb.connect(user=options.stats_db_user,
@@ -256,7 +260,11 @@ def LaunchStatsDb():
 
 def LaunchVideoDb():
     '''Launches the video db.'''
-
+    if options.get('supportServices.neondata.dbPort') == 6379:
+        raise Exception('Not allowed to talk to the default Redis server '
+                        'so that we do not accidentially erase it. '
+                        'Please change the port number.')
+    
     _log.info('Launching video db')
     proc = subprocess.Popen([
         '/usr/bin/env', 'redis-server',
