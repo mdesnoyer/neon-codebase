@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-'''This script fires up the serving system and runs end to end tests.
+''' This script fires up the serving system and runs end to end tests.
 
 ***WARNING*** This test does not run completely locally. It interfaces
    with some Amazon services and will thus incure some fees. Also, it
