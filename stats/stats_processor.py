@@ -13,6 +13,7 @@ if sys.path[0] <> base_path:
 
 import atexit
 import logging
+import os
 from stats.hourly_event_stats_mr import HourlyEventStats
 import signal
 import time
@@ -39,8 +40,9 @@ def main():
     atexit.register(utils.ps.shutdown_children)
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
 
-    job = HourlyEventStats(args=['--conf-path', options.mr_conf,
-                                 '-r', options.runner,
+    os.environ['MRJOB_CONF'] = options.mr_conf
+
+    job = HourlyEventStats(args=['-r', options.runner,
                                  options.input])
 
     known_input_files = 0

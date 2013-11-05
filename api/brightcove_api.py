@@ -64,7 +64,7 @@ class BrightcoveApi(object):
     ''' add thumbnail and videostill in to brightcove account.
         used by neon client to update thumbnail, Image gets sent to the method call
     '''
-    def update_thumbnail_and_videostill(self,video_id,image,ref_id):
+    def update_thumbnail_and_videostill(self,video_id,image,ref_id): #ref_id = tid
         
         #If url is passed, then set thumbnail using the remote url (not used currently)
         if isinstance(image,basestring):

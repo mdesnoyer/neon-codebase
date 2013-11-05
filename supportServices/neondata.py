@@ -87,6 +87,13 @@ class DBConnection(object):
             keys = self.blocking_conn.keys(key_prefix)
             return keys
 
+    def clear_db(self):
+        '''Erases all the keys in the database.
+
+        This should really only be used in test scenarios.
+        '''
+        self.blocking_conn.flushdb()
+
     #@classmethod
     #def instance(cls,otype=None):
     #    class_name = None
@@ -147,6 +154,18 @@ class DBConnectionCheck(threading.Thread):
 #start watchdog thread for the DB connection
 t = DBConnectionCheck()
 t.start()
+
+def _erase_all_data():
+    '''Erases all the data from the redis databases.
+
+    This should only be used for testing purposes.
+    '''
+    _log.warn('Erasing all the data. I hope this is a test.')
+    AbstractPlatform._erase_all_data()
+    ThumbnailMetaData._erase_all_data()
+    ThumbnailURLMapper._erase_all_data()
+    ThumbnailIDMapper._erase_all_data()
+    VideoMetadata._erase_all_data()
 
 '''
 Static class for REDIS configuration
@@ -465,6 +484,11 @@ class AbstractPlatform(object):
                 _log.debug("key=get_all_platform data msg=no data for acc %s i_id %s" %(api_key,i_id))
         
         return platform_data
+
+    @classmethod
+    def _erase_all_data(cls):
+        db_connection=DBConnection(cls)
+        db_connection.clear_db()
 
 class NeonPlatform(AbstractPlatform):
     '''
@@ -1142,6 +1166,11 @@ class ThumbnailMetaData(object):
     def to_dict(self):
         return self.__dict__
 
+    @classmethod
+    def _erase_all_data(cls):
+        db_connection=DBConnection(cls)
+        db_connection.clear_db()
+
 class ThumbnailID(AbstractHashGenerator):
     '''
     Static class to generate thumbnail id
@@ -1218,9 +1247,19 @@ class ThumbnailURLMapper(AbstractRedisUserBlob):
         else:
             return ThumbnailURLMapper.blocking_conn.get(key)
 
+    @classmethod
+    def _erase_all_data(cls):
+        db_connection=DBConnection(cls)
+        db_connection.clear_db()
+
 class ImageMD5Mapper(object):
     '''
     Maps a given Image MD5 to Thumbnail ID
+
+    This is needed to keep the mapping of individual image md5's to tid
+    A single image can exist is different sizes, for example brightcove has 
+    videostills and thumbnails for any given video
+
     '''
     def __init__(self,imgdata,tid):
         self.key = self.format_key(imgdata)
@@ -1382,6 +1421,11 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
         else:
             return pipe.execute()
 
+    @classmethod
+    def _erase_all_data(cls):
+        db_connection=DBConnection(cls)
+        db_connection.clear_db()
+
 class VideoMetadata(object):
     '''
     Schema for metadata associated with video which gets stored
@@ -1475,4 +1519,9 @@ class VideoMetadata(object):
     def get_video_metadata(internal_accnt_id,internal_video_id):
         jdata = NeonApiRequest.get_request(internal_accnt_id,internal_video_id)
         nreq = NeonApiRequest.create(jdata)
+
+    @classmethod
+    def _erase_all_data(cls):
+        db_connection=DBConnection(cls)
+        db_connection.clear_db()
 

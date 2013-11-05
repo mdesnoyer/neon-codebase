@@ -121,7 +121,9 @@ class S3DataHandler(object):
     def do_work(self):
         http_client = tornado.httpclient.HTTPClient()
         req = tornado.httpclient.HTTPRequest(url = self.fetch_url,
-                            method = "GET",request_timeout = 10.0, connect_timeout = 10.0)
+                                             method = "GET",
+                                             request_timeout = 10.0, 
+                                             connect_timeout = 10.0)
         try:
             response = http_client.fetch(req)
             self.lines_to_save += response.body

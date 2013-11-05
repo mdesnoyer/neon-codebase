@@ -54,6 +54,8 @@ def AddConfiguredLogger():
         handler.setLevel(logging.ERROR)
         logger.addHandler(handler)
 
+    logging.captureWarnings(True)
+
 def CreateLogger(name=None,
                  stream=None,
                  logfile=None,

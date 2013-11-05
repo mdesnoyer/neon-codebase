@@ -20,13 +20,18 @@ if sys.path[0] <> base_path:
 import atexit
 import clickTracker.clickLogServer
 import clickTracker.logDatatoS3
+from datetime import datetime
+import json
 import logging
 import mastermind.server
-import mysql.connector as sqldb
+import MySQLdb as sqldb
 import multiprocessing
 import os
+import random
 import re
 import signal
+import SimpleHTTPServer
+import SocketServer
 import stats.db
 import stats.stats_processor
 import subprocess
@@ -34,13 +39,14 @@ import supportServices.services
 from supportServices import neondata
 import tempfile
 import time
+import tornado.httpserver
+import tornado.ioloop
+import tornado.web
 import unittest
-import utils.neon
-import utils.ps
-import random
 import urllib
 import urllib2
-from clickTracker.clickLogServer import TrackerData
+import utils.neon
+import utils.ps
 
 from utils.options import define, options
 
@@ -50,96 +56,85 @@ define('stats_db_user', help='User for the stats db connection',
        default='neon')
 define('stats_db_pass', help='Password for the stats db connection',
        default='neon')
+define('bc_directive_port', default=7212,
+       help='Port where the brightcove directives will be output')
 
 _log = logging.getLogger(__name__)
 
 class TestServingSystem(unittest.TestCase):
 
+    @classmethod
+    def setUpClass(cls):
+        _log.info('Starting the directive capture server on port %i' 
+                  % options.bc_directive_port)
+        cls._directive_cap = DirectiveCaptureProc(options.bc_directive_port)
+        cls.directive_q = cls._directive_cap.q
+        cls._directive_cap.start()
+        cls._directive_cap.wait_until_running()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._directive_cap.terminate()
+        cls._directive_cap.join(30)
+        if cls._directive_cap.is_alive():
+            try:
+                os.kill(cls._directive_cap.pid, signal.SIGKILL)
+            except OSError:
+                pass
+
     def setUp(self):
-        #TODO: Clear the databases
+        # Clear the stats database
+        conn = sqldb.connect(user=options.stats_db_user,
+                             passwd=options.stats_db_pass,
+                             host='localhost',
+                             db=options.stats_db)
+        self.statscursor = conn.cursor()
+        stats.db.execute(self.statscursor,
+                         '''DELETE from hourly_events''')
+        stats.db.execute(self.statscursor,
+                         '''DELETE from last_update''')
+        stats.db.execute(
+            self.statscursor,
+            'REPLACE INTO last_update (tablename, logtime) VALUES (%s, %s)',
+            ('hourly_events', datetime.utcfromtimestamp(0)))
+        conn.commit()
 
-        #TODO: Add a couple of bare bones entries to the video db?
+        # Empty the directives queue
+        while not self.__class__.directive_q.empty():
+            self.__class__.directive_q.get_nowait()
+        self.directives_captured = []
+        
+        # Clear the video database
+        neondata._erase_all_data()
 
-        #TODO: Setup endpoint to capture directives from mastermind
-        pass
+        # Add a couple of bare bones entries to the video db?
+        self.setup_videodb()
+
 
     def tearDown(self):
         pass
 
-    def dbsetup_helper(self):
-        a_id = 'dbtestuser'
-        i_id = 'test_integration'
-        nvids = 10
-        video_ids = [ "vid%"%i for i in range(nvids)]
-        n_thumbs = 3 #assume last image is bcove
-
-        # create neon user account
-        nu = NeonUserAccount(user)
-        api_key = nu.neon_api_key
-        nu.save()
-
-        # create brightcove platform account
-        bp = BrightcovePlatform(a_id,i_id) 
-        bp.save()
-
-        # Create Request objects  <-- not required? 
-        #TODO: ImageMD5Mapper & TID generator 
-        # Add fake video data in to DB
-        for vid in video_ids:
-            i_vid = InternalVideoID.generate(api_key,vid)
-            bp.add_video(i_vid,"dummy_request_id")
-            tids = []; thumbnail_url_mappers=[];thumbnail_id_mappers=[]  
-            # fake thumbnails for videos
-            for t in range(n_thumbs):
-                ttype = "neon" if t < (n_thumbs -1) else "brightcove"
-                tid = vid + '_thumb_%s' %t 
-                url = self.get_random_image_url() #TODO
-                urls = [] ; urls.append(url)
-                tdata = ThumbnailMetaData(tid,urls,time.time(),480,360,ttype,0,0,t)
-                tids.append(tdata.to_dict())
-                
-                # ID Mappers (ThumbIDMapper,ImageMD5Mapper,URLMapper)
-                url_mapper = ThumbnailURLMapper(url,tid)
-                id_mapper = ThumbnailIDMapper(tid,i_vid,tdata.to_dict)
-                thumbnail_url_mappers.append(url_mapper)
-                thumbnail_id_mappers.append(id_mapper)
-
-            #brightcove image
-            #bcove_url =  self.get_random_image_url()
-            #tid = vid + '_thumb_bcove'
-            #urls = []; urls.append(bcove_url)
-            #tdata = ThumbnailMetaData(tid,urls,time.time(),480,360,"brightcove",0,0,t)
-            #tids.append(tdata.to_dict())
-
-            vmdata = VideoMetadata(i_vid,tids,"job_id","http://testvideo.mp4",10,0,0,i_id)
-            retid = ThumbnailIDMapper.save_all(thumbnail_id_mappers)
-            returl = ThumbnailURLMapper.save_all(thumbnail_url_mappers)
-            if not vmdata.save():
-                _log.debug("video not saved")
-            
-        # Update Brightcove account with videos
-        bp.save()
-
     #TODO: remove
-    def temp_test_load(self):
-        l = 10
-        t = {}
-        t['ur1'] = 0.1
-        t['ur2'] = 0.2
-        t['ur3'] = 0.3
-
-        self.simulateLoads(l,t)
-
+    #def test_load(self):
+    #    l = 10
+    #    t = {}
+    #    t['ur1'] = 0.1
+    #    t['ur2'] = 0.2
+    #    t['ur3'] = 0.3
+    #    self.simulateLoads(l,t)
+    
     def simulateLoads(self, n_loads, thumbs_ctr):
-        '''Simulate a set of loads and clicks
+        '''
+        Simulate a set of loads and clicks
 
         n_loads - Number of player-like loads to generate
         thumbs_ctr - Dict of thumbnail urls => target CTR for each thumb.
         randomize the click order
         '''
-        random.seed(1)
+        random.seed(5951674)
         def format_get_request(vals):
-            base_url = "http://localhost:%s/track?" %9080 #clickTracker.clickLogServer.port
+            base_url = "http://localhost:%s/track?" % (
+                options.clickTracker.clickLogServer.port)
             base_url += urllib.urlencode(vals)
             return base_url
 
@@ -166,34 +161,142 @@ class TestServingSystem(unittest.TestCase):
                 params['cvid'] = 0
                 
                 req = format_get_request(params)
-                #make request 
                 response = urllib2.urlopen(req)
+                if response.getcode() !=200 :
+                    _log.debug("Tracker request not submitted")
 
-    def assertDirectiveCaptured(self, directive, timeout=30):
+
+    def assertDirectiveCaptured(self, directive, timeout=10):
         '''Verifies that a given directive is received.
 
         Inputs:
         directive - (video_id, [(thumb_id, frac)])
         timeout - How long to wait for the directive
         '''
-        pass
+        deadline = time.time() + timeout
+        
+        # Check the directives we already know about
+        if directive in self.directives_captured:
+            return
 
-    def getStats(self, video_id, thumb_id):
+        while time.time() < deadline:
+            new_directive = self.__class__.directive_q.get(
+                True, deadline-time.time())
+            self.directives_captured.append(new_directive)
+            if directive == new_directive:
+                return
+
+        self.fail('Directive %s not found. Saw %s' % 
+                  (directive, self.directives_captured))
+            
+
+    def getStats(self, thumb_id):
         '''Retrieves the statistics about a given thumb.
 
         Inputs:
-        video_id - Video id
         thumb_id - Thumbnail id
 
         Outputs:
         (loads, clicks)
         '''
-        pass
+        stats = stats.db.execute(
+            self.statscursor,
+            '''SELECT sum(loads), sum(clicks) from hourly_events
+            where thumbnail_id = %s''', (thumb_id,))
+        return (stats[0][0], stats[0][1])
         
 
-    #TODO: Add helper functions to add stuff to the video database?
+    #Add helper functions to add stuff to the video database
+    def setup_videodb(self,a_id='dbtestuser',
+            i_id='testintegration1',n_vids=1,n_thumbs=3):
+        
+        def get_random_image_url():
+            size=10
+            random.seed(2151)
+            return 'http://' + ''.join(random.choice(
+                        'abcdefghijklmnopqrstuvwxyz') for x in range(size)) + '.jpg'
+
+        video_ids = ["vid%"%i for i in range(n_vids)]
+
+        # create neon user account
+        nu = NeonUserAccount(user)
+        api_key = nu.neon_api_key
+        nu.save()
+
+        # create brightcove platform account
+        bp = BrightcovePlatform(a_id,i_id) 
+        bp.save()
+
+        # Create Request objects  <-- not required? 
+        #TODO: ImageMD5Mapper & TID generator 
+        # Add fake video data in to DB
+        for vid in video_ids:
+            i_vid = InternalVideoID.generate(api_key,vid)
+            bp.add_video(i_vid,"dummy_request_id")
+            tids = []; thumbnail_url_mappers=[];thumbnail_id_mappers=[]  
+            # fake thumbnails for videos
+            for t in range(n_thumbs):
+                #Note: assume last image is bcove
+                ttype = "neon" if t < (n_thumbs -1) else "brightcove"
+                tid = vid + '_thumb_%s' %t 
+                url = get_random_image_url()
+                urls = [] ; urls.append(url)
+                tdata = ThumbnailMetaData(tid,urls,
+                        time.time(),480,360,ttype,0,0,t)
+                tids.append(tdata.to_dict())
+                
+                # ID Mappers (ThumbIDMapper,ImageMD5Mapper,URLMapper)
+                url_mapper = ThumbnailURLMapper(url,tid)
+                id_mapper = ThumbnailIDMapper(tid,i_vid,tdata.to_dict)
+                thumbnail_url_mappers.append(url_mapper)
+                thumbnail_id_mappers.append(id_mapper)
+
+            vmdata = VideoMetadata(i_vid,tids,
+                    "job_id","http://testvideo.mp4",10,0,0,i_id)
+            retid = ThumbnailIDMapper.save_all(thumbnail_id_mappers)
+            returl = ThumbnailURLMapper.save_all(thumbnail_url_mappers)
+            if not vmdata.save() or retid or returl:
+                _log.debug("Didnt save data to the DB, DB error")
+            
+        # Update Brightcove account with videos
+        bp.save()
+
 
     #TODO: Write the actual tests
+    def test_initial_directives_received(self):
+        pass
+
+class DirectiveCaptureProc(multiprocessing.Process):
+    '''A mini little http server that captures mastermind directives.
+
+    The directives are shoved into a multiprocess Queue after being parsed.
+    '''
+    def __init__(self, port):
+        super(DirectiveCaptureProc, self).__init__()
+        self.port = port
+        self.q = multiprocessing.Queue()
+        self.is_running = multiprocessing.Event()
+
+    def wait_until_running(self):
+        '''Blocks until the data is loaded.'''
+        self.is_running.wait()
+
+    def run(self):
+        application = tornado.web.Application([
+            (r'/', DirectiveCaptureHandler, dict(q=self.q))])
+        server = tornado.httpserver.HTTPServer(application)
+        utils.ps.register_tornado_shutdown(server)
+        server.listen(self.port)
+        self.is_running.set()
+        tornado.ioloop.IOLoop.instance().start()
+
+class DirectiveCaptureHandler(tornado.web.RequestHandler):
+    def initialize(self, q):
+        self.q = q
+
+    def post(self):
+        data = json.loads(self.request.body)
+        self.q.put(data['d'])
 
 def LaunchStatsDb():
     '''Launches the stats db, which is a mysql interface.
@@ -203,9 +306,9 @@ def LaunchStatsDb():
     _log.info('Connecting to stats db')
     try:
         conn = sqldb.connect(user=options.stats_db_user,
-                             password=options.stats_db_pass,
+                             passwd=options.stats_db_pass,
                              host='localhost',
-                             database=options.stats_db)
+                             db=options.stats_db)
     except sqldb.Error as e:
         _log.error(('Error connection to stats db. Make sure that you '
                     'have a mysql server running locally and that it has '
@@ -293,5 +396,5 @@ def main():
     
 
 if __name__ == "__main__":
-    utils.neon.InitNeonTest()
+    utils.neon.InitNeon()
     main()

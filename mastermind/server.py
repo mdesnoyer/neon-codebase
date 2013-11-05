@@ -117,10 +117,11 @@ class VideoDBWatcher(threading.Thread):
             try:
                 self._process_db_data()
 
-                # Now we wait so that we don't hit the database too much.
-                time.sleep(options.video_db_polling_delay)
             except Exception as e:
                 _log.exception('Uncaught video DB Error: %s' % e)
+
+            # Now we wait so that we don't hit the database too much.
+            time.sleep(options.video_db_polling_delay)
 
     def wait_until_loaded(self):
         '''Blocks until the data is loaded.'''
@@ -170,10 +171,11 @@ class StatsDBWatcher(threading.Thread):
             try:
                 self._process_db_data()            
 
-                # Now we wait so that we don't hit the database too much.
-                time.sleep(options.stats_db_polling_delay)
             except Exception as e:
                 _log.exception('Uncaught stats DB Error: %s' % e)
+
+            # Now we wait so that we don't hit the database too much.
+            time.sleep(options.stats_db_polling_delay)
 
     def _process_db_data(self):
         try:
@@ -199,7 +201,9 @@ class StatsDBWatcher(threading.Thread):
             _log.error('Cannot determine when the database was last updated')
             self.is_loaded.set()
             return
-        cur_update = datetime.strptime(result[0][0], '%Y-%m-%d %H:%M:%S')
+        cur_update = result[0][0]
+        if isinstance(cur_update, basestring):
+            cur_update = datetime.strptime(cur_update, '%Y-%m-%d %H:%M:%S')
         if self.last_update is None or cur_update > self.last_update:
             _log.info('The database was updated at %s. Processing' 
                       % cur_update)
@@ -209,14 +213,15 @@ class StatsDBWatcher(threading.Thread):
                                     sum(loads), sum(clicks) 
                                     FROM %s group by thumbnail_id''' %
                 options.stats_table)
-            data = ((self._find_video_id(x[0]), x[0], x[1], x[2]) 
-                    for x in result)
+            if result:
+                data = ((self._find_video_id(x[0]), x[0], x[1], x[2]) 
+                        for x in result)
                     
-            directives = self.mastermind.update_stats_info(
-                (cur_update - datetime(1970,1, 1)).total_seconds(),
-                data)
-            for directive in directives:
-                self.ab_manager.send(directive)
+                directives = self.mastermind.update_stats_info(
+                    (cur_update - datetime(1970,1, 1)).total_seconds(),
+                    data)
+                for directive in directives:
+                    self.ab_manager.send(directive)
                     
         self.last_update = cur_update
         self.is_loaded.set()
@@ -299,7 +304,7 @@ class GetDirectives(tornado.web.RequestHandler):
             self.flush()
         self.finish()
 
-def main():   
+def main():
     mastermind, ab_manager = initialize()
 
     videoDbThread = VideoDBWatcher(mastermind, ab_manager)
