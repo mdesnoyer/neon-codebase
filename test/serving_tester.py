@@ -209,6 +209,12 @@ class TestServingSystem(unittest.TestCase):
     #Add helper functions to add stuff to the video database
     def setup_videodb(self,a_id='dbtestuser',
             i_id='testintegration1',n_vids=1,n_thumbs=3):
+        '''Creates a basic account in the video db.
+
+        This account has account id a_id, integration id i_id, a
+        number of video ids from 0->n-1, and thumbs <vid>_thumb_<j>
+        for j in 0->m-1. Thumb m-1 is brighcove, while the rest are neon.
+        '''
         
         def get_random_image_url():
             size=10
@@ -264,6 +270,7 @@ class TestServingSystem(unittest.TestCase):
 
     #TODO: Write the actual tests
     def test_initial_directives_received(self):
+        self.assertDirectiveCaptured
         pass
 
 class DirectiveCaptureProc(multiprocessing.Process):
