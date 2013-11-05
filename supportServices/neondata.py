@@ -1349,7 +1349,15 @@ class ThumbnailIDMapper(object):
         return obj
 
     @classmethod
-    def get_id(cls,key,callback=None):
+    def get_thumb_info(cls, id, callback=None):
+        '''Given a thumbnail id, retrieves the thumbnail metadata.
+
+        Inputs:
+        id - The thumbnail id 
+
+        Returns:
+        ThumbnailMetadata object.
+        '''
         db_connection = DBConnection(cls)
         if callback:
             ThumbnailIDMapper.get(key, callback, db_connection)

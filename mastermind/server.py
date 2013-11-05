@@ -89,7 +89,7 @@ def initialize():
     for platform in neondata.AbstractPlatform.get_all_instances():
         for video_id in platform.videos.iterkeys():
             video_metadata = neondata.VideoMetadata.get(video_id)
-            thumbnails = [core.ThumbnailInfo.from_db_data(
+            thumbnails = [ThumbnailInfo.from_db_data(
                 neondata.ThumbnailIDMapper.get_id(thumb_id,
                                                   ).thumbnail_metadata) 
                 for thumb_id in video_metadata.thumbnail_ids]
@@ -133,7 +133,7 @@ class VideoDBWatcher(threading.Thread):
                 video_metadata = neondata.VideoMetadata.get(
                     video_id)
                 thumbnails = [
-                    core.ThumbnailInfo.from_db_data(
+                    ThumbnailInfo.from_db_data(
                         neondata.ThumbnailIDMapper.get_id(
                             thumb_id).thumbnail_metadata) 
                     for thumb_id in video_metadata.thumbnail_ids]

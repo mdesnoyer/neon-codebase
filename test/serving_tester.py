@@ -245,11 +245,12 @@ class TestServingSystem(unittest.TestCase):
                 urls = [] ; urls.append(url)
                 tdata = neondata.ThumbnailMetaData(tid,urls,
                         time.time(),480,360,ttype,0,0,True,False,rank=t)
-                tids.append(tdata.to_dict())
+                tids.append(tid)
                 
                 # ID Mappers (ThumbIDMapper,ImageMD5Mapper,URLMapper)
                 url_mapper = neondata.ThumbnailURLMapper(url,tid)
-                id_mapper = neondata.ThumbnailIDMapper(tid,i_vid,tdata.to_dict)
+                id_mapper = neondata.ThumbnailIDMapper(
+                    tid, i_vid, tdata.to_dict())
                 thumbnail_url_mappers.append(url_mapper)
                 thumbnail_id_mappers.append(id_mapper)
 
