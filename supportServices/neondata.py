@@ -918,9 +918,9 @@ class YoutubePlatform(AbstractPlatform):
         db_connection = DBConnection(cls)
         key = "YoutubePlatform".lower() + '_' + api_key + '_' + i_id
         if callback:
-            YoutubePlatform.conn.get(key,callback) 
+            db_connection.conn.get(key,callback) 
         else:
-            return YoutubePlatform.blocking_conn.get(key)
+            return db_connection.blocking_conn.get(key)
     
     @staticmethod
     def create(json_data):
@@ -1029,16 +1029,18 @@ class NeonApiRequest(object):
         self.api_param  = param
 
     def save(self,callback=None):
+        db_connection=DBConnection(self)
         value = self.to_json()
         if self.key is None:
             raise Exception("key not set")
         if callback:
-            NeonApiRequest.conn.set(self.key,value,callback)
+            db_connection.conn.set(self.key,value,callback)
         else:
-            return NeonApiRequest.blocking_conn.set(self.key,value)
+            return db_connection.blocking_conn.set(self.key,value)
 
-    @staticmethod
-    def get(api_key,job_id,callback=None):
+    @classmethod
+    def get(cls,api_key,job_id,callback=None):
+        db_connection=DBConnection(cls)
         def package(result):
             if result:
                 nar = NeonApiRequest.create(result)
@@ -1048,21 +1050,23 @@ class NeonApiRequest(object):
 
         key = generate_request_key(api_key,job_id)
         if callback:
-            NeonApiRequest.conn.get(key,callback)
+            db_connection.conn.get(key,callback)
         else:
-            result = NeonApiRequest.blocking_conn.get(key)
+            result = db_connection.blocking_conn.get(key)
             return NeonApiRequest.create(result)
 
-    @staticmethod
-    def get_request(api_key,job_id,callback=None):
+    @classmethod
+    def get_request(cls,api_key,job_id,callback=None):
+        db_connection=DBConnection(cls)
         key = generate_request_key(api_key,job_id)
         if callback:
-            NeonApiRequest.conn.get(key,callback)
+            db_connection.conn.get(key,callback)
         else:
-            return NeonApiRequest.blocking_conn.get(key)
+            return db_connection.blocking_conn.get(key)
 
-    @staticmethod
-    def get_requests(keys,callback=None):
+    @classmethod
+    def get_requests(cls,keys,callback=None):
+        db_connection=DBConnection(cls)
         def create(jdata):
             if not jdata:
                 return 
@@ -1078,18 +1082,19 @@ class NeonApiRequest(object):
             callback(response)
 
         if callback:
-            NeonApiRequest.conn.mget(keys,get_results)
+            db_connection.conn.mget(keys,get_results)
         else:
-            results = NeonApiRequest.blocking_conn.mget(keys)
+            results = db_connection.blocking_conn.mget(keys)
             response = [create(result) for result in results]
             return response 
 
     @staticmethod
-    def multiget(keys,callback=None):
+    def multiget(cls,keys,callback=None):
+        db_connection=DBConnection(cls)
         if callback:
-            NeonApiRequest.conn.mget(keys,callback)
+            db_connection.conn.mget(keys,callback)
         else:
-            return NeonApiRequest.blocking_conn.mget(keys)
+            return db_connection.blocking_conn.mget(keys)
 
     @staticmethod
     def create(json_data):
