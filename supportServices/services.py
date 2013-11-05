@@ -514,8 +514,12 @@ class AccountHandler(tornado.web.RequestHandler):
             except:
                 pass #job id not found
 
-        #2 Get Job status
+        # No videos in the account
+        if len(job_ids) == 0:
+            data = '[]'
+            self.send_json_response(data,200)
         
+        #2 Get Job status
         completed_videos = [] #jobs that have completed 
 
         #Hack for first time video requests in brightcove #TODO: cleanup

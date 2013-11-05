@@ -643,7 +643,7 @@ class BrightcoveApi(object):
             if not result.error and "error" not in result.body:
                 bc_json = yield tornado.gen.Task(supportServices.neondata.BrightcovePlatform.get_account,self.neon_api_key,i_id)
                 if not bc_json:
-                    log.error("key=verify_brightcove_tokens msg=account not found %s"%i_id)
+                    _log.error("key=verify_brightcove_tokens msg=account not found %s"%i_id)
                     callback(None)
                     return
 
@@ -676,12 +676,12 @@ class BrightcoveApi(object):
                 #Update the videos in customer inbox
                 res = yield tornado.gen.Task(bc.save)
                 if not res:
-                    log.error("key=async_verify_token_and_create_requests msg=customer inbox not updated %s" %i_id)
+                    _log.error("key=async_verify_token_and_create_requests msg=customer inbox not updated %s" %i_id)
 
                 #send result back with job_id
                 callback(result)
             else:
-                log.error("key=async_verify_token_and_create_requests msg=brightcove api failed for %s" %i_id)
+                _log.error("key=async_verify_token_and_create_requests msg=brightcove api failed for %s" %i_id)
                 callback(None)
         self.async_get_n_videos(5,verify_brightcove_tokens)
 
