@@ -789,10 +789,9 @@ class BrightcovePlatform(AbstractPlatform):
         return instances
 
 
-class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
+class YoutubePlatform(AbstractPlatform):
     def __init__(self, a_id, i_id, access_token=None, refresh_token=None,
                  expires=None, auto_update=False, abtest=False):
-        super(BrightcovePlatform,self).__init__()
         AbstractPlatform.__init__(self)
         
         self.key = self.__class__.__name__.lower()  + '_' + NeonApiKey.generate(a_id ) + '_' + i_id
@@ -1201,7 +1200,7 @@ class ThumbnailID(AbstractHashGenerator):
             return ThumbnailID.generate_from_image(input)
 
 
-class ThumbnailURLMapper(AbstractRedisUserBlob):
+class ThumbnailURLMapper(object):
     '''
     Schema to map thumbnail url to thumbnail ID. 
 
@@ -1211,9 +1210,6 @@ class ThumbnailURLMapper(AbstractRedisUserBlob):
     THUMBNAIL_URL => (tid)
     '''
     
-    host,port = dbsettings.DBConfig.urlMapperDB
-    conn,blocking_conn = RedisClient.get_client(host,port)
-   
     def __init__(self,thumbnail_url,tid,imdata=None):
         self.key = thumbnail_url
         if not imdata:
@@ -1222,30 +1218,33 @@ class ThumbnailURLMapper(AbstractRedisUserBlob):
             self.value = ThumbnailID.generate(imdata) 
 
     def save(self,callback=None):
+        db_connection = DBConnection(self)
         if self.key is None:
             raise Exception("key not set")
         if callback:
-            ThumbnailURLMapper.conn.set(self.key,self.value,callback)
+            db_connection.conn.set(self.key,self.value,callback)
         else:
-            return ThumbnailURLMapper.blocking_conn.set(self.key,value)
+            return db_connection.blocking_conn.set(self.key,value)
 
-    @staticmethod
-    def save_all(thumbnailMapperList,callback=None):
+    @classmethod
+    def save_all(cls,thumbnailMapperList,callback=None):
+        db_connection = DBConnection(cls)
         data = {}
         for t in thumbnailMapperList:
             data[t.key] = t.value 
 
         if callback:
-            ThumbnailURLMapper.conn.mset(data,callback)
+            db_connection.conn.mset(data,callback)
         else:
-            return ThumbnailURLMapper.blocking_conn.mset(data)
+            return db_connection.blocking_conn.mset(data)
 
-    @staticmethod
-    def get_id(key,callback):
+    @classmethod
+    def get_id(cls,key,callback=None):
+        db_connection = DBConnection(cls)
         if callback:
-            ThumbnailURLMapper.conn.get(key,callback)
+            db_connection.conn.get(key,callback)
         else:
-            return ThumbnailURLMapper.blocking_conn.get(key)
+            return db_connection.blocking_conn.get(key)
 
     @classmethod
     def _erase_all_data(cls):
@@ -1306,7 +1305,7 @@ class ImageMD5Mapper(object):
             return db_connection.blocking_conn.mset(data)
 
 
-class ThumbnailIDMapper(AbstractRedisUserBlob):
+class ThumbnailIDMapper(object):
     '''
     Class schema for Thumbnail URL to thumbnail metadata map
     Thumbnail ID  => (Internal Video ID, ThumbnailMetadata) 
@@ -1332,6 +1331,9 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
 
     def to_dict(self):
         return self.__dict__
+    
+    def to_json(self):
+        return json.dumps(self, default=lambda o: o.__dict__) 
 
     @staticmethod
     def create(json_data):
@@ -1345,7 +1347,6 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
         
         return obj
 
-    # TODO(sunil): Decide whether these functions 
     @classmethod
     def get_id(cls,key,callback=None):
         db_connection = DBConnection(cls)
@@ -1488,7 +1489,7 @@ class VideoMetadata(object):
             return create(jdata)
 
     @classmethod
-    def multi_get(cls,internal_video_ids,callback):
+    def multi_get(cls,internal_video_ids,callback=None):
         db_connection=DBConnection(cls) 
         def create(jdata):
             data_dict = json.loads(jdata)
@@ -1519,6 +1520,7 @@ class VideoMetadata(object):
     def get_video_metadata(internal_accnt_id,internal_video_id):
         jdata = NeonApiRequest.get_request(internal_accnt_id,internal_video_id)
         nreq = NeonApiRequest.create(jdata)
+        return nreq
 
     @classmethod
     def _erase_all_data(cls):
