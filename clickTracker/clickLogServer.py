@@ -78,13 +78,14 @@ class LogLines(tornado.web.RequestHandler):
                     cvid = self.get_argument('cvid')
             else:
                 imgs = self.get_argument('img')
-            cip = self.request.remote_ip
 
         except Exception,e:
             _log.exception("key=get_track msg=%s" %e) 
             self.finish()
             return
 
+
+        cip = self.request.remote_ip
         cd = TrackerData(action,id,ttype,cts,sts,page,cip,imgs,cvid)
         data = cd.to_json()
         try:
@@ -152,6 +153,7 @@ class TestTracker(tornado.web.RequestHandler):
             self.finish()
             return
 
+        cip = None
         cd = TrackerData(action,id,ttype,cts,sts,page,cip,imgs,cvid)
         data = cd.to_json()
         self.set_header("Content-Type", "application/json")

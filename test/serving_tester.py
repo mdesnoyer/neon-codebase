@@ -107,13 +107,25 @@ class TestServingSystem(unittest.TestCase):
         # Clear the video database
         neondata._erase_all_data()
 
-        # TODO: Add a couple of bare bones entries to the video db?
+        # Add a couple of bare bones entries to the video db?
+        self.setup_videodb()
+
 
     def tearDown(self):
         pass
 
+    #TODO: remove
+    #def test_load(self):
+    #    l = 10
+    #    t = {}
+    #    t['ur1'] = 0.1
+    #    t['ur2'] = 0.2
+    #    t['ur3'] = 0.3
+    #    self.simulateLoads(l,t)
+    
     def simulateLoads(self, n_loads, thumbs_ctr):
-        '''Simulate a set of loads and clicks
+        '''
+        Simulate a set of loads and clicks
 
         n_loads - Number of player-like loads to generate
         thumbs_ctr - Dict of thumbnail urls => target CTR for each thumb.
@@ -149,8 +161,10 @@ class TestServingSystem(unittest.TestCase):
                 params['cvid'] = 0
                 
                 req = format_get_request(params)
-                #make request 
                 response = urllib2.urlopen(req)
+                if response.getcode() !=200 :
+                    _log.debug("Tracker request not submitted")
+
 
     def assertDirectiveCaptured(self, directive, timeout=20):
         '''Verifies that a given directive is received.
@@ -192,7 +206,61 @@ class TestServingSystem(unittest.TestCase):
         return (stats[0][0], stats[0][1])
         
 
-    #TODO: Add helper functions to add stuff to the video database?
+    #Add helper functions to add stuff to the video database
+    def setup_videodb(self,a_id='dbtestuser',
+            i_id='testintegration1',n_vids=1,n_thumbs=3):
+        
+        def get_random_image_url():
+            size=10
+            random.seed(2151)
+            return 'http://' + ''.join(random.choice(
+                        'abcdefghijklmnopqrstuvwxyz') for x in range(size)) + '.jpg'
+
+        video_ids = ["vid%"%i for i in range(n_vids)]
+
+        # create neon user account
+        nu = NeonUserAccount(user)
+        api_key = nu.neon_api_key
+        nu.save()
+
+        # create brightcove platform account
+        bp = BrightcovePlatform(a_id,i_id) 
+        bp.save()
+
+        # Create Request objects  <-- not required? 
+        #TODO: ImageMD5Mapper & TID generator 
+        # Add fake video data in to DB
+        for vid in video_ids:
+            i_vid = InternalVideoID.generate(api_key,vid)
+            bp.add_video(i_vid,"dummy_request_id")
+            tids = []; thumbnail_url_mappers=[];thumbnail_id_mappers=[]  
+            # fake thumbnails for videos
+            for t in range(n_thumbs):
+                #Note: assume last image is bcove
+                ttype = "neon" if t < (n_thumbs -1) else "brightcove"
+                tid = vid + '_thumb_%s' %t 
+                url = get_random_image_url()
+                urls = [] ; urls.append(url)
+                tdata = ThumbnailMetaData(tid,urls,
+                        time.time(),480,360,ttype,0,0,t)
+                tids.append(tdata.to_dict())
+                
+                # ID Mappers (ThumbIDMapper,ImageMD5Mapper,URLMapper)
+                url_mapper = ThumbnailURLMapper(url,tid)
+                id_mapper = ThumbnailIDMapper(tid,i_vid,tdata.to_dict)
+                thumbnail_url_mappers.append(url_mapper)
+                thumbnail_id_mappers.append(id_mapper)
+
+            vmdata = VideoMetadata(i_vid,tids,
+                    "job_id","http://testvideo.mp4",10,0,0,i_id)
+            retid = ThumbnailIDMapper.save_all(thumbnail_id_mappers)
+            returl = ThumbnailURLMapper.save_all(thumbnail_url_mappers)
+            if not vmdata.save() or retid or returl:
+                _log.debug("Didnt save data to the DB, DB error")
+            
+        # Update Brightcove account with videos
+        bp.save()
+
 
     #TODO: Write the actual tests
     def test_initial_directives_received(self):

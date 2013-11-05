@@ -51,9 +51,8 @@ define("dbPort",default=6379,type=int,help="redis port")
 class DBConnection(object):
     '''Connection to the database.'''
 
-    #TODO(sunil): make these calls able to do callbacks properly
-
-    __singleton_lock = threading.Lock() #TODO: Lock for each instance
+    #TODO: Lock for each instance, currently locks for any instance creation
+    __singleton_lock = threading.Lock() 
     _singleton_instance = {} 
 
     def __init__(self,*args,**kwargs):
@@ -194,12 +193,14 @@ class RedisClient(object):
     '''
     @staticmethod
     def get_client(host=None,port=None):
-        if host is None and port is None:
-            return RedisClient.client, RedisClient.blocking_client
-        else:
-            RedisClient.c = redis.Client(host,port)
-            RedisClient.bc = blockingRedis.StrictRedis(host,port,socket_timeout=10)
-            return RedisClient.c,RedisClient.bc 
+        if host is None:
+            host = RedisClient.host 
+        if port is None:
+            port = RedisClient.port
+        
+        RedisClient.c = redis.Client(host,port)
+        RedisClient.bc = blockingRedis.StrictRedis(host,port,socket_timeout=10)
+        return RedisClient.c,RedisClient.bc 
 
 ''' Format request key (with job_id) to find NeonApiRequest Object'''
 def generate_request_key(api_key,job_id):
@@ -397,6 +398,13 @@ class NeonUserAccount(object):
    
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__)
+    
+    def save(self,callback=None):
+        db_connection=DBConnection(self)
+        if callback:
+            db_connection.conn.set(self.key,self.to_json(),callback)
+        else:
+            return db_connection.blocking_conn.set(self.key,self.to_json())
     
     '''
     Save Neon User account and corresponding integration
@@ -1247,6 +1255,11 @@ class ThumbnailURLMapper(AbstractRedisUserBlob):
 class ImageMD5Mapper(object):
     '''
     Maps a given Image MD5 to Thumbnail ID
+
+    This is needed to keep the mapping of individual image md5's to tid
+    A single image can exist is different sizes, for example brightcove has 
+    videostills and thumbnails for any given video
+
     '''
     def __init__(self,imgdata,tid):
         self.key = self.format_key(imgdata)
