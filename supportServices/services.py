@@ -578,7 +578,10 @@ class AccountHandler(tornado.web.RequestHandler):
                 if thumb:
                     vid = neondata.InternalVideoID.to_external(thumb.video_id)
                     tdata = thumb.get_metadata() #to_dict()
-                    result[vid].thumbnails.append(tdata) 
+                    if not result.has_key(vid):
+                        _log.debug("key=get_video_status_brightcove msg=video deleted %s"%vid)
+                    else:
+                        result[vid].thumbnails.append(tdata) 
 
         #4. Set the default thumbnail for each of the video
         for res in result:
