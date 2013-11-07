@@ -1268,17 +1268,17 @@ class ImageMD5Mapper(object):
     videostills and thumbnails for any given video
 
     '''
-    def __init__(self,imgdata,tid):
-        self.key = self.format_key(imgdata)
+    def __init__(self,ext_video_id,imgdata,tid):
+        self.key = self.format_key(ext_video_id,imgdata)
         self.value = tid
 
     def get_md5(self):
         return self.key.split('_')[-1]
 
-    def format_key(self,imdata):
+    def format_key(self,video_id,imdata):
         if imdata:
             md5 = ThumbnailID.generate(imdata)
-            return self.__class__.__name__.lower()  + '_' + md5
+            return self.__class__.__name__.lower() + '_' + video_id + '_' + md5
         else:
             raise
 
@@ -1291,10 +1291,10 @@ class ImageMD5Mapper(object):
             db_connection.blocking_conn.set(self.key,self.value)
 
     @classmethod   
-    def get_tid(cls,image_md5,callback=None):
+    def get_tid(cls,ext_video_id,image_md5,callback=None):
         db_connection = DBConnection(cls)
         
-        key = "ImageMD5Mapper".lower() + '_' + image_md5
+        key = "ImageMD5Mapper".lower() + '_' + ext_video_id + '_' + image_md5
         if callback:
             db_connection.conn.get(key,callback)
         else:
@@ -1323,9 +1323,13 @@ class ThumbnailIDMapper(object):
     '''
     def __init__(self, tid, internal_vid, thumbnail_metadata):
         super(ThumbnailIDMapper,self).__init__()
-        self.key = tid 
+        self.key = internal_vid + '_' + tid #api_key + platform video id + tid(imagemd5) 
         self.video_id = internal_vid #api_key + platform video id
         self.thumbnail_metadata = thumbnail_metadata #dict of ThumbnailMetadata object
+
+    @classmethod
+    def generate_key(cls,video_id,tid):
+        return video_id + '_' + tid 
 
     def get_account_id(self):
         return self.video_id.split('_')[0]
