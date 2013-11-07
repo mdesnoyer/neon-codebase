@@ -201,7 +201,7 @@ class S3Handler(threading.Thread):
         self.daemon = True
 
     def upload_to_s3(self):
-        _log.info("upload to s3")
+        ret = 's3'
         k = Key(self.s3bucket)
         k.key = shortuuid.uuid() 
         try:
@@ -210,19 +210,22 @@ class S3Handler(threading.Thread):
         except S3ResponseError,e:
             _log.exception("key=upload_to_s3 msg=S3 Errror %s"%e)
             self.save_to_disk()
+            ret = 'disk'
 
         self.nlines = 0
         self.lines_to_save = ''
+        return ret
 
     def save_to_disk(self):
-        if not path.exists(options.s3disk):
-            os.mkdirs(options.s3disk)
+        if not os.path.exists(options.s3disk):
+            os.makedirs(options.s3disk)
         
         fname = "s3backlog_%s" %time.time()
         with open(options.s3disk +'/' + fname,'a') as f:
             f.write(self.lines_to_save)
 
     def do_work(self):
+        ret = False
         qsize = self.dataQ.qsize()
         data = ''
 
@@ -239,7 +242,8 @@ class S3Handler(threading.Thread):
         #If time since the last upload has been long enough --upload
         if self.last_upload_time + self.upload_interval <= time.time() or self.nlines >= self.s3_batch_count: 
             if self.nlines >0:
-                self.upload_to_s3()
+                ret = self.upload_to_s3()
+        return ret
 
     def run(self):
         while True:
