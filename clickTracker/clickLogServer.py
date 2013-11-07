@@ -74,6 +74,7 @@ class LogLines(tornado.web.RequestHandler):
             #On load the current video loaded in the player is logged
             if action == 'load':
                 imgs = self.get_argument('imgs')
+                imgs = [e.strip('"\' ') for e in imgs.strip('[]').split(',')]
                 if ttype != 'imagetracker':
                     cvid = self.get_argument('cvid')
             else:

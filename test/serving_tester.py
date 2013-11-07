@@ -18,8 +18,11 @@ if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
 import atexit
+from boto.s3.connection import S3Connection
+from boto.s3.bucketlistresultset import BucketListResultSet
 import clickTracker.clickLogServer
 import clickTracker.logDatatoS3
+import copy
 from datetime import datetime
 import json
 import logging
@@ -27,6 +30,7 @@ import mastermind.server
 import MySQLdb as sqldb
 import multiprocessing
 import os
+import Queue
 import random
 import re
 import signal
@@ -99,6 +103,13 @@ class TestServingSystem(unittest.TestCase):
             ('hourly_events', datetime.utcfromtimestamp(0)))
         conn.commit()
 
+        # Clear the s3 bucket
+        s3conn = S3Connection()
+        bucket = s3conn.get_bucket(
+            options.get('clickTracker.logDatatoS3.bucket_name'))
+        for key in BucketListResultSet(bucket):
+            key.delete()
+
         # Empty the directives queue
         while not self.__class__.directive_q.empty():
             self.__class__.directive_q.get_nowait()
@@ -114,48 +125,50 @@ class TestServingSystem(unittest.TestCase):
     def tearDown(self):
         pass
     
-    def simulateLoads(self, n_loads, thumbs_ctr):
+    def simulateEvents(self, data):
         '''
-        Simulate a set of loads and clicks
+        Simulate a set of loads and clicks with randomized ordering
 
-        n_loads - Number of player-like loads to generate
-        thumbs_ctr - Dict of thumbnail urls => target CTR for each thumb.
-        randomize the click order
+        data - [(url, n_loads, n_clicks)]
         '''
         random.seed(5951674)
         def format_get_request(vals):
             base_url = "http://localhost:%s/track?" % (
-                options.clickTracker.clickLogServer.port)
+                options.get('clickTracker.clickLogServer.port'))
             base_url += urllib.urlencode(vals)
             return base_url
 
-        data = []    
-        thumbs = thumbs_ctr.keys()
-        for thumb,ctr in thumbs_ctr.iteritems():     
-            ts = time.time()
-            clicks = [x for x in range(int(ctr*n_loads))]
-            random.shuffle(clicks)
+        # First generate the events
+        base_event = {
+            'ttype': 'flashonlyplayer',
+            'id': 0,
+            'page': "http://neontest",
+            'cvid': 0
+            }
+        events = []
+        for url, n_loads, n_clicks in data:
             for i in range(n_loads):
-                params = {}
-                action = "load"
-                if i in clicks:
-                    action = "click"
-                    params['img'] = thumb
-                else:
-                    params['imgs'] = thumbs
+                if i < n_clicks:
+                    event = copy.copy(base_event)
+                    event['a'] = 'click'
+                    event['img'] = url
+                    events.append(event)
+                event = copy.copy(base_event)
+                event['a'] = 'load'
+                event['imgs'] = [url, 'garbage.jpg']
+                events.append(event)
 
-                params['a'] = action
-                params['ttype'] = 'flashonlyplayer'
-                params['id'] = 0
-                params['ts'] = ts + i 
-                params['page'] = "http://neontest"
-                params['cvid'] = 0
-                
-                req = format_get_request(params)
-                response = urllib2.urlopen(req)
-                if response.getcode() !=200 :
-                    _log.debug("Tracker request not submitted")
 
+        # Shuffle the events
+        random.shuffle(events)
+
+        # Now blast them off
+        for event in events:
+            event['ts'] = time.time()
+            req = format_get_request(event)
+            response = urllib2.urlopen(req)
+            if response.getcode() !=200 :
+                _log.debug("Tracker request not submitted")
 
     def assertDirectiveCaptured(self, directive, timeout=20):
         '''Verifies that a given directive is received.
@@ -171,15 +184,18 @@ class TestServingSystem(unittest.TestCase):
             return
 
         while time.time() < deadline:
-            new_directive = self.__class__.directive_q.get(
-                True, deadline-time.time())
+            try:
+                new_directive = self.__class__.directive_q.get(
+                    True, deadline-time.time())
+            except Queue.Empty:
+                break
+            
             self.directives_captured.append(new_directive)
-            if directive == new_directive:
+            if directivesEqual(directive, new_directive):
                 return
 
         self.fail('Directive %s not found. Saw %s' % 
-                  (directive, self.directives_captured))
-            
+                  (directive, self.directives_captured))            
 
     def getStats(self, thumb_id):
         '''Retrieves the statistics about a given thumb.
@@ -217,7 +233,7 @@ class TestServingSystem(unittest.TestCase):
         nu.save()
 
         # create brightcove platform account
-        bp = neondata.BrightcovePlatform(a_id, i_id) 
+        bp = neondata.BrightcovePlatform(a_id, i_id, abtest=True) 
         bp.save()
 
         # Create Request objects  <-- not required? 
@@ -260,9 +276,48 @@ class TestServingSystem(unittest.TestCase):
     #TODO: Write the actual tests
     def test_initial_directives_received(self):
         self.assertDirectiveCaptured(('acct0_vid0',
-                                      [('vid0_thumb0', 0.80),
+                                      [('vid0_thumb0', 0.85),
                                        ('vid0_thumb1', 0.00),
-                                       ('vid0_thumb2', 0.20)]))
+                                       ('vid0_thumb2', 0.15)]))
+
+    def test_video_got_bad_stats(self):
+        # Simulate loads and clicks to the point that the thumbnail
+        # should turn off.
+        self.simulateEvents([
+            ('http://vid0_thumb0.jpg', 8500, 100),
+            ('http://vid0_thumb1.jpg', 20, 1),
+            ('http://vid0_thumb2.jpg', 1500, 500)])
+
+        # The neon thumb (0) should be turned off
+        self.assertDirectiveCaptured(('acct0_vid0',
+                                      [('vid0_thumb0', 0.00),
+                                       ('vid0_thumb1', 0.00),
+                                       ('vid0_thumb2', 1.00)]),
+            timeout=600)
+
+        # Check that the database got the stats correctly.
+        self.assertEqual(self.getStats('vid0_thumb0'),
+                         (8500, 100))
+        self.assertEqual(self.getStats('vid0_thumb1'),
+                         (20, 1))
+        self.assertEqual(self.getStats('vid0_thumb2'),
+                         (1500, 500))
+
+def directivesEqual(a, b):
+    '''Returns true if two directives are equivalent.
+    
+    Directives are of the form:
+    (video_id, [(thumb_id, frac)])
+    '''
+    if a[0] <> b[0] or len(a[1]) <> len(b[1]):
+        return False
+
+    for thumb_id, frac in a[1]:
+        if ((thumb_id, frac) not in b[1] and
+            [thumb_id, frac] not in b[1]):
+            return False
+
+    return True
 
 class DirectiveCaptureProc(multiprocessing.Process):
     '''A mini little http server that captures mastermind directives.
@@ -281,7 +336,7 @@ class DirectiveCaptureProc(multiprocessing.Process):
 
     def run(self):
         application = tornado.web.Application([
-            (r'/', DirectiveCaptureHandler, dict(q=self.q))])
+            (r'/directive', DirectiveCaptureHandler, dict(q=self.q))])
         server = tornado.httpserver.HTTPServer(application)
         utils.ps.register_tornado_shutdown(server)
         server.listen(self.port)
@@ -301,7 +356,7 @@ def LaunchStatsDb():
 
     Makes sure that the database is up.
     '''
-    if options.get('stats.hourly_event_stats_mr.stats_host') <> 'localhost':
+    if options.get('stats.stats_processor.stats_host') <> 'localhost':
         raise Exception('Stats db has to be local so we do not squash '
                         'important data')
     
@@ -382,6 +437,11 @@ def LaunchStatsProcessor():
 def main():
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
     atexit.register(utils.ps.shutdown_children)
+
+    # Turn off the annoying logs
+    logging.getLogger('tornado.access').propagate = False
+    #logging.getLogger('mrjob.local').propagate = False
+    logging.getLogger('mrjob.config').propagate = False
 
     LaunchStatsDb()
     LaunchVideoDb()

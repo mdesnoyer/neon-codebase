@@ -175,6 +175,10 @@ class OptionParser(object):
         with self.__dict__['lock']:
             return self._options[global_name].value()
 
+    def get_config_file(self):
+        '''Returns the config file name that is used by this parser.'''
+        return self.cmd_options.config
+
     @contextlib.contextmanager
     def _set_bounded(self, global_name, value):
         '''Sets the value of an option in a bounded region.

@@ -146,9 +146,10 @@ class DBConnectionCheck(threading.Thread):
                 for key,value in DBConnection._singleton_instance.iteritems():
                     DBConnection.update_instance(key)
                     value.blocking_conn.get("dummy")
-                time.sleep(self.interval)
             except Exception,e:
                 _log.exception("key=DBConnection msg=%s"%e)
+            
+            time.sleep(self.interval)
 
 #start watchdog thread for the DB connection
 t = DBConnectionCheck()
