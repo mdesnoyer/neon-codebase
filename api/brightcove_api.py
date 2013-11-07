@@ -74,8 +74,8 @@ class BrightcoveApi(object):
             bcove_thumb = image.resize(self.THUMB_SIZE)
             bcove_still = image.resize(self.STILL_SIZE)
 
-            t_md5 = supportServices.neondata.ImageMD5Mapper(bcove_thumb,ref_id)
-            s_md5 = supportServices.neondata.ImageMD5Mapper(bcove_still,ref_id)
+            t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,bcove_thumb,ref_id)
+            s_md5 = supportServices.neondata.ImageMD5Mapper(video_id,bcove_still,ref_id)
             md5_objs = []
             md5_objs.append(t_md5); md5_objs.append(s_md5)
             res = supportServices.neondata.ImageMD5Mapper.save_all(md5_objs)
@@ -285,8 +285,8 @@ class BrightcoveApi(object):
         bcove_thumb = image.resize(self.THUMB_SIZE)
         bcove_still = image.resize(self.STILL_SIZE)
 
-        t_md5 = supportServices.neondata.ImageMD5Mapper(bcove_thumb,thumbnail_id)
-        s_md5 = supportServices.neondata.ImageMD5Mapper(bcove_still,thumbnail_id)
+        t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,bcove_thumb,thumbnail_id)
+        s_md5 = supportServices.neondata.ImageMD5Mapper(video_id,bcove_still,thumbnail_id)
         md5_objs = []
         md5_objs.append(t_md5); md5_objs.append(s_md5)
         res = supportServices.neondata.ImageMD5Mapper.save_all(md5_objs)
@@ -350,8 +350,8 @@ class BrightcoveApi(object):
                 bcove_thumb = image.resize(self.THUMB_SIZE)
                 bcove_still = image.resize(self.STILL_SIZE)
                 
-                t_md5 = supportServices.neondata.ImageMD5Mapper(bcove_thumb,thumbnail_id)
-                s_md5 = supportServices.neondata.ImageMD5Mapper(bcove_still,thumbnail_id)
+                t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,bcove_thumb,thumbnail_id)
+                s_md5 = supportServices.neondata.ImageMD5Mapper(video_id,bcove_still,thumbnail_id)
                 md5_objs = []
                 md5_objs.append(t_md5); md5_objs.append(s_md5)
                 res = yield tornado.gen.Task(supportServices.neondata.ImageMD5Mapper.save_all,md5_objs)
@@ -643,7 +643,7 @@ class BrightcoveApi(object):
             if not result.error and "error" not in result.body:
                 bc_json = yield tornado.gen.Task(supportServices.neondata.BrightcovePlatform.get_account,self.neon_api_key,i_id)
                 if not bc_json:
-                    log.error("key=verify_brightcove_tokens msg=account not found %s"%i_id)
+                    _log.error("key=verify_brightcove_tokens msg=account not found %s"%i_id)
                     callback(None)
                     return
 
@@ -676,12 +676,12 @@ class BrightcoveApi(object):
                 #Update the videos in customer inbox
                 res = yield tornado.gen.Task(bc.save)
                 if not res:
-                    log.error("key=async_verify_token_and_create_requests msg=customer inbox not updated %s" %i_id)
+                    _log.error("key=async_verify_token_and_create_requests msg=customer inbox not updated %s" %i_id)
 
                 #send result back with job_id
                 callback(result)
             else:
-                log.error("key=async_verify_token_and_create_requests msg=brightcove api failed for %s" %i_id)
+                _log.error("key=async_verify_token_and_create_requests msg=brightcove api failed for %s" %i_id)
                 callback(None)
         self.async_get_n_videos(5,verify_brightcove_tokens)
 
@@ -718,7 +718,7 @@ class BrightcoveApi(object):
         def check_image_md5_db(thumb_url,thumbnail,callback):
             if thumbnail:
                 t_md5 = supportServices.neondata.ThumbnailID.generate(thumbnail)
-                tid = yield tornado.gen.Task(supportServices.neondata.ImageMD5Mapper.get_tid,t_md5)
+                tid = yield tornado.gen.Task(supportServices.neondata.ImageMD5Mapper.get_tid,video_id,t_md5)
                 if tid:
                     url_mapper = yield tornado.gen.Task(supportServices.neondata.ThumbnailURLMapper.get_id,thumb_url)
                     if not url_mapper:

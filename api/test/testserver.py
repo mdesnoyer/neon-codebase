@@ -201,7 +201,7 @@ class IntegrationTestHandler(tornado.web.RequestHandler):
     def create_neon_requests(self):
         vid = shortuuid.uuid()  
         request_body = {}
-        request_body["api_key"] = 'a63728c09cda459c3caaa158f4adff49' #neon user key 
+        request_body["api_key"] = API_KEY 
         request_body["video_title"] = 'test-' + vid 
         request_body["video_id"] =  vid
         request_body["video_url"] = random.choice(self.test_videos)  

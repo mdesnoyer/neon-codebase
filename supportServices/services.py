@@ -502,10 +502,21 @@ class AccountHandler(tornado.web.RequestHandler):
         #1 Get job ids for the videos from account, get the request status
         jdata = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,self.api_key,i_id)
         ba = neondata.BrightcovePlatform.create(jdata)
+        if not ba:
+            _log.error("key=get_video_status_brightcove msg=account not found")
+            self.send_json_response("brightcove account not found",400)
+            return
        
         #return all videos in the account
         if vids is None:
             vids = ba.get_videos()
+        
+        # No videos in the account
+        if not vids:
+            data = '[]'
+            self.send_json_response(data,200)
+            return
+
         job_ids = [] 
         for vid in vids:
             try:
@@ -514,8 +525,8 @@ class AccountHandler(tornado.web.RequestHandler):
             except:
                 pass #job id not found
 
-        #2 Get Job status
         
+        #2 Get Job status
         completed_videos = [] #jobs that have completed 
 
         #Hack for first time video requests in brightcove #TODO: cleanup
@@ -567,7 +578,10 @@ class AccountHandler(tornado.web.RequestHandler):
                 if thumb:
                     vid = neondata.InternalVideoID.to_external(thumb.video_id)
                     tdata = thumb.get_metadata() #to_dict()
-                    result[vid].thumbnails.append(tdata) 
+                    if not result.has_key(vid):
+                        _log.debug("key=get_video_status_brightcove msg=video deleted %s"%vid)
+                    else:
+                        result[vid].thumbnails.append(tdata) 
 
         #4. Set the default thumbnail for each of the video
         for res in result:
@@ -760,8 +774,8 @@ class AccountHandler(tornado.web.RequestHandler):
                     video_response = []
                     if not response:
                         #TODO : Distinguish between api call failure and bad tokens
-                        log.error("key=create brightcove account msg=brightcove api call failed")
-                        data = '{"error": "integration was not added, brightcove api failed"}'
+                        _log.error("key=create brightcove account msg=brightcove api call failed or token error")
+                        data = '{"error": "Read token given is incorrect or brightcove api failed"}'
                         self.send_json_response(data,502)
                         return
 
