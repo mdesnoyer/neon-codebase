@@ -747,7 +747,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
         except Exception,e:
             _log.error("key=create brightcove account msg= %" %e)
-            data = '{"error": "API Params missing" }'
+            data = '{"error": "API Params missing"}'
             self.send_json_response(data,400)
             return 
 
@@ -768,7 +768,9 @@ class AccountHandler(tornado.web.RequestHandler):
                 
                 #Saved Integration
                 if res:
-                    response = yield tornado.gen.Task(bc.verify_token_and_create_requests_for_video,5)
+                    response = bc.verify_token_and_create_requests_for_video(5)
+                    #Not Async due to tornado redis bug in neon server
+                    #yield tornado.gen.Task(bc.verify_token_and_create_requests_for_video,5)
                     ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     #TODO : Add expected time of completion !
                     video_response = []
@@ -835,7 +837,7 @@ class AccountHandler(tornado.web.RequestHandler):
             autosync = self.get_argument("auto_update")
         except Exception,e:
             _log.error("key=create brightcove account msg= %s" %e)
-            data = '{"error": "API Params missing" }'
+            data = '{"error": "API Params missing"}'
             self.send_json_response(data,400)
             return
 

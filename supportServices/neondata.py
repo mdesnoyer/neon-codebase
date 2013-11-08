@@ -67,7 +67,7 @@ class DBConnection(object):
         port = options.dbPort 
         
         if cname:
-            if cname in ["AbstractPlatform","BrightcovePlatform","YoutubePlatform","NeonUserAccount"]:
+            if cname in ["AbstractPlatform","BrightcovePlatform","YoutubePlatform","NeonUserAccount","NeonApiRequest"]:
                 host = options.accountDB 
                 port = options.dbPort 
             elif cname == "VideoMetadata":
@@ -591,21 +591,6 @@ class BrightcovePlatform(AbstractPlatform):
         if len(self.videos) > 0:
             return self.videos.keys()
     
-    def get_thumbnails(self,video_id,callback=None):
-        def wrap_callback(res):
-            if res:
-                callback(nar.thumbnails)
-            else:
-                callback(None)
-
-        job_id = self.videos[video_id]
-        if callback:
-            NeonApiRequest.get_request(self.neon_api_key,job_id,wrap_callback)
-        else:
-            nar = NeonApiRequest.get_request(api_key,job_id)
-            if nar:
-                return nar.thumbnails
-
     def get(self,callback=None):
         db_connection=DBConnection(self)
         if callback:
@@ -735,7 +720,7 @@ class BrightcovePlatform(AbstractPlatform):
         if callback:
             bc.async_verify_token_and_create_requests(self.integration_id,n,callback)
         else:
-            return bc.verify_token_and_create_requests(n)
+            return bc.verify_token_and_create_requests(self.integration_id,n)
 
     @staticmethod
     def create(json_data):
@@ -877,21 +862,6 @@ class YoutubePlatform(AbstractPlatform):
             # Not yet supported
             callback(None)
 
-    def get_thumbnails(self,video_id,callback=None):
-        def wrap_callback(res):
-            if res:
-                callback(nar.thumbnails)
-            else:
-                callback(None)
-
-        job_id = self.videos[video_id]
-        if callback:
-            NeonApiRequest.get_request(self.neon_api_key,job_id,wrap_callback)
-        else:
-            nar = NeonApiRequest.get_request(api_key,job_id)
-            if nar:
-                return nar.thumbnails
-    
     '''
     Update thumbnail for the given video
     '''
@@ -971,6 +941,8 @@ class NeonApiRequest(object):
     Getting request blobs :
     use static get method to get a json based response NeonApiRequest.get_request()
     '''
+
+    conn,blocking_conn = RedisClient.get_client()
     def __init__(self,job_id,api_key,vid,title,url,request_type,http_callback):
         self.key = generate_request_key(api_key,job_id) 
         self.job_id = job_id
@@ -1050,7 +1022,8 @@ class NeonApiRequest(object):
             db_connection.conn.get(key,callback)
         else:
             result = db_connection.blocking_conn.get(key)
-            return NeonApiRequest.create(result)
+            if result:
+                return NeonApiRequest.create(result)
 
     @classmethod
     def get_request(cls,api_key,job_id,callback=None):
