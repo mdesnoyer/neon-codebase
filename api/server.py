@@ -350,7 +350,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             api_request.state = RequestState.SUBMIT
 
             #Validate Request & Insert in to Queue (serialized/json)
-            job_result = None #NeonApiRequest.blocking_conn.get(api_request.key)
+            #job_result = None #NeonApiRequest.blocking_conn.get(api_request.key)
             job_result = yield tornado.gen.Task(BrightcoveApiRequest.get,api_request.api_key,api_request.job_id)
             if job_result is not None:
                 response_data = '{"error":"duplicate job"}' 
@@ -436,7 +436,7 @@ def main():
     utils.neon.InitNeon()
     global server
     server = tornado.httpserver.HTTPServer(application)
-    #os.ps.utils.register_tornado_shutdown(server)
+    utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)
     tornado.ioloop.IOLoop.instance().start()
 
