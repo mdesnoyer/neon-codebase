@@ -574,14 +574,15 @@ class BrightcoveApi(object):
 
         self.find_video_by_id(video_id,get_vid_info)
 
-    def create_request_by_video_id(self,video_id):
+    def create_request_by_video_id(self,video_id,i_id):
         
-        url = 'http://api.brightcove.com/services/library?command=find_video_by_id&token='+ self.read_token +'&media_delivery=http&output=json&video_id=' + video_id + '&video_fields=FLVURL,id'
+        url = 'http://api.brightcove.com/services/library?command=find_video_by_id&token='+ self.read_token +'&media_delivery=http&output=json&video_id=' + video_id 
         http_client = tornado.httpclient.HTTPClient()
         req = tornado.httpclient.HTTPRequest(url = url, method = "GET", request_timeout = 60.0, connect_timeout = 10.0)
         response = http_client.fetch(req)
         resp = tornado.escape.json_decode(response.body)
-        #self.format_neon_api_request(resp['id'] ,resp['FLVURL'])
+        still = resp['videoStillURL']
+        self.format_neon_api_request(resp['id'] ,resp['FLVURL'], still, request_type='topn', i_id=i_id)
 
     def async_get_n_videos(self,n,callback):
         self.get_publisher_feed(command='find_all_videos',page_size = n, callback = callback)
