@@ -20,8 +20,7 @@ if sys.path[0] <> base_path:
 import atexit
 from boto.s3.connection import S3Connection
 from boto.s3.bucketlistresultset import BucketListResultSet
-import clickTracker.clickLogServer
-import clickTracker.logDatatoS3
+import clickTracker.trackserver
 import copy
 from datetime import datetime
 import json
@@ -65,6 +64,8 @@ define('bc_directive_port', default=7212,
 
 _log = logging.getLogger(__name__)
 
+_erase_local_log_dir = multiprocessing.Event()
+
 class TestServingSystem(unittest.TestCase):
 
     @classmethod
@@ -106,9 +107,10 @@ class TestServingSystem(unittest.TestCase):
         # Clear the s3 bucket
         s3conn = S3Connection()
         bucket = s3conn.get_bucket(
-            options.get('clickTracker.logDatatoS3.bucket_name'))
+            options.get('clickTracker.trackserver.bucket_name'))
         for key in BucketListResultSet(bucket):
             key.delete()
+        _erase_local_log_dir.set()
 
         # Empty the directives queue
         while not self.__class__.directive_q.empty():
@@ -134,7 +136,7 @@ class TestServingSystem(unittest.TestCase):
         random.seed(5951674)
         def format_get_request(vals):
             base_url = "http://localhost:%s/track?" % (
-                options.get('clickTracker.clickLogServer.port'))
+                options.get('clickTracker.trackserver.port'))
             base_url += urllib.urlencode(vals)
             return base_url
 
@@ -210,6 +212,7 @@ class TestServingSystem(unittest.TestCase):
             self.statscursor,
             '''SELECT sum(loads), sum(clicks) from hourly_events
             where thumbnail_id = %s''', (thumb_id,))
+        stats = stats.fetchall()
         return (stats[0][0], stats[0][1])
         
 
@@ -419,18 +422,14 @@ def LaunchMastermind():
 
 def LaunchClickLogServer():
     proc = multiprocessing.Process(
-        target=clickTracker.clickLogServer.main)
+        target=clickTracker.trackserver.main)
     proc.start()
     _log.info('Launching click log server with pid %i' % proc.pid)
 
-    proc = multiprocessing.Process(
-        target=clickTracker.logDatatoS3.main)
-    proc.start()
-    _log.info('Launching s3 data pusher with pid %i' % proc.pid)
-
 def LaunchStatsProcessor():
     proc = multiprocessing.Process(
-        target=stats.stats_processor.main)
+        target=stats.stats_processor.main,
+        args=(_erase_local_log_dir,))
     proc.start()
     _log.info('Launching stats processor with pid %i' % proc.pid)
 
@@ -442,6 +441,7 @@ def main():
     logging.getLogger('tornado.access').propagate = False
     #logging.getLogger('mrjob.local').propagate = False
     logging.getLogger('mrjob.config').propagate = False
+    logging.getLogger('mrjob.conf').propagate = False
 
     LaunchStatsDb()
     LaunchVideoDb()

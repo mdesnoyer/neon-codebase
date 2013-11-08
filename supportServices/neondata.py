@@ -1185,13 +1185,23 @@ class ThumbnailID(AbstractHashGenerator):
 
     input: String or Image stream. 
 
-    Thumbnail ID is the MD5 hash of image data
+    Thumbnail ID is: <internal_video_id>_<md5 MD5 hash of image data>
+    '''
+
+    @staticmethod
+    def generate(input, internal_video_id):
+        return '%s_%s' % (internal_video_id, ThumbnailMD5.generate(input))
+
+class ThumbnailMD5(AbstractHashGenerator):
+    '''Static class to generate the thumbnail md5.
+
+    input: String or Image stream.
     '''
     salt = 'Thumbn@il'
     
     @staticmethod
     def generate_from_string(input):
-        input = ThumbnailID.salt + str(input)
+        input = ThumbnailMD5.salt + str(input)
         return AbstractHashGenerator._api_hash_function(input)
 
     @staticmethod
@@ -1199,14 +1209,14 @@ class ThumbnailID(AbstractHashGenerator):
         filestream = StringIO()
         imstream.save(filestream,'jpeg')
         filestream.seek(0)
-        return ThumbnailID.generate_from_string(filestream.buf)
+        return ThumbnailMD5.generate_from_string(filestream.buf)
 
     @staticmethod
-    def generate(input):
+    def generate(input,):
         if isinstance(input,basestring):
-            return ThumbnailID.generate_from_string(input)
+            return ThumbnailMD5.generate_from_string(input)
         else:
-            return ThumbnailID.generate_from_image(input)
+            return ThumbnailMD5.generate_from_image(input)
 
 
 class ThumbnailURLMapper(object):
@@ -1324,7 +1334,7 @@ class ThumbnailIDMapper(object):
     '''
     def __init__(self, tid, internal_vid, thumbnail_metadata):
         super(ThumbnailIDMapper,self).__init__()
-        self.key = internal_vid + '_' + tid #api_key + platform video id + tid(imagemd5) 
+        self.key = tid
         self.video_id = internal_vid #api_key + platform video id
         self.thumbnail_metadata = thumbnail_metadata #dict of ThumbnailMetadata object
 

@@ -43,7 +43,6 @@ define("s3disk", default="/mnt/neon/s3diskbacklog",
         help="backup lines which failed to upload s3", type=str)
 define("bucket_name", default='neon-tracker-logs',
        help='Bucket to store the logs on')
-MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
 
 #############################################
 #### DATA FORMAT ###
@@ -91,6 +90,7 @@ class LogLines(tornado.web.RequestHandler):
 
             #On load the current video loaded in the player is logged
             if action == 'load':
+                imgs = self.get_argument('imgs')
                 imgs = [e.strip('"\' ') for e in imgs.strip('[]').split(',')]
                 if ttype != 'imagetracker':
                     cvid = self.get_argument('cvid')

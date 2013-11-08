@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 '''
 Test functionality of the click log server.
 
@@ -33,7 +34,7 @@ import unittest
 import json
 import time
 import Queue
-import trackserver as cs 
+import clickTracker.trackserver as cs 
 
 from boto.exception import S3ResponseError
 from boto.s3.connection import S3Connection
@@ -62,6 +63,8 @@ class TestLogger(unittest.TestCase):
             #self.assertIn(handler.do_work(),["s3","disk"])
             self.assertEqual(handler.do_work(),"s3")
 
+            # TODO(Sunil): Check that the data on s3 is what we expect it to be
+
     def test_log_to_disk(self):
         nlines = 100
         #conn = S3Connection('test','test')
@@ -84,6 +87,12 @@ class TestLogger(unittest.TestCase):
         handler = cs.S3Handler(dataQ,batch_size,fetch_count,bucket)
         for i in range(nlines/batch_size):
             self.assertEqual(handler.do_work(),"disk")
+
+            # TODO(Sunil): Check that the data on disk is what we
+            # expect it to be.
+            
+    # TODO(Sunil): Test that data which gets put on disk, gets
+    # uploaded to S3 once the connection is back.
 
     def _test_send_data_to_server(self):
         port = 9080

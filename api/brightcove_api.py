@@ -717,13 +717,20 @@ class BrightcoveApi(object):
         @tornado.gen.engine
         def check_image_md5_db(thumb_url,thumbnail,callback):
             if thumbnail:
-                t_md5 = supportServices.neondata.ThumbnailID.generate(thumbnail)
-                tid = yield tornado.gen.Task(supportServices.neondata.ImageMD5Mapper.get_tid,video_id,t_md5)
+                t_md5 = supportServices.neondata.ThumbnailMD5.generate(
+                    thumbnail)
+                tid = yield tornado.gen.Task(
+                    supportServices.neondata.ImageMD5Mapper.get_tid,
+                    video_id,
+                    t_md5)
                 if tid:
-                    url_mapper = yield tornado.gen.Task(supportServices.neondata.ThumbnailURLMapper.get_id,thumb_url)
+                    url_mapper = yield tornado.gen.Task(
+                        supportServices.neondata.ThumbnailURLMapper.get_id,
+                        thumb_url)
                     if not url_mapper:
                         #entry for the given thumbnail url doesn't exist, Save it !
-                        mapper = supportServices.neondata.ThumbnailURLMapper(thumb_url,tid)
+                        mapper = supportServices.neondata.ThumbnailURLMapper(
+                            thumb_url,tid)
                         res = yield tornado.gen.Task(mapper.save)
                         if res:
                             callback(True)

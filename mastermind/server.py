@@ -199,10 +199,11 @@ class StatsDBWatcher(threading.Thread):
                       % cur_update)
 
             # The database was updated, so process the new state.
-            result = cursor.execute('''SELECT thumbnail_id,
-                                    sum(loads), sum(clicks) 
-                                    FROM %s group by thumbnail_id''' %
+            cursor.execute('''SELECT thumbnail_id,
+                           sum(loads), sum(clicks) 
+                           FROM %s group by thumbnail_id''' %
                 options.stats_table)
+            result = cursor.fetchall()
             if result:
                 data = ((self._find_video_id(x[0]), x[0], x[1], x[2]) 
                         for x in result)

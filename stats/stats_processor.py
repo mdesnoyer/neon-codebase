@@ -109,6 +109,11 @@ class DataDirectory:
             shutil.rmtree(self.localdir)
         self.localdir = None
 
+    def erase(self):
+        '''Erases all the files in the directory, but keeps the path the same.'''
+        for path in os.listdir(self.localdir):
+            os.remove(path)
+
     def count_files(self, runner):
         '''Count the number of files available for input.'''
         if must_download():
@@ -139,7 +144,13 @@ class DataDirectory:
 
     
 
-def main():
+def main(erase_local_data=None):
+    '''The main routine.
+
+    erase_local_data - An optional mutiprocessing.Event() that when
+    set, will cause the local data to be erased.
+    
+    '''
     atexit.register(utils.ps.shutdown_children)
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
 
@@ -164,6 +175,10 @@ def main():
 
             known_input_files = 0
             while True:
+                if erase_local_data is not None and erase_local_data.is_set():
+                    data_dir.erase()
+                    erase_local_data.clear()
+                
                 _log.debug('Looking for new log files to process from %s' % 
                            options.input)
                 try:
