@@ -656,7 +656,7 @@ class BrightcovePlatform(AbstractPlatform):
             else:
                 callback(False)
         else:
-            _log.debug("key=update_thumbnail msg=update result thumb ref %s still ref %s for video %" %(tref,sref,i_vid))
+            _log.debug("key=update_thumbnail msg=update result thumb ref %s still ref %s for video %s" %(tref,sref,i_vid))
             _log.error("key=update_thumbnail msg=failed to enable thumb %s for %s" %(new_tid,i_vid))
             callback(False)
 
