@@ -642,7 +642,7 @@ class BrightcoveApi(object):
         return
 
     def verify_token_and_create_requests(self,i_id,n):
-        result = self.get_n_videos(5)
+        result = self.get_n_videos(n)
         if result:
             bc_json = supportServices.neondata.BrightcovePlatform.get_account(self.neon_api_key,i_id)
             if not bc_json:
