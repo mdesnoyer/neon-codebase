@@ -1207,7 +1207,8 @@ class ThumbnailURLMapper(object):
         if not imdata:
             self.value = tid
         else:
-            self.value = ThumbnailID.generate(imdata) 
+            #TODO: Is this imdata really needed ? 
+            raise #self.value = ThumbnailID.generate(imdata) 
 
     def save(self,callback=None):
         db_connection = DBConnection(self)
@@ -1261,8 +1262,8 @@ class ImageMD5Mapper(object):
 
     def format_key(self,video_id,imdata):
         if imdata:
-            md5 = ThumbnailID.generate(imdata)
-            return self.__class__.__name__.lower() + '_' + video_id + '_' + md5
+            md5 = ThumbnailID.generate(imdata,video_id)
+            return self.__class__.__name__.lower() + '_' + md5
         else:
             raise
 

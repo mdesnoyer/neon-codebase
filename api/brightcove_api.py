@@ -582,7 +582,13 @@ class BrightcoveApi(object):
         response = http_client.fetch(req)
         resp = tornado.escape.json_decode(response.body)
         still = resp['videoStillURL']
-        self.format_neon_api_request(resp['id'] ,resp['FLVURL'], still, request_type='topn', i_id=i_id)
+        response = self.format_neon_api_request(resp['id'] ,resp['FLVURL'], still, request_type='topn', i_id=i_id)
+        jid = tornado.escape.json_decode(response.body)
+        job_id = jid["job_id"]
+        bc_json = supportServices.neondata.BrightcovePlatform.get_account(self.neon_api_key, i_id)
+        bc = supportServices.neondata.BrightcovePlatform.create(bc_json)
+        bc.videos[video_id] = job_id
+        bc.save()
 
     def async_get_n_videos(self,n,callback):
         self.get_publisher_feed(command='find_all_videos',page_size = n, callback = callback)
