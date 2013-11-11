@@ -23,49 +23,98 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
                                          '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
-import subprocess
-import sys
-import urllib2
-import random
-import boto
-from boto.s3.connection import S3Connection
-from moto import mock_s3
-import unittest
-import json
-import time
-import Queue
-import clickTracker.trackserver as cs 
 
+
+import boto
 from boto.exception import S3ResponseError
 from boto.s3.connection import S3Connection
-from boto.s3.key import Key
-from boto.s3.bucket import Bucket
+import test_utils.mock_boto_s3 as boto_mock
+import clickTracker.trackserver as cs 
+import json
+import mock
+from mock import patch
+import Queue
+import random
+import time
+import unittest
+import urllib2
+import utils.neon
 
 class TestLogger(unittest.TestCase):
+    def setUp(self):
+        pass
 
-    @mock_s3
-    def test_log_to_s3(self):
-        nlines = 1000
-        conn = S3Connection('test','test')
-        bucket = conn.create_bucket('neon-tracker-logs')
-        dataQ = Queue.Queue()
-        #add data
-        for i in range(nlines):
-            cd = cs.TrackerData("load",1,"flashonlytracker",time.time(),time.time(),
-                "http://localhost","127.0.0.1",['i1.jpg','i2.jpg'],'v1')
-            data = cd.to_json()
-            dataQ.put(data)
+    def tearDown(self):
+        pass
+
+    @patch('clickTracker.trackserver.S3Connection')
+    def test_log_to_s3(self, mock_conntype):
+        conn = boto_mock.MockConnection()
+        mock_conntype.return_value = conn
         
-        batch_size = 100
-        fetch_count = 100
-        handler = cs.S3Handler(dataQ,batch_size,fetch_count,bucket)
-        for i in range(nlines/batch_size):
-            #self.assertIn(handler.do_work(),["s3","disk"])
-            self.assertEqual(handler.do_work(),"s3")
+        # Create the S3 bucket for the logs
+        bucket = conn.create_bucket('neon-tracker-logs')
 
-            # TODO(Sunil): Check that the data on s3 is what we expect it to be
+        # Start a thread to handle the data
+        dataQ = Queue.Queue()
+        handle_thread = cs.S3Handler(dataQ)
+        handle_thread.start()
 
-    def test_log_to_disk(self):
+        # Send data
+        nlines = 1000
+        for i in range(nlines/2):
+            cd = cs.TrackerData("load", 1, "flashonlytracker", time.time(),
+                                time.time(), "http://localhost",
+                                "127.0.0.1", ['i1.jpg','i2.jpg'],'v1')
+            dataQ.put(cd.to_json())
+
+            click = cs.TrackerData("click", 1, "flashonlytracker", time.time(),
+                                time.time(), "http://localhost",
+                                "127.0.0.1", 'i1.jpg')
+            dataQ.put(click.to_json())
+            
+        # Wait until the data is processeed 
+        dataQ.join()
+        
+        # Check that there are 10 files in the bucket because each
+        # file by default is 100 lines
+        s3_keys = [x for x in bucket.get_all_keys()]
+        self.assertEqual(len(s3_keys), 10)
+
+        # Make sure that the files have the same number of lines
+        file_lines = None
+        for key in s3_keys:
+            nlines = 0
+            for line in key.get_contents_as_string().split('\n'):
+                nlines += 1
+            if file_lines is None:
+                file_lines = nlines
+            else:
+                self.assertEqual(file_lines, nlines)
+
+        # Open one of the files and check that it contains what we expect
+        for line in s3_keys[0].get_contents_as_string().split('\n'):
+            line = line.strip()
+            if line == '':
+                continue
+            parsed = json.loads(line)
+            self.assertEqual(parsed['id'], 1)
+            self.assertEqual(parsed['ttype'], 'flashonlytracker')
+            self.assertEqual(parsed['page'], 'http://localhost')
+            self.assertEqual(parsed['cip'], '127.0.0.1')
+            self.assertTrue(parsed['ts'])
+            self.assertTrue(parsed['sts'])
+
+            if parsed['a'] == 'load':
+                self.assertEqual(parsed['cvid'], 'v1')
+                self.assertEqual(parsed['imgs'], ['i1.jpg','i2.jpg'])
+            elif parsed['a'] == 'click':
+                self.assertEqual(parsed['img'], 'i1.jpg')
+            else:
+                self.fail('Bad action field %s' % parsed['a'])
+        
+        
+    def _test_log_to_disk(self):
         nlines = 100
         #conn = S3Connection('test','test')
         #bucket = conn.create_bucket('neon-tracker-logs')
@@ -113,4 +162,5 @@ class TestLogger(unittest.TestCase):
             r.read()
 
 if __name__ == '__main__':
+    utils.neon.InitNeon()
     unittest.main()
