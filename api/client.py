@@ -633,7 +633,10 @@ class ProcessVideo(object):
             bc_request.save()
 
         #Save previous thumbnail to s3
+        if not bc_request.previous_thumbnail:
+            _log.debug("key=finalize_brightcove_request msg=no thumbnail for %s %s" %(api_key,video_id))
         p_url = bc_request.previous_thumbnail.split('?')[0]
+
         http_client = tornado.httpclient.HTTPClient()
         req = tornado.httpclient.HTTPRequest(url = p_url,
                                                 method = "GET",

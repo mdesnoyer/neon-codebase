@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 ''''
 Server that logs data from the tracker in to S3
 

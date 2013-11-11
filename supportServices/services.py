@@ -4,7 +4,6 @@ This script launches the services server which hosts Services that neon web acco
 - Neon Account managment
 - Submit video processing request via Neon API, Brightcove, Youtube
 '''
-import daemon
 import os.path
 import sys
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -747,7 +746,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
         except Exception,e:
             _log.error("key=create brightcove account msg= %" %e)
-            data = '{"error": "API Params missing" }'
+            data = '{"error": "API Params missing"}'
             self.send_json_response(data,400)
             return 
 
@@ -768,7 +767,9 @@ class AccountHandler(tornado.web.RequestHandler):
                 
                 #Saved Integration
                 if res:
-                    response = yield tornado.gen.Task(bc.verify_token_and_create_requests_for_video,5)
+                    response = bc.verify_token_and_create_requests_for_video(5)
+                    #Not Async due to tornado redis bug in neon server
+                    #yield tornado.gen.Task(bc.verify_token_and_create_requests_for_video,5)
                     ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     #TODO : Add expected time of completion !
                     video_response = []
@@ -835,7 +836,7 @@ class AccountHandler(tornado.web.RequestHandler):
             autosync = self.get_argument("auto_update")
         except Exception,e:
             _log.error("key=create brightcove account msg= %s" %e)
-            data = '{"error": "API Params missing" }'
+            data = '{"error": "API Params missing"}'
             self.send_json_response(data,400)
             return
 
@@ -1298,6 +1299,5 @@ def main():
     tornado.ioloop.IOLoop.instance().start()
 
 if __name__ == "__main__":
-    #with daemon.DaemonContext():
     utils.neon.InitNeon()
     main()
