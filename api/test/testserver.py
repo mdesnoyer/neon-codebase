@@ -61,6 +61,7 @@ class DemoHandler(tornado.web.RequestHandler):
     def vimeo_request(self,topn,vid_url):
         def vimeo_callback(response):
             if response.error:
+		_log.error('Error getting video from %s: %s' % (response.request.url, response.error))
                 self.set_status(500)
                 self.finish()
                 return
@@ -87,6 +88,8 @@ class DemoHandler(tornado.web.RequestHandler):
                 d_url = links["MB"]
 
             if d_url == '':
+                r = tornado.escape.json_encode(result)
+                self.set_header("Access-Control-Allow-Origin","*")
                 self.set_status(400)
                 self.finish()
                 return
@@ -97,11 +100,16 @@ class DemoHandler(tornado.web.RequestHandler):
 
         vimeo_vid = vid_url.split('/')[-1]
         tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
-        h = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/28.0.1500.71 Safari/537.36', 'Referer': 'https://vimeo.com/'+ vimeo_vid, 'X-Requested-With':'XMLHttpRequest'})
-        #TODO ADD all headers
-        # -H 'Host: vimeo.com' -H 'Accept-Language: en-US,en;q=0.8' -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.69 Safari/537.36' -H 'Accept: text/html, application/xml, text/xml, */*' -H 'Referer: https://vimeo.com/4862839' -H 'X-Requested-With: XMLHttpRequest' -H 'Connection: keep-alive' --compressed
+        h = tornado.httputil.HTTPHeaders({
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/28.0.1500.71 Safari/537.36',
+            'Referer': 'http://vimeo.com/'+ vimeo_vid, 'X-Requested-With':'XMLHttpRequest',
+            'HOST': 'vimeo.com', 
+            'Accept': 'text/html, application/xml, text/xml',
+            'Connection': 'keep-alive',
+            'Cache-Control': 'max-age=0'
+            })
 
-        url = 'https://vimeo.com/' + vimeo_vid + '?action=download' 
+        url = 'http://vimeo.com/' + vimeo_vid + '?action=download' 
         http_client = tornado.httpclient.AsyncHTTPClient()
         req = tornado.httpclient.HTTPRequest(url = url,headers =h , request_timeout = 60.0, connect_timeout = 10.0)
         response = http_client.fetch(req,vimeo_callback)
@@ -133,17 +141,32 @@ class DemoHandler(tornado.web.RequestHandler):
         
         def job_finish_callback(resp):
             jresponse = tornado.escape.json_decode(resp.body)
-            result = jresponse['result']
+            result = jresponse['response']
             print result, len(result)
-            if len(result) >1:
-                r = tornado.escape.json_encode(result)
-                self.set_header("Access-Control-Allow-Origin","*")
-                self.set_header("Content-Type", "application/json")
-                self.write(r)
-                self.finish()
-            else:
+            if len(result) <1:
                 time.sleep(5)
                 check_status(job_id)
+                return
+
+            #Compatiblity with Demo
+            thumbs =[] ; i=0 
+            for t in result["thumbnails"]:
+                resp = {}
+                resp["id"] = i
+                resp["title"] = "test"
+                resp["width"] = 640
+                resp["height"] = 360
+                resp["duration"] = 10
+                resp["url"] = t
+                i +=1
+                thumbs.append(resp)
+
+            result = {} ; result["thumbnails"] = thumbs
+            r = tornado.escape.json_encode(result)
+            self.set_header("Access-Control-Allow-Origin","*")
+            self.set_header("Content-Type", "application/json")
+            self.write(r)
+            self.finish()
 
         def check_status(job_id):
             client_url = 'http://localhost:8081/api/v1/jobstatus?api_key=' +API_KEY + '&job_id=' + job_id
