@@ -766,7 +766,8 @@ class AccountHandler(tornado.web.RequestHandler):
             self.send_json_response(data,400)
             return 
 
-        na_data = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,self.api_key)
+        na_data = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
+                                         self.api_key)
         #Create and Add Platform Integration
         if na_data:
             na = neondata.NeonUserAccount.create(na_data)
@@ -777,7 +778,8 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.send_json_response(data,409)
             else:
                 curtime = time.time() #account creation time
-                bc = neondata.BrightcovePlatform(a_id,i_id,p_id,rtoken,wtoken,autosync,curtime)
+                bc = neondata.BrightcovePlatform(a_id, i_id, p_id, rtoken, 
+                                                 wtoken, autosync, curtime)
                 na.add_integration(bc.integration_id,"brightcove")
                 res = yield tornado.gen.Task(na.save_integration,bc) #save integration & update acnt
                 
@@ -857,7 +859,9 @@ class AccountHandler(tornado.web.RequestHandler):
             return
 
         uri_parts = self.request.uri.split('/')
-        neondata.BrightcovePlatform.get_account(self.api_key,i_id,update_account)
+        neondata.BrightcovePlatform.get_account(self.api_key,
+                                                i_id,
+                                                update_account)
 
 
     '''

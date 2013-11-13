@@ -159,6 +159,17 @@ class TestCommandLineParsing(unittest.TestCase):
 
         self.assertEqual(test_mod.get(self.parser, 'an_int'), 10)
 
+    def test_config_stream_set_variable_in_main(self):
+        self.parser.define('an_int', default=6, type=int)
+
+        config_stream = StringIO('utils:\n'
+                                 ' test:\n'
+                                 '  options_test:\n'
+                                 '   an_int: 10')
+        self.parser.parse_options([], config_stream)
+
+        self.assertEqual(self.parser.an_int, 10)
+
 
     @patch('utils.options.os.path.getmtime', return_value=int(time.time()))
     def test_finding_config_file(self, mtime_mock):

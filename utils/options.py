@@ -46,7 +46,9 @@ While the config file is in yaml format and would look like:
       mysql_host: 127.0.0.1
       mysql_port: 9854
 
-For variables defined in __main__, they are at the root of the option hierarchy
+For variables defined in __main__, they are at the root of the option
+hierarchy although they can be specified in the config file in their
+modules instead.
 
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright 2013 Neon Labs
@@ -93,6 +95,9 @@ class OptionParser(object):
 
         if cur_dir == '/':
             raise Error('Could not find the NEON_ROOT file in the source tree.')
+
+        # Find the full prefix for the main module
+        self.__dict__['main_prefix'] = self._get_main_prefix()
 
     def __getattr__(self, name):
         with self.__dict__['lock']:
@@ -320,7 +325,7 @@ class OptionParser(object):
     def _parse_dict(self, d, prefix):
         '''Parses a nested dictionary and stores the variables values.'''
         for key, value in d.iteritems():
-            if prefix == '':
+            if prefix == '' or prefix == self.main_prefix:
                 name = key
             else:
                 name = '%s.%s' % (prefix, key)
@@ -341,7 +346,7 @@ class OptionParser(object):
     def _local2global(self, option, stack_depth=2):
         '''Converts the local name of the option to a global one.
 
-        e.g. if define("font", ...) is in utils, this returns "utils.font"
+        e.g. if define("font", ...) is in utils.py, this returns "utils.font"
 
         Stack depth controls how far back the module is found.
         Normally this is 2.
@@ -352,12 +357,22 @@ class OptionParser(object):
         if mod.__name__ in ['__main__', '', '.', None]:
             return option
 
-        modpath = os.path.abspath(mod.__file__)
-        relpath = os.path.relpath(modpath, self.NEON_ROOT)
-        relpath = os.path.splitext(relpath)[0]
-        relmod = '.'.join(relpath.split('/'))
-        return '%s.%s' % (relmod, option)
+        return '%s.%s' % (self._get_option_prefix(mod.__file__), option)
+
+    def _get_main_prefix(self):
+        for frame in inspect.stack():
+            mod = inspect.getmodule(frame[0])
+            if mod.__name__ == '__main__':
+                return self._get_option_prefix(mod.__file__)
+        raise Error("Could not find the main module")
+
+    def _get_option_prefix(self, filename):
+        '''Returns the module-like prefix for a given filename.'''
         
+        apath = os.path.abspath(filename)
+        relpath = os.path.relpath(apath, self.NEON_ROOT)
+        relpath = os.path.splitext(relpath)[0]
+        return '.'.join(relpath.split('/'))
 
 class _Option(object):
     def __init__(self, name, default=None, type=str, help=None):
