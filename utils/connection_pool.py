@@ -11,7 +11,6 @@ import threading
 import time
 import tornado.escape
 import tornado.httpclient
-import tornado.ioloop
 
 _log = logging.getLogger(__name__)
 
@@ -33,6 +32,11 @@ class HttpConnectionThread(threading.Thread):
                 request, callback, n_tries = self.q.get()
 
                 if request is None:
+                    self.q.task_done()
+                    if not self._stopped.is_set():
+                        # This stop was for somebody else who is
+                        # listening on the queue, so requeue it.
+                        self.q.put((None, None, None))
                     continue
 
                 http_client = tornado.httpclient.HTTPClient()
@@ -56,19 +60,19 @@ class HttpConnectionThread(threading.Thread):
                                  'msg=Response err from %s: %s') %
                                  (request.url, data['error']))
                         else:
-                            callback(response)
+                            self._finish(callback, response)
                             continue
 
                                 
                     except ValueError:
                         # It's not JSON data so just call the callback
-                        callback(response)
+                        self._finish(callback, response)
                         continue
 
                     except KeyError:
                         # The JSON doens't have an error field, so
                         # call the callback
-                        callback(response)
+                        self._finish(callback, response)
                         continue
 
                 else:
@@ -84,20 +88,29 @@ class HttpConnectionThread(threading.Thread):
                         response.error = tornado.httpclient.HTTPError(
                             503, 'Too many errors connecting to %s' 
                             % request.url)
-                    callback(response)
+                    self._finish(callback, response)
                 else:
                     # Requeue the request after a delay
                     delay = (1 << n_tries) * 0.1 # in seconds
-                    io_loop = tornado.ioloop.IOLoop.instance()
-                    io_loop.add_callback(
-                        lambda: io_loop.add_timeout(
-                            time.time() + delay,
-                            lambda: self.q.put((request, callback, n_tries)))) 
+                    self._delayed_requeue(request, callback, n_tries, delay)
 
             except Exception as e:
                 _log.exception(
                     'key=http_connection msg=Unhandled exception: %s'
-                    % e)            
+                    % e)
+
+    def _delayed_requeue(self, request, callback, n_tries, delay):
+        '''Adds a request to the queue after delay seconds.'''
+        def do_requeue():
+            self.q.put((request, callback, n_tries))
+            self.q.task_done()
+
+        timer = threading.Timer(delay, do_requeue)
+        timer.start()
+
+    def _finish(self, callback, response):
+        callback(response)
+        self.q.task_done()
 
 class HttpConnectionPool(object):
     '''Handles a number of concurrent requests to an http service.
@@ -123,6 +136,9 @@ class HttpConnectionPool(object):
                    returns with its response as the parameter. If it is None,
                    this call blocks and returns the HTTPResponse.
         '''
+        if request is None:
+            raise TypeError('Request must be non Null')
+        
         if callback is not None:
             self.request_q.put((request, callback, 0))
             return
@@ -142,3 +158,7 @@ class HttpConnectionPool(object):
 
         for thread in self.threads:
             thread.join()
+
+    def join(self):
+        '''Blocks until all the requests have been processed.'''
+        self.request_q.join()

@@ -22,3 +22,7 @@ target_link_libraries(connectedcomponents
 add_test(options_test
   ${PROJECT_SOURCE_DIR}/test/options_test.py
 )
+
+add_test(connection_pool_test
+  ${PROJECT_SOURCE_DIR}/test/connection_pool_test.py
+)
