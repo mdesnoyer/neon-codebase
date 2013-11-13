@@ -75,9 +75,9 @@ class TestDataParsing(unittest.TestCase):
 
     def test_valid_click(self):
         results, counters = run_single_step(self.mr,
-            ('{"sts":19800, "a":"click", '
+            ('{"sts":19800, "a":"click", "page":"here.com",'
              '"ttype":"flashonly", "img":"http://monkey.com"}\n'
-             '{"sts":19800, "a":"click", '
+             '{"sts":19800, "a":"click", "page":"here.com",'
              '"ttype":"flashonly", "img":"http://panda.com"}\n'),
             protocol=RawProtocol)
         self.assertItemsEqual(results,
@@ -88,7 +88,7 @@ class TestDataParsing(unittest.TestCase):
 
     def test_valid_load(self):
         results, counters = run_single_step(self.mr,
-          ('{"sts":19800, "a":"load", "ttype":"flashonly",'
+          ('{"sts":19800, "a":"load", "page":"here.com", "ttype":"flashonly",'
            '"imgs":["http://monkey.com","poprocks.jpg","pumpkin.wow"]}'),
             protocol=RawProtocol)
                                             
@@ -371,17 +371,17 @@ class TestEndToEnd(unittest.TestCase):
     def test_bunch_of_data(self):
         # Setup the input data
         input_data = (
-            '{"sts":19800, "a":"click", '
+            '{"sts":19800, "a":"click", "page":"here.com",'
             '"ttype":"flashonly", "img":"http://monkey.com"}\n'
             '{"sts":19795, "a":"load", "ttype":"flashonly",'
             '"imgs":["http://monkey.com","http://panda.com","pumpkin.wow"]}\n'
-            '{"sts":19805, "a":"click", '
+            '{"sts":19805, "a":"click", "page":"here.com",'
              '"ttype":"flashonly", "img":"http://panda.com"}\n'
-            '{"sts":19800, "a":"load", "ttype":"flashonly",'
+            '{"sts":19800, "a":"load", "page":"here.com", "ttype":"flashonly",'
             '"imgs":["http://monkey.com","pumpkin.jpg"]}\n'
-            '{"sts":19810, "a":"click", '
+            '{"sts":19810, "a":"click", "page":"here.com",'
              '"ttype":"flashonly", "img":"http://panda.com"}\n'
-            '{"sts":19810, "a":"click", '
+            '{"sts":19810, "a":"click", "page":"here.com",'
              '"ttype":"flashonly", "img":"pumpkin.jpg"}')
         stdin = StringIO(input_data)
         self.mr.sandbox(stdin=stdin)

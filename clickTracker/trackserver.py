@@ -167,20 +167,23 @@ class S3Handler(threading.Thread):
             self.s3bucket = self.s3conn.create_bucket(options.bucket_name)
 
     def upload_to_s3(self, data):
-        k = self.s3bucket.new_key(shortuuid.uuid())
         try:
+            k = self.s3bucket.new_key(shortuuid.uuid())
             k.set_contents_from_string(data)
             self.last_upload_time = time.time()
-        except boto.exception.S3ResponseError,e:
-            _log.exception("key=upload_to_s3 msg=S3 Errror %s"%e)
+        except boto.exception.BotoServerError as e:
+            _log.exception("key=upload_to_s3 msg=S3 Error %s" % e)
+            self.save_to_disk(data)
+        except IOError as e:
+            _log.exception("key=upload_to_s3 msg=S3 I/O Error %s" % e)
             self.save_to_disk(data)
 
     def save_to_disk(self, data):
         if not os.path.exists(options.s3disk):
             os.makedirs(options.s3disk)
         
-        fname = "s3backlog_%s" %time.time()
-        with open(options.s3disk +'/' + fname,'a') as f:
+        fname = "s3backlog_%s.log" % time.time()
+        with open(os.path.join(options.s3disk, fname),'a') as f:
             f.write(data)
 
     def run(self):
@@ -202,7 +205,7 @@ class S3Handler(threading.Thread):
                         data = ''
                         nlines = 0
             except Exception as e:
-                _log.exception("key=do_work msg=%s" % e)
+                _log.exception("key=s3_uploader msg=%s" % e)
             self.dataQ.task_done()
 
 ###########################################
