@@ -12,6 +12,8 @@ Api Request Types
 - Neon, Brightcove, youtube
 
 #TODO Connection pooling of redis connection https://github.com/leporo/tornado-redis/blob/master/demos/connection_pool/app.py
+
+#TODO(sunil): Fix your docstrings so that they actually are doc strings (ie. below the function definition)
 '''
 import os.path
 import sys
@@ -35,7 +37,6 @@ from api import brightcove_api
 import api.youtube_api
 from PIL import Image
 from StringIO import StringIO
-import dbsettings
 import threading
 
 from utils.options import define, options
@@ -51,9 +52,8 @@ define("dbPort",default=6379,type=int,help="redis port")
 class DBConnection(object):
     '''Connection to the database.'''
 
-    #TODO(sunil): make these calls able to do callbacks properly
-
-    __singleton_lock = threading.Lock() #TODO: Lock for each instance
+    #TODO: Lock for each instance, currently locks for any instance creation
+    __singleton_lock = threading.Lock() 
     _singleton_instance = {} 
 
     def __init__(self,*args,**kwargs):
@@ -69,7 +69,7 @@ class DBConnection(object):
         port = options.dbPort 
         
         if cname:
-            if cname in ["AbstractPlatform","BrightcovePlatform","YoutubePlatform","NeonUserAccount"]:
+            if cname in ["AbstractPlatform","BrightcovePlatform","YoutubePlatform","NeonUserAccount","NeonApiRequest"]:
                 host = options.accountDB 
                 port = options.dbPort 
             elif cname == "VideoMetadata":
@@ -87,6 +87,13 @@ class DBConnection(object):
         else:
             keys = self.blocking_conn.keys(key_prefix)
             return keys
+
+    def clear_db(self):
+        '''Erases all the keys in the database.
+
+        This should really only be used in test scenarios.
+        '''
+        self.blocking_conn.flushdb()
 
     #@classmethod
     #def instance(cls,otype=None):
@@ -141,13 +148,26 @@ class DBConnectionCheck(threading.Thread):
                 for key,value in DBConnection._singleton_instance.iteritems():
                     DBConnection.update_instance(key)
                     value.blocking_conn.get("dummy")
-                time.sleep(self.interval)
             except Exception,e:
                 _log.exception("key=DBConnection msg=%s"%e)
+            
+            time.sleep(self.interval)
 
 #start watchdog thread for the DB connection
 t = DBConnectionCheck()
 t.start()
+
+def _erase_all_data():
+    '''Erases all the data from the redis databases.
+
+    This should only be used for testing purposes.
+    '''
+    _log.warn('Erasing all the data. I hope this is a test.')
+    AbstractPlatform._erase_all_data()
+    ThumbnailMetaData._erase_all_data()
+    ThumbnailURLMapper._erase_all_data()
+    ThumbnailIDMapper._erase_all_data()
+    VideoMetadata._erase_all_data()
 
 '''
 Static class for REDIS configuration
@@ -175,12 +195,14 @@ class RedisClient(object):
     '''
     @staticmethod
     def get_client(host=None,port=None):
-        if host is None and port is None:
-            return RedisClient.client, RedisClient.blocking_client
-        else:
-            RedisClient.c = redis.Client(host,port)
-            RedisClient.bc = blockingRedis.StrictRedis(host,port,socket_timeout=10)
-            return RedisClient.c,RedisClient.bc 
+        if host is None:
+            host = RedisClient.host 
+        if port is None:
+            port = RedisClient.port
+        
+        RedisClient.c = redis.Client(host,port)
+        RedisClient.bc = blockingRedis.StrictRedis(host,port,socket_timeout=10)
+        return RedisClient.c,RedisClient.bc 
 
 ''' Format request key (with job_id) to find NeonApiRequest Object'''
 def generate_request_key(api_key,job_id):
@@ -379,6 +401,13 @@ class NeonUserAccount(object):
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__)
     
+    def save(self,callback=None):
+        db_connection=DBConnection(self)
+        if callback:
+            db_connection.conn.set(self.key,self.to_json(),callback)
+        else:
+            return db_connection.blocking_conn.set(self.key,self.to_json())
+    
     '''
     Save Neon User account and corresponding integration
     '''
@@ -420,9 +449,8 @@ class NeonUserAccount(object):
 
 class AbstractPlatform(object):
     def __init__(self, abtest=False):
-        # TODO(sunil): Should this be an internal or external video id?!?
         self.neon_api_key = ''
-        self.videos = {} # External video id => Job ID
+        self.videos = {} # External video id (Original Platform VID) => Job ID
         self.abtest = abtest # Boolean on wether AB tests can run
         self.integration_id = None # Unique platform ID to 
     
@@ -430,15 +458,39 @@ class AbstractPlatform(object):
         return self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
     
     def to_json(self):
-        #TODO : don't save all the class specific params ( keyname,callback,ttl )
-        return json.dumps(self, default=lambda o: o.__dict__) #don't save keyname
+        return json.dumps(self, default=lambda o: o.__dict__) 
 
-    # TODO(Sunil): Implement this function. Maybe returns a generator?
-    @staticmethod
-    def get_all_instances(callback=None):
-        '''Returns a list of all the platform instances.'''
-        raise NotImplementedError()
+    def get_ovp(self):
+        raise NotImplementedError
 
+    @classmethod
+    def get_all_instances(cls,callback=None):
+        '''Returns a list of all the platform instances from the db.'''
+        instances = []
+        instances.extend(NeonPlatform.get_all_instances())
+        instances.extend(BrightcovePlatform.get_all_instances())
+        return instances
+
+    @classmethod
+    def get_all_platform_data(cls):
+        db_connection=DBConnection(cls)
+        accounts = db_connection.blocking_conn.keys(cls.__name__.lower() + "*")
+        platform_data = []
+        for accnt in accounts:
+            api_key = accnt.split('_')[-2]
+            i_id = accnt.split('_')[-1]
+            jdata = db_connection.blocking_conn.get(accnt) 
+            if jdata:
+                platform_data.append(jdata)
+            else:
+                _log.debug("key=get_all_platform data msg=no data for acc %s i_id %s" %(api_key,i_id))
+        
+        return platform_data
+
+    @classmethod
+    def _erase_all_data(cls):
+        db_connection=DBConnection(cls)
+        db_connection.clear_db()
 
 class NeonPlatform(AbstractPlatform):
     '''
@@ -463,6 +515,9 @@ class NeonPlatform(AbstractPlatform):
         else:
             value = self.to_json()
             return db_connection.blocking_conn.set(self.key,value)
+
+    def get_ovp(self):
+        return "neon"
     
     @classmethod
     def get_account(cls,api_key,callback=None):
@@ -484,6 +539,9 @@ class NeonPlatform(AbstractPlatform):
 
     @staticmethod
     def create(json_data):
+        if not json_data:
+            return None
+
         data_dict = json.loads(json_data)
         obj = NeonPlatform("dummy")
 
@@ -492,6 +550,16 @@ class NeonPlatform(AbstractPlatform):
             obj.__dict__[key] = data_dict[key]
         
         return obj
+
+    @classmethod
+    def get_all_instances(cls,callback=None):
+        platforms = NeonPlatform.get_all_platform_data()
+        instances = [] 
+        for pdata in platforms:
+            platform = NeonPlatform.create(pdata)
+            instances.append(platform)
+
+        return instances
 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
@@ -525,21 +593,6 @@ class BrightcovePlatform(AbstractPlatform):
         if len(self.videos) > 0:
             return self.videos.keys()
     
-    def get_thumbnails(self,video_id,callback=None):
-        def wrap_callback(res):
-            if res:
-                callback(nar.thumbnails)
-            else:
-                callback(None)
-
-        job_id = self.videos[video_id]
-        if callback:
-            NeonApiRequest.get_request(self.neon_api_key,job_id,wrap_callback)
-        else:
-            nar = NeonApiRequest.get_request(api_key,job_id)
-            if nar:
-                return nar.thumbnails
-
     def get(self,callback=None):
         db_connection=DBConnection(self)
         if callback:
@@ -558,8 +611,9 @@ class BrightcovePlatform(AbstractPlatform):
     ''' method to keep video metadata and thumbnail data consistent '''
     @tornado.gen.engine
     def update_thumbnail(self,platform_vid,new_tid,nosave=False,callback=None):
-        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
-                self.read_token,self.write_token,self.auto_update)
+        bc = api.brightcove_api.BrightcoveApi(
+            self.neon_api_key, self.publisher_id,
+            self.read_token, self.write_token, self.auto_update)
         
         #Get video metadata
         i_vid = InternalVideoID.generate(self.neon_api_key,platform_vid)
@@ -572,7 +626,7 @@ class BrightcovePlatform(AbstractPlatform):
         tids = vmdata.thumbnail_ids
         
         #Get all thumbnails
-        thumb_mappings = yield tornado.gen.Task(ThumbnailIDMapper.get_ids,tids)
+        thumb_mappings = yield tornado.gen.Task(ThumbnailIDMapper.get_thumb_mappings,tids)
         t_url = None
         
         for thumb_mapping in thumb_mappings:
@@ -584,7 +638,10 @@ class BrightcovePlatform(AbstractPlatform):
             callback(None)
             return
 
-        tref,sref = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,platform_vid,t_url,new_tid)
+        tref,sref = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,
+                                           platform_vid,
+                                           t_url,
+                                           new_tid)
         if not sref:
             _log.error("key=update_thumbnail msg=brightcove error update video still for video %s %s" %(i_vid,new_tid))
 
@@ -594,9 +651,11 @@ class BrightcovePlatform(AbstractPlatform):
 
         if tref:
             #Get previous thumbnail and new thumb
-            modified_thumbs = ThumbnailIDMapper.enable_thumbnail(thumb_mappings,new_tid)
+            modified_thumbs = ThumbnailIDMapper.enable_thumbnail(
+                thumb_mappings, new_tid)
             if modified_thumbs:
-                res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,modified_thumbs)  
+                res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
+                                             modified_thumbs)  
                 if res:
                     callback(True)
                 else:
@@ -605,19 +664,19 @@ class BrightcovePlatform(AbstractPlatform):
             else:
                 callback(False)
         else:
-            _log.debug("key=update_thumbnail msg=update result thumb ref %s still ref %s for video %" %(tref,sref,i_vid))
+            _log.debug("key=update_thumbnail msg=update result thumb ref %s still ref %s for video %s" %(tref,sref,i_vid))
             _log.error("key=update_thumbnail msg=failed to enable thumb %s for %s" %(new_tid,i_vid))
             callback(False)
 
     ''' 
     Create neon job for particular video
     '''
-    def create_job(self,vid,callback):
+    def create_job(self, vid, callback):
         def created_job(result):
             if not result.error:
                 try:
                     job_id = tornado.escape.json_decode(result.body)["job_id"]
-                    self.add_video(vid,job_id)
+                    self.add_video(vid, job_id)
                     self.save(callback)
                 except Exception,e:
                     #_log.exception("key=create_job msg=" + e.message) 
@@ -625,34 +684,42 @@ class BrightcovePlatform(AbstractPlatform):
             else:
                 callback(False)
 
-        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
-                self.read_token,self.write_token,self.auto_update)
-        bc.create_video_request(vid,bc.integration_id,created_job)
+        bc = api.brightcove_api.BrightcoveApi(
+            self.neon_api_key, self.publisher_id, self.read_token,
+            self.write_token, self.auto_update)
+        bc.create_video_request(vid, bc.integration_id, created_job)
 
     '''
     Use this only after you retreive the object from DB
     '''
     def check_feed_and_create_api_requests(self):
-        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
-                self.read_token,self.write_token,self.auto_update,self.last_process_date)
+        bc = api.brightcove_api.BrightcoveApi(
+            self.neon_api_key, self.publisher_id,
+            self.read_token, self.write_token, self.auto_update,
+            self.last_process_date)
         bc.create_neon_api_requests(self.integration_id)    
 
     '''
     Temp method to support backward compatibility
     '''
     def check_feed_and_create_request_by_tag(self):
-        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
-                self.read_token,self.write_token,self.auto_update,self.last_process_date)
+        bc = api.brightcove_api.BrightcoveApi(
+            self.neon_api_key, self.publisher_id, self.read_token,
+            self.write_token, self.auto_update, self.last_process_date)
         bc.create_brightcove_request_by_tag(self.integration_id)
+        
 
-
-    '''
-    Check if the current thumbnail for the given video on brightcove
-    has been recorded in Neon DB
-    '''
     def check_current_thumbnail_in_db(self,video_id,callback=None):
-        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
-                self.read_token,self.write_token,self.auto_update,self.last_process_date)
+        '''
+        Check if the current thumbnail for the given video on brightcove
+        has been recorded in Neon DB. Returns True if it has
+        '''
+        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,
+                                              self.publisher_id,
+                                              self.read_token,
+                                              self.write_token,
+                                              self.auto_update,
+                                              self.last_process_date)
         if callback:
             bc.async_check_thumbnail(video_id,callback)
         else:
@@ -664,15 +731,22 @@ class BrightcovePlatform(AbstractPlatform):
         @return: Callback returns job id, along with brightcove vid metadata
     '''
     def verify_token_and_create_requests_for_video(self,n,callback=None):
-        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
-                self.read_token,self.write_token,False,self.last_process_date)
+        bc = api.brightcove_api.BrightcoveApi(
+            self.neon_api_key, self.publisher_id, self.read_token,
+            self.write_token, False, self.last_process_date)
         if callback:
-            bc.async_verify_token_and_create_requests(self.integration_id,n,callback)
+            bc.async_verify_token_and_create_requests(self.integration_id,
+                                                      n,
+                                                      callback)
         else:
-            return bc.verify_token_and_create_requests(n)
+            return bc.verify_token_and_create_requests(self.integration_id,
+                                                       n)
 
     @staticmethod
     def create(json_data):
+        if not json_data:
+            return None
+
         params = json.loads(json_data)
         a_id = params['account_id']
         i_id = params['integration_id'] 
@@ -709,11 +783,20 @@ class BrightcovePlatform(AbstractPlatform):
         req = tornado.httpclient.HTTPRequest(url = url, method = "GET", request_timeout = 60.0, connect_timeout = 10.0)
         http_client.fetch(req,callback)
 
+    @classmethod
+    def get_all_instances(cls,callback=None):
+        platforms = BrightcovePlatform.get_all_platform_data()
+        instances = [] 
+        for pdata in platforms:
+            platform = BrightcovePlatform.create(pdata)
+            if platform:
+                instances.append(platform)
+        return instances
 
-class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
+
+class YoutubePlatform(AbstractPlatform):
     def __init__(self, a_id, i_id, access_token=None, refresh_token=None,
                  expires=None, auto_update=False, abtest=False):
-        super(BrightcovePlatform,self).__init__()
         AbstractPlatform.__init__(self)
         
         self.key = self.__class__.__name__.lower()  + '_' + NeonApiKey.generate(a_id ) + '_' + i_id
@@ -799,21 +882,6 @@ class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
             # Not yet supported
             callback(None)
 
-    def get_thumbnails(self,video_id,callback=None):
-        def wrap_callback(res):
-            if res:
-                callback(nar.thumbnails)
-            else:
-                callback(None)
-
-        job_id = self.videos[video_id]
-        if callback:
-            NeonApiRequest.get_request(self.neon_api_key,job_id,wrap_callback)
-        else:
-            nar = NeonApiRequest.get_request(api_key,job_id)
-            if nar:
-                return nar.thumbnails
-    
     '''
     Update thumbnail for the given video
     '''
@@ -840,9 +908,9 @@ class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
         db_connection = DBConnection(cls)
         key = "YoutubePlatform".lower() + '_' + api_key + '_' + i_id
         if callback:
-            YoutubePlatform.conn.get(key,callback) 
+            db_connection.conn.get(key,callback) 
         else:
-            return YoutubePlatform.blocking_conn.get(key)
+            return db_connection.blocking_conn.get(key)
     
     @staticmethod
     def create(json_data):
@@ -855,6 +923,17 @@ class YoutubePlatform(AbstractRedisUserBlob,AbstractPlatform):
             yt.__dict__[key] = params[key]
 
         return yt
+    
+    @classmethod
+    def get_all_instances(cls,callback=None):
+        platforms = YoutubePlatform.get_all_platform_data()
+        instances = [] 
+        for pdata in platforms:
+            platform = YoutubePlatform.create(pdata)
+            instances.append(platform)
+
+        return instances
+
 
 
 #######################
@@ -882,9 +961,8 @@ class NeonApiRequest(object):
     Getting request blobs :
     use static get method to get a json based response NeonApiRequest.get_request()
     '''
-    host,port = dbsettings.DBConfig.videoDB 
-    conn,blocking_conn = RedisClient.get_client(host,port)
 
+    conn,blocking_conn = RedisClient.get_client()
     def __init__(self,job_id,api_key,vid,title,url,request_type,http_callback):
         self.key = generate_request_key(api_key,job_id) 
         self.job_id = job_id
@@ -940,16 +1018,18 @@ class NeonApiRequest(object):
         self.api_param  = param
 
     def save(self,callback=None):
+        db_connection=DBConnection(self)
         value = self.to_json()
         if self.key is None:
             raise Exception("key not set")
         if callback:
-            NeonApiRequest.conn.set(self.key,value,callback)
+            db_connection.conn.set(self.key,value,callback)
         else:
-            return NeonApiRequest.blocking_conn.set(self.key,value)
+            return db_connection.blocking_conn.set(self.key,value)
 
-    @staticmethod
-    def get(api_key,job_id,callback=None):
+    @classmethod
+    def get(cls,api_key,job_id,callback=None):
+        db_connection=DBConnection(cls)
         def package(result):
             if result:
                 nar = NeonApiRequest.create(result)
@@ -959,21 +1039,24 @@ class NeonApiRequest(object):
 
         key = generate_request_key(api_key,job_id)
         if callback:
-            NeonApiRequest.conn.get(key,callback)
+            db_connection.conn.get(key,callback)
         else:
-            result = NeonApiRequest.blocking_conn.get(key)
-            return NeonApiRequest.create(result)
+            result = db_connection.blocking_conn.get(key)
+            if result:
+                return NeonApiRequest.create(result)
 
-    @staticmethod
-    def get_request(api_key,job_id,callback=None):
+    @classmethod
+    def get_request(cls,api_key,job_id,callback=None):
+        db_connection=DBConnection(cls)
         key = generate_request_key(api_key,job_id)
         if callback:
-            NeonApiRequest.conn.get(key,callback)
+            db_connection.conn.get(key,callback)
         else:
-            return NeonApiRequest.blocking_conn.get(key)
+            return db_connection.blocking_conn.get(key)
 
-    @staticmethod
-    def get_requests(keys,callback=None):
+    @classmethod
+    def get_requests(cls,keys,callback=None):
+        db_connection=DBConnection(cls)
         def create(jdata):
             if not jdata:
                 return 
@@ -989,18 +1072,19 @@ class NeonApiRequest(object):
             callback(response)
 
         if callback:
-            NeonApiRequest.conn.mget(keys,get_results)
+            db_connection.conn.mget(keys,get_results)
         else:
-            results = NeonApiRequest.blocking_conn.mget(keys)
+            results = db_connection.blocking_conn.mget(keys)
             response = [create(result) for result in results]
             return response 
 
     @staticmethod
-    def multiget(keys,callback=None):
+    def multiget(cls,keys,callback=None):
+        db_connection=DBConnection(cls)
         if callback:
-            NeonApiRequest.conn.mget(keys,callback)
+            db_connection.conn.mget(keys,callback)
         else:
-            return NeonApiRequest.blocking_conn.mget(keys)
+            return db_connection.blocking_conn.mget(keys)
 
     @staticmethod
     def create(json_data):
@@ -1076,19 +1160,41 @@ class ThumbnailMetaData(object):
     def to_dict(self):
         return self.__dict__
 
+    @staticmethod
+    def create(params_dict):
+        obj = ThumbnailMetaData(0,0,0,0,0,0,0,0)
+        for key in params_dict:
+            obj.__dict__[key] = params_dict[key]
+        return obj 
+    
+    @classmethod
+    def _erase_all_data(cls):
+        db_connection=DBConnection(cls)
+        db_connection.clear_db()
+
 class ThumbnailID(AbstractHashGenerator):
     '''
     Static class to generate thumbnail id
 
     input: String or Image stream. 
 
-    Thumbnail ID is the MD5 hash of image data
+    Thumbnail ID is: <internal_video_id>_<md5 MD5 hash of image data>
+    '''
+
+    @staticmethod
+    def generate(input, internal_video_id):
+        return '%s_%s' % (internal_video_id, ThumbnailMD5.generate(input))
+
+class ThumbnailMD5(AbstractHashGenerator):
+    '''Static class to generate the thumbnail md5.
+
+    input: String or Image stream.
     '''
     salt = 'Thumbn@il'
     
     @staticmethod
     def generate_from_string(input):
-        input = ThumbnailID.salt + str(input)
+        input = ThumbnailMD5.salt + str(input)
         return AbstractHashGenerator._api_hash_function(input)
 
     @staticmethod
@@ -1096,17 +1202,17 @@ class ThumbnailID(AbstractHashGenerator):
         filestream = StringIO()
         imstream.save(filestream,'jpeg')
         filestream.seek(0)
-        return ThumbnailID.generate_from_string(filestream.buf)
+        return ThumbnailMD5.generate_from_string(filestream.buf)
 
     @staticmethod
-    def generate(input):
+    def generate(input,):
         if isinstance(input,basestring):
-            return ThumbnailID.generate_from_string(input)
+            return ThumbnailMD5.generate_from_string(input)
         else:
-            return ThumbnailID.generate_from_image(input)
+            return ThumbnailMD5.generate_from_image(input)
 
 
-class ThumbnailURLMapper(AbstractRedisUserBlob):
+class ThumbnailURLMapper(object):
     '''
     Schema to map thumbnail url to thumbnail ID. 
 
@@ -1116,57 +1222,68 @@ class ThumbnailURLMapper(AbstractRedisUserBlob):
     THUMBNAIL_URL => (tid)
     '''
     
-    host,port = dbsettings.DBConfig.urlMapperDB
-    conn,blocking_conn = RedisClient.get_client(host,port)
-   
     def __init__(self,thumbnail_url,tid,imdata=None):
         self.key = thumbnail_url
         if not imdata:
             self.value = tid
         else:
-            self.value = ThumbnailID.generate(imdata) 
+            #TODO: Is this imdata really needed ? 
+            raise #self.value = ThumbnailID.generate(imdata) 
 
     def save(self,callback=None):
+        db_connection = DBConnection(self)
         if self.key is None:
             raise Exception("key not set")
         if callback:
-            ThumbnailURLMapper.conn.set(self.key,self.value,callback)
+            db_connection.conn.set(self.key,self.value,callback)
         else:
-            return ThumbnailURLMapper.blocking_conn.set(self.key,value)
+            return db_connection.blocking_conn.set(self.key,value)
 
-    @staticmethod
-    def save_all(thumbnailMapperList,callback=None):
+    @classmethod
+    def save_all(cls,thumbnailMapperList,callback=None):
+        db_connection = DBConnection(cls)
         data = {}
         for t in thumbnailMapperList:
             data[t.key] = t.value 
 
         if callback:
-            ThumbnailURLMapper.conn.mset(data,callback)
+            db_connection.conn.mset(data,callback)
         else:
-            return ThumbnailURLMapper.blocking_conn.mset(data)
+            return db_connection.blocking_conn.mset(data)
 
-    @staticmethod
-    def get_id(key,callback):
+    @classmethod
+    def get_id(cls,key,callback=None):
+        db_connection = DBConnection(cls)
         if callback:
-            ThumbnailURLMapper.conn.get(key,callback)
+            db_connection.conn.get(key,callback)
         else:
-            return ThumbnailURLMapper.blocking_conn.get(key)
+            return db_connection.blocking_conn.get(key)
+
+    @classmethod
+    def _erase_all_data(cls):
+        db_connection=DBConnection(cls)
+        db_connection.clear_db()
 
 class ImageMD5Mapper(object):
     '''
     Maps a given Image MD5 to Thumbnail ID
+
+    This is needed to keep the mapping of individual image md5's to tid
+    A single image can exist is different sizes, for example brightcove has 
+    videostills and thumbnails for any given video
+
     '''
-    def __init__(self,imgdata,tid):
-        self.key = self.format_key(imgdata)
+    def __init__(self,ext_video_id,imgdata,tid):
+        self.key = self.format_key(ext_video_id,imgdata)
         self.value = tid
 
     def get_md5(self):
         return self.key.split('_')[-1]
 
-    def format_key(self,imdata):
+    def format_key(self,video_id,imdata):
         if imdata:
-            md5 = ThumbnailID.generate(imdata)
-            return self.__class__.__name__.lower()  + '_' + md5
+            md5 = ThumbnailID.generate(imdata,video_id)
+            return self.__class__.__name__.lower() + '_' + md5
         else:
             raise
 
@@ -1179,10 +1296,10 @@ class ImageMD5Mapper(object):
             db_connection.blocking_conn.set(self.key,self.value)
 
     @classmethod   
-    def get_tid(cls,image_md5,callback=None):
+    def get_tid(cls,ext_video_id,image_md5,callback=None):
         db_connection = DBConnection(cls)
         
-        key = "ImageMD5Mapper".lower() + '_' + image_md5
+        key = "ImageMD5Mapper".lower() + '_' + ext_video_id + '_' + image_md5
         if callback:
             db_connection.conn.get(key,callback)
         else:
@@ -1201,7 +1318,7 @@ class ImageMD5Mapper(object):
             return db_connection.blocking_conn.mset(data)
 
 
-class ThumbnailIDMapper(AbstractRedisUserBlob):
+class ThumbnailIDMapper(object):
     '''
     Class schema for Thumbnail URL to thumbnail metadata map
     Thumbnail ID  => (Internal Video ID, ThumbnailMetadata) 
@@ -1211,9 +1328,13 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
     '''
     def __init__(self, tid, internal_vid, thumbnail_metadata):
         super(ThumbnailIDMapper,self).__init__()
-        self.key = tid 
+        self.key = tid
         self.video_id = internal_vid #api_key + platform video id
         self.thumbnail_metadata = thumbnail_metadata #dict of ThumbnailMetadata object
+
+    @classmethod
+    def generate_key(cls,video_id,tid):
+        return video_id + '_' + tid 
 
     def get_account_id(self):
         return self.video_id.split('_')[0]
@@ -1227,6 +1348,9 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
 
     def to_dict(self):
         return self.__dict__
+    
+    def to_json(self):
+        return json.dumps(self, default=lambda o: o.__dict__) 
 
     @staticmethod
     def create(json_data):
@@ -1240,17 +1364,58 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
         
         return obj
 
-    # TODO(sunil): Decide whether these functions 
     @classmethod
-    def get_id(cls,key,callback=None):
+    def get_video_id(cls, tid, callback=None):
+        '''Given a thumbnail id, retrieves the video id 
+            asscociated with tid'''
+
+        def get_metadata(result):
+            vid = None
+            if result:
+                obj = ThumbnailIDMapper.create(result)
+                callback(obj.video_id)
+            callback(vid)
+
         db_connection = DBConnection(cls)
         if callback:
-            ThumbnailIDMapper.get(key, callback, db_connection)
+            db_connection.conn.get(tid, get_metadata)
         else:
-            return db_connection.blocking_conn.get(key)
+            result = db_connection.blocking_conn.get(tid)
+            if result:
+                obj = ThumbnailIDMapper.create(result)
+                return obj.video_id
 
     @classmethod
-    def get_ids(cls,keys,callback=None):
+    def get_thumb_metadata(cls, id, callback=None):
+        '''Given a thumbnail id, retrieves the thumbnail metadata.
+
+        Inputs:
+        id - The thumbnail id 
+
+        Returns:
+        ThumbnailMetadata object.
+        '''
+        def get_metadata(result):
+            tmdata = None
+            if result:
+                obj = ThumbnailIDMapper.create(result)
+                tmdata = ThumbnailMetaData.create(obj.thumbnail_metadata)
+            callback(tmdata)
+
+        db_connection = DBConnection(cls)
+        if callback:
+            db_connection.conn.get(id, get_metadata)
+        else:
+            result = db_connection.blocking_conn.get(id)
+            if result:
+                obj = ThumbnailIDMapper.create(result)
+                return ThumbnailMetaData.create(obj.thumbnail_metadata)
+
+
+    @classmethod
+    def get_thumb_mappings(cls,keys,callback=None):
+        ''' Returns list of thumbnail mappings for give thumb ids(keys)
+        '''
         db_connection = DBConnection(cls)
 
         def process(results):
@@ -1316,6 +1481,11 @@ class ThumbnailIDMapper(AbstractRedisUserBlob):
         else:
             return pipe.execute()
 
+    @classmethod
+    def _erase_all_data(cls):
+        db_connection=DBConnection(cls)
+        db_connection.clear_db()
+
 class VideoMetadata(object):
     '''
     Schema for metadata associated with video which gets stored
@@ -1378,7 +1548,7 @@ class VideoMetadata(object):
             return create(jdata)
 
     @classmethod
-    def multi_get(cls,internal_video_ids,callback):
+    def multi_get(cls,internal_video_ids,callback=None):
         db_connection=DBConnection(cls) 
         def create(jdata):
             data_dict = json.loads(jdata)
@@ -1409,4 +1579,10 @@ class VideoMetadata(object):
     def get_video_metadata(internal_accnt_id,internal_video_id):
         jdata = NeonApiRequest.get_request(internal_accnt_id,internal_video_id)
         nreq = NeonApiRequest.create(jdata)
+        return nreq
+
+    @classmethod
+    def _erase_all_data(cls):
+        db_connection=DBConnection(cls)
+        db_connection.clear_db()
 

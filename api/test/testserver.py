@@ -140,6 +140,11 @@ class DemoHandler(tornado.web.RequestHandler):
         job_id = data['job_id']
         
         def job_finish_callback(resp):
+            if resp.error:
+                self.set_status(500)
+                self.finish()
+                return
+
             jresponse = tornado.escape.json_decode(resp.body)
             result = jresponse['response']
             print result, len(result)
@@ -216,7 +221,7 @@ class IntegrationTestHandler(tornado.web.RequestHandler):
     def create_neon_requests(self):
         vid = shortuuid.uuid()  
         request_body = {}
-        request_body["api_key"] = 'a63728c09cda459c3caaa158f4adff49' #neon user key 
+        request_body["api_key"] = API_KEY 
         request_body["video_title"] = 'test-' + vid 
         request_body["video_id"] =  vid
         request_body["video_url"] = random.choice(self.test_videos)  

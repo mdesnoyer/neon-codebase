@@ -22,6 +22,7 @@ import hashlib
 import re
 import properties
 import os
+import utils.ps
 
 from boto.s3.connection import S3Connection
 from boto.exception import S3ResponseError
@@ -45,28 +46,6 @@ _log = logging.getLogger(__name__)
 dir = os.path.dirname(__file__)
 
 #=============== Global Handlers ======================================#
-
-def sig_handler(sig, frame):
-    _log.debug('Caught signal: ' + str(sig) )
-    tornado.ioloop.IOLoop.instance().add_callback(shutdown)
-
-def shutdown():
-    server.stop()
-
-    #logging.info('Will shutdown in %s seconds ...', MAX_WAIT_SECONDS_BEFORE_SHUTDOWN)
-    io_loop = tornado.ioloop.IOLoop.instance()
-
-    deadline = time.time() + MAX_WAIT_SECONDS_BEFORE_SHUTDOWN
-
-    def stop_loop():
-        now = time.time()
-        if now < deadline and (io_loop._callbacks or io_loop._timeouts):
-            io_loop.add_timeout(now + 1, stop_loop)
-        else:
-            io_loop.stop()
-            _log.info('Shutdown')
-    stop_loop()
-
 
 def format_status_json(state,timestamp,data=None):
 
@@ -245,7 +224,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous
     @tornado.gen.engine
     def post(self, *args, **kwargs):
-
         #insert job in to user account
         def update_account(result):
             if not result:
@@ -267,16 +245,21 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     yt.add_video(vid,job_id)
                     yt.save(update_account)
             else:
-                _log.error("key=thumbnail_handler update account  msg=account not found or api key error")
+                _log.error("key=thumbnail_handler update yt account  msg=account not found or api key error")
                 self.set_status(502)
                 self.finish()
+                return
                
         def get_platform(nplatform):
             if nplatform:
                 nplatform.add_video(vid,job_id)
                 nplatform.save(update_account)
             else:
-                _log.error("key=thumbnail_handler update account  msg=account not found or api key error")
+                _log.error("key=thumbnail_handler update platform account  msg=account not found or api key error")
+                self.write("ccount not found or api key error")
+                self.set_status(502)
+                self.finish()
+                return
 
         #DB Callback
         def saved_request(result):
@@ -330,7 +313,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             #Use Params that can change to generate UUID, support same video to be processed with diff params
             intermediate = api_key + str(vid) + api_method + str(api_param) 
             job_id = hashlib.md5(intermediate).hexdigest()
-           
+          
+            #import pdb;pdb.set_trace()
             #Identify Request Type
             if "brightcove" in self.request.uri:
                 pub_id  = params[properties.PUBLISHER_ID] #publisher id
@@ -366,8 +350,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             api_request.state = RequestState.SUBMIT
 
             #Validate Request & Insert in to Queue (serialized/json)
-            job_result = yield tornado.gen.Task(NeonApiRequest.conn.get, api_request.key)
-            if False and job_result is not None:
+            #job_result = None #NeonApiRequest.blocking_conn.get(api_request.key)
+            job_result = yield tornado.gen.Task(BrightcoveApiRequest.get,api_request.api_key,api_request.job_id)
+            if job_result is not None:
                 response_data = '{"error":"duplicate job"}' 
                 self.write(response_data)
                 self.finish()
@@ -382,7 +367,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             response_data = "{\"job_id\":\"" + job_id + "\"}"
             
             result = yield tornado.gen.Task(api_request.save)
-            result = api_request.save()
+            #api_request.save(saved_request)
+
             if not result:
                 _log.error("key=thumbnail_handler  msg=request save failed: ")
                 self.set_status(502)
@@ -397,7 +383,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     self.finish()
 
         except Exception,e:
-            _log.error("key=thumbnail_handler msg=" + e.__str__());
+            _log.exception("key=thumbnail_handler msg= %s"%e)
             self.set_status(400)
             self.finish("<html><body>Bad Request " + e.__str__() + " </body></html>")
             return
@@ -449,9 +435,8 @@ application = tornado.web.Application([
 def main():
     utils.neon.InitNeon()
     global server
-    signal.signal(signal.SIGTERM, sig_handler)
-    signal.signal(signal.SIGINT, sig_handler)
     server = tornado.httpserver.HTTPServer(application)
+    utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)
     tornado.ioloop.IOLoop.instance().start()
 

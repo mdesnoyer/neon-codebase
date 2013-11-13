@@ -40,6 +40,18 @@ class TestCommandLineParsing(unittest.TestCase):
 
     def tearDown(self):
         sys.modules['__builtin__'].open = self.open_func
+
+    def test_define_twice(self):
+        self.parser.define('an_int', default=6, type=int,
+                           help='help me')
+
+        # Repeating the identical definition again is ok
+        self.parser.define('an_int', default=6, type=int,
+                           help='help me')
+
+        with self.assertRaises(utils.options.Error):
+            self.parser.define('an_int', default=3, type=int,
+                               help='help me')
         
     def test_module_namespace_hiding(self):
         test_mod.define(self.parser, 'an_int', default=6, type=int)

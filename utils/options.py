@@ -122,7 +122,14 @@ class OptionParser(object):
         global_name = self._local2global(name, stack_depth=stack_depth)
 
         if global_name in self._options:
-            raise Error("Option %s already defined." % global_name)
+            known_option = self._options[global_name]
+            if (known_option.default == default and 
+                known_option.type == type and
+                known_option.help == help):
+                # It's redefined exactly the same. Ignore silently.
+                return
+            else:
+                raise Error("Option %s already defined." % global_name)
 
         if type == bool:
             raise TypeError('Boolean variables are not supported. Variable: %s'
@@ -174,6 +181,10 @@ class OptionParser(object):
          ''' 
         with self.__dict__['lock']:
             return self._options[global_name].value()
+
+    def get_config_file(self):
+        '''Returns the config file name that is used by this parser.'''
+        return self.cmd_options.config
 
     @contextlib.contextmanager
     def _set_bounded(self, global_name, value):

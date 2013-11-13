@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 '''
 Sample test script to create account, test brightcove and youtube integrations
 '''
@@ -261,5 +262,6 @@ def youtube_test():
 #############  TEST #############
 
 
+#test_signup_flow('neontest')
 test_signup_flow('test_new_account' +str(time.time()))
 

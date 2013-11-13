@@ -164,7 +164,7 @@ class ProcessVideo(object):
         self.abtest_thumbnails= {}
 
         #thumbnail list of maps
-        self.thumbnails = [] # thumbnail_id, url, created, enabled, width, height, type 
+        self.thumbnails = [] # ThumbnailMetaData
         
         self.debug = debug
         self.pid   = cur_pid
@@ -498,13 +498,17 @@ class ProcessVideo(object):
             s3_urls.append(s3fname)
             
             urls = []
-            tid = ThumbnailID.generate(imgdata)
+            api_key = self.request_map[properties.API_KEY] 
+            video_id = self.request_map[properties.VIDEO_ID]
+            tid = ThumbnailID.generate(imgdata,
+                                       InternalVideoID.generate(api_key,
+                                                                video_id))
             urls.append(s3fname)
             created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             enabled = None 
             width   = image.size[0]
             height  = image.size[1] 
-            ttype   = "neon" + str(i)
+            ttype   = "neon" 
             rank    = i +1 
 
             #populate thumbnails
@@ -616,6 +620,7 @@ class ProcessVideo(object):
        
         api_key = self.request_map[properties.API_KEY]  
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
+        video_id = self.request_map[properties.VIDEO_ID]
         bc_request = BrightcoveApiRequest.get(api_key,job_id)
         bc_request.response = tornado.escape.json_decode(result)
         
@@ -628,7 +633,10 @@ class ProcessVideo(object):
             bc_request.save()
 
         #Save previous thumbnail to s3
+        if not bc_request.previous_thumbnail:
+            _log.debug("key=finalize_brightcove_request msg=no thumbnail for %s %s" %(api_key,video_id))
         p_url = bc_request.previous_thumbnail.split('?')[0]
+
         http_client = tornado.httpclient.HTTPClient()
         req = tornado.httpclient.HTTPRequest(url = p_url,
                                                 method = "GET",
@@ -651,7 +659,8 @@ class ProcessVideo(object):
         
         #populate default brightcove thumbnail
         urls = []
-        tid = ThumbnailID.generate(imgdata)
+        tid = ThumbnailID.generate(imgdata,
+                                   InternalVideoID.generate(api_key, video_id))
         urls.append(p_url)
         urls.append(s3fname)
         created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -669,14 +678,17 @@ class ProcessVideo(object):
         if bc_request.autosync:
             rtoken  = self.request_map[properties.BCOVE_READ_TOKEN]
             wtoken  = self.request_map[properties.BCOVE_WRITE_TOKEN]
-            video_id = self.request_map[properties.VIDEO_ID]
             pid = self.request_map[properties.PUBLISHER_ID]
             fno = bc_request.response["data"][0]
             img = Image.fromarray(self.data_map[fno][1])
             #img_url = self.thumbnails[0]["urls"][0]
             tid = self.thumbnails[0]["thumbnail_id"] 
-            bcove   = brightcove_api.BrightcoveApi(neon_api_key=api_key,publisher_id=pid,read_token=rtoken,write_token=wtoken)
-            ret = bcove.update_thumbnail_and_videostill(video_id,img,tid)
+            bcove   = brightcove_api.BrightcoveApi(
+                neon_api_key=api_key,
+                publisher_id=pid,
+                read_token=rtoken,
+                write_token=wtoken)
+            ret = bcove.update_thumbnail_and_videostill(video_id, img, tid)
 
             if ret[0]:
                 #update enabled time & reference ID
@@ -707,6 +719,7 @@ class ProcessVideo(object):
     def finalize_youtube_request(self,result,error=False):
         api_key = self.request_map[properties.API_KEY]  
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
+        video_id = self.request_map[properties.VIDEO_ID]
         yt_request = YoutubeApiRequest.get(api_key,job_id)
         yt_request.response = tornado.escape.json_decode(result)
        
@@ -743,7 +756,8 @@ class ProcessVideo(object):
         
         #populate thumbnail
         urls = []
-        tid = ThumbnailID.generate(imgdata)
+        tid = ThumbnailID.generate(imgdata,
+                                   InternalVideoID.generate(api_key, video_id))
         urls.append(p_url)
         urls.append(s3fname)
         created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -764,7 +778,6 @@ class ProcessVideo(object):
             rtoken  = self.request_map["refresh_token"]
             atoken  = self.request_map["access_token"]
             expiry  = self.request_map["token_expiry"]
-            video_id = self.request_map[properties.VIDEO_ID]
             fno = yt_request.response["data"][0]
             img = Image.fromarray(self.data_map[fno][1])
             yt  = youtube_api.YoutubeApi(rtoken)
@@ -873,7 +886,8 @@ class HttpDownload(object):
     def async_callback(self, response):
         # if video size < the chunk size
         try:
-            #TODO Check for content type (html,json,xml) which may be error messages
+            #TODO Check for content type (html,json,xml) which may be
+            #error messages
 
             #False link or transfer encoding is chunked
             if not response.headers.has_key('Content-Length'):
@@ -915,8 +929,10 @@ class HttpDownload(object):
                 _log.error("key=async_callback_error  msg=" + response.error.message + " request=" + self.job_params[properties.VIDEO_DOWNLOAD_URL])
             else:
                 _log.error("key=async_request_timeout msg=" +response.error.message)
-                ## Verify content length & total size to see if video has been downloaded 
-                ## == If request times out and we have 75% of data, then process the video and send data to client 
+                ## Verify content length & total size to see if video
+                ## has been downloaded == If request times out and we
+                ## have 75% of data, then process the video and send
+                ## data to client
                 try:
                     self.content_length = response.headers['Content-Length']
                     if (self.total_size_so_far /float(self.content_length)) < 0.75:
@@ -928,8 +944,9 @@ class HttpDownload(object):
             #print("Success: %s" % self.tempfile.name)
         self.ioloop.stop()
       
-        #Process the final chunk, since all file size isn't always a multiple of chunk size
-        #Certain video formats don't allow partial rendering/ extraction of video
+        #Process the final chunk, since all file size isn't always a
+        #multiple of chunk size Certain video formats don't allow
+        #partial rendering/ extraction of video
 
         #TODO:Remove n_thumbs hack
         n_thumbs = 10 # Dummy

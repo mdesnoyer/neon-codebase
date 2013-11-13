@@ -6,15 +6,16 @@ if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
 from datetime import datetime
-from mock import MagicMock
+from mock import MagicMock, patch
 from mrjob.protocol import *
-import mysql.connector
+import MySQLdb
 import os
+import redis.exceptions
 from StringIO import StringIO
 import sqlite3
+from supportServices import neondata
 import tempfile
 import unittest
-import urllib2
 import utils.neon
 from utils.options import define, options
 
@@ -74,9 +75,9 @@ class TestDataParsing(unittest.TestCase):
 
     def test_valid_click(self):
         results, counters = run_single_step(self.mr,
-            ('{"sts":19800, "a":"click", '
+            ('{"sts":19800, "a":"click", "page":"here.com",'
              '"ttype":"flashonly", "img":"http://monkey.com"}\n'
-             '{"sts":19800, "a":"click", '
+             '{"sts":19800, "a":"click", "page":"here.com",'
              '"ttype":"flashonly", "img":"http://panda.com"}\n'),
             protocol=RawProtocol)
         self.assertItemsEqual(results,
@@ -87,7 +88,7 @@ class TestDataParsing(unittest.TestCase):
 
     def test_valid_load(self):
         results, counters = run_single_step(self.mr,
-          ('{"sts":19800, "a":"load", "ttype":"flashonly",'
+          ('{"sts":19800, "a":"load", "page":"here.com", "ttype":"flashonly",'
            '"imgs":["http://monkey.com","poprocks.jpg","pumpkin.wow"]}'),
             protocol=RawProtocol)
                                             
@@ -150,100 +151,57 @@ class TestIDMapping(unittest.TestCase):
     '''Tests for mapping thumbnail urls to ids.'''
     def setUp(self):
         self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
-        self.urlopen = urllib2.urlopen
+        self.real_mapper = neondata.ThumbnailURLMapper.get_id
+        self.mock_mapper = MagicMock()
+        neondata.ThumbnailURLMapper.get_id = self.mock_mapper
+        
 
     def tearDown(self):
-        urllib2.urlopen = self.urlopen
+        neondata.ThumbnailURLMapper.get_id = self.real_mapper
 
     def test_valid_mapping(self):
-        mock = MagicMock(side_effect=[StringIO('{"tid":"54s9dfewgvw9e8g9"}')])
-        urllib2.urlopen = mock
+        self.mock_mapper.return_value = "54s9dfewgvw9e8g9"
         results, counters = run_single_step(self.mr,
             encode([(('click', 'http://first.jpg', 94), 3)]),
             step=1)
 
-        self.assertEqual(mock.call_count, 1)
-        cargs, kwargs = mock.call_args
-        self.assertEqual(cargs[1], 'url=http%3A%2F%2Ffirst.jpg')
+        self.assertEqual(self.mock_mapper.call_count, 1)
+        cargs, kwargs = self.mock_mapper.call_args
+        self.assertEqual(cargs[0], 'http://first.jpg')
         self.assertEqual(results[0], (['click', '54s9dfewgvw9e8g9', 94], 3))
 
     def test_mapping_too_short(self):
-        mock = MagicMock(side_effect=[StringIO('{"tid":"54s9"}')])
-        urllib2.urlopen = mock
+        self.mock_mapper.side_effect = "54s9"
         results, counters = run_single_step(self.mr,
             encode([(('click', 'http://first.jpg', 94), 3)]),
             step=1)
 
         self.assertEqual(results, [])
-        self.assertEqual(mock.call_count, 1)
+        self.assertEqual(self.mock_mapper.call_count, 1)
         self.assertEqual(
-            counters['HourlyEventStatsErrors']['TIDParseError'], 1)
+            counters['HourlyEventStatsErrors']['ThumbIDTooShort'], 1)
 
     def test_no_thumb_mapping(self):
-        mock = MagicMock(side_effect=[StringIO('{"tid":null}')])
-        urllib2.urlopen = mock
+        self.mock_mapper.side_effect = [None]
         results, counters = run_single_step(self.mr,
             encode([(('click', 'http://first.jpg', 94), 3)]),
             step=1)
 
         self.assertEqual(results, [])
-        self.assertEqual(mock.call_count, 1)
+        self.assertEqual(self.mock_mapper.call_count, 1)
         self.assertEqual(
             counters['HourlyEventStatsErrors']['UnknownThumbnailURL'], 1)
 
-    def test_no_tid_field(self):
-        mock = MagicMock(side_effect=[StringIO('{"fid":"feswfefs9"}')])
-        urllib2.urlopen = mock
+    def test_redis_error(self):
+        self.mock_mapper.side_effect = redis.exceptions.RedisError
         results, counters = run_single_step(self.mr,
             encode([(('click', 'http://first.jpg', 94), 3)]),
             step=1)
 
         self.assertEqual(results, [])
-        self.assertEqual(mock.call_count, 1)
+        self.assertEqual(self.mock_mapper.call_count, 1)
         self.assertEqual(
-            counters['HourlyEventStatsErrors']['TIDFieldMissing'], 1)
-
-    def test_invalid_json_response(self):
-        mock = MagicMock(side_effect=[StringIO('feswfefs9')])
-        urllib2.urlopen = mock
-        results, counters = run_single_step(self.mr,
-            encode([(('click', 'http://first.jpg', 94), 3)]),
-            step=1)
-
-        self.assertEqual(results, [])
-        self.assertEqual(mock.call_count, 1)
-        self.assertEqual(
-            counters['HourlyEventStatsErrors']['TIDParseError'], 1)
-
-    def test_io_error(self):
-        mock = MagicMock(side_effect=IOError)
-        urllib2.urlopen = mock
-        results, counters = run_single_step(self.mr,
-            encode([(('click', 'http://first.jpg', 94), 3)]),
-            step=1)
-
-        self.assertEqual(results, [])
-        self.assertEqual(mock.call_count, 1)
-        self.assertEqual(
-            counters['HourlyEventStatsErrors']['TIDParseError'], 1)
-
-    def test_url_error(self):
-        mock = MagicMock(side_effect=[urllib2.URLError("because")])
-        urllib2.urlopen = mock
-        results, counters = run_single_step(self.mr,
-            encode([(('click', 'http://first.jpg', 94), 3)]),
-            step=1)
-
-        self.assertEqual(results, [])
-        self.assertEqual(mock.call_count, 1)
-        self.assertEqual(
-            counters['HourlyEventStatsErrors']['VideoDBConnectionError'], 1)
-
-    def test_latest_time(self):
-        results, counters = run_single_step(self.mr,
-            encode([('latest', 19800)]),
-            step=1)
-        self.assertEqual(results[0], ('latest', 19800))
+            counters['HourlyEventStatsErrors']['RedisErrors'], 1)
         
 
 class TestDatabaseWriting(unittest.TestCase):
@@ -251,16 +209,16 @@ class TestDatabaseWriting(unittest.TestCase):
     def setUp(self):
         self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
         
-        self.dbconnect = mysql.connector.connect
+        self.dbconnect = MySQLdb.connect
         dbmock = MagicMock()
         def connect2db(*args, **kwargs):
             return sqlite3.connect('file::memory:?cache=shared')
         dbmock.side_effect = connect2db
-        mysql.connector.connect = dbmock
+        MySQLdb.connect = dbmock
         self.ramdb = connect2db()
 
     def tearDown(self):
-        mysql.connector.connect = self.dbconnect
+        MySQLdb.connect = self.dbconnect
         try:
             cursor = self.ramdb.cursor()
             cursor.execute('drop table hourly_events')
@@ -343,39 +301,38 @@ class TestDatabaseWriting(unittest.TestCase):
 
     def test_increment_data(self):
         '''Test when the counts are incremented.'''
-        with options._set_bounded(
-                'stats.hourly_event_stats_mr.increment_stats', 1):
+        self.mr.options.increment_stats = 1
             
-            run_single_step(self.mr,
-                            encode([(('imgA', 56),(5, 'click')),
-                                    (('imgA', 56),(55, 'load')),
-                                    (('imgB', 56),(9, 'click')),
-                                    (('imgA', 54),(12, 'load'))]),
-                                    step=2,
-                                    step_type='reducer')
-            run_single_step(self.mr,
-                            encode([(('imgA', 56),(2, 'click')),
-                                    (('imgA', 56),(10, 'load')),
-                                    (('imgA', 59),(16, 'load'))]),
-                                    step=2,
-                                    step_type='reducer')
-            cursor = self.ramdb.cursor()
-            cursor.execute('select thumbnail_id, hour, loads, clicks from '
-                           'hourly_events')
-            results = {}
-            for data in cursor.fetchall():
-                results[(data[0], data[1])] = (data[2], data[3])
+        run_single_step(self.mr,
+                        encode([(('imgA', 56),(5, 'click')),
+                                (('imgA', 56),(55, 'load')),
+                                (('imgB', 56),(9, 'click')),
+                                (('imgA', 54),(12, 'load'))]),
+                                step=2,
+                                step_type='reducer')
+        run_single_step(self.mr,
+                        encode([(('imgA', 56),(2, 'click')),
+                                (('imgA', 56),(10, 'load')),
+                                (('imgA', 59),(16, 'load'))]),
+                                step=2,
+                                step_type='reducer')
+        cursor = self.ramdb.cursor()
+        cursor.execute('select thumbnail_id, hour, loads, clicks from '
+                       'hourly_events')
+        results = {}
+        for data in cursor.fetchall():
+            results[(data[0], data[1])] = (data[2], data[3])
 
-            self.assertEqual(len(results.items()), 4)
-            self.assertEqual(results[('imgA', hr2str(56))], (65, 7))
-            self.assertEqual(results[('imgA', hr2str(54))], (12, 0))
-            self.assertEqual(results[('imgB', hr2str(56))], (0, 9))
-            self.assertEqual(results[('imgA', hr2str(59))], (16, 0))
+        self.assertEqual(len(results.items()), 4)
+        self.assertEqual(results[('imgA', hr2str(56))], (65, 7))
+        self.assertEqual(results[('imgA', hr2str(54))], (12, 0))
+        self.assertEqual(results[('imgB', hr2str(56))], (0, 9))
+        self.assertEqual(results[('imgA', hr2str(59))], (16, 0))
 
     def test_connection_error(self):
-        mysql.connector.connect = MagicMock(
-            side_effect=[mysql.connector.Error('yikes')])
-        self.assertRaises(mysql.connector.Error, run_single_step,
+        MySQLdb.connect = MagicMock(
+            side_effect=[MySQLdb.Error('yikes')])
+        self.assertRaises(MySQLdb.Error, run_single_step,
            self.mr, '', 'reducer', 2)
 
 
@@ -383,8 +340,10 @@ class TestEndToEnd(unittest.TestCase):
     '''Tests database writing step.'''
     def setUp(self):
         self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
-        self.urlopen = urllib2.urlopen
-        self.dbconnect = mysql.connector.connect
+        self.real_urlmapper = neondata.ThumbnailURLMapper
+        self.mock_urlmapper = MagicMock()
+        neondata.ThumbnailURLMapper = self.mock_urlmapper
+        self.dbconnect = MySQLdb.connect
 
         # For some reason, the in memory database isn't shared, so use
         # a temporary file instead. It worked in the other test case....
@@ -396,13 +355,13 @@ class TestEndToEnd(unittest.TestCase):
             return sqlite3.connect(self.tempfile.name)
             #return sqlite3.connect('file::memory:?cache=shared')
         dbmock.side_effect = connect2db
-        mysql.connector.connect = dbmock
+        MySQLdb.connect = dbmock
         self.ramdb = connect2db()
         
 
     def tearDown(self):
-        urllib2.urlopen = self.urlopen
-        mysql.connector.connect = self.dbconnect
+        neondata.ThumbnailURLMapper = self.real_urlmapper
+        MySQLdb.connect = self.dbconnect
         try:
             self.ramdb.execute('drop table hourly_events')
         except Exception as e:
@@ -412,41 +371,36 @@ class TestEndToEnd(unittest.TestCase):
     def test_bunch_of_data(self):
         # Setup the input data
         input_data = (
-            '{"sts":19800, "a":"click", '
+            '{"sts":19800, "a":"click", "page":"here.com",'
             '"ttype":"flashonly", "img":"http://monkey.com"}\n'
             '{"sts":19795, "a":"load", "ttype":"flashonly",'
             '"imgs":["http://monkey.com","http://panda.com","pumpkin.wow"]}\n'
-            '{"sts":19805, "a":"click", '
+            '{"sts":19805, "a":"click", "page":"here.com",'
              '"ttype":"flashonly", "img":"http://panda.com"}\n'
-            '{"sts":19800, "a":"load", "ttype":"flashonly",'
+            '{"sts":19800, "a":"load", "page":"here.com", "ttype":"flashonly",'
             '"imgs":["http://monkey.com","pumpkin.jpg"]}\n'
-            '{"sts":19810, "a":"click", '
+            '{"sts":19810, "a":"click", "page":"here.com",'
              '"ttype":"flashonly", "img":"http://panda.com"}\n'
-            '{"sts":19810, "a":"click", '
+            '{"sts":19810, "a":"click", "page":"here.com",'
              '"ttype":"flashonly", "img":"pumpkin.jpg"}')
         stdin = StringIO(input_data)
         self.mr.sandbox(stdin=stdin)
 
         # Mock out the responses for converting urls to thumbnail ids
-        tid_list = [
-            ("http://monkey.com", "49a8efg1ea98"),
-            ("http://panda.com", "2348598ewsfrwe"),
-            ("pumpkin.wow", "68367sgdhs"),
-            ("pumpkin.jpg", "faefr42345dsfg")
-        ]
-        tid_map = dict([(urllib.urlencode({'url':x[0]}),
-                         json.dumps({'tid':x[1]})) 
-                        for x in tid_list])
-        tid_mock = MagicMock()
-        tid_mock.side_effect = lambda x, url, y: StringIO(tid_map[url])
-        urllib2.urlopen = tid_mock
+        tid_map = {
+            "http://monkey.com": "49a8efg1ea98",
+            "http://panda.com": "2348598ewsfrwe",
+            "pumpkin.wow": "68367sgdhs",
+            "pumpkin.jpg": "faefr42345dsfg"
+        }
+        self.mock_urlmapper.get_id.side_effect = lambda url: tid_map[url]
 
         # Run the map reduce job
         runner = self.mr.make_runner()
         runner.run()
         
-        self.assertGreater(tid_mock.call_count, 0)
-        self.assertGreater(mysql.connector.connect.call_count, 0)
+        self.assertGreater(self.mock_urlmapper.get_id.call_count, 0)
+        self.assertGreater(MySQLdb.connect.call_count, 0)
 
         # Finally, check the database to make sure it says what we want
         cursor = self.ramdb.cursor()

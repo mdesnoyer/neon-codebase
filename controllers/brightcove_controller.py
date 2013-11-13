@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 '''
 AB Controller for Brightcove
 

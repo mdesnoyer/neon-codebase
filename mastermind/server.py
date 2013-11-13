@@ -17,7 +17,8 @@ from datetime import datetime
 from mastermind import directive_pusher
 import json
 import logging
-import mysql.connector as sqldb
+import MySQLdb as sqldb
+import stats.db
 from supportServices import neondata
 import time
 import threading
@@ -56,6 +57,10 @@ define('stats_table', default='hourly_events',
 define('stats_db_polling_delay', default=57, type=float,
        help='Number of seconds between polls of the video db')
 
+# Video db options
+define('video_db_polling_delay', default=300, type=float,
+       help='Number of seconds between polls of the video db')
+
 _log = logging.getLogger(__name__)
 
 def initialize():
@@ -80,19 +85,6 @@ def initialize():
                                         options.youtube_controller_url)
     
     mastermind = Mastermind()
-    # Get all the current information about the videos
-    for platform in neondata.AbstractPlatform.get_all_instances():
-        for video_id in platform.videos.iterkeys():
-            video_metadata = neondata.VideoMetadata.get(video_id)
-            thumbnails = [core.ThumbnailInfo.from_db_data(
-                neondata.ThumbnailIDMapper.get_id(thumb_id,
-                                                  ).thumbnail_metadata) 
-                for thumb_id in video_metadata.thumbnail_ids]
-
-            mastermind.update_video_info(video_id, platform.abtest,
-                                         thumbnails)
-            ab_manager.register_video_distribution(
-                video_id, DistributionType.fromString(platform.get_ovp()))
 
     return mastermind, ab_manager
 
@@ -112,10 +104,11 @@ class VideoDBWatcher(threading.Thread):
             try:
                 self._process_db_data()
 
-                # Now we wait so that we don't hit the database too much.
-                time.sleep(options.video_db_polling_delay)
             except Exception as e:
                 _log.exception('Uncaught video DB Error: %s' % e)
+
+            # Now we wait so that we don't hit the database too much.
+            time.sleep(options.video_db_polling_delay)
 
     def wait_until_loaded(self):
         '''Blocks until the data is loaded.'''
@@ -127,14 +120,17 @@ class VideoDBWatcher(threading.Thread):
                 video_metadata = neondata.VideoMetadata.get(
                     video_id)
                 thumbnails = [
-                    core.ThumbnailInfo.from_db_data(
-                        neondata.ThumbnailIDMapper.get_id(
-                            thumb_id).thumbnail_metadata) 
+                    ThumbnailInfo.from_db_data(
+                        neondata.ThumbnailIDMapper.get_thumb_metadata(
+                            thumb_id)) 
                     for thumb_id in video_metadata.thumbnail_ids]
 
-                directive = mastermind.update_video_info(video_id,
-                                                         platform.abtest,
-                                                         thumbnails)
+                self.ab_manager.register_video_distribution(
+                    video_id, DistributionType.fromString(platform.get_ovp()))
+
+                directive = self.mastermind.update_video_info(video_id,
+                                                              platform.abtest,
+                                                              thumbnails)
                 if directive:
                     self.ab_manager.send(directive)
 
@@ -165,19 +161,20 @@ class StatsDBWatcher(threading.Thread):
             try:
                 self._process_db_data()            
 
-                # Now we wait so that we don't hit the database too much.
-                time.sleep(options.stats_db_polling_delay)
             except Exception as e:
                 _log.exception('Uncaught stats DB Error: %s' % e)
+
+            # Now we wait so that we don't hit the database too much.
+            time.sleep(options.stats_db_polling_delay)
 
     def _process_db_data(self):
         try:
             conn = sqldb.connect(
                 user=options.stats_user,
-                password=options.stats_pass,
+                passwd=options.stats_pass,
                 host=options.stats_host,
                 port=options.stats_port,
-                database=options.stats_db)
+                db=options.stats_db)
         except sqldb.Error as e:
             _log.exception('Error connecting to stats db: %s' % e)
             return
@@ -185,31 +182,37 @@ class StatsDBWatcher(threading.Thread):
         cursor = conn.cursor()
 
         # See if there are any new entries
-        cursor.execute('''SELECT logtime FROM 
-                       last_update WHERE tablename = ?''',
-                       (options.stats_table,))
+        stats.db.execute(
+            cursor,
+            '''SELECT logtime FROM last_update WHERE tablename = %s''',
+            (options.stats_table,))
         result = cursor.fetchall()
         if len(result) == 0:
             _log.error('Cannot determine when the database was last updated')
+            self.is_loaded.set()
             return
-        cur_update = datetime.strptime(result[0][0], '%Y-%m-%d %H:%M:%S')
+        cur_update = result[0][0]
+        if isinstance(cur_update, basestring):
+            cur_update = datetime.strptime(cur_update, '%Y-%m-%d %H:%M:%S')
         if self.last_update is None or cur_update > self.last_update:
             _log.info('The database was updated at %s. Processing' 
                       % cur_update)
 
             # The database was updated, so process the new state.
-            result = cursor.execute('''SELECT thumbnail_id,
-                                    sum(loads), sum(clicks) 
-                                    FROM %s group by thumbnail_id''' %
+            cursor.execute('''SELECT thumbnail_id,
+                           sum(loads), sum(clicks) 
+                           FROM %s group by thumbnail_id''' %
                 options.stats_table)
-            data = ((self._find_video_id(x[0]), x[0], x[1], x[2]) 
-                    for x in result)
+            result = cursor.fetchall()
+            if result:
+                data = ((self._find_video_id(x[0]), x[0], x[1], x[2]) 
+                        for x in result)
                     
-            directives = self.mastermind.update_stats_info(
-                (cur_update - datetime(1970,1, 1)).total_seconds(),
-                data)
-            for directive in directives:
-                self.ab_manager.send(directive)
+                directives = self.mastermind.update_stats_info(
+                    (cur_update - datetime(1970,1, 1)).total_seconds(),
+                    data)
+                for directive in directives:
+                    self.ab_manager.send(directive)
                     
         self.last_update = cur_update
         self.is_loaded.set()
@@ -219,7 +222,7 @@ class StatsDBWatcher(threading.Thread):
         try:
             video_id = self.video_id_cache[thumb_id]
         except KeyError:
-            video_id = neondata.ThumbnailIDMapper.get_id(thumb_id).video_id
+            video_id = neondata.ThumbnailIDMapper.get_video_id(thumb_id)
             self.video_id_cache[thumb_id] = video_id
         return video_id
 
@@ -292,13 +295,13 @@ class GetDirectives(tornado.web.RequestHandler):
             self.flush()
         self.finish()
 
-def main():   
+def main():
     mastermind, ab_manager = initialize()
 
-    videoDbThread = VideoDBWatcher()
+    videoDbThread = VideoDBWatcher(mastermind, ab_manager)
     videoDbThread.start()
     videoDbThread.wait_until_loaded()
-    statsDbThread = StatsDBWatcher()
+    statsDbThread = StatsDBWatcher(mastermind, ab_manager)
     statsDbThread.start()
     statsDbThread.wait_until_loaded()
 
@@ -309,6 +312,7 @@ def main():
         (r'/get_directives', GetDirectives,
          dict(mastermind=mastermind, ab_manager=ab_manager))])
     server = tornado.httpserver.HTTPServer(application)
+    utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)
     
     tornado.ioloop.IOLoop.instance().start()

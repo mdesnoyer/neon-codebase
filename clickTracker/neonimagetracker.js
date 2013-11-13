@@ -31,7 +31,8 @@ var imtrackerNeonDataSender = (function() {
 			var ts = new Date().getTime(); 
 			var req = url + "?" + params + "&ts=" + ts + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + NeonTrackerType;
 			if ( NeonImageTracker.neonTrackerTestMode){ 
-				req = "http://localhost:8888/test" + "?" + params + "&ts=" + ts + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + NeonTrackerType;
+				req = "http://tracker.neon-lab.com/test" + "?" + params + "&ts=" + ts + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + NeonTrackerType;
+				//req = "http://localhost:8888/test" + "?" + params + "&ts=" + ts + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + NeonTrackerType;
 				req = req+"&callback=NeonImageTracker.testJsonCallback";}
 			console.log("Send request to Neon " + req );
 			try { bObj = new JSONscriptRequest(req); bObj.buildScriptTag(); bObj.addScriptTag();  } catch(err) {}	
@@ -48,7 +49,8 @@ var imtrackerNeonDataSender = (function() {
 
 var reqGuid = imtrackerNeonDataSender._NeonPageRequestUUID();
 var NeonImageTracker = ( function ()  {
-    var NeonTrackerURL = "http://localhost:8888/track";
+    var NeonTrackerURL = "http://tracker.neon-lab.com/track";
+    //var NeonTrackerURL = "http://localhost:8888/track";
 	var neonTrackerTestMode = false;
 
 	return {

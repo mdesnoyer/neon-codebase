@@ -19,35 +19,55 @@ import logging
 from mrjob.job import MRJob
 import mrjob.protocol
 import mrjob.util
-import mysql.connector as sqldb
+import MySQLdb as sqldb
+import redis.exceptions
+import stats.db
+from supportServices import neondata
 import time
 import urllib
 import urllib2
 import utils.neon
+import utils.options
 
 _log = logging.getLogger(__name__)
 
-from utils.options import define, options
-
-define('stats_host', default='stats.cnvazyzlgq2v.us-east-1.rds.amazonaws.com',
-       help='Host of the stats database')
-define('stats_port', type=int, default=3306,
-       help='Port to the stats database')
-define('stats_user', default='mrwriter', help='User for the stats database')
-define('stats_pass', default='kjge8924qm',
-       help='Password for the stats database')
-define('stats_db', default='stats_dev', help='Stats database to connect to')
-define('increment_stats', type=int, default=0,
-       help='If true, stats are incremented. Otherwise, they are overwritten')
-define('stats_table', default='hourly_events',
-       help='Table in the stats database to write to')
-define('videodb_url', default='http://localhost:8080',
-       help='url for the video database call')
-
-
 class HourlyEventStats(MRJob):
     INPUT_PROTOCOL = mrjob.protocol.RawProtocol
-    INTERNAL_PROTOCOL = mrjob.protocol.PickleProtocol            
+    INTERNAL_PROTOCOL = mrjob.protocol.PickleProtocol 
+
+    def configure_options(self):
+        super(HourlyEventStats, self).configure_options()
+        self.add_passthrough_option(
+            '--stats_host',
+            default='stats.cnvazyzlgq2v.us-east-1.rds.amazonaws.com',
+            help='Host of the stats database')
+        self.add_passthrough_option(
+            '--stats_port', type='int', default=3306,
+            help='Port to the stats database')
+        self.add_passthrough_option(
+            '--stats_user', default='mrwriter',
+            help='User for the stats database')
+        self.add_passthrough_option('--stats_pass', default='kjge8924qm',
+                                    help='Password for the stats database')
+        self.add_passthrough_option('--stats_db', default='stats_dev',
+                                    help='Stats database to connect to')
+        self.add_passthrough_option(
+            '--increment_stats', type='int', default=0,
+            help=('If true, stats are incremented. Otherwise, they are '
+                  'overwritten'))
+        self.add_passthrough_option(
+            '--stats_table', default='hourly_events',
+            help='Table in the stats database to write to')
+        self.add_file_option(
+            '--neon_config', default=None,
+            help='Config file to parse for Neon options.')
+
+    def load_options(self, args):
+        super(HourlyEventStats, self).load_options(args)
+
+        if self.options.neon_config is not None:
+            with open(self.options.neon_config) as f:
+                utils.options.parse_options(args=[], config_stream=f)
 
     def mapper_get_events(self, line, _):
         '''Reads the json log and outputs event data.
@@ -112,41 +132,26 @@ class HourlyEventStats(MRJob):
         if event == 'latest':
             yield (event, count)
             return
-        
+
         try:
-            stream = urllib2.urlopen(options.videodb_url,
-                                     urllib.urlencode({'url':event[1]}),
-                                     60)
-            data = json.load(stream)
-            if data['tid'] is None:
-                _log.error('Could not find the thumbnail id for url: %s' %
-                           event[1])
+            thumb_id = neondata.ThumbnailURLMapper.get_id(event[1])
+
+            if thumb_id is None:
+                _log.warn('URL %s not in database' % event[1])
                 self.increment_counter('HourlyEventStatsErrors',
                                        'UnknownThumbnailURL', 1)
-                return
+            elif len(thumb_id) < 5:
+                _log.warn('ID for URL %s is too short: %s' % (event[1],
+                                                              thumb_id))
+                self.increment_counter('HourlyEventStatsErrors',
+                                       'ThumbIDTooShort', 1)
                 
-            if len(data['tid']) < 5:
-                raise ValueError('Thumbnail ID is too short: %s' % data['tid'])
-            yield (event[0], data['tid'], event[2]), count
-        except urllib2.URLError as e:
-            _log.exception('Error connecting to: %s' % 
-                           options.videodb_url)
+            else:
+                yield (event[0], thumb_id, event[2]), count
+        except redis.exceptions.RedisError as e:
+            _log.exception('Error getting data from Redis server: %s' % e)
             self.increment_counter('HourlyEventStatsErrors',
-                                   'VideoDBConnectionError', 1)
-        except KeyError as e:
-            _log.error('Data format incorrect: %s' % e)
-            self.increment_counter('HourlyEventStatsErrors',
-                                   'TIDFieldMissing', 1)
-        except ValueError as e:
-            _log.error('Could not parse response')
-            self.increment_counter('HourlyEventStatsErrors',
-                                   'TIDParseError', 1)
-        except IOError as e:
-            _log.exception(
-                'Error reading data from videodb for thumbnail url %s: %s' % 
-                (event[1], e))
-            self.increment_counter('HourlyEventStatsErrors',
-                                   'TIDParseError', 1)
+                                   'RedisErrors', 1)
 
     def merge_events(self, event, count):
         if event == 'latest':
@@ -156,9 +161,9 @@ class HourlyEventStats(MRJob):
 
     def write_latest2db(self, time):
         '''Writes the latest log time to the database.'''
-        self.statscursor.execute(
-            '''REPLACE INTO last_update (tablename, logtime) VALUES (?, ?)''',
-            (options.stats_table, datetime.utcfromtimestamp(time)))
+        stats.db.execute(self.statscursor,
+            '''REPLACE INTO last_update (tablename, logtime) VALUES (%s, %s)''',
+            (self.options.stats_table, datetime.utcfromtimestamp(time)))
 
     def reducer_write2db(self, img_hr, count_events):
         '''Writes the event counts to the database.
@@ -178,52 +183,43 @@ class HourlyEventStats(MRJob):
         clicks = counts.setdefault('click', 0)
         hourdate = datetime.utcfromtimestamp(hours * 3600)
 
-        if options.increment_stats:
-            self.statscursor.execute(
+        if self.options.increment_stats:
+            stats.db.execute(self.statscursor,
                 '''SELECT loads, clicks from %s 
-                where thumbnail_id = ? and hour = ?''' %
-              options.stats_table, (img_id, hourdate))
+                where thumbnail_id = %%s and hour = %%s''' %
+              self.options.stats_table, (img_id, hourdate))
             result = self.statscursor.fetchone()
             if result is None:
-                self.statscursor.execute(
+                stats.db.execute(self.statscursor,
                     '''INSERT INTO %s (thumbnail_id, hour, loads, clicks)
-                    VALUES (?, ?, ?, ?) ''' % options.stats_table,
+                    VALUES (%%s, %%s, %%s, %%s) ''' % self.options.stats_table,
                     (img_id, hourdate, loads, clicks))
             else:
-                self.statscursor.execute(
-                    '''UPDATE %s set loads=?, clicks=? where
-                    thumbnail_id = ? and hour = ?''' %
-                    options.stats_table,
+                stats.db.execute(self.statscursor,
+                    '''UPDATE %s set loads=%%s, clicks=%%s where
+                    thumbnail_id = %%s and hour = %%s''' %
+                    self.options.stats_table,
                     (loads + result[0], clicks + result[1], img_id, hourdate))
         else:
-            self.statscursor.execute(
+            stats.db.execute(self.statscursor,
                 '''REPLACE INTO %s (thumbnail_id, hour, loads, clicks) 
-                VALUES (?, ?, ?, ?) ''' % options.stats_table,
+                VALUES (%%s, %%s, %%s, %%s) ''' % self.options.stats_table,
                 (img_id, hourdate, loads, clicks))
 
     def statsdb_connect(self):
         try:
             self.statsdb = sqldb.connect(
-                user=options.stats_user,
-                password=options.stats_pass,
-                host=options.stats_host,
-                port=options.stats_port,
-                database=options.stats_db)
+                user=self.options.stats_user,
+                passwd=self.options.stats_pass,
+                host=self.options.stats_host,
+                port=self.options.stats_port,
+                db=self.options.stats_db)
         except sqldb.Error as e:
             _log.exception('Error connecting to stats db: %s' % e)
             raise
         self.statscursor = self.statsdb.cursor()
 
-        self.statscursor.execute('''CREATE TABLE IF NOT EXISTS %s (
-                                 thumbnail_id VARCHAR(32) NOT NULL,
-                                 hour DATETIME NOT NULL,
-                                 loads INT NOT NULL DEFAULT 0,
-                                 clicks INT NOT NULL DEFAULT 0,
-                                 UNIQUE (thumbnail_id, hour))''' %
-                                 (options.stats_table,))
-        self.statscursor.execute('''CREATE TABLE IF NOT EXISTS last_update (
-                                 tablename VARCHAR(256) NOT NULL UNIQUE,
-                                 logtime DATETIME)''')
+        stats.db.create_tables(self.statscursor)
 
     def statsdb_disconnect(self):
         self.statscursor.close()
@@ -243,3 +239,13 @@ class HourlyEventStats(MRJob):
                     reducer_init=self.statsdb_connect,
                     reducer=self.reducer_write2db,
                     reducer_final=self.statsdb_disconnect)]
+
+def main():
+    # Setup a logger for dumping errors to stderr
+    utils.logs.CreateLogger(__name__, stream=sys.stderr,
+                            level=logging.WARNING)
+    
+    HourlyEventStats.run()
+
+if __name__ == '__main__':
+    main()
