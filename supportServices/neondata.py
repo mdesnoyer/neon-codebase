@@ -12,6 +12,8 @@ Api Request Types
 - Neon, Brightcove, youtube
 
 #TODO Connection pooling of redis connection https://github.com/leporo/tornado-redis/blob/master/demos/connection_pool/app.py
+
+#TODO(sunil): Fix your docstrings so that they actually are doc strings (ie. below the function definition)
 '''
 import os.path
 import sys
@@ -609,8 +611,9 @@ class BrightcovePlatform(AbstractPlatform):
     ''' method to keep video metadata and thumbnail data consistent '''
     @tornado.gen.engine
     def update_thumbnail(self,platform_vid,new_tid,nosave=False,callback=None):
-        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
-                self.read_token,self.write_token,self.auto_update)
+        bc = api.brightcove_api.BrightcoveApi(
+            self.neon_api_key, self.publisher_id,
+            self.read_token, self.write_token, self.auto_update)
         
         #Get video metadata
         i_vid = InternalVideoID.generate(self.neon_api_key,platform_vid)
@@ -635,7 +638,10 @@ class BrightcovePlatform(AbstractPlatform):
             callback(None)
             return
 
-        tref,sref = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,platform_vid,t_url,new_tid)
+        tref,sref = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,
+                                           platform_vid,
+                                           t_url,
+                                           new_tid)
         if not sref:
             _log.error("key=update_thumbnail msg=brightcove error update video still for video %s %s" %(i_vid,new_tid))
 
@@ -645,9 +651,11 @@ class BrightcovePlatform(AbstractPlatform):
 
         if tref:
             #Get previous thumbnail and new thumb
-            modified_thumbs = ThumbnailIDMapper.enable_thumbnail(thumb_mappings,new_tid)
+            modified_thumbs = ThumbnailIDMapper.enable_thumbnail(
+                thumb_mappings, new_tid)
             if modified_thumbs:
-                res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,modified_thumbs)  
+                res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
+                                             modified_thumbs)  
                 if res:
                     callback(True)
                 else:
@@ -663,12 +671,12 @@ class BrightcovePlatform(AbstractPlatform):
     ''' 
     Create neon job for particular video
     '''
-    def create_job(self,vid,callback):
+    def create_job(self, vid, callback):
         def created_job(result):
             if not result.error:
                 try:
                     job_id = tornado.escape.json_decode(result.body)["job_id"]
-                    self.add_video(vid,job_id)
+                    self.add_video(vid, job_id)
                     self.save(callback)
                 except Exception,e:
                     #_log.exception("key=create_job msg=" + e.message) 
@@ -676,34 +684,42 @@ class BrightcovePlatform(AbstractPlatform):
             else:
                 callback(False)
 
-        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
-                self.read_token,self.write_token,self.auto_update)
-        bc.create_video_request(vid,bc.integration_id,created_job)
+        bc = api.brightcove_api.BrightcoveApi(
+            self.neon_api_key, self.publisher_id, self.read_token,
+            self.write_token, self.auto_update)
+        bc.create_video_request(vid, bc.integration_id, created_job)
 
     '''
     Use this only after you retreive the object from DB
     '''
     def check_feed_and_create_api_requests(self):
-        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
-                self.read_token,self.write_token,self.auto_update,self.last_process_date)
+        bc = api.brightcove_api.BrightcoveApi(
+            self.neon_api_key, self.publisher_id,
+            self.read_token, self.write_token, self.auto_update,
+            self.last_process_date)
         bc.create_neon_api_requests(self.integration_id)    
 
     '''
     Temp method to support backward compatibility
     '''
     def check_feed_and_create_request_by_tag(self):
-        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
-                self.read_token,self.write_token,self.auto_update,self.last_process_date)
+        bc = api.brightcove_api.BrightcoveApi(
+            self.neon_api_key, self.publisher_id, self.read_token,
+            self.write_token, self.auto_update, self.last_process_date)
         bc.create_brightcove_request_by_tag(self.integration_id)
+        
 
-
-    '''
-    Check if the current thumbnail for the given video on brightcove
-    has been recorded in Neon DB
-    '''
     def check_current_thumbnail_in_db(self,video_id,callback=None):
-        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
-                self.read_token,self.write_token,self.auto_update,self.last_process_date)
+        '''
+        Check if the current thumbnail for the given video on brightcove
+        has been recorded in Neon DB. Returns True if it has
+        '''
+        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,
+                                              self.publisher_id,
+                                              self.read_token,
+                                              self.write_token,
+                                              self.auto_update,
+                                              self.last_process_date)
         if callback:
             bc.async_check_thumbnail(video_id,callback)
         else:
@@ -715,12 +731,16 @@ class BrightcovePlatform(AbstractPlatform):
         @return: Callback returns job id, along with brightcove vid metadata
     '''
     def verify_token_and_create_requests_for_video(self,n,callback=None):
-        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,self.publisher_id,
-                self.read_token,self.write_token,False,self.last_process_date)
+        bc = api.brightcove_api.BrightcoveApi(
+            self.neon_api_key, self.publisher_id, self.read_token,
+            self.write_token, False, self.last_process_date)
         if callback:
-            bc.async_verify_token_and_create_requests(self.integration_id,n,callback)
+            bc.async_verify_token_and_create_requests(self.integration_id,
+                                                      n,
+                                                      callback)
         else:
-            return bc.verify_token_and_create_requests(self.integration_id,n)
+            return bc.verify_token_and_create_requests(self.integration_id,
+                                                       n)
 
     @staticmethod
     def create(json_data):

@@ -476,9 +476,12 @@ class AccountHandler(tornado.web.RequestHandler):
                     token = bc_account.read_token
                     self.integration_id = bc_account.integration_id
                     if (bc_account.videos) > 0:
-                        keys = [ neondata.generate_request_key(api_key,j_id) for j_id in bc_account.videos.values()] 
-                        neondata.NeonApiRequest.multiget(keys,result_aggregator)
-                        neondata.BrightcovePlatform.find_all_videos(token,limit,result_aggregator)
+                        keys = [ neondata.generate_request_key(api_key,j_id) 
+                                 for j_id in bc_account.videos.values()] 
+                        neondata.NeonApiRequest.multiget(keys,
+                                                         result_aggregator)
+                        neondata.BrightcovePlatform.find_all_videos(
+                            token, limit,result_aggregator)
                     else:
                         raise Exception("NOT YET IMPL")
                 except Exception,e:
@@ -489,17 +492,21 @@ class AccountHandler(tornado.web.RequestHandler):
 
         limit = self.get_argument('limit')
         #get brightcove tokens and video info from neondb 
-        neondata.BrightcovePlatform.get_account(self.api_key,i_id,account_callback)
+        neondata.BrightcovePlatform.get_account(self.api_key,
+                                                i_id,
+                                                account_callback)
 
     ''' Get video status for multiple videos -- Brightcove Integration '''
     @tornado.gen.engine
     def get_video_status_brightcove(self,i_id,vids):
         result = {}
-        incomplete_states = [neondata.RequestState.SUBMIT,neondata.RequestState.PROCESSING,
-                                neondata.RequestState.REQUEUED,neondata.RequestState.INT_ERROR]
+        incomplete_states = [
+            neondata.RequestState.SUBMIT,neondata.RequestState.PROCESSING,
+            neondata.RequestState.REQUEUED,neondata.RequestState.INT_ERROR]
         
         #1 Get job ids for the videos from account, get the request status
-        jdata = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,self.api_key,i_id)
+        jdata = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,
+                                       self.api_key,i_id)
         ba = neondata.BrightcovePlatform.create(jdata)
         if not ba:
             _log.error("key=get_video_status_brightcove msg=account not found")
@@ -519,7 +526,8 @@ class AccountHandler(tornado.web.RequestHandler):
         job_ids = [] 
         for vid in vids:
             try:
-                jid = neondata.generate_request_key(self.api_key,ba.videos[vid])
+                jid = neondata.generate_request_key(self.api_key,
+                                                    ba.videos[vid])
                 job_ids.append(jid)
             except:
                 pass #job id not found
@@ -745,7 +753,7 @@ class AccountHandler(tornado.web.RequestHandler):
             autosync = self.get_argument("auto_update")
 
         except Exception,e:
-            _log.error("key=create brightcove account msg= %" %e)
+            _log.error("key=create brightcove account msg= %s" %e)
             data = '{"error": "API Params missing"}'
             self.send_json_response(data,400)
             return 
