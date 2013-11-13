@@ -42,9 +42,9 @@ class HttpConnectionThread(threading.Thread):
                     if e.response:
                         response = e.response
                     else:
-                    response = tornado.httpclient.HTTPResponse(request,
-                                                               e.code,
-                                                               error=e)
+                        response = tornado.httpclient.HTTPResponse(request,
+                                                                   e.code,
+                                                                   error=e)
                     
                 n_tries += 1
                 if not response.error:

@@ -58,9 +58,6 @@ class HourlyEventStats(MRJob):
         self.add_passthrough_option(
             '--stats_table', default='hourly_events',
             help='Table in the stats database to write to')
-        self.add_passthrough_option('--videodb_url', 
-                                    default='http://localhost:8080',
-                                    help='url for the video database call')
         self.add_file_option(
             '--neon_config', default=None,
             help='Config file to parse for Neon options.')

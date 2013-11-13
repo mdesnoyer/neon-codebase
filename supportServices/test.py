@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 '''
 Sample test script to create account, test brightcove and youtube integrations
 '''

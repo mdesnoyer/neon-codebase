@@ -55,8 +55,6 @@ define('increment_stats', type=int, default=0,
        help='If true, stats are incremented. Otherwise, they are overwritten')
 define('stats_table', default='hourly_events',
        help='Table in the stats database to write to')
-define('videodb_url', default='http://localhost:8080',
-       help='url for the video database call')
 
 _log = logging.getLogger(__name__)
 
@@ -169,7 +167,6 @@ def main(erase_local_data=None):
                 '--stats_db', options.stats_db,
                 '--stats_table', options.stats_table,
                 '--increment_stats', str(options.increment_stats),
-                '--videodb_url', options.videodb_url,
                 '--neon_config', options.get_config_file(),
                 data_dir.path])
 

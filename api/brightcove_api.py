@@ -29,7 +29,7 @@ import utils.neon
 _log = utils.logs.FileLogger("brighcove_api")
 
 from utils.options import define, options
-define("local", default=1, help="create neon requests locally", type=int)
+#define("local", default=1, help="create neon requests locally", type=int)
 define('max_write_connections', default=1, type=int, 
        help='Maximum number of write connections to Brightcove')
 define('max_read_connections', default=50, type=int, 
@@ -537,7 +537,7 @@ class BrightcoveApi(object):
             except tornado.httpclient.HTTPError, e:
                 _log.error(('key=format_neon_api_request '
                             'msg=Error sending Neon API request: %s') % e)
-                last_response = tornado.httpclient.HTTPResponse(request,
+                last_response = tornado.httpclient.HTTPResponse(req,
                                                                 e.code,
                                                                 error=e)
         return last_response
@@ -567,7 +567,7 @@ class BrightcoveApi(object):
                 pno   = json['page_number']
 
             except Exception,e:
-                print json
+                _log.exception('key=create_neon_api_requests msg=%s' % e)
                 return
         
             for item in items:
@@ -576,7 +576,8 @@ class BrightcoveApi(object):
                     items_to_process.append(item)
                     count += 1
 
-            #if we have seen all items or if we have seen all the new videos since last pub date 
+            #if we have seen all items or if we have seen all the new
+            #videos since last pub date
             if count < total or psize * (pno +1) > total:
                 done = True
 
