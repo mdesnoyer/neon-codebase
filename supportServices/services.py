@@ -107,6 +107,8 @@ class AccountHandler(tornado.web.RequestHandler):
             return True
         else:
             data = '{"error":"invalid api key or account id doesnt match api key"}'
+            _log.warning(("key=verify_account "
+                          "msg=api key doesn't match for account %s") % a_id)
             self.send_json_response(data,400)
             return False
 
