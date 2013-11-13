@@ -916,15 +916,15 @@ if __name__ == "__main__" :
     thumb = image.resize(bc.THUMB_SIZE)
     still = image.resize(bc.STILL_SIZE)
 
-    #response = bc.add_image(video_id, im=thumb, 
-    #                        callback=lambda x: _log.warn(x.body))
-    bc.add_image(video_id, remote_url=image_url, atype='videostill',
-                 callback=lambda x: _log.warn(x.body))
+    response = bc.add_image(video_id, im=thumb, 
+                            callback=lambda x: _log.warn(x.body))
+    #bc.add_image(video_id, remote_url=image_url, atype='videostill',
+    #             callback=lambda x: _log.warn(x.body))
 
-    bc.add_image(video_id, remote_url=image_url, #atype='videostill',
-                 callback=lambda x: _log.warn(x.body))
-    #response = bc.add_image(video_id, im=still, atype='videostill',
-    #                        callback=lambda x: _log.warn(x.body))
+    #bc.add_image(video_id, remote_url=image_url, #atype='videostill',
+    #             callback=lambda x: _log.warn(x.body))
+    response = bc.add_image(video_id, im=still, atype='videostill',
+                            callback=lambda x: _log.warn(x.body))
     #print bc.add_image(video_id, im=still, atype='videostill').body
 
     #print response.body

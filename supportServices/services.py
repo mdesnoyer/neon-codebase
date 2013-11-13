@@ -188,11 +188,17 @@ class AccountHandler(tornado.web.RequestHandler):
                     self.get_youtube_videos(i_id)
             else:
                 self.write("API not supported")
+                _log.warning(('key=account_handler '
+                              'msg=Invalid method in request %s') 
+                              % self.request.uri)
                 self.set_status(400)
                 self.finish()
 
         else:
             self.write("API not supported")
+            _log.warning(('key=account_handler '
+                          'msg=Account missing in request %s')
+                          % self.request.uri)
             self.set_status(400)
             self.finish()
 

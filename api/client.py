@@ -1327,7 +1327,8 @@ def main():
 
     #spawn workers
     for i in range(num_processes):
-        worker = Worker(options.model_file, model_version_file,options.debug,options.sync)
+        worker = Worker(options.model_file, model_version_file,
+                        options.debug, options.sync)
         workers.append(worker)
         if options.debug or num_processes ==1:
             worker.run()
