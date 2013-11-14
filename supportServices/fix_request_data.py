@@ -12,6 +12,7 @@ if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
 from supportServices import neondata
+import utils.neon
 
 from utils.options import define, options
 
@@ -31,4 +32,4 @@ def main():
 
 if __name__ == "__main__":
     utils.neon.InitNeon()
-	main()
+    main()
