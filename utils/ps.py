@@ -123,8 +123,12 @@ def register_tornado_shutdown(server):
     def sighandler(sig, frame):
         _log.warn('Received signal %s. Shutting down pid %i' % (sig,
                                                                 os.getpid()))
-        tornado.ioloop.IOLoop.instance().add_callback(shutdown)
+        tornado.ioloop.IOLoop.instance().add_callback_from_signal(shutdown)
 
-    signal.signal(signal.SIGINT, sighandler)
-    signal.signal(signal.SIGTERM, sighandler)
+    try:
+        signal.signal(signal.SIGINT, sighandler)
+        signal.signal(signal.SIGTERM, sighandler)
+    except ValueError as e:
+        _log.warning('Can only register signal in the main thread. Skipping. '
+                     '%s' % e)
         

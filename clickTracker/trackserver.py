@@ -11,17 +11,19 @@ import sys
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
+
+
+import json
+import os
+import Queue
+import shortuuid
+import threading
+import time
+import tornado.gen
 import tornado.ioloop
 import tornado.web
 import tornado.httpserver
 import tornado.escape
-import Queue
-import signal
-import time
-import os
-import json
-import threading
-import shortuuid
 import utils.neon
 import utils.ps
 
@@ -106,8 +108,7 @@ class TrackerDataHandler(tornado.web.RequestHandler):
 
 class LogLines(TrackerDataHandler):
 
-    def __init__(self, q):
-        super(LogLines, self).__init__()
+    def initialize(self, q):
         self.q = q
     
     ''' Track call logger '''
@@ -115,16 +116,19 @@ class LogLines(TrackerDataHandler):
     def get(self, *args, **kwargs):
         try:
             tracker_data = self.parse_tracker_data()
-        except Exception,e:
+        except Exception, e:
             _log.exception("key=get_track msg=%s" %e) 
+            self.set_status(500)
             self.finish()
             return
 
         data = tracker_data.to_json()
         try:
-            q.put(data)
-        except Exception,e:
+            self.q.put(data)
+            self.set_status(200)
+        except Exception, e:
             _log.exception("key=loglines msg=Q error %s" %e)
+            self.set_status(500)
         self.finish()
 
     '''
@@ -212,21 +216,53 @@ class S3Handler(threading.Thread):
 # Create Tornado server application
 ###########################################
 
-def main():
-    event_queue = Queue.Queue()
+class Server(threading.Thread):
+    '''The server, which can be run as it's own thread.
 
-    application = tornado.web.Application([
-        (r"/",LogLines),
-        (r"/track",LogLines, dict(q=event_queue)),
-        (r"/test",TestTracker),
-        ])
-    server = tornado.httpserver.HTTPServer(application)
-    utils.ps.register_tornado_shutdown(server)
-    server.listen(options.port)
+    Or just call run() directly to have it startup and block.
+    '''
+    def __init__(self):
+        super(Server, self).__init__()
+        self.event_queue = Queue.Queue()
+        self.s3handler = S3Handler(self.event_queue)
+        self.io_loop = tornado.ioloop.IOLoop()
+        self._is_running = threading.Event()
+
+    def run(self):
+        self.s3handler.start()
+
+        application = tornado.web.Application([
+            (r"/",LogLines, dict(q=self.event_queue)),
+            (r"/track",LogLines, dict(q=self.event_queue)),
+            (r"/test",TestTracker),
+            ])
+        server = tornado.httpserver.HTTPServer(application,
+                                               io_loop=self.io_loop)
+        utils.ps.register_tornado_shutdown(server)
+        server.listen(options.port)
+        
+        self.io_loop.make_current()
+        self._is_running.set()
+        self.io_loop.start()
+        server.stop()
+
+    @tornado.gen.engine
+    def wait_until_running(self):
+        '''Blocks until the server/io_loop is running.'''
+        self._is_running.wait()
+        yield tornado.gen.Task(self.io_loop.add_callback)
+
+    def wait_for_processing(self):
+        '''Blocks until the current requests are all processed.'''
+        self.event_queue.join()
+
+    def stop(self):
+        self.io_loop.stop()
+
+def main():
+    server = Server()
+    server.run()
     
-    s3handler = S3Handler(event_queue)
-    s3handler.start() 
-    tornado.ioloop.IOLoop.instance().start()
 
 # ============= MAIN ======================== #
 if __name__ == "__main__":

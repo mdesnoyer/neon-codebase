@@ -26,6 +26,7 @@ import test_utils.mock_boto_s3 as boto_mock
 import clickTracker.trackserver 
 import fake_filesystem
 import json
+import logging
 import mock
 from mock import patch
 from mock import MagicMock
@@ -34,6 +35,7 @@ import Queue
 import random
 import socket
 import threading
+import tornado.ioloop
 import time
 import unittest
 import urllib2
@@ -265,7 +267,7 @@ class TestFullServer(unittest.TestCase):
         random.seed(168984)
 
     def tearDown(self):
-        pass
+        tornado.ioloop.IOLoop.instance().stop()
 
     @patch('clickTracker.trackserver.S3Connection')
     def test_send_data_to_server(self, mock_conntype):
@@ -274,11 +276,10 @@ class TestFullServer(unittest.TestCase):
 
         with options._set_bounded('clickTracker.trackserver.port', self.port):
             # Start the server in its own thread
-            server_thread = \
-              threading.Thread(target=clickTracker.trackserver.main)
-            server_thread.daemon = True
-            server_thread.start()
-            time.sleep(10)
+            server = clickTracker.trackserver.Server()
+            server.daemon = True
+            server.start()
+            server.wait_until_running()
 
             # Fire requests to the server      
             nlines = 1000
@@ -290,6 +291,8 @@ class TestFullServer(unittest.TestCase):
                     response = urllib2.urlopen(self.load_url)
                 self.assertEqual(response.getcode(), 200)
 
+            server.wait_for_processing()
+
             # Now check that all the data got sent to S3
             bucket = s3conn.get_bucket('neon-tracker-logs')
             s3_keys = [x for x in bucket.get_all_keys()]
@@ -297,5 +300,7 @@ class TestFullServer(unittest.TestCase):
             
 
 if __name__ == '__main__':
-    utils.neon.InitNeon()
+    utils.neon.InitNeonTest()
+    # Turn off the annoying logs
+    logging.getLogger('tornado.access').propagate = False
     unittest.main()
