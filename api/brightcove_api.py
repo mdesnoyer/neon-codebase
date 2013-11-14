@@ -116,11 +116,11 @@ class BrightcoveApi(object):
         
         tref_id = None ; vref_id = None
         #Get thumbnail name, referenceId params
-        if rt:
-            add_image_val = tornado.escape.json_decode(rt)
+        if rt and not rt.error:
+            add_image_val = tornado.escape.json_decode(rt.body)
             tref_id = add_image_val["result"]["referenceId"]
-        if rv:
-            add_image_val = tornado.escape.json_decode(rv)
+        if rv and not rv.error:
+            add_image_val = tornado.escape.json_decode(rv.body)
             vref_id = add_image_val["result"]["referenceId"]
 
         return ((rt is not None and rv is not None),tref_id,vref_id)
@@ -313,11 +313,11 @@ class BrightcoveApi(object):
        
         tref_id = None ; vref_id = None
         #Get thumbnail name, referenceId params
-        if rt:
-            add_image_val = tornado.escape.json_decode(rt)
+        if rt and not rt.error:
+            add_image_val = tornado.escape.json_decode(rt.body)
             tref_id = add_image_val["result"]["referenceId"]
-        if rv:
-            add_image_val = tornado.escape.json_decode(rv)
+        if rv and not rv.error:
+            add_image_val = tornado.escape.json_decode(rv.body)
             vref_id = add_image_val["result"]["referenceId"]
 
         return ((rt is not None and rv is not None),tref_id,vref_id)
