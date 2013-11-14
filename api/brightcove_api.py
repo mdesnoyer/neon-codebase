@@ -532,6 +532,11 @@ class BrightcoveApi(object):
             try:
                 response = http_client.fetch(req)
                 #verify response 200 OK
+                if not response.error:
+                    data = tornado.escape.json_decode(resp.body)
+                    if 'error' in data and data['error']:
+                        raise tornado.httpclient.HTTPError(
+                            409, data['error'], response)
                 return response
 
             except tornado.httpclient.HTTPError, e:
