@@ -947,7 +947,7 @@ class RequestState(object):
     PROCESSING = "processing"
     REQUEUED   = "requeued"
     FAILED     = "failed"
-    FINISHED   = "internal_video_id"
+    FINISHED   = "finished"
     INT_ERROR  = "internal_error"
 
 class NeonApiRequest(object):

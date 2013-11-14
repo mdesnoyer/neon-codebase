@@ -332,7 +332,8 @@ class AccountHandler(tornado.web.RequestHandler):
                 elif req.state == "processing":
                     client_response["in_progress"] += 1 
 
-                elif req.state == "finished":
+                elif (req.state == "finished" or 
+                      req.state == neondata.RequestState.FINISHED):
                     client_response["finished"] += 1 
                 
                 elif req.state == "failed":
