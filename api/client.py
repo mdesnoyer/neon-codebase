@@ -1288,7 +1288,7 @@ class Worker(multiprocessing.Process):
                 time.sleep(self.SLEEP_INTERVAL * random.random())  
 
           except Exception,e:
-                _log.error("key=worker [%s] msg=exception %s" %(self.pid,e.message))
+                _log.exception("key=worker [%s] msg=exception %s" %(self.pid,e.message))
                 if self.debug:
                       raise
                 time.sleep(self.SLEEP_INTERVAL)
