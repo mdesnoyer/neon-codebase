@@ -35,6 +35,6 @@ try:
         bc.check_feed_and_create_api_requests()
 
 except Exception as e:
-    _log.error('key=create_brightcove_requests msg=Unhandled exception %s' %
-               e)
+    _log.exception('key=create_brightcove_requests msg=Unhandled exception %s'
+                   % e)
 
