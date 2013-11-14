@@ -472,7 +472,7 @@ class BrightcoveApi(object):
                                                     prev_thumbnail=still,
                                                     request_type='topn',
                                                     i_id=i_id)
-                _log.info("creating request for video [topn] %i" % vid)
+                _log.info("creating request for video [topn] %s" % vid)
                 if resp is not None and not resp.error:
                     #Update the videos in customer inbox
                     bc_json = supportServices.neondata.BrightcovePlatform.get_account(self.neon_api_key,i_id)
@@ -641,7 +641,7 @@ class BrightcoveApi(object):
                                                 i_id=i_id)
         if not response or response.error:
             _log.error(('key=create_request_by_video_id '
-                        'msg=Unable to create request for video %i')
+                        'msg=Unable to create request for video %s')
                         % video_id)
             return
         
