@@ -352,7 +352,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
 
             #Validate Request & Insert in to Queue (serialized/json)
             #job_result = None #NeonApiRequest.blocking_conn.get(api_request.key)
-            job_result = yield tornado.gen.Task(BrightcoveApiRequest.get,api_request.api_key,api_request.job_id)
+            job_result = yield tornado.gen.Task(BrightcoveApiRequest.get,
+                                                api_request.api_key,
+                                                api_request.job_id)
             if job_result is not None:
                 response_data = '{"error":"duplicate job"}' 
                 self.write(response_data)
