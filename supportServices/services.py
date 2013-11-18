@@ -798,8 +798,12 @@ class AccountHandler(tornado.web.RequestHandler):
                 #Saved Integration
                 if res:
                     response = bc.verify_token_and_create_requests_for_video(5)
+                    
+                    # TODO: investigate further, ReferenceError: weakly-referenced object no longer exists
+                    # (self.subscribed and cmd == 'PUBLISH')):
                     #Not Async due to tornado redis bug in neon server
                     #yield tornado.gen.Task(bc.verify_token_and_create_requests_for_video,5)
+                    
                     ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     #TODO : Add expected time of completion !
                     video_response = []
@@ -930,7 +934,7 @@ class AccountHandler(tornado.web.RequestHandler):
         #update thumbnail for videos without a current neon thumbnail 
         for vid,new_tid in update_videos.iteritems():
             p_vid = neondata.InternalVideoID.to_external(vid)
-            result = yield tornado.gen.Task(ba.update_thumbnail,p_vid,new_tid)
+            result = yield tornado.gen.Task(bplatform_account.update_thumbnail,p_vid,new_tid)
             if not result:
                 _log.error("key=autopublish msg=update thumbnail failed for api_key=%s vid=%s tid=%s" %(self.api_key,p_vid,new_tid)) 
 
