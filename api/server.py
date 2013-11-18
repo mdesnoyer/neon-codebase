@@ -358,8 +358,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             if job_result is not None:
                 response_data = '{"error":"duplicate job"}' 
                 self.write(response_data)
-                # TODO(sunil): Set an error code?!?
-                #self.set_status(409)
+                self.set_status(409)
                 self.finish()
                 return
             
