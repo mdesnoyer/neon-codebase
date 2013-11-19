@@ -897,8 +897,7 @@ class BrightcoveApi(object):
                     else:
                         _log.info("key=async_check_thumbnail msg= entry for url %s exists already"%thumb_url)
                 else:
-                    _log.error("key=async_check_thumbnail msg=failed to fetch tid" \ 
-                            "for image url %s md5 %s"%(thumb_url,t_md5))
+                    _log.error("key=async_check_thumbnail msg=failed to fetch tidi for image url %s md5 %s"%(thumb_url,t_md5)) 
             else:
                 _log.error("key=async_check_thumbnail msg=thumbnail not downloaded %s" %thumb_url)
             
