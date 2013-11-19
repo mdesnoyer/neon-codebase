@@ -561,7 +561,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 result[vid] = None #indicate job not found
                 continue
 
-            status = neondata.RequestState.PROCESSING #"processing"
+            status = neondata.RequestState.PROCESSING 
             if request.state in incomplete_states:
                 t_urls = []; thumbs = []
                 t_urls.append(request.previous_thumbnail)

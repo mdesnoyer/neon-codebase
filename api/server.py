@@ -245,7 +245,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     yt.add_video(vid,job_id)
                     yt.save(update_account)
             else:
-                _log.error("key=thumbnail_handler update yt account  msg=account not found or api key error")
+                _log.error("key=thumbnail_handler update yt account" \ 
+                        " msg=account not found or api key error")
                 self.set_status(502)
                 self.finish()
                 return
@@ -255,7 +256,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 nplatform.add_video(vid,job_id)
                 nplatform.save(update_account)
             else:
-                _log.error("key=thumbnail_handler update platform account  msg=account not found or api key error")
+                _log.error("key=thumbnail_handler update platform account" \
+                        " msg=account not found or api key error")
                 self.write("ccount not found or api key error")
                 self.set_status(502)
                 self.finish()
