@@ -619,6 +619,7 @@ class ProcessVideo(object):
     def finalize_brightcove_request(self,result,error=False):
        
         api_key = self.request_map[properties.API_KEY]  
+        i_id = self.request_map[properties.INTEGRATION_ID]
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
         video_id = self.request_map[properties.VIDEO_ID]
         bc_request = BrightcoveApiRequest.get(api_key,job_id)
@@ -675,7 +676,15 @@ class ProcessVideo(object):
         self.thumbnails.append(thumb)
 
         #2 Push thumbnail in to brightcove account
-        if bc_request.autosync:
+        autosync = bc_request.autosync
+        jdata = BrightcovePlatform.get_account(api_key,i_id)
+        ba = BrightcovePlatform.create(jdata)
+        if not ba:
+            _log.error("key=finalize_brightcove_request msg=Brightcove account doesnt exists a_id=%s i_id=%s"%(api_key,i_id))
+        else: 
+            autosync = ba.auto_update 
+        
+        if autosync:
             rtoken  = self.request_map[properties.BCOVE_READ_TOKEN]
             wtoken  = self.request_map[properties.BCOVE_WRITE_TOKEN]
             pid = self.request_map[properties.PUBLISHER_ID]
@@ -704,7 +713,6 @@ class ProcessVideo(object):
         #TODO: The newly uploaded thumbnail's url isn't available immidiately, what should be done ?
 
         #4 Save the Thumbnail URL and ID to Mapper DB
-        i_id = self.request_map[properties.INTEGRATION_ID]
         self.save_thumbnail_metadata("brightcove",i_id)
 
         if ret:
@@ -774,7 +782,7 @@ class ProcessVideo(object):
         #TODO: Standalone youtube requests ?
 
         #2 Push thumbnail in to youtube account
-        if bc_request.autosync:
+        if yt_request.autosync:
             rtoken  = self.request_map["refresh_token"]
             atoken  = self.request_map["access_token"]
             expiry  = self.request_map["token_expiry"]
@@ -1249,7 +1257,6 @@ class Worker(multiprocessing.Process):
                         api_request.model_version = self.model_version 
                         api_request.save()
                     ts = str(time.time())
-                    #_log.info("key=worker [%s] msg=request %s" % (self.pid,NeonApiRequest.get_request(api_key,job_id)) ) 
                     _log.info("key=worker [%s] msg=processing request %s %s" %(self.pid,dl.job_params[properties.REQUEST_UUID_KEY],str(time.time())))
 
                 except Exception,e:
@@ -1271,8 +1278,7 @@ class Worker(multiprocessing.Process):
 
                 if self.debug:
                     un_objs = gc.collect()
-                    print 'Unreachable objects:', un_objs
-                    print "Remaining Garbage:"
+                    _log.debug('Unreachable objects:%r' %un_objs)
                     pprint.pprint(gc.garbage)
 
                 if options.profile:    

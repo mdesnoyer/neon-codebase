@@ -766,11 +766,11 @@ class AccountHandler(tornado.web.RequestHandler):
 
         try:
             a_id = self.request.uri.split('/')[-2]
-            i_id = self.get_argument("integration_id")
-            p_id = self.get_argument("publisher_id")
-            rtoken = self.get_argument("read_token")
-            wtoken = self.get_argument("write_token")
-            autosync = self.get_argument("auto_update")
+            i_id = InputSanitizer.to_string(self.get_argument("integration_id"))
+            p_id = InputSanitizer.to_string(self.get_argument("publisher_id"))
+            rtoken = InputSanitizer.to_string(self.get_argument("read_token"))
+            wtoken = InputSanitizer.to_string(self.get_argument("write_token"))
+            autosync = InputSanitizer.to_bool(self.get_argument("auto_update"))
 
         except Exception,e:
             _log.error("key=create brightcove account msg= %s" %e)
