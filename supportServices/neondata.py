@@ -566,6 +566,7 @@ class BrightcovePlatform(AbstractPlatform):
     
     def __init__(self, a_id, i_id, p_id=None, rtoken=None, wtoken=None,
                  auto_update=False, last_process_date=None, abtest=False):
+        ''' On every request, the job id is saved '''
         AbstractPlatform.__init__(self, abtest)
         self.neon_api_key = NeonApiKey.generate(a_id)
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
@@ -575,13 +576,9 @@ class BrightcovePlatform(AbstractPlatform):
         self.read_token = rtoken
         self.write_token = wtoken
         self.auto_update = auto_update 
-        
-        '''
-        On every request, the job id is saved
-        videos[video_id] = job_id 
-        '''
         self.last_process_date = last_process_date #The publish date of the last processed video - UTC timestamp 
         self.linked_youtube_account = False
+        self.account_created = time.time() #UTC timestamp of account creation
 
     def get_ovp(self):
         return "brightcove"
@@ -614,7 +611,25 @@ class BrightcovePlatform(AbstractPlatform):
         bc = api.brightcove_api.BrightcoveApi(
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update)
-        
+       
+        #Update the database with video first
+        #Get previous thumbnail and new thumb
+        modified_thumbs = [] 
+        new_thumb, old_thumb = ThumbnailIDMapper.enable_thumbnail(
+                                    thumb_mappings, new_tid)
+        modified_thumbs.append(new_thumb)
+        modified_thumbs.append(old_thumb)
+        if new_thumb is not None and old_thumb is not None: 
+            res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
+                                        modified_thumbs)  
+            if not res:
+                _log.error("key=update_thumbnail msg=[pre-update] ThumbnailIDMapper save_all failed for %s" %new_tid)
+                callback(False)
+                return
+        else:
+            callback(False)
+            return
+
         #Get video metadata
         i_vid = InternalVideoID.generate(self.neon_api_key,platform_vid)
         vmdata = yield tornado.gen.Task(VideoMetadata.get,i_vid)
@@ -649,17 +664,23 @@ class BrightcovePlatform(AbstractPlatform):
             callback(tref)
             return
 
-        if tref:
-            #Get previous thumbnail and new thumb
-            modified_thumbs = ThumbnailIDMapper.enable_thumbnail(
-                thumb_mappings, new_tid)
-            if modified_thumbs:
+        if not tref:
+            # Thumbnail was not update via the brightcove api, revert the DB changes
+            modified_thumbs = []
+            old_tid = old_thumb.thumbnail_metadata["thumbnail_id"] #get old thumbnail tid to revert to, this was the tid that was previously live before this request
+            new_thumb, old_thumb = ThumbnailIDMapper.enable_thumbnail(
+                                    thumb_mappings, old_tid)
+            modified_thumbs.append(new_thumb)
+            modified_thumbs.append(old_thumb)
+            
+            if new_thumb is not None and old_thumb is not None: 
                 res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
                                              modified_thumbs)  
                 if res:
                     callback(True)
                 else:
-                    _log.error("key=update_thumbnail msg=ThumbnailIDMapper save_all failed for %s" %new_tid)
+                    _log.error("key=update_thumbnail msg=ThumbnailIDMapper save_all failed for video=%s cur_db_tid=%s cur_bcove_tid=%s, DB not reverted" %(i_vid,new_tid,old_tid))
+                    #The tid that was passed to the method is reflected in the DB, but not on Brightcove. the old_tid is the current bcove thumbnail
                     callback(False)
             else:
                 callback(False)
@@ -696,7 +717,7 @@ class BrightcovePlatform(AbstractPlatform):
         bc = api.brightcove_api.BrightcoveApi(
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update,
-            self.last_process_date)
+            self.last_process_date,account_created=self.account_created)
         bc.create_neon_api_requests(self.integration_id)    
 
     '''
@@ -759,10 +780,17 @@ class BrightcovePlatform(AbstractPlatform):
         ba.videos = params['videos']
         ba.last_process_date = params['last_process_date'] 
         ba.linked_youtube_account = params['linked_youtube_account']
+        
+        #backward compatibility
         if params.has_key('abtest'):
             ba.abtest = params['abtest'] 
-        #for key in params:
-        #    ba.__dict__[key] = params[key]
+      
+        if not params.has_key('account_created'):
+            ba.account_created = None
+        
+        #populate rest of keys
+        for key in params:
+            ba.__dict__[key] = params[key]
         return ba
 
     @classmethod
@@ -1450,20 +1478,20 @@ class ThumbnailIDMapper(object):
 
     @staticmethod
     def enable_thumbnail(mapper_objs,new_tid):
-        mod_objs = [] 
+        new_thumb_obj = None; old_thumb_obj = None
         for mapper_obj in mapper_objs:
             #set new tid as chosen
             if mapper_obj.thumbnail_metadata["thumbnail_id"] == new_tid: 
                 mapper_obj.thumbnail_metadata["chosen"] = True
-                mod_objs.append(mapper_obj)
+                new_thumb_obj = mapper_obj 
             else:
                 #set chosen=False for old tid
                 if mapper_obj.thumbnail_metadata["chosen"] == True:
                     mapper_obj.thumbnail_metadata["chosen"] = False 
-                    mod_objs.append(mapper_obj)
+                    old_thumb_obj = mapper_obj 
 
         #return only the modified thumbnail objs
-        return mod_objs
+        return new_thumb_obj,old_thumb_obj 
 
     @classmethod
     def save_integration(cls,mapper_objs,callback=None):

@@ -1,4 +1,7 @@
-''' Submit jobs to the server '''
+'''
+Brightcove API Interface class
+'''
+
 import os.path
 import sys
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -46,7 +49,7 @@ class BrightcoveApi(object):
     
     def __init__(self, neon_api_key, publisher_id=0, read_token=None,
                  write_token=None, autosync=False, publish_date=None,
-                 local=True):
+                 local=True,account_created=None):
         self.publisher_id = publisher_id
         self.neon_api_key = neon_api_key
         self.read_token = read_token
@@ -63,6 +66,7 @@ class BrightcoveApi(object):
         
         self.THUMB_SIZE = 120,90
         self.STILL_SIZE = 480,360
+        self.account_created = account_created
 
     def format_get(self, url, data=None):
         if data is not None:
@@ -413,6 +417,8 @@ class BrightcoveApi(object):
     
         '''Get videos after the signup date, Iterate until you hit video the publish date
         optimize with the latest video processed which is stored in the account
+
+        NOTE: using customFields or specifying video_fields creates API delays
         '''
 
         data = {}
@@ -420,7 +426,6 @@ class BrightcoveApi(object):
         data['token'] = self.read_token
         data['media_delivery'] = 'http'
         data['output'] = output
-        #data['video_fields'] = 'customFields,id,tags,FLVURL,thumbnailURL,videostillURL,publishedDate,name,videoFullLength' #creates api delay
         data['page_number'] = page_no 
         data['page_size'] = page_size
         data['sort_by'] = 'publish_date'
@@ -577,7 +582,8 @@ class BrightcoveApi(object):
         
             for item in items:
                 pdate = int(item['publishedDate']) / 1000
-                if pdate > self.last_publish_date:
+                check_date = self.account_created if self.account_created is not None else self.last_publish_date
+                if pdate > check_date:
                     items_to_process.append(item)
                     count += 1
 
