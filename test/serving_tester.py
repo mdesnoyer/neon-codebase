@@ -88,21 +88,13 @@ class TestServingSystem(unittest.TestCase):
                 pass
 
     def setUp(self):
-        # Clear the stats database
+        ClearStatsDb()
+
         conn = sqldb.connect(user=options.stats_db_user,
                              passwd=options.stats_db_pass,
                              host='localhost',
                              db=options.stats_db)
         self.statscursor = conn.cursor()
-        stats.db.execute(self.statscursor,
-                         '''DELETE from hourly_events''')
-        stats.db.execute(self.statscursor,
-                         '''DELETE from last_update''')
-        stats.db.execute(
-            self.statscursor,
-            'REPLACE INTO last_update (tablename, logtime) VALUES (%s, %s)',
-            ('hourly_events', datetime.utcfromtimestamp(0)))
-        conn.commit()
 
         # Clear the s3 bucket
         s3conn = S3Connection()
@@ -208,12 +200,12 @@ class TestServingSystem(unittest.TestCase):
         Outputs:
         (loads, clicks)
         '''
-        stats = stats.db.execute(
+        response = stats.db.execute(
             self.statscursor,
             '''SELECT sum(loads), sum(clicks) from hourly_events
             where thumbnail_id = %s''', (thumb_id,))
-        stats = stats.fetchall()
-        return (stats[0][0], stats[0][1])
+        response = self.statscursor.fetchall()
+        return (response[0][0], response[0][1])
         
 
     #Add helper functions to add stuff to the video database
@@ -291,7 +283,7 @@ class TestServingSystem(unittest.TestCase):
             ('http://vid0_thumb1.jpg', 20, 1),
             ('http://vid0_thumb2.jpg', 1500, 500)])
 
-        # The neon thumb (0) should be turned off
+        # The neon thumb (0) should be turned off now
         self.assertDirectiveCaptured(('acct0_vid0',
                                       [('vid0_thumb0', 0.00),
                                        ('vid0_thumb1', 0.00),
@@ -354,6 +346,23 @@ class DirectiveCaptureHandler(tornado.web.RequestHandler):
         data = json.loads(self.request.body)
         self.q.put(data['d'])
 
+def ClearStatsDb():
+    # Clear the stats database
+    conn = sqldb.connect(user=options.stats_db_user,
+                         passwd=options.stats_db_pass,
+                         host='localhost',
+                         db=options.stats_db)
+    statscursor = conn.cursor()
+    stats.db.execute(statscursor,
+                     '''DELETE from hourly_events''')
+    stats.db.execute(statscursor,
+                     '''DELETE from last_update''')
+    stats.db.execute(
+        statscursor,
+        'REPLACE INTO last_update (tablename, logtime) VALUES (%s, %s)',
+        ('hourly_events', datetime.utcfromtimestamp(0)))
+    conn.commit()
+
 def LaunchStatsDb():
     '''Launches the stats db, which is a mysql interface.
 
@@ -378,6 +387,7 @@ def LaunchStatsDb():
         raise
 
     cursor = conn.cursor()
+    ClearStatsDb()    
     stats.db.create_tables(cursor)
     
     _log.info('Connection to stats db is good')
@@ -439,9 +449,11 @@ def main():
 
     # Turn off the annoying logs
     logging.getLogger('tornado.access').propagate = False
-    #logging.getLogger('mrjob.local').propagate = False
+    logging.getLogger('mrjob.local').propagate = False
     logging.getLogger('mrjob.config').propagate = False
     logging.getLogger('mrjob.conf').propagate = False
+    logging.getLogger('mrjob.runner').propagate = False
+    logging.getLogger('mrjob.sim').propagate = False
 
     LaunchStatsDb()
     LaunchVideoDb()

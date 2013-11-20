@@ -16,6 +16,7 @@ if sys.path[0] <> base_path:
 import json
 import os
 import Queue
+import multiprocessing
 import shortuuid
 import threading
 import time
@@ -108,28 +109,30 @@ class TrackerDataHandler(tornado.web.RequestHandler):
 
 class LogLines(TrackerDataHandler):
 
-    def initialize(self, q):
+    def initialize(self, q, watcher):
         self.q = q
+        self.watcher = watcher
     
     ''' Track call logger '''
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
-        try:
-            tracker_data = self.parse_tracker_data()
-        except Exception, e:
-            _log.exception("key=get_track msg=%s" %e) 
-            self.set_status(500)
-            self.finish()
-            return
+        with self.watcher.activate():
+            try:
+                tracker_data = self.parse_tracker_data()
+            except Exception, e:
+                _log.exception("key=get_track msg=%s" %e) 
+                self.set_status(500)
+                self.finish()
+                return
 
-        data = tracker_data.to_json()
-        try:
-            self.q.put(data)
-            self.set_status(200)
-        except Exception, e:
-            _log.exception("key=loglines msg=Q error %s" %e)
-            self.set_status(500)
-        self.finish()
+            data = tracker_data.to_json()
+            try:
+                self.q.put(data)
+                self.set_status(200)
+            except Exception, e:
+                _log.exception("key=loglines msg=Q error %s" %e)
+                self.set_status(500)
+            self.finish()
 
     '''
     Method to check memory on the node
@@ -156,7 +159,7 @@ class TestTracker(TrackerDataHandler):
 # S3 Handler thread 
 ###########################################
 class S3Handler(threading.Thread):
-    def __init__(self, dataQ):
+    def __init__(self, dataQ, watcher):
         super(S3Handler, self).__init__()
         S3_ACCESS_KEY = 'AKIAJ5G2RZ6BDNBZ2VBA' 
         S3_SECRET_KEY = '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'
@@ -165,6 +168,7 @@ class S3Handler(threading.Thread):
         self.dataQ = dataQ
         self.last_upload_time = time.time()
         self.daemon = True
+        self.watcher = watcher
 
         self.s3bucket = self.s3conn.lookup(options.bucket_name)
         if self.s3bucket is None:
@@ -174,7 +178,6 @@ class S3Handler(threading.Thread):
         try:
             k = self.s3bucket.new_key(shortuuid.uuid())
             k.set_contents_from_string(data)
-            self.last_upload_time = time.time()
         except boto.exception.BotoServerError as e:
             _log.exception("key=upload_to_s3 msg=S3 Error %s" % e)
             self.save_to_disk(data)
@@ -195,9 +198,15 @@ class S3Handler(threading.Thread):
         nlines = 0
         while True:
             try:
-                data += self.dataQ.get()
-                data += '\n'
-                nlines += 1
+                was_empty = False
+                try:
+                    new_data = self.dataQ.get(True, options.flush_interval)
+                    if data != '':
+                        data += '\n'
+                    data += new_data
+                    nlines += 1
+                except Queue.Empty:
+                    was_empty = True
 
                 # If we have enough data or it's been too long, upload
                 if (nlines >= options.batch_count or 
@@ -205,12 +214,15 @@ class S3Handler(threading.Thread):
                      time.time())):
                     if nlines > 0:
                         _log.info('Uploading %i lines to S3' % nlines)
-                        self.upload_to_s3(data)
-                        data = ''
-                        nlines = 0
+                        with self.watcher.activate():
+                            self.upload_to_s3(data)
+                            data = ''
+                            nlines = 0
+                            self.last_upload_time = time.time()
             except Exception as e:
                 _log.exception("key=s3_uploader msg=%s" % e)
-            self.dataQ.task_done()
+            if not was_empty:
+                self.dataQ.task_done()
 
 ###########################################
 # Create Tornado server application
@@ -221,19 +233,30 @@ class Server(threading.Thread):
 
     Or just call run() directly to have it startup and block.
     '''
-    def __init__(self):
+    def __init__(self, watcher=utils.ps.ActivityWatcher()):
+        '''Create the server. 
+
+        Inputs:
+        
+        watcher - Optional synchronization object that can be used to
+        know when the server is active.
+        
+        '''
         super(Server, self).__init__()
         self.event_queue = Queue.Queue()
-        self.s3handler = S3Handler(self.event_queue)
+        self.s3handler = S3Handler(self.event_queue, watcher)
         self.io_loop = tornado.ioloop.IOLoop()
         self._is_running = threading.Event()
+        self._watcher = watcher
 
     def run(self):
         self.s3handler.start()
 
         application = tornado.web.Application([
-            (r"/",LogLines, dict(q=self.event_queue)),
-            (r"/track",LogLines, dict(q=self.event_queue)),
+            (r"/", LogLines, dict(q=self.event_queue, 
+                                  watcher=self._watcher)),
+            (r"/track",LogLines, dict(q=self.event_queue,
+                                      watcher=self._watcher)),
             (r"/test",TestTracker),
             ])
         server = tornado.httpserver.HTTPServer(application,
@@ -259,8 +282,8 @@ class Server(threading.Thread):
     def stop(self):
         self.io_loop.stop()
 
-def main():
-    server = Server()
+def main(watcher=utils.ps.ActivityWatcher()):
+    server = Server(activity_counter)
     server.run()
     
 

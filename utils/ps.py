@@ -4,18 +4,17 @@ Copyright: 2013 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
 
+from contextlib import contextmanager
 import logging
 import os
 import platform
+import multiprocessing
 import signal
 import subprocess
 import time
 import tornado.ioloop
 
-_log = logging.getLogger(__name__)
-
-def reap_child(signal, frame):
-    print 'reaping'
+_log = logging.getLogger(__name__)    
 
 def get_child_pids():
     '''Returns a list of pids for child processes.'''
@@ -132,3 +131,44 @@ def register_tornado_shutdown(server):
         _log.warning('Can only register signal in the main thread. Skipping. '
                      '%s' % e)
         
+class ActivityWatcher:
+    '''A multiprocess shared object to keep track of when a process is active.
+
+    To use it, in your process:
+    with activity_counter.activate():
+      do stuff
+
+    Then, another process can call the other functions to find out if
+    that process is in the activate() block.
+    
+    '''
+    def __init__(self):
+        self.value = multiprocess.Value('i', 0)
+        self.condition = multiprocess.Condition()
+    
+    @contextmanager
+    def activate(self):
+        '''A context manager to signal when an activity is happening.'''
+        with self.get_lock():
+            self.value.value += 1
+
+        yield
+
+        with self.value.get_lock():
+            self.value.value -= 1
+            with self.condition:
+                self.condition.notify_all()
+
+    def is_active(self):
+        '''Returns true if an activity is going on.'''
+        return self.value.value > 0
+
+    def is_idle(self):
+        '''Returns true if the process is idle.'''
+        return not self.is_active()
+
+    def wait_for_idle(self):
+        '''Join until the process is idle.'''
+        while self.is_active():
+            with self.condition:
+                self.condition.wait()

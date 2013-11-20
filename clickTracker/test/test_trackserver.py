@@ -126,6 +126,45 @@ class TestS3Handler(unittest.TestCase):
                 self.assertEqual(parsed['img'], 'i1.jpg')
             else:
                 self.fail('Bad action field %s' % parsed['a'])
+
+    @patch('clickTracker.trackserver.S3Connection')
+    def test_log_to_s3_with_timeout(self, mock_conntype):
+        '''Make sure that a package is sent to S3 after a timeout.'''
+        conn = boto_mock.MockConnection()
+        mock_conntype.return_value = conn
+
+        # Create the S3 bucket for the logs
+        bucket = conn.create_bucket('neon-tracker-logs')
+
+        with options._set_bounded('clickTracker.trackserver.flush_interval',
+                                  0.5):
+            
+            # Start a thread to handle the data
+            dataQ = Queue.Queue()
+            handle_thread = clickTracker.trackserver.S3Handler(dataQ)
+            handle_thread.start()
+
+            # Send the data
+            nlines = 56
+            for i in range(nlines):
+                cd = clickTracker.trackserver.TrackerData(
+                    "load", 1, "flashonlytracker", time.time(),
+                    time.time(), "http://localhost",
+                    "127.0.0.1", ['i1.jpg','i2.jpg'],'v1')
+                dataQ.put(cd.to_json())
+            
+            # Wait for the timeout
+            time.sleep(0.6)
+
+        # Check that the file is in the bucket
+        s3_keys = [x for x in bucket.get_all_keys()]
+        self.assertEqual(len(s3_keys), 1)
+
+        # Make sure that all the data is in the file
+        nlines = 0
+        for line in s3_keys[0].get_contents_as_string().split('\n'):
+            nlines += 1
+        self.assertEqual(nlines, 56)
         
     @patch('clickTracker.trackserver.S3Connection')
     def test_log_to_disk_on_connection_error(self, mock_conntype):
