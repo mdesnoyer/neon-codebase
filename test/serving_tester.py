@@ -50,6 +50,7 @@ import urllib
 import urllib2
 import utils.neon
 import utils.ps
+from utils import statemon
 
 from utils.options import define, options
 
@@ -65,6 +66,7 @@ define('bc_directive_port', default=7212,
 _log = logging.getLogger(__name__)
 
 _erase_local_log_dir = multiprocessing.Event()
+_activity_watcher = utils.ps.ActivityWatcher()
 
 class TestServingSystem(unittest.TestCase):
 
@@ -110,10 +112,7 @@ class TestServingSystem(unittest.TestCase):
         self.directives_captured = []
         
         # Clear the video database
-        neondata._erase_all_data()
-
-        # Add a couple of bare bones entries to the video db?
-        self.setup_videodb()
+        #neondata._erase_all_data()
 
 
     def tearDown(self):
@@ -164,18 +163,47 @@ class TestServingSystem(unittest.TestCase):
             if response.getcode() !=200 :
                 _log.debug("Tracker request not submitted")
 
-    def assertDirectiveCaptured(self, directive, timeout=20):
+    def waitToFinish(self):
+        '''Waits until the processing is finished.'''
+        # Waits until the trackserver is done
+        while (_activity_watcher.is_active() or
+               statemon.state.get('clickTracker.trackserver.buffer_size')>0 or
+               statemon.state.get('clickTracker.trackserver.qsize') > 0):
+            _activity_watcher.wait_for_idle()
+
+        # Give the stats processor enough time to kick off
+        time.sleep(options.get('stats.stats_processor.run_period') + 0.1)
+
+        # Wait for activity to stop again
+        _activity_watcher.wait_for_idle()
+
+    def waitForMastermind(self):
+        '''Waits until mastermind is finished processing.'''
+        sleep_time = max(
+            options.get('mastermind.server.stats_db_polling_delay'),
+            options.get('mastermind.server.video_db_polling_delay')) + 0.1
+        time.sleep(sleep_time)
+
+        _activity_watcher.wait_for_idle()
+
+    def assertDirectiveCaptured(self, directive, timeout=None):
         '''Verifies that a given directive is received.
 
         Inputs:
         directive - (video_id, [(thumb_id, frac)])
-        timeout - How long to wait for the directive
+        timeout - (optional) How long to wait for the directive
         '''
-        deadline = time.time() + timeout
         
         # Check the directives we already know about
-        if directive in self.directives_captured:
-            return
+        for saw_directive in self.directives_captured:
+            if directivesEqual(directive, saw_directive):
+                return
+
+        if timeout is None:
+            self.fail('Directive %s not found. Saw %s' % 
+                      (directive, self.directives_captured)) 
+
+        deadline = time.time() + timeout
 
         while time.time() < deadline:
             try:
@@ -209,13 +237,14 @@ class TestServingSystem(unittest.TestCase):
         
 
     #Add helper functions to add stuff to the video database
-    def setup_videodb(self, a_id='acct0',
-            i_id='testintegration1',n_vids=1,n_thumbs=3):
+    def add_account_to_videodb(self, account_id='acct0',
+                               integration_id='testintegration1',
+                               n_vids=1, n_thumbs=3):
         '''Creates a basic account in the video db.
 
         This account has account id a_id, integration id i_id, a
         number of video ids <a_id>_vid<i> for i in 0->n-1, and thumbs
-        vid<i>_thumb<j> for j in 0->m-1. Thumb m-1 is brighcove, while
+        <a_id>_vid<i>_thumb<j> for j in 0->m-1. Thumb m-1 is brighcove, while
         the rest are neon. 
 
         '''
@@ -223,41 +252,43 @@ class TestServingSystem(unittest.TestCase):
         video_ids = ["vid%i" % i for i in range(n_vids)]
 
         # create neon user account
-        nu = neondata.NeonUserAccount(a_id)
+        nu = neondata.NeonUserAccount(account_id)
         api_key = nu.neon_api_key
         nu.save()
 
         # create brightcove platform account
-        bp = neondata.BrightcovePlatform(a_id, i_id, abtest=True) 
+        bp = neondata.BrightcovePlatform(account_id, integration_id,
+                                         abtest=True) 
         bp.save()
 
         # Create Request objects  <-- not required? 
         #TODO: ImageMD5Mapper & TID generator 
         # Add fake video data in to DB
         for vid in video_ids:
-            i_vid = '%s_%s' % (a_id, vid)
+            i_vid = '%s_%s' % (account_id, vid)
             bp.add_video(i_vid,"dummy_request_id")
             tids = []; thumbnail_url_mappers=[];thumbnail_id_mappers=[]  
             # fake thumbnails for videos
             for t in range(n_thumbs):
                 #Note: assume last image is bcove
                 ttype = "neon" if t < (n_thumbs -1) else "brightcove"
-                tid = '%s_thumb%i' % (vid, t) 
+                tid = '%s_%s_thumb%i' % (account_id, vid, t) 
                 url = 'http://%s.jpg' % tid 
                 urls = [] ; urls.append(url)
-                tdata = neondata.ThumbnailMetaData(tid,urls,
-                        time.time(),480,360,ttype,0,0,True,False,rank=t)
+                tdata = neondata.ThumbnailMetaData(
+                    tid, urls, time.time(), 480, 360,
+                    ttype, 0, 0, True, False, rank=t)
                 tids.append(tid)
                 
                 # ID Mappers (ThumbIDMapper,ImageMD5Mapper,URLMapper)
-                url_mapper = neondata.ThumbnailURLMapper(url,tid)
+                url_mapper = neondata.ThumbnailURLMapper(url, tid)
                 id_mapper = neondata.ThumbnailIDMapper(
                     tid, i_vid, tdata.to_dict())
                 thumbnail_url_mappers.append(url_mapper)
                 thumbnail_id_mappers.append(id_mapper)
 
             vmdata = neondata.VideoMetadata(i_vid,tids,
-                    "job_id","http://testvideo.mp4",10,0,0,i_id)
+                    "job_id","http://testvideo.mp4", 10, 0, 0, integration_id)
             retid = neondata.ThumbnailIDMapper.save_all(thumbnail_id_mappers)
             returl = neondata.ThumbnailURLMapper.save_all(
                 thumbnail_url_mappers)
@@ -270,32 +301,38 @@ class TestServingSystem(unittest.TestCase):
 
     #TODO: Write the actual tests
     def test_initial_directives_received(self):
-        self.assertDirectiveCaptured(('acct0_vid0',
-                                      [('vid0_thumb0', 0.85),
-                                       ('vid0_thumb1', 0.00),
-                                       ('vid0_thumb2', 0.15)]))
+        self.add_account_to_videodb('init_account0', 'init_int0', 1, 3)
+        self.assertDirectiveCaptured(('init_account0_vid0',
+                                      [('init_account0_vid0_thumb0', 0.85),
+                                       ('init_account0_vid0_thumb1', 0.00),
+                                       ('init_account0_vid0_thumb2', 0.15)]),
+            timeout=5)
 
     def test_video_got_bad_stats(self):
+        self.add_account_to_videodb('bad_stats0', 'bad_stats_int0', 1, 3)
+        
         # Simulate loads and clicks to the point that the thumbnail
         # should turn off.
         self.simulateEvents([
-            ('http://vid0_thumb0.jpg', 8500, 100),
-            ('http://vid0_thumb1.jpg', 20, 1),
-            ('http://vid0_thumb2.jpg', 1500, 500)])
+            ('http://bad_stats0_vid0_thumb0.jpg', 8500, 100),
+            ('http://bad_stats0_vid0_thumb1.jpg', 20, 1),
+            ('http://bad_stats0_vid0_thumb2.jpg', 1500, 500)])
+
+        self.waitToFinish()
 
         # The neon thumb (0) should be turned off now
-        self.assertDirectiveCaptured(('acct0_vid0',
-                                      [('vid0_thumb0', 0.00),
-                                       ('vid0_thumb1', 0.00),
-                                       ('vid0_thumb2', 1.00)]),
-            timeout=600)
+        self.assertDirectiveCaptured(('bad_stats0_vid0',
+                                      [('bad_stats0_vid0_thumb0', 0.00),
+                                       ('bad_stats0_vid0_thumb1', 0.00),
+                                       ('bad_stats0_vid0_thumb2', 1.00)]),
+            timeout=5)
 
         # Check that the database got the stats correctly.
-        self.assertEqual(self.getStats('vid0_thumb0'),
+        self.assertEqual(self.getStats('bad_stats0_vid0_thumb0'),
                          (8500, 100))
-        self.assertEqual(self.getStats('vid0_thumb1'),
+        self.assertEqual(self.getStats('bad_stats0_vid0_thumb1'),
                          (20, 1))
-        self.assertEqual(self.getStats('vid0_thumb2'),
+        self.assertEqual(self.getStats('bad_stats0_vid0_thumb2'),
                          (1500, 500))
 
 def directivesEqual(a, b):
@@ -423,25 +460,27 @@ def LaunchVideoDb():
 def LaunchSupportServices():
     proc = multiprocessing.Process(target=supportServices.services.main)
     proc.start()
-    _log.info('Launching Support Services with pid %i' % proc.pid)
+    _log.warn('Launching Support Services with pid %i' % proc.pid)
 
 def LaunchMastermind():
-    proc = multiprocessing.Process(target=mastermind.server.main)
+    proc = multiprocessing.Process(target=mastermind.server.main,
+                                   args=(_activity_watcher,))
     proc.start()
-    _log.info('Launching Mastermind with pid %i' % proc.pid)
+    _log.warn('Launching Mastermind with pid %i' % proc.pid)
 
 def LaunchClickLogServer():
     proc = multiprocessing.Process(
-        target=clickTracker.trackserver.main)
+        target=clickTracker.trackserver.main,
+        args=(_activity_watcher,))
     proc.start()
-    _log.info('Launching click log server with pid %i' % proc.pid)
+    _log.warn('Launching click log server with pid %i' % proc.pid)
 
 def LaunchStatsProcessor():
     proc = multiprocessing.Process(
         target=stats.stats_processor.main,
-        args=(_erase_local_log_dir,))
+        args=(_erase_local_log_dir, _activity_watcher))
     proc.start()
-    _log.info('Launching stats processor with pid %i' % proc.pid)
+    _log.warn('Launching stats processor with pid %i' % proc.pid)
 
 def main():
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
@@ -449,6 +488,7 @@ def main():
 
     # Turn off the annoying logs
     logging.getLogger('tornado.access').propagate = False
+    logging.getLogger('tornado.application').propagate = False
     logging.getLogger('mrjob.local').propagate = False
     logging.getLogger('mrjob.config').propagate = False
     logging.getLogger('mrjob.conf').propagate = False

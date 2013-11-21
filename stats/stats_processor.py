@@ -144,7 +144,7 @@ class DataDirectory:
 
     
 
-def main(erase_local_data=None):
+def main(erase_local_data=None, activity_watcher=utils.ps.ActivityWatcher()):
     '''The main routine.
 
     erase_local_data - An optional mutiprocessing.Event() that when
@@ -183,13 +183,15 @@ def main(erase_local_data=None):
                 
                     _log.debug(('Looking for new log files to process '
                                'from %s') % options.input)
-                    with job.make_runner() as runner:
-                        n_files = data_dir.count_files(runner)
-                        if (n_files - known_input_files) >= options.min_new_files:
-                            _log.warn('Running stats processing job')
-                            runner.run()
-                            known_input_files = n_files
-                            runner.print_counters()
+                    with activity_watcher.activate():
+                        with job.make_runner() as runner:
+                            n_files = data_dir.count_files(runner)
+                            if ((n_files - known_input_files) >= 
+                                options.min_new_files):
+                                _log.info('Running stats processing job')
+                                runner.run()
+                                known_input_files = n_files
+                                runner.print_counters()
                 except Exception as e:
                     _log.exception('Unhandled error when processing stats: %s'
                                    % e)

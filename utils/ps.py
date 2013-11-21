@@ -102,27 +102,31 @@ def register_tornado_shutdown(server):
     Inputs:
     server - http server instance
     '''
+    try:
+        cur_ioloop = tornado.ioloop.IOLoop.current()
+    except ValueError:
+        cur_ioloop = tornado.ioloop.IOLoop.instance()
+    
     def shutdown():
         server.stop()
-
-        io_loop = tornado.ioloop.IOLoop.instance()
 
         deadline = time.time() + 3
 
         def stop_loop():
             now = time.time()
-            if now < deadline and (io_loop._callbacks or io_loop._timeouts):
-                io_loop.add_timeout(now + 1, stop_loop)
+            if now < deadline and (cur_ioloop._callbacks or
+                                   cur_ioloop._timeouts):
+                cur_ioloop.add_timeout(now + 1, stop_loop)
                 
             else:
-                io_loop.stop()
+                cur_ioloop.stop()
                 _log.info('Shutdown')
         stop_loop()
         
     def sighandler(sig, frame):
         _log.warn('Received signal %s. Shutting down pid %i' % (sig,
                                                                 os.getpid()))
-        tornado.ioloop.IOLoop.instance().add_callback_from_signal(shutdown)
+        cur_ioloop.add_callback_from_signal(shutdown)
 
     try:
         signal.signal(signal.SIGINT, sighandler)
@@ -143,21 +147,31 @@ class ActivityWatcher:
     
     '''
     def __init__(self):
-        self.value = multiprocess.Value('i', 0)
-        self.condition = multiprocess.Condition()
+        self.value = multiprocessing.Value('i', 0)
+        self.condition = multiprocessing.Condition()
     
     @contextmanager
     def activate(self):
         '''A context manager to signal when an activity is happening.'''
-        with self.get_lock():
-            self.value.value += 1
-
-        yield
-
         with self.value.get_lock():
-            self.value.value -= 1
+            self.value.value += 1
+            _log.debug('Entering block for pid %i. val: %i' % 
+                       (os.getpid(), self.value.value))
             with self.condition:
                 self.condition.notify_all()
+
+        try:
+            yield
+
+        finally:
+
+            with self.value.get_lock():
+                self.value.value -= 1
+                _log.debug('Exited block for pid %i. val: %i' % 
+                           (os.getpid(), self.value.value))
+                with self.condition:
+                    self.condition.notify_all()
+
 
     def is_active(self):
         '''Returns true if an activity is going on.'''
@@ -170,5 +184,11 @@ class ActivityWatcher:
     def wait_for_idle(self):
         '''Join until the process is idle.'''
         while self.is_active():
+            with self.condition:
+                self.condition.wait()
+
+    def wait_for_active(self):
+        '''Join until the process is active.'''
+        while self.is_idle():
             with self.condition:
                 self.condition.wait()

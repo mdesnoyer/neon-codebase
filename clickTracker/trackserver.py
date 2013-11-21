@@ -35,7 +35,6 @@ from boto.s3.connection import S3Connection
 import logging
 _log = logging.getLogger(__name__)
 
-#Tornado options
 from utils.options import define, options
 define("port", default=9080, help="run on the given port", type=int)
 define("test", default=0, help="populate queue for test", type=int)
@@ -47,6 +46,10 @@ define("bucket_name", default='neon-tracker-logs',
        help='Bucket to store the logs on')
 define("flush_interval", default=120, type=float,
        help='Interval in seconds to force a flush to S3')
+
+from utils import statemon
+statemon.define('qsize', int)
+statemon.define('buffer_size', int)
 
 #############################################
 #### DATA FORMAT ###
@@ -128,6 +131,7 @@ class LogLines(TrackerDataHandler):
             data = tracker_data.to_json()
             try:
                 self.q.put(data)
+                statemon.state.qsize = self.q.qsize()
                 self.set_status(200)
             except Exception, e:
                 _log.exception("key=loglines msg=Q error %s" %e)
@@ -159,24 +163,23 @@ class TestTracker(TrackerDataHandler):
 # S3 Handler thread 
 ###########################################
 class S3Handler(threading.Thread):
-    def __init__(self, dataQ, watcher):
+    def __init__(self, dataQ, watcher=utils.ps.ActivityWatcher()):
         super(S3Handler, self).__init__()
-        S3_ACCESS_KEY = 'AKIAJ5G2RZ6BDNBZ2VBA' 
-        S3_SECRET_KEY = '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'
-        self.s3conn = S3Connection(aws_access_key_id=S3_ACCESS_KEY,
-                                   aws_secret_access_key =S3_SECRET_KEY)
+        s3conn = S3Connection()
         self.dataQ = dataQ
         self.last_upload_time = time.time()
         self.daemon = True
         self.watcher = watcher
 
-        self.s3bucket = self.s3conn.lookup(options.bucket_name)
-        if self.s3bucket is None:
-            self.s3bucket = self.s3conn.create_bucket(options.bucket_name)
+        bucket = s3conn.lookup(options.bucket_name)
+        if bucket is None:
+            s3conn.create_bucket(options.bucket_name)
 
     def upload_to_s3(self, data):
         try:
-            k = self.s3bucket.new_key(shortuuid.uuid())
+            s3conn = S3Connection()
+            bucket = s3conn.get_bucket(options.bucket_name)
+            k = bucket.new_key(shortuuid.uuid())
             k.set_contents_from_string(data)
         except boto.exception.BotoServerError as e:
             _log.exception("key=upload_to_s3 msg=S3 Error %s" % e)
@@ -208,6 +211,9 @@ class S3Handler(threading.Thread):
                 except Queue.Empty:
                     was_empty = True
 
+                statemon.state.qsize = self.dataQ.qsize()
+                statemon.state.buffer_size = nlines
+
                 # If we have enough data or it's been too long, upload
                 if (nlines >= options.batch_count or 
                     (self.last_upload_time + options.flush_interval <= 
@@ -221,6 +227,10 @@ class S3Handler(threading.Thread):
                             self.last_upload_time = time.time()
             except Exception as e:
                 _log.exception("key=s3_uploader msg=%s" % e)
+            
+
+            statemon.state.qsize = self.dataQ.qsize()
+            statemon.state.buffer_size = nlines
             if not was_empty:
                 self.dataQ.task_done()
 
@@ -251,6 +261,7 @@ class Server(threading.Thread):
 
     def run(self):
         self.s3handler.start()
+        self.io_loop.make_current()
 
         application = tornado.web.Application([
             (r"/", LogLines, dict(q=self.event_queue, 
@@ -264,7 +275,7 @@ class Server(threading.Thread):
         utils.ps.register_tornado_shutdown(server)
         server.listen(options.port)
         
-        self.io_loop.make_current()
+
         self._is_running.set()
         self.io_loop.start()
         server.stop()
@@ -283,7 +294,7 @@ class Server(threading.Thread):
         self.io_loop.stop()
 
 def main(watcher=utils.ps.ActivityWatcher()):
-    server = Server(activity_counter)
+    server = Server(watcher)
     server.run()
     
 

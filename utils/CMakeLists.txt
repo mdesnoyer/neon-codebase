@@ -26,3 +26,11 @@ add_test(options_test
 add_test(connection_pool_test
   ${PROJECT_SOURCE_DIR}/test/connection_pool_test.py
 )
+
+add_test(ps_test
+  ${PROJECT_SOURCE_DIR}/test/ps_test.py
+)
+
+add_test(statemon_test
+  ${PROJECT_SOURCE_DIR}/test/statemon_test.py
+)
