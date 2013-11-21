@@ -308,7 +308,7 @@ class BrightcoveApi(object):
         md5_objs.append(t_md5); md5_objs.append(s_md5)
         res = supportServices.neondata.ImageMD5Mapper.save_all(md5_objs)
         if not res:
-            _log.error('key=update_thumbnail msg=failed to save supportServices.neondata.ImageMD5Mapper for %s' %video_id)
+            _log.error('key=update_thumbnail msg=failed to save ImageMD5Mapper for %s' %video_id)
 
         rt = self.add_image(video_id,image, atype='thumbnail',
                             reference_id=reference_id)
@@ -438,8 +438,10 @@ class BrightcoveApi(object):
                                              connect_timeout = 10.0)
         return BrightcoveApi.read_connection.send_request(req, callback)
 
-    ''' process publisher feed for neon tags and generate brightcove thumbnail/still requests '''
     def process_publisher_feed(self,items,i_id):
+        ''' process publisher feed for neon tags and generate brightcove
+        thumbnail/still requests '''
+        
         vids_to_process = [] 
         bc_json = supportServices.neondata.BrightcovePlatform.get_account(
             self.neon_api_key,i_id)
@@ -463,6 +465,7 @@ class BrightcoveApi(object):
                 still = item['videoStillURL']
                 d_url = item['FLVURL']
                 length = item['length']
+                title = item['name']
 
                 if thumb is None or still is None or length <0:
                     _log.info("key=process_publisher_feed msg=%s is a live feed" %vid)
@@ -476,7 +479,8 @@ class BrightcoveApi(object):
                                                     d_url,
                                                     prev_thumbnail=still,
                                                     request_type='topn',
-                                                    i_id=i_id)
+                                                    i_id=i_id,
+                                                    title=title)
                 _log.info("creating request for video [topn] %s" % vid)
                 if resp is not None and not resp.error:
                     #Update the videos in customer inbox
@@ -600,7 +604,8 @@ class BrightcoveApi(object):
 
     ''' Brightcove api request to get info about a videoid '''
     def find_video_by_id(self,video_id,find_vid_callback=None):
-        url = 'http://api.brightcove.com/services/library?command=find_video_by_id&token='+ self.read_token + '&media_delivery=http&output=json&video_id=' + video_id
+        url = 'http://api.brightcove.com/services/library?command=find_video_by_id' \
+                '&token=%s&media_delivery=http&output=json&video_id=%s' %(self.read_token,video_id)  
         req = tornado.httpclient.HTTPRequest(url = url, method = "GET", request_timeout = 60.0, connect_timeout = 10.0)
 
         return BrightcoveApi.read_connection.send_request(req,
@@ -618,11 +623,13 @@ class BrightcoveApi(object):
                 v_url = data["FLVURL"]
                 still = data['videoStillURL']
                 vid = str(data["id"])
+                title = data["name"]
                 self.format_neon_api_request(vid,
                                              v_url,
                                              still,
                                              request_type='topn',
                                              i_id=i_id,
+                                             title=title,
                                              callback = create_callback)
             else:
                 create_callback(response)
@@ -631,7 +638,8 @@ class BrightcoveApi(object):
 
     def create_request_by_video_id(self, video_id,i_id):
         
-        url = 'http://api.brightcove.com/services/library?command=find_video_by_id&token='+ self.read_token +'&media_delivery=http&output=json&video_id=' + video_id 
+        url = 'http://api.brightcove.com/services/library?command=find_video_by_id' \
+                '&token=%s&media_delivery=http&output=json&video_id=%s' %(self.read_token,video_id)  
         http_client = tornado.httpclient.HTTPClient()
         req = tornado.httpclient.HTTPRequest(url = url,
                                              method = "GET",
@@ -649,7 +657,8 @@ class BrightcoveApi(object):
                                                 resp['FLVURL'], 
                                                 still, 
                                                 request_type='topn', 
-                                                i_id=i_id)
+                                                i_id=i_id,
+                                                title=resp['name'])
         if not response or response.error:
             _log.error(('key=create_request_by_video_id '
                         'msg=Unable to create request for video %s')
@@ -676,7 +685,8 @@ class BrightcoveApi(object):
 
     def create_brightcove_request_by_tag(self,i_id):
         
-        url = 'http://api.brightcove.com/services/library?command=search_videos&token=' + self.read_token + '&media_delivery=http&output=json&sort_by=publish_date:DESC&any=tag:neon'
+        url = 'http://api.brightcove.com/services/library?command=search_videos&token=%s' \
+                '&media_delivery=http&output=json&sort_by=publish_date:DESC&any=tag:neon' %self.read_token
         req = tornado.httpclient.HTTPRequest(url = url,
                                              method = "GET",
                                              request_timeout = 60.0,
@@ -724,6 +734,11 @@ class BrightcoveApi(object):
         return
 
     def verify_token_and_create_requests(self,i_id,n):
+        '''
+        Initial call when the brightcove account gets created
+        verify the read token and create neon api requests
+        #Sync version
+        '''
         result = self.get_n_videos(n)
         if result and not result.error:
             bc_json = supportServices.neondata.BrightcovePlatform.get_account(
@@ -742,6 +757,12 @@ class BrightcoveApi(object):
                 vid = str(item['id'])                              
                 title = item['name']
                 video_download_url = item['FLVURL']
+                
+                #NOTE: If a video doesn't have a thumbnail 
+                #Perhaps a signle renedition video or a live feed
+                if not item.has_key('videoStillURL'):
+                    continue
+
                 prev_thumbnail = item['videoStillURL'] #item['thumbnailURL']
                 response = self.format_neon_api_request(vid,
                                                         video_download_url,
@@ -871,11 +892,12 @@ class BrightcoveApi(object):
                         if res:
                             callback(True)
                         else:
-                            _log.error("key=async_check_thumbnail msg=failed to save ThumbnailURLMapper url %s tid %s" %(thumb_url,tid))
+                            _log.error("key=async_check_thumbnail msg=failed to save" \
+                                    "ThumbnailURLMapper url %s tid %s" %(thumb_url,tid))
                     else:
                         _log.info("key=async_check_thumbnail msg= entry for url %s exists already"%thumb_url)
                 else:
-                    _log.error("key=async_check_thumbnail msg=failed to fetch tid for image url %s md5 %s"%(thumb_url,t_md5))
+                    _log.error("key=async_check_thumbnail msg=failed to fetch tidi for image url %s md5 %s"%(thumb_url,t_md5)) 
             else:
                 _log.error("key=async_check_thumbnail msg=thumbnail not downloaded %s" %thumb_url)
             
@@ -900,7 +922,8 @@ class BrightcoveApi(object):
                 stret = yield tornado.gen.Task(check_image_md5_db,still_url,videostill)
                 callback(tret and stret)
 
-        url = 'http://api.brightcove.com/services/library?command=find_video_by_id&token='+ self.read_token +'&media_delivery=http&output=json&video_id=' + video_id 
+        url = 'http://api.brightcove.com/services/library?command=find_video_by_id&token=%s' \
+                '&media_delivery=http&output=json&video_id=%s' %(self.read_token,video_id)
 
         req = tornado.httpclient.HTTPRequest(url=url,
                                              method="GET", 
