@@ -16,6 +16,7 @@ if sys.path[0] <> base_path:
 import json
 import os
 import Queue
+import re
 import multiprocessing
 import shortuuid
 import threading
@@ -40,16 +41,20 @@ define("port", default=9080, help="run on the given port", type=int)
 define("test", default=0, help="populate queue for test", type=int)
 define("batch_count", default=100, type=int, 
        help="Number of lines to bacth to s3")
-define("s3disk", default="/mnt/neon/s3diskbacklog",
-        help="backup lines which failed to upload s3", type=str)
-define("bucket_name", default='neon-tracker-logs',
-       help='Bucket to store the logs on')
+define("s3disk", default="/mnt/neon/s3diskbacklog", type=str,
+        help="Location to store backup lines which failed to upload s3")
+define("output", default='s3://neon-tracker-logs',
+       help=('Location to store the output. Can be a local directory, '
+             'or an S3 bucket of the form s3://<bucket_name>'))
 define("flush_interval", default=120, type=float,
        help='Interval in seconds to force a flush to S3')
+define("max_concurrent_uploads", default=100, type=int,
+       help='Maximum number of concurrent uploads')
 
 from utils import statemon
 statemon.define('qsize', int)
 statemon.define('buffer_size', int)
+statemon.define('s3_connection_errors', int)
 
 #############################################
 #### DATA FORMAT ###
@@ -165,52 +170,139 @@ class TestTracker(TrackerDataHandler):
 class S3Handler(threading.Thread):
     def __init__(self, dataQ, watcher=utils.ps.ActivityWatcher()):
         super(S3Handler, self).__init__()
-        s3conn = S3Connection()
         self.dataQ = dataQ
         self.last_upload_time = time.time()
         self.daemon = True
         self.watcher = watcher
 
-        bucket = s3conn.lookup(options.bucket_name)
-        if bucket is None:
-            s3conn.create_bucket(options.bucket_name)
+        self.s3conn = None
+        self._mutex = threading.RLock()
+        self._upload_limiter = \
+          threading.Semaphore(options.max_concurrent_uploads)
 
-    def upload_to_s3(self, data):
-        try:
-            s3conn = S3Connection()
-            bucket = s3conn.get_bucket(options.bucket_name)
-            k = bucket.new_key(shortuuid.uuid())
-            k.set_contents_from_string(data)
-        except boto.exception.BotoServerError as e:
-            _log.exception("key=upload_to_s3 msg=S3 Error %s" % e)
-            self.save_to_disk(data)
-        except IOError as e:
-            _log.exception("key=upload_to_s3 msg=S3 I/O Error %s" % e)
-            self.save_to_disk(data)
+        self.check_output_location()
 
-    def save_to_disk(self, data):
+    def check_output_location(self):
+        # Make sure the s3 backup exists
         if not os.path.exists(options.s3disk):
             os.makedirs(options.s3disk)
         
-        fname = "s3backlog_%s.log" % time.time()
-        with open(os.path.join(options.s3disk, fname),'a') as f:
-            f.write(data)
+        # Determine where the output will be and create the
+        # directories if necessary
+        s3pathRe = re.compile('s3://([0-9a-zA-Z_\-]+)')
+        s3match = s3pathRe.match(options.output)
+        self.use_s3 = False
+        if s3match:
+            self.bucket_name = s3match.groups()[0]
+            self.use_s3 = True
+
+            if self.s3conn is None:
+                self.s3conn = S3Connection()
+                
+            bucket = self.s3conn.lookup(self.bucket_name)
+            if bucket is None:
+                self.s3conn.create_bucket(self.bucket_name)
+        else:
+            if not os.path.exists(options.output):
+                os.makedirs(options.output)
+            if not os.path.isdir(options.output):
+                raise IOError('The output directory: %s is not a directory' %
+                              options.output)
+
+    def generate_log_filename(self):
+        return '%s_%s_clicklog.log' % (
+            time.strftime('%S%M%H%d%m%Y', time.gmtime()),
+            shortuuid.uuid())
+
+    def send_to_output(self, data):
+        '''Sends the data to the appropriate output location.'''
+        filename = self.generate_log_filename()
+        self.check_output_location()
+        if self.use_s3:
+            thread = threading.Thread(target=self.save_to_s3,
+                                      args=('\n'.join(data), self.bucket_name,
+                                            filename, len(data)))
+        else:
+            thread = threading.Thread(
+                target=self.save_to_disk,
+                args=('\n'.join(data),
+                      os.path.join(options.output, filename),
+                      len(data)))
+
+        self._upload_limiter.acquire()
+        thread.start()
+
+    def save_to_s3(self, data, bucket_name, key_name, nlines):
+        try:
+            bucket = self.s3conn.get_bucket(bucket_name)
+            key = bucket.new_key(key_name)
+            key.set_contents_from_string(data)
+
+            self.upload_temp_logs_to_s3(bucket_name)
+
+            self._upload_limiter.release()
+            
+            for i in range(nlines):
+                self.dataQ.task_done()
+                
+        except boto.exception.BotoServerError as e:
+            _log.error("key=upload_to_s3 msg=S3 Error %s" % e)
+            statemon.state.increment('s3_connection_errors')
+            self.save_to_disk(data, os.path.join(options.s3disk, key_name),
+                              nlines)
+            return
+        except IOError as e:
+            _log.error("key=upload_to_s3 msg=S3 I/O Error %s" % e)
+            statemon.state.increment('s3_connection_errors')
+            self.save_to_disk(data, os.path.join(options.s3disk, key_name),
+                              nlines)
+            return
+
+    def save_to_disk(self, data, path, nlines):
+        try:
+            if not os.path.exists(os.path.dirname(path)):
+                os.makedirs(os.path.dirname(path))
+
+            if self.use_s3:
+                with self._mutex:
+                    with open(path,'a') as f:
+                        f.write(data)
+            else:
+                with open(path,'a') as f:
+                    f.write(data)
+
+            for i in range(nlines):
+                self.dataQ.task_done()
+        finally:
+            self._upload_limiter.release()
+
+    def upload_temp_logs_to_s3(self, bucket_name):
+        '''Uploads temporary files to S3
+
+        The temporary files were put there because the connection to
+        S3 had a hiccup.
+        
+        '''
+        with self._mutex:
+            for filename in os.listdir(options.s3disk):
+                full_path = os.path.join(options.s3disk, filename)
+                if filename.endswith('clicklog.log'):
+                    bucket = self.s3conn.get_bucket(bucket_name)
+                    key = bucket.new_key(filename)
+                    key.set_contents_from_filename(full_path)
+                    os.remove(full_path)
 
     def run(self):
-        data = ''
-        nlines = 0
+        data = []
+        statemon.state.s3_connection_errors = 0
         while True:
             try:
-                was_empty = False
                 try:
-                    new_data = self.dataQ.get(True, options.flush_interval)
-                    if data != '':
-                        data += '\n'
-                    data += new_data
-                    nlines += 1
+                    data.append(self.dataQ.get(True, options.flush_interval))
                 except Queue.Empty:
-                    was_empty = True
+                    pass
 
+                nlines = len(data)
                 statemon.state.qsize = self.dataQ.qsize()
                 statemon.state.buffer_size = nlines
 
@@ -219,11 +311,11 @@ class S3Handler(threading.Thread):
                     (self.last_upload_time + options.flush_interval <= 
                      time.time())):
                     if nlines > 0:
-                        _log.info('Uploading %i lines to S3' % nlines)
+                        _log.info('Sending %i lines to output %s' % 
+                                  (nlines, options.output))
                         with self.watcher.activate():
-                            self.upload_to_s3(data)
-                            data = ''
-                            nlines = 0
+                            self.send_to_output(data)
+                            data = []
                             self.last_upload_time = time.time()
             except Exception as e:
                 _log.exception("key=s3_uploader msg=%s" % e)
@@ -231,8 +323,6 @@ class S3Handler(threading.Thread):
 
             statemon.state.qsize = self.dataQ.qsize()
             statemon.state.buffer_size = nlines
-            if not was_empty:
-                self.dataQ.task_done()
 
 ###########################################
 # Create Tornado server application
