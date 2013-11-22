@@ -82,8 +82,8 @@ endfunction(add_cc_test)
 # Function that enables this library to generate python interfaces for c++ code
 macro(enable_python)
   find_package(PythonLibs REQUIRED)
+  find_package(PythonInterp REQUIRED)
   include_directories(${PYTHON_INCLUDE_PATH})
-  SET(PYTHON_EXECUTABLE /usr/bin/python)
   find_package(Numpy REQUIRED)
   include_directories(${PYTHON_NUMARRAY_INCLUDE_DIR})
 
