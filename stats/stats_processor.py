@@ -93,6 +93,8 @@ class DataDirectory:
         else:
             self.path = options.input
 
+        _log.info('Keeping data in %s' % self.localdir)
+
     def __del__(self):
         self.close()
 
@@ -110,7 +112,7 @@ class DataDirectory:
     def erase(self):
         '''Erases all the files in the directory, but keeps the path the same.'''
         for path in os.listdir(self.localdir):
-            os.remove(path)
+            os.remove(os.path.join(self.localdir,path))
 
     def count_files(self, runner):
         '''Count the number of files available for input.'''
@@ -142,7 +144,7 @@ class DataDirectory:
 
     
 
-def main(erase_local_data=None):
+def main(erase_local_data=None, activity_watcher=utils.ps.ActivityWatcher()):
     '''The main routine.
 
     erase_local_data - An optional mutiprocessing.Event() that when
@@ -172,20 +174,24 @@ def main(erase_local_data=None):
 
             known_input_files = 0
             while True:
-                if erase_local_data is not None and erase_local_data.is_set():
-                    data_dir.erase()
-                    erase_local_data.clear()
-                
-                _log.debug('Looking for new log files to process from %s' % 
-                           options.input)
                 try:
-                    with job.make_runner() as runner:
-                        n_files = data_dir.count_files(runner)
-                        if (n_files - known_input_files) >= options.min_new_files:
-                            _log.warn('Running stats processing job')
-                            runner.run()
-                            known_input_files = n_files
-                            runner.print_counters()
+                    if (erase_local_data is not None and 
+                        erase_local_data.is_set()):
+                        data_dir.erase()
+                        erase_local_data.clear()
+                        known_input_files = 0
+                
+                    _log.debug(('Looking for new log files to process '
+                               'from %s') % options.input)
+                    with activity_watcher.activate():
+                        with job.make_runner() as runner:
+                            n_files = data_dir.count_files(runner)
+                            if ((n_files - known_input_files) >= 
+                                options.min_new_files):
+                                _log.info('Running stats processing job')
+                                runner.run()
+                                known_input_files = n_files
+                                runner.print_counters()
                 except Exception as e:
                     _log.exception('Unhandled error when processing stats: %s'
                                    % e)

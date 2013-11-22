@@ -215,8 +215,8 @@ class Mastermind(object):
                 thumb = self._find_thumb(video_id, thumb_id)
                 if thumb is None:
                     continue
-                thumb.loads = loads
-                thumb.clicks = clicks
+                thumb.loads = float(loads)
+                thumb.clicks = float(clicks)
 
                 new_directive = self._calculate_new_serving_directive(video_id)
                 if new_directive is not None:

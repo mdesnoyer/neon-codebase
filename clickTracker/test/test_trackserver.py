@@ -17,7 +17,6 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
-
 import __builtin__
 import boto
 import boto.exception
@@ -30,6 +29,7 @@ import logging
 import mock
 from mock import patch
 from mock import MagicMock
+import multiprocessing
 import os
 import Queue
 import random
@@ -49,10 +49,12 @@ class TestS3Handler(unittest.TestCase):
         self.fake_open = fake_filesystem.FakeFileOpen(self.filesystem)
         clickTracker.trackserver.os = self.fake_os
         clickTracker.trackserver.open = self.fake_open
+        boto_mock.open = self.fake_open
 
     def tearDown(self):
         clickTracker.trackserver.os = os
         clickTracker.trackserver.open = __builtin__.open
+        boto_mock.open = __builtin__.open
 
     def processData(self):
         '''Sends 1000 requests to a handler and waits until they are done.'''
@@ -126,6 +128,89 @@ class TestS3Handler(unittest.TestCase):
                 self.assertEqual(parsed['img'], 'i1.jpg')
             else:
                 self.fail('Bad action field %s' % parsed['a'])
+
+    @patch('clickTracker.trackserver.S3Connection')
+    def test_log_to_s3_with_timeout(self, mock_conntype):
+        '''Make sure that a package is sent to S3 after a timeout.'''
+        conn = boto_mock.MockConnection()
+        mock_conntype.return_value = conn
+
+        # Create the S3 bucket for the logs
+        bucket = conn.create_bucket('neon-tracker-logs')
+
+        with options._set_bounded('clickTracker.trackserver.flush_interval',
+                                  0.5):
+            
+            # Start a thread to handle the data
+            dataQ = Queue.Queue()
+            handle_thread = clickTracker.trackserver.S3Handler(dataQ)
+            handle_thread.start()
+
+            # Send the data
+            nlines = 56
+            for i in range(nlines):
+                cd = clickTracker.trackserver.TrackerData(
+                    "load", 1, "flashonlytracker", time.time(),
+                    time.time(), "http://localhost",
+                    "127.0.0.1", ['i1.jpg','i2.jpg'],'v1')
+                dataQ.put(cd.to_json())
+            
+            # Wait for the timeout
+            time.sleep(0.6)
+
+        # Check that the file is in the bucket
+        s3_keys = [x for x in bucket.get_all_keys()]
+        self.assertEqual(len(s3_keys), 1)
+
+        # Make sure that all the data is in the file
+        nlines = 0
+        for line in s3_keys[0].get_contents_as_string().split('\n'):
+            nlines += 1
+        self.assertEqual(nlines, 56)
+
+    def test_log_to_disk_normally(self):
+        '''Check the mechanism to log to disk.'''
+        log_dir = '/tmp/fake_log_dir'
+        with options._set_bounded('clickTracker.trackserver.output',
+                                  log_dir):
+            self.processData()
+
+            files = self.fake_os.listdir(log_dir)
+            self.assertEqual(len(files), 10)
+
+            # Make sure the files have the same number of lines
+            file_lines = None
+            for fname in files:
+                with self.fake_open(os.path.join(log_dir, fname)) as f:
+                    nlines = 0
+                    for line in f:
+                        nlines += 1
+                    if file_lines is None:
+                        file_lines = nlines
+                    else:
+                        self.assertEqual(file_lines, nlines)
+
+            # Open one of the files and check that it contains what we expect
+            with self.fake_open(os.path.join(log_dir, files[0])) as f:
+                for line in f:
+                    line = line.strip()
+                    if line == '':
+                        continue
+                    parsed = json.loads(line)
+                    self.assertEqual(parsed['id'], 1)
+                    self.assertEqual(parsed['ttype'], 'flashonlytracker')
+                    self.assertEqual(parsed['page'], 'http://localhost')
+                    self.assertEqual(parsed['cip'], '127.0.0.1')
+                    self.assertTrue(parsed['ts'])
+                    self.assertTrue(parsed['sts'])
+
+                    if parsed['a'] == 'load':
+                        self.assertEqual(parsed['cvid'], 'v1')
+                        self.assertEqual(parsed['imgs'], ['i1.jpg','i2.jpg'])
+                    elif parsed['a'] == 'click':
+                        self.assertEqual(parsed['img'], 'i1.jpg')
+                    else:
+                        self.fail('Bad action field %s' % parsed['a'])
         
     @patch('clickTracker.trackserver.S3Connection')
     def test_log_to_disk_on_connection_error(self, mock_conntype):
@@ -249,10 +334,34 @@ class TestS3Handler(unittest.TestCase):
         files = self.fake_os.listdir('/mnt/neon/s3diskbacklog')
         self.assertEqual(len(files), 10)
 
+    @patch('clickTracker.trackserver.S3Connection')
+    def test_upload_to_s3_once_connection_back(self, mock_conntype):
+        conn = boto_mock.MockConnection()
+        mock_conntype.return_value = conn
+
+        # Create the bucket
+        bucket = conn.create_bucket('neon-tracker-logs')
+
+        # Mock out the exception to throw for the first chunk of data
+        mock_bucket = MagicMock()
+        conn.buckets['neon-tracker-logs'] = mock_bucket
+        mock_bucket.new_key.side_effect = socket.gaierror()
+
+        self.processData()
+
+        # Now, mock out a valid connection
+        conn.buckets['neon-tracker-logs'] = bucket
+
+        self.processData()
+
+        # Make sure there are 20 files on S3
+        s3_keys = [x for x in bucket.get_all_keys()]
+        self.assertEqual(len(s3_keys), 20)
+
+        # Make sure that there are no files on disk
+        files = self.fake_os.listdir('/mnt/neon/s3diskbacklog')
+        self.assertEqual(len(files), 0)
         
-            
-    # TODO(Sunil): Test that data which gets put on disk, gets
-    # uploaded to S3 once the connection is back.
 
 class TestFullServer(unittest.TestCase):
     '''A set of tests that fire up the whole server and throws http requests at it.'''
@@ -266,37 +375,39 @@ class TestFullServer(unittest.TestCase):
 
         random.seed(168984)
 
-    def tearDown(self):
-        tornado.ioloop.IOLoop.instance().stop()
+        self.patcher = patch('clickTracker.trackserver.S3Connection')
+        mock_conn = self.patcher.start()
+        self.s3conn = boto_mock.MockConnection()
+        mock_conn.return_value = self.s3conn
 
-    @patch('clickTracker.trackserver.S3Connection')
-    def test_send_data_to_server(self, mock_conntype):
-        s3conn = boto_mock.MockConnection()
-        mock_conntype.return_value = s3conn
-
+        # Start the server in its own thread
         with options._set_bounded('clickTracker.trackserver.port', self.port):
-            # Start the server in its own thread
-            server = clickTracker.trackserver.Server()
-            server.daemon = True
-            server.start()
-            server.wait_until_running()
+            self.server = clickTracker.trackserver.Server()
+            self.server.daemon = True
+            self.server.start()
+            self.server.wait_until_running()
 
-            # Fire requests to the server      
-            nlines = 1000
-            for i in range(nlines):
-                rd = random.randint(1,100)
-                if rd <2:
-                    response = urllib2.urlopen(self.click_url) 
-                else:
-                    response = urllib2.urlopen(self.load_url)
-                self.assertEqual(response.getcode(), 200)
+    def tearDown(self):
+        self.server.stop()
+        self.patcher.stop()
 
-            server.wait_for_processing()
+    def test_send_data_to_server(self):        
+        # Fire requests to the server      
+        nlines = 1000
+        for i in range(nlines):
+            rd = random.randint(1,100)
+            if rd <2:
+                response = urllib2.urlopen(self.click_url) 
+            else:
+                response = urllib2.urlopen(self.load_url)
+            self.assertEqual(response.getcode(), 200)
 
-            # Now check that all the data got sent to S3
-            bucket = s3conn.get_bucket('neon-tracker-logs')
-            s3_keys = [x for x in bucket.get_all_keys()]
-            self.assertEqual(len(s3_keys), 10)
+        self.server.wait_for_processing()
+
+        # Now check that all the data got sent to S3
+        bucket = self.s3conn.get_bucket('neon-tracker-logs')
+        s3_keys = [x for x in bucket.get_all_keys()]
+        self.assertEqual(len(s3_keys), 10)
             
 
 if __name__ == '__main__':

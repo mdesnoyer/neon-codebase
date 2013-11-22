@@ -27,6 +27,7 @@ import tornado.ioloop
 import tornado.web
 import utils.neon
 from utils.options import define, options
+import utils.ps
 
 # This server's options
 define('port', default=8080, help='Port to listen on', type=int)
@@ -90,11 +91,13 @@ def initialize():
 
 class VideoDBWatcher(threading.Thread):
     '''This thread polls the video database for changes.'''
-    def __init__(self, mastermind, ab_manager):
+    def __init__(self, mastermind, ab_manager,
+                 activity_watcher=utils.ps.ActivityWatcher()):
         super(VideoDBWatcher, self).__init__(name='VideoDBWatcher')
         self.mastermind = mastermind
         self.ab_manager = ab_manager
         self.daemon = True
+        self.activity_watcher = activity_watcher
 
         # Is the initial data loaded
         self.is_loaded = threading.Event()
@@ -102,7 +105,8 @@ class VideoDBWatcher(threading.Thread):
     def run(self):
         while True:
             try:
-                self._process_db_data()
+                with self.activity_watcher.activate():
+                    self._process_db_data()
 
             except Exception as e:
                 _log.exception('Uncaught video DB Error: %s' % e)
@@ -139,13 +143,15 @@ class VideoDBWatcher(threading.Thread):
 
 class StatsDBWatcher(threading.Thread):
     '''This thread polls the stats database for changes.'''
-    def __init__(self, mastermind, ab_manager):
+    def __init__(self, mastermind, ab_manager,
+                 activity_watcher=utils.ps.ActivityWatcher()):
         super(StatsDBWatcher, self).__init__(name='StatsDBWatcher')
         self.mastermind = mastermind
         self.ab_manager = ab_manager
         self.video_id_cache = {} # Thumb_id -> video_id
         self.last_update = None
         self.daemon = True
+        self.activity_watcher = activity_watcher
 
         # Is the initial data loaded
         self.is_loaded = threading.Event()
@@ -159,7 +165,8 @@ class StatsDBWatcher(threading.Thread):
                   (options.stats_host, options.stats_port, options.stats_db))
         while True:
             try:
-                self._process_db_data()            
+                with self.activity_watcher.activate():
+                    self._process_db_data()            
 
             except Exception as e:
                 _log.exception('Uncaught stats DB Error: %s' % e)
@@ -239,26 +246,29 @@ class ApplyDelta(tornado.web.RequestHandler):
     dload - The number of loads in this delta
     dclick - The number of clicks in this delta
     '''
-    def initialize(self, mastermind, ab_manager):
+    def initialize(self, mastermind, ab_manager,
+                   activity_watcher=utils.ps.ActivityWatcher()):
         self.mastermind = mastermind
         self.ab_manager = ab_manager
+        self.activity_watcher = activity_watcher
         
     def post(self):
-        for line in self.request.body:
-            try:
-                parsed_data = json.loads(line)
+        with self.activity_watcher.activate():
+            for line in self.request.body:
                 try:
-                    parsed_args = parsed_data['d']
-                except KeyError:
-                    _log.warn('Invalid delta format: %s' % line)
-                    continue
-                directive = self.mastermind.incorporate_delta_stats(
-                    *parsed_args)
-                if directive:
-                    self.ab_manager.send(directive)
-            except TypeError:
-                _log.warn('Problem using delta from: %s' % line)
-        self.finish()
+                    parsed_data = json.loads(line)
+                    try:
+                        parsed_args = parsed_data['d']
+                    except KeyError:
+                        _log.warn('Invalid delta format: %s' % line)
+                        continue
+                    directive = self.mastermind.incorporate_delta_stats(
+                        *parsed_args)
+                    if directive:
+                        self.ab_manager.send(directive)
+                except TypeError:
+                    _log.warn('Problem using delta from: %s' % line)
+            self.finish()
     
 
 class GetDirectives(tornado.web.RequestHandler):
@@ -272,45 +282,50 @@ class GetDirectives(tornado.web.RequestHandler):
           Otherwise, return them all.
     push - If true, push to the known controllers. Default: True
     '''
-    def initialize(self, mastermind, ab_manager):
+    def initialize(self, mastermind, ab_manager,
+                   activity_watcher=utils.ps.ActivityWatcher()):
         self.mastermind = mastermind
         self.ab_manager = ab_manager
+        self.activity_watcher = activity_watcher
 
     def get(self):
-        video_id = self.get_argument('vid', None)
-        push = self.get_argument('push', True)
+        with self.activity_watcher.activate():
+            video_id = self.get_argument('vid', None)
+            push = self.get_argument('push', True)
 
-        if video_id is not None:
-            video_id = [video_id]
+            if video_id is not None:
+                video_id = [video_id]
 
-        firstLine = True
-        for directive in self.mastermind.get_directives(video_id):
-            if push:
-                self.ab_manager.send(directive)
-            if firstLine:
-                firstLine = False
-            else:
-                self.write('\n')
-            self.write(json.dumps({'d': directive}))
-            self.flush()
-        self.finish()
+            firstLine = True
+            for directive in self.mastermind.get_directives(video_id):
+                if push:
+                    self.ab_manager.send(directive)
+                if firstLine:
+                    firstLine = False
+                else:
+                    self.write('\n')
+                self.write(json.dumps({'d': directive}))
+                self.flush()
+            self.finish()
 
-def main():
+def main(activity_watcher = utils.ps.ActivityWatcher()):
     mastermind, ab_manager = initialize()
 
-    videoDbThread = VideoDBWatcher(mastermind, ab_manager)
+    videoDbThread = VideoDBWatcher(mastermind, ab_manager, activity_watcher)
     videoDbThread.start()
     videoDbThread.wait_until_loaded()
-    statsDbThread = StatsDBWatcher(mastermind, ab_manager)
+    statsDbThread = StatsDBWatcher(mastermind, ab_manager, activity_watcher)
     statsDbThread.start()
     statsDbThread.wait_until_loaded()
 
     _log.info('Starting server on port %i' % options.port)
     application = tornado.web.Application([
         (r'/delta', ApplyDelta,
-         dict(mastermind=mastermind, ab_manager=ab_manager)),
+         dict(mastermind=mastermind, ab_manager=ab_manager,
+              activity_watcher=activity_watcher)),
         (r'/get_directives', GetDirectives,
-         dict(mastermind=mastermind, ab_manager=ab_manager))])
+         dict(mastermind=mastermind, ab_manager=ab_manager,
+              activity_watcher=activity_watcher))])
     server = tornado.httpserver.HTTPServer(application)
     utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)

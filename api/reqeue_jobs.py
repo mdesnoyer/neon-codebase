@@ -34,12 +34,13 @@ def main():
         request_json = db_connection.blocking_conn.get(key)
         request = neondata.NeonApiRequest.create(request_json)
 
-        # Fix when the finished requests got labeled as internal_video_id
-        if request.state == neondata.RequestState.PROCESSING:
+        #If request state is submitted, being processed, Requeued or Failed
+        if request.state in [neondata.RequestState.SUBMIT,neondata.RequestState.PROCESSING,
+                neondata.RequestState.REQUEUED,neondata.RequestState.FAILED]:
             url = 'http://%s:%s/requeue' % (options.host, options.port)
             response = urllib2.urlopen(url, request.to_json())
 
-            if response != 200:
+            if response.code != 200:
                 _log.error('Could not requeue %s' % request.__dict__)
 
 if __name__ == "__main__":
