@@ -4,18 +4,17 @@ Copyright: 2013 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
 
+from contextlib import contextmanager
 import logging
 import os
 import platform
+import multiprocessing
 import signal
 import subprocess
 import time
 import tornado.ioloop
 
-_log = logging.getLogger(__name__)
-
-def reap_child(signal, frame):
-    print 'reaping'
+_log = logging.getLogger(__name__)    
 
 def get_child_pids():
     '''Returns a list of pids for child processes.'''
@@ -103,27 +102,31 @@ def register_tornado_shutdown(server):
     Inputs:
     server - http server instance
     '''
+    try:
+        cur_ioloop = tornado.ioloop.IOLoop.current()
+    except ValueError:
+        cur_ioloop = tornado.ioloop.IOLoop.instance()
+    
     def shutdown():
         server.stop()
-
-        io_loop = tornado.ioloop.IOLoop.instance()
 
         deadline = time.time() + 3
 
         def stop_loop():
             now = time.time()
-            if now < deadline and (io_loop._callbacks or io_loop._timeouts):
-                io_loop.add_timeout(now + 1, stop_loop)
+            if now < deadline and (cur_ioloop._callbacks or
+                                   cur_ioloop._timeouts):
+                cur_ioloop.add_timeout(now + 1, stop_loop)
                 
             else:
-                io_loop.stop()
+                cur_ioloop.stop()
                 _log.info('Shutdown')
         stop_loop()
         
     def sighandler(sig, frame):
         _log.warn('Received signal %s. Shutting down pid %i' % (sig,
                                                                 os.getpid()))
-        tornado.ioloop.IOLoop.instance().add_callback_from_signal(shutdown)
+        cur_ioloop.add_callback_from_signal(shutdown)
 
     try:
         signal.signal(signal.SIGINT, sighandler)
@@ -132,3 +135,60 @@ def register_tornado_shutdown(server):
         _log.warning('Can only register signal in the main thread. Skipping. '
                      '%s' % e)
         
+class ActivityWatcher:
+    '''A multiprocess shared object to keep track of when a process is active.
+
+    To use it, in your process:
+    with activity_counter.activate():
+      do stuff
+
+    Then, another process can call the other functions to find out if
+    that process is in the activate() block.
+    
+    '''
+    def __init__(self):
+        self.value = multiprocessing.Value('i', 0)
+        self.condition = multiprocessing.Condition()
+    
+    @contextmanager
+    def activate(self):
+        '''A context manager to signal when an activity is happening.'''
+        with self.value.get_lock():
+            self.value.value += 1
+            _log.debug('Entering block for pid %i. val: %i' % 
+                       (os.getpid(), self.value.value))
+            with self.condition:
+                self.condition.notify_all()
+
+        try:
+            yield
+
+        finally:
+
+            with self.value.get_lock():
+                self.value.value -= 1
+                _log.debug('Exited block for pid %i. val: %i' % 
+                           (os.getpid(), self.value.value))
+                with self.condition:
+                    self.condition.notify_all()
+
+
+    def is_active(self):
+        '''Returns true if an activity is going on.'''
+        return self.value.value > 0
+
+    def is_idle(self):
+        '''Returns true if the process is idle.'''
+        return not self.is_active()
+
+    def wait_for_idle(self):
+        '''Join until the process is idle.'''
+        while self.is_active():
+            with self.condition:
+                self.condition.wait()
+
+    def wait_for_active(self):
+        '''Join until the process is active.'''
+        while self.is_idle():
+            with self.condition:
+                self.condition.wait()

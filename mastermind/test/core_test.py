@@ -14,6 +14,7 @@ if sys.path[0] <> base_path:
 import mastermind.core
 from mastermind.core import Mastermind, ThumbnailInfo, VideoInfo
 
+import decimal
 import fake_filesystem
 import fake_tempfile
 from mock import patch
@@ -214,6 +215,18 @@ class TestStatUpdating(unittest.TestCase):
             ('vidB', 'b', 10, 5),
             ('vidB', 'ba', 1000, 100),
             ('vidB', 'bz', 1000, 100)]))
+        self.assertIn('vidA', result)
+        self.assertNotIn('vidB', result)
+        self.assertItemsEqual([('a', 0.0), ('aa', 0.0),
+                               ('az', 1.0)], result['vidA'])
+
+    def test_decimal_from_db(self):
+        result = dict(self.mastermind.update_stats_info(100, [
+            ('vidA', 'a', decimal.Decimal(1000), decimal.Decimal(5)),
+            ('vidA', 'az', decimal.Decimal(1000), decimal.Decimal(100)),
+            ('vidB', 'b', decimal.Decimal(10), decimal.Decimal(5)),
+            ('vidB', 'ba', decimal.Decimal(1000), decimal.Decimal(100)),
+            ('vidB', 'bz', decimal.Decimal(1000), decimal.Decimal(100))]))
         self.assertIn('vidA', result)
         self.assertNotIn('vidB', result)
         self.assertItemsEqual([('a', 0.0), ('aa', 0.0),

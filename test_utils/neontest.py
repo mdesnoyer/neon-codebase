@@ -36,16 +36,18 @@ class TestCase(unittest.TestCase):
         logger = logging.getLogger()
         logger.addHandler(handler)
 
-        yield
+        try:
+            yield
 
-        logger.removeHandler(handler)
-        handler.flush()
-        reg = re.compile(regexp)
-        for line in log_stream.getvalue().split('\n'):
-            if reg.search(line):
-                return
-        self.fail('Msg: %s was not logged. The log was: %s' % 
-                  (regexp, log_stream.getvalue()))
+        finally:
+            logger.removeHandler(handler)
+            handler.flush()
+            reg = re.compile(regexp)
+            for line in log_stream.getvalue().split('\n'):
+                if reg.search(line):
+                    return
+            self.fail('Msg: %s was not logged. The log was: %s' % 
+                      (regexp, log_stream.getvalue()))
     
 
 def main():
