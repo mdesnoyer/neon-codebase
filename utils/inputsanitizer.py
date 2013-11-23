@@ -51,4 +51,26 @@ class InputSanitizer(object):
            return "".join((map(str,input)))
        
         else:
-           raise
+           raise Exception("Conversion not supported")
+
+    @classmethod
+    def to_alphanumeric(cls,input):
+        OK_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+        out = ''
+        if isinstance(input,basestring):
+            for x in input:
+                if x in OK_CHARS:
+                    out += x
+            return out
+        else:
+           raise Exception("Conversion not supported")
+
+    @classmethod
+    def to_urlchars(cls,input):
+        OK_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789 .,!?:"
+        out = ''
+        for x in input:
+            if x in OK_CHARS:
+                out += x
+        return out
+

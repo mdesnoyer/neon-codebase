@@ -191,8 +191,8 @@ class AccountHandler(tornado.web.RequestHandler):
             else:
                 self.write("API not supported")
                 _log.warning(('key=account_handler '
-                              'msg=Invalid method in request %s') 
-                              % self.request.uri)
+                              'msg=Invalid method in request %s method %s') 
+                              % (self.request.uri,method))
                 self.set_status(400)
                 self.finish()
 
@@ -425,7 +425,7 @@ class AccountHandler(tornado.web.RequestHandler):
         completed_videos = [] #jobs that have completed 
 
         #Hack for first time video requests in brightcove #TODO: cleanup
-        requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_requests,job_ids)  
+        requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_requests,job_ids) 
         ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for request,vid in zip(requests,vids):
             if not request:
@@ -477,7 +477,7 @@ class AccountHandler(tornado.web.RequestHandler):
                         _log.debug("key=get_video_status_brightcove msg=video deleted %s"%vid)
                     else:
                         result[vid].thumbnails.append(tdata) 
-
+        
         #4. Set the default thumbnail for each of the video
         for res in result:
             vres = result[res]
@@ -563,30 +563,6 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.send_json_response(data,502)
 
 
-    ''' 
-    Create a Neon Account
-    '''
-
-    def create_account(self,a_id):
-        def saved_user(result):
-            if result:
-                data = '{ "neon_api_key": "' + api_key + '" }'
-            else:
-                data = '{"error": "account not created, DB error"}'
-            self.send_json_response(data)
-        
-        def check_exists(result):
-            if result:
-                data = '{"error": "account already exists"}'
-                _log.error("key=create_account mag=account already exists %s" %api_key)
-                self.send_json_response(data)
-            else:
-                user.save(saved_user)
-
-        user = neondata.NeonUserAccount(a_id)
-        api_key = user.neon_api_key
-        neondata.NeonUserAccount.get_account(api_key,callback=check_exists)
-    
     '''
     Update a Neon account
     '''
@@ -713,32 +689,8 @@ class AccountHandler(tornado.web.RequestHandler):
     '''
     Update Brightcove account details
     '''
+    @tornado.gen.engine
     def update_brightcove_integration(self,i_id):
-        
-        def saved_account(result):
-            if result:
-                data = ''
-                self.send_json_response(data,200)
-            else:
-                data = '{"error": "account not updated"}'
-                self.send_json_response(data,500)
-
-        def update_account(result):
-            if result:
-                bc = neondata.BrightcovePlatform.create(result)
-                bc.read_token = rtoken
-                bc.write_token = wtoken
-                
-                #Auto publish all the previous thumbnails in the account
-                if bc.auto_update == False and autosync == True:
-                    self.autopublish_brightcove_videos(bc)
-
-                bc.auto_update = autosync
-                bc.save(saved_account)
-            else:
-                _log.error("key=update_brightcove_integration msg= no such account %s integration id %s" %(self.api_key,i_id))
-                data = '{"error": "Account doesnt exists"}'
-                self.send_json_response(data,400)
         
         try:
             rtoken = InputSanitizer.to_string(self.get_argument("read_token"))
@@ -751,10 +703,29 @@ class AccountHandler(tornado.web.RequestHandler):
             return
 
         uri_parts = self.request.uri.split('/')
-        neondata.BrightcovePlatform.get_account(self.api_key,
-                                                i_id,
-                                                update_account)
 
+        result = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,self.api_key,i_id)
+        if result:
+            bc = neondata.BrightcovePlatform.create(result)
+            bc.read_token = rtoken
+            bc.write_token = wtoken
+                
+            #Auto publish all the previous thumbnails in the account
+            if bc.auto_update == False and autosync == True:
+                self.autopublish_brightcove_videos(bc)
+
+            bc.auto_update = autosync
+            res = yield tornado.gen.Task(bc.save)
+            if res:
+                data = ''
+                self.send_json_response(data,200)
+            else:
+                data = '{"error": "account not updated"}'
+                self.send_json_response(data,500)
+        else:
+            _log.error("key=update_brightcove_integration msg= no such account %s integration id %s" %(self.api_key,i_id))
+            data = '{"error": "Account doesnt exists"}'
+            self.send_json_response(data,400)
    
     '''
     Auto publish the videos in the account which are not active
@@ -769,11 +740,12 @@ class AccountHandler(tornado.web.RequestHandler):
             return
 
         keys = [neondata.InternalVideoID.generate(self.api_key,vid) for vid in vids]
+        video_results = neondata.VideoMetadata.multi_get(keys)
         video_results = yield tornado.gen.Task(neondata.VideoMetadata.multi_get,keys)
         tids = []
         video_thumb_mappings = {} #vid => [thumbnail metadata ...] 
         update_videos = {} #vid => neon_tid 
-        
+      
         #for all videos in account where status is not active 
         for vresult in video_results:
             if vresult:
@@ -1136,18 +1108,11 @@ class JobHandler(tornado.web.RequestHandler):
     def get(self, *args, **kwargs):
         
         #Get Job status
-        self.get_job_status()
+        #j_id = self.request.uri.split('/')[-1]
+        #neondata.NeonApiRequest.get_request(api_key,j_id,status_callback)
+        self.write("Not yet Impl")
+        self.finish()
 
-    def get_job_status(self):
-        def status_callback(result):
-            pass
-
-        j_id = self.request.uri.split('/')[-1]
-        #self.api_key
-        neondata.NeonApiRequest.get_request(self.api_key,j_id,status_callback)
-
-
-##
 ## Delete handler only for test accounts, use cautiously
 
 class DeleteHandler(tornado.web.RequestHandler):
@@ -1158,7 +1123,9 @@ class DeleteHandler(tornado.web.RequestHandler):
         #make sure you delete only a test account
         if "test" in a_id:
             neondata.NeonUserAccount.remove(a_id)
-
+        
+        self.finish()
+        
 ######################################################################
 ## Brightcove support handler -- Mainly used by brigthcovecontroller 
 ######################################################################
@@ -1240,12 +1207,13 @@ class BcoveHandler(tornado.web.RequestHandler):
 ### MAIN
 ################################################################
 
-def main():
-    application = tornado.web.Application([
+application = tornado.web.Application([
         (r'/api/v1/removeaccount(.*)', DeleteHandler),
         (r'/api/v1/accounts(.*)', AccountHandler),
         (r'/api/v1/brightcovecontroller(.*)', BcoveHandler),
-        (r'/api/v1/jobs(.*)', JobHandler)])
+        (r'/api/v1/jobs(.*)', JobHandler)],debug=True)
+
+def main():
     
     global server
     global BASE_URL 

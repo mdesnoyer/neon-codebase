@@ -705,8 +705,8 @@ class ProcessVideo(object):
                 self.thumbnails[0]["chosen"] = True #datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.thumbnails[0]["refid"] = tid
 
-        #3 Add thumbnails to the request object and save
-        bc_request.thumbnails = self.thumbnails
+        #3 Update Request State
+        #bc_request.thumbnails = self.thumbnails
         bc_request.state = RequestState.FINISHED 
         ret = bc_request.save()
 

@@ -107,7 +107,7 @@ class BrightcoveApi(object):
             md5_objs.append(t_md5); md5_objs.append(s_md5)
             res = supportServices.neondata.ImageMD5Mapper.save_all(md5_objs)
             if not res:
-                _log.error('key=update_thumbnail msg=failed to save supportServices.neondata.ImageMD5Mapper for %s' %video_id)
+                _log.error('key=update_thumbnail msg=failed to save ImageMD5Mapper for %s' %video_id)
             
             rt = self.add_image(video_id,
                                 bcove_thumb,
@@ -356,7 +356,7 @@ class BrightcoveApi(object):
                 except:
                     pass
 
-                callback_value = thumb,still 
+                callback_value = thumb,still
                 callback(callback_value)
 
         @tornado.gen.engine
@@ -399,14 +399,12 @@ class BrightcoveApi(object):
             else:
                 callback((False,False))
 
-        #img_url = 'http://leanerbythelake.com/wp-content/uploads/2013/02/2001_a_space_odyssey_1.jpg' 
         http_client = tornado.httpclient.AsyncHTTPClient()
         req = tornado.httpclient.HTTPRequest(url = img_url,
                                              method = "GET",
                                              request_timeout = 60.0,
-                                             connect_timeout = 10.0)
+                                             connect_timeout = 5.0)
         http_client.fetch(req,image_data_callback)
-
 
     ##################################################################################
     # Feed Processors
@@ -739,7 +737,9 @@ class BrightcoveApi(object):
         verify the read token and create neon api requests
         #Sync version
         '''
-        result = self.get_n_videos(n)
+        result = self.get_publisher_feed(command='find_all_videos',
+                                       page_size = n) #get n videos
+
         if result and not result.error:
             bc_json = supportServices.neondata.BrightcovePlatform.get_account(
                 self.neon_api_key, i_id)
