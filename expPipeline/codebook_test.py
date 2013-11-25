@@ -7,26 +7,31 @@ to those clusters. Also, we can check what cluster an image is in.
 '''
 import os.path
 import sys
-sys.path.insert(0,os.path.abspath(
-    os.path.join(os.path.dirname(__file__), '..')))
-import model.model
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
+import model
 
 import cv2
-import errorlog
 import logging
 import numpy as np
-from optparse import OptionParser
 import cPickle as pickle
 from PIL import Image
 import random
 import scipy.spatial.distance
 from cStringIO import StringIO
 import urllib2
+import utils.logs
+import utils.neon
+from utils.options import options, define
+
+define('input', help='Input codebook file')
+define('image', default=None, help='Image to determine what cluster it is in')
 
 _log = logging.getLogger(__name__)
 
 def assign_cluster(codebook, image, white_vector):
-    gist = model.model.GistGenerator()
+    gist = model.GistGenerator()
     features = gist.generate(image)
     dists = scipy.spatial.distance.cdist([features / white_vector], codebook)
     return np.argmin(dists, axis=1)
@@ -41,16 +46,7 @@ def get_image(url):
     return np.array(image)[:,:,::-1]
 
 if __name__ == '__main__':
-    parser = OptionParser()
-
-    parser.add_option('-i', '--input',
-                      help='Input codebook file')
-    parser.add_option('--image', default=None,
-                      help='Image to determine what cluster it is in')
-
-    options, args = parser.parse_args()
-
-    errorlog.createLogger(stream=sys.stdout)
+    utils.neon.InitNeon()
 
     # Open the codebook
     with open(options.input, 'rb') as f:

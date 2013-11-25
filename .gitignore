@@ -51,6 +51,7 @@ nosetests.xml
 #### cmake stuff ###
 CMakeCache.txt
 CMakeFiles
-Makefile
+!CMakeLists.txt
+#Makefile
 cmake_install.cmake
 install_manifest.txt

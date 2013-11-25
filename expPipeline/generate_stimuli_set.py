@@ -10,9 +10,6 @@ labeled (larger distance is better). These images are then added to those
 that will be labeled and the priority queues are recalculated. We stop when
 one of the queues is empty.
 
-TODO When a queue is empty try to intelligently find videos that are
-likely to have a frame in that region in image space.
-
 Copyright: 2013 Neon Labs
 Author: Sunil Mallya (mallaya@neon-lab.com)
         Mark Desnoyer (desnoyer@neon-lab.com)
@@ -21,13 +18,14 @@ USAGE = '%prog [options]'
 
 import os.path
 import sys
-sys.path.insert(0,os.path.abspath(
-    os.path.join(os.path.dirname(__file__), '..')))
-import model.model
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
+import model
+import model.features
 
 import cv2
 import heapq
-import errorlog
 import logging
 import re
 import os
@@ -37,14 +35,15 @@ import cPickle as pickle
 import pyflann
 from PIL import Image
 import scipy.spatial.distance
+import utils.logs
 import youtube_video_id_scraper as yt_scraper
 
 _log = logging.getLogger(__name__)
 
 def load_gist_generator(cache_dir=None):
-    generator = model.model.GistGenerator()
+    generator = model.features.GistGenerator()
     if cache_dir is not None:
-        generator = model.model.DiskCachedFeatures(generator, cache_dir)
+        generator = model.features.DiskCachedFeatures(generator, cache_dir)
 
     return generator
 
@@ -56,14 +55,18 @@ def parse_image_db(imdb_file, aspect_ratio, image_dir):
     aspect_ratio: string specifying the aspect ratio to accept
     image_dir: directory that contains the images
 
-    Outputs: [(image_file, video_url)]
+    Outputs: [(image_file, video_url)], [known_ids]
 
     '''
     _log.info('Loading the image database file: %s' % imdb_file)
     retval = []
+    known_ids = []
     with open(imdb_file) as f:
         for line in f:
             fields = line.split()
+            if len(fields) < 2:
+                continue
+            known_ids.append(videoid_from_url(fields[1]))
             if float(fields[3]) == aspect_ratio:
                 cur_file = '%s.jpg' % fields[0]
                 if not os.path.exists(os.path.join(image_dir, cur_file)):
@@ -73,7 +76,7 @@ def parse_image_db(imdb_file, aspect_ratio, image_dir):
                 else:
                     retval.append(('%s.jpg' % fields[0], fields[1]))
 
-    return retval
+    return (retval, set(known_ids))
 
 def find_labeled_files(stimuli_dir, image_dir):
     '''Find all the images that are already in a stimuli set.'''
@@ -94,6 +97,20 @@ def load_codebook(codebook):
         return (None, None, 1.0)
     with open(codebook, 'rb') as f:
         return pickle.load(f)
+
+def merge_example_urls(codebook_urls, examples_file):
+    if examples_file is not None:
+        _log.info('Loading example urls from %s' % examples_file)
+        with open(examples_file, 'rb') as f:
+            new_examples = pickle.load(f)
+
+        if len(codebook_urls) <> len(new_examples):
+            _log.error('Wrong number of clusters')
+            return codebook_urls
+
+        for cluster_id in range(len(new_examples)):
+            codebook_urls[cluster_id].extend(new_examples[cluster_id])
+    return codebook_urls
 
 def generate_features(image_files, image_dir, white_vector, generator):
     '''Creates a matrix of features.
@@ -250,17 +267,18 @@ def find_new_urls(seed_ids, output_file, n_videos=100, known_ids=[]):
         _log.info('Appending %i new urls to %s' % (len(new_ids), output_file))
         f.write('\n'.join(['http://www.youtube.com/watch?v=%s' % x for
                       x in new_ids]))
+        f.write('\n')
 
     return new_ids
 
 def main(options):
     generator = load_gist_generator(options.cache_dir)
     example_urls, codebook, white_vector = load_codebook(options.codebook)
+    example_urls = merge_example_urls(example_urls, options.example_urls)
 
-    db_parse = parse_image_db(options.image_db, options.aspect_ratio,
-                                 options.image_dir)
-    known_videoids = set(filter(lambda x: x is not None,
-                                [videoid_from_url(x[1]) for x in db_parse]))
+    db_parse, known_videoids = parse_image_db(options.image_db,
+                                              options.aspect_ratio,
+                                              options.image_dir)
 
     labeled_files = find_labeled_files(options.stimuli_dir,
                                        options.image_dir)
@@ -378,6 +396,9 @@ if __name__ == '__main__':
     parser.add_option('--codebook', default=None,
                       help=('File containing the codebook definition. '
                             'Created using the divide_visual_space.py script.'))
+    parser.add_option('--example_urls', default=None,
+                      help=('File of example urls for each cluster '
+                            'generated using generate_example_urls.py'))
 
     parser.add_option('--cache_dir', default=None,
                       help='Directory for cached feature files.')
@@ -395,8 +416,8 @@ if __name__ == '__main__':
     options, args = parser.parse_args()
 
     if options.log is None:
-        errorlog.StreamLogger(None)
+        utils.logs.StreamLogger(None)
     else:
-        errorlog.FileLogger(None, options.log)
+        utils.logs.FileLogger(None, options.log)
 
     main(options)

@@ -12,13 +12,13 @@ USAGE = '%prog [options]'
 
 import os.path
 import sys
-sys.path.insert(0,os.path.abspath(
-    os.path.join(os.path.dirname(__file__), '..')))
-import model.model
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
+import model
 
 import cPickle as pickle
 from flickrapi import FlickrAPI, shorturl
-import errorlog
 import numpy as np
 from optparse import OptionParser
 from PIL import Image
@@ -26,6 +26,7 @@ from cStringIO import StringIO
 import time
 import urllib2
 import re
+import utils.logs
 import youtube_video_id_scraper as youtube
 
 
@@ -143,13 +144,13 @@ if __name__ == '__main__':
 
     options, args = parser.parse_args()
 
-    _log = errorlog.FileLogger(__name__, options.log)
+    _log = utils.logs.FileLogger(__name__, options.log)
 
     in_stream = sys.stdin
     if options.input is not None:
         in_stream = open(options.input, 'r')
 
-    generator = model.model.GistGenerator()
+    generator = model.GistGenerator()
 
     i = -1
     for line in in_stream:

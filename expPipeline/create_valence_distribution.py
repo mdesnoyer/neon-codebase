@@ -1,40 +1,54 @@
-''' usage for multiple files -  for i in {1..10} ; do python create_valence_distribution.py stimuli_set$i; done '''
+#!/usr/bin/env python
+''' Script that bins the valence scores.
 
-''' Creates a distribution from the input file values of net keep -return scores and assign valence scores to each image ''' 
-import pylab
+'''
+import csv
+import logging
 import sys
-import matplotlib.pyplot as pyplot
-import operator
+import numpy as np
+from optparse import OptionParser
 
-#number of bins to create the distribution 
-nbins = 7
 
-map ={}
-infile = sys.argv[1]
-outfile = "vscore.txt"
+def main(options):
 
-#file format   
-#fname <net valence score>
-with open(infile) as f:
-    for f in f.readlines():
-        vals = f.strip().split(', ')
-        fname = vals[0]
-        score = float(vals[1].rstrip('\n'))
-        map[fname] = score
+    score_map = {}
+        
+    with open(options.input) as f:
+        for fields in csv.reader(f):
+            score_map[fields[0]] = float(fields[1])
 
-sorted_map = sorted(map.iteritems(), key=operator.itemgetter(1)) #tuple
-x = [ v[1] for v in sorted_map ]
-hist = pylab.hist(x,nbins)
-bin_distribution = hist[0]
+    fnames, scores = zip(*score_map.items())
 
-f = open(outfile,'a')
-idx = 0
-vscore = 1 
-for b in bin_distribution:
-    for i in range(b):
-        f.write( sorted_map[idx][0] + " " + str(vscore) + "\n")
-        idx += 1
+    # Limit to +- 3 stddev so that outliers don't throw off the bins
+    mn = np.mean(scores)
+    stdev = np.std(scores)
+    lowRange = max(min(scores), mn - 3*stdev)
+    hiRange = min(max(scores), mn + 3*stdev)
 
-    vscore += 1
+    hist, bins = np.histogram(scores, options.nbins, range=(lowRange, hiRange))
+    bins[0] = min(scores)
+    bins[-1] = max(scores)
+    new_scores = np.digitize(scores, bins)
+
+    with open(options.output,'w') as f:
+        writer = csv.writer(f)
+        for fname, score in zip(fnames, new_scores):
+            writer.writerow([fname, score])
+
+if __name__ == '__main__':
+    parser = OptionParser()
+
+    parser.add_option('--input', '-i', default=None,
+                      help='File with input scores in raw valences from mturk task')
+    parser.add_option('--output', '-o', default=None,
+                      help='File with binned output scores')
+    parser.add_option('--nbins', type='int', default=7,
+                      help='Number of bins')
+    
+    options, args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO)
+
+    main(options)
 
 

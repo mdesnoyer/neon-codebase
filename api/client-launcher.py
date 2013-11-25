@@ -1,9 +1,29 @@
 # Launch clients
 #!/usr/bin/env python
-import subprocess
+import os.path
 import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
+    
+import subprocess
 import time
 import signal
+import utils.neon
+from utils.options import define, options
+
+import logging
+_log = logging.getLogger(__name__)
+
+define('local', default=0, type=int,
+       help='If set, use the localproperties file for config')
+define('n_workers', default=1, type=int,
+       help='Number of workers to spawn')
+define('model_file', default=None,
+       help='File that contains the model')
+define('debug', default=0, type=int,
+       help='If true, runs in debug mode')
+
 
 def sig_handler(sig, frame):
     kill = True
@@ -16,9 +36,16 @@ def read_version_from_file(fname):
         return int(f.readline())
 
 def launch_clients():
-    p = subprocess.Popen("nohup python client.py " + num_clients + " " + local + " &", shell=True, stdout=subprocess.PIPE)
+
+    for i in range(nclients):
+        if local:
+            print "start"
+            p = subprocess.Popen("nohup python client.py --model_file=" + model  + " --local &", shell=True, stdout=subprocess.PIPE)
+        else:
+            p = subprocess.Popen("nohup python client.py --model_file=" + model  + " &", shell=True, stdout=subprocess.PIPE)
 
 if __name__ == "__main__":
+    utils.neon.InitNeon()
 
     #signal handlers
     signal.signal(signal.SIGTERM, sig_handler)
@@ -29,12 +56,14 @@ if __name__ == "__main__":
     global client_pids
 
     kill = False
-    try:
-        num_clients = sys.argv[1]
-        local = sys.argv[2]
-    except:
-        print "./script <nclients> <local properties 0/1>"
-        sys.exit(0)
+    
+    nclients = options.n_workers
+    model = options.model_file
+    local = options.local
+    
+    #if len(options) <2:
+    #    print "missing args"
+    #    sys.exit(0)
 
     sleep_interval = 5
     code_version_file = "code.version"

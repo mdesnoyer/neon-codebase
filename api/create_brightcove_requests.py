@@ -1,28 +1,46 @@
 #!/usr/bin/python
+'''
+BRIGHTCOVE CRON 
 
-''' Create api requests for the brightcove customers '''
+Parse Brightcove Feed for all customers and 
+Create api requests for the brightcove customers 
 
-from brightcove_api import BrightcoveApi
-import tornado.escape
-
-customer_file = 'brightcoveCustomerTokens.json'
-customer_data = None
-
-with open(customer_file,'r') as f:
-    data = f.readline()
-
-customer_data = tornado.escape.json_decode(data)
-
-for customer_id in customer_data.keys():
+'''
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
     
-    customer = customer_data[customer_id]
-    rtoken = customer['read_token']
-    wtoken = customer['write_token']
-    napi   = customer['neon_api_key']
-    pid   = customer['publisher_id']
+from brightcove_api import BrightcoveApi
+import redis as blockingRedis
+import os
+from supportServices.neondata import *
+import json
+import logging
+logging.basicConfig(level=logging.DEBUG,
+        format='%(asctime)s %(levelname)s %(message)s',
+        datefmt='%m-%d %H:%M',
+        filename='/mnt/logs/neon/brightcovecron.log',
+        filemode='a')
+_log = logging.getLogger(__name__)
 
-    print "Retreiveing feed for " , customer_id
+try:
+    # Get all Brightcove accounts
+    host = '127.0.0.1'
+    port = 6379
+    rclient = blockingRedis.StrictRedis(host,port)
+    accounts = rclient.keys('brightcoveplatform*')
+    for accnt in accounts:
+        api_key = accnt.split('_')[-2]
+        i_id = accnt.split('_')[-1]
+        _log.debug("key=brightcove_request msg= internal account %s i_id %s" %(api_key,i_id))
+        #retrieve the blob and create the object
+        jdata = rclient.get(accnt) 
+        bc = BrightcovePlatform.create(jdata)
+        bc.check_feed_and_create_api_requests()
 
-    bc = BrightcoveApi(publisher_id=pid, neon_api_key=napi, read_token=rtoken, write_token=wtoken)
-    #bc.create_neon_api_requests(request_type='abtest')
-    bc.create_neon_api_requests()
+except Exception as e:
+    _log.exception('key=create_brightcove_requests msg=Unhandled exception %s'
+                   % e)
+

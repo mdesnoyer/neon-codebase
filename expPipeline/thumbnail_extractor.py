@@ -18,6 +18,7 @@ import logging.handlers
 
 import StringIO
 import signal
+import traceback
 
 import youtube_dl
 
@@ -25,12 +26,15 @@ _log = logging.getLogger(__name__)
 
 def sig_handler(sig, frame):
     _log.info('Shutting Down')
+    _log.info('Traceback:\n%s' % ''.join(traceback.format_stack(frame)))
     for proc in multiprocessing.active_children():
         proc.terminate()
         proc.join(10)
     for proc in multiprocessing.active_children():
         os.kill(proc.pid, signal.SIGKILL)
     sys.exit(0)
+
+class TimeoutError(IOError): pass
 
 
 class ProcessVideo(youtube_dl.PostProcessor):
@@ -70,8 +74,11 @@ class ProcessVideo(youtube_dl.PostProcessor):
         if dur > self.nthumbnails:
             locations = random.sample(range(dur),self.nthumbnails)
             return locations
+        elif dur == 0:
+            _log.warn("Duration is less than a second. Taking middle frame.")
+            return [duration / 2.0]
         else:
-            _log.error("Duration smaller than nthumbnails dur = " + str(dur))
+            _log.warn("Duration smaller than nthumbnails dur = " + str(dur))
             return range(dur)
 
     ''' process all the frames from the partial video downloaded '''
@@ -181,6 +188,7 @@ class VideoDownload(object):
         return fd.download([self.url])
 
 class Worker(multiprocessing.Process):
+    _DOWNLOAD_TIMEOUT = 1800 # seconds
 
     def __init__(self, work_queue, failed_count, image_db,
                  image_dir, failed_links, nthumbs, thumb_location):
@@ -200,8 +208,15 @@ class Worker(multiprocessing.Process):
         self.thumb_location = thumb_location
 
     def run(self):
-        try:
-            url = work_queue.get()
+        try:            
+            url = self.work_queue.get()
+
+            # Setup an alarm so that we can timeout
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.signal(signal.SIGALRM,
+                          lambda sig, frame: self.clean_timeout(url))
+            signal.alarm(Worker._DOWNLOAD_TIMEOUT)
 
             # See if we should wait a little bit because we're
             # hitting the server too hard. We try to use
@@ -232,6 +247,12 @@ class Worker(multiprocessing.Process):
             exit(0)
         except Exception,e:
             _log.exception("worker error" + e.__str__())
+
+    def clean_timeout(self, url):
+        self.work_queue.put(url)
+        _log.error('Timeout when downloading %s. Requeing' % url)
+        raise TimeoutError()
+        
 
 class LinkLoader(multiprocessing.Process):
     '''Process that identifies when new links to download are requested and quese them.
@@ -332,6 +353,8 @@ if __name__ == "__main__":
                       help='File to list the failed links')
     parser.add_option('--log', default=None,
                       help='Log file. If none, dumps to stdout')
+    parser.add_option('--debug', action='store_true', default=False,
+                      help='If true, allows you to debug the worker')
     
     options,args = parser.parse_args()
 
@@ -362,9 +385,9 @@ if __name__ == "__main__":
 
     delay = 5 #secs
 
-    #Run Loop
+    # Run Loop
     try:
-        while True:
+        while True:                   
             nproc_to_fork = (options.nprocess + 1 -
                              len(multiprocessing.active_children()))
             #spawn workers
@@ -376,8 +399,10 @@ if __name__ == "__main__":
                                 options.failed_links,
                                 options.nthumbs,
                                 options.location)
-                #worker.start()
-                worker.run()
+                if options.debug:
+                    worker.run()
+                else:
+                    worker.start()
 
             time.sleep(delay)
     finally:

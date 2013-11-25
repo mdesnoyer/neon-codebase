@@ -1,3 +1,9 @@
+import os.path
+import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
+
 import tornado.httpserver
 import tornado.ioloop
 import tornado.web
@@ -9,7 +15,6 @@ import signal
 import time
 import urllib
 import urlparse
-import errorlog
 import youtube
 import hashlib
 import re
@@ -30,24 +35,26 @@ from botornado.s3.key import AsyncKey
 import tornado.stack_context
 import contextlib
 
+import logging
+import utils.neon
+
 
 #String constants
 REQUEST_UUID_KEY = 'uuid'
 JOB_ID = "job_id"
 
 #Tornado options
-from tornado.options import define, options
+from utils.options import define, options
 define("port", default=8081, help="run on the given port", type=int)
 MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
     
-global log
-log = errorlog.FileLogger("server")
+_log = logging.getLogger(__name__)
 
 
 #=============== Global Handlers ======================================#
 
 def sig_handler(sig, frame):
-    log.debug('Caught signal: ' + str(sig) )
+    _log.debug('Caught signal: ' + str(sig) )
     tornado.ioloop.IOLoop.instance().add_callback(shutdown)
 
 def shutdown():
@@ -64,7 +71,7 @@ def shutdown():
             io_loop.add_timeout(now + 1, stop_loop)
         else:
             io_loop.stop()
-            log.info('Shutdown')
+            _log.info('Shutdown')
     stop_loop()
 
 
@@ -158,7 +165,7 @@ class MetaDataHandler(tornado.web.RequestHandler):
             self.write(resp)
 
         except Exception,e:
-            log.error("key=metadata_handler msg=exception " + e.__str__())
+            _log.error("key=metadata_handler msg=exception " + e.__str__())
             raise tornado.web.HTTPError(400)
 
         self.finish()
@@ -179,7 +186,7 @@ class DequeueHandler(tornado.web.RequestHandler):
             self.write("{}")
 
         except Exception,e:
-            log.error("key=dequeue_handler msg=error from work queue")
+            _log.error("key=dequeue_handler msg=error from work queue")
             raise tornado.web.HTTPError(500)
 
         self.finish()
@@ -189,13 +196,13 @@ class RequeueHandler(tornado.web.RequestHandler):
     def post(self, *args, **kwargs):
         
         try:
-            log.info("key=requeue_handler msg=requeing ")
+            _log.info("key=requeue_handler msg=requeing ")
             #data = tornado.escape.url_unescape(self.request.body, encoding='utf-8')
             data = self.request.body
             #TODO Verify data Format
             global_api_work_queue.put(data)
         except Exception,e:
-            log.error("key=requeue_handler msg=error " + e.__str__())
+            _log.error("key=requeue_handler msg=error " + e.__str__())
             raise tornado.web.HTTPError(500)
 
         self.finish()
@@ -250,12 +257,12 @@ class GetResultsHandler(tornado.web.RequestHandler):
                 data = k.get_contents_as_string(callback=self.s3_get_callback)
     
         except S3ResponseError,e:
-            log.exception("key=getresultshandler msg=traceback")
+            _log.exception("key=getresultshandler msg=traceback")
             self.write("Result not ready yet")
             self.finish()
 
         except:
-            log.exception("key=getresultshandler msg=general traceback")
+            _log.exception("key=getresultshandler msg=general traceback")
             raise tornado.web.HTTPError(400)
             self.finish()
 
@@ -297,7 +304,7 @@ class JobStatusHandler(tornado.web.RequestHandler):
             self.write("S3 resp error")
 
         except Exception,e:
-            log.error("key=jobstatus_handler msg=exception " + e.__str__())
+            _log.error("key=jobstatus_handler msg=exception " + e.__str__())
             raise tornado.web.HTTPError(400)
             self.finish()
 
@@ -316,7 +323,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
 
     @contextlib.contextmanager
     def exp_handler(self,*args,**kwargs):
-        log.error("key=thumbnail_handler api_key=" + self.parsed_params[properties.API_KEY] + " id=" +
+        _log.error("key=thumbnail_handler api_key=" + self.parsed_params[properties.API_KEY] + " id=" +
                 self.parsed_params[properties.REQUEST_UUID_KEY] + "msg=s3 save failed state=%s" %(self.state))
         raise tornado.web.HTTPError(400)
         self.finish()
@@ -413,7 +420,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 k.set_contents_from_string(json_data,callback=self.save_data_s3_callback)
         
         except Exception,e:
-            log.error("key=thumbnail_handler msg=" + e.__str__());
+            _log.error("key=thumbnail_handler msg=" + e.__str__());
             self.set_status(400)
             self.finish("<html><body>Bad Request " + e.__str__() + " </body></html>")
 
@@ -467,10 +474,10 @@ class TestCallback(tornado.web.RequestHandler):
     def post(self, *args, **kwargs):
         
         try:
-            log.info("key=testcallback msg=output: " + self.request.body)
+            _log.info("key=testcallback msg=output: " + self.request.body)
         except Exception,e:
             raise tornado.web.HTTPError(500)  
-            log.error("key=testcallback msg=error recieving message")
+            _log.error("key=testcallback msg=error recieving message")
         
         self.finish()
 
@@ -486,16 +493,14 @@ application = tornado.web.Application([
     (r"/dequeue",DequeueHandler),
     (r"/requeue",RequeueHandler),
     (r"/testcallback",TestCallback),
-    #(r'/api/v1/get_youtube/(.*)',GetYoutube),
     (r'/api/v1/jobstatus',JobStatusHandler),
     (r'/api/v1/videometadata',MetaDataHandler),    
     (r'/api/v1/getresults',GetResultsHandler),    
 ])
 
 def main():
-
+    utils.neon.InitNeon()
     global server
-    tornado.options.parse_command_line()
     signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGINT, sig_handler)
     server = tornado.httpserver.HTTPServer(application)

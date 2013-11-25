@@ -15,7 +15,7 @@ VIDEO_TITLE = "video_title"
 BCOVE_READ_TOKEN = "read_token"
 BCOVE_WRITE_TOKEN = "write_token"
 LOG_FILE = "/tmp/neon-server.log"
-REQUEST_UUID_KEY = "uuid"
+REQUEST_UUID_KEY = "job_id"
 API_KEY = "api_key"
 JOB_SUBMIT_TIME = "submit_time"
 JOB_END_TIME = "end_time"
@@ -34,7 +34,7 @@ API_KEY_FILE = 'apikeys.json'
 BRIGHTCOVE_THUMBNAILS = "brightcove"
 PUBLISHER_ID = "publisher_id"
 PREV_THUMBNAIL = "previous_thumbnail"
-
+INTEGRATION_ID = "integration_id"
 #=========== S3 Config ===============#
 
 S3_KEY_PREFIX = 'internal_test_'

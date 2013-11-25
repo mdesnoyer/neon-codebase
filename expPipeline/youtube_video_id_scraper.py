@@ -116,6 +116,7 @@ def get_video_duration(video_id):
     time_str = response["items"][0]["contentDetails"]["duration"]
     minRe = re.compile('([0-9]+)M')
     secRe = re.compile('([0-9]+)S')
+    hourRe = re.compile('([0-9]+)H')
     timeval = 0
     minParse = minRe.search(time_str)
     if minParse:
@@ -125,10 +126,14 @@ def get_video_duration(video_id):
     if secParse:
         timeval += int(secParse.groups()[0])
 
+    hourParse = hourRe.search(time_str)
+    if hourParse:
+        timeval += 3600 * int(hourParse.groups()[0])
+
     return timeval
 
 def get_new_videos(video_ids, old_video_ids=[], max_duration=600,
-                        n_videos=25):
+                   n_videos=25):
     '''Retrieves videos similar to video_ids, skipping old ones.
 
     Inputs:
@@ -197,7 +202,7 @@ if __name__ == '__main__':
 
     if options.use_queries:
         for line in inStream:
-            video_ids.extend(['http://www.youtube.com/watch/?v=%s' % x for x in
+            video_ids.extend(['http://www.youtube.com/watch?v=%s' % x for x in
                               get_video_ids(line,
                                             n_videos=options.n,
                                             max_duration=options.max_duration)])
