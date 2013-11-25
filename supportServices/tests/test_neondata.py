@@ -10,8 +10,13 @@ if sys.path[0] <> base_path:
 import unittest
 from supportServices.neondata import *
 
-class TestSingleton(unittest.TestCase):
+#TODO: Test db connection stuff and more.....
+
+class TestNeondata(unittest.TestCase):
     def setUp(self):
+        pass
+
+    def test_dbconn_singleton(self):
         bp = BrightcovePlatform('2','3',4)
         self.bp_conn = DBConnection(bp)
 
@@ -24,8 +29,7 @@ class TestSingleton(unittest.TestCase):
 
         vm2 = VideoMetadata('test2',None,None,None,None,None,None,None)
         self.vm_conn2 = DBConnection(vm2)
-
-    def test_instance(self):
+        
         self.assertEqual(self.bp_conn,self.bp_conn2)
         self.assertEqual(self.vm_conn,self.vm_conn2)
 

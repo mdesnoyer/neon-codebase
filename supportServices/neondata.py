@@ -1042,27 +1042,6 @@ class NeonApiRequest(object):
         self.response['urls'] = urls 
         self.response['error'] = error
   
-    '''
-    Enable thumbnail given the id
-    iterate and set the given thumbnail and disable the previous
-    '''
-    def choose_thumbnail(self,tid):
-        t_url = None
-        for t in self.thumbnails:
-            if t['thumbnail_id'] == tid:
-                t['chosen'] = True #datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") 
-                t_url = t['url'][0]
-            else:
-                t['chosen'] = False 
-        return t_url
-   
-    def get_current_thumbnail(self):
-        tid = None
-        for t in self.thumbnails:
-            if t['enabled'] is not None:
-                tid = t['thumbnail_id']
-                return tid
-    
     def set_api_method(self,method,param):
         #TODO Verify
         self.api_method = method

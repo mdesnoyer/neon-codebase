@@ -1,5 +1,11 @@
 #!/usr/bin/python
-''' Create api requests for the brightcove customers '''
+'''
+BRIGHTCOVE CRON 
+
+Parse Brightcove Feed for all customers and 
+Create api requests for the brightcove customers 
+
+'''
 import os.path
 import sys
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
