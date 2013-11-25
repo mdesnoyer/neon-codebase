@@ -653,7 +653,7 @@ class ProcessVideo(object):
         s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
         k = Key(s3bucket)
         k.key = self.base_filename + "/brightcove.jpeg" 
-        k.set_contents_from_string(imgdata)
+        k.set_contents_from_string(imgdata,{"Content-Type":"image/jpeg"})
         s3bucket.set_acl('public-read',k.key)
         s3fname = s3_url_prefix + "/" + k.key 
         bc_request.previous_thumbnail = s3fname
@@ -757,7 +757,7 @@ class ProcessVideo(object):
         s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
         k = Key(s3bucket)
         k.key = self.base_filename + "/youtube.jpeg" 
-        k.set_contents_from_string(imgdata)
+        k.set_contents_from_string(imgdata,{"Content-Type":"image/jpeg"})
         s3bucket.set_acl('public-read',k.key)
         s3fname = s3_url_prefix + "/" + k.key 
         yt_request.previous_thumbnail = s3fname

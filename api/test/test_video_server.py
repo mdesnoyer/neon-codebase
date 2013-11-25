@@ -38,7 +38,8 @@ class TestVideoServer(AsyncHTTPTestCase):
 
         #self.nplatform_patcher = patch('api.server.NeonPlatform')
         #self.mock_nplatform_patcher = self.nplatform_patcher.start()
-        
+        #self.mock_nplatform_patcher.get_account.side_effect = self._db_side_effect
+
         self.base_uri = '/api/v1/submitvideo/topn'
         self.neon_api_url = self.get_url(self.base_uri)
 
@@ -64,6 +65,7 @@ class TestVideoServer(AsyncHTTPTestCase):
     def tearDown(self):
         self.sync_patcher.stop()
         self.async_patcher.stop()
+        #self.mock_nplatform_patcher.stop()
         #TODO: teardown db
 
     def make_neon_api_request(self,vals):
@@ -104,7 +106,7 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.cleanup_db(api_key)
         self.assertEqual(resp.code,409)
 
-    def test_brightcove_request(self):
+    def _test_brightcove_request(self):
         #create brightcove platform account
         na = neondata.NeonPlatform("testaccountneonapi")
         api_key = na.neon_api_key
@@ -129,7 +131,7 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.cleanup_db(api_key)
         self.assertEqual(resp.code,201)
 
-    def _test_empty_request(self):
+    def test_empty_request(self):
         self.real_asynchttpclient.fetch(self.neon_api_url, 
                 callback=self.stop, method="POST", body='')
         resp = self.wait()

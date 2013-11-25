@@ -509,12 +509,12 @@ class BrightcoveApi(object):
 
             else:
                 #Sync the changes in brightcove account to NeonDB
-                job_id = videos_processed[vid]
+                job_id = bc.videos[vid]
                 req_data = supportServices.neondata.NeonApiRequest.get_request(
                         self.neon_api_key,job_id)
-                vid_request = supportServices.neondata.NeonApiRequest.NeonApiRequest.create(
+                vid_request = supportServices.neondata.NeonApiRequest.create(
                         req_data)
-                vid_request.title = title
+                vid_request.video_title = title
                 vid_request.save()
 
     def format_neon_api_request(self, id, video_download_url, 

@@ -644,7 +644,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 
                 #Saved Integration
                 if res:
-                    response = bc.verify_token_and_create_requests_for_video(5)
+                    response = bc.verify_token_and_create_requests_for_video(10)
                     
                     # TODO: investigate further, ReferenceError: weakly-referenced object no longer exists
                     # (self.subscribed and cmd == 'PUBLISH')):
