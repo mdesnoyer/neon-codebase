@@ -206,7 +206,9 @@ class TestStatsDBWatcher(unittest.TestCase):
         except Exception as e:
             pass
         self.ramdb.close()
-        os.remove('file::memory:?cache=shared')
+        f = 'file::memory:?cache=shared'
+        if os.path.exists(f):
+            os.remove(f)
 
     def test_working_db(self):
         # Always say that the thumbnail id is part of the same video

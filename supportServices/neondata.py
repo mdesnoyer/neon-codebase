@@ -12,8 +12,6 @@ Api Request Types
 - Neon, Brightcove, youtube
 
 #TODO Connection pooling of redis connection https://github.com/leporo/tornado-redis/blob/master/demos/connection_pool/app.py
-
-#TODO(sunil): Fix your docstrings so that they actually are doc strings (ie. below the function definition)
 '''
 import os.path
 import sys
@@ -108,9 +106,9 @@ class DBConnection(object):
     #                cls._singleton_instance[class_name] = cls(cname = class_name)
     #    return cls._singleton_instance[class_name]
 
-    ''' Method to update the connection object in case of db config update '''
     @classmethod
     def update_instance(cls,cname):
+        ''' Method to update the connection object in case of db config update '''
         if cls._singleton_instance.has_key(cname):
             with cls.__singleton_lock:
                 if cls._singleton_instance.has_key(cname):
@@ -169,10 +167,10 @@ def _erase_all_data():
     ThumbnailIDMapper._erase_all_data()
     VideoMetadata._erase_all_data()
 
-'''
-Static class for REDIS configuration
-'''
 class RedisClient(object):
+    '''
+    Static class for REDIS configuration
+    '''
     #static variables
     host = '127.0.0.1'
     port = 6379
@@ -190,11 +188,11 @@ class RedisClient(object):
         client.connect()
         blocking_client = blockingRedis.StrictRedis(host,port)
     
-    '''
-    return connection objects (blocking and non blocking)
-    '''
     @staticmethod
     def get_client(host=None,port=None):
+        '''
+        return connection objects (blocking and non blocking)
+        '''
         if host is None:
             host = RedisClient.host 
         if port is None:
@@ -204,22 +202,24 @@ class RedisClient(object):
         RedisClient.bc = blockingRedis.StrictRedis(host,port,socket_timeout=10)
         return RedisClient.c,RedisClient.bc 
 
-''' Format request key (with job_id) to find NeonApiRequest Object'''
+##############################################################################
+
 def generate_request_key(api_key,job_id):
+    ''' Format request key (with job_id) to find NeonApiRequest Object'''
     key = "request_" + api_key + "_" + job_id
     return key
+##############################################################################
 
-'''
-Abstract Hash Generator
-'''
 
 class AbstractHashGenerator(object):
+    ' Abstract Hash Generator '
+
     @staticmethod
     def _api_hash_function(input):
         return hashlib.md5(input).hexdigest()
 
-''' Static class to generate Neon API Key'''
 class NeonApiKey(AbstractHashGenerator):
+    ''' Static class to generate Neon API Key'''
     salt = 'SUNIL'
     
     @staticmethod
@@ -227,8 +227,8 @@ class NeonApiKey(AbstractHashGenerator):
         input = NeonApiKey.salt + str(input)
         return NeonApiKey._api_hash_function(input)
 
-''' Internal Video ID Generator '''
 class InternalVideoID(object):
+    ''' Internal Video ID Generator '''
     @staticmethod
     def generate(api_key,vid):
         key = api_key + "_" + vid
@@ -408,10 +408,10 @@ class NeonUserAccount(object):
         else:
             return db_connection.blocking_conn.set(self.key,self.to_json())
     
-    '''
-    Save Neon User account and corresponding integration
-    '''
     def save_integration(self,new_integration,callback=None):
+        '''
+        Save Neon User account and corresponding integration
+        '''
         db_connection = DBConnection(self)
         pipe = db_connection.conn.pipeline()
         pipe.set(self.key,self.to_json())
@@ -605,31 +605,14 @@ class BrightcovePlatform(AbstractPlatform):
             value = self.to_json()
             return db_connection.blocking_conn.set(self.key,value)
 
-    ''' method to keep video metadata and thumbnail data consistent '''
     @tornado.gen.engine
     def update_thumbnail(self,platform_vid,new_tid,nosave=False,callback=None):
+        ''' method to keep video metadata and thumbnail data consistent '''
+        
         bc = api.brightcove_api.BrightcoveApi(
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update)
        
-        #Update the database with video first
-        #Get previous thumbnail and new thumb
-        modified_thumbs = [] 
-        new_thumb, old_thumb = ThumbnailIDMapper.enable_thumbnail(
-                                    thumb_mappings, new_tid)
-        modified_thumbs.append(new_thumb)
-        modified_thumbs.append(old_thumb)
-        if new_thumb is not None and old_thumb is not None: 
-            res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
-                                        modified_thumbs)  
-            if not res:
-                _log.error("key=update_thumbnail msg=[pre-update] ThumbnailIDMapper save_all failed for %s" %new_tid)
-                callback(False)
-                return
-        else:
-            callback(False)
-            return
-
         #Get video metadata
         i_vid = InternalVideoID.generate(self.neon_api_key,platform_vid)
         vmdata = yield tornado.gen.Task(VideoMetadata.get,i_vid)
@@ -638,12 +621,14 @@ class BrightcovePlatform(AbstractPlatform):
             callback(None)
             return
 
+        #Thumbnail ids for the video
         tids = vmdata.thumbnail_ids
         
         #Get all thumbnails
         thumb_mappings = yield tornado.gen.Task(ThumbnailIDMapper.get_thumb_mappings,tids)
         t_url = None
         
+        #Check if the new tid exists
         for thumb_mapping in thumb_mappings:
             if thumb_mapping.thumbnail_metadata["thumbnail_id"] == new_tid:
                 t_url = thumb_mapping.thumbnail_metadata["urls"][0]
@@ -652,42 +637,81 @@ class BrightcovePlatform(AbstractPlatform):
             _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
             callback(None)
             return
+        
+        #Update the database with video first
+        #Get previous thumbnail and new thumb
+        modified_thumbs = [] 
+        new_thumb, old_thumb = ThumbnailIDMapper.enable_thumbnail(
+                                    thumb_mappings, new_tid)
+        modified_thumbs.append(new_thumb)
+        if old_thumb is None:
+            _log.debug("key=update_thumbnaili msg=set thumbnail for the first time %s tid %s"%(i_vid,new_tid))
+        else:
+            modified_thumbs.append(old_thumb)
+        
+        if new_thumb is not None:
+            res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
+                                        modified_thumbs)  
+            if not res:
+                _log.error("key=update_thumbnail msg=[pre-update]" 
+                        "ThumbnailIDMapper save_all failed for %s" %new_tid)
+                callback(False)
+                return
+        else:
+            callback(False)
+            return
 
+        # Update the new_tid as the thumbnail for the video
         tref,sref = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,
                                            platform_vid,
                                            t_url,
                                            new_tid)
         if not sref:
-            _log.error("key=update_thumbnail msg=brightcove error update video still for video %s %s" %(i_vid,new_tid))
+            _log.error("key=update_thumbnail msg=brightcove error" 
+                    "update video still for video %s %s" %(i_vid,new_tid))
 
         if nosave:
             callback(tref)
             return
 
         if not tref:
+            _log.error("key=update_thumbnail msg=failed to" 
+                    "enable thumb %s for %s" %(new_tid,i_vid))
+            
             # Thumbnail was not update via the brightcove api, revert the DB changes
             modified_thumbs = []
-            old_tid = old_thumb.thumbnail_metadata["thumbnail_id"] #get old thumbnail tid to revert to, this was the tid that was previously live before this request
+            
+            #get old thumbnail tid to revert to, this was the tid 
+            #that was previously live before this request
+            old_tid = old_thumb.thumbnail_metadata["thumbnail_id"] 
             new_thumb, old_thumb = ThumbnailIDMapper.enable_thumbnail(
                                     thumb_mappings, old_tid)
             modified_thumbs.append(new_thumb)
-            modified_thumbs.append(old_thumb)
+            if old_thumb: 
+                modified_thumbs.append(old_thumb)
             
-            if new_thumb is not None and old_thumb is not None: 
+            if new_thumb is not None:
                 res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
                                              modified_thumbs)  
                 if res:
-                    callback(True)
+                    callback(False) #return False coz bcove thumb not updated
+                    return
                 else:
-                    _log.error("key=update_thumbnail msg=ThumbnailIDMapper save_all failed for video=%s cur_db_tid=%s cur_bcove_tid=%s, DB not reverted" %(i_vid,new_tid,old_tid))
-                    #The tid that was passed to the method is reflected in the DB, but not on Brightcove. the old_tid is the current bcove thumbnail
+                    _log.error("key=update_thumbnail msg=ThumbnailIDMapper save_all" 
+                            "failed for video=%s cur_db_tid=%s cur_bcove_tid=%s," 
+                            "DB not reverted" %(i_vid,new_tid,old_tid))
+                    
+                    #The tid that was passed to the method is reflected in the DB,
+                    #but not on Brightcove. the old_tid is the current bcove thumbnail
                     callback(False)
             else:
+                #Why was new_thumb None?
+                _log.error("key=update_thumbnail msg=enable_thumbnail"
+                        "new_thumb data missing") 
                 callback(False)
         else:
-            _log.debug("key=update_thumbnail msg=update result thumb ref %s still ref %s for video %s" %(tref,sref,i_vid))
-            _log.error("key=update_thumbnail msg=failed to enable thumb %s for %s" %(new_tid,i_vid))
-            callback(False)
+            #Success       
+            callback(True)
 
     ''' 
     Create neon job for particular video
@@ -1019,27 +1043,6 @@ class NeonApiRequest(object):
         self.response['urls'] = urls 
         self.response['error'] = error
   
-    '''
-    Enable thumbnail given the id
-    iterate and set the given thumbnail and disable the previous
-    '''
-    def choose_thumbnail(self,tid):
-        t_url = None
-        for t in self.thumbnails:
-            if t['thumbnail_id'] == tid:
-                t['chosen'] = True #datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") 
-                t_url = t['url'][0]
-            else:
-                t['chosen'] = False 
-        return t_url
-   
-    def get_current_thumbnail(self):
-        tid = None
-        for t in self.thumbnails:
-            if t['enabled'] is not None:
-                tid = t['thumbnail_id']
-                return tid
-    
     def set_api_method(self,method,param):
         #TODO Verify
         self.api_method = method
@@ -1474,7 +1477,7 @@ class ThumbnailIDMapper(object):
         if callback:
             db_connection.conn.mset(data,callback)
         else:
-            db_connection.blocking_conn.mset(data)
+            return db_connection.blocking_conn.mset(data)
 
     @staticmethod
     def enable_thumbnail(mapper_objs,new_tid):
@@ -1601,7 +1604,14 @@ class VideoMetadata(object):
         if callback:
             db_connection.conn.mget(internal_video_ids,cb) 
         else:
-            raise
+            results = db_connection.blocking_conn.mget(internal_video_ids) 
+            vmdata  = []
+            for result in results:
+                vm = None
+                if result:
+                    vm = create(result)
+                vmdata.append(vm)
+            return vmdata
 
     @staticmethod
     def get_video_metadata(internal_accnt_id,internal_video_id):

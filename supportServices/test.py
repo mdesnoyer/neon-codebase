@@ -146,7 +146,6 @@ def test_signup_flow(a_id,i_id='i12345'):
     print url
     data = get_request(url,key)
     print data
-    return #test only bcove account
     
     #4. Update brightcove account
     url = BASE + '/accounts/' + a_id +'/brightcove_integrations/' + i_id 
@@ -154,6 +153,7 @@ def test_signup_flow(a_id,i_id='i12345'):
     resp = put_request(url,vals,key)
     print resp 
 
+    return #test only bcove account
 
     #create youtube account
     create_youtube_account()

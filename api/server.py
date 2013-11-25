@@ -278,7 +278,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     self.set_status(201)
                     self.write(response_data)
                     self.finish()
-        
         try:
             params = tornado.escape.json_decode(self.request.body)
             uri = self.request.uri
@@ -317,7 +316,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             intermediate = api_key + str(vid) + api_method + str(api_param) 
             job_id = hashlib.md5(intermediate).hexdigest()
           
-            #import pdb;pdb.set_trace()
             #Identify Request Type
             if "brightcove" in self.request.uri:
                 pub_id  = params[properties.PUBLISHER_ID] #publisher id
@@ -373,7 +371,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             response_data = "{\"job_id\":\"" + job_id + "\"}"
             
             result = yield tornado.gen.Task(api_request.save)
-            #api_request.save(saved_request)
 
             if not result:
                 _log.error("key=thumbnail_handler  msg=request save failed: ")
