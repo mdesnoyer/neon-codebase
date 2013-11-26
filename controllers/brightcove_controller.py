@@ -73,7 +73,7 @@ class PriorityQ(object):
             priority, count, task = heappop(self.pq)
             if task is not self.REMOVED:
                 del self.entry_finder[task]
-                return task
+                return task,priority
         raise KeyError('pop from an empty priority queue')
 
     def peek_task(self):
@@ -188,7 +188,7 @@ class TaskManager(object):
 
     def pop_task(self):
         try:
-            task = self.taskQ.pop_task()
+            task,priority = self.taskQ.pop_task()
         except:
             _log.error("key=TaskManager msg=trying to pop from empty Q")
             return
@@ -197,7 +197,7 @@ class TaskManager(object):
         if self.video_map.has_key(vid):
             vminfo = self.video_map[vid]
             vminfo.remove_task(task)
-        return task
+        return task,priority
 
     #If already present, then clear the old tasks
     def clear_taskinfo_for_video(self,vid):
@@ -230,7 +230,7 @@ class TaskManager(object):
         priority, count, task = self.taskQ.peek_task()
         cur_time = time.time()
         if priority and priority <= cur_time:
-            task = self.pop_task() 
+            task,p = self.pop_task() 
             t = threading.Thread(target=self.task_worker,args=(task,))
             t.setDaemon(True)
             t.start()
@@ -262,7 +262,12 @@ class BrightcoveABController(object):
         thumbA = time_dist.pop(0)
         cur_time = time.time()
         time_to_exec_task = cur_time + delay
-        
+       
+        # Task sched visualization
+        #-----------------------------------------------------
+        #| check |  sched A  | sched B | sched A |  end task |
+        #-----------------------------------------------------
+
         #Thumbnail Check Task -- May need to run more than once? 
         ctask = ThumbnailCheckTask(account_id,video_id)
         taskmgr.add_task(ctask,cur_time)

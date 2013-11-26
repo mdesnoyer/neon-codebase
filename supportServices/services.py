@@ -185,15 +185,14 @@ class AccountHandler(tornado.web.RequestHandler):
                         return
 
                     self.get_video_status_brightcove(i_id,vids)
-                    #self.get_brightcove_videos(i_id)
 
                 elif itype == "youtube_integrations":
                     self.get_youtube_videos(i_id)
             else:
                 self.write("API not supported")
                 _log.warning(('key=account_handler '
-                              'msg=Invalid method in request %s') 
-                              % self.request.uri)
+                              'msg=Invalid method in request %s method %s') 
+                              % (self.request.uri,method))
                 self.set_status(400)
                 self.finish()
 
@@ -374,7 +373,7 @@ class AccountHandler(tornado.web.RequestHandler):
     ''' Get Videos which were called from the Neon API '''
 
     def get_neon_videos(self):
-        self.send_json_response('',200)
+        self.send_json_response('{"msg":"not yet implemented"}',200)
 
     ''' Get brightcove video to populate in the web account
      Get account details from db, including videos that have been
@@ -385,134 +384,6 @@ class AccountHandler(tornado.web.RequestHandler):
      Aggregrate results and format for the client
     '''
     
-    def get_brightcove_videos(self,i_id,limit=1):
-        self.bc_aggr = 0 
-        self.video_results = {}
-        self.brightcove_results = {}
-        
-        self.client_response = {} 
-        ''' Format
-            { "videos": [
-                {
-            "video_id": "v123",
-            "integration_type": "brightcove",
-            "integration_id": "1234",
-            "title": "sample",
-            "duration": 10,
-            "publish_date": "2013-01-01",
-            "status": "finished",
-            "current_thumbnail_id": "1234"
-            "thumbnails": [
-                {
-                "url": "http://thumb1",
-                "created": "2013-01-01",
-                "enabled": "2013-01-01",
-                "width": 480,
-                "height": 360,
-                "type": "neon1"
-                },
-                    ]
-              } ...
-            }
-            status : not_processed, processing, finished, failed
-        '''
-       
-        def process_video_results(res):
-            for r in res:
-                rd = tornado.escape.json_decode(r)
-                self.video_results[rd['video_id']] = rd
-
-        def process_brightcove_results(res):
-            items = res['items']
-            for i in items:
-                key = str(i['id'])
-                self.brightcove_results[key] = i   
-
-        '''
-        Format resposne to the client
-        '''
-        def format_response():
-                def get_current_thumbnail(thumbnails):
-                    tid = None
-                    for t in thumbnails:
-                        if t['enabled'] is not None:
-                            tid = t['thumbnail_id']
-                            return tid
-
-                videos = []
-                for vid in self.brightcove_results.keys():
-                    video = {}
-                    video['video_id'] = str(vid) 
-                    video['integration_type'] = "brightcove"
-                    video['integration_id'] = self.integration_id
-                    video['title'] = self.brightcove_results[vid]['name']
-                    video['duration'] =  self.brightcove_results[vid]['videoFullLength']['videoDuration']
-                    pdate = int(self.brightcove_results[vid]['publishedDate'])
-                    video['publish_date'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(pdate/1000))
-                    
-                    #Fill from DB result
-                    if vid in self.video_results.keys():
-                        video['status'] = self.video_results[vid]['state'] 
-                        thumbs = self.video_results[vid]['thumbnails']
-                        video['current_thumbnail_id'] = get_current_thumbnail(thumbs) 
-                        video['thumbnails'] = thumbs
-                    else:
-                        video['status'] = "unprocessed"
-                        video['current_thumbnail_id'] = None 
-                        video['thumbnails'] = None 
-
-                    videos.append(video)
-                
-                data = tornado.escape.json_encode(videos)
-                return data
-
-        def result_aggregator(result):
-            self.bc_aggr += 1
-            #check each discrete call
-            
-            if isinstance(result,tornado.httpclient.HTTPResponse):
-                bcove_result = tornado.escape.json_decode(result.body)
-                process_brightcove_results(bcove_result)
-            else:
-                process_video_results(result)
-
-            #both calls have finished
-            if self.bc_aggr == 2:
-
-                data = format_response()
-                self.set_header("Content-Type", "application/json")
-                self.write(data)
-                self.finish()
-                #send response and terminate
-                #self.send_json_response()
-
-        def account_callback(data):
-            if data: 
-                try:
-                    bc_account = neondata.BrightcovePlatform.create(data)
-                    token = bc_account.read_token
-                    self.integration_id = bc_account.integration_id
-                    if (bc_account.videos) > 0:
-                        keys = [ neondata.generate_request_key(api_key,j_id) 
-                                 for j_id in bc_account.videos.values()] 
-                        neondata.NeonApiRequest.multiget(keys,
-                                                         result_aggregator)
-                        neondata.BrightcovePlatform.find_all_videos(
-                            token, limit,result_aggregator)
-                    else:
-                        raise Exception("NOT YET IMPL")
-                except Exception,e:
-                    _log.exception("key=account_callback %s" %e)
-            else:
-                data = '{"error":"no such account"}'
-                self.send_json_response(data,400)
-
-        limit = self.get_argument('limit')
-        #get brightcove tokens and video info from neondb 
-        neondata.BrightcovePlatform.get_account(self.api_key,
-                                                i_id,
-                                                account_callback)
-
     ''' Get video status for multiple videos -- Brightcove Integration '''
     @tornado.gen.engine
     def get_video_status_brightcove(self,i_id,vids):
@@ -554,7 +425,7 @@ class AccountHandler(tornado.web.RequestHandler):
         completed_videos = [] #jobs that have completed 
 
         #Hack for first time video requests in brightcove #TODO: cleanup
-        requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_requests,job_ids)  
+        requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_requests,job_ids) 
         ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for request,vid in zip(requests,vids):
             if not request:
@@ -606,7 +477,7 @@ class AccountHandler(tornado.web.RequestHandler):
                         _log.debug("key=get_video_status_brightcove msg=video deleted %s"%vid)
                     else:
                         result[vid].thumbnails.append(tdata) 
-
+        
         #4. Set the default thumbnail for each of the video
         for res in result:
             vres = result[res]
@@ -692,30 +563,6 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.send_json_response(data,502)
 
 
-    ''' 
-    Create a Neon Account
-    '''
-
-    def create_account(self,a_id):
-        def saved_user(result):
-            if result:
-                data = '{ "neon_api_key": "' + api_key + '" }'
-            else:
-                data = '{"error": "account not created, DB error"}'
-            self.send_json_response(data)
-        
-        def check_exists(result):
-            if result:
-                data = '{"error": "account already exists"}'
-                _log.error("key=create_account mag=account already exists %s" %api_key)
-                self.send_json_response(data)
-            else:
-                user.save(saved_user)
-
-        user = neondata.NeonUserAccount(a_id)
-        api_key = user.neon_api_key
-        neondata.NeonUserAccount.get_account(api_key,callback=check_exists)
-    
     '''
     Update a Neon account
     '''
@@ -797,7 +644,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 
                 #Saved Integration
                 if res:
-                    response = bc.verify_token_and_create_requests_for_video(5)
+                    response = bc.verify_token_and_create_requests_for_video(10)
                     
                     # TODO: investigate further, ReferenceError: weakly-referenced object no longer exists
                     # (self.subscribed and cmd == 'PUBLISH')):
@@ -842,32 +689,8 @@ class AccountHandler(tornado.web.RequestHandler):
     '''
     Update Brightcove account details
     '''
+    @tornado.gen.engine
     def update_brightcove_integration(self,i_id):
-        
-        def saved_account(result):
-            if result:
-                data = ''
-                self.send_json_response(data,200)
-            else:
-                data = '{"error": "account not updated"}'
-                self.send_json_response(data,500)
-
-        def update_account(result):
-            if result:
-                bc = neondata.BrightcovePlatform.create(result)
-                bc.read_token = rtoken
-                bc.write_token = wtoken
-                
-                #Auto publish all the previous thumbnails in the account
-                if bc.auto_update == False and autosync == True:
-                    self.autopublish_brightcove_videos(bc)
-
-                bc.auto_update = autosync
-                bc.save(saved_account)
-            else:
-                _log.error("key=update_brightcove_integration msg= no such account %s integration id %s" %(self.api_key,i_id))
-                data = '{"error": "Account doesnt exists"}'
-                self.send_json_response(data,400)
         
         try:
             rtoken = InputSanitizer.to_string(self.get_argument("read_token"))
@@ -880,10 +703,29 @@ class AccountHandler(tornado.web.RequestHandler):
             return
 
         uri_parts = self.request.uri.split('/')
-        neondata.BrightcovePlatform.get_account(self.api_key,
-                                                i_id,
-                                                update_account)
 
+        result = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,self.api_key,i_id)
+        if result:
+            bc = neondata.BrightcovePlatform.create(result)
+            bc.read_token = rtoken
+            bc.write_token = wtoken
+                
+            #Auto publish all the previous thumbnails in the account
+            if bc.auto_update == False and autosync == True:
+                self.autopublish_brightcove_videos(bc)
+
+            bc.auto_update = autosync
+            res = yield tornado.gen.Task(bc.save)
+            if res:
+                data = ''
+                self.send_json_response(data,200)
+            else:
+                data = '{"error": "account not updated"}'
+                self.send_json_response(data,500)
+        else:
+            _log.error("key=update_brightcove_integration msg= no such account %s integration id %s" %(self.api_key,i_id))
+            data = '{"error": "Account doesnt exists"}'
+            self.send_json_response(data,400)
    
     '''
     Auto publish the videos in the account which are not active
@@ -898,11 +740,12 @@ class AccountHandler(tornado.web.RequestHandler):
             return
 
         keys = [neondata.InternalVideoID.generate(self.api_key,vid) for vid in vids]
+        video_results = neondata.VideoMetadata.multi_get(keys)
         video_results = yield tornado.gen.Task(neondata.VideoMetadata.multi_get,keys)
         tids = []
         video_thumb_mappings = {} #vid => [thumbnail metadata ...] 
         update_videos = {} #vid => neon_tid 
-        
+      
         #for all videos in account where status is not active 
         for vresult in video_results:
             if vresult:
@@ -958,7 +801,10 @@ class AccountHandler(tornado.web.RequestHandler):
 
         neondata.BrightcovePlatform.get_account(self.api_key,i_id,get_account)
 
-    #### YOUTUBE ####
+
+    ##################################################################
+    # Youtube methods
+    ##################################################################
 
     '''
     Cretate a Youtube Account
@@ -1262,18 +1108,11 @@ class JobHandler(tornado.web.RequestHandler):
     def get(self, *args, **kwargs):
         
         #Get Job status
-        self.get_job_status()
+        #j_id = self.request.uri.split('/')[-1]
+        #neondata.NeonApiRequest.get_request(api_key,j_id,status_callback)
+        self.write("Not yet Impl")
+        self.finish()
 
-    def get_job_status(self):
-        def status_callback(result):
-            pass
-
-        j_id = self.request.uri.split('/')[-1]
-        #self.api_key
-        neondata.NeonApiRequest.get_request(self.api_key,j_id,status_callback)
-
-
-##
 ## Delete handler only for test accounts, use cautiously
 
 class DeleteHandler(tornado.web.RequestHandler):
@@ -1284,10 +1123,13 @@ class DeleteHandler(tornado.web.RequestHandler):
         #make sure you delete only a test account
         if "test" in a_id:
             neondata.NeonUserAccount.remove(a_id)
+        
+        self.finish()
+        
+######################################################################
+## Brightcove support handler -- Mainly used by brigthcovecontroller 
+######################################################################
 
-'''
-Brightcove support handler -- Mainly used by brigthcovecontroller 
-'''
 class BcoveHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous
     @tornado.gen.engine
@@ -1365,12 +1207,13 @@ class BcoveHandler(tornado.web.RequestHandler):
 ### MAIN
 ################################################################
 
-def main():
-    application = tornado.web.Application([
+application = tornado.web.Application([
         (r'/api/v1/removeaccount(.*)', DeleteHandler),
         (r'/api/v1/accounts(.*)', AccountHandler),
         (r'/api/v1/brightcovecontroller(.*)', BcoveHandler),
-        (r'/api/v1/jobs(.*)', JobHandler)])
+        (r'/api/v1/jobs(.*)', JobHandler)],debug=True)
+
+def main():
     
     global server
     global BASE_URL 

@@ -32,6 +32,9 @@ class TestInputSantizer(unittest.TestCase):
     def test_to_string(self):
         s = 'teststring'
         self.assertEqual(InputSanitizer.to_string(s),s)
+        
+        l = [ "s","t","r" ]
+        self.assertEqual(InputSanitizer.to_string(l),"str")
 
 if __name__ == '__main__':
     unittest.main()

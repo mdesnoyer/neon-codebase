@@ -351,8 +351,10 @@ class OptionParser(object):
         Stack depth controls how far back the module is found.
         Normally this is 2.
         '''
-        frame = inspect.stack()[stack_depth]
-        mod = inspect.getmodule(frame[0])
+        frame = inspect.currentframe()
+        for i in range(stack_depth):
+            frame = frame.f_back
+        mod = inspect.getmodule(frame)
         
         if mod.__name__ in ['__main__', '', '.', None]:
             return option

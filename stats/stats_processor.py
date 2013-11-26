@@ -35,6 +35,10 @@ define('input', default=None,
        help=('Glob specifying the input log files. '
              'Can be an s3 glob of the form s3://bucket/file* or '
              'a local glob'))
+define("s3host", default=None, type=str,
+       help='Host where the S3 server is. If None, uses the boto default.')
+define("s3port", default=None, type=int,
+       help='Optional port where the S3 server is.')
 define('runner', default='local',
        help='Where to run the MapReduce. "emr", "local" or "hadoop"')
 define('run_period', default=10800, type=int,
@@ -124,6 +128,10 @@ class DataDirectory:
     def _sync_local_dir(self):
         '''Synchronizes the local directory with S3.'''
         s3conn = S3Connection()
+        s3host = options.s3host
+        if s3host is None:
+            s3host = S3Connection.DefaultHost
+        s3conn = S3Connection(port=options.s3port, host=s3host)
 
         s3pathRe = re.compile('s3://([0-9a-zA-Z_\-]+)/([0-9a-zA-Z_/\-\*]*)')
         bucket_name, key_match = s3pathRe.match(options.input).groups()
