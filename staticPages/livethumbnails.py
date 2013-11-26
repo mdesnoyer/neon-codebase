@@ -17,10 +17,17 @@ height: auto;  width: auto;  float: left;  text-align: center;}   div.img img{  
 html_end = '</body></html>'
 img_w = 480 ; img_h = 360;
 thumb_w = 129 ; thumb_h = 90;
-img_div_tmpl = '<div class="img"><img src="%s" alt="vid-%s" width="%s" height="%s"></div>' 
+img_div_tmpl = '<div class="img"><img src="%s" alt="%s" title="%s" width="%s" height="%s"></div>' 
 
 img_divs = ''
 thumb_divs = ''
+
+skip_accounts = ["brightcoveplatform_dd2e93646e6509e275cf1e7712ca5a94_production_test1_24",
+"brightcoveplatform_8bda0ee38d1036b46d07aec4040af69c_production_test1_26",
+"brightcoveplatform_5cbcbb8e8ea526235f2eea41b572cf36_production_test1_25",
+"brightcoveplatform_5329143981226ef6593f3762b636bd44_production_test1_23",
+"brightcoveplatform_d927f1b798758dcd1d012263608f4ae8_production_test1_13"
+]
 try:
     # Get all Brightcove accounts
     host = '127.0.0.1'
@@ -28,6 +35,9 @@ try:
     rclient = blockingRedis.StrictRedis(host,port)
     accounts = rclient.keys('brightcoveplatform*')
     for accnt in accounts:
+        if accnt in skip_accounts:
+            continue
+
         jdata = rclient.get(accnt) 
         bc = BrightcovePlatform.create(jdata)
         jfeed = brightcove_api.BrightcoveApi(bc.neon_api_key,
@@ -39,12 +49,13 @@ try:
         try:
             for item in items:
                 vid = item['id']
+                title = item['name']
                 still = item['videoStillURL']
                 thumb = item['thumbnailURL']
                 if "thumbnail" in thumb:
-                    img_divs += img_div_tmpl %(still,vid,img_w,img_h)
+                    img_divs += img_div_tmpl %(still,title,title,img_w,img_h)
                     img_divs +='\n'
-                    thumb_divs += img_div_tmpl %(thumb,vid,thumb_w,thumb_h)
+                    thumb_divs += img_div_tmpl %(thumb,title,title,thumb_w,thumb_h)
                     thumb_divs +='\n'
         except:
             pass
@@ -55,5 +66,5 @@ except Exception,e:
 #create live thumbs page
 page = html_start + '\n' + img_divs + '\n'  + html_end
 page = html_start + '\n' + thumb_divs + '\n'  + html_end
-with open("livethumbnails.html",'w') as f:
+with open("/var/www/static/livethumbnails.html",'w') as f:
     print >>f, page
