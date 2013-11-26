@@ -98,13 +98,19 @@ class TestServingSystem(unittest.TestCase):
                              db=options.stats_db)
         self.statscursor = conn.cursor()
 
-        # Clear the s3 bucket
-        s3conn = S3Connection()
-        bucket = s3conn.get_bucket(
-            options.get('clickTracker.trackserver.bucket_name'))
-        for key in BucketListResultSet(bucket):
-            key.delete()
-        _erase_local_log_dir.set()
+        # Clear the log storage area
+        log_path = options.get('clickTracker.trackserver.output')
+        s3pathRe = re.compile('s3://([0-9a-zA-Z_\-]+)')
+        s3match = s3pathRe.match(log_path)
+        if s3match:
+            s3conn = S3Connection()
+            bucket = s3conn.get_bucket(s3match.groups()[0])
+            for key in BucketListResultSet(bucket):
+                key.delete()
+            _erase_local_log_dir.set()
+        else:
+            for cur_file in os.listdir(log_path):
+                os.remove(os.path.join(log_path, cur_file))
 
         # Empty the directives queue
         while not self.__class__.directive_q.empty():
