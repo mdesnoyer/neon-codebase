@@ -501,7 +501,7 @@ class AccountHandler(tornado.web.RequestHandler):
             vres = result[res]
             vresult.append(vres.to_dict())
 
-        s_vresult = sorted(vresult, key=lambda k: k['publish_date'])
+        s_vresult = sorted(vresult, key=lambda k: k['publish_date'],reverse=True)
         data = tornado.escape.json_encode(s_vresult)
         self.send_json_response(data,200)
 
