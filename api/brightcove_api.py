@@ -366,7 +366,8 @@ class BrightcoveApi(object):
                             elif res["result"]["type"] == 'VIDEO_STILL':
                                 still = res["result"]["referenceId"]
                         else:
-                            _log.error("key=async_update_thumbnail msg=brightcove api error for %s %s" % (video_id, res["error"]))
+                            _log.error("key=async_update_thumbnail"
+                                    " msg=brightcove api error for %s %s" % (video_id, res["error"]))
                 except:
                     pass
 
