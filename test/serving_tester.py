@@ -60,8 +60,10 @@ define('stats_db_user', help='User for the stats db connection',
        default='neon')
 define('stats_db_pass', help='Password for the stats db connection',
        default='neon')
-define('bc_directive_port', default=7212,
+define('bc_directive_port', default=7212, type=int,
        help='Port where the brightcove directives will be output')
+define('fakes3root', default='/tmp/neon_s3_root', type=str,
+       help='Directory that acts as the root for fakes3')
 
 _log = logging.getLogger(__name__)
 
@@ -481,6 +483,44 @@ def LaunchClickLogServer():
     proc.start()
     _log.warn('Launching click log server with pid %i' % proc.pid)
 
+def LaunchFakeS3():
+    '''Launch a fakes3 instance if the settings call for it.'''
+    s3host = options.get('stats.stats_processor.s3host')
+    s3port = options.get('stats.stats_processor.s3port')
+
+    # Check the options for consistency
+    if s3host != options.get('clickTracker.trackserver.s3host'):
+        raise ArgumentError(
+            'Hosts do not match. %s vs %s' %
+            (s3host, options.get('clickTracker.trackserver.s3host')))
+    if s3port != options.get('clickTracker.trackserver.s3port'):
+        raise ArgumentError(
+            'Ports do not match. %s vs %s' %
+            (s3port, options.get('clickTracker.trackserver.s3port')))
+
+    if s3host == 'localhost':
+        _log.info('Launching fakes3')
+        proc = subprocess.Popen([
+            '/usr/bin/env', 'fakes3',
+            '--root', options.fakes3root,
+            '--port', str(s3port)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT)
+
+        upRe = re.compile('port=')
+        fakes3_log = []
+        while proc.poll() is None:
+            line = proc.stdout.readline()
+            fakes3_log.append(line)
+            if upRe.search(line):
+                break
+
+        if proc.poll() is not None:
+            raise Exception('Error starting fake s3. Log:\n%s' %
+                            '\n'.join(video_db_log))
+
+        _log.warn('FakeS3 is up with pid %i' % proc.pid)
+
 def LaunchStatsProcessor():
     proc = multiprocessing.Process(
         target=stats.stats_processor.main,
@@ -506,6 +546,7 @@ def main():
     LaunchSupportServices()
     LaunchMastermind()
     LaunchClickLogServer()
+    LaunchFakeS3()
     LaunchStatsProcessor()
 
     time.sleep(1)
