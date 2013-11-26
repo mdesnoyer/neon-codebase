@@ -69,6 +69,7 @@ def shutdown_children():
     child_pids = get_child_pids()    
     for pid in child_pids:
         try:
+            os.kill(pid, signal.SIGINT)
             os.kill(pid, signal.SIGTERM)
         except OSError as e:
             if e.errno <> 3:
