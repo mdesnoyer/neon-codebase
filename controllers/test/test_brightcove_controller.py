@@ -53,12 +53,17 @@ class TestScheduler(unittest.TestCase):
         #inspect TaskQ for expeted task ordering
         task_map = self.get_video_task_map() 
         cur_time = time.time()
-        
+        cushion_time = brightcove_controller.BrightcoveABController.cushion_time
+        abtest_start = brightcove_controller.BrightcoveABController.timeslice - cushion_time
+
         expected_order = ["ThumbnailCheckTask","ThumbnailChangeTask_A","ThumbnailChangeTask_B",
                 "ThumbnailChangeTask_A","TimesliceEndTask"]
-        #expected_time_interval = [ 
-        #                (0,cur_time + delay)
-        #        ] 
+        expected_time_interval = [ 
+                        (cur_time,self.controller.delay),
+                        (cur_time,cur_time + self.controller.delay),
+                        (cur_time + self.controller.delay,cur_time + self.controller.delay+abtest),
+                        (cur_time + self.controller.delay + cushion_time, brightcove_controller.BrightcoveABController.timeslice)
+                ] 
 
         for vid,tasks in task_map.iteritems():
             task_order = []

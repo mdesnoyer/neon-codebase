@@ -447,13 +447,14 @@ class AccountHandler(tornado.web.RequestHandler):
                 status = "finished"
                 thumbs = None
 
+            pub_date = None if not request.__dict__.has_key('publish_date') else request.publish_date
             vr = VideoResponse(vid,
                               status,
                               request.request_type,
                               i_id,
                               request.video_title,
-                              None,
-                              None,
+                              None, #duration
+                              pub_date,
                               0, #current tid,add fake tid
                               thumbs)
             result[vid] = vr
@@ -500,7 +501,8 @@ class AccountHandler(tornado.web.RequestHandler):
             vres = result[res]
             vresult.append(vres.to_dict())
 
-        data = tornado.escape.json_encode(vresult)
+        s_vresult = sorted(vresult, key=lambda k: k['publish_date'])
+        data = tornado.escape.json_encode(s_vresult)
         self.send_json_response(data,200)
 
 

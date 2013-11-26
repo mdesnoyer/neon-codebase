@@ -515,6 +515,7 @@ class BrightcoveApi(object):
                         self.neon_api_key,job_id)
                 vid_request = supportServices.neondata.NeonApiRequest.create(
                         req_data)
+                vid_request.publish_date = item['publishedDate']
                 vid_request.video_title = title
                 vid_request.save()
 
