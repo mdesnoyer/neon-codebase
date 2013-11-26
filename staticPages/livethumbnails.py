@@ -11,8 +11,8 @@ if sys.path[0] <> base_path:
 from supportServices.neondata import *
 from api import brightcove_api
 
-html_start = '<html>\<head><style>div.img{  margin: 5px;  padding: 5px;  border: 1px solid #0000ff;\
-height: auto;  width: auto;  float: left;  text-align: center;}   div.img img{  display: inline;  margin: 5px;  border: 1px solid #ffffff;}div.img a:hover img {border: 1px solid #0000ff;}div.desc{  text-align: center;  font-weight: normal;  width: 120px;  margin: 5px;}</style></head><body>'
+html_start = '<html>\<head><style>div.img{  margin: 5px;  padding: 5px;  border: 1px solid #0000ff;'
+'height: auto;  width: auto;  float: left;  text-align: center;}   div.img img{  display: inline;  margin: 5px;  border: 1px solid #ffffff;}div.img a:hover img {border: 1px solid #0000ff;}div.desc{  text-align: center;  font-weight: normal;  width: 120px;  margin: 5px;}</style></head><body>'
 
 html_end = '</body></html>'
 img_w = 480 ; img_h = 360;
@@ -37,22 +37,35 @@ try:
     for accnt in accounts:
         if accnt in skip_accounts:
             continue
-
         jdata = rclient.get(accnt) 
         bc = BrightcovePlatform.create(jdata)
         jfeed = brightcove_api.BrightcoveApi(bc.neon_api_key,
                 bc.publisher_id,bc.read_token,
                 bc.write_token
                 ).get_publisher_feed()
+      
+        a_id = bc.account_id
+        i_id = bc.integration_id
+        url = "http://localhost:8083/api/v1/accounts/%s/brightcove_integrations/%s/videos?" %(a_id,i_id)
+        headers = {'X-Neon-API-Key' : bc.neon_api_key }
+        req = urllib2.Request(url,None,headers)
+        response = urllib2.urlopen(req)
+        neon_response = json.loads(response.read())
+        active_videos = []
+        
+        for nitem in neon_response:
+            if nitem["status"] == "active":
+                active_videos.append(nitem["video_id"])
+
         feed = json.loads(jfeed.body)
         items = feed['items']
         try:
             for item in items:
-                vid = item['id']
+                vid = str(item['id'])
                 title = item['name']
                 still = item['videoStillURL']
                 thumb = item['thumbnailURL']
-                if "thumbnail" in thumb:
+                if vid in active_videos:
                     img_divs += img_div_tmpl %(still,title,title,img_w,img_h)
                     img_divs +='\n'
                     thumb_divs += img_div_tmpl %(thumb,title,title,thumb_w,thumb_h)
@@ -64,7 +77,10 @@ except Exception,e:
     print e
 
 #create live thumbs page
-page = html_start + '\n' + img_divs + '\n'  + html_end
-page = html_start + '\n' + thumb_divs + '\n'  + html_end
+s_page = html_start + '\n' + img_divs + '\n'  + html_end
+t_page = html_start + '\n' + thumb_divs + '\n'  + html_end
 with open("/var/www/static/livethumbnails.html",'w') as f:
-    print >>f, page
+    print >>f, t_page
+
+with open("/var/www/static/livevideostills.html",'w') as f:
+    print >>f, s_page
