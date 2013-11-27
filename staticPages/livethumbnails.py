@@ -11,7 +11,7 @@ if sys.path[0] <> base_path:
 from supportServices.neondata import *
 from api import brightcove_api
 
-html_start = '<html>\<head><style>div.img{  margin: 5px;  padding: 5px;  border: 1px solid #0000ff;'
+html_start = '<html><head><style>div.img{  margin: 5px;  padding: 5px;  border: 1px solid #0000ff;'\
 'height: auto;  width: auto;  float: left;  text-align: center;}   div.img img{  display: inline;  margin: 5px;  border: 1px solid #ffffff;}div.img a:hover img {border: 1px solid #0000ff;}div.desc{  text-align: center;  font-weight: normal;  width: 120px;  margin: 5px;}</style></head><body>'
 
 html_end = '</body></html>'

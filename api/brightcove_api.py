@@ -152,7 +152,7 @@ class BrightcoveApi(object):
                 "filePath",
                 value=image_data,
                 filetype='image/jpeg',
-                filename='thumbnail-' + str(video_id) + '.jpeg')
+                filename='neonthumbnail-' + str(video_id) + '.jpeg')
             args = poster.encode.MultipartParam("JSONRPC", value=body)
             post_param.append(args)
             post_param.append(fileparam)
