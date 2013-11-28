@@ -608,7 +608,6 @@ class BrightcovePlatform(AbstractPlatform):
     @tornado.gen.engine
     def update_thumbnail(self,platform_vid,new_tid,nosave=False,callback=None):
         ''' method to keep video metadata and thumbnail data consistent '''
-        
         bc = api.brightcove_api.BrightcoveApi(
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update)
@@ -621,7 +620,6 @@ class BrightcovePlatform(AbstractPlatform):
             callback(None)
             return
         
-        import pdb;pdb.set_trace()
         #Thumbnail ids for the video
         tids = vmdata.thumbnail_ids
         

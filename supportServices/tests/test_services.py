@@ -106,7 +106,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         headers = {'X-Neon-API-Key' : apikey, 'Content-Type':'application/x-www-form-urlencoded' }
         body = urllib.urlencode(vals)
         client.fetch(url,self.stop,method="PUT",body=body,headers=headers)
-        response = self.wait(timeout=100)
+        response = self.wait(timeout=6100)
         return response
 
 
