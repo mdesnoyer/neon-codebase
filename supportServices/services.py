@@ -447,13 +447,14 @@ class AccountHandler(tornado.web.RequestHandler):
                 status = "finished"
                 thumbs = None
 
+            pub_date = None if not request.__dict__.has_key('publish_date') else request.publish_date
             vr = VideoResponse(vid,
                               status,
                               request.request_type,
                               i_id,
                               request.video_title,
-                              None,
-                              None,
+                              None, #duration
+                              pub_date,
                               0, #current tid,add fake tid
                               thumbs)
             result[vid] = vr
@@ -500,7 +501,8 @@ class AccountHandler(tornado.web.RequestHandler):
             vres = result[res]
             vresult.append(vres.to_dict())
 
-        data = tornado.escape.json_encode(vresult)
+        s_vresult = sorted(vresult, key=lambda k: k['publish_date'],reverse=True)
+        data = tornado.escape.json_encode(s_vresult)
         self.send_json_response(data,200)
 
 
@@ -541,10 +543,12 @@ class AccountHandler(tornado.web.RequestHandler):
         #TODO : Check for the linked youtube account 
         
         #Get account/integration
-        jdata = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,self.api_key,i_id)
+        jdata = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,
+                self.api_key,i_id)
         ba = neondata.BrightcovePlatform.create(jdata)
         if not ba:
-            _log.error("key=update_video_brightcove msg=account doesnt exist api key=%s i_id=%s"%(self.api_key,i_id))
+            _log.error("key=update_video_brightcove" 
+                    " msg=account doesnt exist api key=%s i_id=%s"%(self.api_key,i_id))
             data = '{"error": "no such account"}'
             self.send_json_response(data,400)
             return
@@ -552,6 +556,8 @@ class AccountHandler(tornado.web.RequestHandler):
         result = yield tornado.gen.Task(ba.update_thumbnail,p_vid,new_tid)
         
         if result:
+            _log.debug("key=update_video_brightcove" 
+                    " msg=thumbnail updated for video=%s tid=%s"%(p_vid,new_tid))
             data = ''
             self.send_json_response(data,200)
         else:

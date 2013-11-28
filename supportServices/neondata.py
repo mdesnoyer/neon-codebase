@@ -608,7 +608,6 @@ class BrightcovePlatform(AbstractPlatform):
     @tornado.gen.engine
     def update_thumbnail(self,platform_vid,new_tid,nosave=False,callback=None):
         ''' method to keep video metadata and thumbnail data consistent '''
-        
         bc = api.brightcove_api.BrightcoveApi(
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update)
@@ -620,10 +619,13 @@ class BrightcovePlatform(AbstractPlatform):
             _log.error("key=update_thumbnail msg=vid %s not found" %i_vid)
             callback(None)
             return
-
+        
         #Thumbnail ids for the video
         tids = vmdata.thumbnail_ids
         
+        #Aspect ratio of the video 
+        fsize = vmdata.get_frame_size()
+
         #Get all thumbnails
         thumb_mappings = yield tornado.gen.Task(ThumbnailIDMapper.get_thumb_mappings,tids)
         t_url = None
@@ -665,7 +667,8 @@ class BrightcovePlatform(AbstractPlatform):
         tref,sref = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,
                                            platform_vid,
                                            t_url,
-                                           new_tid)
+                                           new_tid,
+                                           fsize)
         if not sref:
             _log.error("key=update_thumbnail msg=brightcove error" 
                     "update video still for video %s %s" %(i_vid,new_tid))
@@ -1538,9 +1541,16 @@ class VideoMetadata(object):
         self.model_version = model_version
         self.job_id = request_id
         self.integration_id = i_id
+        self.frame_size = frame_size #(w,h)
 
     def get_id(self):
         return self.key
+
+    def get_frame_size(self):
+        #if self.frame_size:
+        #    return float(self.frame_size[0])/self.frame_size[1]
+        if self.__dict__.has_key('frame_size'):
+            return self.frame_size
 
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__) 

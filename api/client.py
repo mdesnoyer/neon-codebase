@@ -697,12 +697,14 @@ class ProcessVideo(object):
                 publisher_id=pid,
                 read_token=rtoken,
                 write_token=wtoken)
-            ret = bcove.update_thumbnail_and_videostill(video_id, img, tid)
+            
+            frame_size = self.video_metadata['frame_size']
+            ret = bcove.update_thumbnail_and_videostill(video_id, img, tid, frame_size)
 
             if ret[0]:
                 #update enabled time & reference ID
-                #By default Neon rank 1 is always uploaded
-                self.thumbnails[0]["chosen"] = True #datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                #NOTE: By default Neon rank 1 is always uploaded
+                self.thumbnails[0]["chosen"] = True 
                 self.thumbnails[0]["refid"] = tid
 
         #3 Update Request State
@@ -710,7 +712,8 @@ class ProcessVideo(object):
         bc_request.state = RequestState.FINISHED 
         ret = bc_request.save()
 
-        #TODO: The newly uploaded thumbnail's url isn't available immidiately, what should be done ?
+        #NOTE: The newly uploaded thumbnail's url isn't available immidiately, 
+        # A background check thumbnail job is run to get its url
 
         #4 Save the Thumbnail URL and ID to Mapper DB
         self.save_thumbnail_metadata("brightcove",i_id)

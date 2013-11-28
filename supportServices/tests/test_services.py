@@ -62,7 +62,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         self.cp_mock_client = self.cp_sync_patcher.start()
         self.cp_mock_async_client = self.cp_async_patcher.start()
 
-        self.a_id = "unittester-1"
+        self.a_id = "unittester-0"
         self.api_key = neondata.NeonApiKey.generate(self.a_id) 
         self.rtoken = "rtoken"
         self.wtoken = "wtoken"
@@ -70,8 +70,8 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         self.pub_id = "p124"
         self.mock_image_url_prefix = "http://servicesunittest.mock.com/"
         self.thumbnail_url_to_image = {} # mock url => raw image buffer data
-        self.video_to_jobids = {} #video => job_ids
         self.job_ids = [] #ordered list
+        self.video_ids = []
 
     def get_app(self):
         return services.application
@@ -106,7 +106,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         headers = {'X-Neon-API-Key' : apikey, 'Content-Type':'application/x-www-form-urlencoded' }
         body = urllib.urlencode(vals)
         client.fetch(url,self.stop,method="PUT",body=body,headers=headers)
-        response = self.wait(timeout=100)
+        response = self.wait(timeout=6100)
         return response
 
 
@@ -364,9 +364,19 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         for item in vitems['items']:
             videos.append(str(item['id']))                              
         self._check_neon_default_chosen(videos)
-        
-    def test_update_brightcove_thumbnail(self):
-        pass
+    
+        #update a thumbnail
+        for vid in videos:
+            i_vid = neondata.InternalVideoID.generate(self.api_key,vid)
+            vmdata= neondata.VideoMetadata.get(i_vid)
+            tids = vmdata.thumbnail_ids
+            resp = self.update_brightcove_thumbnail(vid,tids[1]) #set neon rank 2 
+            self.assertEqual(resp.code,200)
+
+    def update_brightcove_thumbnail(self,vid,tid):
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/%s/videos/%s' %(self.a_id,self.b_id,vid))
+        vals = {'thumbnail_id' : tid }
+        return self.put_request(url,vals,self.api_key)
     
     def test_check_brightcove_thumbnail(self):
         pass

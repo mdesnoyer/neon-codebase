@@ -242,7 +242,7 @@ class BrightcoveABController(object):
 
     timeslice = 71 *60    #timeslice for experiment
     cushion_time = 10 *60 #cushion time for data extrapolation
-    seed = 10
+    seed = 25110
 
     def __init__(self,delay=0):
         self.neon_service_url = options.service_url 
@@ -253,15 +253,19 @@ class BrightcoveABController(object):
         
         account_id = video_id.split('_')[0] 
 
+        #The time in seconds each thumbnail to be run
+        time_dist = self.convert_from_percentages(distribution)
+        
         #Make a decision based on the current state of the video data
         delay = random.randint(0, self.max_update_delay)
-        abtest_start_time = random.randint(BrightcoveABController.cushion_time,
-                BrightcoveABController.timeslice - BrightcoveABController.cushion_time) 
-       
-        time_dist = self.convert_from_percentages(distribution)
-        thumbA = time_dist.pop(0)
         cur_time = time.time()
         time_to_exec_task = cur_time + delay
+        
+        thumbA = time_dist.pop(0)
+        
+        #Time when the thumbnail to be A/B tested starts (the lower % thumbnail)
+        abtest_start_time = random.randint(BrightcoveABController.cushion_time,
+                BrightcoveABController.timeslice - BrightcoveABController.cushion_time) 
        
         # Task sched visualization
         #-----------------------------------------------------
@@ -279,21 +283,32 @@ class BrightcoveABController(object):
         #schedule A - The Majority run thumbnail at the start of time slice 
         taskA = ThumbnailChangeTask(account_id,video_id,thumbA[0]) 
         taskmgr.add_task(taskA,time_to_exec_task) 
+        #print "Sched A ", (time_to_exec_task - cur_time - delay)/60, time_dist
 
         #schedule the B's - the lower % thumbnails
         time_to_exec_task += abtest_start_time
         for tup in time_dist:
             task = ThumbnailChangeTask(account_id,video_id,tup[0]) 
             taskmgr.add_task(task,time_to_exec_task)
+            #print "---" , cur_time,delay,abtest_start_time
+            #print "Sched B ", (time_to_exec_task - cur_time - delay)/60
             time_to_exec_task += tup[1] # Add the time the thumbnail should run for 
         
-        #schedule A - The Majority run thumbnail 
-        taskA = ThumbnailChangeTask(account_id,video_id,thumbA[0]) 
-        taskmgr.add_task(taskA,cur_time + delay) 
-        time_to_exec_task += (BrightcoveABController.timeslice 
+
+        #If timeslice of A has been completed previously, then just schedule EOT
+        if (time_to_exec_task - cur_time - delay) > BrightcoveABController.timeslice:
+            _log.debug("key=thumbnail_change_scheduler msg=majority thumbnail has exceeded timeslice")
+        else:
+            #print "Sched A ", (time_to_exec_task - cur_time - delay)/60
+            #schedule A - The Majority run thumbnail 
+            taskA = ThumbnailChangeTask(account_id,video_id,thumbA[0]) 
+            taskmgr.add_task(taskA,time_to_exec_task) 
+            time_to_exec_task += (BrightcoveABController.timeslice 
                                     - sum([tup[1] for tup in time_dist])
                                     - abtest_start_time)
 
+        
+        #print "end task ", (time_to_exec_task - cur_time - delay)/60 
         task_time_slice = TimesliceEndTask(video_id) 
         #schedule End of Timeslice for a particular video
         taskmgr.add_task(task_time_slice,time_to_exec_task)

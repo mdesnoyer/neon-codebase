@@ -26,8 +26,10 @@ import os
 
 import supportServices.neondata 
 
+
 from utils.http import RequestPool
 import utils.http
+from utils.imageutils import ImageUtils
 import utils.logs
 import utils.neon
 _log = utils.logs.FileLogger("brighcove_api")
@@ -153,7 +155,7 @@ class BrightcoveApi(object):
                 "filePath",
                 value=image_data,
                 filetype='image/jpeg',
-                filename='thumbnail-' + str(video_id) + '.jpeg')
+                filename='neonthumbnail-' + str(video_id) + '.jpeg')
             args = poster.encode.MultipartParam("JSONRPC", value=body)
             post_param.append(args)
             post_param.append(fileparam)
@@ -177,7 +179,7 @@ class BrightcoveApi(object):
 
         ref_id = tid
     '''
-    def update_thumbnail_and_videostill(self, video_id, image, ref_id): 
+    def update_thumbnail_and_videostill(self, video_id, image, ref_id, frame_size=None): 
 
         
         #If url is passed, then set thumbnail using the remote url (not used currently)
@@ -185,8 +187,16 @@ class BrightcoveApi(object):
             rt = self.add_image(video_id,remote_url = image,atype='thumbnail')
             rv = self.add_image(video_id,remote_url = image,atype='videostill')
         else:
-            bcove_thumb = image.resize(self.THUMB_SIZE)
-            bcove_still = image.resize(self.STILL_SIZE)
+            #Always save the Image with the aspect ratio of the video
+            if frame_size is None:
+                #resize to brightcove default size
+                bcove_thumb = image.resize(self.THUMB_SIZE)
+                bcove_still = image.resize(self.STILL_SIZE)
+            else:
+                THUMB_SIZE = (self.THUMB_SIZE[0],int(float(frame_size[1])/frame_size[0] * self.THUMB_SIZE[0]))  
+                STILL_SIZE = (self.STILL_SIZE[0],int(float(frame_size[1])/frame_size[0] * self.STILL_SIZE[0])) 
+                bcove_thumb = ImageUtils.resize(image,THUMB_SIZE[1],THUMB_SIZE[0])
+                bcove_still = ImageUtils.resize(image,STILL_SIZE[1],STILL_SIZE[0])
 
             t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
                                                             bcove_thumb,
@@ -293,7 +303,8 @@ class BrightcoveApi(object):
     '''
     Enable a particular thumbnail in the brightcove account
     '''
-    def enable_thumbnail_from_url(self, video_id, url, reference_id=None):
+    def enable_thumbnail_from_url(self, video_id, url,frame_size=None,
+                                  reference_id=None):
         headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
         req = tornado.httpclient.HTTPRequest(url = url,
@@ -308,9 +319,21 @@ class BrightcoveApi(object):
         except Exception,e:
             _log.exception("Image format error %s" %e )
 
+        #TODO: Resize to the aspect ratio of video; key by width
         thumbnail_id = reference_id
-        bcove_thumb = image.resize(self.THUMB_SIZE)
-        bcove_still = image.resize(self.STILL_SIZE)
+        if frame_size is None:
+            #resize to brightcove default size
+            bcove_thumb = image.resize(self.THUMB_SIZE)
+            bcove_still = image.resize(self.STILL_SIZE)
+        else:
+            THUMB_SIZE = (self.THUMB_SIZE[0],
+                          int(float(frame_size[1])/frame_size[0] *
+                              self.THUMB_SIZE[0]))  
+            STILL_SIZE = (self.STILL_SIZE[0],
+                          int(float(frame_size[1])/frame_size[0] *
+                              self.STILL_SIZE[0])) 
+            bcove_thumb = ImageUtils.resize(image,THUMB_SIZE[1],THUMB_SIZE[0])
+            bcove_still = ImageUtils.resize(image,STILL_SIZE[1],THUMB_SIZE[0])
 
         t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
                                                         bcove_thumb,
@@ -345,7 +368,7 @@ class BrightcoveApi(object):
     '''
 
     def async_enable_thumbnail_from_url(self, video_id, img_url, 
-                                        thumbnail_id, callback=None):
+                                        thumbnail_id,frame_size=None, callback=None):
         self.img_result = []  
         reference_id = thumbnail_id
         
@@ -380,9 +403,19 @@ class BrightcoveApi(object):
                 imfile = StringIO(image_response.body)
                 image =  Image.open(imfile)
                 srefid = reference_id if not reference_id else "still-" + reference_id
-                bcove_thumb = image.resize(self.THUMB_SIZE)
-                bcove_still = image.resize(self.STILL_SIZE)
                 
+                if frame_size is None:
+                    #resize to brightcove default size
+                    bcove_thumb = image.resize(self.THUMB_SIZE)
+                    bcove_still = image.resize(self.STILL_SIZE)
+                else:
+                    THUMB_SIZE = (self.THUMB_SIZE[0],
+                            int(float(frame_size[1])/frame_size[0] * self.THUMB_SIZE[0]))  
+                    STILL_SIZE = (self.STILL_SIZE[0],
+                            int(float(frame_size[1])/frame_size[0] * self.STILL_SIZE[0])) 
+                    bcove_thumb = ImageUtils.resize(image,THUMB_SIZE[1],THUMB_SIZE[0])
+                    bcove_still = ImageUtils.resize(image,STILL_SIZE[1],THUMB_SIZE[0])
+
                 t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
                                                                 bcove_thumb,
                                                                 thumbnail_id)
@@ -514,6 +547,7 @@ class BrightcoveApi(object):
                         self.neon_api_key,job_id)
                 vid_request = supportServices.neondata.NeonApiRequest.create(
                         req_data)
+                vid_request.publish_date = item['publishedDate']
                 vid_request.video_title = title
                 vid_request.save()
 
@@ -793,7 +827,7 @@ class BrightcoveApi(object):
 
     #Verify Tokens and Create Neon requests
     def async_verify_token_and_create_requests(self, i_id, n, callback=None):
-
+        
         @tornado.gen.engine
         def verify_brightcove_tokens(result):
             if not result.error:
