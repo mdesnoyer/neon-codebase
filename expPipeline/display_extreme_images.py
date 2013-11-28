@@ -34,14 +34,15 @@ if __name__ == '__main__':
     IMAGES_PER_PAGE = IMAGES_PER_ROW * IMAGES_PER_ROW
     data = data[(options.page * IMAGES_PER_PAGE):
                 ((options.page+1) * IMAGES_PER_PAGE)]
-    plt.figure(figsize=(15,15), dpi=80)
+    plt.figure(figsize=(15,15), dpi=70)
 
     for i in range(IMAGES_PER_PAGE):
         image = PIL.Image.open(os.path.join(options.image_dir, data[i][0]))
         frame = plt.subplot(IMAGES_PER_ROW, IMAGES_PER_ROW, i+1)
         frame.axes.get_xaxis().set_ticks([])
         frame.axes.get_yaxis().set_visible(False)
-        plt.imshow(image.transpose(PIL.Image.FLIP_TOP_BOTTOM))
+        plt.imshow(image)
+        #plt.imshow(image.transpose(PIL.Image.FLIP_TOP_BOTTOM))
         plt.xlabel('%5.4f' % data[i][1])
 
     plt.tight_layout()

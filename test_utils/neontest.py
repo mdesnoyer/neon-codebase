@@ -10,6 +10,7 @@ from contextlib import contextmanager
 import logging
 import re
 from StringIO import StringIO
+import tornado.testing
 import unittest
 
 class TestCase(unittest.TestCase):
@@ -43,12 +44,18 @@ class TestCase(unittest.TestCase):
             logger.removeHandler(handler)
             handler.flush()
             reg = re.compile(regexp)
+            found_log = False
             for line in log_stream.getvalue().split('\n'):
                 if reg.search(line):
-                    return
-            self.fail('Msg: %s was not logged. The log was: %s' % 
-                      (regexp, log_stream.getvalue()))
-    
+                    found_log = True
+                    break
+            if not found_log:
+                self.fail('Msg: %s was not logged. The log was: %s' % 
+                          (regexp, log_stream.getvalue()))
+
+class AsyncTestCase(tornado.testing.AsyncTestCase, TestCase):
+    '''A test case that has access to Neon functions and can do tornado async calls.'''
+    pass
 
 def main():
     unittest.main()
