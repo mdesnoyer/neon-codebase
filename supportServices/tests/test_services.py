@@ -366,11 +366,12 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         self._check_neon_default_chosen(videos)
     
         #update a thumbnail
-        #for vid in videos:
-        #    i_vid = neondata.InternalVideoID.generate(self.api_key,vid)
-        #    vmdata= neondata.VideoMetadata.get(i_vid)
-        #    tids = vmdata.thumbnail_ids
-        #    self.update_brightcove_thumbnail(vid,tids[1]) #set neon rank 2 
+        for vid in videos:
+            i_vid = neondata.InternalVideoID.generate(self.api_key,vid)
+            vmdata= neondata.VideoMetadata.get(i_vid)
+            tids = vmdata.thumbnail_ids
+            resp = self.update_brightcove_thumbnail(vid,tids[1]) #set neon rank 2 
+            self.assertEqual(resp.code,200)
 
     def update_brightcove_thumbnail(self,vid,tid):
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/%s/videos/%s' %(self.a_id,self.b_id,vid))
