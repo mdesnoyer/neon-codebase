@@ -375,6 +375,13 @@ class TestFullServer(unittest.TestCase):
 
         random.seed(168984)
 
+        self.filesystem = fake_filesystem.FakeFilesystem()
+        self.fake_os = fake_filesystem.FakeOsModule(self.filesystem)
+        self.fake_open = fake_filesystem.FakeFileOpen(self.filesystem)
+        clickTracker.trackserver.os = self.fake_os
+        clickTracker.trackserver.open = self.fake_open
+        boto_mock.open = self.fake_open
+
         self.patcher = patch('clickTracker.trackserver.S3Connection')
         mock_conn = self.patcher.start()
         self.s3conn = boto_mock.MockConnection()
@@ -390,6 +397,10 @@ class TestFullServer(unittest.TestCase):
     def tearDown(self):
         self.server.stop()
         self.patcher.stop()
+
+        clickTracker.trackserver.os = os
+        clickTracker.trackserver.open = __builtin__.open
+        boto_mock.open = __builtin__.open
 
     def test_send_data_to_server(self):        
         # Fire requests to the server      

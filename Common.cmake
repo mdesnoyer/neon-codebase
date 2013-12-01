@@ -40,6 +40,7 @@ SET( CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING
 
 # Set the linking to include local because sometimes it's not set
 SET(CMAKE_INCLUDE_CURRENT_DIR ON)
+LINK_DIRECTORIES(/opt/local/lib)
 LINK_DIRECTORIES(/usr/local/lib)
 
 #if(COMMAND cmake_policy)
