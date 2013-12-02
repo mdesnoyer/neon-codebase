@@ -410,66 +410,6 @@ class ProcessVideo(object):
             if self.debug:
                 raise
   
-    ''' Save the top thumbnails to s3 as tar.gz file '''
-    def save_result_data_to_s3(self,frames):
-        try:
-            # Save Ranked images to S3 
-            tmp_tar_file = tempfile.NamedTemporaryFile(delete=True)
-            tar_file = tarfile.TarFile(tmp_tar_file.name,"w")
-            k = Key(self.s3bucket)
-            for rank,frame_no in zip(range(len(frames)),frames):
-                score = self.data_map[frame_no][0]
-                image = Image.fromarray(self.data_map[frame_no][1])
-                size = properties.THUMBNAIL_IMAGE_SIZE
-
-                # Image size requested is different set it
-                if self.request_map.has_key(properties.THUMBNAIL_SIZE):
-                    size = self.request_map.has_key(properties.THUMBNAIL_SIZE)
-
-                image.thumbnail(size,Image.ANTIALIAS)
-                #fname = "result/" +'rank_' + str(rank+1) + "_score_" + str(score) + "." + self.format
-                #fname = "result/" +'rank_' + str(rank+1) + "." + self.format
-                fname = "result-"+ self.request_map[properties.REQUEST_UUID_KEY]  + "/" +'rank_' + str(rank+1) + "." + self.format
-                filestream = StringIO()
-                image.save(filestream, self.format)
-                filestream.seek(0)
-                info = tarfile.TarInfo(name=fname)
-                info.size = len(filestream.buf)
-                tar_file.addfile(tarinfo=info, fileobj=filestream)
-            tar_file.close()
-
-            gzip_file = tempfile.NamedTemporaryFile(delete=properties.DELETE_TEMP_TAR)
-            gz = gzip.GzipFile(filename=gzip_file.name, mode='wb')
-            tmp_tar_file.seek(0)
-            gz.write(tmp_tar_file.read())
-            gz.close()
-
-            if properties.SAVE_DATA_TO_S3:
-                #Save gzip to s3
-                #fname = self.request_map[properties.REQUEST_UUID_KEY] + '.tar.gz'
-                k.key = self.base_filename + "/result.tar.gz"
-                k.set_contents_from_filename(gzip_file.name)
-        
-            else:
-                _log.info("result saved to " + gzip_file.name)
-                if not os.path.exists('results'):
-                    os.mkdir('results')
-                fname = self.request_map[properties.REQUEST_UUID_KEY] + '.tar.gz'
-                shutil.copy(gzip_file.name,'results/' + fname)
-                
-            tmp_tar_file.close()
-            gzip_file.close()
-
-        except S3ResponseError,e:
-            _log.error("key=save_result_to_s3 msg=s3 response error " + 
-                      e.__str__() )
-        except Exception,e:
-            _log.error("key=save_result_to_s3 msg=general exception " + 
-                      e.__str__() )
-            if self.debug:
-                raise
-
-    
     ''' Host images on s3 which is available publicly '''
     def host_images_s3(self, frames):
         s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)

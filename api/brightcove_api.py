@@ -192,10 +192,8 @@ class BrightcoveApi(object):
                 bcove_thumb = image.resize(self.THUMB_SIZE)
                 bcove_still = image.resize(self.STILL_SIZE)
             else:
-                THUMB_SIZE = (self.THUMB_SIZE[0],int(float(frame_size[1])/frame_size[0] * self.THUMB_SIZE[0]))  
-                STILL_SIZE = (self.STILL_SIZE[0],int(float(frame_size[1])/frame_size[0] * self.STILL_SIZE[0])) 
-                bcove_thumb = ImageUtils.resize(image,THUMB_SIZE[1],THUMB_SIZE[0])
-                bcove_still = ImageUtils.resize(image,STILL_SIZE[1],STILL_SIZE[0])
+                bcove_thumb = ImageUtils.resize(image,im_w=self.THUMB_SIZE[0])
+                bcove_still = ImageUtils.resize(image,im_w=self.STILL_SIZE[0])
 
             t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
                                                             bcove_thumb,
@@ -325,10 +323,8 @@ class BrightcoveApi(object):
             bcove_thumb = image.resize(self.THUMB_SIZE)
             bcove_still = image.resize(self.STILL_SIZE)
         else:
-            THUMB_SIZE = (self.THUMB_SIZE[0],int(float(frame_size[1])/frame_size[0] * self.THUMB_SIZE[0]))  
-            STILL_SIZE = (self.STILL_SIZE[0],int(float(frame_size[1])/frame_size[0] * self.STILL_SIZE[0])) 
-            bcove_thumb = ImageUtils.resize(image,THUMB_SIZE[1],THUMB_SIZE[0])
-            bcove_still = ImageUtils.resize(image,STILL_SIZE[1],STILL_SIZE[0])
+            bcove_thumb = ImageUtils.resize(image,im_w=self.THUMB_SIZE[0])
+            bcove_still = ImageUtils.resize(image,im_w=self.STILL_SIZE[0])
 
         t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
                                                         bcove_thumb,
@@ -366,7 +362,7 @@ class BrightcoveApi(object):
                                         thumbnail_id,frame_size=None, callback=None):
         self.img_result = []  
         reference_id = thumbnail_id
-        
+       
         def add_image_callback(result):
             if not result.error and len(result.body) > 0:
                 self.img_result.append(tornado.escape.json_decode(result.body))
@@ -404,12 +400,8 @@ class BrightcoveApi(object):
                     bcove_thumb = image.resize(self.THUMB_SIZE)
                     bcove_still = image.resize(self.STILL_SIZE)
                 else:
-                    THUMB_SIZE = (self.THUMB_SIZE[0],
-                            int(float(frame_size[1])/frame_size[0] * self.THUMB_SIZE[0]))  
-                    STILL_SIZE = (self.STILL_SIZE[0],
-                            int(float(frame_size[1])/frame_size[0] * self.STILL_SIZE[0])) 
-                    bcove_thumb = ImageUtils.resize(image,THUMB_SIZE[1],THUMB_SIZE[0])
-                    bcove_still = ImageUtils.resize(image,STILL_SIZE[1],STILL_SIZE[0])
+                    bcove_thumb = ImageUtils.resize(image,im_w=self.THUMB_SIZE[0])
+                    bcove_still = ImageUtils.resize(image,im_w=self.STILL_SIZE[0])
 
                 t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
                                                                 bcove_thumb,

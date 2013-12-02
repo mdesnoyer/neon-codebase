@@ -80,7 +80,7 @@ except Exception,e:
 s_page = html_start + '\n' + img_divs + '\n'  + html_end
 t_page = html_start + '\n' + thumb_divs + '\n'  + html_end
 with open("/var/www/static/livethumbnails.html",'w') as f:
-    print >>f, t_page
+    print >>f, t_page.encode('utf-8').strip()
 
 with open("/var/www/static/livevideostills.html",'w') as f:
-    print >>f, s_page
+    print >>f, s_page.encode('utf-8').strip()
