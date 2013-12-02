@@ -26,9 +26,10 @@ import os
 
 import supportServices.neondata 
 
-from utils.connection_pool import HttpConnectionPool
-from utils.imageutils import ImageUtils
 
+from utils.http import RequestPool
+import utils.http
+from utils.imageutils import ImageUtils
 import utils.logs
 import utils.neon
 _log = utils.logs.FileLogger("brighcove_api")
@@ -44,10 +45,10 @@ define('max_retries', default=5, type=int,
 
 ## NOTE : All video ids used in the class refer to the Brightcove platform VIDEO ID
 class BrightcoveApi(object): 
-    write_connection = HttpConnectionPool(options.max_write_connections,
-                                          options.max_retries)
-    read_connection = HttpConnectionPool(options.max_read_connections,
-                                         options.max_retries)
+    write_connection = RequestPool(options.max_write_connections,
+                                   options.max_retries)
+    read_connection = RequestPool(options.max_read_connections,
+                                  options.max_retries)
     
     def __init__(self, neon_api_key, publisher_id=0, read_token=None,
                  write_token=None, autosync=False, publish_date=None,
@@ -300,8 +301,8 @@ class BrightcoveApi(object):
     '''
     Enable a particular thumbnail in the brightcove account
     '''
-    def enable_thumbnail_from_url(self, video_id, url,frame_size=None, reference_id=None):
-        http_client = tornado.httpclient.HTTPClient()
+    def enable_thumbnail_from_url(self, video_id, url,frame_size=None,
+                                  reference_id=None):
         headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
         req = tornado.httpclient.HTTPRequest(url = url,
@@ -309,7 +310,7 @@ class BrightcoveApi(object):
                                              headers = headers,
                                              request_timeout = 60.0,
                                              connect_timeout = 10.0)
-        response = http_client.fetch(req)
+        response = utils.http.send_request(req)
         imfile = StringIO(response.body)
         try:
             image =  Image.open(imfile)
@@ -435,12 +436,11 @@ class BrightcoveApi(object):
             else:
                 callback((False,False))
 
-        http_client = tornado.httpclient.AsyncHTTPClient()
         req = tornado.httpclient.HTTPRequest(url = img_url,
                                              method = "GET",
                                              request_timeout = 60.0,
                                              connect_timeout = 5.0)
-        http_client.fetch(req,image_data_callback)
+        utils.http.send_request(req, image_data_callback)
 
     ##################################################################################
     # Feed Processors
@@ -576,33 +576,14 @@ class BrightcoveApi(object):
                                              body = body,
                                              request_timeout = 30.0,
                                              connect_timeout = 10.0)
-        #async
-        if callback:
-            http_client = tornado.httpclient.AsyncHTTPClient()
-            http_client.fetch(req,callback) 
-            return
 
-        http_client = tornado.httpclient.HTTPClient()
-        retries = 3 
-        last_response = None
-        for i in range(retries):
-            try:
-                response = http_client.fetch(req)
-                #verify response 200 OK
-                if not response.error:
-                    data = tornado.escape.json_decode(response.body)
-                    if 'error' in data and data['error']:
-                        raise tornado.httpclient.HTTPError(
-                            409, data['error'], response)
-                return response
+        response = utils.http.send_request(req, ntries=3, callback=callback)
+        if response and response.error:
+            _log.error(('key=format_neon_api_request '
+                        'msg=Error sending Neon API request: %s')
+                        % response.error)
 
-            except tornado.httpclient.HTTPError, e:
-                _log.error(('key=format_neon_api_request '
-                            'msg=Error sending Neon API request: %s') % e)
-                last_response = tornado.httpclient.HTTPResponse(req,
-                                                                e.code,
-                                                                error=e)
-        return last_response
+        return response
 
     '''
     Create Neon Brightcove API Requests
@@ -682,8 +663,7 @@ class BrightcoveApi(object):
     def create_request_by_video_id(self, video_id,i_id):
         
         url = 'http://api.brightcove.com/services/library?command=find_video_by_id' \
-                '&token=%s&media_delivery=http&output=json&video_id=%s' %(self.read_token,video_id)  
-        http_client = tornado.httpclient.HTTPClient()
+                '&token=%s&media_delivery=http&output=json&video_id=%s' %(self.read_token,video_id) 
         req = tornado.httpclient.HTTPRequest(url = url,
                                              method = "GET",
                                              request_timeout = 60.0,

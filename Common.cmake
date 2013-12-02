@@ -40,6 +40,7 @@ SET( CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING
 
 # Set the linking to include local because sometimes it's not set
 SET(CMAKE_INCLUDE_CURRENT_DIR ON)
+LINK_DIRECTORIES(/opt/local/lib)
 LINK_DIRECTORIES(/usr/local/lib)
 
 #if(COMMAND cmake_policy)
@@ -82,8 +83,8 @@ endfunction(add_cc_test)
 # Function that enables this library to generate python interfaces for c++ code
 macro(enable_python)
   find_package(PythonLibs REQUIRED)
+  find_package(PythonInterp REQUIRED)
   include_directories(${PYTHON_INCLUDE_PATH})
-  SET(PYTHON_EXECUTABLE /usr/bin/python)
   find_package(Numpy REQUIRED)
   include_directories(${PYTHON_NUMARRAY_INCLUDE_DIR})
 

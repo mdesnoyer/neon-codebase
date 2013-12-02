@@ -1,11 +1,11 @@
 BUILD_TYPE ?= Debug
 
-CMAKE_FLAGS= -D CMAKE_BUILD_TYPE=$(BUILD_TYPE)
+CMAKE_FLAGS= -D CMAKE_BUILD_TYPE=$(BUILD_TYPE) 
 
 # Create the build directory and invoke cmake
 all:
 	@mkdir -p build/${BUILD_TYPE}
-	cd build/${BUILD_TYPE} && cmake $(CMAKE_FLAGS) ../..
+	cd build/${BUILD_TYPE} && CXX=g++ CC=gcc cmake $(CMAKE_FLAGS) ../..
 	cd build/${BUILD_TYPE} && make
 
 # Convienience targets for different build types
