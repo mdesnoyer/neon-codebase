@@ -2,7 +2,9 @@
 '''
 Unit test for Video Server
 '''
-
+import os
+import subprocess
+import re
 import unittest
 import urllib
 import tornado.gen
@@ -24,6 +26,10 @@ if sys.path[0] <> base_path:
         sys.path.insert(0,base_path)
 from api import server
 from supportServices import neondata
+import utils
+from utils.options import define, options
+import logging
+_log = logging.getLogger(__name__)
 
 class TestVideoServer(AsyncHTTPTestCase):
     def setUp(self):
@@ -42,7 +48,8 @@ class TestVideoServer(AsyncHTTPTestCase):
 
         self.base_uri = '/api/v1/submitvideo/topn'
         self.neon_api_url = self.get_url(self.base_uri)
-
+    
+    
     def _db_side_effect(*args,**kwargs):
         key = args[0]
         cb  = args[1]
@@ -137,5 +144,34 @@ class TestVideoServer(AsyncHTTPTestCase):
         resp = self.wait()
         self.assertEqual(resp.code,400)
 
+def LaunchVideoDb():
+    '''Launches the video db.'''
+    if options.get('supportServices.neondata.dbPort') == 6379:
+        raise Exception('Not allowed to talk to the default Redis server '
+                        'so that we do not accidentially erase it. '
+                        'Please change the port number.')
+    
+    _log.info('Launching video db')
+    proc = subprocess.Popen([
+        '/usr/bin/env', 'redis-server',
+        os.path.join(os.path.dirname(__file__), 'test_video_db.conf')],
+        stdout=subprocess.PIPE)
+
+    # Wait until the db is up correctly
+    upRe = re.compile('The server is now ready to accept connections on port')
+    video_db_log = []
+    while proc.poll() is None:
+        line = proc.stdout.readline()
+        video_db_log.append(line)
+        if upRe.search(line):
+            break
+
+    if proc.poll() is not None:
+        raise Exception('Error starting video db. Log:\n%s' %
+                        '\n'.join(video_db_log))
+
+    _log.info('Video db is up')
 if __name__ == '__main__':
+    utils.neon.InitNeon()
+    #LaunchVideoDb()
     unittest.main()

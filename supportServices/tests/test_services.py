@@ -35,7 +35,9 @@ import api.properties
 
 import bcove_responses
 class TestBrightcoveServices(AsyncHTTPTestCase):
+
     def setUp(self):
+        #TODO: Spin up new redis instance
         super(TestBrightcoveServices, self).setUp()
         self.real_httpclient = tornado.httpclient.HTTPClient()
         self.real_asynchttpclient = tornado.httpclient.AsyncHTTPClient(self.io_loop)
@@ -176,7 +178,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
                         "brightcove",2,"test",enabled=True,rank=0)
                 else:
                     tdata = neondata.ThumbnailMetaData(tid,urls,created,480,360,
-                        "neon",2,"test",enabled=True,rank=t)
+                        "neon",2,"test",enabled=True,rank=t+1)
                 thumbnails.append(tdata)
         
             i_vid = neondata.InternalVideoID.generate(self.api_key,video_id)
@@ -204,16 +206,21 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
             vmdata = neondata.VideoMetadata(i_vid,tids,job_id,url,10,5,"test",self.b_id)
             self.assertTrue(vmdata.save())
 
-    def _check_video_status_brightcove(self,vstatus):
-        def check_video_status(status,expected_status):
-            self.assertEqual(status,expected_status)
 
+    def _get_video_status_brightcove(self):
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/%s/videos' %(self.a_id,self.b_id))
         headers = {'X-Neon-API-Key' : self.api_key} 
         client = AsyncHTTPClient(self.io_loop)
         client.fetch(url, self.stop, headers=headers)
         resp = self.wait()
         items = json.loads(resp.body)
+        return items
+
+    def _check_video_status_brightcove(self,vstatus):
+        def check_video_status(status,expected_status):
+            self.assertEqual(status,expected_status)
+
+        items = self._get_video_status_brightcove()
         for item in items:
             vr = services.VideoResponse(None,None,None,None,None,None,None,None,None)
             vr.__dict__ = item
@@ -366,12 +373,22 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         self._check_neon_default_chosen(videos)
     
         #update a thumbnail
+        new_tids = [] 
         for vid in videos:
             i_vid = neondata.InternalVideoID.generate(self.api_key,vid)
             vmdata= neondata.VideoMetadata.get(i_vid)
             tids = vmdata.thumbnail_ids
+            new_tids.append(tids[1])
             resp = self.update_brightcove_thumbnail(vid,tids[1]) #set neon rank 2 
             self.assertEqual(resp.code,200)
+
+        thumbs = []
+        items = self._get_video_status_brightcove()
+        for item,tid in zip(items,new_tids):
+            vr = services.VideoResponse(None,None,None,None,None,None,None,None,None)
+            vr.__dict__ = item
+            thumbs.append(vr.current_thumbnail)
+        self.assertItemsEqual(thumbs,new_tids)
 
     def update_brightcove_thumbnail(self,vid,tid):
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/%s/videos/%s' %(self.a_id,self.b_id,vid))

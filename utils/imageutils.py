@@ -33,7 +33,20 @@ class ImageUtils(object):
         return Image.fromarray(im_array)
 
     @classmethod
-    def resize(cls,im,im_h,im_w):
+    def resize(cls,im,im_h=None,im_w=None):
+        #TODO: instance check, PIL.Image check is ambigous, type is JpegImagePlugin?
+
+        if im_h is None and im_w is None:
+            return im
+
+        ar = im.size
+        #resize on either dimension
+        if im_h is None:
+            im_h = int(float(ar[1])/ar[0] * im_w) 
+
+        elif im_w is None:
+            im_w = int(float(ar[0])/ar[1] * im_h) 
+
         image_size = (im_w,im_h)
         image = im.resize(image_size,Image.ANTIALIAS)
         return image

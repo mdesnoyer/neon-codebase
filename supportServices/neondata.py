@@ -67,7 +67,8 @@ class DBConnection(object):
         port = options.dbPort 
         
         if cname:
-            if cname in ["AbstractPlatform","BrightcovePlatform","YoutubePlatform","NeonUserAccount","NeonApiRequest"]:
+            if cname in ["AbstractPlatform","BrightcovePlatform",
+                    "YoutubePlatform","NeonUserAccount","NeonApiRequest"]:
                 host = options.accountDB 
                 port = options.dbPort 
             elif cname == "VideoMetadata":

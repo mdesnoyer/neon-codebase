@@ -42,7 +42,8 @@ class TestImageUtils(unittest.TestCase):
 
     #test common aspect ratios 
     def test_resize(self):
-        sizes = [ (270,480), (480,640), (90,120), (100,100) ] #(w,h) 
+        sizes = [ (270,480), (480,640), (90,120), (100,100), 
+                (480,360), (120,90), (1280,720), (120,67) ] #(w,h) 
         sizes.extend(self._generate_aspect_ratio_tuples((16,9)))
         sizes.extend(self._generate_aspect_ratio_tuples((4,3)))
         sizes.extend(self._generate_aspect_ratio_tuples((3,2)))
@@ -51,6 +52,20 @@ class TestImageUtils(unittest.TestCase):
             im2 = imageutils.ImageUtils.resize(self.im,size[1],size[0])
             self.assertTrue(im2.size[0],size[0])
             self.assertTrue(im2.size[1],size[1])                    
+
+        #empty height
+        im2 = imageutils.ImageUtils.resize(self.im,None,640)
+        self.assertTrue(im2.size[0],640)
+        self.assertTrue(im2.size[1],480)
+        
+        #empty width
+        im2 = imageutils.ImageUtils.resize(self.im,90,None)
+        self.assertTrue(im2.size[0],120)
+        self.assertTrue(im2.size[1],90)
+        
+        #empty width
+        im2 = imageutils.ImageUtils.resize(self.im,None,None)
+        self.assertEqual(self.im,im2)
 
 if __name__ == '__main__':
     unittest.main()
