@@ -30,7 +30,7 @@ import utils.neon
 import utils.ps
 
 import boto.exception
-from boto.s3.connection import S3Connection
+from utils.s3 import S3Connection
 
 #logging
 import logging
@@ -43,10 +43,6 @@ define("batch_count", default=100, type=int,
        help="Number of lines to bacth to s3")
 define("s3disk", default="/mnt/neon/s3diskbacklog", type=str,
         help="Location to store backup lines which failed to upload s3")
-define("s3host", default=None, type=str,
-       help='Host where the S3 server is. If None, uses the boto default.')
-define("s3port", default=None, type=int,
-       help='Optional port where the S3 server is.')
 define("output", default='s3://neon-tracker-logs',
        help=('Location to store the output. Can be a local directory, '
              'or an S3 bucket of the form s3://<bucket_name>'))
@@ -201,10 +197,7 @@ class S3Handler(threading.Thread):
             self.use_s3 = True
 
             if self.s3conn is None:
-                s3host = options.s3host
-                if s3host is None:
-                    s3host = S3Connection.DefaultHost
-                self.s3conn = S3Connection(port=options.s3port, host=s3host)
+                self.s3conn = S3Connection()
                 
             bucket = self.s3conn.lookup(self.bucket_name)
             if bucket is None:
@@ -357,23 +350,24 @@ class Server(threading.Thread):
         self._watcher = watcher
 
     def run(self):
-        self.s3handler.start()
-        self.io_loop.make_current()
+        with self._watcher.activate():
+            self.s3handler.start()
+            self.io_loop.make_current()
 
-        application = tornado.web.Application([
-            (r"/", LogLines, dict(q=self.event_queue, 
-                                  watcher=self._watcher)),
-            (r"/track",LogLines, dict(q=self.event_queue,
+            application = tornado.web.Application([
+                (r"/", LogLines, dict(q=self.event_queue, 
                                       watcher=self._watcher)),
-            (r"/test",TestTracker),
-            ])
-        server = tornado.httpserver.HTTPServer(application,
-                                               io_loop=self.io_loop)
-        utils.ps.register_tornado_shutdown(server)
-        server.listen(options.port)
+                (r"/track",LogLines, dict(q=self.event_queue,
+                                          watcher=self._watcher)),
+                (r"/test",TestTracker),
+                ])
+            server = tornado.httpserver.HTTPServer(application,
+                                                   io_loop=self.io_loop)
+            utils.ps.register_tornado_shutdown(server)
+            server.listen(options.port)
         
 
-        self._is_running.set()
+            self._is_running.set()
         self.io_loop.start()
         server.stop()
 
@@ -391,7 +385,8 @@ class Server(threading.Thread):
         self.io_loop.stop()
 
 def main(watcher=utils.ps.ActivityWatcher()):
-    server = Server(watcher)
+    with watcher.activate():
+        server = Server(watcher)
     server.run()
     
 

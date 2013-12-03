@@ -5,9 +5,6 @@
    with some Amazon services and will thus incure some fees. Also, it
    cannot be run from multiple locations at the same time.
 
-TODO(mdesnoyer): Enable a version of this to run locally with out
-Amazon dependencies.
-
 Copyright: 2013 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
@@ -485,18 +482,8 @@ def LaunchClickLogServer():
 
 def LaunchFakeS3():
     '''Launch a fakes3 instance if the settings call for it.'''
-    s3host = options.get('stats.stats_processor.s3host')
-    s3port = options.get('stats.stats_processor.s3port')
-
-    # Check the options for consistency
-    if s3host != options.get('clickTracker.trackserver.s3host'):
-        raise ArgumentError(
-            'Hosts do not match. %s vs %s' %
-            (s3host, options.get('clickTracker.trackserver.s3host')))
-    if s3port != options.get('clickTracker.trackserver.s3port'):
-        raise ArgumentError(
-            'Ports do not match. %s vs %s' %
-            (s3port, options.get('clickTracker.trackserver.s3port')))
+    s3host = options.get('utils.s3.s3host')
+    s3port = options.get('utils.s3.s3port')
 
     if s3host == 'localhost':
         _log.info('Launching fakes3')
@@ -549,7 +536,7 @@ def main():
     LaunchFakeS3()
     LaunchStatsProcessor()
 
-    time.sleep(1)
+    _activity_watcher.wait_for_idle()
 
     suite = unittest.TestLoader().loadTestsFromTestCase(TestServingSystem)
     result = unittest.TextTestRunner().run(suite)
