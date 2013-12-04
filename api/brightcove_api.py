@@ -372,7 +372,7 @@ class BrightcoveApi(object):
 
             if len(self.img_result) == 2:
                 thumb = False
-                still = False; 
+                still = False 
                 try:
                     for res in self.img_result:
                         if res and not res["error"]:
@@ -382,7 +382,8 @@ class BrightcoveApi(object):
                                 still = res["result"]["referenceId"]
                         else:
                             _log.error("key=async_update_thumbnail"
-                                    " msg=brightcove api error for %s %s" % (video_id, res["error"]))
+                                    " msg=brightcove api error for %s %s" 
+                                    %(video_id, res["error"]))
                 except:
                     pass
 
@@ -432,9 +433,10 @@ class BrightcoveApi(object):
                                atype='videostill',
                                reference_id=srefid,
                                callback=add_image_callback)
-
             else:
-                callback((False,False))
+                _log.error('key=async_update_thumbnail' 
+                        'msg=failed to download image for %s' %thumbnail_id)
+                callback(None)
 
         req = tornado.httpclient.HTTPRequest(url = img_url,
                                              method = "GET",

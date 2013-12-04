@@ -630,7 +630,7 @@ class BrightcovePlatform(AbstractPlatform):
         #Get all thumbnails
         thumb_mappings = yield tornado.gen.Task(ThumbnailIDMapper.get_thumb_mappings,tids)
         t_url = None
-        
+       
         #Check if the new tid exists
         for thumb_mapping in thumb_mappings:
             if thumb_mapping.thumbnail_metadata["thumbnail_id"] == new_tid:
@@ -648,7 +648,9 @@ class BrightcovePlatform(AbstractPlatform):
                                     thumb_mappings, new_tid)
         modified_thumbs.append(new_thumb)
         if old_thumb is None:
-            _log.debug("key=update_thumbnaili msg=set thumbnail for the first time %s tid %s"%(i_vid,new_tid))
+            #old_thumb can be None if there was no neon thumb before
+            _log.debug("key=update_thumbnail" 
+                    " msg=set thumbnail in DB %s tid %s"%(i_vid,new_tid))
         else:
             modified_thumbs.append(old_thumb)
         
@@ -657,7 +659,7 @@ class BrightcovePlatform(AbstractPlatform):
                                         modified_thumbs)  
             if not res:
                 _log.error("key=update_thumbnail msg=[pre-update]" 
-                        "ThumbnailIDMapper save_all failed for %s" %new_tid)
+                        " ThumbnailIDMapper save_all failed for %s" %new_tid)
                 callback(False)
                 return
         else:
@@ -665,29 +667,34 @@ class BrightcovePlatform(AbstractPlatform):
             return
 
         # Update the new_tid as the thumbnail for the video
-        tref,sref = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,
+        thumb_res = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,
                                            platform_vid,
                                            t_url,
                                            new_tid,
                                            fsize)
+        if thumb_res is None:
+            callback(None)
+            return
+
+        tref,sref = thumb_res[0],thumb_res[1]
         if not sref:
             _log.error("key=update_thumbnail msg=brightcove error" 
-                    "update video still for video %s %s" %(i_vid,new_tid))
+                    " update video still for video %s %s" %(i_vid,new_tid))
 
-        if nosave:
+        if nosave: #Why is this here? 
             callback(tref)
             return
 
         if not tref:
             _log.error("key=update_thumbnail msg=failed to" 
-                    "enable thumb %s for %s" %(new_tid,i_vid))
+                    " enable thumb %s for %s" %(new_tid,i_vid))
             
             # Thumbnail was not update via the brightcove api, revert the DB changes
             modified_thumbs = []
             
             #get old thumbnail tid to revert to, this was the tid 
             #that was previously live before this request
-            old_tid = old_thumb.thumbnail_metadata["thumbnail_id"] 
+            old_tid = "no_thumb" if old_thumb is None else old_thumb.thumbnail_metadata["thumbnail_id"] 
             new_thumb, old_thumb = ThumbnailIDMapper.enable_thumbnail(
                                     thumb_mappings, old_tid)
             modified_thumbs.append(new_thumb)

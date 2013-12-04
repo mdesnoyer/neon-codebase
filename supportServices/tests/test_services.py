@@ -13,6 +13,7 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] <> base_path:
         sys.path.insert(0,base_path)
 
+import subprocess
 import unittest
 import urllib
 import tornado.gen
@@ -21,6 +22,7 @@ import tornado.gen
 import json
 import random
 import time
+import re
 import Image
 import datetime
 from StringIO import StringIO
@@ -30,10 +32,13 @@ from api import client,server,brightcove_api
 from tornado.concurrent import Future
 from tornado.testing import AsyncHTTPTestCase,AsyncTestCase,AsyncHTTPClient
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
+from utils.options import define, options
+import logging
+_log = logging.getLogger(__name__)
 
 import api.properties
-
 import bcove_responses
+random.seed(215)
 class TestBrightcoveServices(AsyncHTTPTestCase):
 
     def setUp(self):
@@ -75,6 +80,35 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         self.job_ids = [] #ordered list
         self.video_ids = []
 
+        self.port = random.randint(10000,11000)
+
+    def launch_videodb(self):
+        '''Launches the video db.'''
+        if options.get('supportServices.neondata.dbPort') == 6379:
+            raise Exception('Not allowed to talk to the default Redis server '
+                        'so that we do not accidentially erase it. '
+                        'Please change the port number.')
+    
+        _log.info('Launching video db')
+        self.proc = subprocess.Popen([
+            '/usr/bin/env', 'redis-server',
+            '--port', str(self.port)],
+            stdout=subprocess.PIPE)
+
+        # Wait until the db is up correctly
+        upRe = re.compile('The server is now ready to accept connections on port')
+        video_db_log = []
+        while self.proc.poll() is None:
+            line = self.proc.stdout.readline()
+            video_db_log.append(line)
+            if upRe.search(line):
+                break
+
+        if self.proc.poll() is not None:
+            raise Exception('Error starting video db. Log:\n%s' %'\n'.join(video_db_log)) 
+
+        _log.info('Video db is up')
+    
     def get_app(self):
         return services.application
     
@@ -87,6 +121,8 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         self.bapi_sync_patcher.stop()
         self.bapi_async_patcher.stop()
         self.delete_test_data()
+        self.proc.terminate()
+        self.proc.wait()
 
     def delete_test_data(self):
         import redis
@@ -113,7 +149,22 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
 
 
     ### Helper methods
+
+    ##Brightcove response parser methods
+    def _get_videos(self):    
+        vitems = json.loads(bcove_responses.find_all_videos_response)
+        videos = []
+        for item in vitems['items']:
+            vid = str(item['id'])
+            videos.append(vid)
+        return videos
     
+    def _get_thumbnails(self,vid):
+        i_vid = neondata.InternalVideoID.generate(self.api_key,vid)
+        vmdata= neondata.VideoMetadata.get(i_vid)
+        tids = vmdata.thumbnail_ids
+        return tids
+
     def _create_random_image(self):
         h = 360
         w = 480
@@ -261,19 +312,13 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         vals = {'read_token' : rtoken, 'write_token': wtoken,'auto_update': autoupdate}
         return self.put_request(url,vals,self.api_key)
 
-    ################################################################
-    # Unit Tests
-    ################################################################
-
-    def test_brightcove_web_account_flow(self):
-        #Create Neon Account --> Bcove Integration --> update Integration --> 
-        #query videos --> autopublish --> verify autopublish
-        
-        random.seed(1234)
+    def update_brightcove_thumbnail(self,vid,tid):
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/%s/videos/%s' %(self.a_id,self.b_id,vid))
+        vals = {'thumbnail_id' : tid }
+        return self.put_request(url,vals,self.api_key)
     
-        def _create_random_image_response():
-            return image_buffer
-
+   
+    def _success_http_side_effect(self,*args,**kwargs):
         def _neon_submit_job_response():
             job_id = random.random()
             self.job_ids.append(job_id)
@@ -294,39 +339,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
                     '"referenceId":"test_ref_id","remoteUrl":null,"type":"%s"},'
                     '"error": null, "id": null}'%itype))
             return response
-
-        def _http_side_effect(*args,**kwargs):
-            http_request = args[0]
-            if "http://api.brightcove.com/services/library" in http_request.url:
-                return bcove_response
-           
-            #add_image api call 
-            elif "http://api.brightcove.com/services/post" in http_request.url:
-                return _add_image_response(http_request) 
-
-            #Download image from brightcove CDN
-            elif "http://brightcove.vo.llnwd.net" in http_request.url:
-                return _create_random_image_response()
-            
-            #Download image from mock unit test url ; This is done async in the code
-            elif self.mock_image_url_prefix in http_request.url:
-                request = HTTPRequest(http_request.url)
-                response = HTTPResponse(request, 200,
-                    buffer=StringIO(self.thumbnail_url_to_image[http_request.url]))
-                #on async fetch, callback is returned
-                #check if callable -- hasattr(obj, '__call__')
-                if kwargs.has_key("callback"):
-                    callback  = kwargs["callback"]
-                else:
-                    callback = args[1] 
-                return callback(response)
-
-            #neon request
-            elif "api/v1/submitvideo/brightcove" in http_request.url:
-                return _neon_submit_job_response() 
-            else:
-                raise
-
+        
         #################### HTTP request/responses #################
         #mock brightcove api call
         bcove_request = HTTPRequest('http://api.brightcove.com/services/library?'
@@ -339,17 +352,85 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         request = HTTPRequest('http://google.com')
         response = HTTPResponse(request, 200,
                 buffer=StringIO('{"job_id":"neon error"}'))
+        
         #################### HTTP request/responses #################
+        
+        http_request = args[0]
+        if "http://api.brightcove.com/services/library" in http_request.url:
+            return bcove_response
+           
+        #add_image api call 
+        elif "http://api.brightcove.com/services/post" in http_request.url:
+            return _add_image_response(http_request) 
+
+        #Download image from brightcove CDN
+        elif "http://brightcove.vo.llnwd.net" in http_request.url:
+            return _create_random_image_response()
+            
+        #Download image from mock unit test url ; This is done async in the code
+        elif self.mock_image_url_prefix in http_request.url:
+            request = HTTPRequest(http_request.url)
+            response = HTTPResponse(request, 200,
+                    buffer=StringIO(self.thumbnail_url_to_image[http_request.url]))
+            #on async fetch, callback is returned
+            #check if callable -- hasattr(obj, '__call__')
+            if kwargs.has_key("callback"):
+                callback  = kwargs["callback"]
+            else:
+                callback = args[1] 
+            return callback(response)
+
+        #neon request
+        elif "api/v1/submitvideo/brightcove" in http_request.url:
+            return _neon_submit_job_response() 
+        else:
+            raise
+
+    def _setup_initial_brightcove_state(self):
+        '''
+        Setup the state of a brightcove account with 5 processed videos 
+        '''
+        #Setup Side effect for the http clients
+        self.bapi_mock_client().fetch.side_effect = self._success_http_side_effect
+        self.cp_mock_client().fetch.side_effect = self._success_http_side_effect 
+        self.bapi_mock_async_client().fetch.side_effect = self._success_http_side_effect
+        self.cp_mock_async_client().fetch.side_effect = self._success_http_side_effect
+    
+        #set up account and video state for testing
+        api_key = self.create_neon_account()
+        json_video_response = self.create_brightcove_account()
+        reqs = self._create_neon_api_requests()
+        self._process_neon_api_requests(reqs)
+    
+    ################################################################
+    # Unit Tests
+    ################################################################
+    
+    def test_brightcove_web_account_flow(self):
+        with options._set_bounded('supportServices.neondata.dbPort',self.port):
+            self.launch_videodb()
+            self._test_brightcove_web_account_flow()
+
+    def _test_brightcove_web_account_flow(self):
+        #Create Neon Account --> Bcove Integration --> update Integration --> 
+        #query videos --> autopublish --> verify autopublish
+        
+        random.seed(1234)
+    
+        def _create_random_image_response():
+            return image_buffer
+
+
         
         #create neon account
         api_key = self.create_neon_account()
         self.assertEqual(api_key,neondata.NeonApiKey.generate(self.a_id))
 
         #Setup Side effect for the http clients
-        self.bapi_mock_client().fetch.side_effect = _http_side_effect 
-        self.cp_mock_client().fetch.side_effect = _http_side_effect  
-        self.bapi_mock_async_client().fetch.side_effect = _http_side_effect
-        self.cp_mock_async_client().fetch.side_effect = _http_side_effect
+        self.bapi_mock_client().fetch.side_effect = self._success_http_side_effect
+        self.cp_mock_client().fetch.side_effect = self._success_http_side_effect 
+        self.bapi_mock_async_client().fetch.side_effect = self._success_http_side_effect
+        self.cp_mock_async_client().fetch.side_effect = self._success_http_side_effect
 
         #create brightcove account
         json_video_response = self.create_brightcove_account()
@@ -394,17 +475,73 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
             thumbs.append(vr.current_thumbnail)
         self.assertItemsEqual(thumbs,new_tids)
 
-    def update_brightcove_thumbnail(self,vid,tid):
-        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/%s/videos/%s' %(self.a_id,self.b_id,vid))
-        vals = {'thumbnail_id' : tid }
-        return self.put_request(url,vals,self.api_key)
-    
-    def test_check_brightcove_thumbnail(self):
-        pass
-
     #Failure test cases
     #Database failure on account creation, updation
     #Brightcove API failures
+
+    def test_update_thumbnail_fails(self):
+        with options._set_bounded('supportServices.neondata.dbPort',self.port):
+            self.launch_videodb()
+            self._setup_initial_brightcove_state()
+            self._test_update_thumbnail_fails()
+    
+    def _test_update_thumbnail_fails(self):
+        def _failure_http_side_effect(*args,**kwargs):
+            http_request = args[0]
+            if self.mock_image_url_prefix in http_request.url:
+                request = HTTPRequest(http_request.url)
+                response = HTTPResponse(request, 500,
+                    buffer=StringIO("Server error"))
+                if kwargs.has_key("callback"):
+                    callback = kwargs["callback"]
+                else:
+                    callback = args[1]
+                return callback(response)
+
+            if "http://api.brightcove.com/services/post" in http_request.url:
+                itype = "THUMBNAIL"
+                if "VIDEO_STILL" in http_request.body:
+                    itype = "VIDEO_STILL"
+
+                request = HTTPRequest("http://api.brightcove.com/services/post")
+                response = HTTPResponse(request, 500,
+                    buffer=StringIO
+                        ('{"result": {"displayName":"test","id":123,'
+                        '"referenceId":"test_ref_id","remoteUrl":null,"type":"%s"},'
+                        '"error": "mock error", "id": null}'%itype))
+                return response
+
+        vids = self._get_videos()
+        vid  = vids[0]
+        tids = self._get_thumbnails(vid)
+        
+        #Failed to download Image; Expect internal error 500
+        self.cp_mock_async_client().fetch.side_effect = \
+                _failure_http_side_effect
+        resp = self.update_brightcove_thumbnail(vid,tids[1]) 
+        self.assertEqual(resp.code,500) 
+
+        #Brightcove api error, gateway error 502
+        self.cp_mock_async_client().fetch.side_effect = \
+                self._success_http_side_effect
+        self.cp_mock_client().fetch.side_effect =\
+                _failure_http_side_effect 
+        resp = self.update_brightcove_thumbnail(vid,tids[1]) 
+        self.assertEqual(resp.code,502) 
+
+        #Successful update of thumbnail
+        self.cp_mock_client().fetch.side_effect =\
+                self._success_http_side_effect
+        resp = self.update_brightcove_thumbnail(vid,tids[1]) 
+        self.assertEqual(resp.code,200) 
+
+        #Induce Failure again, bcove api error
+        self.cp_mock_client().fetch.side_effect =\
+                _failure_http_side_effect 
+        resp = self.update_brightcove_thumbnail(vid,tids[1]) 
+        self.assertEqual(resp.code,502) 
+
+        #TODO: Induce DB connection failures
 
 if __name__ == '__main__':
     unittest.main()
