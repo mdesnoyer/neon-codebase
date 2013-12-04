@@ -13,7 +13,6 @@ if sys.path[0] <> base_path:
 
 import atexit
 from boto.s3.bucketlistresultset import BucketListResultSet
-from boto.s3.connection import S3Connection
 from boto.exception import S3ResponseError
 import fnmatch
 import logging
@@ -26,6 +25,7 @@ import tarfile
 import tempfile
 import time
 import utils.ps
+from utils.s3 import S3Connection
 
 from utils.options import define, options
 
@@ -35,10 +35,6 @@ define('input', default=None,
        help=('Glob specifying the input log files. '
              'Can be an s3 glob of the form s3://bucket/file* or '
              'a local glob'))
-define("s3host", default=None, type=str,
-       help='Host where the S3 server is. If None, uses the boto default.')
-define("s3port", default=None, type=int,
-       help='Optional port where the S3 server is.')
 define('runner', default='local',
        help='Where to run the MapReduce. "emr", "local" or "hadoop"')
 define('run_period', default=10800, type=int,
@@ -128,16 +124,12 @@ class DataDirectory:
     def _sync_local_dir(self):
         '''Synchronizes the local directory with S3.'''
         s3conn = S3Connection()
-        s3host = options.s3host
-        if s3host is None:
-            s3host = S3Connection.DefaultHost
-        s3conn = S3Connection(port=options.s3port, host=s3host)
 
         s3pathRe = re.compile('s3://([0-9a-zA-Z_\-]+)/([0-9a-zA-Z_/\-\*]*)')
         bucket_name, key_match = s3pathRe.match(options.input).groups()
 
-        bucket = s3conn.get_bucket(bucket_name)
         try:
+            bucket = s3conn.get_bucket(bucket_name)
             for key in BucketListResultSet(bucket):
                 if fnmatch.fnmatch(key.name, key_match):
                     local_fn = os.path.join(self.localdir, key.name)
@@ -145,8 +137,11 @@ class DataDirectory:
                         key.get_contents_to_filename(local_fn)
         except S3ResponseError as e:
             if e.status == '404':
-                _log.warn('Could not find key %s in bucket %s' %
-                            (key.name, bucket_name))
+                if key is not None:
+                    _log.warn('Could not find key %s in bucket %s' %
+                              (key.name, bucket_name))
+                else:
+                    _log.warn('Could not find bucket %s' % bucket)
             else:
                 raise
 
@@ -164,21 +159,23 @@ def main(erase_local_data=None, activity_watcher=utils.ps.ActivityWatcher()):
 
     os.environ['MRJOB_CONF'] = options.mr_conf
 
-    archive_name = tar_src_tree()
+    with activity_watcher.activate():
+        archive_name = tar_src_tree()
     try:
         with DataDirectory() as data_dir:
-            job = HourlyEventStats(args=[
-                '-r', options.runner,
-                '--python-archive', archive_name,
-                '--stats_host', options.stats_host,
-                '--stats_port', str(options.stats_port),
-                '--stats_user', options.stats_user,
-                '--stats_pass', options.stats_pass,
-                '--stats_db', options.stats_db,
-                '--stats_table', options.stats_table,
-                '--increment_stats', str(options.increment_stats),
-                '--neon_config', options.get_config_file(),
-                data_dir.path])
+            with activity_watcher.activate():
+                job = HourlyEventStats(args=[
+                    '-r', options.runner,
+                    '--python-archive', archive_name,
+                    '--stats_host', options.stats_host,
+                    '--stats_port', str(options.stats_port),
+                    '--stats_user', options.stats_user,
+                    '--stats_pass', options.stats_pass,
+                    '--stats_db', options.stats_db,
+                    '--stats_table', options.stats_table,
+                    '--increment_stats', str(options.increment_stats),
+                    '--neon_config', options.get_config_file(),
+                    data_dir.path])
 
             known_input_files = 0
             while True:

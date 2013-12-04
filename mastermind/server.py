@@ -309,14 +309,17 @@ class GetDirectives(tornado.web.RequestHandler):
             self.finish()
 
 def main(activity_watcher = utils.ps.ActivityWatcher()):
-    mastermind, ab_manager = initialize()
+    with activity_watcher.activate():
+        mastermind, ab_manager = initialize()
 
-    videoDbThread = VideoDBWatcher(mastermind, ab_manager, activity_watcher)
-    videoDbThread.start()
-    videoDbThread.wait_until_loaded()
-    statsDbThread = StatsDBWatcher(mastermind, ab_manager, activity_watcher)
-    statsDbThread.start()
-    statsDbThread.wait_until_loaded()
+        videoDbThread = VideoDBWatcher(mastermind, ab_manager,
+                                       activity_watcher)
+        videoDbThread.start()
+        videoDbThread.wait_until_loaded()
+        statsDbThread = StatsDBWatcher(mastermind, ab_manager,
+                                       activity_watcher)
+        statsDbThread.start()
+        statsDbThread.wait_until_loaded()
 
     _log.info('Starting server on port %i' % options.port)
     application = tornado.web.Application([

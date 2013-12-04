@@ -11,6 +11,7 @@ import platform
 import multiprocessing
 import signal
 import subprocess
+import threading
 import time
 import tornado.ioloop
 
@@ -54,6 +55,35 @@ def pid_running(pid):
     except OSError:
         return False
 
+def send_signal_and_wait(sig, pids, timeout=20):
+    '''Sends a given signal to all the pids and waits until they finish.
+
+    sig - The signal to send
+    pids - List of pids to send the signals to
+    timeout - Timeout in seconds
+
+    Returns - True if any process is still running
+    '''
+    for pid in pids:
+        try:
+            os.kill(pid, sig)
+        except OSError as e:
+            if e.errno <> 3:
+                # Process is already dead
+                raise
+
+    still_running = True
+    deadline = time.time() + timeout
+    while time.time() < deadline and still_running:
+        still_running = False
+        for pid in pids:
+            if pid_running(pid):
+                still_running = True
+        time.sleep(0.1)
+
+    return still_running
+        
+
 def shutdown_children():
     '''Shuts down the children of the current process.
 
@@ -62,29 +92,19 @@ def shutdown_children():
     atexit.register(utils.ps.shutdown_children)
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
     '''
-    import os
-    import time
     
     print 'Shutting down children of pid %i' % os.getpid()
-    child_pids = get_child_pids()    
-    for pid in child_pids:
-        try:
-            os.kill(pid, signal.SIGINT)
-            os.kill(pid, signal.SIGTERM)
-        except OSError as e:
-            if e.errno <> 3:
-                raise
+    child_pids = get_child_pids()
+    still_running = send_signal_and_wait(signal.SIGTERM, child_pids,
+                                         timeout=5)
 
-    still_running = True
-    count = 0
-    while still_running and count < 20:
-        still_running = False
-        for pid in child_pids:
-            if pid_running(pid):
-                still_running = True
-        time.sleep(1)
-        count += 1
+    # Some stupid processes ignore SIGTERM, but accept SIGINT e.g. webrick
+    # So send SIGINTs
+    if still_running:
+        still_running = send_signal_and_wait(signal.SIGINT, child_pids,
+                                             timeout=20)
 
+    # Ok, we're done waiting. Bring out the big guns
     if still_running:
         for pid in child_pids:
             if pid_running(pid):

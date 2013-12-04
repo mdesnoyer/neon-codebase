@@ -15,3 +15,5 @@ add_subdirectory(clickTracker)
 add_subdirectory(controllers)
 add_subdirectory(supportServices)
 add_subdirectory(api)
+
+add_subdirectory(test)

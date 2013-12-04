@@ -30,7 +30,7 @@ def create_valid_ack():
 class TestSyncSendRequest(test_utils.neontest.TestCase):
     def setUp(self):
         self.sync_patcher = \
-          patch('utils.connection_pool.tornado.httpclient.HTTPClient')
+          patch('utils.http.tornado.httpclient.HTTPClient')
 
         self.mock_client = self.sync_patcher.start()
 
@@ -108,7 +108,7 @@ class TestAsyncSendRequest(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestAsyncSendRequest, self).setUp()
         self.async_patcher = \
-          patch('utils.connection_pool.tornado.httpclient.AsyncHTTPClient')
+          patch('utils.http.tornado.httpclient.AsyncHTTPClient')
 
         self.mock_client = self.async_patcher.start()
         self.mock_responses = MagicMock()
@@ -167,7 +167,7 @@ class TestRequestPool(test_utils.neontest.TestCase):
     def setUp(self):
         self.pool = utils.http.RequestPool(5, 3)
         self.patcher = \
-          patch('utils.connection_pool.tornado.httpclient.HTTPClient')
+          patch('utils.http.tornado.httpclient.HTTPClient')
         self.mock_client = self.patcher.start()
 
         self.response_q = Queue.Queue()
@@ -310,5 +310,5 @@ class TestRequestPool(test_utils.neontest.TestCase):
         
    
 if __name__ == '__main__':
-    utils.neon.InitNeon()
+    utils.neon.InitNeonTest()
     unittest.main()
