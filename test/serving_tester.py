@@ -548,5 +548,5 @@ def main():
     
 
 if __name__ == "__main__":
-    utils.neon.InitNeon()
+    utils.neon.InitNeonTest()
     main()
