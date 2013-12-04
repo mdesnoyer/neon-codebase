@@ -225,6 +225,19 @@ class ProcessVideo(object):
 
     ############# THUMBNAIL METHODS ##################
 
+    def get_center_frame(self,video_file):
+        '''approximation of brightcove logic 
+         #Note: Its unclear the exact nature of brighcove thumbnailing,
+         the images are close but this is not the exact frame
+        '''
+        try:
+            mov = ffvideo.VideoStream(video_file)
+            mid = int(mov.duration / 2)
+            mid_frame = vs.get_frame_at_sec(mid)
+            return mid_frame
+        except Exception,e:
+            _log.debug("key=get_center_frame msg=%s"%e)
+
     def get_timecodes(self,frames):
         result = []
         for f in frames:

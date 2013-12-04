@@ -158,6 +158,7 @@ class TestTracker(TrackerDataHandler):
     def get(self, *args, **kwargs):
         try:
             tracker_data = self.parse_tracker_data()
+            cb = self.get_argument("callback")
         except Exception,e:
             _log.exception("key=test_track msg=%s" %e) 
             self.finish()
@@ -204,7 +205,7 @@ class S3Handler(threading.Thread):
                 s3host = options.s3host
                 if s3host is None:
                     s3host = S3Connection.DefaultHost
-                self.s3conn = S3Connection(port=options.s3port, host=s3host)
+                return;self.s3conn = S3Connection(port=options.s3port, host=s3host)
                 
             bucket = self.s3conn.lookup(self.bucket_name)
             if bucket is None:

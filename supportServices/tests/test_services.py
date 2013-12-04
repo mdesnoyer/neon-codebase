@@ -58,9 +58,9 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
 
         #Http Connection pool Mock
         self.cp_sync_patcher = \
-          patch('utils.connection_pool.tornado.httpclient.HTTPClient')
+          patch('utils.http.tornado.httpclient.HTTPClient')
         self.cp_async_patcher = \
-          patch('utils.connection_pool.tornado.httpclient.AsyncHTTPClient')
+          patch('utils.http.tornado.httpclient.AsyncHTTPClient')
         self.cp_mock_client = self.cp_sync_patcher.start()
         self.cp_mock_async_client = self.cp_async_patcher.start()
 
@@ -308,13 +308,17 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
             elif "http://brightcove.vo.llnwd.net" in http_request.url:
                 return _create_random_image_response()
             
-            #Download image from mock unit test url
+            #Download image from mock unit test url ; This is done async in the code
             elif self.mock_image_url_prefix in http_request.url:
                 request = HTTPRequest(http_request.url)
                 response = HTTPResponse(request, 200,
                     buffer=StringIO(self.thumbnail_url_to_image[http_request.url]))
                 #on async fetch, callback is returned
-                callback = args[1] #,kwargs
+                #check if callable -- hasattr(obj, '__call__')
+                if kwargs.has_key("callback"):
+                    callback  = kwargs["callback"]
+                else:
+                    callback = args[1] 
                 return callback(response)
 
             #neon request

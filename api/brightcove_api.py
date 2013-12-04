@@ -440,7 +440,7 @@ class BrightcoveApi(object):
                                              method = "GET",
                                              request_timeout = 60.0,
                                              connect_timeout = 5.0)
-        utils.http.send_request(req, image_data_callback)
+        utils.http.send_request(req, callback=image_data_callback)
 
     ##################################################################################
     # Feed Processors

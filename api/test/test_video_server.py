@@ -7,6 +7,7 @@ import subprocess
 import re
 import unittest
 import urllib
+import random
 import tornado.gen
 import tornado.ioloop
 import tornado.web
@@ -31,6 +32,7 @@ from utils.options import define, options
 import logging
 _log = logging.getLogger(__name__)
 
+random.seed(1324)
 class TestVideoServer(AsyncHTTPTestCase):
     def setUp(self):
         super(TestVideoServer, self).setUp()
@@ -48,7 +50,35 @@ class TestVideoServer(AsyncHTTPTestCase):
 
         self.base_uri = '/api/v1/submitvideo/topn'
         self.neon_api_url = self.get_url(self.base_uri)
+  
+        self.port = random.randint(10000,11000)
     
+    def launch_videodb(self):
+        '''Launches the video db.'''
+        if options.get('supportServices.neondata.dbPort') == 6379:
+            raise Exception('Not allowed to talk to the default Redis server '
+                        'so that we do not accidentially erase it. '
+                        'Please change the port number.')
+    
+        _log.info('Launching video db')
+        self.proc = subprocess.Popen([
+            '/usr/bin/env', 'redis-server',
+            '--port', str(self.port)],
+            stdout=subprocess.PIPE)
+
+        # Wait until the db is up correctly
+        upRe = re.compile('The server is now ready to accept connections on port')
+        video_db_log = []
+        while self.proc.poll() is None:
+            line = self.proc.stdout.readline()
+            video_db_log.append(line)
+            if upRe.search(line):
+                break
+
+        if self.proc.poll() is not None:
+            raise Exception('Error starting video db. Log:\n%s' %'\n'.join(video_db_log)) 
+
+        _log.info('Video db is up')
     
     def _db_side_effect(*args,**kwargs):
         key = args[0]
@@ -73,7 +103,8 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.sync_patcher.stop()
         self.async_patcher.stop()
         #self.mock_nplatform_patcher.stop()
-        #TODO: teardown db
+        self.proc.terminate()
+        self.proc.wait()
 
     def make_neon_api_request(self,vals):
         body = json.dumps(vals)
@@ -82,8 +113,27 @@ class TestVideoServer(AsyncHTTPTestCase):
         response = self.wait()
         return response
 
-
     def test_neon_api_request(self):
+        with options._set_bounded('supportServices.neondata.dbPort',self.port):
+            self.launch_videodb()
+            self._test_neon_api_request()
+
+    def test_brightcove_request(self):
+        with options._set_bounded('supportServices.neondata.dbPort',self.port):
+            self.launch_videodb()
+            self._test_brightcove_request()
+
+    def test_empty_request(self):
+        with options._set_bounded('supportServices.neondata.dbPort',self.port):
+            self.launch_videodb()
+            self._test_empty_request()
+
+    def test_duplicate_request(self):
+        with options._set_bounded('supportServices.neondata.dbPort',self.port):
+            self.launch_videodb()
+            self._test_duplicate_request()
+
+    def _test_neon_api_request(self):
         #Create fake account
         na = neondata.NeonPlatform("testaccountneonapi")
         api_key = na.neon_api_key
@@ -99,7 +149,7 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.cleanup_db(api_key)
         self.assertEqual(resp.code,201)
 
-    def test_duplicate_request(self):
+    def _test_duplicate_request(self):
         na = neondata.NeonPlatform("testaccountneonapi")
         api_key = na.neon_api_key
         na.save()
@@ -138,40 +188,11 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.cleanup_db(api_key)
         self.assertEqual(resp.code,201)
 
-    def test_empty_request(self):
+    def _test_empty_request(self):
         self.real_asynchttpclient.fetch(self.neon_api_url, 
                 callback=self.stop, method="POST", body='')
         resp = self.wait()
         self.assertEqual(resp.code,400)
 
-def LaunchVideoDb():
-    '''Launches the video db.'''
-    if options.get('supportServices.neondata.dbPort') == 6379:
-        raise Exception('Not allowed to talk to the default Redis server '
-                        'so that we do not accidentially erase it. '
-                        'Please change the port number.')
-    
-    _log.info('Launching video db')
-    proc = subprocess.Popen([
-        '/usr/bin/env', 'redis-server',
-        os.path.join(os.path.dirname(__file__), 'test_video_db.conf')],
-        stdout=subprocess.PIPE)
-
-    # Wait until the db is up correctly
-    upRe = re.compile('The server is now ready to accept connections on port')
-    video_db_log = []
-    while proc.poll() is None:
-        line = proc.stdout.readline()
-        video_db_log.append(line)
-        if upRe.search(line):
-            break
-
-    if proc.poll() is not None:
-        raise Exception('Error starting video db. Log:\n%s' %
-                        '\n'.join(video_db_log))
-
-    _log.info('Video db is up')
 if __name__ == '__main__':
-    utils.neon.InitNeon()
-    #LaunchVideoDb()
     unittest.main()
