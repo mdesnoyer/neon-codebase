@@ -3,13 +3,18 @@
 Copyright: 2013 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
+import os.path
+import sys
+sys.path.insert(0,os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..')))
 
 import logging
 import Queue
-import time
 import threading
+import time
 import tornado.escape
 import tornado.httpclient
+import tornado.ioloop
 
 _log = logging.getLogger(__name__)
 
@@ -77,9 +82,10 @@ def send_request(request, ntries=5, callback=None, cur_try=0):
             time.sleep(delay)
             return send_request(request, ntries, cur_try=cur_try)
         else:
-            timer = threading.Timer(delay, send_request, [request, ntries,
-                                    callback, cur_try])
-            timer.start()
+            ioloop = tornado.ioloop.IOLoop.current()
+            ioloop.add_callback(ioloop.add_timeout, time.time()+delay,
+                                lambda: send_request(request, ntries, callback,
+                                                     cur_try))
 
         # TODO(mdesnoyer): Return a future
         return None

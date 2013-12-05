@@ -209,6 +209,24 @@ class OptionParser(object):
             with self.__dict__['lock']:
                 self._options[global_name].set(old_val)
 
+    def _set(self, global_name, value):
+        '''Sets the value of an option.
+
+        This should only be used in test setups, primarily so that
+        you can do:
+        def setUp(self):
+          self.old_variable = options.get('my.variable')
+          options.set('my.variable', 45)
+
+        def tearDown(self):
+          options.set('my.variable', self.old_variable)
+        '''
+        with self.__dict__['lock']:
+            try:
+                self._options[global_name].set(value)
+            except KeyError:
+                _log.warn('Cannot set %s. It does not exist' % global_name)
+
     def _parse_command_line(self, args=None, usage='%prog [options]'):
         '''Parse the command line.'''
         if args is None:
