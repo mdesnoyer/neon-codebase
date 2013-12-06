@@ -1,0 +1,4 @@
+# These are requirements that must be installed before all the other ones.
+
+Cython==0.18
+numpy==1.6.1
