@@ -13,12 +13,12 @@ import logging
 from . import logs
 from . import options
 
-def InitNeon():
+def InitNeon(usage='%prog [options]'):
     '''Perform the initialization for the Neon environment.
 
     Returns the leftover arguments
     '''
-    garb, args = options.parse_options()
+    garb, args = options.parse_options(usage=usage)
     logs.AddConfiguredLogger()
 
     return args

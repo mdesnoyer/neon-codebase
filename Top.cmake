@@ -12,16 +12,16 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 if(EXISTS $ENV{VIRTUAL_ENV})
   message("Installing python dependencies.")
   execute_process(
-    COMMAND ${CMAKE_SOURCE_DIR}/pyenv/bin/pip install -r ${CMAKE_SOURCE_DIR}/pre_requirements.txt
+    COMMAND ${CMAKE_SOURCE_DIR}/pyenv/bin/pip install -r ${CMAKE_SOURCE_DIR}/pre_requirements.txt --no-index --find-links http://s3-us-west-1.amazonaws.com/neon-dependencies/index.html
     RESULT_VARIABLE FAILED_PY_INSTALL
     )
   if(NOT FAILED_PY_INSTALL)
     execute_process(
-      COMMAND ${CMAKE_SOURCE_DIR}/pyenv/bin/pip install -r ${CMAKE_SOURCE_DIR}/requirements.txt --find-links ${CMAKE_SOURCE_DIR}/externalLibs
+      COMMAND ${CMAKE_SOURCE_DIR}/pyenv/bin/pip install -r ${CMAKE_SOURCE_DIR}/requirements.txt --no-index --find-links http://s3-us-west-1.amazonaws.com/neon-dependencies/index.html
     
       RESULT_VARIABLE FAILED_PY_INSTALL
       )
-  endif(not FAILED_PY_INSTALL)
+  endif(NOT FAILED_PY_INSTALL)
   if(FAILED_PY_INSTALL)
     message(FATAL_ERROR "Error installing the python dependencies. Stopping.")
   endif(FAILED_PY_INSTALL)
