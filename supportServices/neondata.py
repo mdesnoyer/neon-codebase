@@ -2,7 +2,7 @@
 '''
 Data Model classes 
 
-Blob Types available 
+Defines interfaces for Neon User Account, Platform accounts
 Account Types
 - NeonUser
 - BrightcovePlatform
@@ -11,7 +11,6 @@ Account Types
 Api Request Types
 - Neon, Brightcove, youtube
 
-#TODO Connection pooling of redis connection https://github.com/leporo/tornado-redis/blob/master/demos/connection_pool/app.py
 '''
 import os.path
 import sys
@@ -46,6 +45,7 @@ define("accountDB", default="127.0.0.1", type=str,help="")
 define("videoDB", default="127.0.0.1", type=str,help="")
 define("thumbnailDB", default="127.0.0.1", type=str,help="")
 define("dbPort",default=6379,type=int,help="redis port")
+define("watchdogInterval",default=3,type=int,help="interval for watchdog thread")
 
 class DBConnection(object):
     '''Connection to the database.'''
@@ -137,7 +137,7 @@ class DBConnectionCheck(threading.Thread):
     ''' Watchdog thread class to check the DB connection objects '''
     def __init__(self,tid=None):
         super(DBConnectionCheck, self).__init__()
-        self.interval = 10
+        self.interval = options.watchdogInterval
         self.daemon = True
 
     def run(self):
@@ -248,7 +248,6 @@ class AbstractRedisUserBlob(object):
 
     def __init__(self,keyname=None):
         self.key = keyname
-        self.external_callback = None
         self.lock_ttl = 3 #secs
         return
 
@@ -286,7 +285,6 @@ class AbstractRedisUserBlob(object):
         db_connection.conn.set(self.key,value,self.external_callback)
 
     def to_json(self):
-        #TODO : don't save all the class specific params ( keyname,callback,ttl )
         return json.dumps(self, default=lambda o: o.__dict__) #don't save keyname
 
     def get(self, callback=None):

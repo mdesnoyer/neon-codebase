@@ -10,28 +10,27 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
+import datetime
+import json
+import hashlib
+import PIL.Image as Image
+import logging
+import os
+import random
+import sys
+import signal
+import time
+import traceback
 import tornado.httpserver
 import tornado.ioloop
 import tornado.web
 import tornado.escape
 import tornado.gen
 import tornado.httpclient
-import time
-import os
-import sys
-import signal
-import hashlib
-import logging
-import json
-import datetime
-import traceback
-from tornado.stack_context import ExceptionStackContext
-import tornado.stack_context
-import contextlib
-
-#Neon classes
-from supportServices import neondata
 import utils.neon
+
+from StringIO import StringIO
+from supportServices import neondata
 from utils.inputsanitizer import InputSanitizer
 
 from utils.options import define, options
@@ -1106,18 +1105,43 @@ class AccountHandler(tornado.web.RequestHandler):
         neondata.YoutubePlatform.get_account(self.api_key,i_id,get_account_callback)
 
 ###########################################################
-## Job Handler
+## Util Handler 
 ###########################################################
 
-class JobHandler(tornado.web.RequestHandler):
+class UtilHandler(tornado.web.RequestHandler):
+    def prepare(self):
+        random.seed(340)
+
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
         
-        #Get Job status
-        #j_id = self.request.uri.split('/')[-1]
-        #neondata.NeonApiRequest.get_request(api_key,j_id,status_callback)
-        self.write("Not yet Impl")
-        self.finish()
+        width = 480
+        height = 360
+        try:
+            width = int(self.get_argument("width"))
+            height = (self.get_argument("height"))
+        except:
+            pass
+        
+        seed = int(hashlib.md5(self.request.uri).hexdigest(),16)
+        random.seed(seed)
+        im = self._create_random_image(height,width)
+        imgstream = StringIO() 
+        im.save(imgstream, "jpeg", quality=100)
+        imgstream.seek(0)
+        data = imgstream.read()
+        self.finish(data)
+
+    def _create_random_image(self,h,w):
+        pixels = [(0,0,0) for _w in range(h*w)] 
+        r = random.randrange(0,255)
+        g = random.randrange(0,255)
+        b = random.randrange(0,255)
+        pixels[0] = (r,g,b)
+        im = Image.new("RGB",(h,w))
+        im.putdata(pixels)
+        return im
+
 
 ## Delete handler only for test accounts, use cautiously
 
@@ -1217,7 +1241,7 @@ application = tornado.web.Application([
         (r'/api/v1/removeaccount(.*)', DeleteHandler),
         (r'/api/v1/accounts(.*)', AccountHandler),
         (r'/api/v1/brightcovecontroller(.*)', BcoveHandler),
-        (r'/api/v1/jobs(.*)', JobHandler)],debug=True)
+        (r'/api/v1/utils(.*)', UtilHandler)],debug=True)
 
 def main():
     

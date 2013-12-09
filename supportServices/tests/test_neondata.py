@@ -7,14 +7,21 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] <> base_path:
         sys.path.insert(0,base_path)
 
+import time
 import unittest
+
 from supportServices.neondata import *
+from test_utils.redis import * 
 
 #TODO: Test db connection stuff and more.....
 
 class TestNeondata(unittest.TestCase):
     def setUp(self):
-        pass
+        self.redis = RedisServer()
+        self.redis.start()
+
+    def tearDown(self):
+        self.redis.stop()
 
     def test_dbconn_singleton(self):
         bp = BrightcovePlatform('2','3',4)
@@ -34,6 +41,46 @@ class TestNeondata(unittest.TestCase):
         self.assertEqual(self.vm_conn,self.vm_conn2)
 
         self.assertNotEqual(self.bp_conn,self.vm_conn)
+
+    def test_db_connection(self):
+        ap = AbstractPlatform()
+        db = DBConnection(ap)
+        key = "fookey"
+        val = "fooval"
+        self.assertTrue(db.blocking_conn.set(key,val))
+        self.assertEqual(db.blocking_conn.get(key),val)
+        self.assertTrue(db.blocking_conn.delete(key))
+
+    #TODO: Verify that database connection is re-established after config change
+
+    def test_db_connection_error(self):
+        ap = AbstractPlatform()
+        db = DBConnection(ap)
+        key = "fookey"
+        val = "fooval"
+        self.assertTrue(db.blocking_conn.set(key,val))
+        self.redis.stop()
+        
+        #try fetching the key after db has been stopped
+        try :
+            db.blocking_conn.get(key)
+        except Exception,e:
+            print e
+            #assert exception is ConnectionError 
+
+        self.redis = RedisServer()
+        self.redis.start()
+        
+        #Trigger a change in the options, so that the watchdog thread 
+        #can update the connection
+        options._set("supportServices.neondata.dbPort",self.redis.port)
+        check_interval = options.get("supportServices.neondata.watchdogInterval")
+        time.sleep(check_interval + 0.5)
+        
+        #try any db operation
+        self.assertTrue(db.blocking_conn.set(key,val))
+
+    #TODO: Test Async DB Connection
 
 if __name__ == '__main__':
     unittest.main()
