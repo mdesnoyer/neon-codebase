@@ -16,10 +16,13 @@ import Queue
 import random
 from StringIO import StringIO
 import test_utils.neontest
+from tornado.concurrent import Future
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 import unittest
 import utils.http
 import utils.neon
+
+_log = logging.getLogger(__name__)
 
 def create_valid_ack():
     request = HTTPRequest('http://www.neon.com')
@@ -111,7 +114,7 @@ class TestAsyncSendRequest(test_utils.neontest.AsyncTestCase):
           patch('utils.http.tornado.httpclient.AsyncHTTPClient')
 
         self.mock_client = self.async_patcher.start()
-        self.mock_responses = MagicMock()
+        self.mock_responses = MagicMock()                              
 
         self.mock_client().fetch.side_effect = \
           lambda x, callback: self.io_loop.add_callback(callback,
@@ -310,5 +313,5 @@ class TestRequestPool(test_utils.neontest.TestCase):
         
    
 if __name__ == '__main__':
-    utils.neon.InitNeonTest()
+    utils.neon.InitNeon()
     unittest.main()

@@ -91,11 +91,11 @@ class AccountHandler(tornado.web.RequestHandler):
 
     @tornado.gen.engine
     def async_sleep(self,secs):
-        yield tornado.gen.Task(tornado.ioloop.IOLoop.instance().add_timeout, time.time() + secs)
+        yield tornado.gen.Task(tornado.ioloop.IOLoop.current().add_timeout, time.time() + secs)
 
     @tornado.gen.engine
     def delayed_callback(self,secs,callback):
-        yield tornado.gen.Task(tornado.ioloop.IOLoop.instance().add_timeout, time.time() + secs)
+        yield tornado.gen.Task(tornado.ioloop.IOLoop.current().add_timeout, time.time() + secs)
         callback(secs)
 
     #### Support Functions #####
@@ -1212,14 +1212,20 @@ class BcoveHandler(tornado.web.RequestHandler):
     
     @tornado.gen.engine   
     def check_thumbnail(self):
-        vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get,self.internal_video_id)
+        vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get,
+                                        self.internal_video_id)
         if vmdata:
             i_id = vmdata.integration_id
-            jdata = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,self.a_id,i_id)
+            jdata = yield tornado.gen.Task(
+                neondata.BrightcovePlatform.get_account,
+                self.a_id,
+                i_id)
             ba = neondata.BrightcovePlatform.create(jdata)
             if ba:
-                bcove_vid = neondata.InternalVideoID.to_external(self.internal_video_id) 
-                result = yield tornado.gen.Task(ba.check_current_thumbnail_in_db,bcove_vid)
+                bcove_vid = neondata.InternalVideoID.to_external(
+                    self.internal_video_id) 
+                result = yield tornado.gen.Task(
+                    ba.check_current_thumbnail_in_db,bcove_vid)
                 if result:
                     self.set_status(200)
                 else:
@@ -1254,7 +1260,7 @@ def main():
     
     server = tornado.httpserver.HTTPServer(application)
     server.listen(options.port)
-    tornado.ioloop.IOLoop.instance().start()
+    tornado.ioloop.IOLoop.current().start()
 
 if __name__ == "__main__":
     utils.neon.InitNeon()

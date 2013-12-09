@@ -16,9 +16,12 @@ if sys.path[0] <> base_path:
 import subprocess
 import unittest
 import urllib
+import tempfile
+import test_utils.redis
 import tornado.gen
 import tornado.ioloop
 import tornado.gen
+import utils.neon
 import json
 import random
 import time
@@ -38,14 +41,10 @@ _log = logging.getLogger(__name__)
 
 import api.properties
 import bcove_responses
-random.seed(215)
 class TestBrightcoveServices(AsyncHTTPTestCase):
 
     def setUp(self):
-        #TODO: Spin up new redis instance
         super(TestBrightcoveServices, self).setUp()
-        self.real_httpclient = tornado.httpclient.HTTPClient()
-        self.real_asynchttpclient = tornado.httpclient.AsyncHTTPClient(self.io_loop)
         self.sync_patcher = \
           patch('supportServices.services.tornado.httpclient.HTTPClient')
         self.async_patcher = \
@@ -80,62 +79,36 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         self.job_ids = [] #ordered list
         self.video_ids = []
 
-        self.port = random.randint(10000,11000)
-
-    def launch_videodb(self):
-        '''Launches the video db.'''
-        if options.get('supportServices.neondata.dbPort') == 6379:
-            raise Exception('Not allowed to talk to the default Redis server '
-                        'so that we do not accidentially erase it. '
-                        'Please change the port number.')
-    
-        _log.info('Launching video db')
-        self.proc = subprocess.Popen([
-            '/usr/bin/env', 'redis-server',
-            '--port', str(self.port)],
-            stdout=subprocess.PIPE)
-
-        # Wait until the db is up correctly
-        upRe = re.compile('The server is now ready to accept connections on port')
-        video_db_log = []
-        while self.proc.poll() is None:
-            line = self.proc.stdout.readline()
-            video_db_log.append(line)
-            if upRe.search(line):
-                break
-
-        if self.proc.poll() is not None:
-            raise Exception('Error starting video db. Log:\n%s' %'\n'.join(video_db_log)) 
-
-        _log.info('Video db is up')
-    
-    def get_app(self):
-        return services.application
-    
-    def get_new_ioloop(self):
-        return tornado.ioloop.IOLoop.instance()
-
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+        
     def tearDown(self):
         self.sync_patcher.stop()
         self.async_patcher.stop()
         self.bapi_sync_patcher.stop()
         self.bapi_async_patcher.stop()
-        self.delete_test_data()
-        self.proc.terminate()
-        self.proc.wait()
+        self.cp_sync_patcher.stop()
+        self.cp_async_patcher.stop()
+        self.redis.stop()
+        super(TestBrightcoveServices, self).tearDown()
+    
+    def get_app(self):
+        return services.application
 
-    def delete_test_data(self):
-        import redis
-        client = redis.StrictRedis()
-        keys = client.keys("*%s*"%self.api_key)
-        for key in keys:
-            client.delete(key)
+    # TODO: It should be possible to run this with an IOLoop for each
+    # test, but it's not running. Need to figure out why.
+    def get_new_ioloop(self):
+        return tornado.ioloop.IOLoop.instance()
 
     def post_request(self,url,vals,apikey):
         client = AsyncHTTPClient(self.io_loop)
         headers = {'X-Neon-API-Key' : apikey, 'Content-Type':'application/x-www-form-urlencoded' }
         body = urllib.urlencode(vals)
-        client.fetch(url,self.stop,method="POST",body=body,headers=headers)
+        client.fetch(url,
+                     callback=self.stop,
+                     method="POST",
+                     body=body,
+                     headers=headers)
         response = self.wait()
         return response
 
@@ -378,7 +351,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
                 callback  = kwargs["callback"]
             else:
                 callback = args[1] 
-            return callback(response)
+            return self.io_loop.add_callback(callback, response)
 
         #neon request
         elif "api/v1/submitvideo/brightcove" in http_request.url:
@@ -405,13 +378,8 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
     ################################################################
     # Unit Tests
     ################################################################
-    
-    def test_brightcove_web_account_flow(self):
-        with options._set_bounded('supportServices.neondata.dbPort',self.port):
-            self.launch_videodb()
-            self._test_brightcove_web_account_flow()
 
-    def _test_brightcove_web_account_flow(self):
+    def test_brightcove_web_account_flow(self):
         #Create Neon Account --> Bcove Integration --> update Integration --> 
         #query videos --> autopublish --> verify autopublish
         
@@ -480,8 +448,8 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
     #Brightcove API failures
 
     def test_update_thumbnail_fails(self):
-        with options._set_bounded('supportServices.neondata.dbPort',self.port):
-            self.launch_videodb()
+        with options._set_bounded('supportServices.neondata.dbPort',
+                                  self.redis.port):
             self._setup_initial_brightcove_state()
             self._test_update_thumbnail_fails()
     
@@ -496,7 +464,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
                     callback = kwargs["callback"]
                 else:
                     callback = args[1]
-                return callback(response)
+                return self.io_loop.add_callback(callback, response)
 
             if "http://api.brightcove.com/services/post" in http_request.url:
                 itype = "THUMBNAIL"
@@ -544,4 +512,5 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         #TODO: Induce DB connection failures
 
 if __name__ == '__main__':
+    utils.neon.InitNeon()
     unittest.main()
