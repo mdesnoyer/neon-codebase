@@ -428,9 +428,9 @@ def LaunchStatsDb():
                        options.stats_db_pass))
         raise
 
-    cursor = conn.cursor()
-    ClearStatsDb()    
+    cursor = conn.cursor()    
     stats.db.create_tables(cursor)
+    ClearStatsDb()
     
     _log.info('Connection to stats db is good')
 
@@ -504,7 +504,7 @@ def LaunchFakeS3():
 
         if proc.poll() is not None:
             raise Exception('Error starting fake s3. Log:\n%s' %
-                            '\n'.join(video_db_log))
+                            '\n'.join(fakes3_log))
 
         _log.warn('FakeS3 is up with pid %i' % proc.pid)
 

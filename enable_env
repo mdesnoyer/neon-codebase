@@ -20,7 +20,7 @@ _OLD_VIRTUAL_PS1="$PS1"
 if [ "x" != x ] ; then
   PS1="$PS1"
 else
-  PS1="(`basename ${ROOT_DIR}`)$PS1"
+  PS1="(`basename ${NEON_ROOT_DIR}`)$PS1"
 fi
 export PS1
 

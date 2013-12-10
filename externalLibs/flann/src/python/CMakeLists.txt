@@ -13,7 +13,9 @@ if (PYTHON_EXECUTABLE)
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Installing pyflann"
   )
-  add_dependencies(pyflann_install
-    flann
-  )
-endif()
+  if (BUILD_C_BINDINGS)
+    add_dependencies(pyflann_install
+      flann
+    )
+  endif(BUILD_C_BINDINGS)
+endif(PYTHON_EXECUTABLE)

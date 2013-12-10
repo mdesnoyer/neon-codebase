@@ -9,6 +9,10 @@ string(TOLOWER ${PROJECT_NAME} PROJECT_NAME_LOWER)
 
 include(${CMAKE_SOURCE_DIR}/Common.cmake)
 
+# Force the libraries to be built in /lib
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY})
+
 include(${PROJECT_SOURCE_DIR}/cmake/flann_utils.cmake)
 set(FLANN_VERSION 1.8.4)
 DISSECT_VERSION()
@@ -36,9 +40,13 @@ ADD_CUSTOM_TARGET (uninstall "${CMAKE_COMMAND}" -P
 # set output path for tests
 set(TEST_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/test)
 
-option(BUILD_C_BINDINGS "Build C bindings" ON)
+# By default, we do not build the c bindings because the libraries are
+# in the repo. This can be overriden by -D BUILD_C_BINDINGS=ON -D
+# BUILD_CPP_BINDINGS=ON
+option(BUILD_C_BINDINGS "Build C bindings" OFF)
+option(BUILD_CPP_BINDINGS "Build C++ bindings" OFF)
 option(BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
-option(BUILD_MATLAB_BINDINGS "Build Matlab bindings" ON)
+option(BUILD_MATLAB_BINDINGS "Build Matlab bindings" OFF)
 option(BUILD_CUDA_LIB "Build CUDA library" OFF)
 option(USE_OPENMP "Use OpenMP multi-threading" ON)
 option(USE_MPI "Use MPI" OFF)
@@ -46,7 +54,7 @@ option(USE_MPI "Use MPI" OFF)
 set(NVCC_COMPILER_BINDIR "" CACHE PATH  "Directory where nvcc should look for C++ compiler. This is passed to nvcc through the --compiler-bindir option.")
 
 if (NOT BUILD_C_BINDINGS)
-    set(BUILD_PYTHON_BINDINGS OFF)
+    #set(BUILD_PYTHON_BINDINGS OFF)
     set(BUILD_MATLAB_BINDINGS OFF)
 endif()
 
@@ -141,7 +149,7 @@ endif(WIN32)
 
 add_subdirectory( cmake )
 add_subdirectory( src )
-add_subdirectory( examples )
+#add_subdirectory( examples )
 add_subdirectory( test )
 add_subdirectory( doc )
 

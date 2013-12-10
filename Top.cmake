@@ -9,7 +9,10 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 # don't set this up as a target because it must be installed so that
 # the dependencies can find where the python pieces are installed
 # (e.g. numpy)
-if(EXISTS $ENV{VIRTUAL_ENV})
+if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+  message("You are on OSX. We can't install the python dependencies properly because some have to be compiled and compiling on a Mac is a nightmare. So, you have to manually install the dependencies in pre_requirements.txt and requriements.txt. MacPorts should help. Or you can just get a real developers' OS ...")
+
+elseif(EXISTS $ENV{VIRTUAL_ENV})
   message("Installing python dependencies.")
   execute_process(
     COMMAND ${CMAKE_SOURCE_DIR}/pyenv/bin/pip install -r ${CMAKE_SOURCE_DIR}/pre_requirements.txt --no-index --find-links http://s3-us-west-1.amazonaws.com/neon-dependencies/index.html
@@ -52,6 +55,6 @@ if(EXISTS $ENV{VIRTUAL_ENV})
     OUTPUT_STRIP_TRAILING_WHITESPACE
     )
   file(COPY ${PYCV2_FILE} DESTINATION ${PY_PACKAGE_DIR} )
-else(EXISTS $ENV{VIRTUAL_ENV})
+else(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   message(FATAL_ERROR "Not in a virtual environment. Please run 'source enable_env'")
-endif(EXISTS $ENV{VIRTUAL_ENV})
+endif(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")

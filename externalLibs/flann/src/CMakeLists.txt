@@ -1,5 +1,7 @@
 
-add_subdirectory( cpp )
+if (BUILD_CPP_BINDINGS)
+  add_subdirectory( cpp )
+endif()
 
 if (BUILD_MATLAB_BINDINGS)
     add_subdirectory( matlab )
