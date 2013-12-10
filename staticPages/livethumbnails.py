@@ -17,7 +17,7 @@ html_start = '<html><head><style>div.img{  margin: 5px;  padding: 5px;  border: 
 html_end = '</body></html>'
 img_w = 480 ; img_h = 360;
 thumb_w = 129 ; thumb_h = 90;
-img_div_tmpl = '<div class="img"><img src="%s" alt="%s" title="%s" width="%s" height="%s"></div>' 
+img_div_tmpl = '<div class="img"><img src="%s" alt="%s" title="%s"></div>' 
 
 img_divs = ''
 thumb_divs = ''
@@ -66,9 +66,9 @@ try:
                 still = item['videoStillURL']
                 thumb = item['thumbnailURL']
                 if vid in active_videos:
-                    img_divs += img_div_tmpl %(still,title,title,img_w,img_h)
+                    img_divs += img_div_tmpl %(still,title,title)
                     img_divs +='\n'
-                    thumb_divs += img_div_tmpl %(thumb,title,title,thumb_w,thumb_h)
+                    thumb_divs += img_div_tmpl %(thumb,title,title)
                     thumb_divs +='\n'
         except:
             pass
