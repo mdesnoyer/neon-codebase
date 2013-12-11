@@ -123,11 +123,25 @@ class VideoDBWatcher(threading.Thread):
             for video_id in platform.videos.iterkeys():
                 video_metadata = neondata.VideoMetadata.get(
                     video_id)
-                thumbnails = [
-                    ThumbnailInfo.from_db_data(
-                        neondata.ThumbnailIDMapper.get_thumb_metadata(
-                            thumb_id)) 
-                    for thumb_id in video_metadata.thumbnail_ids]
+                if video_metadata is None:
+                    _log.error('Could not find information about video %s' %
+                               video_id)
+                    continue
+
+                thumbnails = []
+                data_missing = False
+                for thumb_id in video_metadata.thumbnail_ids:
+                    meta = neondata.ThumbnailIDMapper.get_thumb_metadata(
+                        thumb_id)
+                    if meta is None:
+                        _log.error('Could not find metadata for thumb %s' %
+                                   thumb_id)
+                        data_missing = True
+                    else:
+                        thumbnails.append(ThumbnailInfo.from_db_data(meta))
+
+                if data_missing:
+                    continue
 
                 self.ab_manager.register_video_distribution(
                     video_id, DistributionType.fromString(platform.get_ovp()))
