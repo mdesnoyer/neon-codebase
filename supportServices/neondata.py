@@ -497,8 +497,8 @@ class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
     '''
-    def __init__(self,a_id):
-        AbstractPlatform.__init__(self)
+    def __init__(self, a_id, abtest=False):
+        AbstractPlatform.__init__(self, abtest=abtest)
         self.neon_api_key = NeonApiKey.generate(a_id)
         self.integration_id = '0'
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + self.integration_id
@@ -1184,8 +1184,9 @@ class ThumbnailMetaData(object):
 
     A single thumbnail id maps to all its urls [Neon, OVP name space ones, other associated ones] 
     '''
-    def __init__(self,tid,urls,created,width,height,ttype,model_score,
-            model_version,enabled=True,chosen=False,rank=None,refid=None):
+    def __init__(self, tid, urls, created, width, height, ttype, model_score,
+                 model_version, enabled=True, chosen=False, rank=None, 
+                 refid=None):
         self.thumbnail_id = tid
         self.urls = urls  # All urls associated with single image
         self.created_time = created #Timestamp when thumbnail was created 
