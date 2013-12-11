@@ -479,9 +479,8 @@ class BrightcoveApi(object):
         thumbnail/still requests '''
         
         vids_to_process = [] 
-        bc_json = supportServices.neondata.BrightcovePlatform.get_account(
-            self.neon_api_key,i_id)
-        bc = supportServices.neondata.BrightcovePlatform.create(bc_json)
+        bc = supportServices.neondata.BrightcovePlatform.get_account(
+            self.neon_api_key, i_id)
         videos_processed = bc.get_videos() 
         if videos_processed is None:
             videos_processed = {} 
@@ -522,9 +521,8 @@ class BrightcoveApi(object):
                 _log.info("creating request for video [topn] %s" % vid)
                 if resp is not None and not resp.error:
                     #Update the videos in customer inbox
-                    bc_json = supportServices.neondata.BrightcovePlatform.get_account(
-                            self.neon_api_key,i_id)
-                    bc = supportServices.neondata.BrightcovePlatform.create(bc_json)
+                    bc = supportServices.neondata.BrightcovePlatform.get_account(
+                            self.neon_api_key, i_id)
                     r = tornado.escape.json_decode(resp.body)
                     bc.videos[vid] = r['job_id']
                     bc.last_process_date = int(item['publishedDate']) / 1000
@@ -692,9 +690,8 @@ class BrightcoveApi(object):
         
         jid = tornado.escape.json_decode(response.body)
         job_id = jid["job_id"]
-        bc_json = supportServices.neondata.BrightcovePlatform.get_account(
+        bc = supportServices.neondata.BrightcovePlatform.get_account(
             self.neon_api_key, i_id)
-        bc = supportServices.neondata.BrightcovePlatform.create(bc_json)
         bc.videos[video_id] = job_id
         bc.save()
 
@@ -772,13 +769,11 @@ class BrightcoveApi(object):
                                        page_size = n) #get n videos
 
         if result and not result.error:
-            bc_json = supportServices.neondata.BrightcovePlatform.get_account(
+            bc = supportServices.neondata.BrightcovePlatform.get_account(
                 self.neon_api_key, i_id)
-            if not bc_json:
+            if not bc:
                 _log.error("key=verify_brightcove_tokens msg=account not found %s"%i_id)
                 return
-                
-            bc = supportServices.neondata.BrightcovePlatform.create(bc_json)
             vitems = tornado.escape.json_decode(result.body)
             items = vitems['items']
             keys = []
@@ -821,15 +816,15 @@ class BrightcoveApi(object):
         @tornado.gen.engine
         def verify_brightcove_tokens(result):
             if not result.error:
-                bc_json = yield tornado.gen.Task(
+                bc = yield tornado.gen.Task(
                     supportServices.neondata.BrightcovePlatform.get_account,
                     self.neon_api_key, i_id)
-                if not bc_json:
+                if not bc:
                     _log.error("key=verify_brightcove_tokens msg=account not found %s"%i_id)
                     callback(None)
                     return
                 
-                bc = supportServices.neondata.BrightcovePlatform.create(bc_json)
+                
                 vitems = tornado.escape.json_decode(result.body)
                 items = vitems['items']
                 keys = []

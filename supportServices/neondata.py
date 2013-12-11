@@ -424,15 +424,17 @@ class NeonUserAccount(object):
         db_connection=DBConnection(cls)
         key = "NeonUserAccount".lower() + '_' + api_key
         if callback:
-            db_connection.conn.get(key,callback) 
+            db_connection.conn.get(key, lambda x: callback(cls.create(x))) 
         else:
-            return db_connection.blocking_conn.get(key)
+            return cls.create(db_connection.blocking_conn.get(key))
     
-    @staticmethod
-    def create(json_data):
+    @classmethod
+    def create(cls, json_data):
+        if not json_data:
+            return None
         params = json.loads(json_data)
         a_id = params['account_id']
-        na = NeonUserAccount(a_id)
+        na = cls(a_id)
        
         for key in params:
             na.__dict__[key] = params[key]
@@ -463,6 +465,22 @@ class AbstractPlatform(object):
 
     def get_ovp(self):
         raise NotImplementedError
+
+    @classmethod
+    def get_account(cls, api_key, i_id, callback=None):
+        '''Returns the platform object for the key.
+
+        Inputs:
+          api_key - The api key for the Neon account
+          i_id - The integration id for the platform
+          callback - If None, done asynchronously
+        '''
+        key = cls.__name__.lower()  + '_' + api_key + '_' + i_id 
+        db_connection=DBConnection(cls)
+        if callback:
+            db_connection.conn.get(key, lambda x: callback(cls.create(x))) 
+        else:
+            return cls.create(db_connection.blocking_conn.get(key))
 
     @classmethod
     def get_all_instances(cls,callback=None):
@@ -519,27 +537,13 @@ class NeonPlatform(AbstractPlatform):
 
     def get_ovp(self):
         return "neon"
-    
+
     @classmethod
-    def get_account(cls,api_key,callback=None):
-        def create_account(data):
-            if not data:
-                callback(None)
-            else:
-                obj = NeonPlatform.create(data)
-                callback(obj)
+    def get_account(cls, api_key, callback=None):
+        return super(NeonPlatform, cls).get_account(api_key, 0, callback)
 
-        key = cls.__name__.lower()  + '_' + api_key + '_' + '0' 
-        db_connection=DBConnection(cls)
-        if callback:
-            db_connection.conn.get(key,create_account) 
-        else:
-            data = db_connection.blocking_conn.get(key)
-            if data:
-                return NeonPlatform.create(data)
-
-    @staticmethod
-    def create(json_data):
+    @classmethod
+    def create(cls, json_data):
         if not json_data:
             return None
 
@@ -798,8 +802,8 @@ class BrightcovePlatform(AbstractPlatform):
             return bc.verify_token_and_create_requests(self.integration_id,
                                                        n)
 
-    @staticmethod
-    def create(json_data):
+    @classmethod
+    def create(cls, json_data):
         if not json_data:
             return None
 
@@ -827,15 +831,6 @@ class BrightcovePlatform(AbstractPlatform):
         for key in params:
             ba.__dict__[key] = params[key]
         return ba
-
-    @classmethod
-    def get_account(cls,api_key,i_id,callback=None):
-        db_connection = DBConnection(cls)
-        key = "BrightcovePlatform".lower() + '_' + api_key + '_' + i_id
-        if callback:
-            db_connection.conn.get(key,callback) 
-        else:
-            return db_connection.blocking_conn.get(key)
 
     @staticmethod
     def find_all_videos(token,limit,callback=None):
@@ -965,18 +960,12 @@ class YoutubePlatform(AbstractPlatform):
 
     def create_job(self):
         pass
-
-    @classmethod
-    def get_account(cls,api_key,i_id,callback=None,lock=False):
-        db_connection = DBConnection(cls)
-        key = "YoutubePlatform".lower() + '_' + api_key + '_' + i_id
-        if callback:
-            db_connection.conn.get(key,callback) 
-        else:
-            return db_connection.blocking_conn.get(key)
     
-    @staticmethod
-    def create(json_data):
+    @classmethod
+    def create(cls, json_data):
+        if json_data is None:
+            return None
+        
         params = json.loads(json_data)
         a_id = params['account_id']
         i_id = params['integration_id'] 
