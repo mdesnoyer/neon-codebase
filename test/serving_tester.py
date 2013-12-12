@@ -68,6 +68,7 @@ _erase_local_log_dir = multiprocessing.Event()
 _activity_watcher = utils.ps.ActivityWatcher()
 
 class TestServingSystem(unittest.TestCase):
+    __test__ = False
 
     @classmethod
     def setUpClass(cls):

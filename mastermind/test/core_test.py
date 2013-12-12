@@ -18,6 +18,7 @@ import decimal
 import fake_filesystem
 import fake_tempfile
 from mock import patch
+import utils.neon
 import unittest
 
 def build_thumb(id=None, origin=None, rank=None, enabled=True, chosen=False,
@@ -73,9 +74,11 @@ class TestCurrentServingDirective(unittest.TestCase):
         self.mastermind = Mastermind()
 
     def test_no_default_or_chosen(self):
-        self.assertIsNone(self.mastermind._calculate_current_serving_directive(
+        self.assertEqual([],
+                         self.mastermind._calculate_current_serving_directive(
             VideoInfo(True, [])))
-        self.assertIsNone(self.mastermind._calculate_current_serving_directive(
+        self.assertEqual([],
+                         self.mastermind._calculate_current_serving_directive(
             VideoInfo(True,
                       [build_thumb(origin='neon', rank=2, enabled=False)])))
 
@@ -174,7 +177,7 @@ class TestCurrentServingDirective(unittest.TestCase):
                                        enabled=False),
                            build_thumb(id='b', origin='bc')])))
 
-        self.assertIsNone(
+        self.assertEqual([],
             self.mastermind._calculate_current_serving_directive(
                 VideoInfo(True,
                           [build_thumb(id='a', origin='neon', rank=0,
@@ -348,4 +351,5 @@ class TestVideoInfoUpdate(unittest.TestCase):
         
 
 if __name__ == '__main__':
+    utils.neon.InitNeonTest()
     unittest.main()
