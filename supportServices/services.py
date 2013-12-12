@@ -348,9 +348,8 @@ class AccountHandler(tornado.web.RequestHandler):
             data = tornado.escape.json_encode(client_response)
             self.send_json_response(data,200)
 
-        def account_callback(account_data):
+        def account_callback(account):
             if account_data:
-                account = neondata.NeonUserAccount.create(account_data)
                 self.keys = [ neondata.generate_request_key(self.api_key,j_id) for j_id in account.videos.values()] 
                 neondata.NeonApiRequest.multiget(self.keys,get_videos)
             else:
@@ -392,9 +391,8 @@ class AccountHandler(tornado.web.RequestHandler):
             neondata.RequestState.REQUEUED,neondata.RequestState.INT_ERROR]
         
         #1 Get job ids for the videos from account, get the request status
-        jdata = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,
+        ba = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,
                                        self.api_key,i_id)
-        ba = neondata.BrightcovePlatform.create(jdata)
         if not ba:
             _log.error("key=get_video_status_brightcove msg=account not found")
             self.send_json_response("brightcove account not found",400)
@@ -517,11 +515,10 @@ class AccountHandler(tornado.web.RequestHandler):
                 data = '{"error": "failed to create job, bad request"}'
                 self.send_json_response(data,400)  
 
-        def get_account_callback(result):
-            if result:
-                bc = neondata.BrightcovePlatform.create(result)
+        def get_account_callback(account):
+            if account:
                 #submit job for processing
-                bc.create_job(vid,job_created)
+                account.create_job(vid,job_created)
             else:
                 data = '{"error": "no such account"}'
                 self.send_json_response(data,400)
@@ -533,7 +530,9 @@ class AccountHandler(tornado.web.RequestHandler):
             data = '{"error": "video_id not set"}'
             self.send_json_response(data,400)
             
-        neondata.BrightcovePlatform.get_account(self.api_key,i_id,get_account_callback)
+        neondata.BrightcovePlatform.get_account(self.api_key,
+                                                i_id,
+                                                get_account_callback)
         
 
     ''' update thumbnail for a brightcove video '''
@@ -542,9 +541,8 @@ class AccountHandler(tornado.web.RequestHandler):
         #TODO : Check for the linked youtube account 
         
         #Get account/integration
-        jdata = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,
+        ba = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,
                 self.api_key,i_id)
-        ba = neondata.BrightcovePlatform.create(jdata)
         if not ba:
             _log.error("key=update_video_brightcove" 
                     " msg=account doesnt exist api key=%s i_id=%s"%(self.api_key,i_id))
@@ -630,11 +628,10 @@ class AccountHandler(tornado.web.RequestHandler):
             self.send_json_response(data,400)
             return 
 
-        na_data = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
-                                         self.api_key)
+        na = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
+                                    self.api_key)
         #Create and Add Platform Integration
-        if na_data:
-            na = neondata.NeonUserAccount.create(na_data)
+        if na:
             
             #Check if integration exists
             if len(na.integrations) >0 and na.integrations.has_key(i_id):
@@ -709,9 +706,9 @@ class AccountHandler(tornado.web.RequestHandler):
 
         uri_parts = self.request.uri.split('/')
 
-        result = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,self.api_key,i_id)
-        if result:
-            bc = neondata.BrightcovePlatform.create(result)
+        bc = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,
+                                    self.api_key, i_id)
+        if bc:
             bc.read_token = rtoken
             bc.write_token = wtoken
                 
@@ -792,19 +789,22 @@ class AccountHandler(tornado.web.RequestHandler):
 
     def get_brightcove_videos_by_state(self,i_id):
 
-        def get_account(result):
-            if result:
-                bc = neondata.BrightcovePlatform.create(result)
+        def get_account(account):
+            if account:
+                #TODO(sunil): Implement this
                 #Get all videos for this account
                 #Aggregate result based on state
 
                 #Get unprocessed list from brightcove 
+                pass
             else:
                 _log.error("key=update_brightcove_integration msg= no such account %s integration id %s" %(self.api_key,i_id))
                 data = '{"error": "Account doesnt exists" }'
                 self.send_json_response(data,400)
 
-        neondata.BrightcovePlatform.get_account(self.api_key,i_id,get_account)
+        neondata.BrightcovePlatform.get_account(self.api_key,
+                                                i_id,
+                                                get_account)
 
 
     ##################################################################
@@ -829,11 +829,10 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.send_json_response(data,500)
             return
        
-        def neon_account(result):
-            if result:
-                na = neondata.NeonUserAccount.create(result)
-                na.add_integration(yt.integration_id,yt.key) 
-                na.save_integration(yt,saved_account)
+        def neon_account(account):
+            if account:
+                account.add_integration(yt.integration_id,yt.key) 
+                account.save_integration(yt,saved_account)
             else:
                 _log.error("key=create_youtube_integration msg=neon account not found")
                 data = '{"error": "account creation issue"}'
@@ -841,7 +840,8 @@ class AccountHandler(tornado.web.RequestHandler):
 
         def channel_callback(result):
             if result:
-                neondata.NeonUserAccount.get_account(self.api_key,neon_account)
+                neondata.NeonUserAccount.get_account(self.api_key,
+                                                     neon_account)
             else:
                 data = '{"error": "account creation issue"}'
                 self.send_json_response(data,500)
@@ -867,13 +867,12 @@ class AccountHandler(tornado.web.RequestHandler):
                 data = '{"error": "account not updated"}'
                 self.send_json_response(data,500)
 
-        def update_account(result):
-            if result:
-                ya = neondata.YoutubePlatform.create(result)
-                ya.access_token = access_token
-                ya.refresh_token = refresh_token
-                ya.auto_update = auto_update
-                ya.save(saved_account)
+        def update_account(account):
+            if account:
+                account.access_token = access_token
+                account.refresh_token = refresh_token
+                account.auto_update = auto_update
+                account.save(saved_account)
             else:
                 _log.error("key=update youtube account msg= no such account %s integration id %s" %(self.api_key,i_id))
                 data = '{"error": "Account doesnt exists" }'
@@ -883,7 +882,9 @@ class AccountHandler(tornado.web.RequestHandler):
             access_token = self.request.get_argument('access_token')
             refresh_token = self.request.get_argument('refresh_token')
             auto_update = self.request.get_argument('auto_update')
-            neondata.YoutubePlatform.get_account(self.api_key,i_id,update_account)
+            neondata.YoutubePlatform.get_account(self.api_key,
+                                                 i_id,
+                                                 update_account)
         except:
             data = '{"error": "missing arguments"}'
             self.send_json_response()
@@ -903,9 +904,8 @@ class AccountHandler(tornado.web.RequestHandler):
         #Get params from request
         #Get account details   
        
-        def get_account(result):
-            if result:
-                ya = neondata.YoutubePlatform.create(result)
+        def get_account(account):
+            if account:
                 params = {}
                 params["api_key"] = self.api_key
                 params["video_id"] = self.get_argument("video_id")
@@ -913,10 +913,10 @@ class AccountHandler(tornado.web.RequestHandler):
                 params["video_url"] = self.get_argument("video_url") 
                 params["topn"] = 5
                 params["callback_url"] = "http://thumbnails.neon-lab.com/testcallback"
-                params["access_token"] = ya.access_token
-                params["refresh_token"] = ya.refresh_token
-                params["token_expiry"] = ya.expires
-                params["autosync"] = ya.auto_update
+                params["access_token"] = account.access_token
+                params["refresh_token"] = account.refresh_token
+                params["token_expiry"] = account.expires
+                params["autosync"] = account.auto_update
 
                 body = tornado.escape.json_encode(params)
                 yt_request = "http://thumbnails.neon-lab.com/api/v1/submitvideo/youtube"
@@ -932,7 +932,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 data = '{"error" : "no such youtube account" }'
                 self.send_json_response(data,400)
 
-        neondata.YoutubePlatform.get_account(self.api_key,i_id,get_account)
+        neondata.YoutubePlatform.get_account(self.api_key, i_id, get_account)
 
 
     '''
@@ -1044,18 +1044,16 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.write(data)
                 self.finish()
 
-        def account_callback(account_response):
-            if account_response:
-                yt_account = neondata.YoutubePlatform.create(account_response)
+        def account_callback(account):
+            if account:                
                 
-                
-                if (yt_account.videos) > 0:
+                if (account.videos) > 0:
                     #1.Get videos from youtube api
-                    yt_account.get_videos(format_result)
+                    account.get_videos(format_result)
                     
                     #2.Get videos that have been already processed from Neon Youtube account
-                    keys = [ neondata.generate_request_key(api_key,j_id) for j_id in yt_account.videos.values()] 
-                    neondata.NeonApiRequest.multiget(keys,result_aggregator)
+                    keys = [ neondata.generate_request_key(api_key,j_id) for j_id in account.videos.values()] 
+                    neondata.NeonApiRequest.multiget(keys, result_aggregator)
                 else:
                     raise Exception("NOT YET IMPL")
             else:
@@ -1063,7 +1061,9 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.send_json_response(data,500)
 
         uri_parts = self.request.uri.split('/')
-        neondata.YoutubePlatform.get_account(self.api_key,i_id,account_callback)
+        neondata.YoutubePlatform.get_account(self.api_key,
+                                             i_id,
+                                             account_callback)
 
     ''' Update the thumbnail for a particular video '''
     def update_youtube_video(self,i_id,vid):
@@ -1085,11 +1085,13 @@ class AccountHandler(tornado.web.RequestHandler):
                 data = '{"error": "thumbnail not updated"}'
                 self.send_json_response(data,500)
 
-        def get_account_callback(result):
-            if result:
-                self.yt = neondata.YoutubePlatform.create(result)
+        def get_account_callback(account):
+            if account:
+                self.yt = account
                 job_id = self.yt.videos[vid] 
-                yt_request = YoutubeApiRequest.get_request(self.api_key,job_id,get_request) 
+                yt_request = YoutubeApiRequest.get_request(self.api_key,
+                                                           job_id,
+                                                           get_request) 
             else:
                 data = '{"error": "no such account"}'
                 self.send_json_response(data,500)
@@ -1102,7 +1104,9 @@ class AccountHandler(tornado.web.RequestHandler):
             self.finish()
             return
 
-        neondata.YoutubePlatform.get_account(self.api_key,i_id,get_account_callback)
+        neondata.YoutubePlatform.get_account(self.api_key,
+                                             i_id,
+                                             get_account_callback)
 
 ###########################################################
 ## Util Handler 
@@ -1192,8 +1196,8 @@ class BcoveHandler(tornado.web.RequestHandler):
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get,self.internal_video_id)
         if vmdata:
             i_id = vmdata.integration_id
-            jdata = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,self.a_id,i_id)
-            ba = neondata.BrightcovePlatform.create(jdata)
+            ba  = yield tornado.gen.Task(
+                neondata.BrightcovePlatform.get_account, self.a_id, i_id)
             if ba:
                 bcove_vid = neondata.InternalVideoID.to_external(self.internal_video_id) 
                 result = yield tornado.gen.Task(ba.update_thumbnail,bcove_vid,new_tid,True)
@@ -1216,11 +1220,10 @@ class BcoveHandler(tornado.web.RequestHandler):
                                         self.internal_video_id)
         if vmdata:
             i_id = vmdata.integration_id
-            jdata = yield tornado.gen.Task(
+            ba = yield tornado.gen.Task(
                 neondata.BrightcovePlatform.get_account,
                 self.a_id,
                 i_id)
-            ba = neondata.BrightcovePlatform.create(jdata)
             if ba:
                 bcove_vid = neondata.InternalVideoID.to_external(
                     self.internal_video_id) 
