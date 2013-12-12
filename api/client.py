@@ -69,6 +69,7 @@ from pympler.classtracker import ClassTracker
 import pickle
 
 import utils.neon
+import properties
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -427,7 +428,8 @@ class ProcessVideo(object):
     def host_images_s3(self, frames):
         s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
         s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
-        s3bucket = Bucket(name = s3bucket_name,connection = s3conn)
+        #s3bucket = Bucket(name = s3bucket_name,connection = s3conn)
+        s3bucket = s3conn.get_bucket(s3bucket_name)
         
         fname_prefix = 'neon'
         fmt = 'jpeg'
@@ -443,8 +445,10 @@ class ProcessVideo(object):
             image.save(filestream, fmt, quality=100) 
             filestream.seek(0)
             imgdata = filestream.read()
-            k = Key(s3bucket)
-            k.key = self.base_filename + "/" + fname_prefix + str(i) + "." + fmt 
+            #k = Key(s3bucket)
+            #k.key = self.base_filename + "/" + fname_prefix + str(i) + "." + fmt 
+            keyname = self.base_filename + "/" + fname_prefix + str(i) + "." + fmt
+            k = s3bucket.new_key(keyname)
             k.set_contents_from_string(imgdata,{"Content-Type":"image/jpeg"})
             s3bucket.set_acl('public-read',k.key)
             s3fname = s3_url_prefix + "/" + self.base_filename + "/" + fname_prefix + str(i) + ".jpeg"
@@ -1035,7 +1039,7 @@ class HttpDownload(object):
             elif request_type == "youtube":
                 pass
             else:
-                if debug:
+                if self.debug:
                     raise Exception("Request Type not Supported")
                 _log.exception("type=Client Response msg=Request Type not Supported")
 
@@ -1113,10 +1117,12 @@ class ClientResponse(object):
         for i in range(self.retries):
             try:
                 response = self.http_client.fetch(self.client_request)
-                #Verify HTTP 200 OK
-                break
-            except tornado.httpclient.HTTPError, e:
-                _log.error("type=client_response msg=response error")
+                if response.error:
+                    _log.error("type=client_response msg=response error")
+                    continue
+                else:
+                    break
+            except:
                 continue
 
 ##############################################

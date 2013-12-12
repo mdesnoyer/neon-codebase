@@ -69,13 +69,6 @@ class TestVideoServer(AsyncHTTPTestCase):
     def get_new_ioloop(self):
         return tornado.ioloop.IOLoop.instance()
     
-    def cleanup_db(self,prefix):
-        import redis
-        client = redis.StrictRedis()
-        keys = client.keys("*%s*"%prefix)
-        for key in keys:
-            client.delete(key)
-
     def tearDown(self):
         self.sync_patcher.stop()
         self.async_patcher.stop()
@@ -93,7 +86,6 @@ class TestVideoServer(AsyncHTTPTestCase):
         #Create fake account
         na = neondata.NeonPlatform("testaccountneonapi")
         api_key = na.neon_api_key
-        self.cleanup_db(api_key)
         na.save()
         vals = {"api_key": api_key, 
                     "video_url": "http://testurl/video.mp4", 
@@ -102,7 +94,6 @@ class TestVideoServer(AsyncHTTPTestCase):
                     "video_title": "test_title"}
 
         resp = self.make_neon_api_request(vals)
-        self.cleanup_db(api_key)
         self.assertEqual(resp.code,201)
 
     def test_duplicate_request(self):
@@ -116,7 +107,6 @@ class TestVideoServer(AsyncHTTPTestCase):
                     "video_title": "test_title" }
         resp = self.make_neon_api_request(vals)
         resp = self.make_neon_api_request(vals)
-        self.cleanup_db(api_key)
         self.assertEqual(resp.code,409)
 
     def test_brightcove_request(self):
@@ -141,7 +131,6 @@ class TestVideoServer(AsyncHTTPTestCase):
                     "write_token": "wtoken"
                     }
         resp = self.make_neon_api_request(vals)
-        self.cleanup_db(api_key)
         self.assertEqual(resp.code,201)
 
     def test_empty_request(self):
