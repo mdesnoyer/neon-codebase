@@ -1,9 +1,10 @@
 #!/usr/bin/env python
-''' This script fires up the serving system and runs end to end tests.
+''' This script fires up the image serving system and runs end to end tests.
 
-***WARNING*** This test does not run completely locally. It interfaces
-   with some Amazon services and will thus incure some fees. Also, it
-   cannot be run from multiple locations at the same time.
+***WARNING*** Depending on the config file used for this test, it does
+   not run completely locally. It interfaces with some Amazon services
+   and will thus incure some fees. Also, it cannot be run from
+   multiple locations at the same time.
 
 Copyright: 2013 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
@@ -23,9 +24,11 @@ from datetime import datetime
 import json
 import logging
 import mastermind.server
+from mock import MagicMock, patch
 import MySQLdb as sqldb
 import multiprocessing
 import os
+import PIL.Image
 import Queue
 import random
 import re
@@ -34,13 +37,15 @@ import SimpleHTTPServer
 import SocketServer
 import stats.db
 import stats.stats_processor
+from StringIO import StringIO
 import subprocess
-import supportServices.services
 from supportServices import neondata
 import tempfile
 import time
+import tornado.httpclient
 import tornado.httpserver
 import tornado.ioloop
+import tornado.testing
 import tornado.web
 import unittest
 import urllib
@@ -67,7 +72,7 @@ _log = logging.getLogger(__name__)
 _erase_local_log_dir = multiprocessing.Event()
 _activity_watcher = utils.ps.ActivityWatcher()
 
-class TestServingSystem(unittest.TestCase):
+class TestServingSystem(tornado.testing.AsyncTestCase):
 
     @classmethod
     def setUpClass(cls):
@@ -89,6 +94,7 @@ class TestServingSystem(unittest.TestCase):
                 pass
 
     def setUp(self):
+        super(TestServingSystem, self).setUp()
         ClearStatsDb()
 
         conn = sqldb.connect(user=options.stats_db_user,
@@ -115,13 +121,38 @@ class TestServingSystem(unittest.TestCase):
         while not self.__class__.directive_q.empty():
             self.__class__.directive_q.get_nowait()
         self.directives_captured = []
-        
-        # Clear the video database
-        #neondata._erase_all_data()
+
+        # Mock out the brightcove connection
+        self.bc_patcher = patch('supportServices.neondata.api.'
+                                'brightcove_api.utils.http.RequestPool')
+        self.mock_bc_conn = self.bc_patcher.start()
+
+        # Mock out the http request to get an image. Just returns a
+        # random image. Can handle an async request even if it doesn't
+        # actually do it asynchronously.
+        self.im_request_patcher = \
+          patch('supportServices.neondata.api.'
+                'brightcove_api.utils.http.send_request')
+        mock_im = self.im_request_patcher.start()
+        def return_image(request, callback=None):
+            im = PIL.Image.new("RGB", (640,480))
+            filestream = StringIO()
+            im.save(filestream, "JPEG", quality=80)
+            response = tornado.httpclient.HTTPResponse(
+                request,
+                200,
+                headers = {'Content-Type':'image/jpeg'},
+                body=filestream.getvalue())
+            if callback:
+                callback(response)
+            return response
+        mock_im.side_effect = return_image
 
 
     def tearDown(self):
-        pass
+        self.bc_patcher.stop()
+        self.im_request_patcher.stop()
+        super(TestServingSystem, self).tearDown()
     
     def simulateEvents(self, data):
         '''
@@ -313,7 +344,8 @@ class TestServingSystem(unittest.TestCase):
                                        ('init_account0_vid0_thumb2', 0.15)]),
             timeout=5)
 
-    def test_video_got_bad_stats(self):
+    def _test_video_got_bad_stats(self):
+        '''The serving thumbnail should turn off after the stats show its bad.'''
         self.add_account_to_videodb('bad_stats0', 'bad_stats_int0', 1, 3)
         
         # Simulate loads and clicks to the point that the thumbnail
@@ -339,6 +371,25 @@ class TestServingSystem(unittest.TestCase):
                          (20, 1))
         self.assertEqual(self.getStats('bad_stats0_vid0_thumb2'),
                          (1500, 500))
+
+    def test_override_thumbnail(self):
+        '''Manually choose a thumbnail.'''
+        self.add_account_to_videodb('ch_thumb0', 'ch_thumb_int0', 1, 3)
+
+        account = neondata.BrightcovePlatform.get_account(
+            neondata.NeonApiKey.generate('ch_thumb0'),
+            'ch_thumb_int0')
+        
+        account.update_thumbnail('vid0', 'ch_thumb0_vid0_thumb1',
+                                 callback=self.stop)
+
+        # Make sure that the update_thumbnail call succeeds
+        self.assertTrue(self.wait())
+        self.assertDirectiveCaptured(('ch_thumb0_vid0',
+                                      [('ch_thumb0_vid0_thumb0', 0.00),
+                                       ('ch_thumb0_vid0_thumb1', 1.00),
+                                       ('ch_thumb0_vid0_thumb2', 0.00)]),
+            timeout=5)
 
 def directivesEqual(a, b):
     '''Returns true if two directives are equivalent.
@@ -442,6 +493,8 @@ def LaunchVideoDb():
                         'Please change the port number.')
     
     _log.info('Launching video db')
+    if not os.path.exists('/tmp/test/redis'):
+        os.makedirs('/tmp/test/redis')
     proc = subprocess.Popen([
         '/usr/bin/env', 'redis-server',
         os.path.join(os.path.dirname(__file__), 'test_video_db.conf')],
@@ -461,11 +514,6 @@ def LaunchVideoDb():
                         '\n'.join(video_db_log))
 
     _log.info('Video db is up')
-
-def LaunchSupportServices():
-    proc = multiprocessing.Process(target=supportServices.services.main)
-    proc.start()
-    _log.warn('Launching Support Services with pid %i' % proc.pid)
 
 def LaunchMastermind():
     proc = multiprocessing.Process(target=mastermind.server.main,
@@ -530,7 +578,6 @@ def main():
 
     LaunchStatsDb()
     LaunchVideoDb()
-    LaunchSupportServices()
     LaunchMastermind()
     LaunchClickLogServer()
     LaunchFakeS3()

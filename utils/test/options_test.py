@@ -58,7 +58,7 @@ class TestAsyncOptions(tornado.testing.AsyncTestCase):
         self.parser.define('an_int', default=6, type=int,
                            help='help me')
 
-        self.io_loop.add_callback(self.lookup_int_callback, 237, self.stop)
+        self.io_loop.add_callback(self.lookup_int_callback, 128, self.stop)
 
         self.wait()
         
