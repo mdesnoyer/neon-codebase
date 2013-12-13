@@ -155,6 +155,11 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         self.bc_patcher.stop()
         self.im_request_patcher.stop()
         super(TestServingSystem, self).tearDown()
+
+    # TODO(sunil): Once we figure out why these tests don't run if
+    # using one ioloop per test, get rid of this function.
+    def get_new_ioloop(self):
+        return tornado.ioloop.IOLoop.instance()
     
     def simulateEvents(self, data):
         '''
@@ -346,7 +351,7 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
                                        ('init_account0_vid0_thumb2', 0.15)]),
             timeout=5)
 
-    def _test_video_got_bad_stats(self):
+    def test_video_got_bad_stats(self):
         '''The serving thumbnail should turn off after the stats show its bad.'''
         self.add_account_to_videodb('bad_stats0', 'bad_stats_int0', 1, 3)
         
@@ -374,7 +379,7 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         self.assertEqual(self.getStats('bad_stats0_vid0_thumb2'),
                          (1500, 500))
 
-    def test_override_thumbnail(self):
+    def _test_override_thumbnail(self):
         '''Manually choose a thumbnail.'''
         self.add_account_to_videodb('ch_thumb0', 'ch_thumb_int0', 1, 3)
 
@@ -597,5 +602,5 @@ def main():
     
 
 if __name__ == "__main__":
-    utils.neon.InitNeonTest()
+    utils.neon.InitNeon()
     main()
