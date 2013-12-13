@@ -82,38 +82,6 @@ def check_remote_ip(request):
 ## Internal Handlers and not be exposed externally
 ## ===================== API ===========================================#
 
-class RegisterBrightcove(tornado.web.RequestHandler):
-    def post(self, *args, **kwargs):
-        try:
-            json_data = self.get_argument('JSONRPC')
-            data = tornado.escape.json_decode(json_data)
-            uri = self.request.uri
-            publisher_name = data['publisherName'].strip()
-            read_token   = data['rtoken'] 
-            write_token  = data['wtoken']
-            publisher_id = data['publisherID']
-            ak = APIKey()
-            neon_api_key = ak.add_key(publisher_name) 
-            bm = BrightcoveMetadata(publisher_name,read_token,write_token,neon_api_key,publisher_id)
-            bm.save()
-        
-            s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
-            s3bucket_name = properties.S3_CUSTOMER_ACCOUNT_BUCKET_NAME
-            s3bucket = Bucket(name = s3bucket_name, connection = s3conn)
-            k = Key(s3bucket)
-            k.key = 'brightcoveCustomerTokens.json'
-            k.set_contents_from_filename('brightcoveCustomerTokens.json')
-
-            #api key
-            k.key = 'apikeys.json'
-            k.set_contents_from_filename('apikeys.json')
-        except Exception,e:
-            _log.error("key=RegisterBrightcove msg=exception " + e.__str__())
-            raise tornado.web.HTTPError(400)
-
-        self.write("Success")
-        self.finish()
-
 class StatsHandler(tornado.web.RequestHandler):
     def get(self, *args, **kwargs):
         size = -1
@@ -432,7 +400,6 @@ application = tornado.web.Application([
     (r"/testcallback",TestCallback),
     (r'/api/v1/jobstatus',JobStatusHandler),
     (r'/api/v1/getresults',GetResultsHandler),    
-    (r'/registerbrightcove',RegisterBrightcove),    
 ])
 
 def main():

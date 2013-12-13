@@ -240,118 +240,6 @@ class InternalVideoID(object):
         vid = internal_vid.split('_')[-1]
         return vid
     
-class AbstractRedisUserBlob(object):
-    ''' 
-        Abstract Redis interface and operations
-        Lock and Get, unlock & set opertaions made easy
-    '''
-
-    def __init__(self,keyname=None):
-        self.key = keyname
-        self.lock_ttl = 3 #secs
-        return
-
-    def add_callback(self,result):
-        try:
-            items = json.loads(result)
-            for key in items.keys():
-                self.__dict__[key] = items[key]
-        except:
-            print "error decoding"
-
-        if self.external_callback:
-            self.external_callback(self)
-
-    #Delayed callback function which performs async sleep
-    #On wake up executes the callback which it was intended to perform
-    #In this case calls the callback with the external_callback function as param
-    @tornado.gen.engine
-    def delayed_callback(self,secs,callback):
-        yield tornado.gen.Task(tornado.ioloop.IOLoop.instance().add_timeout, time.time() + secs)
-        self.callback(self.external_callback)
-
-    def _get(self, callback):
-        db_connection=DBConnection()
-        if self.key is None:
-            raise Exception("key not set")
-        self.external_callback = callback
-        db_connection.conn.get(self.key,self.add_callback)
-
-    def _save(self, value, callback=None):
-        db_connection=DBConnection()
-        if self.key is None:
-            raise Exception("key not set")
-        self.external_callback = callback
-        db_connection.conn.set(self.key,value,self.external_callback)
-
-    def to_json(self):
-        return json.dumps(self, default=lambda o: o.__dict__) #don't save keyname
-
-    def get(self, callback=None):
-        db_connection=DBConnection()
-        if callback:
-            return self._get(callback, db_connection)
-        else:
-            return db_connection.blocking_conn.get(self.key)
-
-    def save(self,callback=None):
-        db_connection=DBConnection()
-        value = self.to_json()
-        if callback:
-            self._save(value, callback, db_connection)
-        else:
-            return db_connection.blocking_conn.save(self.key,value)
-
-    def lget_callback(self, result):
-        db_connection=DBConnection()
-        #lock unsuccessful, lock exists: 
-        print "lget", result
-        if result == True:
-            #return False to callback to retry
-            self.external_callback(False)
-            '''  delayed callback stub
-            #delayed_callback to lget()
-            #delay the call to lget() by the TTL time
-            #self.delayed_callback(self.lock_ttl,self.lget)
-            #return
-            '''
-
-        #If not locked, lock the key and return value (use transaction) 
-        #save with TTL
-        lkey = self.key + "_lock"
-        value = shortuuid.uuid() 
-        pipe = db_connection.conn.pipeline()
-        pipe.setex(lkey,self.lock_ttl,value)
-        pipe.get(self.key)
-        pipe.get(lkey)
-        pipe.execute(self.external_callback)
-
-    #lock and get
-    def lget(self,callback):
-        db_connection=DBConnection()
-        ttl = self.lock_ttl
-        self.external_callback = callback
-        lkey = self.key + "_lock"
-        db_connection.conn.exists(lkey,self.lget_callback)
-        
-    def _unlock_set(self, callback):
-        db_connection=DBConnection()
-        self.external_callback = callback
-        value = self.to_json()
-        lkey = self.key + "_lock"
-        
-        #pipeline set, delete lock 
-        pipe = db_connection.conn.pipeline()
-        pipe.set(self.key,value)
-        pipe.delete(lkey)
-        pipe.execute(self.external_callback)
-
-    #exists
-    def exists(self, callback):
-        db_connection=DBConnection()
-        self.external_callback = callback
-        db_connection.conn.exists(self.key,callback)
-
 ''' NeonUserAccount
 
 Every user in the system has a neon account and all other integrations are 
@@ -420,7 +308,7 @@ class NeonUserAccount(object):
     @classmethod
     def get_account(cls,api_key,callback=None):
         db_connection=DBConnection(cls)
-        key = "NeonUserAccount".lower() + '_' + api_key
+        key = "neonuseraccount_%s" %api_key
         if callback:
             db_connection.conn.get(key, lambda x: callback(cls.create(x))) 
         else:
@@ -439,15 +327,6 @@ class NeonUserAccount(object):
         
         return na
     
-    @classmethod
-    def delete(cls,a_id):
-        db_connection=DBConnection(cls)
-        #check if test account
-        if "test" in a_id:
-            key = 'neonuseraccount' + NeonApiKey.generate(a_id)  
-            db_connection.blocking_conn.delete(key)
-
-
 class AbstractPlatform(object):
     def __init__(self, abtest=False):
         self.neon_api_key = ''
@@ -456,7 +335,7 @@ class AbstractPlatform(object):
         self.integration_id = None # Unique platform ID to 
     
     def generate_key(self,i_id):
-        return self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
+        return self.__class__.__name__.lower()  + '_%s_%s' %(self.neon_api_key, i_id)
     
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__) 
@@ -473,7 +352,7 @@ class AbstractPlatform(object):
           i_id - The integration id for the platform
           callback - If None, done asynchronously
         '''
-        key = cls.__name__.lower()  + '_' + api_key + '_' + i_id 
+        key = cls.__name__.lower()  + '_%s_%s' %(api_key, i_id) 
         db_connection=DBConnection(cls)
         if callback:
             db_connection.conn.get(key, lambda x: callback(cls.create(x))) 
@@ -517,7 +396,7 @@ class NeonPlatform(AbstractPlatform):
         AbstractPlatform.__init__(self, abtest=abtest)
         self.neon_api_key = NeonApiKey.generate(a_id)
         self.integration_id = '0'
-        self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + self.integration_id
+        self.key = self.__class__.__name__.lower()  + '_%s_%s' %(self.neon_api_key, self.integration_id)
         self.account_id = a_id
         
         #By default integration ID 0 represents Neon Platform Integration (via neon api)
@@ -572,7 +451,7 @@ class BrightcovePlatform(AbstractPlatform):
         ''' On every request, the job id is saved '''
         AbstractPlatform.__init__(self, abtest)
         self.neon_api_key = NeonApiKey.generate(a_id)
-        self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
+        self.key = self.__class__.__name__.lower()  + '_%s_%s' %(self.neon_api_key, i_id)
         self.account_id = a_id
         self.integration_id = i_id
         self.publisher_id = p_id
@@ -683,7 +562,7 @@ class BrightcovePlatform(AbstractPlatform):
             _log.error("key=update_thumbnail msg=brightcove error" 
                     " update video still for video %s %s" %(i_vid,new_tid))
 
-        if nosave: #Why is this here? 
+        if nosave: #Why is this used for checkthumb? 
             callback(tref)
             return
 
@@ -855,7 +734,7 @@ class YoutubePlatform(AbstractPlatform):
                  expires=None, auto_update=False, abtest=False):
         AbstractPlatform.__init__(self)
         
-        self.key = self.__class__.__name__.lower()  + '_' + NeonApiKey.generate(a_id ) + '_' + i_id
+        self.key = self.__class__.__name__.lower()  + '_%s_%s' %(NeonApiKey.generate(a_id ), i_id)
         self.account_id = a_id
         self.integration_id = i_id
         self.access_token = access_token

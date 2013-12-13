@@ -875,6 +875,7 @@ class BrightcoveApi(object):
     def get_image(self, image_url, callback=None):
         '''Returns the raw image stream from a given URL.'''
         def process_response(response):
+
             if response.error:
                 _log.error('key=get_image msg=Error getting %s' % image_url)
                 raise response.error
@@ -887,7 +888,7 @@ class BrightcoveApi(object):
 
         #TODO: Not a brightcove api call, switch to normal http fetch
         if callback:
-            callback = lambda x: callback(process_response(x))
+            #callback = lambda x: callback(process_response(x)) #investigate recursion
             return BrightcoveApi.read_connection.send_request(req, callback)
         return process_response(
             BrightcoveApi.read_connection.send_request(req))
@@ -925,6 +926,7 @@ class BrightcoveApi(object):
                         res = yield tornado.gen.Task(mapper.save)
                         if res:
                             callback(True)
+                            return
                         else:
                             _log.error("key=async_check_thumbnail msg=failed to save" \
                                     "ThumbnailURLMapper url %s tid %s" %(thumb_url,tid))
@@ -932,8 +934,10 @@ class BrightcoveApi(object):
                         _log.info("key=async_check_thumbnail"
                                 " msg=entry for url %s exists already"%thumb_url)
                 else:
+                    #TODO: Should this entry be saved, perhaps its a new image 
+                    #that the customer may have overriden ?
                     _log.error("key=async_check_thumbnail"
-                            " msg=failed to fetch tidi for image url" 
+                            " msg=failed to fetch tid for image url" 
                             " %s md5 %s"%(thumb_url,t_md5)) 
             else:
                 _log.error("key=async_check_thumbnail" 
@@ -952,12 +956,11 @@ class BrightcoveApi(object):
                     _log.error("key=async_check_thumbnail msg=thumbnail url not found for %s"%video_id)
                     callback(None)
                     return
-
                 thumbnail = yield tornado.gen.Task(self.get_image,thumb_url)
                 videostill = yield tornado.gen.Task(self.get_image,still_url)
                 
-                tret = yield tornado.gen.Task(check_image_md5_db,thumb_url,thumbnail)
-                stret = yield tornado.gen.Task(check_image_md5_db,still_url,videostill)
+                tret = yield tornado.gen.Task(check_image_md5_db,thumb_url,thumbnail.body)
+                stret = yield tornado.gen.Task(check_image_md5_db,still_url,videostill.body)
                 callback(tret and stret)
 
         url = 'http://api.brightcove.com/services/library?command=find_video_by_id&token=%s' \

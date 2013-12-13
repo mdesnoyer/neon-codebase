@@ -634,8 +634,7 @@ class ProcessVideo(object):
 
         #2 Push thumbnail in to brightcove account
         autosync = bc_request.autosync
-        jdata = BrightcovePlatform.get_account(api_key,i_id)
-        ba = BrightcovePlatform.create(jdata)
+        ba = BrightcovePlatform.get_account(api_key,i_id)
         if not ba:
             _log.error("key=finalize_brightcove_request msg=Brightcove account doesnt exists a_id=%s i_id=%s"%(api_key,i_id))
         else: 
