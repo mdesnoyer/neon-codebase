@@ -72,7 +72,9 @@ _log = logging.getLogger(__name__)
 _erase_local_log_dir = multiprocessing.Event()
 _activity_watcher = utils.ps.ActivityWatcher()
 
+
 class TestServingSystem(tornado.testing.AsyncTestCase):
+    __test__ = False # Disabled the test when run by nose
 
     @classmethod
     def setUpClass(cls):
