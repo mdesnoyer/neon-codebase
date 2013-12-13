@@ -488,14 +488,14 @@ class BrightcovePlatform(AbstractPlatform):
             return db_connection.blocking_conn.set(self.key,value)
 
     @tornado.gen.engine
-    def update_thumbnail(self,platform_vid,new_tid,nosave=False,callback=None):
+    def update_thumbnail(self,i_vid,new_tid,nosave=False,callback=None):
         ''' method to keep video metadata and thumbnail data consistent '''
         bc = api.brightcove_api.BrightcoveApi(
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update)
        
         #Get video metadata
-        i_vid = InternalVideoID.generate(self.neon_api_key,platform_vid)
+        platform_vid = InternalVideoID.to_external(i_vid)
         vmdata = yield tornado.gen.Task(VideoMetadata.get,i_vid)
         if not vmdata:
             _log.error("key=update_thumbnail msg=vid %s not found" %i_vid)
@@ -646,11 +646,12 @@ class BrightcovePlatform(AbstractPlatform):
         bc.create_brightcove_request_by_tag(self.integration_id)
         
 
-    def check_current_thumbnail_in_db(self,video_id,callback=None):
+    def check_current_thumbnail_in_db(self,i_vid,callback=None):
         '''
         Check if the current thumbnail for the given video on brightcove
         has been recorded in Neon DB. Returns True if it has
         '''
+        p_vid = InternalVideoID.to_external(i_vid)
         bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,
                                               self.publisher_id,
                                               self.read_token,
@@ -658,9 +659,9 @@ class BrightcovePlatform(AbstractPlatform):
                                               self.auto_update,
                                               self.last_process_date)
         if callback:
-            bc.async_check_thumbnail(video_id,callback)
+            bc.async_check_thumbnail(p_vid,callback)
         else:
-            return bc.check_thumbnail(video_id)
+            return bc.check_thumbnail(p_vid)
 
     ''' Method to verify brightcove token on account creation
         And create requests for processing

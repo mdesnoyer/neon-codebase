@@ -278,6 +278,7 @@ class AccountHandler(tornado.web.RequestHandler):
         elif method == "videos":
             if len(uri_parts) == 9:
                 vid = uri_parts[-1]
+                i_vid = neondata.InternalVideoID.generate(self.api_key,vid)
                 if "brightcove_integrations" == itype:
                     try:
                         new_tid = self.get_argument('thumbnail_id')
@@ -286,10 +287,10 @@ class AccountHandler(tornado.web.RequestHandler):
                         self.send_json_response(data,400)
                         return
                         
-                    self.update_video_brightcove(i_id,vid,new_tid)
+                    self.update_video_brightcove(i_id,i_vid,new_tid)
 
                 elif "youtube_integrations" == itype:
-                    self.update_youtube_video(i_id,vid)
+                    self.update_youtube_video(i_id,i_vid)
                     return
             else:
                 self.method_not_supported()
@@ -469,9 +470,10 @@ class AccountHandler(tornado.web.RequestHandler):
 
     ''' update thumbnail for a brightcove video '''
     @tornado.gen.engine
-    def update_video_brightcove(self,i_id,p_vid,new_tid):
+    def update_video_brightcove(self,i_id,i_vid,new_tid):
         #TODO : Check for the linked youtube account 
         
+        p_vid = neondata.InternalVideoID.to_external(i_vid)
         #Get account/integration
         ba = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,
                 self.api_key,i_id)
@@ -482,7 +484,7 @@ class AccountHandler(tornado.web.RequestHandler):
             self.send_json_response(data,400)
             return
 
-        result = yield tornado.gen.Task(ba.update_thumbnail,p_vid,new_tid)
+        result = yield tornado.gen.Task(ba.update_thumbnail,i_vid,new_tid)
         
         if result:
             _log.debug("key=update_video_brightcove" 
@@ -682,9 +684,9 @@ class AccountHandler(tornado.web.RequestHandler):
                 
                 #update thumbnail for videos without a current neon thumbnail
                 for vid,new_tid in update_videos.iteritems():
-                    p_vid = neondata.InternalVideoID.to_external(vid)
-                    result = yield tornado.gen.Task(bplatform_account.update_thumbnail,p_vid,new_tid)
+                    result = yield tornado.gen.Task(bplatform_account.update_thumbnail,vid,new_tid)
                     if not result:
+                        p_vid = neondata.InternalVideoID.to_external(vid)
                         _log.error("key=autopublish msg=update thumbnail failed for" 
                                 " api_key=%s vid=%s tid=%s" %(self.api_key,p_vid,new_tid))
             
@@ -1110,7 +1112,7 @@ class BcoveHandler(tornado.web.RequestHandler):
                 neondata.BrightcovePlatform.get_account, self.a_id, i_id)
             if ba:
                 bcove_vid = neondata.InternalVideoID.to_external(self.internal_video_id) 
-                result = yield tornado.gen.Task(ba.update_thumbnail,bcove_vid,new_tid,True)
+                result = yield tornado.gen.Task(ba.update_thumbnail,self.internal_video_id,new_tid,True)
                 if result:
                     self.set_status(200)
                 else:
@@ -1136,10 +1138,8 @@ class BcoveHandler(tornado.web.RequestHandler):
                 self.a_id,
                 i_id)
             if ba:
-                bcove_vid = neondata.InternalVideoID.to_external(
-                    self.internal_video_id) 
                 result = yield tornado.gen.Task(
-                    ba.check_current_thumbnail_in_db,bcove_vid)
+                    ba.check_current_thumbnail_in_db,self.internal_video_id)
                 if result:
                     self.set_status(200)
                 else:
@@ -1158,7 +1158,6 @@ class BcoveHandler(tornado.web.RequestHandler):
 ################################################################
 
 application = tornado.web.Application([
-        (r'/api/v1/removeaccount(.*)', DeleteHandler),
         (r'/api/v1/accounts(.*)', AccountHandler),
         (r'/api/v1/brightcovecontroller(.*)', BcoveHandler),
         (r'/api/v1/utils(.*)', UtilHandler)],debug=True)
