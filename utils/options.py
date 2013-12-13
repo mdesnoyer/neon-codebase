@@ -374,7 +374,8 @@ class OptionParser(object):
             frame = frame.f_back
         mod = inspect.getmodule(frame)
         
-        if mod.__name__ in ['__main__', '', '.', None]:
+        if (mod.__name__ in ['__main__', '', '.', None] or
+            mod.__name__.endswith('options_test')):
             return option
 
         return '%s.%s' % (self._get_option_prefix(mod.__file__), option)
@@ -382,7 +383,8 @@ class OptionParser(object):
     def _get_main_prefix(self):
         for frame in inspect.stack():
             mod = inspect.getmodule(frame[0])
-            if mod.__name__ == '__main__':
+            if (mod.__name__ == '__main__' or
+                mod.__name__.endswith('options_test')):
                 return self._get_option_prefix(mod.__file__)
         raise Error("Could not find the main module")
 

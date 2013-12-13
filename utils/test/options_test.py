@@ -57,8 +57,9 @@ class TestAsyncOptions(tornado.testing.AsyncTestCase):
         # Define a variable
         self.parser.define('an_int', default=6, type=int,
                            help='help me')
+        self.parser.parse_options([])
 
-        self.io_loop.add_callback(self.lookup_int_callback, 237, self.stop)
+        self.io_loop.add_callback(self.lookup_int_callback, 128, self.stop)
 
         self.wait()
         
@@ -146,7 +147,7 @@ class TestCommandLineParsing(unittest.TestCase):
         self.parser.define('a_float', default=6.5, type=float)
 
         config_stream = StringIO('a_floaty: 10.8')
-        self.parser.parse_options(config_stream = config_stream)
+        self.parser.parse_options([], config_stream = config_stream)
 
         # TODO(mdesnoyer): Test that a warning was logged
         self.assertEqual(self.parser.a_float, 6.5)
@@ -164,7 +165,7 @@ class TestCommandLineParsing(unittest.TestCase):
         self.parser.define('a_float', default=6.5, type=float)
 
         config_stream = StringIO('a_float2: 3.0')
-        self.parser.parse_options(config_stream = config_stream)
+        self.parser.parse_options([], config_stream = config_stream)
 
         self.assertEqual(self.parser.a_float, 6.5)
 
