@@ -377,7 +377,8 @@ class AccountHandler(tornado.web.RequestHandler):
                 status = "finished"
                 thumbs = None
 
-            pub_date = None if not request.__dict__.has_key('publish_date') else int(request.publish_date)
+            pub_date = None if not request.__dict__.has_key('publish_date') else request.publish_date
+            pub_date = int(pub_date) if pub_date else None #type
             vr = VideoResponse(vid,
                               status,
                               request.request_type,
