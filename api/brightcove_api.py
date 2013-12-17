@@ -530,12 +530,13 @@ class BrightcoveApi(object):
 
             else:
                 #Sync the changes in brightcove account to NeonDB
+                #TODO: Sync not just the latest 100 videos
                 job_id = bc.videos[vid]
                 req_data = supportServices.neondata.NeonApiRequest.get_request(
                         self.neon_api_key,job_id)
                 vid_request = supportServices.neondata.NeonApiRequest.create(
                         req_data)
-                vid_request.publish_date = item['publishedDate']
+                vid_request.publish_date = int(item['publishedDate'])
                 vid_request.video_title = title
                 vid_request.save()
 

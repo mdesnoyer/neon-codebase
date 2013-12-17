@@ -581,7 +581,8 @@ class ProcessVideo(object):
         video_id = self.request_map[properties.VIDEO_ID]
         bc_request = BrightcoveApiRequest.get(api_key,job_id)
         bc_request.response = tornado.escape.json_decode(result)
-        
+        bc_request.publish_date = time.time() *1000.0 #ms
+
         if error:
             bc_request.save()
             return

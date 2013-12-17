@@ -911,6 +911,7 @@ class NeonApiRequest(object):
         #API Method
         self.api_method = None
         self.api_param  = None
+        self.publish_date = None
 
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__) 
@@ -1209,7 +1210,7 @@ class ImageMD5Mapper(object):
     def get_tid(cls,ext_video_id,image_md5,callback=None):
         db_connection = DBConnection(cls)
         
-        key = "ImageMD5Mapper".lower() + '_' + ext_video_id + '_' + image_md5
+        key = "ImageMD5Mapper".lower() + '_%s_%s' %(ext_video_id, image_md5)
         if callback:
             db_connection.conn.get(key,callback)
         else:
