@@ -27,6 +27,7 @@ import logging
 import model
 import mock
 import os
+import pickle
 import subprocess
 import random
 import re
@@ -60,9 +61,15 @@ class TestVideoClient(unittest.TestCase):
     def setUp(self):
         #setup properties,model
         #TODO: options
-        self.model_file = os.path.join(os.path.dirname(__file__),"../../model_data/20130924.model")
+        self.model_file = os.path.join(os.path.dirname(__file__),"model.pkl")
         self.model_version = "test" 
-        self.model = model.load_model(self.model_file)
+        self.model = MagicMock()
+
+        #Mock Model methods, use pkl to load captured outputs
+        ct_output,ft_output = pickle.load(open(self.model_file)) 
+        self.model.choose_thumbnails.return_value = (ct_output,9)
+        self.model.filter_duplicates.return_value = ft_output 
+        self.model.score.return_value = 1,2 
         self.test_video_file = os.path.join(os.path.dirname(__file__),"test.mp4") 
    
         self.dl = None

@@ -186,13 +186,12 @@ class ProcessVideo(object):
         # >1 hr
         if duration > 3600:
             self.sec_to_extract_offset = 4
-
         results, self.sec_to_extract = \
           self.model.choose_thumbnails(mov,
                                        n=n_thumbs,
                                        sample_step=self.sec_to_extract_offset,
                                        start_time=self.sec_to_extract)
-        
+
         if self.debug:
             _log.info("key=process_all current time=%s " %(self.sec_to_extract))
 
@@ -488,7 +487,7 @@ class ProcessVideo(object):
         duration = self.video_metadata["duration"]
         video_valence = "%.4f" %float(np.mean(self.valence_scores[1])) 
         url = self.request_map[properties.VIDEO_DOWNLOAD_URL]
-        model_version = self.model.__version__ 
+        model_version = self.model_version 
         frame_size = self.video_metadata['frame_size']
 
         tids = []
