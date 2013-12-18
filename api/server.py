@@ -47,22 +47,6 @@ dir = os.path.dirname(__file__)
 
 #=============== Global Handlers ======================================#
 
-def format_status_json(state,timestamp,data=None):
-
-    status = {}
-    result = {}
-
-    status['state'] = state
-    status['timestamp'] = timestamp
-    result['status'] = status
-    result['result'] = ''
-
-    if data is not None:
-        result['result'] = data
-
-    json = tornado.escape.json_encode(result)
-    return json
-
 def check_remote_ip(request):
     is_remote = False
     if request.headers.has_key('X-Real-Ip'):
@@ -74,9 +58,7 @@ def check_remote_ip(request):
                 pass
         else:
             pass
-
     return is_remote
-
 
 ## ===================== API ===========================================#
 ## Internal Handlers and not be exposed externally

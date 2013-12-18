@@ -333,10 +333,10 @@ class ProcessVideo(object):
             return spread_result
 
     def save_data_to_s3(self):
-        
+       
+        self.s3bucket = self.s3conn.get_bucket(self.s3bucket_name)
         try:
             # Save images to S3 
-            k = Key(self.s3bucket)
             tmp_tar_file = tempfile.NamedTemporaryFile(delete=True)
             tar_file = tarfile.TarFile(tmp_tar_file.name,"w")
             
@@ -367,7 +367,8 @@ class ProcessVideo(object):
 
             if properties.SAVE_DATA_TO_S3:
                 #Save gzip file to S3
-                k.key = self.base_filename + "/thumbnails.tar.gz"
+                keyname = self.base_filename + "/thumbnails.tar.gz"
+                k = self.s3bucket.new_key(keyname)
                 k.set_contents_from_filename(gzip_file.name)
             else:
                 _log.info("thumbnails saved to " + gzip_file.name)
@@ -393,21 +394,20 @@ class ProcessVideo(object):
             plt.ylabel('valence score')
             plt.plot(self.valence_scores[0],self.valence_scores[1])
             fig = plt.gcf()
-            
             if properties.SAVE_DATA_TO_S3:
                 #Save video metadata
-                k = Key(self.s3bucket)
-                k.key = self.base_filename + "/"+ 'video_metadata.txt'
+                keyname = self.base_filename + "/"+ 'video_metadata.txt'
+                k = self.s3bucket.new_key(keyname)
                 k.set_contents_from_string(video_metadata)
                 
                 #save valence graph
                 imgdata = StringIO()
                 fig.savefig(imgdata, format='png')
                 fig.clear()
-                k = Key(self.s3bucket)
-                k.key = self.base_filename + "/"+ 'vgraph' +"." + self.format
                 imgdata.seek(0)
                 data = imgdata.read()
+                keyname = self.base_filename + "/"+ 'vgraph' +"." + self.format
+                k = self.s3bucket.new_key(keyname)
                 k.set_contents_from_string(data)
             else:
                 #save to filesystem
@@ -419,6 +419,8 @@ class ProcessVideo(object):
 
         except S3ResponseError,e:
             _log.error("key=save_to_s3 msg=s3 response error " + e.__str__() )
+        except StopIteration,e:
+            pass #known error with boto
         except Exception,e:
             _log.error("key=save_to_s3 msg=general exception " + e.__str__() )
             if self.debug:
@@ -445,12 +447,10 @@ class ProcessVideo(object):
             image.save(filestream, fmt, quality=100) 
             filestream.seek(0)
             imgdata = filestream.read()
-            #k = Key(s3bucket)
-            #k.key = self.base_filename + "/" + fname_prefix + str(i) + "." + fmt 
             keyname = self.base_filename + "/" + fname_prefix + str(i) + "." + fmt
             k = s3bucket.new_key(keyname)
             k.set_contents_from_string(imgdata,{"Content-Type":"image/jpeg"})
-            s3bucket.set_acl('public-read',k.key)
+            s3bucket.set_acl('public-read',keyname)
             s3fname = s3_url_prefix + "/" + self.base_filename + "/" + fname_prefix + str(i) + ".jpeg"
             s3_urls.append(s3fname)
             
@@ -574,7 +574,6 @@ class ProcessVideo(object):
     - update request object with the thumbnails
     '''
     def finalize_brightcove_request(self,result,error=False):
-       
         api_key = self.request_map[properties.API_KEY]  
         i_id = self.request_map[properties.INTEGRATION_ID]
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
@@ -590,49 +589,51 @@ class ProcessVideo(object):
         if len(self.thumbnails) == 0 :
             bc_request.state = RequestState.INT_ERROR
             bc_request.save()
-
+        
         #Save previous thumbnail to s3
-        if not bc_request.previous_thumbnail:
-            _log.debug("key=finalize_brightcove_request msg=no thumbnail for %s %s" %(api_key,video_id))
-        p_url = bc_request.previous_thumbnail.split('?')[0]
+        if  bc_request.previous_thumbnail:
+            p_url = bc_request.previous_thumbnail.split('?')[0]
 
-        http_client = tornado.httpclient.HTTPClient()
-        req = tornado.httpclient.HTTPRequest(url = p_url,
+            http_client = tornado.httpclient.HTTPClient()
+            req = tornado.httpclient.HTTPRequest(url = p_url,
                                                 method = "GET",
                                                 request_timeout = 60.0,
                                                 connect_timeout = 10.0)
 
-        response = http_client.fetch(req)
-        imgdata = response.body
-        image = Image.open(StringIO(imgdata))
-        s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
-        s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
-        s3bucket = Bucket(name = s3bucket_name,connection = s3conn)
-        s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
-        k = Key(s3bucket)
-        k.key = self.base_filename + "/brightcove.jpeg" 
-        k.set_contents_from_string(imgdata,{"Content-Type":"image/jpeg"})
-        s3bucket.set_acl('public-read',k.key)
-        s3fname = s3_url_prefix + "/" + k.key 
-        bc_request.previous_thumbnail = s3fname
+            response = http_client.fetch(req)
+            imgdata = response.body
+            image = Image.open(StringIO(imgdata))
+            s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
+            s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
+            s3bucket = s3conn.get_bucket(s3bucket_name)
+            s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
+            keyname =  self.base_filename + "/brightcove.jpeg" 
+            k = s3bucket.new_key(keyname)
+            k.set_contents_from_string(imgdata,{"Content-Type":"image/jpeg"})
+            s3bucket.set_acl('public-read',keyname)
+            s3fname = s3_url_prefix + "/" + keyname
+            bc_request.previous_thumbnail = s3fname
         
-        #populate default brightcove thumbnail
-        urls = []
-        tid = ThumbnailID.generate(imgdata,
-                                   InternalVideoID.generate(api_key, video_id))
-        urls.append(p_url)
-        urls.append(s3fname)
-        created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        enabled = True 
-        width   = 480
-        height  = 360
-        ttype   = "brightcove" 
-        rank    = 0 
-        score   = self.valence_score(image) 
-        tdata = ThumbnailMetaData(tid,urls,created,width,height,ttype,score,self.model_version,enabled=enabled,rank=rank)
-        thumb = tdata.to_dict()
-        self.thumbnails.append(thumb)
-
+            #populate default brightcove thumbnail
+            urls = []
+            tid = ThumbnailID.generate(imgdata,
+                                       InternalVideoID.generate(api_key, video_id))
+            urls.append(p_url)
+            urls.append(s3fname)
+            created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            enabled = True 
+            width   = 480
+            height  = 360
+            ttype   = "brightcove" 
+            rank    = 0 
+            score   = self.valence_score(image) 
+            tdata = ThumbnailMetaData(tid,urls,created,width,height,ttype,score,self.model_version,enabled=enabled,rank=rank)
+            thumb = tdata.to_dict()
+            self.thumbnails.append(thumb)
+        
+        else:
+            _log.debug("key=finalize_brightcove_request msg=no thumbnail for %s %s" %(api_key,video_id))
+        
         #2 Push thumbnail in to brightcove account
         autosync = bc_request.autosync
         ba = BrightcovePlatform.get_account(api_key,i_id)
@@ -1023,7 +1024,7 @@ class HttpDownload(object):
             s3_urls = self.pv.host_images_s3(ranked_frames[:MAX_T])
             cr = ClientResponse(self.job_params,data,self.error,urls=s3_urls[:topn])
             cr.send_response()  
-            
+           
             ## Neon section
             if request_type == "neon":
                 
@@ -1072,6 +1073,7 @@ class ClientResponse(object):
         #Add standard headers
         return
 
+    '''
     def format_get(self, url, data=None):
         if data is not None:
             if isinstance(data, dict):
@@ -1087,6 +1089,7 @@ class ClientResponse(object):
             if isinstance(data, dict):
                 data = urlencode(data)
         return data
+    '''
 
     def build_request(self):
         response_body = {}
