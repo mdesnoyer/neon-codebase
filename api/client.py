@@ -1,10 +1,20 @@
 #!/usr/bin/python
+'''
+Video Processing client, no longer a multiprocessing client
 
-USAGE='%prog [options] <workers> <local properties>'
+VideoClient class has a run loop which uses httpdownload object to
+download the video file after dequeueing job from video-server
 
-#============ Future Items ================
-#TODO: Tracing calls and timers on the code
-#==============       =======================
+Sync and Async options are available to download the video file in httpdownload
+
+If Async, on the streaming_callback video processing is done partially.
+
+ProcessVideo class has all the methods to deal with video processing and
+post processing
+
+'''
+
+USAGE='%prog [options] <model_file> <local>'
 
 import os
 import os.path
@@ -13,7 +23,11 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
+import datetime
+import hashlib
+import matplotlib
 import model
+import random
 import tempfile
 import tornado.web
 import tornado.gen
@@ -21,16 +35,12 @@ import tornado.escape
 import tornado.httpclient
 import tornado.httputil
 import tornado.ioloop
-import random
-import multiprocessing
 import Queue
 import time
-import hashlib
 import numpy as np
 import signal
 import shutil
-import datetime
-import matplotlib
+
 matplotlib.use('Agg') #To use without the $DISPLAY var on aws
 import matplotlib.pyplot as plt
 
@@ -75,14 +85,11 @@ import properties
 from utils.options import define, options
 define('local', type=int, default=0,
       help='If set, use the localproperties file for config')
-define('n_workers', default=1, type=int,
-       help='Number of workers to spawn')
 define('model_file', default=None, help='File that contains the model')
 define('debug', default=0, type=int, help='If true, runs in debug mode')
 define('profile', default=0, type=int, help='If true, runs in debug mode')
 define('sync', default=0, type=int,
        help='If true, runs http client in async mode')
-
 
 # ======== API String constants  =======================#
 
@@ -98,22 +105,6 @@ def sig_handler(sig, frame):
             worker.kill_received = TrueQQQA
     except:
         sys.exit(0)
-
-def format_status_json(state,timestamp,data=None):
-
-    status = {}
-    result = {}
-
-    status['state'] = state
-    status['timestamp'] = timestamp
-    result['status'] = status
-    result['result'] = ''
-
-    if data is not None:
-        result['result'] = data
-
-    json = tornado.escape.json_encode(result)
-    return json
 
 #=============== Global Handlers =======================#
 
@@ -365,7 +356,7 @@ class ProcessVideo(object):
             gz.write(tmp_tar_file.read())
             gz.close()
 
-            if properties.SAVE_DATA_TO_S3:
+            if not options.local:
                 #Save gzip file to S3
                 keyname = self.base_filename + "/thumbnails.tar.gz"
                 k = self.s3bucket.new_key(keyname)
@@ -394,7 +385,7 @@ class ProcessVideo(object):
             plt.ylabel('valence score')
             plt.plot(self.valence_scores[0],self.valence_scores[1])
             fig = plt.gcf()
-            if properties.SAVE_DATA_TO_S3:
+            if not options.local:
                 #Save video metadata
                 keyname = self.base_filename + "/"+ 'video_metadata.txt'
                 k = self.s3bucket.new_key(keyname)
@@ -1124,6 +1115,7 @@ class ClientResponse(object):
                     _log.error("type=client_response msg=response error")
                     continue
                 else:
+                    _log.info("key=ClientResponse msg=sent client response")
                     break
             except:
                 continue
@@ -1132,43 +1124,29 @@ class ClientResponse(object):
 ## Multi Processing worker class
 #############################################
 
-class Worker(multiprocessing.Process):
 
-    """ Generic worker framework to execute tasks adopted for specific needs
-
-        State Transitions 
-        1. Download job from master queue (Metadata from api call)
-        2. Downloading video and extracting frames
-        3. onDownload complete, run through model and rank thumbnails
-        4a. Use api callback to submit the result
-        4b. Insert into image library with Metadata
-        4c. Mark job in api inbox as complete
-
-    """
-
-    def __init__(self, model_file, model_version_file, debug=False, sync=False):
-        # base class initialization
-        multiprocessing.Process.__init__(self)
+class VideoClient(object):
+    
+    def __init__(self, model_file, debug=False, sync=False):
         self.model_file = model_file
-        self.model_version_file = model_version_file
         self.SLEEP_INTERVAL = 10
         self.kill_received = False
         self.dequeue_url = properties.BASE_SERVER_URL + "/dequeue"
         self.state = "start"
         self.model_version = -1
-        self.code_version = self.read_version_from_file(code_version_file)
         self.model = None
         self.debug = debug
         self.sync = sync
+        self.pid = os.getpid()
 
     def read_version_from_file(self,fname):
         with open(fname,'r') as f:
             return int(f.readline())
-
+    
     """ Blocking http call to global queue to dequeue work """
     def dequeue_job(self):
         retries = 2
-
+        
         http_client = tornado.httpclient.HTTPClient()
         result = None
         for i in range(retries):
@@ -1177,56 +1155,53 @@ class Worker(multiprocessing.Process):
                 result = response.body
                 break
             except tornado.httpclient.HTTPError, e:
-                _log.error("Dequeue Error " + e.__str__())
+                _log.error("Dequeue Error %s" %e)
                 continue
-
-        return result
-
-    def check_code_release_version(self):
-        code_version = self.read_version_from_file(code_version_file)
         
-        # check if new code version > current
-        # Also check code_version ==0, i.e graceful shutdown
-        if code_version > self.code_version or code_version ==0:
-            self.kill_received = True
-
+        return result
+    
     def load_model(self):
-        parts = self.model_version_file.split('/')[-1]
+        parts = self.model_file.split('/')[-1]
         version = parts.split('.model')[0]
         self.model_version = version
-        _log.info('Loading model from %s version %s' % (self.model_file,self.model_version))
+        _log.info('Loading model from %s version %s'
+                  % (self.model_file,self.model_version))
         self.model = model.load_model(self.model_file)
+        if not self.model:
+            _log.error('Error loading the Model')
+            exit(1)
 
     def run(self):
         _log.info("starting worker [%s] " %(self.pid))
         self.load_model()
         while not self.kill_received:
-          # get a task
-          try:
+            # get a task
+            try:
                 job = self.dequeue_job()
-                if job == "{}": #string match
-                      raise Queue.Empty
+                if not job or job == "{}": #string match
+                    raise Queue.Empty
                 
-
                 ## ===== ASYNC Code Starts ===== ##
                 ioloop = tornado.ioloop.IOLoop.instance()
-                dl = HttpDownload(job, ioloop, self.model,self.model_version, self.debug, self.pid, self.sync)
-                #_log.info("ioloop %r" %ioloop)  
+                dl = HttpDownload(job, ioloop, self.model,self.model_version,
+                                  self.debug, self.pid, self.sync)
+            
                 try:
                     #Change Job State
-                    api_key = dl.job_params[properties.API_KEY] 
+                    api_key = dl.job_params[properties.API_KEY]
                     job_id = dl.job_params[properties.REQUEST_UUID_KEY]
                     api_request = NeonApiRequest.get(api_key,job_id)
                     if api_request.state == RequestState.SUBMIT:
                         api_request.state = RequestState.PROCESSING
-                        api_request.model_version = self.model_version 
+                        api_request.model_version = self.model_version
                         api_request.save()
                     ts = str(time.time())
-                    _log.info("key=worker [%s] msg=processing request %s %s" %(self.pid,dl.job_params[properties.REQUEST_UUID_KEY],str(time.time())))
-
+                    _log.info("key=worker [%s] msg=processing request %s %s"
+                              %(self.pid,dl.job_params[properties.REQUEST_UUID_KEY],str(time.time())))
+        
                 except Exception,e:
                     _log.error("key=worker [%s] msg=db error %s" %(self.pid,e.message))
-
+            
                 #profile
                 if options.profile:
                     mem_tracker1 = summary.summarize(muppy.get_objects())
@@ -1234,19 +1209,19 @@ class Worker(multiprocessing.Process):
                     ctracker.track_object(dl)
                     ctracker.track_class(HttpDownload)
                     ctracker.create_snapshot()
-                
+        
                 ioloop.start()
                 
                 #delete http download object
                 del dl
                 gc.collect()
-
+                
                 if self.debug:
                     un_objs = gc.collect()
                     _log.debug('Unreachable objects:%r' %un_objs)
                     pprint.pprint(gc.garbage)
-
-                if options.profile:    
+        
+                if options.profile:
                     mem_tracker2 = summary.summarize(muppy.get_objects())
                     mem_diff =  summary.get_diff(mem_tracker1,mem_tracker2)
                     pr_ts = job_id #int(time.time())
@@ -1254,65 +1229,30 @@ class Worker(multiprocessing.Process):
                     ctracker.create_snapshot()
                     ctracker.stats.dump_stats('ctrackerprofile.'+str(pr_ts))
 
-          except Queue.Empty:
+            except Queue.Empty:
                 _log.debug("Q,Empty")
-                time.sleep(self.SLEEP_INTERVAL * random.random())  
-
-          except Exception,e:
+                time.sleep(self.SLEEP_INTERVAL * random.random())
+            
+            except Exception,e:
                 _log.exception("key=worker [%s] msg=exception %s" %(self.pid,e.message))
                 if self.debug:
-                      raise
+                    raise
                 time.sleep(self.SLEEP_INTERVAL)
-        
-          #check for new code release
-          self.check_code_release_version()
 
 def main():
     utils.neon.InitNeon()
     
     signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGINT, sig_handler)
-
-    num_processes= options.n_workers
-    if options.debug:
-        num_processes = 1
-   
-    global properties
-
+    
     if options.local:
         _log.info("Running locally")
-        import localproperties as properties
-    else:
-        import properties
+        properties.BASE_SERVER_URL = properties.LOCALHOST_URL
 
-    
-    #code version file
-    cdir = os.path.dirname(__file__)  
-    global code_version_file
-    code_version_file = os.path.join(cdir,"code.version")
-    
-    #Load the path to the model
-    model_version_file = options.model_file
-
-    workers = []
-
-    #spawn workers
-    for i in range(num_processes):
-        worker = Worker(options.model_file, model_version_file,
-                        options.debug, options.sync)
-        workers.append(worker)
-        if options.debug or num_processes ==1:
-            worker.run()
-        else:
-            worker.start()
-    
-    #join workers
-    if not options.debug:
-        if num_processes ==1:
-            exit(0)
-        for w in workers:
-            w.join()
-
+    #start video client
+    vc = VideoClient(options.model_file,
+                     options.debug, options.sync)
+    vc.run()
 
 if __name__ == "__main__":
     main()

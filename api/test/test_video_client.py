@@ -60,10 +60,10 @@ class TestVideoClient(unittest.TestCase):
     def setUp(self):
         #setup properties,model
         #TODO: options
-        self.model_file = "../../model_data/20130924.model"
+        self.model_file = os.path.join(os.path.dirname(__file__),"../../model_data/20130924.model")
         self.model_version = "test" 
         self.model = model.load_model(self.model_file)
-        self.test_video_file = "test.mp4" #~8sec video
+        self.test_video_file = os.path.join(os.path.dirname(__file__),"test.mp4") 
    
         self.dl = None
         self.pv = None
@@ -123,7 +123,7 @@ class TestVideoClient(unittest.TestCase):
         
         #verify metadata has been populated
         for key,value in self.pv.video_metadata.iteritems():
-            self.assertNotEqual(value,None)
+            self.assertNotEqual(value,None,"Video metadata test")
        
         #verify that following maps get populated
         self.assertGreater(len(self.pv.data_map),0,"Model did not return values")

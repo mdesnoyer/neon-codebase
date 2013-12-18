@@ -7,3 +7,7 @@ include(${CMAKE_SOURCE_DIR}/Common.cmake)
 add_test(video_server_test
   ${PROJECT_SOURCE_DIR}/test/test_video_server.py
 )
+
+add_test(video_client_test
+  ${PROJECT_SOURCE_DIR}/test/test_video_client.py
+)
