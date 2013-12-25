@@ -37,6 +37,7 @@ import urllib
 import utils
 import test_utils
 import test_utils.mock_boto_s3 as boto_mock
+import test_utils.redis
 
 from boto.s3.connection import S3Connection
 from mock import patch
@@ -60,7 +61,6 @@ class TestVideoClient(unittest.TestCase):
     '''
     def setUp(self):
         #setup properties,model
-        #TODO: options
         self.model_file = os.path.join(os.path.dirname(__file__),"model.pkl")
         self.model_version = "test" 
         self.model = MagicMock()
@@ -75,16 +75,26 @@ class TestVideoClient(unittest.TestCase):
         self.dl = None
         self.pv = None
 
+        
+        #Redis
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start() 
+
         #mock s3
-        self.patcher = patch('api.client.S3Connection')
-        mock_conn = self.patcher.start()
+        self.s3patcher = patch('api.client.S3Connection')
+        mock_conn = self.s3patcher.start()
         self.s3conn = boto_mock.MockConnection()
         mock_conn.return_value = self.s3conn
+        
+        #setup process video object
+        self.processvideo_setup()
 
     #ProcessVideo setup
     def processvideo_setup(self):
         #httpdownload
-        jparams = request_template.neon_api_request %("j","v","ak","neon","ak","j")
+        j_id = "j123"
+        api_key = "apikey123"
+        jparams = request_template.neon_api_request %(j_id,"v",api_key,"neon",api_key,j_id)
         params = json.loads(jparams)
         self.dl = client.HttpDownload(jparams, None, self.model, self.model_version)
         self.pv = client.ProcessVideo(params, jparams, 
@@ -92,9 +102,14 @@ class TestVideoClient(unittest.TestCase):
         self.dl.pv = self.pv
         nthumbs = params['api_param']
         self.pv.process_all(self.test_video_file,nthumbs)
+        
+        na = neondata.NeonApiRequest(j_id,api_key,None,None,None,None,None)
+        na.save()
+        
 
     def tearDown(self):
-        self.patcher.stop()
+        self.s3patcher.stop()
+        self.redis.stop()
 
     def _create_random_image(self):
         h = 360
@@ -115,18 +130,9 @@ class TestVideoClient(unittest.TestCase):
     def _dequeue_job(self,request_type):
         #Mock/ Job template
         pass
-#if request_type == "neon"
+        #if request_type == "neon"
 
-    @patch('api.client.S3Connection')
-    def test_process_all(self,mock_conntype):
-        
-        #s3mocks to mock host_thumbnails_to_s3
-        conn = boto_mock.MockConnection()
-        mock_conntype.return_value = conn
-        conn.create_bucket('host-thumbnails')
-        conn.create_bucket('neon-beta-test')
-
-        self.processvideo_setup()
+    def test_process_all(self):
         
         #verify metadata has been populated
         for key,value in self.pv.video_metadata.iteritems():
@@ -137,22 +143,45 @@ class TestVideoClient(unittest.TestCase):
         self.assertGreater(len(self.pv.attr_map),0,"Model did not return values")
         self.assertGreater(len(self.pv.timecodes),0,"Model did not return values")
         
+    @patch('api.client.S3Connection')
+    def test_neon_request_process(self,mock_conntype):
+        
+        #s3mocks to mock host_thumbnails_to_s3
+        conn = boto_mock.MockConnection()
+        mock_conntype.return_value = conn
+        conn.create_bucket('host-thumbnails')
+        conn.create_bucket('neon-beta-test')
+        
         #HttpDownload
-        #Mock Database call NeonApiRequest.get
-        self.nplatform_patcher = patch('api.client.NeonApiRequest')
-        self.mock_nplatform_patcher = self.nplatform_patcher.start()
-        self.mock_nplatform_patcher.get.side_effect = [
-                neondata.NeonApiRequest("d","d",None,None,None,None,None)]
 
         #send client response & verify
         self.dl.send_client_response()
         s3_keys = [x for x in conn.buckets['host-thumbnails'].get_all_keys()]
         self.assertEqual(len(s3_keys),1,"send client resposne and host images s3")
+    
+    @patch('api.client.S3Connection')
+    def test_save_data_to_s3(self,mock_conntype):
 
+        #s3mocks to mock host_thumbnails_to_s3
+        conn = boto_mock.MockConnection()
+        conn.create_bucket('neon-beta-test')
+        conn.create_bucket('host-thumbnails')
+        mock_conntype.return_value = conn
+        
+        self.dl.send_client_response()
+        
         #save data to s3
         self.pv.save_data_to_s3()
         s3_keys = [x for x in conn.buckets['neon-beta-test'].get_all_keys()]
         self.assertEqual(len(s3_keys),3,"Save data to s3")
+
+    @patch('api.client.S3Connection')
+    def test_brightcove_request_process(self,mock_conntype):
+        
+        conn = boto_mock.MockConnection()
+        mock_conntype.return_value = conn
+        conn.create_bucket('host-thumbnails')
+        conn.create_bucket('neon-beta-test')
 
         # TEST Brightcove request flow and finalize_brightcove_request() 
         # Replace the request parameters of the dl & pv objects to save time on
@@ -171,11 +200,11 @@ class TestVideoClient(unittest.TestCase):
         self.dl.job_params = params
         
         #brightcove platform patcher
-        self.bplatform_patcher = patch('api.client.BrightcoveApiRequest')
-        self.mock_bplatform_patcher = self.bplatform_patcher.start()
+        bplatform_patcher = patch('api.client.BrightcoveApiRequest')
+        mock_bplatform_patcher = bplatform_patcher.start()
         breq = neondata.BrightcoveApiRequest("d","d",None,None,None,None,None,None)
         breq.previous_thumbnail = "http://prevthumb"
-        self.mock_bplatform_patcher.get.side_effect = [breq]
+        mock_bplatform_patcher.get.side_effect = [breq]
        
         #mock tornado http
         request = HTTPRequest('http://google.com')
@@ -200,12 +229,30 @@ class TestVideoClient(unittest.TestCase):
     
         #cleanup
         http_patcher.stop()
-        self.mock_nplatform_patcher.stop()
-        self.mock_bplatform_patcher.stop()
+        clientp.stop()
+        mock_bplatform_patcher.stop()
     
     #TODO: test request finalizers independently
     
     #TODO: test intermittent DB/ processing failure cases
+
+    def test_processing_error(self):
+
+        #mock requeue job failure
+        request = HTTPRequest('http://neon-lab.com')
+        response = HTTPResponse(request, 500, buffer=StringIO(""))
+        clientp = patch('api.client.tornado.httpclient.HTTPClient')
+        http_patcher = clientp.start()
+        http_patcher().fetch.side_effect = [response,response]
+
+        #requeue job mock
+        self.dl.send_client_response(error=True)
+        clientp.stop()
+
+        #self.nplatform_patcher = patch('api.client.NeonApiRequest')
+        #self.mock_nplatform_patcher = self.nplatform_patcher.start()
+        #self.mock_nplatform_patcher.get.side_effect = [
+        #        neondata.NeonApiRequest("d","d",None,None,None,None,None)]
 
     #TODO: test streaming callback and async callback
 

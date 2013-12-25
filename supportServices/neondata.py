@@ -635,6 +635,7 @@ class BrightcovePlatform(AbstractPlatform):
             self.read_token, self.write_token, self.auto_update,
             self.last_process_date,account_created=self.account_created)
         bc.create_neon_api_requests(self.integration_id)    
+        bc.create_requests_unscheduled_videos(self.integration_id)
 
     '''
     Temp method to support backward compatibility

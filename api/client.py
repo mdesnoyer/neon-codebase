@@ -27,6 +27,7 @@ import datetime
 import hashlib
 import matplotlib
 import model
+import properties
 import random
 import tempfile
 import tornado.web
@@ -79,7 +80,7 @@ from pympler.classtracker import ClassTracker
 import pickle
 
 import utils.neon
-import properties
+from utils.http import RequestPool
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -324,7 +325,9 @@ class ProcessVideo(object):
 
     def save_data_to_s3(self):
        
-        self.s3bucket = self.s3conn.get_bucket(self.s3bucket_name)
+        s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
+        s3bucket = s3conn.get_bucket(self.s3bucket_name)
+
         try:
             # Save images to S3 
             tmp_tar_file = tempfile.NamedTemporaryFile(delete=True)
@@ -354,11 +357,11 @@ class ProcessVideo(object):
             tmp_tar_file.seek(0)
             gz.write(tmp_tar_file.read())
             gz.close()
-
+            
             if not options.local:
                 #Save gzip file to S3
                 keyname = self.base_filename + "/thumbnails.tar.gz"
-                k = self.s3bucket.new_key(keyname)
+                k = s3bucket.new_key(keyname)
                 k.set_contents_from_filename(gzip_file.name)
             else:
                 _log.info("thumbnails saved to " + gzip_file.name)
@@ -387,7 +390,7 @@ class ProcessVideo(object):
             if not options.local:
                 #Save video metadata
                 keyname = self.base_filename + "/"+ 'video_metadata.txt'
-                k = self.s3bucket.new_key(keyname)
+                k = s3bucket.new_key(keyname)
                 k.set_contents_from_string(video_metadata)
                 
                 #save valence graph
@@ -397,7 +400,7 @@ class ProcessVideo(object):
                 imgdata.seek(0)
                 data = imgdata.read()
                 keyname = self.base_filename + "/"+ 'vgraph' +"." + self.format
-                k = self.s3bucket.new_key(keyname)
+                k = s3bucket.new_key(keyname)
                 k.set_contents_from_string(data)
             else:
                 #save to filesystem
@@ -525,11 +528,13 @@ class ProcessVideo(object):
 
     ''' Update the request state for Neon API Request '''
     def finalize_neon_request(self, result=None):
-        
         api_key = self.request_map[properties.API_KEY] 
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
         api_request = NeonApiRequest.get(api_key,job_id)
-        
+       
+        if api_request is None:
+            pass #TODO: erorr
+
         #change the status to requeued, and don't store a response 
         if result is None:
             api_request.state = RequestState.REQUEUED 
@@ -794,7 +799,8 @@ class HttpDownload(object):
         self.debug = debug
         self.debug_timestamps = {}
         self.debug_timestamps["streaming_callback"] = time.time()
-       
+        
+        self.http_client_pool = RequestPool() #TODO: use this for all outbound requests
         if not sync:
             tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
             req = tornado.httpclient.HTTPRequest(url = url, headers = headers,
@@ -957,16 +963,9 @@ class HttpDownload(object):
         requeue_request = tornado.httpclient.HTTPRequest(url = self.global_work_queue_url, 
                 method = "POST",body =body, request_timeout = 60.0, connect_timeout = 10.0)
         http_client = tornado.httpclient.HTTPClient()
-        retries = 1
-
-        for i in range(retries):
-            try:
-                response = http_client.fetch(requeue_request)
-                break
-            except tornado.httpclient.HTTPError, e:
-                _log.error("key=requeue  msg=requeue error " + e.__str__())
-                continue
-
+        response = http_client.fetch(requeue_request)
+        if response.error:
+            return False
         return True
 
     def send_client_response(self,error=False):
@@ -983,7 +982,7 @@ class HttpDownload(object):
                 #error_msg = self.response.error.message
                 #self.error = error_msg
                 error_msg = self.error
-                cr = ClientResponse(self.job_params,None,error_msg)
+                cr = ClientCallbackResponse(self.job_params,None,error_msg)
                 cr.send_response() 
                 self.pv.finalize_neon_request(cr.response)
             return
@@ -1012,7 +1011,7 @@ class HttpDownload(object):
             
             #host top 5 images on s3
             s3_urls = self.pv.host_images_s3(ranked_frames[:MAX_T])
-            cr = ClientResponse(self.job_params,data,self.error,urls=s3_urls[:topn])
+            cr = ClientCallbackResponse(self.job_params,data,self.error,urls=s3_urls[:topn])
             cr.send_response()  
            
             ## Neon section
@@ -1048,7 +1047,7 @@ class HttpDownload(object):
             #TO BE Implemented
 
 
-class ClientResponse(object):
+class ClientCallbackResponse(object):
     """ Http response to the callback url -- This is the final response to the client """
     def __init__(self,job_params,response_data,error=None,timecodes=None,urls=None):
         self.data = response_data
@@ -1114,7 +1113,7 @@ class ClientResponse(object):
                     _log.error("type=client_response msg=response error")
                     continue
                 else:
-                    _log.info("key=ClientResponse msg=sent client response")
+                    _log.info("key=ClientCallbackResponse msg=sent client response")
                     break
             except:
                 continue

@@ -536,7 +536,8 @@ class BrightcoveApi(object):
                         self.neon_api_key,job_id)
                 vid_request = supportServices.neondata.NeonApiRequest.create(
                         req_data)
-                vid_request.publish_date = int(item['publishedDate'])
+                pub_date = int(item['publishedDate']) if item['publishedDate'] else None
+                vid_request.publish_date = pub_date 
                 vid_request.video_title = title
                 vid_request.save()
 
@@ -632,6 +633,53 @@ class BrightcoveApi(object):
 
         self.process_publisher_feed(items_to_process,i_id)
         return
+
+    ## Find videos scheduled in the future and process them
+    ## Use this method as an additional call to check for videos 
+    ## that are scheduled in the future
+
+    ## TODO: After further evaluation of api, replace find_all_videos by find_modified_videos
+
+    def create_requests_unscheduled_videos(self,i_id,page_no=0,page_size=25):
+        #http://docs.brightcove.com/en/video-cloud/media/reference.html#PublicVideoFieldsEnum
+        data = {}
+        data['command'] = "find_modified_videos" 
+        data['token'] = self.read_token
+        data['media_delivery'] = 'http'
+        data['output'] = 'json' 
+        data['page_number'] = page_no 
+        data['page_size'] = page_size
+        #data['sort_by'] = 'modified_date'
+        #data['sort_order'] = 'DESC'
+        data['get_item_count'] = "true"
+        data['video_fields'] = "id,name,length,endDate,startDate,creationDate,publishedDate,lastModifiedDate,thumbnailURL,videoStillURL,FLVURL"
+        data["from_date"] = 21492000
+        data["filter"] = "UNSCHEDULED,INACTIVE"
+
+        url = self.format_get(self.read_url, data)
+        req = tornado.httpclient.HTTPRequest(url = url,
+                                             method = "GET",
+                                             request_timeout = 60.0
+                                             )
+        response = BrightcoveApi.read_connection.send_request(req)
+        items = tornado.escape.json_decode(response.body)
+
+        import pdb; pdb.set_trace()
+        #Logic to determine videos that may be not scheduled to run yet
+        #publishedDate is null, and creationDate is recent (last 24 hrs) 
+        #publishedDate can be null for inactive videos too
+
+        #NOTE: There may be videos which are marked as not to use
+        # by renaming the title  
+        
+        #check if requests for these videos have been created
+        items_to_process = []
+
+        for item in items['items']:
+            if item['publishedDate'] is None:
+                items_to_process.append(item)
+
+        self.process_publisher_feed(items_to_process,i_id)
 
 
     ############## NEON API INTERFACE ########### 
@@ -785,6 +833,8 @@ class BrightcoveApi(object):
                 title = item['name']
                 video_download_url = item['FLVURL']
                 
+                #TODO: Try searching for highest renedition to get quality thumb
+
                 #NOTE: If a video doesn't have a thumbnail 
                 #Perhaps a signle renedition video or a live feed
                 if not item.has_key('videoStillURL'):
