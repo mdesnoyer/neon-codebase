@@ -3,6 +3,9 @@
 '''
 Video processing client unit test
 
+NOTE: Model call has been mocked out, the results are embedded in the 
+pickle file for the calls made from model object
+
 1. Neon api request
 2. Brightcoev api request 
 3. Brightcove api request with autosync
@@ -53,17 +56,13 @@ _log = logging.getLogger(__name__)
 
 class TestVideoClient(unittest.TestCase):
     '''
-    NOTE: In this test the database calls have been mocked out
-    
-    The test is mostly monolithic to save time on video processing,
-    asserts have messages to indicate the failure points
-
     '''
     def setUp(self):
         #setup properties,model
         self.model_file = os.path.join(os.path.dirname(__file__),"model.pkl")
         self.model_version = "test" 
         self.model = MagicMock()
+        self.ioloop = MagicMock() #mock ioloop
 
         #Mock Model methods, use pkl to load captured outputs
         ct_output,ft_output = pickle.load(open(self.model_file)) 
@@ -91,7 +90,15 @@ class TestVideoClient(unittest.TestCase):
 
     #ProcessVideo setup
     def processvideo_setup(self):
-        #httpdownload
+        '''
+        Setup variables for process video process_all call
+
+        Then run process_all call, which has calls to the model
+        mocked out.
+
+        Once process_all has extracted thumbs, scored them subsequent
+        methods can do their opertaions depending on the api call type
+        '''
         j_id = "j123"
         api_key = "apikey123"
         jparams = request_template.neon_api_request %(j_id,"v",api_key,"neon",api_key,j_id)
@@ -133,6 +140,10 @@ class TestVideoClient(unittest.TestCase):
         #if request_type == "neon"
 
     def test_process_all(self):
+       
+        '''
+        Verify execution of the process_all call in ProcessVideo
+        '''
         
         #verify metadata has been populated
         for key,value in self.pv.video_metadata.iteritems():
@@ -145,7 +156,9 @@ class TestVideoClient(unittest.TestCase):
         
     @patch('api.client.S3Connection')
     def test_neon_request_process(self,mock_conntype):
-        
+        '''
+        Test Neon api request
+        '''
         #s3mocks to mock host_thumbnails_to_s3
         conn = boto_mock.MockConnection()
         mock_conntype.return_value = conn
@@ -232,9 +245,6 @@ class TestVideoClient(unittest.TestCase):
         clientp.stop()
         mock_bplatform_patcher.stop()
     
-    #TODO: test request finalizers independently
-    
-    #TODO: test intermittent DB/ processing failure cases
 
     def test_processing_error(self):
 
@@ -254,7 +264,87 @@ class TestVideoClient(unittest.TestCase):
         #self.mock_nplatform_patcher.get.side_effect = [
         #        neondata.NeonApiRequest("d","d",None,None,None,None,None)]
 
-    #TODO: test streaming callback and async callback
+    
+    @patch('api.client.S3Connection')
+    def test_httpdownload_async_callback(self,mock_conntype):
+        ''' test streaming callback and async callback '''
+
+        j_id = "j123"
+        api_key = "apikey123"
+        jparams = request_template.neon_api_request %(j_id,"v",api_key,"neon",api_key,j_id)
+        params = json.loads(jparams)
+        self.dl = client.HttpDownload(jparams, self.ioloop, self.model, self.model_version)
+        request = HTTPRequest('http://neon-lab.com/video.mp4')
+        data = "somefakevideodata"
+        response = HTTPResponse(request, 200, buffer=StringIO(data),
+                    headers={'Content-Length':len(data)})
+        
+        #s3mocks to mock host_thumbnails_to_s3
+        conn = boto_mock.MockConnection()
+        mock_conntype.return_value = conn
+        conn.create_bucket('host-thumbnails')
+        conn.create_bucket('neon-beta-test')
+        
+        self.dl.async_callback(response)
+
+        #Assert error response
+        api_request = neondata.NeonApiRequest.get(api_key,j_id)
+        self.assertEqual(api_request.state,neondata.RequestState.INT_ERROR)
+
+
+    def test_httpdownload_async_callback_error_cases(self):
+        
+        j_id = "j123"
+        api_key = "apikey123"
+        jparams = request_template.neon_api_request %(j_id,"v",api_key,"neon",api_key,j_id)
+        params = json.loads(jparams)
+        self.dl = client.HttpDownload(jparams, self.ioloop, self.model, self.model_version)
+        request = HTTPRequest('http://neon-lab.com/video.mp4')
+        data = "somefakevideodata"
+        
+        #E1. No content length header in response
+        response = HTTPResponse(request, 500, buffer=StringIO(data))
+        
+        #mock requeue job, set requeue job to fail so that error propogates up
+        clientp = patch('api.client.tornado.httpclient.HTTPClient')
+        http_patcher = clientp.start()
+        http_patcher().fetch.side_effect = [response] *10
+        
+        self.dl.async_callback(response)
+        api_request = neondata.NeonApiRequest.get(api_key,j_id)
+        self.assertEqual(api_request.state,neondata.RequestState.INT_ERROR)
+
+        #E2. Http Response error
+        response = HTTPResponse(request, 500, buffer=StringIO(data),
+                    headers={'Content-Length':len(data)})
+        self.dl.async_callback(response)
+        api_request = neondata.NeonApiRequest.get(api_key,j_id)
+        
+        self.assertEqual(api_request.state,neondata.RequestState.INT_ERROR)
+        
+        clientp.stop()
+
+    def test_streaming_callback(self):
+        
+        j_id = "j123"
+        api_key = "apikey123"
+        jparams = request_template.neon_api_request %(j_id,"v",api_key,"neon",api_key,j_id)
+        params = json.loads(jparams)
+        self.dl = client.HttpDownload(jparams, self.ioloop, self.model, self.model_version)
+        data = "somefakevideodata"
+        self.dl.callback_data_size = len(data) -1 #change callback datasize
+        '''process_all method would return an error coz data is not valid 
+            video, but we are only testing the streaming callback method here
+        '''
+        self.dl.streaming_callback(data)
+        self.assertFalse(self.dl.tempfile.close_called)
+        #verify size of temp file
+
+    #TODO: test intermittent DB/ processing failure cases
+
+    #TODO: autosync enabled video processing
+    
+    #TODO: test videoclient class
 
 if __name__ == '__main__':
     unittest.main()

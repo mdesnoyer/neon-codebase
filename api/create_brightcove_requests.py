@@ -38,7 +38,6 @@ try:
         #retrieve the blob and create the object
         jdata = rclient.get(accnt) 
         bc = BrightcovePlatform.create(jdata)
-        bc.read_token = 'Nsp26ucVQKAaWHwuE-NLbVtmVtxG9zFI-DiR0anuugXn-tIX6Di7Hg..' 
         bc.check_feed_and_create_api_requests()
 
 except Exception as e:

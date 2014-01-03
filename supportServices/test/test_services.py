@@ -121,6 +121,12 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         response = self.wait(timeout=10)
         return response
 
+    def get_request(self,url,apikey):
+        headers = {'X-Neon-API-Key' :apikey} 
+        client = AsyncHTTPClient(self.io_loop)
+        client.fetch(url, self.stop, headers=headers)
+        resp = self.wait()
+        return resp
 
     ### Helper methods
 
@@ -660,7 +666,76 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
             #rc = redis.StrictRedis('localhost',self.redis.port)
             #print rc.keys('im*') 
 
-    #TODO: API URL PARSING TESTs
+    #TODO: Test pagination of video requests
+    def test_pagination_videos(self):
+        #create neon account
+        api_key = self.create_neon_account()
+        self.assertEqual(api_key,neondata.NeonApiKey.generate(self.a_id))
+
+        #Setup Side effect for the http clients
+        self.bapi_mock_client().fetch.side_effect = self._success_http_side_effect
+        self.cp_mock_client().fetch.side_effect = self._success_http_side_effect 
+        self.bapi_mock_async_client().fetch.side_effect = self._success_http_side_effect
+        self.cp_mock_async_client().fetch.side_effect = self._success_http_side_effect
+
+        #create brightcove account
+        json_video_response = self.create_brightcove_account()
+        video_response = json.loads(json_video_response)
+        self.assertEqual(len(video_response),5) 
+
+        #auto publish test
+        reqs = self._create_neon_api_requests()
+        self._process_neon_api_requests(reqs)
+        
+        ordered_videos = sorted(self._get_videos())
+        
+        #get videos in pages
+        page_no = 0
+        page_size = 2
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
+                '%s/videos?page_no=%s&page_size=%s'
+                %(self.a_id,self.b_id,page_no,page_size))
+        resp = self.get_request(url,self.api_key)
+        items = json.loads(resp.body)
+        self.assertEqual(len(items),page_size,"page size did not match")
+        result_vids = [ x['video_id'] for x in items ]
+        self.assertItemsEqual(ordered_videos[:page_size],result_vids) 
+
+        #test page no (initial # of vids populated =5)
+        page_no = 1
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
+                '%s/videos?page_no=%s&page_size=%s'
+                %(self.a_id,self.b_id,page_no,page_size))
+        resp = self.get_request(url,self.api_key)
+        items = json.loads(resp.body)
+        self.assertEqual(len(items),page_size,"page number did not match")
+        result_vids = [ x['video_id'] for x in items ]
+        self.assertItemsEqual(
+                ordered_videos[page_no*page_size:(page_no+1)*page_size],
+                result_vids)
+
+        #request page_size such that it more than #of vids in account 
+        page_no = 0
+        page_size = 1000
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
+                '%s/videos?page_no=%s&page_size=%s'
+                %(self.a_id,self.b_id,page_no,page_size))
+        resp = self.get_request(url,self.api_key)
+        items = json.loads(resp.body)
+        result_vids = [ x['video_id'] for x in items ]
+        self.assertEqual(len(ordered_videos),len(result_vids))
+        
+        #request last page with page_size > #of videos available in the page
+        page_no = 1 
+        page_size = 3 
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
+                '%s/videos?page_no=%s&page_size=%s'
+                %(self.a_id,self.b_id,page_no,page_size))
+        resp = self.get_request(url,self.api_key)
+        items = json.loads(resp.body)
+        result_vids = [ x['video_id'] for x in items ]
+        self.assertEqual(len(ordered_videos) - (page_no*page_size),
+                        len(result_vids))
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

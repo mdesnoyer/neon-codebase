@@ -681,6 +681,7 @@ class ProcessVideo(object):
     '''
 
     def finalize_youtube_request(self,result,error=False):
+        '''
         api_key = self.request_map[properties.API_KEY]  
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
         video_id = self.request_map[properties.VIDEO_ID]
@@ -761,7 +762,8 @@ class ProcessVideo(object):
             _log.error("key=finalize_youtube_request msg=failed to save request")
 
         #self.save_thumbnail_metadata("youtube",i_id)
-
+        '''
+        pass
 
 #############################################################################################
 # HTTP Downloader client
@@ -891,7 +893,8 @@ class HttpDownload(object):
         if response.error:
             if "HTTP 599: Operation timed out after" not in response.error.message:
                 self.error = INTERNAL_PROCESSING_ERROR #response.error.message
-                _log.error("key=async_callback_error  msg=" + response.error.message + " request=" + self.job_params[properties.VIDEO_DOWNLOAD_URL])
+                _log.error("key=async_callback_error  msg=%s request %s"
+                        %(response.error.message,self.job_params[properties.VIDEO_DOWNLOAD_URL]))
             else:
                 _log.error("key=async_request_timeout msg=" +response.error.message)
                 ## Verify content length & total size to see if video
@@ -925,9 +928,6 @@ class HttpDownload(object):
         self.pv.video_metadata[properties.VIDEO_PROCESS_TIME] = str(total_request_time)
         self.pv.video_metadata[properties.JOB_SUBMIT_TIME] = self.job_params[properties.JOB_SUBMIT_TIME]
         self.pv.video_metadata[properties.JOB_END_TIME] = str(end_time)
-
-        #cleanup or misc methods to be run before the video is deleted
-        #self.pv.finalize(self.tempfile.name)
 
         #Delete the temp video file which was downloaded
         if os.path.exists(self.tempfile.name):
@@ -1110,7 +1110,7 @@ class ClientCallbackResponse(object):
             try:
                 response = self.http_client.fetch(self.client_request)
                 if response.error:
-                    _log.error("type=client_response msg=response error")
+                    _log.error("type=client_response msg=failed to send response to client")
                     continue
                 else:
                     _log.info("key=ClientCallbackResponse msg=sent client response")

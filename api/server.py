@@ -115,7 +115,7 @@ class RequeueHandler(tornado.web.RequestHandler):
 ## ===================== API ===========================================#
 # External Handlers
 ## ===================== API ===========================================#
-
+'''
 class GetResultsHandler(tornado.web.RequestHandler):
     """ Return results gzipped """
     def get(self, *args, **kwargs):
@@ -140,6 +140,7 @@ class GetResultsHandler(tornado.web.RequestHandler):
 
         except:
             _log.exception("key=getresultshandler msg=general traceback")
+'''
 
 class JobStatusHandler(tornado.web.RequestHandler):
     """ JOB Status Handler  """
@@ -381,7 +382,7 @@ application = tornado.web.Application([
     (r"/requeue",RequeueHandler),
     (r"/testcallback",TestCallback),
     (r'/api/v1/jobstatus',JobStatusHandler),
-    (r'/api/v1/getresults',GetResultsHandler),    
+    #(r'/api/v1/getresults',GetResultsHandler),    
 ])
 
 def main():

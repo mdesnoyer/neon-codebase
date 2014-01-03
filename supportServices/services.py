@@ -318,6 +318,14 @@ class AccountHandler(tornado.web.RequestHandler):
     ''' Get video status for multiple videos -- Brightcove Integration '''
     @tornado.gen.engine
     def get_video_status_brightcove(self,i_id,vids):
+        page_no = 0 
+        page_size = 100
+        try:
+            page_no = int(self.get_argument('page_no'))
+            page_size = min(int(self.get_argument('page_size')),100)
+        except:
+            pass
+
         result = {}
         incomplete_states = [
             neondata.RequestState.SUBMIT,neondata.RequestState.PROCESSING,
@@ -340,6 +348,19 @@ class AccountHandler(tornado.web.RequestHandler):
             data = '[]'
             self.send_json_response(data,200)
             return
+
+        #Filter videos on page numbers
+        #NOTE: Assume brightcove vids are in increasing order
+
+        #case1: there are more vids than page_size
+        if len(vids) > page_size:
+            #This means paging is valid
+            #check if for the page_no request there are 
+            #sort video ids
+            s_vids = sorted(vids)
+            s_index = page_no * page_size
+            e_index = (page_no +1) * page_size
+            vids = s_vids[s_index:e_index]
 
         job_ids = [] 
         for vid in vids:
@@ -744,7 +765,7 @@ class AccountHandler(tornado.web.RequestHandler):
     validate the refresh token and retreive list of channels for the acccount    
     '''
     def create_youtube_integration(self):
-
+        '''
         def saved_account(result):
             if result:
                 data = '{"error" : ""}'
@@ -779,11 +800,14 @@ class AccountHandler(tornado.web.RequestHandler):
         yt = neondata.YoutubePlatform(self.api_key,i_id,a_token,r_token,expires,autosync)
         #Add channel
         yt.add_channels(channel_callback)
+        '''
+        pass
 
     '''
     Update Youtube account
     '''
     def update_youtube_account(self,i_id):
+        '''
         def saved_account(result):
             if result:
                 data = ''
@@ -812,12 +836,16 @@ class AccountHandler(tornado.web.RequestHandler):
                                                  update_account)
         except:
             data = '{"error": "missing arguments"}'
-            self.send_json_response()
+            self.send_json_response(data)
+        '''
+        data = '{"error": "not yet impl"}'
+        self.send_json_response(data)
 
     '''
     Create a youtube video request 
     '''
     def create_youtube_video_request(self,i_id):
+        '''
         def job_created(response):
             if not response.error:
                 data = response.body 
@@ -858,12 +886,15 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.send_json_response(data,400)
 
         neondata.YoutubePlatform.get_account(self.api_key, i_id, get_account)
-
+        '''
+        data = '{"error": "not yet impl"}'
+        self.send_json_response(data)
 
     '''
     Populate youtube videos
     '''
     def get_youtube_videos(self,i_id):
+        '''
         self.counter = 0
         self.yt_results = None
         self.video_results = None
@@ -989,10 +1020,13 @@ class AccountHandler(tornado.web.RequestHandler):
         neondata.YoutubePlatform.get_account(self.api_key,
                                              i_id,
                                              account_callback)
+        '''
+        pass
 
     ''' Update the thumbnail for a particular video '''
     def update_youtube_video(self,i_id,vid):
-        
+    
+        '''
         def update_thumbnail(t_result):
             if t_result:
                 data = '{"error" :""}'
@@ -1032,6 +1066,8 @@ class AccountHandler(tornado.web.RequestHandler):
         neondata.YoutubePlatform.get_account(self.api_key,
                                              i_id,
                                              get_account_callback)
+        '''
+        pass
 
 ###########################################################
 ## Util Handler 
