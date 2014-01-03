@@ -27,7 +27,6 @@ if sys.path[0] <> base_path:
 
 import json
 import logging
-import model
 import mock
 import os
 import pickle
