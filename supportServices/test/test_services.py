@@ -253,7 +253,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
             self.assertEqual(status,expected_status)
 
         items = self._get_video_status_brightcove()
-        for item in items:
+        for item in items['items']:
             vr = services.VideoResponse(None,None,None,None,None,None,None,None,None)
             vr.__dict__ = item
             status =  vr.status
@@ -442,7 +442,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
 
             #create brightcove account
             json_video_response = self.create_brightcove_account()
-            video_response = json.loads(json_video_response)
+            video_response = json.loads(json_video_response)['items']
             self.assertEqual(len(video_response),5) #TODO: Verify actual contents
 
             #update brightcove account
@@ -466,7 +466,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
 
             #create brightcove account
             json_video_response = self.create_brightcove_account()
-            video_response = json.loads(json_video_response)
+            video_response = json.loads(json_video_response)['items']
             self.assertEqual(len(video_response),5) #TODO: Verify actual contents
 
             #update brightcove account
@@ -509,7 +509,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
 
             #create brightcove account
             json_video_response = self.create_brightcove_account()
-            video_response = json.loads(json_video_response)
+            video_response = json.loads(json_video_response)['items']
             self.assertEqual(len(video_response),5) #TODO: Verify actual contents
         
             #process requests
@@ -533,7 +533,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
 
             thumbs = []
             items = self._get_video_status_brightcove()
-            for item,tid in zip(items,new_tids):
+            for item,tid in zip(items['items'],new_tids):
                 vr = services.VideoResponse(None,None,None,None,None,None,None,None,None)
                 vr.__dict__ = item
                 thumbs.append(vr.current_thumbnail)
@@ -680,7 +680,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
 
         #create brightcove account
         json_video_response = self.create_brightcove_account()
-        video_response = json.loads(json_video_response)
+        video_response = json.loads(json_video_response)['items']
         self.assertEqual(len(video_response),5) 
 
         #auto publish test
@@ -696,7 +696,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
                 '%s/videos?page_no=%s&page_size=%s'
                 %(self.a_id,self.b_id,page_no,page_size))
         resp = self.get_request(url,self.api_key)
-        items = json.loads(resp.body)
+        items = json.loads(resp.body)['items']
         self.assertEqual(len(items),page_size,"page size did not match")
         result_vids = [ x['video_id'] for x in items ]
         self.assertItemsEqual(ordered_videos[:page_size],result_vids) 
@@ -707,7 +707,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
                 '%s/videos?page_no=%s&page_size=%s'
                 %(self.a_id,self.b_id,page_no,page_size))
         resp = self.get_request(url,self.api_key)
-        items = json.loads(resp.body)
+        items = json.loads(resp.body)['items']
         self.assertEqual(len(items),page_size,"page number did not match")
         result_vids = [ x['video_id'] for x in items ]
         self.assertItemsEqual(
@@ -721,7 +721,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
                 '%s/videos?page_no=%s&page_size=%s'
                 %(self.a_id,self.b_id,page_no,page_size))
         resp = self.get_request(url,self.api_key)
-        items = json.loads(resp.body)
+        items = json.loads(resp.body)['items']
         result_vids = [ x['video_id'] for x in items ]
         self.assertEqual(len(ordered_videos),len(result_vids))
         
@@ -732,7 +732,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
                 '%s/videos?page_no=%s&page_size=%s'
                 %(self.a_id,self.b_id,page_no,page_size))
         resp = self.get_request(url,self.api_key)
-        items = json.loads(resp.body)
+        items = json.loads(resp.body)['items']
         result_vids = [ x['video_id'] for x in items ]
         self.assertEqual(len(ordered_videos) - (page_no*page_size),
                         len(result_vids))

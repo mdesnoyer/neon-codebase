@@ -54,6 +54,16 @@ def CachePrimer():
 # Helper classes  
 ################################################################################
 
+class GetVideoStatusResponse(object):
+    def __init__(self,items,page_no=0,page_size=100):
+        self.items = items
+        self.count = len(items)
+        self.page_no = page_no
+        self.page_size = page_size
+    
+    def to_json(self):
+        return json.dumps(self, default=lambda o: o.__dict__)
+
 class VideoResponse(object):
     def __init__(self,vid,status,i_type,i_id,title,duration,pub_date,cur_tid,thumbs):
         self.video_id = vid
@@ -454,7 +464,10 @@ class AccountHandler(tornado.web.RequestHandler):
             vresult.append(vres.to_dict())
 
         s_vresult = sorted(vresult, key=lambda k: k['publish_date'],reverse=True)
-        data = tornado.escape.json_encode(s_vresult)
+
+        #Json response data format { "items":[], "count":0, "page_no":0, "page_size":0} 
+        vstatus_response = GetVideoStatusResponse(s_vresult,page_no,page_size)
+        data = vstatus_response.to_json() #tornado.escape.json_encode(jresponse.to_json())
         self.send_json_response(data,200)
 
 
@@ -628,7 +641,9 @@ class AccountHandler(tornado.web.RequestHandler):
                               thumbs)
                         video_response.append(vr.to_dict())
                         
-                    data = tornado.escape.json_encode(video_response)
+                    vstatus_response = GetVideoStatusResponse(video_response)
+                    data = vstatus_response.to_json() 
+                    #data = tornado.escape.json_encode(video_response)
                     self.send_json_response(data,201)
                 else:
                     data = '{"error": "integration was not added, account creation issue"}'

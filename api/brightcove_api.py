@@ -525,7 +525,8 @@ class BrightcoveApi(object):
                             self.neon_api_key, i_id)
                     r = tornado.escape.json_decode(resp.body)
                     bc.videos[vid] = r['job_id']
-                    bc.last_process_date = int(item['publishedDate']) / 1000
+                    #publishedDate may be null, if video is unscheduled
+                    bc.last_process_date = pub_date = int(item['publishedDate']) /1000 if item['publishedDate'] else None
                     bc.save()
 
             else:
@@ -614,7 +615,7 @@ class BrightcoveApi(object):
             except Exception,e:
                 _log.exception('key=create_neon_api_requests msg=%s' % e)
                 return
-        
+            
             for item in items:
                 pdate = int(item['publishedDate']) / 1000
                 check_date = self.account_created if \
@@ -664,7 +665,6 @@ class BrightcoveApi(object):
         response = BrightcoveApi.read_connection.send_request(req)
         items = tornado.escape.json_decode(response.body)
 
-        import pdb; pdb.set_trace()
         #Logic to determine videos that may be not scheduled to run yet
         #publishedDate is null, and creationDate is recent (last 24 hrs) 
         #publishedDate can be null for inactive videos too
@@ -676,7 +676,7 @@ class BrightcoveApi(object):
         items_to_process = []
 
         for item in items['items']:
-            if item['publishedDate'] is None:
+            if item['publishedDate'] is None or len(item['publishedDate']) ==0:
                 items_to_process.append(item)
 
         self.process_publisher_feed(items_to_process,i_id)
