@@ -666,27 +666,10 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
             #rc = redis.StrictRedis('localhost',self.redis.port)
             #print rc.keys('im*') 
 
-    #TODO: Test pagination of video requests
+    #Test pagination of video requests
     def test_pagination_videos(self):
-        #create neon account
-        api_key = self.create_neon_account()
-        self.assertEqual(api_key,neondata.NeonApiKey.generate(self.a_id))
+        self._setup_initial_brightcove_state()
 
-        #Setup Side effect for the http clients
-        self.bapi_mock_client().fetch.side_effect = self._success_http_side_effect
-        self.cp_mock_client().fetch.side_effect = self._success_http_side_effect 
-        self.bapi_mock_async_client().fetch.side_effect = self._success_http_side_effect
-        self.cp_mock_async_client().fetch.side_effect = self._success_http_side_effect
-
-        #create brightcove account
-        json_video_response = self.create_brightcove_account()
-        video_response = json.loads(json_video_response)['items']
-        self.assertEqual(len(video_response),5) 
-
-        #auto publish test
-        reqs = self._create_neon_api_requests()
-        self._process_neon_api_requests(reqs)
-        
         ordered_videos = sorted(self._get_videos())
         
         #get videos in pages
