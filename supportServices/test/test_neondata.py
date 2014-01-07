@@ -10,9 +10,11 @@ if sys.path[0] <> base_path:
 import bcove_responses
 import logging
 _log = logging.getLogger(__name__)
+import multiprocessing
 from mock import patch, MagicMock
-import time
 import test_utils.redis
+import time
+import threading
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 from utils.options import define, options
 import unittest
@@ -92,6 +94,35 @@ class TestNeondata(unittest.TestCase):
         self.assertEqual(db.blocking_conn.get(key),val)
         self.assertTrue(db.blocking_conn.delete(key))
 
+    def test_concurrent_requests(self):
+        def db_operation(key):
+            resultQ.put(db.blocking_conn.get(key))
+
+        ap = AbstractPlatform()
+        db = DBConnection(ap)
+        key = "fookey"
+        val = "fooval"*1000
+        nkeys = 100
+        for i in range(nkeys):
+            db.blocking_conn.set(key+"%s"%i,val+"%s"%i)
+       
+        resultQ =  multiprocessing.Queue()
+        threads = []
+        for n in range(nkeys):
+            thread = threading.Thread(target=db_operation,args=(key+"%s"%n,))
+            threads.append(thread)
+            thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        results = []
+        for i in range(nkeys):
+            results.append(resultQ.get())  
+
+        #Make sure that each of the thread retrieved a key
+        #and did not have an exception
+        self.assertTrue(None not in results) 
 
 class TestBrightcovePlatform(unittest.TestCase):
     def setUp(self):
