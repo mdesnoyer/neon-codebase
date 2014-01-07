@@ -115,6 +115,8 @@ class DBConnection(object):
                 if cls._singleton_instance.has_key(cname):
                     cls._singleton_instance[cname] = cls(cname)
 
+    '''
+    #disable singleton instance
     def __new__(cls, *args, **kwargs):
         otype = args[0] #Arg pass can either be class name or class instance
         cname = None
@@ -130,7 +132,7 @@ class DBConnection(object):
                 if not cls._singleton_instance.has_key(cname):
                     cls._singleton_instance[cname] = object.__new__(cls,*args,**kwargs)
         return cls._singleton_instance[cname]
-
+    '''
 
 class DBConnectionCheck(threading.Thread):
 
@@ -153,8 +155,8 @@ class DBConnectionCheck(threading.Thread):
             time.sleep(self.interval)
 
 #start watchdog thread for the DB connection
-t = DBConnectionCheck()
-t.start()
+#t = DBConnectionCheck()
+#t.start()
 
 def _erase_all_data():
     '''Erases all the data from the redis databases.

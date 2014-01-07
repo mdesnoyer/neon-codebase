@@ -30,6 +30,7 @@ class TestNeondata(unittest.TestCase):
     def tearDown(self):
         self.redis.stop()
 
+    '''
     def test_dbconn_singleton(self):
         bp = BrightcovePlatform('2','3',4)
         self.bp_conn = DBConnection(bp)
@@ -48,16 +49,9 @@ class TestNeondata(unittest.TestCase):
         self.assertEqual(self.vm_conn,self.vm_conn2)
 
         self.assertNotEqual(self.bp_conn,self.vm_conn)
+    '''
 
-    def test_db_connection(self):
-        ap = AbstractPlatform()
-        db = DBConnection(ap)
-        key = "fookey"
-        val = "fooval"
-        self.assertTrue(db.blocking_conn.set(key,val))
-        self.assertEqual(db.blocking_conn.get(key),val)
-        self.assertTrue(db.blocking_conn.delete(key))
-
+    '''
     #Verify that database connection is re-established after config change
     def test_db_connection_error(self):
         ap = AbstractPlatform()
@@ -87,6 +81,17 @@ class TestNeondata(unittest.TestCase):
         self.assertTrue(db.blocking_conn.set(key,val))
 
     #TODO: Test Async DB Connection
+    '''
+    
+    def test_db_connection(self):
+        ap = AbstractPlatform()
+        db = DBConnection(ap)
+        key = "fookey"
+        val = "fooval"
+        self.assertTrue(db.blocking_conn.set(key,val))
+        self.assertEqual(db.blocking_conn.get(key),val)
+        self.assertTrue(db.blocking_conn.delete(key))
+
 
 class TestBrightcovePlatform(unittest.TestCase):
     def setUp(self):
