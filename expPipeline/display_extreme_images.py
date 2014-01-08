@@ -53,7 +53,7 @@ if __name__ == '__main__':
         if options.output_dir:
             shutil.copy(imageFn, options.output_dir)
             with open(os.path.join(options.output_dir, 'scores.txt'), 'aw') as f:
-                f.write('%s,%s\n', data[i])
+                f.write('%s,%s\n' % data[i])
 
     plt.tight_layout()
 
