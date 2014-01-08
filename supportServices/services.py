@@ -55,9 +55,9 @@ def CachePrimer():
 ################################################################################
 
 class GetVideoStatusResponse(object):
-    def __init__(self,items,page_no=0,page_size=100):
+    def __init__(self,items,count,page_no=0,page_size=100):
         self.items = items
-        self.total_count = len(items)
+        self.total_count = count 
         self.page_no = page_no
         self.page_size = page_size
         self.processing_count = 0
@@ -340,7 +340,7 @@ class AccountHandler(tornado.web.RequestHandler):
     @tornado.gen.engine
     def get_video_status_brightcove(self,i_id,vids):
         page_no = 0 
-        page_size = 100
+        page_size = 300
         try:
             page_no = int(self.get_argument('page_no'))
             page_size = min(int(self.get_argument('page_size')),300)
@@ -369,6 +369,8 @@ class AccountHandler(tornado.web.RequestHandler):
             data = '[]'
             self.send_json_response(data,200)
             return
+
+        total_count = len(vids)
 
         #Filter videos on page numbers
         #NOTE: Assume brightcove vids are in increasing order
@@ -477,7 +479,7 @@ class AccountHandler(tornado.web.RequestHandler):
         s_vresult = sorted(vresult, key=lambda k: k['publish_date'],reverse=True)
 
         #Json response data format { "items":[], "count":0, "page_no":0, "page_size":0} 
-        vstatus_response = GetVideoStatusResponse(s_vresult,page_no,page_size)
+        vstatus_response = GetVideoStatusResponse(s_vresult,total_count,page_no,page_size)
         data = vstatus_response.to_json() #tornado.escape.json_encode(jresponse.to_json())
         self.send_json_response(data,200)
 
@@ -652,7 +654,7 @@ class AccountHandler(tornado.web.RequestHandler):
                               thumbs)
                         video_response.append(vr.to_dict())
                         
-                    vstatus_response = GetVideoStatusResponse(video_response)
+                    vstatus_response = GetVideoStatusResponse(video_response,len(video_response))
                     data = vstatus_response.to_json() 
                     #data = tornado.escape.json_encode(video_response)
                     self.send_json_response(data,201)
