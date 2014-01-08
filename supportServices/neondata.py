@@ -115,8 +115,6 @@ class DBConnection(object):
                 if cls._singleton_instance.has_key(cname):
                     cls._singleton_instance[cname] = cls(cname)
 
-    '''
-    #disable singleton instance
     def __new__(cls, *args, **kwargs):
         otype = args[0] #Arg pass can either be class name or class instance
         cname = None
@@ -132,9 +130,8 @@ class DBConnection(object):
                 if not cls._singleton_instance.has_key(cname):
                     cls._singleton_instance[cname] = object.__new__(cls,*args,**kwargs)
         return cls._singleton_instance[cname]
-    '''
 
-class DBConnectionBackground(object):
+class RedisAsyncWrapper(object):
     '''
     Replacement class for tornado-redis 
     
@@ -144,8 +141,11 @@ class DBConnectionBackground(object):
     you can write db operations as if they were synchronous.
     
     usage: 
-    value = yield tornado.gen.Task(DBConnectionBackground().get,key)
+    value = yield tornado.gen.Task(RedisAsyncWrapper().get,key)
 
+
+    #TODO: see if we can completely wrap redis-py calls, helpful if
+    you can get the callback attribuet as well when call is made
     '''
 
     _thread_pool = ThreadPool(10)
@@ -156,13 +156,13 @@ class DBConnectionBackground(object):
     def get(self,key,callback):
         def _callback(result):
             tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
-        DBConnectionBackground._thread_pool.apply_async(
+        RedisAsyncWrapper._thread_pool.apply_async(
                 self.client.get,args=(key,),callback=_callback)
    
     def set(self,key,value,callback):
         def _callback(result):
             tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
-        DBConnectionBackground._thread_pool.apply_async(
+        RedisAsyncWrapper._thread_pool.apply_async(
             self.client.set,args=(key,value,),callback=_callback)
     
     def pipeline(self):
@@ -171,28 +171,15 @@ class DBConnectionBackground(object):
     def mget(self,keys,callback):
         def _callback(result):
             tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
-        DBConnectionBackground._thread_pool.apply_async(
+        RedisAsyncWrapper._thread_pool.apply_async(
             self.client.mget,args=(keys,),callback=_callback)
     
     def mset(self,keys,callback):
         def _callback(result):
             tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
-        DBConnectionBackground._thread_pool.apply_async(
+        RedisAsyncWrapper._thread_pool.apply_async(
             self.client.mset,args=(keys,),callback=_callback)
-
-    #def __getattribute__(self,name):
-    #   
-    #       if hasattr(attr, '__call__'):
-    #        def newfunc(*args, **kwargs):
-    #            def _callback(result):
-    #                #tornado.ioloop.IOLoop.current().add_callback(lambda: callback(result))
-    #                tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
-    #            DBConnectionBackground._thread_pool.apply_async(
-    #                    self.client.__getattribute__(name),args,kwargs,_callback)
-    #        return newfunc 
-    #    else:
-    #        return attr
-
+    
 class DBConnectionCheck(threading.Thread):
 
     ''' Watchdog thread class to check the DB connection objects '''
@@ -214,8 +201,8 @@ class DBConnectionCheck(threading.Thread):
             time.sleep(self.interval)
 
 #start watchdog thread for the DB connection
-#t = DBConnectionCheck()
-#t.start()
+t = DBConnectionCheck()
+t.start()
 
 def _erase_all_data():
     '''Erases all the data from the redis databases.
@@ -246,7 +233,7 @@ class RedisClient(object):
     blocking_client = None
 
     def __init__(self):
-        client = DBConnectionBackground(host,port)
+        client = RedisAsyncWrapper(host,port)
         blocking_client = blockingRedis.StrictRedis(host,port)
     
     @staticmethod
@@ -259,7 +246,7 @@ class RedisClient(object):
         if port is None:
             port = RedisClient.port
         
-        RedisClient.c = DBConnectionBackground(host,port)
+        RedisClient.c = RedisAsyncWrapper(host,port)
         RedisClient.bc = blockingRedis.StrictRedis(host,port,socket_timeout=10)
         return RedisClient.c,RedisClient.bc 
 

@@ -57,11 +57,22 @@ def CachePrimer():
 class GetVideoStatusResponse(object):
     def __init__(self,items,page_no=0,page_size=100):
         self.items = items
-        self.count = len(items)
+        self.total_count = len(items)
         self.page_no = page_no
         self.page_size = page_size
-    
+        self.processing_count = 0
+        self.recommended_count = 0
+        self.published_count = 0
+
     def to_json(self):
+        for item in self.items:
+            if item['status'] == "finished":
+                self.recommended_count += 1
+            elif item['status'] == "active":
+                self.published_count += 1
+            else:
+                self.processing_count +=1
+
         return json.dumps(self, default=lambda o: o.__dict__)
 
 class VideoResponse(object):
@@ -332,7 +343,7 @@ class AccountHandler(tornado.web.RequestHandler):
         page_size = 100
         try:
             page_no = int(self.get_argument('page_no'))
-            page_size = min(int(self.get_argument('page_size')),100)
+            page_size = min(int(self.get_argument('page_size')),300)
         except:
             pass
 
