@@ -12,29 +12,28 @@ Api Request Types
 - Neon, Brightcove, youtube
 
 '''
+import os
 import os.path
 import sys
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
-import redis as blockingRedis
-import tornadoredis as redis
-import tornado.gen
+import datetime
 import hashlib
 import json
+from multiprocessing.pool import ThreadPool
+import redis as blockingRedis
 import shortuuid
+import tornado.ioloop
+import tornado.gen
 import tornado.httpclient
-import datetime
+import threading
 import time
-import sys
-import os
-#import api.brightcove_api
-from api import brightcove_api
+from api import brightcove_api #coz of cyclic import 
 import api.youtube_api
 from PIL import Image
 from StringIO import StringIO
-import threading
 
 from utils.options import define, options
 
@@ -47,10 +46,11 @@ define("thumbnailDB", default="127.0.0.1", type=str,help="")
 define("dbPort",default=6379,type=int,help="redis port")
 define("watchdogInterval",default=3,type=int,help="interval for watchdog thread")
 
+
 class DBConnection(object):
     '''Connection to the database.'''
 
-    #TODO: Lock for each instance, currently locks for any instance creation
+    #Note: Lock for each instance, currently locks for any instance creation
     __singleton_lock = threading.Lock() 
     _singleton_instance = {} 
 
@@ -134,6 +134,65 @@ class DBConnection(object):
         return cls._singleton_instance[cname]
     '''
 
+class DBConnectionBackground(object):
+    '''
+    Replacement class for tornado-redis 
+    
+    This is a wrapper class which does redis operation
+    in a background thread and on completion transfers control
+    back to the tornado ioloop. If you wrap this around gen/Task,
+    you can write db operations as if they were synchronous.
+    
+    usage: 
+    value = yield tornado.gen.Task(DBConnectionBackground().get,key)
+
+    '''
+
+    _thread_pool = ThreadPool(10)
+    
+    def __init__(self,host='127.0.0.1',port=6379):
+        self.client = blockingRedis.StrictRedis(host,port,socket_timeout=10)
+
+    def get(self,key,callback):
+        def _callback(result):
+            tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
+        DBConnectionBackground._thread_pool.apply_async(
+                self.client.get,args=(key,),callback=_callback)
+   
+    def set(self,key,value,callback):
+        def _callback(result):
+            tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
+        DBConnectionBackground._thread_pool.apply_async(
+            self.client.set,args=(key,value,),callback=_callback)
+    
+    def pipeline(self):
+        return self.client.pipeline()
+
+    def mget(self,keys,callback):
+        def _callback(result):
+            tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
+        DBConnectionBackground._thread_pool.apply_async(
+            self.client.mget,args=(keys,),callback=_callback)
+    
+    def mset(self,keys,callback):
+        def _callback(result):
+            tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
+        DBConnectionBackground._thread_pool.apply_async(
+            self.client.mset,args=(keys,),callback=_callback)
+
+    #def __getattribute__(self,name):
+    #   
+    #       if hasattr(attr, '__call__'):
+    #        def newfunc(*args, **kwargs):
+    #            def _callback(result):
+    #                #tornado.ioloop.IOLoop.current().add_callback(lambda: callback(result))
+    #                tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
+    #            DBConnectionBackground._thread_pool.apply_async(
+    #                    self.client.__getattribute__(name),args,kwargs,_callback)
+    #        return newfunc 
+    #    else:
+    #        return attr
+
 class DBConnectionCheck(threading.Thread):
 
     ''' Watchdog thread class to check the DB connection objects '''
@@ -187,8 +246,7 @@ class RedisClient(object):
     blocking_client = None
 
     def __init__(self):
-        client = redis.Client(host,port)
-        client.connect()
+        client = DBConnectionBackground(host,port)
         blocking_client = blockingRedis.StrictRedis(host,port)
     
     @staticmethod
@@ -201,7 +259,7 @@ class RedisClient(object):
         if port is None:
             port = RedisClient.port
         
-        RedisClient.c = redis.Client(host,port)
+        RedisClient.c = DBConnectionBackground(host,port)
         RedisClient.bc = blockingRedis.StrictRedis(host,port,socket_timeout=10)
         return RedisClient.c,RedisClient.bc 
 
@@ -301,11 +359,14 @@ class NeonUserAccount(object):
         '''
         Save Neon User account and corresponding integration
         '''
+        
+        #temp: changing this to a blocking pipeline call   
         db_connection = DBConnection(self)
-        pipe = db_connection.conn.pipeline()
+        pipe = db_connection.blocking_conn.pipeline()
         pipe.set(self.key,self.to_json())
         pipe.set(new_integration.key,new_integration.to_json()) 
-        pipe.execute(callback)
+        #pipe.execute(callback)
+        callback(pipe.execute())
 
     @classmethod
     def get_account(cls,api_key,callback=None):
