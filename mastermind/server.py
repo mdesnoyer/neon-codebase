@@ -216,7 +216,7 @@ class StatsDBWatcher(threading.Thread):
         if isinstance(cur_update, basestring):
             cur_update = datetime.strptime(cur_update, '%Y-%m-%d %H:%M:%S')
         if self.last_update is None or cur_update > self.last_update:
-            _log.info('The database was updated at %s. Processing' 
+            _log.info('The stats database was updated at %s. Processing' 
                       % cur_update)
 
             # The database was updated, so process the new state.
