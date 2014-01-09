@@ -559,7 +559,8 @@ class BrightcovePlatform(AbstractPlatform):
         fsize = vmdata.get_frame_size()
 
         #Get all thumbnails
-        thumb_mappings = yield tornado.gen.Task(ThumbnailIDMapper.get_thumb_mappings,tids)
+        thumb_mappings = yield tornado.gen.Task(
+                ThumbnailIDMapper.get_thumb_mappings,tids)
         t_url = None
        
         #Check if the new tid exists
@@ -930,6 +931,7 @@ class RequestState(object):
     FAILED     = "failed"
     FINISHED   = "finished"
     INT_ERROR  = "internal_error"
+    ACTIVE     = "active" #thumbnail live 
 
 class NeonApiRequest(object):
     '''
