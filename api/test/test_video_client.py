@@ -151,10 +151,9 @@ class TestVideoClient(unittest.TestCase):
             self.assertNotEqual(value,None,"Video metadata test")
        
         #verify that following maps get populated
-        self.assertGreater(len(self.pv.data_map),0,"Model did not return values")
-        self.assertGreater(len(self.pv.attr_map),0,"Model did not return values")
-        self.assertGreater(len(self.pv.timecodes),0,"Model did not return values")
-
+        self.assertGreater(len(self.pv.data_map),0)
+        self.assertGreater(len(self.pv.attr_map),0)
+        self.assertGreater(len(self.pv.timecodes),0)
         self.assertFalse(float('-inf') in self.pv.valence_scores[1],
                 "discarded frames havent been filtered")
         
@@ -174,8 +173,7 @@ class TestVideoClient(unittest.TestCase):
         #send client response & verify
         self.dl.send_client_response()
         s3_keys = [x for x in conn.buckets['host-thumbnails'].get_all_keys()]
-        self.assertEqual(len(s3_keys),1,
-                "send client resposne and host images s3")
+        self.assertEqual(len(s3_keys), 1)
     
     @patch('api.client.S3Connection')
     def test_save_data_to_s3(self,mock_conntype):
@@ -191,7 +189,7 @@ class TestVideoClient(unittest.TestCase):
         #save data to s3
         self.pv.save_data_to_s3()
         s3_keys = [x for x in conn.buckets['neon-beta-test'].get_all_keys()]
-        self.assertEqual(len(s3_keys),1)
+        self.assertEqual(len(s3_keys), 1)
 
     @patch('api.client.S3Connection')
     def test_brightcove_request_process(self,mock_conntype):
