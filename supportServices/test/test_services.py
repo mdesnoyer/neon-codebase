@@ -670,7 +670,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
     def test_pagination_videos(self):
         self._setup_initial_brightcove_state()
 
-        ordered_videos = sorted(self._get_videos())
+        ordered_videos = sorted(self._get_videos(),reverse=True)
         
         #get videos in pages
         page_no = 0
@@ -682,7 +682,9 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         items = json.loads(resp.body)['items']
         self.assertEqual(len(items),page_size,"page size did not match")
         result_vids = [ x['video_id'] for x in items ]
-        self.assertItemsEqual(ordered_videos[:page_size],result_vids) 
+        
+        self.assertItemsEqual(ordered_videos[:page_size],
+                result_vids,"result ordering doesnt match") 
 
         #test page no (initial # of vids populated =5)
         page_no = 1
@@ -706,6 +708,8 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         resp = self.get_request(url,self.api_key)
         items = json.loads(resp.body)['items']
         result_vids = [ x['video_id'] for x in items ]
+        
+        #Check videos are sorted by publish date or video ids ? 
         self.assertEqual(len(ordered_videos),len(result_vids))
         
         #request last page with page_size > #of videos available in the page
@@ -719,6 +723,8 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         result_vids = [ x['video_id'] for x in items ]
         self.assertEqual(len(ordered_videos) - (page_no*page_size),
                         len(result_vids))
+
+
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

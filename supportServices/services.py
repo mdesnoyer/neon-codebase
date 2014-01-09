@@ -55,23 +55,21 @@ def CachePrimer():
 ################################################################################
 
 class GetVideoStatusResponse(object):
-    def __init__(self,items,count,page_no=0,page_size=100):
+    def __init__(self,items,count,page_no=0,page_size=100,
+            processing_count=0,recommended_count=0,published_count=0):
         self.items = items
         self.total_count = count 
         self.page_no = page_no
         self.page_size = page_size
-        self.processing_count = 0
-        self.recommended_count = 0
-        self.published_count = 0
+        self.processing_count = processing_count
+        self.recommended_count = recommended_count
+        self.published_count = published_count
 
     def to_json(self):
         for item in self.items:
-            if item['status'] == "finished":
-                self.recommended_count += 1
-            elif item['status'] == "active":
-                self.published_count += 1
-            else:
-                self.processing_count +=1
+            for thumb in item['thumbnails']:
+                if thumb['model_score'] == float('-inf'):
+                    thumb['model_score'] = 0 
 
         return json.dumps(self, default=lambda o: o.__dict__)
 
@@ -339,6 +337,11 @@ class AccountHandler(tornado.web.RequestHandler):
     ''' Get video status for multiple videos -- Brightcove Integration '''
     @tornado.gen.engine
     def get_video_status_brightcove(self,i_id,vids):
+        #counters 
+        c_published = 0
+        c_processing = 0
+        c_recommended = 0
+
         page_no = 0 
         page_size = 300
         try:
@@ -375,15 +378,6 @@ class AccountHandler(tornado.web.RequestHandler):
         #Filter videos on page numbers
         #NOTE: Assume brightcove vids are in increasing order
 
-        #case1: there are more vids than page_size
-        if len(vids) > page_size:
-            #This means paging is valid
-            #check if for the page_no request there are 
-            #sort video ids
-            s_vids = sorted(vids)
-            s_index = page_no * page_size
-            e_index = (page_no +1) * page_size
-            vids = s_vids[s_index:e_index]
 
         job_ids = [] 
         for vid in vids:
@@ -470,17 +464,37 @@ class AccountHandler(tornado.web.RequestHandler):
             if vres.status == "finished" and vres.current_thumbnail == 0:
                 vres.current_thumbnail = bcove_thumb_id
 
-        #convert to dict
+        #convert to dict and count total counts for each state
         vresult = []
         for res in result:
             vres = result[res]
             vresult.append(vres.to_dict())
+            
+            #counters
+            status = vres.status
+            if status == "finished":
+                c_recommended += 1 
+            elif status == "active":
+                c_published += 1 
+            else:
+                c_processing += 1
 
-        s_vresult = sorted(vresult, key=lambda k: k['publish_date'],reverse=True)
+        #s_vresult = sorted(vresult, key=lambda k: k['publish_date'],reverse=True)
+        s_vresult = sorted(vresult, key=lambda k: k['video_id'],reverse=True)
+        
+        #case: There are more vids than page_size
+        if len(vids) > page_size:
+            #This means paging is valid
+            #check if for the page_no request there are 
+            #sort video ids
+            s_index = page_no * page_size
+            e_index = (page_no +1) * page_size
+            s_vresult = s_vresult[s_index:e_index]
 
         #Json response data format { "items":[], "count":0, "page_no":0, "page_size":0} 
-        vstatus_response = GetVideoStatusResponse(s_vresult,total_count,page_no,page_size)
-        data = vstatus_response.to_json() #tornado.escape.json_encode(jresponse.to_json())
+        vstatus_response = GetVideoStatusResponse(s_vresult,total_count,page_no,page_size,
+                c_processing,c_recommended,c_published)
+        data = vstatus_response.to_json() 
         self.send_json_response(data,200)
 
 

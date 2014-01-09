@@ -526,7 +526,7 @@ class BrightcoveApi(object):
                     r = tornado.escape.json_decode(resp.body)
                     bc.videos[vid] = r['job_id']
                     #publishedDate may be null, if video is unscheduled
-                    bc.last_process_date = pub_date = int(item['publishedDate']) /1000 if item['publishedDate'] else None
+                    bc.last_process_date = int(item['publishedDate']) /1000 if item['publishedDate'] else None
                     bc.save()
 
             else:
