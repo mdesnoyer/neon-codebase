@@ -50,6 +50,8 @@ define("flush_interval", default=120, type=float,
        help='Interval in seconds to force a flush to S3')
 define("max_concurrent_uploads", default=100, type=int,
        help='Maximum number of concurrent uploads')
+define("s3accesskey", default='AKIAJ5G2RZ6BDNBZ2VBA', help="s3 access key", type=str)
+define("s3secretkey", default='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', help="s3 secret key", type=str)
 
 from utils import statemon
 statemon.define('qsize', int)
@@ -198,7 +200,8 @@ class S3Handler(threading.Thread):
             self.use_s3 = True
 
             if self.s3conn is None:
-                self.s3conn = S3Connection()
+                self.s3conn = S3Connection(options.s3accesskey,
+                        options.s3secretkey)
                 
             bucket = self.s3conn.lookup(self.bucket_name)
             if bucket is None:

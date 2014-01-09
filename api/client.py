@@ -197,11 +197,12 @@ class ProcessVideo(object):
             _log.info("key=process_all current time=%s " %(self.sec_to_extract))
 
         for image, score, frame_no, timecode, attribute in results:
-            self.valence_scores[0].append(timecode)
-            self.valence_scores[1].append(score)
-            self.timecodes[frame_no] = timecode
-            self.data_map[frame_no] = (score, image[:,:,::-1])
-            self.attr_map[frame_no] = attribute
+            if attribute is not None and attribute == '':
+                self.valence_scores[0].append(timecode)
+                self.valence_scores[1].append(score)
+                self.timecodes[frame_no] = timecode
+                self.data_map[frame_no] = (score, image[:,:,::-1])
+                self.attr_map[frame_no] = attribute
         
         #del reference to stream object
         del mov
