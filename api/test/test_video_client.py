@@ -100,9 +100,11 @@ class TestVideoClient(unittest.TestCase):
         '''
         j_id = "j123"
         api_key = "apikey123"
-        jparams = request_template.neon_api_request %(j_id,"v",api_key,"neon",api_key,j_id)
+        jparams = request_template.neon_api_request %(
+                j_id,"v",api_key,"neon",api_key,j_id)
         params = json.loads(jparams)
-        self.dl = client.HttpDownload(jparams, None, self.model, self.model_version)
+        self.dl = client.HttpDownload(jparams, None, 
+                self.model, self.model_version)
         self.pv = client.ProcessVideo(params, jparams, 
                 self.model, self.model_version, False,123)
         self.dl.pv = self.pv
@@ -152,6 +154,9 @@ class TestVideoClient(unittest.TestCase):
         self.assertGreater(len(self.pv.data_map),0,"Model did not return values")
         self.assertGreater(len(self.pv.attr_map),0,"Model did not return values")
         self.assertGreater(len(self.pv.timecodes),0,"Model did not return values")
+
+        self.assertFalse(float('-inf') in self.pv.valence_scores[1],
+                "discarded frames havent been filtered")
         
     @patch('api.client.S3Connection')
     def test_neon_request_process(self,mock_conntype):
@@ -169,7 +174,8 @@ class TestVideoClient(unittest.TestCase):
         #send client response & verify
         self.dl.send_client_response()
         s3_keys = [x for x in conn.buckets['host-thumbnails'].get_all_keys()]
-        self.assertEqual(len(s3_keys),1,"send client resposne and host images s3")
+        self.assertEqual(len(s3_keys),1,
+                "send client resposne and host images s3")
     
     @patch('api.client.S3Connection')
     def test_save_data_to_s3(self,mock_conntype):
@@ -185,7 +191,7 @@ class TestVideoClient(unittest.TestCase):
         #save data to s3
         self.pv.save_data_to_s3()
         s3_keys = [x for x in conn.buckets['neon-beta-test'].get_all_keys()]
-        self.assertEqual(len(s3_keys),3,"Save data to s3")
+        self.assertEqual(len(s3_keys),1)
 
     @patch('api.client.S3Connection')
     def test_brightcove_request_process(self,mock_conntype):
@@ -270,9 +276,11 @@ class TestVideoClient(unittest.TestCase):
 
         j_id = "j123"
         api_key = "apikey123"
-        jparams = request_template.neon_api_request %(j_id,"v",api_key,"neon",api_key,j_id)
+        jparams = request_template.neon_api_request %(
+                j_id,"v",api_key,"neon",api_key,j_id)
         params = json.loads(jparams)
-        self.dl = client.HttpDownload(jparams, self.ioloop, self.model, self.model_version)
+        self.dl = client.HttpDownload(jparams, self.ioloop, 
+                self.model, self.model_version)
         request = HTTPRequest('http://neon-lab.com/video.mp4')
         data = "somefakevideodata"
         response = HTTPResponse(request, 200, buffer=StringIO(data),
@@ -295,9 +303,11 @@ class TestVideoClient(unittest.TestCase):
         
         j_id = "j123"
         api_key = "apikey123"
-        jparams = request_template.neon_api_request %(j_id,"v",api_key,"neon",api_key,j_id)
+        jparams = request_template.neon_api_request %(
+                j_id,"v",api_key,"neon",api_key,j_id)
         params = json.loads(jparams)
-        self.dl = client.HttpDownload(jparams, self.ioloop, self.model, self.model_version)
+        self.dl = client.HttpDownload(jparams, self.ioloop, 
+                self.model, self.model_version)
         request = HTTPRequest('http://neon-lab.com/video.mp4')
         data = "somefakevideodata"
         
@@ -327,9 +337,11 @@ class TestVideoClient(unittest.TestCase):
         
         j_id = "j123"
         api_key = "apikey123"
-        jparams = request_template.neon_api_request %(j_id,"v",api_key,"neon",api_key,j_id)
+        jparams = request_template.neon_api_request %(j_id,"v",
+                api_key,"neon",api_key,j_id)
         params = json.loads(jparams)
-        self.dl = client.HttpDownload(jparams, self.ioloop, self.model, self.model_version)
+        self.dl = client.HttpDownload(jparams, self.ioloop, 
+                self.model, self.model_version)
         data = "somefakevideodata"
         self.dl.callback_data_size = len(data) -1 #change callback datasize
         '''process_all method would return an error coz data is not valid 

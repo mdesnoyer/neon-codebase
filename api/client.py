@@ -23,12 +23,16 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
+import copy
 import datetime
+import gzip
 import hashlib
-import matplotlib
 import model
 import properties
+import Queue
 import random
+import shutil
+import signal
 import tempfile
 import tornado.web
 import tornado.gen
@@ -36,20 +40,11 @@ import tornado.escape
 import tornado.httpclient
 import tornado.httputil
 import tornado.ioloop
-import Queue
 import time
 import numpy as np
-import signal
-import shutil
-
-matplotlib.use('Agg') #To use without the $DISPLAY var on aws
-import matplotlib.pyplot as plt
-
 from PIL import Image
 from optparse import OptionParser
-
 import leargist
-import svmlight
 import ffvideo 
 
 from boto.exception import S3ResponseError
@@ -59,8 +54,6 @@ from boto.s3.bucket import Bucket
 from StringIO import StringIO
 
 import tarfile
-import gzip
-import copy
 
 import brightcove_api
 import youtube_api
@@ -375,46 +368,8 @@ class ProcessVideo(object):
             tmp_tar_file.close()
             gzip_file.close()
 
-            ''' Save valence plot and video meta data '''
-
-            #compute avg video valence score
-            mean_valence = np.mean(self.valence_scores[1])
-            self.video_metadata["video_valence"] = "%.4f" %float(mean_valence)
-            video_metadata = tornado.escape.json_encode(self.video_metadata)
-                
-            #plot valence graph    
-            plt.ylim([0,10])
-            plt.xlabel('time in secs')
-            plt.ylabel('valence score')
-            plt.plot(self.valence_scores[0],self.valence_scores[1])
-            fig = plt.gcf()
-            if not options.local:
-                #Save video metadata
-                keyname = self.base_filename + "/"+ 'video_metadata.txt'
-                k = s3bucket.new_key(keyname)
-                k.set_contents_from_string(video_metadata)
-                
-                #save valence graph
-                imgdata = StringIO()
-                fig.savefig(imgdata, format='png')
-                fig.clear()
-                imgdata.seek(0)
-                data = imgdata.read()
-                keyname = self.base_filename + "/"+ 'vgraph' +"." + self.format
-                k = s3bucket.new_key(keyname)
-                k.set_contents_from_string(data)
-            else:
-                #save to filesystem
-                fname = "results/" + self.request_map[properties.REQUEST_UUID_KEY] + "-"
-                with open(fname + 'video_metadata.txt','w') as f:
-                    f.write(video_metadata)
-                fig.savefig(fname + "vgraph" + '.png')
-                fig.clear()
-
         except S3ResponseError,e:
             _log.error("key=save_to_s3 msg=s3 response error " + e.__str__() )
-        except StopIteration,e:
-            pass #known error with boto
         except Exception,e:
             _log.error("key=save_to_s3 msg=general exception " + e.__str__() )
             if self.debug:

@@ -706,12 +706,19 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
                 '%s/videos?page_no=%s&page_size=%s'
                 %(self.a_id,self.b_id,page_no,page_size))
         resp = self.get_request(url,self.api_key)
-        items = json.loads(resp.body)['items']
+        response = json.loads(resp.body)
+        items = response['items']
         result_vids = [ x['video_id'] for x in items ]
         
         #Check videos are sorted by publish date or video ids ? 
-        self.assertEqual(len(ordered_videos),len(result_vids))
-        
+        self.assertEqual(len(ordered_videos),len(result_vids),
+                "number of videos returned dont match")
+    
+        #re-create response
+        self.assertEqual(response['published_count'],0)
+        self.assertEqual(response['processing_count'],0)
+        self.assertEqual(response['recommended_count'],len(ordered_videos))
+
         #request last page with page_size > #of videos available in the page
         page_no = 1 
         page_size = 3 
