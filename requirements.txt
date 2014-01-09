@@ -27,3 +27,4 @@ tornado==3.1.1
 tornado-redis==2.4.9
 coverage==3.7
 BeautifulSoup4==4.3.2
+pycurl==7.19
