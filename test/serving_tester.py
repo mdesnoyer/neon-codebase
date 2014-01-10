@@ -41,6 +41,7 @@ from StringIO import StringIO
 import subprocess
 from supportServices import neondata
 import tempfile
+import test_utils.redis
 import time
 import tornado.httpclient
 import tornado.httpserver
@@ -50,6 +51,7 @@ import tornado.web
 import unittest
 import urllib
 import urllib2
+import utils.logs
 import utils.neon
 import utils.ps
 from utils import statemon
@@ -74,16 +76,42 @@ _activity_watcher = utils.ps.ActivityWatcher()
 
 
 class TestServingSystem(tornado.testing.AsyncTestCase):
-    __test__ = False # Disabled the test when run by nose
-
     @classmethod
     def setUpClass(cls):
+        conf_path = os.path.join(os.path.dirname(__file__),
+                                 'local_tester.conf')
+        options.parse_options(['-c', conf_path])
+        utils.logs.AddConfiguredLogger()
+        
+        signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
+        atexit.register(utils.ps.shutdown_children)
+
+        cls.redis = test_utils.redis.RedisServer(7210)
+        cls.redis.start()
+
+        # Turn off the annoying logs
+        logging.getLogger('tornado.access').propagate = False
+        logging.getLogger('tornado.application').propagate = False
+        logging.getLogger('mrjob.local').propagate = False
+        logging.getLogger('mrjob.config').propagate = False
+        logging.getLogger('mrjob.conf').propagate = False
+        logging.getLogger('mrjob.runner').propagate = False
+        logging.getLogger('mrjob.sim').propagate = False
+
+        LaunchStatsDb()
+        LaunchMastermind()
+        LaunchClickLogServer()
+        LaunchFakeS3()
+        LaunchStatsProcessor()
+
         _log.info('Starting the directive capture server on port %i' 
                   % options.bc_directive_port)
         cls._directive_cap = DirectiveCaptureProc(options.bc_directive_port)
         cls.directive_q = cls._directive_cap.q
         cls._directive_cap.start()
         cls._directive_cap.wait_until_running()
+
+        _activity_watcher.wait_for_idle()
 
     @classmethod
     def tearDownClass(cls):
@@ -94,6 +122,8 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
                 os.kill(cls._directive_cap.pid, signal.SIGKILL)
             except OSError:
                 pass
+        cls.redis.stop()
+        utils.ps.shutdown_children()
 
     def setUp(self):
         super(TestServingSystem, self).setUp()
@@ -342,7 +372,6 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         bp.save()
 
 
-    #TODO: Write the actual tests
     def test_initial_directives_received(self):
         self.add_account_to_videodb('init_account0', 'init_int0', 1, 3)
         self.assertDirectiveCaptured(('init_account0_vid0',
@@ -492,36 +521,6 @@ def LaunchStatsDb():
     
     _log.info('Connection to stats db is good')
 
-def LaunchVideoDb():
-    '''Launches the video db.'''
-    if options.get('supportServices.neondata.dbPort') == 6379:
-        raise Exception('Not allowed to talk to the default Redis server '
-                        'so that we do not accidentially erase it. '
-                        'Please change the port number.')
-    
-    _log.info('Launching video db')
-    if not os.path.exists('/tmp/test/redis'):
-        os.makedirs('/tmp/test/redis')
-    proc = subprocess.Popen([
-        '/usr/bin/env', 'redis-server',
-        os.path.join(os.path.dirname(__file__), 'test_video_db.conf')],
-        stdout=subprocess.PIPE)
-
-    # Wait until the db is up correctly
-    upRe = re.compile('The server is now ready to accept connections on port')
-    video_db_log = []
-    while proc.poll() is None:
-        line = proc.stdout.readline()
-        video_db_log.append(line)
-        if upRe.search(line):
-            break
-
-    if proc.poll() is not None:
-        raise Exception('Error starting video db. Log:\n%s' %
-                        '\n'.join(video_db_log))
-
-    _log.info('Video db is up')
-
 def LaunchMastermind():
     proc = multiprocessing.Process(target=mastermind.server.main,
                                    args=(_activity_watcher,))
@@ -599,8 +598,6 @@ def main():
         sys.exit(0)
     else:
         sys.exit(1)
-    
 
 if __name__ == "__main__":
-    utils.neon.InitNeon()
-    main()
+    unittest.main()
