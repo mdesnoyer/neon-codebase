@@ -24,5 +24,5 @@ clean:
 
 test: all
 	cd build/${BUILD_TYPE} && make -k $@
+	nosetests --exe
 
-  
