@@ -19,18 +19,3 @@ target_link_libraries(connectedcomponents
 )
 
 ######## All tests after this point #########
-add_test(options_test
-  ${PROJECT_SOURCE_DIR}/test/options_test.py
-)
-
-add_test(http_test
-  ${PROJECT_SOURCE_DIR}/test/http_test.py
-)
-
-add_test(ps_test
-  ${PROJECT_SOURCE_DIR}/test/ps_test.py
-)
-
-add_test(statemon_test
-  ${PROJECT_SOURCE_DIR}/test/statemon_test.py
-)

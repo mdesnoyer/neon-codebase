@@ -29,4 +29,7 @@ cd ${BUILDDIR}
 ctest -T test --no-compress-output || true
 if [ -f Testing/TAG ] ; then
    xsltproc ${CURDIR}/test_utils/ctest2junix.xsl Testing/`head -n 1 < Testing/TAG`/Test.xml > ${CURDIR}/CTestResults.xml
+
+   cd ${CURDIR}
+   nosetests --with-coverage --with-xunit --cover-package . --cover-erase --exe --cover-xml || true
 fi
