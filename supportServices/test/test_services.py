@@ -731,7 +731,27 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         self.assertEqual(len(ordered_videos) - (page_no*page_size),
                         len(result_vids))
 
+    def test_negative_inf_model_scores(self):
+        self._setup_initial_brightcove_state()
 
+        key = '8dab424867e8c12417a2f1796631c179_2323153341001_451f5b1dcd6d2953ed7863c2af31855c'
+        
+        #update in database the thumbnail to have -inf score
+        td = neondata.ThumbnailIDMapper.get_thumb_mappings([key])
+        td[0].thumbnail_metadata['model_score'] = float('-inf')
+        neondata.ThumbnailIDMapper.save_all(td)
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
+                '%s/videos?page_no=%s&page_size=%s'
+                %(self.a_id,self.b_id,0,100))
+        resp = self.get_request(url,self.api_key)
+        response = json.loads(resp.body)
+       
+        model_scores = []
+        for r in response['items']:
+            for t in r['thumbnails']:
+                model_scores.append(t['model_score'])
+
+        self.assertFalse(float('-inf') in model_scores)    
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

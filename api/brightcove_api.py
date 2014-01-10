@@ -654,11 +654,11 @@ class BrightcoveApi(object):
             if count < total or psize * (pno +1) > total:
                 done = True
 
+        self.sync_neondb_with_brightcovedb(items_processed,i_id)
         if len(items_to_process) < 1 :
             return
 
         self.process_publisher_feed(items_to_process,i_id)
-        self.sync_neondb_with_brightcovedb(items_processed,i_id)
         return
 
     ## Find videos scheduled in the future and process them

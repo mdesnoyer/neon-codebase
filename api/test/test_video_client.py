@@ -173,7 +173,7 @@ class TestVideoClient(unittest.TestCase):
         #send client response & verify
         self.dl.send_client_response()
         s3_keys = [x for x in conn.buckets['host-thumbnails'].get_all_keys()]
-        self.assertEqual(len(s3_keys), 1)
+        self.assertEqual(len(s3_keys), 5)
     
     @patch('api.client.S3Connection')
     def test_save_data_to_s3(self,mock_conntype):
