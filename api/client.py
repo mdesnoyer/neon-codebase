@@ -948,7 +948,7 @@ class HttpDownload(object):
         request_type = self.job_params['request_type']
         api_method = self.job_params['api_method'] 
         api_param =  self.job_params['api_param']
-        MAX_T = 5
+        MAX_T = 6
 
         ''' Neon API section 
         '''
@@ -965,7 +965,7 @@ class HttpDownload(object):
             data = ranked_frames[:topn]
             timecodes = self.pv.get_timecodes(data)
             
-            #host top 5 images on s3
+            #host top MAX_T images on s3
             s3_urls = self.pv.host_images_s3(ranked_frames[:MAX_T])
             cr = ClientCallbackResponse(self.job_params,data,self.error,urls=s3_urls[:topn])
             cr.send_response()  

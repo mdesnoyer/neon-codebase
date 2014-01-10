@@ -542,6 +542,28 @@ class BrightcoveApi(object):
                 vid_request.video_title = title
                 vid_request.save()
 
+    def sync_neondb_with_brightcovedb(self,items,i_id):
+                
+        bc = supportServices.neondata.BrightcovePlatform.get_account(
+            self.neon_api_key, i_id)
+        videos_processed = bc.get_videos() 
+        if videos_processed is None:
+            videos_processed = [] 
+        
+        for item in items:
+            vid   = str(item['id'])
+            title = item['name']
+            if vid in videos_processed:
+                job_id = bc.videos[vid]
+                req_data = supportServices.neondata.NeonApiRequest.get_request(
+                        self.neon_api_key,job_id)
+                vid_request = supportServices.neondata.NeonApiRequest.create(
+                        req_data)
+                pub_date = int(item['publishedDate']) if item['publishedDate'] else None
+                vid_request.publish_date = pub_date 
+                vid_request.video_title = title
+                vid_request.save()
+
     def format_neon_api_request(self, id, video_download_url, 
                                 prev_thumbnail=None, request_type='topn',
                                 i_id=None, title=None, callback=None):
@@ -595,6 +617,7 @@ class BrightcoveApi(object):
         
         #Get publisher feed
         items_to_process = []  
+        items_processed = [] #videos that Neon has processed
         done = False
         page_no = 0
 
@@ -623,6 +646,8 @@ class BrightcoveApi(object):
                 if pdate > check_date:
                     items_to_process.append(item)
                     count += 1
+                else:
+                    items_processed.append(item)
 
             #if we have seen all items or if we have seen all the new
             #videos since last pub date
@@ -633,6 +658,7 @@ class BrightcoveApi(object):
             return
 
         self.process_publisher_feed(items_to_process,i_id)
+        self.sync_neondb_with_brightcovedb(items_processed,i_id)
         return
 
     ## Find videos scheduled in the future and process them
