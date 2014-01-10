@@ -69,7 +69,7 @@ class GetVideoStatusResponse(object):
         for item in self.items:
             for thumb in item['thumbnails']:
                 if thumb['model_score'] == float('-inf'):
-                    thumb['model_score'] = 0 
+                    thumb['model_score'] = 0  # -1 * sys.maxint
 
         return json.dumps(self, default=lambda o: o.__dict__)
 
