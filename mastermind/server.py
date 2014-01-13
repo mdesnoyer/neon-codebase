@@ -123,11 +123,25 @@ class VideoDBWatcher(threading.Thread):
             for video_id in platform.videos.iterkeys():
                 video_metadata = neondata.VideoMetadata.get(
                     video_id)
-                thumbnails = [
-                    ThumbnailInfo.from_db_data(
-                        neondata.ThumbnailIDMapper.get_thumb_metadata(
-                            thumb_id)) 
-                    for thumb_id in video_metadata.thumbnail_ids]
+                if video_metadata is None:
+                    _log.error('Could not find information about video %s' %
+                               video_id)
+                    continue
+
+                thumbnails = []
+                data_missing = False
+                for thumb_id in video_metadata.thumbnail_ids:
+                    meta = neondata.ThumbnailIDMapper.get_thumb_metadata(
+                        thumb_id)
+                    if meta is None:
+                        _log.error('Could not find metadata for thumb %s' %
+                                   thumb_id)
+                        data_missing = True
+                    else:
+                        thumbnails.append(ThumbnailInfo.from_db_data(meta))
+
+                if data_missing:
+                    continue
 
                 self.ab_manager.register_video_distribution(
                     video_id, DistributionType.fromString(platform.get_ovp()))
@@ -202,7 +216,7 @@ class StatsDBWatcher(threading.Thread):
         if isinstance(cur_update, basestring):
             cur_update = datetime.strptime(cur_update, '%Y-%m-%d %H:%M:%S')
         if self.last_update is None or cur_update > self.last_update:
-            _log.info('The database was updated at %s. Processing' 
+            _log.info('The stats database was updated at %s. Processing' 
                       % cur_update)
 
             # The database was updated, so process the new state.
@@ -309,14 +323,17 @@ class GetDirectives(tornado.web.RequestHandler):
             self.finish()
 
 def main(activity_watcher = utils.ps.ActivityWatcher()):
-    mastermind, ab_manager = initialize()
+    with activity_watcher.activate():
+        mastermind, ab_manager = initialize()
 
-    videoDbThread = VideoDBWatcher(mastermind, ab_manager, activity_watcher)
-    videoDbThread.start()
-    videoDbThread.wait_until_loaded()
-    statsDbThread = StatsDBWatcher(mastermind, ab_manager, activity_watcher)
-    statsDbThread.start()
-    statsDbThread.wait_until_loaded()
+        videoDbThread = VideoDBWatcher(mastermind, ab_manager,
+                                       activity_watcher)
+        videoDbThread.start()
+        videoDbThread.wait_until_loaded()
+        statsDbThread = StatsDBWatcher(mastermind, ab_manager,
+                                       activity_watcher)
+        statsDbThread.start()
+        statsDbThread.wait_until_loaded()
 
     _log.info('Starting server on port %i' % options.port)
     application = tornado.web.Application([

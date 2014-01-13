@@ -12,6 +12,7 @@ sys.path.insert(0,os.path.abspath(
 
 import boto
 import boto.exception
+import concurrent.futures
 import fake_filesystem
 import mock
 from mock import patch
@@ -19,7 +20,10 @@ import os
 from StringIO import StringIO
 import options_test_module as test_mod
 import time
+import tornado.gen
 import unittest
+import tornado.ioloop
+import tornado.testing
 import utils.options
 
 class FileStringIO(StringIO):
@@ -29,6 +33,36 @@ class FileStringIO(StringIO):
     def __exit__(self, *args):
         self.close()
         return False
+
+class TestAsyncOptions(tornado.testing.AsyncTestCase):
+    def setUp(self):
+        super(TestAsyncOptions, self).setUp()
+        self.parser = utils.options.OptionParser()
+
+    @tornado.gen.engine
+    def lookup_int_callback(self, ntimes, callback=None):
+        '''Function used by test_lots_of_callbacks.'''
+        self.assertEqual(self.parser.an_int, 6)
+        
+        if ntimes == 0:
+            callback()
+            return
+
+
+        yield tornado.gen.Task(self.lookup_int_callback, ntimes-1)        
+
+        callback()
+
+    def test_lots_of_callbacks(self):
+        # Define a variable
+        self.parser.define('an_int', default=6, type=int,
+                           help='help me')
+        self.parser.parse_options([])
+
+        self.io_loop.add_callback(self.lookup_int_callback, 128, self.stop)
+
+        self.wait()
+        
 
 class TestCommandLineParsing(unittest.TestCase):
     def setUp(self):
@@ -113,7 +147,7 @@ class TestCommandLineParsing(unittest.TestCase):
         self.parser.define('a_float', default=6.5, type=float)
 
         config_stream = StringIO('a_floaty: 10.8')
-        self.parser.parse_options(config_stream = config_stream)
+        self.parser.parse_options([], config_stream = config_stream)
 
         # TODO(mdesnoyer): Test that a warning was logged
         self.assertEqual(self.parser.a_float, 6.5)
@@ -131,7 +165,7 @@ class TestCommandLineParsing(unittest.TestCase):
         self.parser.define('a_float', default=6.5, type=float)
 
         config_stream = StringIO('a_float2: 3.0')
-        self.parser.parse_options(config_stream = config_stream)
+        self.parser.parse_options([], config_stream = config_stream)
 
         self.assertEqual(self.parser.a_float, 6.5)
 

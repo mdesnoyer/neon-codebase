@@ -1,0 +1,26 @@
+# A script that switches to the virtual environment for this directory.
+#
+# To use it, run:
+# source enable_env
+#
+# Author: Mark Desnoyer (desnoyer@neon-lab.com)
+# Copyright 2013 Neon Labs
+
+NEON_ROOT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+echo "Creating the virtual environment"
+virtualenv ${NEON_ROOT_DIR}/pyenv
+
+echo "Switching to the virtual environment"
+VIRTUAL_ENV_DISABLE_PROMPT=yes source ${NEON_ROOT_DIR}/pyenv/bin/activate
+
+# Set the command prompt to make it obvious what virtual environment
+# we're in. This mimicks the python virtualenv behaviour.
+_OLD_VIRTUAL_PS1="$PS1"
+if [ "x" != x ] ; then
+  PS1="$PS1"
+else
+  PS1="(`basename ${NEON_ROOT_DIR}`)$PS1"
+fi
+export PS1
+

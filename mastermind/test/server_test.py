@@ -14,16 +14,20 @@ if sys.path[0] <> base_path:
 import mastermind.server
 
 from datetime import datetime
+import logging
 import mastermind.core
-from mock import MagicMock
+from mock import MagicMock, patch
 import mock
 import MySQLdb
+import redis
 import sqlite3
 import stats.db
 from StringIO import StringIO
 from supportServices import neondata
+import test_utils.neontest
 import tornado.web
 import unittest
+import utils.neon
 
 class TestTornadoHandlers(unittest.TestCase):
     def setUp(self):
@@ -156,17 +160,136 @@ class TestGetDirectives(unittest.TestCase):
             '{"d": ["videoB", [["b1", 1.0], ["b2", 0.0]]]}\n'
             '{"d": ["videoC", [["c1", 0.4], ["c2", 0.6]]]}')
 
-class TestVideoDBWatcher(unittest.TestCase):
+@patch('mastermind.server.neondata')
+class TestVideoDBWatcher(test_utils.neontest.TestCase):
     def setUp(self):
-        self.mastermind = MagicMock()
+        self.mastermind = mastermind.core.Mastermind()
         self.ab_manager = MagicMock()
         self.watcher = mastermind.server.VideoDBWatcher(self.mastermind,
                                                         self.ab_manager)
-
-        # TODO(mdesnoyer) Write this test once the interface to the
-        # video db is better defined
-    def test_good_db_data(self):
+    def tearDown(self):
         pass
+
+    def test_good_db_data(self, datamock):
+        # Define platforms in the database
+        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', abtest=False)
+        bcPlatform.add_video(0, 'job11')
+        bcPlatform.add_video(10, 'job12')
+
+        testPlatform = neondata.BrightcovePlatform('a2', 'i2', abtest=True)
+        testPlatform.add_video(1, 'job21')
+        testPlatform.add_video(2, 'job22')
+
+        apiPlatform = neondata.NeonPlatform('a3', abtest=True)
+        apiPlatform.add_video(4, 'job31')
+
+        noVidPlatform = neondata.BrightcovePlatform('a4', 'i4', abtest=True)
+        
+        datamock.AbstractPlatform.get_all_instances.return_value = \
+          [bcPlatform, testPlatform, apiPlatform, noVidPlatform]
+
+        # Define the video meta data
+        vid_meta = {
+            '0': neondata.VideoMetadata(0,['t01','t02','t03'],'','','','','',''),
+            '10': neondata.VideoMetadata(0,[],'','','','','',''),
+            '1': neondata.VideoMetadata(0,['t11'],'','','','','',''),
+            '2': neondata.VideoMetadata(0,['t21','t22'],'','','','','',''),
+            '4': neondata.VideoMetadata(0,['t41', 't42'],'','','','','','')
+            }
+        datamock.VideoMetadata.get.side_effect = lambda vid: vid_meta[vid]
+
+        # Define the thumbnail meta data
+        TMD = neondata.ThumbnailMetaData
+        tid_meta = {
+            't01': TMD('t01', 0,0,0,0,'brightcove',0,0,True,False,0),
+            't02': TMD('t02', 0,0,0,0,'neon',0,0,True,False,0),
+            't03': TMD('t03', 0,0,0,0,'neon',1,0,True,False,0),
+            't11': TMD('t11', 0,0,0,0,'brightcove',0,0,True,False,0),
+            't21': TMD('t21', 0,0,0,0,'brightcove',0,0,True,False,0),
+            't22': TMD('t22', 0,0,0,0,'neon',0,0,True,False,0),
+            't41': TMD('t41', 0,0,0,0,'neon',0,0,True,False,0),
+            't42': TMD('t42', 0,0,0,0,'neon',1,0,True,False,0),
+            }
+        datamock.ThumbnailIDMapper.get_thumb_metadata.side_effect = \
+          lambda tid: tid_meta[tid]
+
+        # Process the data
+        self.watcher._process_db_data()
+
+        # The order of the thumbnails in the directive doesn't matter,
+        # but there isn't an easy way to do recursive
+        # assertItemsEqual, so I'm hard coding the order.
+        expected = [
+            mock.call(('0', [('t03', 0.0), ('t02', 1.0), ('t01', 0.0)])),
+            mock.call(('10', [])),
+            mock.call(('1', [('t11', 1.0)])),
+            mock.call(('2', [('t21', 0.15), ('t22', 0.85)])),
+            mock.call(('4', [('t42', 0.0), ('t41', 1.0)]))]
+        self.assertEqual(self.ab_manager.send.call_count, 5)
+        self.maxDiff = 700
+        self.assertItemsEqual(expected, self.ab_manager.send.call_args_list)
+
+        self.assertTrue(self.watcher.is_loaded.is_set())
+
+    def test_connection_error(self, datamock):
+        datamock.AbstractPlatform.get_all_instances.side_effect = \
+          redis.ConnectionError
+
+        with self.assertRaises(redis.ConnectionError):
+            self.watcher._process_db_data()
+
+    def test_video_metadata_missing(self, datamock):
+        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', abtest=True)
+        bcPlatform.add_video(0, 'job11')
+        bcPlatform.add_video(10, 'job12')
+        
+        datamock.AbstractPlatform.get_all_instances.return_value = \
+          [bcPlatform]
+        datamock.VideoMetadata.get.return_value = None
+
+        with self.assertLogExists(logging.ERROR,
+                                  'Could not find information about video 10'):
+            with self.assertLogExists(logging.ERROR,
+                                      'Could not find information about '
+                                      'video 0'):
+                self.watcher._process_db_data()
+        
+        self.assertTrue(self.watcher.is_loaded.is_set())
+
+    def test_thumb_metadata_missing(self, datamock):
+        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', abtest=True)
+        bcPlatform.add_video(0, 'job11')
+        bcPlatform.add_video(10, 'job12')
+        
+        datamock.AbstractPlatform.get_all_instances.return_value = \
+          [bcPlatform]
+
+        vid_meta = {
+            '0': neondata.VideoMetadata(0,['t01','t02','t03'],'','','','','',''),
+            '10': neondata.VideoMetadata(0,[],'','','','','','')
+            }
+        datamock.VideoMetadata.get.side_effect = lambda vid: vid_meta[vid]
+
+        TMD = neondata.ThumbnailMetaData
+        tid_meta = {
+            't01': TMD('t01', 0,0,0,0,'brightcove',0,0,True,False,0),
+            't02': TMD('t02', 0,0,0,0,'neon',0,0,True,False,0),
+            't03': None,
+            }
+        datamock.ThumbnailIDMapper.get_thumb_metadata.side_effect = \
+          lambda tid: tid_meta[tid]
+
+        with self.assertLogExists(logging.ERROR,
+                                  'Could not find metadata for thumb t03'):
+            self.watcher._process_db_data()
+
+        # Make sure that there is a directive sent about the other
+        # video in the account.
+        self.assertEqual(self.ab_manager.send.call_count, 1)
+        self.ab_manager.send.assert_called_with(('10', []))
+
+        # Make sure that the processing gets flagged as done
+        self.assertTrue(self.watcher.is_loaded.is_set())
 
 class TestStatsDBWatcher(unittest.TestCase):
     def setUp(self):
@@ -304,6 +427,7 @@ class TestStatsDBWatcher(unittest.TestCase):
 
         
 if __name__ == '__main__':
+    utils.neon.InitNeonTest()
     unittest.main()
         
         

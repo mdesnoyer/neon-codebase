@@ -1,12 +1,10 @@
 #!/usr/bin/env python
-''' This script fires up the serving system and runs end to end tests.
+''' This script fires up the image serving system and runs end to end tests.
 
-***WARNING*** This test does not run completely locally. It interfaces
-   with some Amazon services and will thus incure some fees. Also, it
-   cannot be run from multiple locations at the same time.
-
-TODO(mdesnoyer): Enable a version of this to run locally with out
-Amazon dependencies.
+***WARNING*** Depending on the config file used for this test, it does
+   not run completely locally. It interfaces with some Amazon services
+   and will thus incure some fees. Also, it cannot be run from
+   multiple locations at the same time.
 
 Copyright: 2013 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
@@ -26,9 +24,11 @@ from datetime import datetime
 import json
 import logging
 import mastermind.server
+from mock import MagicMock, patch
 import MySQLdb as sqldb
 import multiprocessing
 import os
+import PIL.Image
 import Queue
 import random
 import re
@@ -37,17 +37,21 @@ import SimpleHTTPServer
 import SocketServer
 import stats.db
 import stats.stats_processor
+from StringIO import StringIO
 import subprocess
-import supportServices.services
 from supportServices import neondata
 import tempfile
+import test_utils.redis
 import time
+import tornado.httpclient
 import tornado.httpserver
 import tornado.ioloop
+import tornado.testing
 import tornado.web
 import unittest
 import urllib
 import urllib2
+import utils.logs
 import utils.neon
 import utils.ps
 from utils import statemon
@@ -60,24 +64,54 @@ define('stats_db_user', help='User for the stats db connection',
        default='neon')
 define('stats_db_pass', help='Password for the stats db connection',
        default='neon')
-define('bc_directive_port', default=7212,
+define('bc_directive_port', default=7212, type=int,
        help='Port where the brightcove directives will be output')
+define('fakes3root', default='/tmp/neon_s3_root', type=str,
+       help='Directory that acts as the root for fakes3')
 
 _log = logging.getLogger(__name__)
 
 _erase_local_log_dir = multiprocessing.Event()
 _activity_watcher = utils.ps.ActivityWatcher()
 
-class TestServingSystem(unittest.TestCase):
 
+class TestServingSystem(tornado.testing.AsyncTestCase):
     @classmethod
     def setUpClass(cls):
+        conf_path = os.path.join(os.path.dirname(__file__),
+                                 'local_tester.conf')
+        options.parse_options(['-c', conf_path])
+        utils.logs.AddConfiguredLogger()
+        
+        signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
+        atexit.register(utils.ps.shutdown_children)
+
+        cls.redis = test_utils.redis.RedisServer(7210)
+        cls.redis.start()
+
+        # Turn off the annoying logs
+        logging.getLogger('tornado.access').propagate = False
+        logging.getLogger('tornado.application').propagate = False
+        logging.getLogger('mrjob.local').propagate = False
+        logging.getLogger('mrjob.config').propagate = False
+        logging.getLogger('mrjob.conf').propagate = False
+        logging.getLogger('mrjob.runner').propagate = False
+        logging.getLogger('mrjob.sim').propagate = False
+
+        LaunchStatsDb()
+        LaunchMastermind()
+        LaunchClickLogServer()
+        LaunchFakeS3()
+        LaunchStatsProcessor()
+
         _log.info('Starting the directive capture server on port %i' 
                   % options.bc_directive_port)
         cls._directive_cap = DirectiveCaptureProc(options.bc_directive_port)
         cls.directive_q = cls._directive_cap.q
         cls._directive_cap.start()
         cls._directive_cap.wait_until_running()
+
+        _activity_watcher.wait_for_idle()
 
     @classmethod
     def tearDownClass(cls):
@@ -88,8 +122,11 @@ class TestServingSystem(unittest.TestCase):
                 os.kill(cls._directive_cap.pid, signal.SIGKILL)
             except OSError:
                 pass
+        cls.redis.stop()
+        utils.ps.shutdown_children()
 
     def setUp(self):
+        super(TestServingSystem, self).setUp()
         ClearStatsDb()
 
         conn = sqldb.connect(user=options.stats_db_user,
@@ -98,25 +135,61 @@ class TestServingSystem(unittest.TestCase):
                              db=options.stats_db)
         self.statscursor = conn.cursor()
 
-        # Clear the s3 bucket
-        s3conn = S3Connection()
-        bucket = s3conn.get_bucket(
-            options.get('clickTracker.trackserver.bucket_name'))
-        for key in BucketListResultSet(bucket):
-            key.delete()
-        _erase_local_log_dir.set()
+        # Clear the log storage area
+        log_path = options.get('clickTracker.trackserver.output')
+        s3pathRe = re.compile('s3://([0-9a-zA-Z_\-]+)')
+        s3match = s3pathRe.match(log_path)
+        if s3match:
+            s3conn = S3Connection()
+            bucket = s3conn.get_bucket(s3match.groups()[0])
+            for key in BucketListResultSet(bucket):
+                key.delete()
+            _erase_local_log_dir.set()
+        else:
+            for cur_file in os.listdir(log_path):
+                os.remove(os.path.join(log_path, cur_file))
 
         # Empty the directives queue
         while not self.__class__.directive_q.empty():
             self.__class__.directive_q.get_nowait()
         self.directives_captured = []
-        
-        # Clear the video database
-        #neondata._erase_all_data()
+
+        # Mock out the brightcove connection
+        self.bc_patcher = patch('supportServices.neondata.api.'
+                                'brightcove_api.utils.http.RequestPool')
+        self.mock_bc_conn = self.bc_patcher.start()
+
+        # Mock out the http request to get an image. Just returns a
+        # random image. Can handle an async request even if it doesn't
+        # actually do it asynchronously.
+        self.im_request_patcher = \
+          patch('supportServices.neondata.api.'
+                'brightcove_api.utils.http.send_request')
+        mock_im = self.im_request_patcher.start()
+        def return_image(request, callback=None):
+            im = PIL.Image.new("RGB", (640,480))
+            filestream = StringIO()
+            im.save(filestream, "JPEG", quality=80)
+            response = tornado.httpclient.HTTPResponse(
+                request,
+                200,
+                headers = {'Content-Type':'image/jpeg'},
+                body=filestream.getvalue())
+            if callback:
+                callback(response)
+            return response
+        mock_im.side_effect = return_image
 
 
     def tearDown(self):
-        pass
+        self.bc_patcher.stop()
+        self.im_request_patcher.stop()
+        super(TestServingSystem, self).tearDown()
+
+    # TODO(sunil): Once we figure out why these tests don't run if
+    # using one ioloop per test, get rid of this function.
+    def get_new_ioloop(self):
+        return tornado.ioloop.IOLoop.instance()
     
     def simulateEvents(self, data):
         '''
@@ -299,7 +372,6 @@ class TestServingSystem(unittest.TestCase):
         bp.save()
 
 
-    #TODO: Write the actual tests
     def test_initial_directives_received(self):
         self.add_account_to_videodb('init_account0', 'init_int0', 1, 3)
         self.assertDirectiveCaptured(('init_account0_vid0',
@@ -309,6 +381,7 @@ class TestServingSystem(unittest.TestCase):
             timeout=5)
 
     def test_video_got_bad_stats(self):
+        '''The serving thumbnail should turn off after the stats show its bad.'''
         self.add_account_to_videodb('bad_stats0', 'bad_stats_int0', 1, 3)
         
         # Simulate loads and clicks to the point that the thumbnail
@@ -334,6 +407,25 @@ class TestServingSystem(unittest.TestCase):
                          (20, 1))
         self.assertEqual(self.getStats('bad_stats0_vid0_thumb2'),
                          (1500, 500))
+
+    def _test_override_thumbnail(self):
+        '''Manually choose a thumbnail.'''
+        self.add_account_to_videodb('ch_thumb0', 'ch_thumb_int0', 1, 3)
+
+        account = neondata.BrightcovePlatform.get_account(
+            neondata.NeonApiKey.generate('ch_thumb0'),
+            'ch_thumb_int0')
+        
+        account.update_thumbnail('vid0', 'ch_thumb0_vid0_thumb1',
+                                 callback=self.stop)
+
+        # Make sure that the update_thumbnail call succeeds
+        self.assertTrue(self.wait())
+        self.assertDirectiveCaptured(('ch_thumb0_vid0',
+                                      [('ch_thumb0_vid0_thumb0', 0.00),
+                                       ('ch_thumb0_vid0_thumb1', 1.00),
+                                       ('ch_thumb0_vid0_thumb2', 0.00)]),
+            timeout=5)
 
 def directivesEqual(a, b):
     '''Returns true if two directives are equivalent.
@@ -423,44 +515,11 @@ def LaunchStatsDb():
                        options.stats_db_pass))
         raise
 
-    cursor = conn.cursor()
-    ClearStatsDb()    
+    cursor = conn.cursor()    
     stats.db.create_tables(cursor)
+    ClearStatsDb()
     
     _log.info('Connection to stats db is good')
-
-def LaunchVideoDb():
-    '''Launches the video db.'''
-    if options.get('supportServices.neondata.dbPort') == 6379:
-        raise Exception('Not allowed to talk to the default Redis server '
-                        'so that we do not accidentially erase it. '
-                        'Please change the port number.')
-    
-    _log.info('Launching video db')
-    proc = subprocess.Popen([
-        '/usr/bin/env', 'redis-server',
-        os.path.join(os.path.dirname(__file__), 'test_video_db.conf')],
-        stdout=subprocess.PIPE)
-
-    # Wait until the db is up correctly
-    upRe = re.compile('The server is now ready to accept connections on port')
-    video_db_log = []
-    while proc.poll() is None:
-        line = proc.stdout.readline()
-        video_db_log.append(line)
-        if upRe.search(line):
-            break
-
-    if proc.poll() is not None:
-        raise Exception('Error starting video db. Log:\n%s' %
-                        '\n'.join(video_db_log))
-
-    _log.info('Video db is up')
-
-def LaunchSupportServices():
-    proc = multiprocessing.Process(target=supportServices.services.main)
-    proc.start()
-    _log.warn('Launching Support Services with pid %i' % proc.pid)
 
 def LaunchMastermind():
     proc = multiprocessing.Process(target=mastermind.server.main,
@@ -474,6 +533,34 @@ def LaunchClickLogServer():
         args=(_activity_watcher,))
     proc.start()
     _log.warn('Launching click log server with pid %i' % proc.pid)
+
+def LaunchFakeS3():
+    '''Launch a fakes3 instance if the settings call for it.'''
+    s3host = options.get('utils.s3.s3host')
+    s3port = options.get('utils.s3.s3port')
+
+    if s3host == 'localhost':
+        _log.info('Launching fakes3')
+        proc = subprocess.Popen([
+            '/usr/bin/env', 'fakes3',
+            '--root', options.fakes3root,
+            '--port', str(s3port)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT)
+
+        upRe = re.compile('port=')
+        fakes3_log = []
+        while proc.poll() is None:
+            line = proc.stdout.readline()
+            fakes3_log.append(line)
+            if upRe.search(line):
+                break
+
+        if proc.poll() is not None:
+            raise Exception('Error starting fake s3. Log:\n%s' %
+                            '\n'.join(fakes3_log))
+
+        _log.warn('FakeS3 is up with pid %i' % proc.pid)
 
 def LaunchStatsProcessor():
     proc = multiprocessing.Process(
@@ -497,12 +584,12 @@ def main():
 
     LaunchStatsDb()
     LaunchVideoDb()
-    LaunchSupportServices()
     LaunchMastermind()
     LaunchClickLogServer()
+    LaunchFakeS3()
     LaunchStatsProcessor()
 
-    time.sleep(1)
+    _activity_watcher.wait_for_idle()
 
     suite = unittest.TestLoader().loadTestsFromTestCase(TestServingSystem)
     result = unittest.TextTestRunner().run(suite)
@@ -511,8 +598,6 @@ def main():
         sys.exit(0)
     else:
         sys.exit(1)
-    
 
 if __name__ == "__main__":
-    utils.neon.InitNeon()
-    main()
+    unittest.main()

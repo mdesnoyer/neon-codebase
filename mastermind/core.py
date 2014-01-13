@@ -353,7 +353,7 @@ class Mastermind(object):
         if default is None and chosen is None:
             _log.error('Could not find any thumbnails to show for video %s'
                        % video_info)
-            return  None
+            return []
 
         if default is None:
             _log.error('Could not find default thumbnail for video: %s' %

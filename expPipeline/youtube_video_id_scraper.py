@@ -14,6 +14,7 @@ import string
 import sys
 
 from apiclient.discovery import build as api_build
+import apiclient.errors
 
 __YOUTUBE_KEY = 'AIzaSyCI1sGIS5svU8FO6cd7S4XG-Z9EvN0DYHE'
 _log = logging.getLogger(__name__)
@@ -80,6 +81,9 @@ def find_similar_videos(video_id, n_videos=100):
     except IOError as e:
         _log.error('Error querying youtube: %s' % e)
         return
+    except apiclient.errors.HttpError as e:
+        _log.error('Error querying youtube: %s' % e)
+        return
     while cur_response:
         for result in cur_response.get("items", []):
             videos_found += 1
@@ -112,6 +116,9 @@ def get_video_duration(video_id):
     except IOError as e:
         _log.error('Error getting the video length: %s' % e)
         return float('inf')
+
+    if len(response["items"]) == 0:
+        return float('+inf')
 
     time_str = response["items"][0]["contentDetails"]["duration"]
     minRe = re.compile('([0-9]+)M')

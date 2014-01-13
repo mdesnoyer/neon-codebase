@@ -209,6 +209,24 @@ class OptionParser(object):
             with self.__dict__['lock']:
                 self._options[global_name].set(old_val)
 
+    def _set(self, global_name, value):
+        '''Sets the value of an option.
+
+        This should only be used in test setups, primarily so that
+        you can do:
+        def setUp(self):
+          self.old_variable = options.get('my.variable')
+          options.set('my.variable', 45)
+
+        def tearDown(self):
+          options.set('my.variable', self.old_variable)
+        '''
+        with self.__dict__['lock']:
+            try:
+                self._options[global_name].set(value)
+            except KeyError:
+                _log.warn('Cannot set %s. It does not exist' % global_name)
+
     def _parse_command_line(self, args=None, usage='%prog [options]'):
         '''Parse the command line.'''
         if args is None:
@@ -351,10 +369,13 @@ class OptionParser(object):
         Stack depth controls how far back the module is found.
         Normally this is 2.
         '''
-        frame = inspect.stack()[stack_depth]
-        mod = inspect.getmodule(frame[0])
+        frame = inspect.currentframe()
+        for i in range(stack_depth):
+            frame = frame.f_back
+        mod = inspect.getmodule(frame)
         
-        if mod.__name__ in ['__main__', '', '.', None]:
+        if (mod.__name__ in ['__main__', '', '.', None] or
+            mod.__name__.endswith('options_test')):
             return option
 
         return '%s.%s' % (self._get_option_prefix(mod.__file__), option)
@@ -362,7 +383,8 @@ class OptionParser(object):
     def _get_main_prefix(self):
         for frame in inspect.stack():
             mod = inspect.getmodule(frame[0])
-            if mod.__name__ == '__main__':
+            if (mod.__name__ == '__main__' or
+                mod.__name__.endswith('options_test')):
                 return self._get_option_prefix(mod.__file__)
         raise Error("Could not find the main module")
 

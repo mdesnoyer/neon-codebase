@@ -19,6 +19,7 @@ develop-eggs
 lib
 lib64
 __pycache__
+pyenv
 
 # Installer logs
 pip-log.txt
@@ -55,3 +56,4 @@ CMakeFiles
 #Makefile
 cmake_install.cmake
 install_manifest.txt
+CTestResults.xml

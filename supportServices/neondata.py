@@ -2,7 +2,7 @@
 '''
 Data Model classes 
 
-Blob Types available 
+Defines interfaces for Neon User Account, Platform accounts
 Account Types
 - NeonUser
 - BrightcovePlatform
@@ -11,31 +11,29 @@ Account Types
 Api Request Types
 - Neon, Brightcove, youtube
 
-#TODO Connection pooling of redis connection https://github.com/leporo/tornado-redis/blob/master/demos/connection_pool/app.py
 '''
+import os
 import os.path
 import sys
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
-import redis as blockingRedis
-import tornadoredis as redis
-import tornado.gen
+import datetime
 import hashlib
 import json
+from multiprocessing.pool import ThreadPool
+import redis as blockingRedis
 import shortuuid
+import tornado.ioloop
+import tornado.gen
 import tornado.httpclient
-import datetime
+import threading
 import time
-import sys
-import os
-#import api.brightcove_api
-from api import brightcove_api
+from api import brightcove_api #coz of cyclic import 
 import api.youtube_api
 from PIL import Image
 from StringIO import StringIO
-import threading
 
 from utils.options import define, options
 
@@ -46,11 +44,13 @@ define("accountDB", default="127.0.0.1", type=str,help="")
 define("videoDB", default="127.0.0.1", type=str,help="")
 define("thumbnailDB", default="127.0.0.1", type=str,help="")
 define("dbPort",default=6379,type=int,help="redis port")
+define("watchdogInterval",default=3,type=int,help="interval for watchdog thread")
+
 
 class DBConnection(object):
     '''Connection to the database.'''
 
-    #TODO: Lock for each instance, currently locks for any instance creation
+    #Note: Lock for each instance, currently locks for any instance creation
     __singleton_lock = threading.Lock() 
     _singleton_instance = {} 
 
@@ -67,7 +67,8 @@ class DBConnection(object):
         port = options.dbPort 
         
         if cname:
-            if cname in ["AbstractPlatform","BrightcovePlatform","YoutubePlatform","NeonUserAccount","NeonApiRequest"]:
+            if cname in ["AbstractPlatform","BrightcovePlatform",
+                    "YoutubePlatform","NeonUserAccount","NeonApiRequest"]:
                 host = options.accountDB 
                 port = options.dbPort 
             elif cname == "VideoMetadata":
@@ -130,13 +131,61 @@ class DBConnection(object):
                     cls._singleton_instance[cname] = object.__new__(cls,*args,**kwargs)
         return cls._singleton_instance[cname]
 
+class RedisAsyncWrapper(object):
+    '''
+    Replacement class for tornado-redis 
+    
+    This is a wrapper class which does redis operation
+    in a background thread and on completion transfers control
+    back to the tornado ioloop. If you wrap this around gen/Task,
+    you can write db operations as if they were synchronous.
+    
+    usage: 
+    value = yield tornado.gen.Task(RedisAsyncWrapper().get,key)
 
+
+    #TODO: see if we can completely wrap redis-py calls, helpful if
+    you can get the callback attribuet as well when call is made
+    '''
+
+    _thread_pool = ThreadPool(10)
+    
+    def __init__(self,host='127.0.0.1',port=6379):
+        self.client = blockingRedis.StrictRedis(host,port,socket_timeout=10)
+
+    def get(self,key,callback):
+        def _callback(result):
+            tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
+        RedisAsyncWrapper._thread_pool.apply_async(
+                self.client.get,args=(key,),callback=_callback)
+   
+    def set(self,key,value,callback):
+        def _callback(result):
+            tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
+        RedisAsyncWrapper._thread_pool.apply_async(
+            self.client.set,args=(key,value,),callback=_callback)
+    
+    def pipeline(self):
+        return self.client.pipeline()
+
+    def mget(self,keys,callback):
+        def _callback(result):
+            tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
+        RedisAsyncWrapper._thread_pool.apply_async(
+            self.client.mget,args=(keys,),callback=_callback)
+    
+    def mset(self,keys,callback):
+        def _callback(result):
+            tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
+        RedisAsyncWrapper._thread_pool.apply_async(
+            self.client.mset,args=(keys,),callback=_callback)
+    
 class DBConnectionCheck(threading.Thread):
 
     ''' Watchdog thread class to check the DB connection objects '''
     def __init__(self,tid=None):
         super(DBConnectionCheck, self).__init__()
-        self.interval = 10
+        self.interval = options.watchdogInterval
         self.daemon = True
 
     def run(self):
@@ -184,8 +233,7 @@ class RedisClient(object):
     blocking_client = None
 
     def __init__(self):
-        client = redis.Client(host,port)
-        client.connect()
+        client = RedisAsyncWrapper(host,port)
         blocking_client = blockingRedis.StrictRedis(host,port)
     
     @staticmethod
@@ -198,7 +246,7 @@ class RedisClient(object):
         if port is None:
             port = RedisClient.port
         
-        RedisClient.c = redis.Client(host,port)
+        RedisClient.c = RedisAsyncWrapper(host,port)
         RedisClient.bc = blockingRedis.StrictRedis(host,port,socket_timeout=10)
         return RedisClient.c,RedisClient.bc 
 
@@ -239,120 +287,6 @@ class InternalVideoID(object):
         vid = internal_vid.split('_')[-1]
         return vid
     
-class AbstractRedisUserBlob(object):
-    ''' 
-        Abstract Redis interface and operations
-        Lock and Get, unlock & set opertaions made easy
-    '''
-
-    def __init__(self,keyname=None):
-        self.key = keyname
-        self.external_callback = None
-        self.lock_ttl = 3 #secs
-        return
-
-    def add_callback(self,result):
-        try:
-            items = json.loads(result)
-            for key in items.keys():
-                self.__dict__[key] = items[key]
-        except:
-            print "error decoding"
-
-        if self.external_callback:
-            self.external_callback(self)
-
-    #Delayed callback function which performs async sleep
-    #On wake up executes the callback which it was intended to perform
-    #In this case calls the callback with the external_callback function as param
-    @tornado.gen.engine
-    def delayed_callback(self,secs,callback):
-        yield tornado.gen.Task(tornado.ioloop.IOLoop.instance().add_timeout, time.time() + secs)
-        self.callback(self.external_callback)
-
-    def _get(self, callback):
-        db_connection=DBConnection()
-        if self.key is None:
-            raise Exception("key not set")
-        self.external_callback = callback
-        db_connection.conn.get(self.key,self.add_callback)
-
-    def _save(self, value, callback=None):
-        db_connection=DBConnection()
-        if self.key is None:
-            raise Exception("key not set")
-        self.external_callback = callback
-        db_connection.conn.set(self.key,value,self.external_callback)
-
-    def to_json(self):
-        #TODO : don't save all the class specific params ( keyname,callback,ttl )
-        return json.dumps(self, default=lambda o: o.__dict__) #don't save keyname
-
-    def get(self, callback=None):
-        db_connection=DBConnection()
-        if callback:
-            return self._get(callback, db_connection)
-        else:
-            return db_connection.blocking_conn.get(self.key)
-
-    def save(self,callback=None):
-        db_connection=DBConnection()
-        value = self.to_json()
-        if callback:
-            self._save(value, callback, db_connection)
-        else:
-            return db_connection.blocking_conn.save(self.key,value)
-
-    def lget_callback(self, result):
-        db_connection=DBConnection()
-        #lock unsuccessful, lock exists: 
-        print "lget", result
-        if result == True:
-            #return False to callback to retry
-            self.external_callback(False)
-            '''  delayed callback stub
-            #delayed_callback to lget()
-            #delay the call to lget() by the TTL time
-            #self.delayed_callback(self.lock_ttl,self.lget)
-            #return
-            '''
-
-        #If not locked, lock the key and return value (use transaction) 
-        #save with TTL
-        lkey = self.key + "_lock"
-        value = shortuuid.uuid() 
-        pipe = db_connection.conn.pipeline()
-        pipe.setex(lkey,self.lock_ttl,value)
-        pipe.get(self.key)
-        pipe.get(lkey)
-        pipe.execute(self.external_callback)
-
-    #lock and get
-    def lget(self,callback):
-        db_connection=DBConnection()
-        ttl = self.lock_ttl
-        self.external_callback = callback
-        lkey = self.key + "_lock"
-        db_connection.conn.exists(lkey,self.lget_callback)
-        
-    def _unlock_set(self, callback):
-        db_connection=DBConnection()
-        self.external_callback = callback
-        value = self.to_json()
-        lkey = self.key + "_lock"
-        
-        #pipeline set, delete lock 
-        pipe = db_connection.conn.pipeline()
-        pipe.set(self.key,value)
-        pipe.delete(lkey)
-        pipe.execute(self.external_callback)
-
-    #exists
-    def exists(self, callback):
-        db_connection=DBConnection()
-        self.external_callback = callback
-        db_connection.conn.exists(self.key,callback)
-
 ''' NeonUserAccount
 
 Every user in the system has a neon account and all other integrations are 
@@ -412,41 +346,37 @@ class NeonUserAccount(object):
         '''
         Save Neon User account and corresponding integration
         '''
+        
+        #temp: changing this to a blocking pipeline call   
         db_connection = DBConnection(self)
-        pipe = db_connection.conn.pipeline()
+        pipe = db_connection.blocking_conn.pipeline()
         pipe.set(self.key,self.to_json())
         pipe.set(new_integration.key,new_integration.to_json()) 
-        pipe.execute(callback)
+        #pipe.execute(callback)
+        callback(pipe.execute())
 
     @classmethod
     def get_account(cls,api_key,callback=None):
         db_connection=DBConnection(cls)
-        key = "NeonUserAccount".lower() + '_' + api_key
+        key = "neonuseraccount_%s" %api_key
         if callback:
-            db_connection.conn.get(key,callback) 
+            db_connection.conn.get(key, lambda x: callback(cls.create(x))) 
         else:
-            return db_connection.blocking_conn.get(key)
+            return cls.create(db_connection.blocking_conn.get(key))
     
-    @staticmethod
-    def create(json_data):
+    @classmethod
+    def create(cls, json_data):
+        if not json_data:
+            return None
         params = json.loads(json_data)
         a_id = params['account_id']
-        na = NeonUserAccount(a_id)
+        na = cls(a_id)
        
         for key in params:
             na.__dict__[key] = params[key]
         
         return na
     
-    @classmethod
-    def delete(cls,a_id):
-        db_connection=DBConnection(cls)
-        #check if test account
-        if "test" in a_id:
-            key = 'neonuseraccount' + NeonApiKey.generate(a_id)  
-            db_connection.blocking_conn.delete(key)
-
-
 class AbstractPlatform(object):
     def __init__(self, abtest=False):
         self.neon_api_key = ''
@@ -455,13 +385,29 @@ class AbstractPlatform(object):
         self.integration_id = None # Unique platform ID to 
     
     def generate_key(self,i_id):
-        return self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
+        return self.__class__.__name__.lower()  + '_%s_%s' %(self.neon_api_key, i_id)
     
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__) 
 
     def get_ovp(self):
         raise NotImplementedError
+
+    @classmethod
+    def get_account(cls, api_key, i_id, callback=None):
+        '''Returns the platform object for the key.
+
+        Inputs:
+          api_key - The api key for the Neon account
+          i_id - The integration id for the platform
+          callback - If None, done asynchronously
+        '''
+        key = cls.__name__.lower()  + '_%s_%s' %(api_key, i_id) 
+        db_connection=DBConnection(cls)
+        if callback:
+            db_connection.conn.get(key, lambda x: callback(cls.create(x))) 
+        else:
+            return cls.create(db_connection.blocking_conn.get(key))
 
     @classmethod
     def get_all_instances(cls,callback=None):
@@ -496,11 +442,11 @@ class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
     '''
-    def __init__(self,a_id):
-        AbstractPlatform.__init__(self)
+    def __init__(self, a_id, abtest=False):
+        AbstractPlatform.__init__(self, abtest=abtest)
         self.neon_api_key = NeonApiKey.generate(a_id)
         self.integration_id = '0'
-        self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + self.integration_id
+        self.key = self.__class__.__name__.lower()  + '_%s_%s' %(self.neon_api_key, self.integration_id)
         self.account_id = a_id
         
         #By default integration ID 0 represents Neon Platform Integration (via neon api)
@@ -518,27 +464,13 @@ class NeonPlatform(AbstractPlatform):
 
     def get_ovp(self):
         return "neon"
-    
+
     @classmethod
-    def get_account(cls,api_key,callback=None):
-        def create_account(data):
-            if not data:
-                callback(None)
-            else:
-                obj = NeonPlatform.create(data)
-                callback(obj)
+    def get_account(cls, api_key, callback=None):
+        return super(NeonPlatform, cls).get_account(api_key, 0, callback)
 
-        key = cls.__name__.lower()  + '_' + api_key + '_' + '0' 
-        db_connection=DBConnection(cls)
-        if callback:
-            db_connection.conn.get(key,create_account) 
-        else:
-            data = db_connection.blocking_conn.get(key)
-            if data:
-                return NeonPlatform.create(data)
-
-    @staticmethod
-    def create(json_data):
+    @classmethod
+    def create(cls, json_data):
         if not json_data:
             return None
 
@@ -569,7 +501,7 @@ class BrightcovePlatform(AbstractPlatform):
         ''' On every request, the job id is saved '''
         AbstractPlatform.__init__(self, abtest)
         self.neon_api_key = NeonApiKey.generate(a_id)
-        self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key + '_' + i_id
+        self.key = self.__class__.__name__.lower()  + '_%s_%s' %(self.neon_api_key, i_id)
         self.account_id = a_id
         self.integration_id = i_id
         self.publisher_id = p_id
@@ -606,28 +538,31 @@ class BrightcovePlatform(AbstractPlatform):
             return db_connection.blocking_conn.set(self.key,value)
 
     @tornado.gen.engine
-    def update_thumbnail(self,platform_vid,new_tid,nosave=False,callback=None):
+    def update_thumbnail(self,i_vid,new_tid,nosave=False,callback=None):
         ''' method to keep video metadata and thumbnail data consistent '''
-        
         bc = api.brightcove_api.BrightcoveApi(
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update)
        
         #Get video metadata
-        i_vid = InternalVideoID.generate(self.neon_api_key,platform_vid)
+        platform_vid = InternalVideoID.to_external(i_vid)
         vmdata = yield tornado.gen.Task(VideoMetadata.get,i_vid)
         if not vmdata:
             _log.error("key=update_thumbnail msg=vid %s not found" %i_vid)
             callback(None)
             return
-
+        
         #Thumbnail ids for the video
         tids = vmdata.thumbnail_ids
         
+        #Aspect ratio of the video 
+        fsize = vmdata.get_frame_size()
+
         #Get all thumbnails
-        thumb_mappings = yield tornado.gen.Task(ThumbnailIDMapper.get_thumb_mappings,tids)
+        thumb_mappings = yield tornado.gen.Task(
+                ThumbnailIDMapper.get_thumb_mappings,tids)
         t_url = None
-        
+       
         #Check if the new tid exists
         for thumb_mapping in thumb_mappings:
             if thumb_mapping.thumbnail_metadata["thumbnail_id"] == new_tid:
@@ -645,7 +580,9 @@ class BrightcovePlatform(AbstractPlatform):
                                     thumb_mappings, new_tid)
         modified_thumbs.append(new_thumb)
         if old_thumb is None:
-            _log.debug("key=update_thumbnaili msg=set thumbnail for the first time %s tid %s"%(i_vid,new_tid))
+            #old_thumb can be None if there was no neon thumb before
+            _log.debug("key=update_thumbnail" 
+                    " msg=set thumbnail in DB %s tid %s"%(i_vid,new_tid))
         else:
             modified_thumbs.append(old_thumb)
         
@@ -654,7 +591,7 @@ class BrightcovePlatform(AbstractPlatform):
                                         modified_thumbs)  
             if not res:
                 _log.error("key=update_thumbnail msg=[pre-update]" 
-                        "ThumbnailIDMapper save_all failed for %s" %new_tid)
+                        " ThumbnailIDMapper save_all failed for %s" %new_tid)
                 callback(False)
                 return
         else:
@@ -662,28 +599,34 @@ class BrightcovePlatform(AbstractPlatform):
             return
 
         # Update the new_tid as the thumbnail for the video
-        tref,sref = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,
+        thumb_res = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,
                                            platform_vid,
                                            t_url,
-                                           new_tid)
+                                           new_tid,
+                                           fsize)
+        if thumb_res is None:
+            callback(None)
+            return
+
+        tref,sref = thumb_res[0],thumb_res[1]
         if not sref:
             _log.error("key=update_thumbnail msg=brightcove error" 
-                    "update video still for video %s %s" %(i_vid,new_tid))
+                    " update video still for video %s %s" %(i_vid,new_tid))
 
-        if nosave:
+        if nosave: #Why is this used for checkthumb? 
             callback(tref)
             return
 
         if not tref:
             _log.error("key=update_thumbnail msg=failed to" 
-                    "enable thumb %s for %s" %(new_tid,i_vid))
+                    " enable thumb %s for %s" %(new_tid,i_vid))
             
             # Thumbnail was not update via the brightcove api, revert the DB changes
             modified_thumbs = []
             
             #get old thumbnail tid to revert to, this was the tid 
             #that was previously live before this request
-            old_tid = old_thumb.thumbnail_metadata["thumbnail_id"] 
+            old_tid = "no_thumb" if old_thumb is None else old_thumb.thumbnail_metadata["thumbnail_id"] 
             new_thumb, old_thumb = ThumbnailIDMapper.enable_thumbnail(
                                     thumb_mappings, old_tid)
             modified_thumbs.append(new_thumb)
@@ -743,6 +686,7 @@ class BrightcovePlatform(AbstractPlatform):
             self.read_token, self.write_token, self.auto_update,
             self.last_process_date,account_created=self.account_created)
         bc.create_neon_api_requests(self.integration_id)    
+        bc.create_requests_unscheduled_videos(self.integration_id)
 
     '''
     Temp method to support backward compatibility
@@ -754,11 +698,12 @@ class BrightcovePlatform(AbstractPlatform):
         bc.create_brightcove_request_by_tag(self.integration_id)
         
 
-    def check_current_thumbnail_in_db(self,video_id,callback=None):
+    def check_current_thumbnail_in_db(self,i_vid,callback=None):
         '''
         Check if the current thumbnail for the given video on brightcove
         has been recorded in Neon DB. Returns True if it has
         '''
+        p_vid = InternalVideoID.to_external(i_vid)
         bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,
                                               self.publisher_id,
                                               self.read_token,
@@ -766,9 +711,9 @@ class BrightcovePlatform(AbstractPlatform):
                                               self.auto_update,
                                               self.last_process_date)
         if callback:
-            bc.async_check_thumbnail(video_id,callback)
+            bc.async_check_thumbnail(p_vid,callback)
         else:
-            return bc.check_thumbnail(video_id)
+            return bc.check_thumbnail(p_vid)
 
     ''' Method to verify brightcove token on account creation
         And create requests for processing
@@ -787,8 +732,8 @@ class BrightcovePlatform(AbstractPlatform):
             return bc.verify_token_and_create_requests(self.integration_id,
                                                        n)
 
-    @staticmethod
-    def create(json_data):
+    @classmethod
+    def create(cls, json_data):
         if not json_data:
             return None
 
@@ -817,15 +762,6 @@ class BrightcovePlatform(AbstractPlatform):
             ba.__dict__[key] = params[key]
         return ba
 
-    @classmethod
-    def get_account(cls,api_key,i_id,callback=None):
-        db_connection = DBConnection(cls)
-        key = "BrightcovePlatform".lower() + '_' + api_key + '_' + i_id
-        if callback:
-            db_connection.conn.get(key,callback) 
-        else:
-            return db_connection.blocking_conn.get(key)
-
     @staticmethod
     def find_all_videos(token,limit,callback=None):
         # Get the names and IDs of recently published videos:
@@ -851,7 +787,7 @@ class YoutubePlatform(AbstractPlatform):
                  expires=None, auto_update=False, abtest=False):
         AbstractPlatform.__init__(self)
         
-        self.key = self.__class__.__name__.lower()  + '_' + NeonApiKey.generate(a_id ) + '_' + i_id
+        self.key = self.__class__.__name__.lower()  + '_%s_%s' %(NeonApiKey.generate(a_id ), i_id)
         self.account_id = a_id
         self.integration_id = i_id
         self.access_token = access_token
@@ -954,18 +890,12 @@ class YoutubePlatform(AbstractPlatform):
 
     def create_job(self):
         pass
-
-    @classmethod
-    def get_account(cls,api_key,i_id,callback=None,lock=False):
-        db_connection = DBConnection(cls)
-        key = "YoutubePlatform".lower() + '_' + api_key + '_' + i_id
-        if callback:
-            db_connection.conn.get(key,callback) 
-        else:
-            return db_connection.blocking_conn.get(key)
     
-    @staticmethod
-    def create(json_data):
+    @classmethod
+    def create(cls, json_data):
+        if json_data is None:
+            return None
+        
         params = json.loads(json_data)
         a_id = params['account_id']
         i_id = params['integration_id'] 
@@ -1001,6 +931,7 @@ class RequestState(object):
     FAILED     = "failed"
     FINISHED   = "finished"
     INT_ERROR  = "internal_error"
+    ACTIVE     = "active" #thumbnail live 
 
 class NeonApiRequest(object):
     '''
@@ -1033,6 +964,7 @@ class NeonApiRequest(object):
         #API Method
         self.api_method = None
         self.api_param  = None
+        self.publish_date = None
 
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__) 
@@ -1173,8 +1105,9 @@ class ThumbnailMetaData(object):
 
     A single thumbnail id maps to all its urls [Neon, OVP name space ones, other associated ones] 
     '''
-    def __init__(self,tid,urls,created,width,height,ttype,model_score,
-            model_version,enabled=True,chosen=False,rank=None,refid=None):
+    def __init__(self, tid, urls, created, width, height, ttype, model_score,
+                 model_version, enabled=True, chosen=False, rank=None, 
+                 refid=None):
         self.thumbnail_id = tid
         self.urls = urls  # All urls associated with single image
         self.created_time = created #Timestamp when thumbnail was created 
@@ -1330,7 +1263,7 @@ class ImageMD5Mapper(object):
     def get_tid(cls,ext_video_id,image_md5,callback=None):
         db_connection = DBConnection(cls)
         
-        key = "ImageMD5Mapper".lower() + '_' + ext_video_id + '_' + image_md5
+        key = "ImageMD5Mapper".lower() + '_%s_%s' %(ext_video_id, image_md5)
         if callback:
             db_connection.conn.get(key,callback)
         else:
@@ -1538,9 +1471,16 @@ class VideoMetadata(object):
         self.model_version = model_version
         self.job_id = request_id
         self.integration_id = i_id
+        self.frame_size = frame_size #(w,h)
 
     def get_id(self):
         return self.key
+
+    def get_frame_size(self):
+        #if self.frame_size:
+        #    return float(self.frame_size[0])/self.frame_size[1]
+        if self.__dict__.has_key('frame_size'):
+            return self.frame_size
 
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__) 
