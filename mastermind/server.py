@@ -53,8 +53,6 @@ define('stats_user', default='mastermind',
 define('stats_pass', default='pignar4iuf434',
        help='Password for the stats database')
 define('stats_db', default='stats_dev', help='Stats database to connect to')
-define('stats_table', default='hourly_events',
-       help='Table in the stats database to write to')
 define('stats_db_polling_delay', default=57, type=float,
        help='Number of seconds between polls of the video db')
 
@@ -206,7 +204,7 @@ class StatsDBWatcher(threading.Thread):
         stats.db.execute(
             cursor,
             '''SELECT logtime FROM last_update WHERE tablename = %s''',
-            (options.stats_table,))
+            (stats.db.get_hourly_events_table(),))
         result = cursor.fetchall()
         if len(result) == 0:
             _log.error('Cannot determine when the database was last updated')
@@ -223,7 +221,7 @@ class StatsDBWatcher(threading.Thread):
             cursor.execute('''SELECT thumbnail_id,
                            sum(loads), sum(clicks) 
                            FROM %s group by thumbnail_id''' %
-                options.stats_table)
+                stats.db.get_hourly_events_table())
             result = cursor.fetchall()
             if result:
                 data = ((self._find_video_id(x[0]), x[0], x[1], x[2]) 

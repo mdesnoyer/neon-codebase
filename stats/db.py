@@ -17,21 +17,28 @@ import sys
 
 from utils.options import define, options
 
+define('hourly_events_table', default='hourly_events',
+       help='Table in the stats database to write the hourly event stats to')
+
 _log = logging.getLogger(__name__)
 
 def create_tables(cursor):
     '''Creates all the tables needed in the stats database if they don't exist.
     '''
-    cursor.execute('''CREATE TABLE IF NOT EXISTS hourly_events (
+    cursor.execute('''CREATE TABLE IF NOT EXISTS %s (
                    thumbnail_id VARCHAR(32) NOT NULL,
                    hour DATETIME NOT NULL,
                    loads INT NOT NULL DEFAULT 0,
                    clicks INT NOT NULL DEFAULT 0,
-                   UNIQUE (thumbnail_id, hour))''')
+                   UNIQUE (thumbnail_id, hour))''' % 
+                   options.hourly_events_table)
     
     cursor.execute('''CREATE TABLE IF NOT EXISTS last_update (
                       tablename VARCHAR(256) NOT NULL UNIQUE,
                       logtime DATETIME)''')
+
+def get_hourly_events_table():
+    return options.hourly_events_table
 
 def execute(cursor, command, args=[]):
     '''Executes a command on a sql cursor, but handles parameters properly.

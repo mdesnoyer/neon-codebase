@@ -153,7 +153,7 @@ class OptionParser(object):
                                              type=type, help=help)
 
     def parse_options(self, args=None, config_stream=None,
-                      usage='%prog [options]'):
+                      usage='%prog [options]', watch_file=True):
         '''Parse the options.
 
         Inputs:
@@ -161,6 +161,8 @@ class OptionParser(object):
         config_stream - Specify a yaml stream to get arguments from. 
                         Otherwise looks for the --config flag in the arguments.
         usage - To display the usage.
+        watch_file - If true, the config file will be watched for changes 
+                     that will be incorporated on the fly.
         '''
         with self.__dict__['lock']:
             cmd_options, args = self._parse_command_line(args, usage)
@@ -172,7 +174,7 @@ class OptionParser(object):
                                           self.cmd_options.config)
 
             # Start the polling thread if there is a config file to read
-            if self.cmd_options.config is not None:
+            if watch_file and self.cmd_options.config is not None:
                 ConfigPoller(self).start()
 
         return self, args
@@ -216,10 +218,10 @@ class OptionParser(object):
         you can do:
         def setUp(self):
           self.old_variable = options.get('my.variable')
-          options.set('my.variable', 45)
+          options._set('my.variable', 45)
 
         def tearDown(self):
-          options.set('my.variable', self.old_variable)
+          options._set('my.variable', self.old_variable)
         '''
         with self.__dict__['lock']:
             try:
