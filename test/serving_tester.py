@@ -78,6 +78,9 @@ _erase_local_log_dir = multiprocessing.Event()
 _activity_watcher = utils.ps.ActivityWatcher()
 
 class TestServingSystem(tornado.testing.AsyncTestCase):
+    # Nose won't find this test now
+    __test__ = False
+    
     @classmethod
     def setUpClass(cls):
         random.seed()

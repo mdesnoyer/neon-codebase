@@ -185,7 +185,7 @@ def main(erase_local_data=None, activity_watcher=utils.ps.ActivityWatcher()):
                         erase_local_data.clear()
                         known_input_files = 0
                 
-                    _log.debug(('Looking for new log files to process '
+                    _log.info(('Looking for new log files to process '
                                'from %s') % options.input)
                     with activity_watcher.activate():
                         with job.make_runner() as runner:
