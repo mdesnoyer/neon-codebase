@@ -88,6 +88,7 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
 
         # Setup randomed parameters so that this run doesn't conflict
         cls.s3disk = tempfile.mkdtemp()
+        cls.fakes3root = tempfile.mkdtemp()
         cls.config_file = tempfile.NamedTemporaryFile()
         base_conf_path = os.path.join(os.path.dirname(__file__),
                                       'local_tester.conf')
@@ -111,6 +112,7 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
             params['stats']['db']['hourly_events_table'] = \
               '%x' % random.randrange(16**20)
             params['clickTracker']['trackserver']['s3disk'] = cls.s3disk
+            params['test']['serving_tester']['fakes3root'] = cls.fakes3root
 
             yaml.dump(params, cls.config_file)
             cls.config_file.flush()
@@ -151,7 +153,6 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        shutil.rmtree(cls.s3disk, True)
         cls._directive_cap.terminate()
         cls._directive_cap.join(30)
         if cls._directive_cap.is_alive():
@@ -163,6 +164,8 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         utils.ps.shutdown_children()
         ClearStatsDb()
         cls.config_file.close()
+        shutil.rmtree(cls.s3disk, True)
+        shutil.rmtree(cls.fakes3root, True)
 
     def setUp(self):
         super(TestServingSystem, self).setUp()
