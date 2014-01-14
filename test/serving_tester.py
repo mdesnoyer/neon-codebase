@@ -645,4 +645,6 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
+    # This forces to output all of stdout
+    print 'CTEST_FULL_OUTPUT'
     unittest.main()
