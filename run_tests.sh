@@ -33,4 +33,4 @@ if [ -f Testing/TAG ] ; then
 fi
 
 cd ${CURDIR}
-nosetests --with-coverage --with-xunit --cover-package . --cover-erase --exe --cover-xml -s || true
+nosetests --with-coverage --with-xunit --cover-package . --cover-erase --exe --cover-xml || true
