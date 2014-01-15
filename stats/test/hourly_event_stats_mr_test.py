@@ -15,6 +15,7 @@ from StringIO import StringIO
 import sqlite3
 from supportServices import neondata
 import tempfile
+import test_utils.mr
 import unittest
 import utils.neon
 from utils.options import define, options
@@ -22,46 +23,10 @@ from utils.options import define, options
 from stats.hourly_event_stats_mr import *
 
 ### Helper functions
-def encode(entries, protocol=JSONProtocol):
+def encode(entries, protocol=PickleProtocol):
     '''Encodes a list of key value pairs into the mrjob protocol.'''
     encoder = protocol()
     return '\n'.join([encoder.write(key, value) for key, value in entries])
-
-def run_single_step(mr, input_str, step_type='mapper', step=0,
-                    protocol=JSONProtocol):
-    '''Runs a single step and returns the results.
-
-    Inputs:
-    mr - Map reduce job
-    input_str - stdin input string to process
-    step - Step to run
-    step_type - 'mapper' or 'reducer'
-    protocol - Protocole that the input data was encoded as
-    
-    Outputs: ([(key, value)], counters)
-    '''
-    results = []
-    counters = {}
-
-    stdin = StringIO(input_str)
-    mr.sandbox(stdin=stdin)
-    if step_type == 'mapper':
-        if step == 0:
-            mr.INPUT_PROTOCOL = protocol
-        else:
-            mr.INTERNAL_PROTOCOL = protocol
-        mr.run_mapper(step)
-        return (mr.parse_output(mr.INTERNAL_PROTOCOL()),
-                mr.parse_counters())
-    elif step_type == 'reducer':
-        mr.INTERNAL_PROTOCOL = protocol
-        mr.run_reducer(step)
-        if step == len(mr.steps()) - 1:
-            return (mr.parse_output(mr.OUTPUT_PROTOCOL()),
-                    mr.parse_counters())
-        else:
-            return (mr.parse_output(mr.INTERNAL_PROTOCOL()),
-                    mr.parse_counters())
 
 def hr2str(hr):
     return datetime.utcfromtimestamp(hr*3600).isoformat(' ')
@@ -74,7 +39,7 @@ class TestDataParsing(unittest.TestCase):
         self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
 
     def test_valid_click(self):
-        results, counters = run_single_step(self.mr,
+        results, counters = test_utils.mr.run_single_step(self.mr,
             ('{"sts":19800, "a":"click", "page":"here.com",'
              '"ttype":"flashonly", "img":"http://monkey.com"}\n'
              '{"sts":19800, "a":"click", "page":"here.com",'
@@ -87,7 +52,7 @@ class TestDataParsing(unittest.TestCase):
                               ('latest', 19800)])
 
     def test_valid_load(self):
-        results, counters = run_single_step(self.mr,
+        results, counters = test_utils.mr.run_single_step(self.mr,
           ('{"sts":19800, "a":"load", "page":"here.com", "ttype":"flashonly",'
            '"imgs":["http://monkey.com","poprocks.jpg","pumpkin.wow"]}'),
             protocol=RawProtocol)
@@ -99,7 +64,7 @@ class TestDataParsing(unittest.TestCase):
                                ('latest', 19800)])
 
     def test_invalid_json(self):
-        results, counters = run_single_step(self.mr,
+        results, counters = test_utils.mr.run_single_step(self.mr,
             ('{"sts":19800, "a":"click" "img":"http://monkey.com"}\n'
             '{"sts":1900, "a":"click", "img":"http://monkey.com"\n'
             '{"sts":1900, "a":"load", "imgs":["now.com"}\n'),
@@ -109,7 +74,7 @@ class TestDataParsing(unittest.TestCase):
             counters['HourlyEventStatsErrors']['JSONParseErrors'], 3)
 
     def test_fields_missing(self):
-        results, counters = run_single_step(self.mr,
+        results, counters = test_utils.mr.run_single_step(self.mr,
             ('{"a":"click", "ttype":"flashonly", "img":"http://monkey.com"}\n'
              '{"sts":19800, "a":"click", "img":"http://monkey.com"}\n'
              '{"sts":19800, "ttype":"flashonly", "img":"http://monkey.com"}\n'
@@ -135,7 +100,7 @@ class TestDataParsing(unittest.TestCase):
 
         It can't track loads properly.
         '''
-        results, counters = run_single_step(self.mr,
+        results, counters = test_utils.mr.run_single_step(self.mr,
             ('{"sts":19800, "a":"click", '
              '"ttype":"html5", "img":"http://monkey.com"}\n'
              '{"sts":19800, "a":"load", '
@@ -161,18 +126,18 @@ class TestIDMapping(unittest.TestCase):
 
     def test_valid_mapping(self):
         self.mock_mapper.return_value = "54s9dfewgvw9e8g9"
-        results, counters = run_single_step(self.mr,
+        results, counters = test_utils.mr.run_single_step(self.mr,
             encode([(('click', 'http://first.jpg', 94), 3)]),
             step=1)
 
         self.assertEqual(self.mock_mapper.call_count, 1)
         cargs, kwargs = self.mock_mapper.call_args
         self.assertEqual(cargs[0], 'http://first.jpg')
-        self.assertEqual(results[0], (['click', '54s9dfewgvw9e8g9', 94], 3))
+        self.assertEqual(results[0], (('click', '54s9dfewgvw9e8g9', 94), 3))
 
     def test_mapping_too_short(self):
         self.mock_mapper.side_effect = "54s9"
-        results, counters = run_single_step(self.mr,
+        results, counters = test_utils.mr.run_single_step(self.mr,
             encode([(('click', 'http://first.jpg', 94), 3)]),
             step=1)
 
@@ -183,7 +148,7 @@ class TestIDMapping(unittest.TestCase):
 
     def test_no_thumb_mapping(self):
         self.mock_mapper.side_effect = [None]
-        results, counters = run_single_step(self.mr,
+        results, counters = test_utils.mr.run_single_step(self.mr,
             encode([(('click', 'http://first.jpg', 94), 3)]),
             step=1)
 
@@ -194,7 +159,7 @@ class TestIDMapping(unittest.TestCase):
 
     def test_redis_error(self):
         self.mock_mapper.side_effect = redis.exceptions.RedisError
-        results, counters = run_single_step(self.mr,
+        results, counters = test_utils.mr.run_single_step(self.mr,
             encode([(('click', 'http://first.jpg', 94), 3)]),
             step=1)
 
@@ -230,7 +195,7 @@ class TestDatabaseWriting(unittest.TestCase):
         os.remove('file::memory:?cache=shared')
 
     def test_table_creation(self):
-        results, counters = run_single_step(self.mr, '', step=2,
+        results, counters = test_utils.mr.run_single_step(self.mr, '', step=2,
                                             step_type='reducer')
         cursor = self.ramdb.cursor()
         cursor.execute('select * from hourly_events')
@@ -240,7 +205,7 @@ class TestDatabaseWriting(unittest.TestCase):
                          ['thumbnail_id', 'hour', 'loads', 'clicks'])
 
     def test_new_data(self):
-        garb, counters = run_single_step(
+        garb, counters = test_utils.mr.run_single_step(
             self.mr,
             encode([(('imgA', 56),(5, 'click')),
                     (('imgA', 56),(55, 'load')),
@@ -267,7 +232,7 @@ class TestDatabaseWriting(unittest.TestCase):
 
     def test_replace_data(self):
         '''The default option replaces instead of increments.'''
-        run_single_step(self.mr,
+        test_utils.mr.run_single_step(self.mr,
                         encode([(('imgA', 56),(5, 'click')),
                                 (('imgA', 56),(55, 'load')),
                                 (('imgB', 56),(9, 'click')),
@@ -275,7 +240,7 @@ class TestDatabaseWriting(unittest.TestCase):
                                 ('latest', 201600)]),
                                 step=2,
                                 step_type='reducer')
-        run_single_step(self.mr,
+        test_utils.mr.run_single_step(self.mr,
                         encode([(('imgA', 56),(10, 'click')),
                                 (('imgA', 56),(75, 'load')),
                                 (('imgB', 56),(9, 'click')),
@@ -303,14 +268,14 @@ class TestDatabaseWriting(unittest.TestCase):
         '''Test when the counts are incremented.'''
         self.mr.options.increment_stats = 1
             
-        run_single_step(self.mr,
+        test_utils.mr.run_single_step(self.mr,
                         encode([(('imgA', 56),(5, 'click')),
                                 (('imgA', 56),(55, 'load')),
                                 (('imgB', 56),(9, 'click')),
                                 (('imgA', 54),(12, 'load'))]),
                                 step=2,
                                 step_type='reducer')
-        run_single_step(self.mr,
+        test_utils.mr.run_single_step(self.mr,
                         encode([(('imgA', 56),(2, 'click')),
                                 (('imgA', 56),(10, 'load')),
                                 (('imgA', 59),(16, 'load'))]),
@@ -332,7 +297,7 @@ class TestDatabaseWriting(unittest.TestCase):
     def test_connection_error(self):
         MySQLdb.connect = MagicMock(
             side_effect=[MySQLdb.Error('yikes')])
-        self.assertRaises(MySQLdb.Error, run_single_step,
+        self.assertRaises(MySQLdb.Error, test_utils.mr.run_single_step,
            self.mr, '', 'reducer', 2)
 
 
@@ -421,5 +386,5 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual(cursor.fetchone()[0], sec2str(19810))
 
 if __name__ == '__main__':
-    utils.neon.InitNeonTest()
+    utils.neon.InitNeon()
     unittest.main()
