@@ -68,7 +68,8 @@ class GetVideoStatusResponse(object):
     def to_json(self):
         for item in self.items:
             for thumb in item['thumbnails']:
-                if thumb['model_score'] == float('-inf'):
+                score = thumb['model_score']
+                if score == float('-inf') or score == '-inf':
                     thumb['model_score'] =  -1 * sys.maxint
 
         return json.dumps(self, default=lambda o: o.__dict__)
@@ -179,18 +180,26 @@ class AccountHandler(tornado.web.RequestHandler):
                 #self.get_account_status(itype,i_id)
                 self.send_json_response('{"error":"not yet impl"}',200)
 
+            elif method == "tracker_account_id":
+                self.get_tracker_account_id()
+
             elif method == "videos" or "videos" in method:
-                #videoid requested
+                #videoids requested or state requested
                 if len(uri_parts) == 9:
-                    try:
-                        ids = self.get_argument('video_ids')
-                        vids = ids.split(',') 
-                    except:
-                        #Get all the videos from the account
-                        self.get_video_status_brightcove(i_id,None)
+                    video_state = uri_parts[-1].split('?')[0]
+                    if video_state in ['processing','recommended','published']:
+                        self.get_video_status_brightcove(i_id,None,video_state)
                         return
-                    self.get_video_status_brightcove(i_id,vids)
-                    return
+                    else:
+                        try:
+                            ids = self.get_argument('video_ids')
+                            vids = ids.split(',') 
+                        except:
+                            #Get all the videos from the account
+                            self.get_video_status_brightcove(i_id,None)
+                            return
+                        self.get_video_status_brightcove(i_id,vids)
+                        return
 
                 if itype  == "neon_integrations":
                     self.get_neon_videos()
@@ -238,7 +247,6 @@ class AccountHandler(tornado.web.RequestHandler):
         elif "accounts" in self.request.uri.split('/')[-1]:
             try:
                 a_id = self.get_argument("account_id") 
-                #self.create_account(a_id)
                 self.create_account_and_neon_integration(a_id)
             except:
                 data = '{"error":"account id not specified"}'
@@ -320,6 +328,19 @@ class AccountHandler(tornado.web.RequestHandler):
     
     ############## User defined methods ###########
 
+    def get_tracker_account_id(self):
+        '''
+        Return tracker account id associated with the neon user account
+        '''
+        nu = neondata.NeonUserAccount.get_account(self.api_key)
+        if nu:
+            data = '{"tracker_account_id":"%s"}'%nu.tracker_account_id
+            self.send_json_response(data,200)
+        else:
+            data = '{"error":"account not found"}'
+            self.send_json_response(data,400)
+
+
     ''' Get Videos which were called from the Neon API '''
 
     def get_neon_videos(self):
@@ -336,11 +357,16 @@ class AccountHandler(tornado.web.RequestHandler):
     
     ''' Get video status for multiple videos -- Brightcove Integration '''
     @tornado.gen.engine
-    def get_video_status_brightcove(self,i_id,vids):
+    def get_video_status_brightcove(self,i_id,vids,video_state=None):
         #counters 
         c_published = 0
         c_processing = 0
         c_recommended = 0
+
+        #videos by state
+        p_videos = []
+        r_videos = []
+        a_videos = []
 
         page_no = 0 
         page_size = 300
@@ -390,9 +416,10 @@ class AccountHandler(tornado.web.RequestHandler):
 
         
         #2 Get Job status
-        completed_videos = [] #jobs that have completed 
+        #jobs that have completed, used to reduce # of keys to fetch 
+        completed_videos = [] 
 
-        #Hack for first time video requests in brightcove #TODO: cleanup
+        #get all requests and populate video response object in advance
         requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_requests,job_ids) 
         ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for request,vid in zip(requests,vids):
@@ -407,13 +434,20 @@ class AccountHandler(tornado.web.RequestHandler):
                 #Create TID 0 as a temp place holder for previous thumbnail during processing stage
                 tm = neondata.ThumbnailMetaData(0,t_urls,ctime,0,0,"brightcove",0,0)
                 thumbs.append(tm.to_dict())
+                p_videos.append(vid)
             elif request.state is neondata.RequestState.FAILED:
                 pass
             else:
                 #Jobs have finished
+                #append to completed_videos 
+                #for backward compatibility with all videos api call 
                 completed_videos.append(vid)
                 status = "finished"
                 thumbs = None
+                if request.state == neondata.RequestState.FINISHED:
+                    r_videos.append(vid) #finshed processing
+                elif request.state == neondata.RequestState.ACTIVE:
+                    a_videos.append(vid) #published /active 
 
             pub_date = None if not request.__dict__.has_key('publish_date') else request.publish_date
             pub_date = int(pub_date) if pub_date else None #type
@@ -427,7 +461,32 @@ class AccountHandler(tornado.web.RequestHandler):
                               0, #current tid,add fake tid
                               thumbs)
             result[vid] = vr
+        
+        #2b Filter videos based on state as requested
+        if video_state:
+            if video_state == "published": #active
+                vids = completed_videos = a_videos
+            elif video_state == "recommended":
+                vids = completed_videos = r_videos
+            elif video_state == "processing":
+                vids = p_videos
+                completed_videos = []
+            else:
+                _log.error("key=get_video_status_brightcove " 
+                        " msg=invalid state requested")
+                self.send_json_response('{"error":"invalid state request"}',400)
+                return
 
+        #2c Pagination, case: There are more vids than page_size
+        if len(vids) > page_size:
+            #This means paging is valid
+            #check if for the page_no request there are 
+            #sort video ids
+            s_index = page_no * page_size
+            e_index = (page_no +1) * page_size
+            vids = sorted(vids,reverse=True)
+            vids = vids[s_index:e_index]
+        
         #3. Populate Completed videos
         keys = [neondata.InternalVideoID.generate(self.api_key,vid) for vid in completed_videos] #get internal vids
         if len(keys) > 0:
@@ -468,29 +527,16 @@ class AccountHandler(tornado.web.RequestHandler):
         vresult = []
         for res in result:
             vres = result[res]
-            vresult.append(vres.to_dict())
+            if vres.video_id in vids: #filter videos by state 
+                vresult.append(vres.to_dict())
             
-            #counters
-            status = vres.status
-            if status == "finished":
-                c_recommended += 1 
-            elif status == "active":
-                c_published += 1 
-            else:
-                c_processing += 1
+        c_processing = len(p_videos)
+        c_recommended = len(r_videos)
+        c_published = len(a_videos)
 
         #s_vresult = sorted(vresult, key=lambda k: k['publish_date'],reverse=True)
         s_vresult = sorted(vresult, key=lambda k: k['video_id'],reverse=True)
         
-        #case: There are more vids than page_size
-        if len(vids) > page_size:
-            #This means paging is valid
-            #check if for the page_no request there are 
-            #sort video ids
-            s_index = page_no * page_size
-            e_index = (page_no +1) * page_size
-            s_vresult = s_vresult[s_index:e_index]
-
         #Json response data format { "items":[], "count":0, "page_no":0, "page_size":0} 
         vstatus_response = GetVideoStatusResponse(s_vresult,total_count,page_no,page_size,
                 c_processing,c_recommended,c_published)
@@ -580,9 +626,15 @@ class AccountHandler(tornado.web.RequestHandler):
         if not nuser_data:
             nplatform = neondata.NeonPlatform(a_id)
             user.add_integration(nplatform.integration_id,"neon")
-            res = yield tornado.gen.Task(user.save_integration,nplatform)
+            res = yield tornado.gen.Task(user.save_integration,nplatform) 
             if res:
-                data = '{ "neon_api_key": "' + user.neon_api_key + '" }'
+                tai_mapper = neondata.TrackerAccountIDMapper(user.tracker_account_id, a_id)
+                resp = yield tornado.gen.Task(tai_mapper.save)
+                if not resp:
+                    _log.error("key=create_neon_user "
+                            " msg=failed to save tai %s" %user.tracker_account_id)
+                data = ('{ "neon_api_key": "%s", "tracker_account_id":"%s" }'
+                        %(user.neon_api_key,user.tracker_account_id)) 
                 self.send_json_response(data,200)
             else:
                 data = '{"error": "account not created"}'
@@ -1239,7 +1291,7 @@ class BcoveHandler(tornado.web.RequestHandler):
 application = tornado.web.Application([
         (r'/api/v1/accounts(.*)', AccountHandler),
         (r'/api/v1/brightcovecontroller(.*)', BcoveHandler),
-        (r'/api/v1/utils(.*)', UtilHandler)],debug=True)
+        (r'/api/v1/utils(.*)', UtilHandler)],debug=True,gzip=True)
 
 def main():
     

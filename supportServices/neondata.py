@@ -19,6 +19,7 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
+import binascii
 import datetime
 import hashlib
 import json
@@ -286,7 +287,43 @@ class InternalVideoID(object):
     def to_external(internal_vid):
         vid = internal_vid.split('_')[-1]
         return vid
+
+class TrackerAccountID(object):
+    @staticmethod
+    def generate(input):
+        return abs(binascii.crc32(input))
+
+class TrackerAccountIDMapper(object):
+    '''
+    Maps a given Tracker Account ID to API Key 
+
+    This is needed to keep the tracker id => api_key
+    '''
+    def __init__(self,tai,account_id):
+        self.key = self.format_key(tai)
+        self.value = account_id 
+
+    def format_key(self,tai):
+        return self.__class__.__name__.lower() + '_%s'%tai
     
+    def save(self,callback=None):
+        db_connection = DBConnection(self)
+        
+        if callback:
+            db_connection.conn.set(self.key,self.value,callback)
+        else:
+            return db_connection.blocking_conn.set(self.key,self.value)
+    
+    @classmethod
+    def get_neon_account_id(cls,tai,callback=None):
+        key = cls.__name__.lower() + '_%s'%tai
+        db_connection = DBConnection(cls)
+        
+        if callback:
+            db_connection.conn.get(key,callback)
+        else:
+            return db_connection.blocking_conn.get(key)
+
 ''' NeonUserAccount
 
 Every user in the system has a neon account and all other integrations are 
@@ -295,18 +332,17 @@ associated with this account.
 Account usage aggregation, Billing information is computed here
 
 @videos: video id / jobid map of requests made directly through neon api
-@integrations: all the integrations associated with this acccount (brightcove,youtube, ... ) 
+@integrations: all the integrations associated with this acccount
 
 '''
 
 class NeonUserAccount(object):
-    def __init__(self,a_id,plan_start=None,processing_mins=None):
+    def __init__(self,a_id):
         self.account_id = a_id
         self.neon_api_key = NeonApiKey.generate(a_id)
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
-        self.plan_start_date = plan_start
-        self.processing_minutes = processing_mins
-        self.videos = {} #phase out 
+        self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
+        self.videos = {} #phase out,should be stored in neon integration 
         self.integrations = {} 
 
     def add_integration(self,integration_id,itype):
@@ -352,7 +388,7 @@ class NeonUserAccount(object):
         pipe = db_connection.blocking_conn.pipeline()
         pipe.set(self.key,self.to_json())
         pipe.set(new_integration.key,new_integration.to_json()) 
-        #pipe.execute(callback)
+        #pipe.set(tracker_account_mapper.key,tracker_account_mapper.value) 
         callback(pipe.execute())
 
     @classmethod
@@ -613,7 +649,9 @@ class BrightcovePlatform(AbstractPlatform):
             _log.error("key=update_thumbnail msg=brightcove error" 
                     " update video still for video %s %s" %(i_vid,new_tid))
 
-        if nosave: #Why is this used for checkthumb? 
+        #NOTE: When the call is made from brightcove controller, do not 
+        #save the changes in the db, this is just a temp change for A/B testing
+        if nosave:
             callback(tref)
             return
 
@@ -653,7 +691,15 @@ class BrightcovePlatform(AbstractPlatform):
                         "new_thumb data missing") 
                 callback(False)
         else:
-            #Success       
+            #Success      
+            #Updaate the request state to Active to facilitate faster filtering
+            req_data = NeonApiRequest.get_request(self.neon_api_key,vmdata.job_id) 
+            vid_request = NeonApiRequest.create(req_data)
+            vid_request.state = RequestState.ACTIVE
+            ret = vid_request.save()
+            if not ret:
+                _log.error("key=update_thumbnail msg=%s state not updated to active"
+                        %vid_request.key)
             callback(True)
 
     ''' 
@@ -731,6 +777,12 @@ class BrightcovePlatform(AbstractPlatform):
         else:
             return bc.verify_token_and_create_requests(self.integration_id,
                                                        n)
+
+    def sync_individual_video_metadata(self):
+        bc = api.brightcove_api.BrightcoveApi(
+            self.neon_api_key, self.publisher_id, self.read_token,
+            self.write_token, self.auto_update, self.last_process_date)
+        bc.sync_individual_video_metadata(self.integration_id)
 
     @classmethod
     def create(cls, json_data):
