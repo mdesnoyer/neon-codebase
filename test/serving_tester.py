@@ -19,6 +19,7 @@ import atexit
 from boto.s3.connection import S3Connection
 from boto.s3.bucketlistresultset import BucketListResultSet
 import clickTracker.trackserver
+import contextlib
 import copy
 from datetime import datetime
 import json
@@ -32,6 +33,7 @@ import PIL.Image
 import Queue
 import random
 import re
+import shutil
 import signal
 import SimpleHTTPServer
 import SocketServer
@@ -55,6 +57,7 @@ import utils.logs
 import utils.neon
 import utils.ps
 from utils import statemon
+import yaml
 
 from utils.options import define, options
 
@@ -74,20 +77,53 @@ _log = logging.getLogger(__name__)
 _erase_local_log_dir = multiprocessing.Event()
 _activity_watcher = utils.ps.ActivityWatcher()
 
-
 class TestServingSystem(tornado.testing.AsyncTestCase):
+    # Nose won't find this test now
+    __test__ = False
+    
     @classmethod
     def setUpClass(cls):
-        conf_path = os.path.join(os.path.dirname(__file__),
-                                 'local_tester.conf')
-        options.parse_options(['-c', conf_path])
+        random.seed()
+        cls.redis = test_utils.redis.RedisServer()
+
+        # Setup randomed parameters so that this run doesn't conflict
+        cls.s3disk = tempfile.mkdtemp()
+        cls.fakes3root = tempfile.mkdtemp()
+        cls.config_file = tempfile.NamedTemporaryFile()
+        base_conf_path = os.path.join(os.path.dirname(__file__),
+                                      'local_tester.conf')
+        with open(base_conf_path) as conf_stream:
+            params = yaml.load(conf_stream)
+
+            params['supportServices']['neondata']['dbPort'] = cls.redis.port
+            params['supportServices']['services']['port'] = \
+              random.randint(10000,11000)
+            params['mastermind']['server']['port'] = \
+              random.randint(10000,11000)
+            params['clickTracker']['trackserver']['port'] = \
+              random.randint(10000,11000)
+            params['utils']['s3']['s3port'] = random.randint(10000,11000)
+            directive_port = random.randint(10000,11000)
+            params['test']['serving_tester']['bc_directive_port'] = directive_port
+            params['controllers']['brightcove_controller']['port'] = \
+              directive_port
+            params['mastermind']['server']['bc_controller_url'] = \
+              "http://localhost:%i/directive" % directive_port
+            params['stats']['db']['hourly_events_table'] = \
+              '%x' % random.randrange(16**20)
+            params['clickTracker']['trackserver']['s3disk'] = cls.s3disk
+            params['test']['serving_tester']['fakes3root'] = cls.fakes3root
+
+            yaml.dump(params, cls.config_file)
+            cls.config_file.flush()
+        
+        options.parse_options(['-c', cls.config_file.name], watch_file=False)
         utils.logs.AddConfiguredLogger()
+
+        random.seed(1965314)
         
         signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
         atexit.register(utils.ps.shutdown_children)
-
-        cls.redis = test_utils.redis.RedisServer(7210)
-        cls.redis.start()
 
         # Turn off the annoying logs
         logging.getLogger('tornado.access').propagate = False
@@ -97,6 +133,8 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         logging.getLogger('mrjob.conf').propagate = False
         logging.getLogger('mrjob.runner').propagate = False
         logging.getLogger('mrjob.sim').propagate = False
+
+        cls.redis.start()
 
         LaunchStatsDb()
         LaunchMastermind()
@@ -124,16 +162,18 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
                 pass
         cls.redis.stop()
         utils.ps.shutdown_children()
+        ClearStatsDb()
+        cls.config_file.close()
+        shutil.rmtree(cls.s3disk, True)
+        shutil.rmtree(cls.fakes3root, True)
 
     def setUp(self):
         super(TestServingSystem, self).setUp()
-        ClearStatsDb()
 
-        conn = sqldb.connect(user=options.stats_db_user,
-                             passwd=options.stats_db_pass,
-                             host='localhost',
-                             db=options.stats_db)
-        self.statscursor = conn.cursor()
+        self.statsconn = sqldb.connect(user=options.stats_db_user,
+                                       passwd=options.stats_db_pass,
+                                       host='localhost',
+                                       db=options.stats_db)
 
         # Clear the log storage area
         log_path = options.get('clickTracker.trackserver.output')
@@ -184,6 +224,7 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
     def tearDown(self):
         self.bc_patcher.stop()
         self.im_request_patcher.stop()
+        self.statsconn.close()
         super(TestServingSystem, self).tearDown()
 
     # TODO(sunil): Once we figure out why these tests don't run if
@@ -301,11 +342,13 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         Outputs:
         (loads, clicks)
         '''
-        response = stats.db.execute(
-            self.statscursor,
-            '''SELECT sum(loads), sum(clicks) from hourly_events
-            where thumbnail_id = %s''', (thumb_id,))
-        response = self.statscursor.fetchall()
+        with contextlib.closing( self.statsconn.cursor() ) as cursor:
+            response = stats.db.execute(
+                cursor,
+                '''SELECT sum(loads), sum(clicks) from %s
+                where thumbnail_id = %%s''' % stats.db.get_hourly_events_table(),
+                (thumb_id,))
+            response = cursor.fetchall()
         return (response[0][0], response[0][1])
         
 
@@ -476,21 +519,22 @@ class DirectiveCaptureHandler(tornado.web.RequestHandler):
         self.q.put(data['d'])
 
 def ClearStatsDb():
-    # Clear the stats database
-    conn = sqldb.connect(user=options.stats_db_user,
-                         passwd=options.stats_db_pass,
-                         host='localhost',
-                         db=options.stats_db)
-    statscursor = conn.cursor()
-    stats.db.execute(statscursor,
-                     '''DELETE from hourly_events''')
-    stats.db.execute(statscursor,
-                     '''DELETE from last_update''')
-    stats.db.execute(
-        statscursor,
-        'REPLACE INTO last_update (tablename, logtime) VALUES (%s, %s)',
-        ('hourly_events', datetime.utcfromtimestamp(0)))
-    conn.commit()
+    '''Clear the stats database'''
+    with contextlib.closing( 
+            sqldb.connect(user=options.stats_db_user,
+                          passwd=options.stats_db_pass,
+                          host='localhost',
+                          db=options.stats_db,
+                          connect_timeout=10)
+                          ) as conn:
+        with contextlib.closing(conn.cursor()) as statscursor:
+            stats.db.execute(statscursor,
+                             '''DELETE from last_update where tablename = %s''',
+                             (stats.db.get_hourly_events_table(),))
+            stats.db.execute(statscursor,
+                             '''DROP TABLE %s''' % 
+                             stats.db.get_hourly_events_table())
+        conn.commit()
 
 def LaunchStatsDb():
     '''Launches the stats db, which is a mysql interface.
@@ -517,7 +561,8 @@ def LaunchStatsDb():
 
     cursor = conn.cursor()    
     stats.db.create_tables(cursor)
-    ClearStatsDb()
+    conn.commit()
+    conn.close()
     
     _log.info('Connection to stats db is good')
 
@@ -600,4 +645,6 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
+    # This forces to output all of stdout
+    print 'CTEST_FULL_OUTPUT'
     unittest.main()

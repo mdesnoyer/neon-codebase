@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
@@ -19,7 +19,7 @@ import unittest
 import utils.neon
 from utils.options import define, options
 
-from hourly_event_stats_mr import *
+from stats.hourly_event_stats_mr import *
 
 ### Helper functions
 def encode(entries, protocol=JSONProtocol):

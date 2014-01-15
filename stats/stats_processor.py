@@ -21,6 +21,7 @@ import re
 from stats.hourly_event_stats_mr import HourlyEventStats
 import shutil
 import signal
+import stats.db
 import tarfile
 import tempfile
 import time
@@ -53,8 +54,6 @@ define('stats_pass', default='kjge8924qm',
 define('stats_db', default='stats_dev', help='Stats database to connect to')
 define('increment_stats', type=int, default=0,
        help='If true, stats are incremented. Otherwise, they are overwritten')
-define('stats_table', default='hourly_events',
-       help='Table in the stats database to write to')
 
 _log = logging.getLogger(__name__)
 
@@ -172,7 +171,7 @@ def main(erase_local_data=None, activity_watcher=utils.ps.ActivityWatcher()):
                     '--stats_user', options.stats_user,
                     '--stats_pass', options.stats_pass,
                     '--stats_db', options.stats_db,
-                    '--stats_table', options.stats_table,
+                    '--stats_table', stats.db.get_hourly_events_table(),
                     '--increment_stats', str(options.increment_stats),
                     '--neon_config', options.get_config_file(),
                     data_dir.path])
@@ -186,7 +185,7 @@ def main(erase_local_data=None, activity_watcher=utils.ps.ActivityWatcher()):
                         erase_local_data.clear()
                         known_input_files = 0
                 
-                    _log.debug(('Looking for new log files to process '
+                    _log.info(('Looking for new log files to process '
                                'from %s') % options.input)
                     with activity_watcher.activate():
                         with job.make_runner() as runner:
