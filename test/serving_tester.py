@@ -110,7 +110,7 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
             params['mastermind']['server']['bc_controller_url'] = \
               "http://localhost:%i/directive" % directive_port
             params['stats']['db']['hourly_events_table'] = \
-              '%x' % random.randrange(16**20)
+              ''.join(random.choice(string.ascii_lowercase) for x in range(20))
             params['clickTracker']['trackserver']['s3disk'] = cls.s3disk
             params['test']['serving_tester']['fakes3root'] = cls.fakes3root
 
