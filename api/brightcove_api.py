@@ -706,7 +706,8 @@ class BrightcoveApi(object):
         for item in items['items']:
             if item['publishedDate'] is None or len(item['publishedDate']) ==0:
                 items_to_process.append(item)
-
+                _log.debug("key=create_requests_unscheduled_videos" 
+                        " msg=creating request for vid %s" %item['id'])
         self.process_publisher_feed(items_to_process,i_id)
 
     def sync_individual_video_metadata(self,i_id):

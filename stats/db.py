@@ -34,7 +34,7 @@ def create_tables(cursor):
                    options.hourly_events_table)
     
     cursor.execute('''CREATE TABLE IF NOT EXISTS last_update (
-                      tablename VARCHAR(256) NOT NULL UNIQUE,
+                      tablename VARCHAR(255) NOT NULL UNIQUE,
                       logtime DATETIME)''')
 
 def get_hourly_events_table():
