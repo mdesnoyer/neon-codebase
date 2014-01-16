@@ -66,7 +66,7 @@ class TrackerData(object):
     '''
     Schema for click tracker data
     '''
-    def __init__(self,action,id,ttype,cts,sts,page,cip,imgs,cvid=None):
+    def __init__(self,action,id,ttype,cts,sts,page,cip,imgs,tai,cvid=None):
         self.a = action # load/ click
         self.id = id    # page load id
         self.ttype = ttype #tracker type
@@ -74,6 +74,7 @@ class TrackerData(object):
         self.sts = sts #server timestamp
         self.cip = cip #client IP
         self.page = page # Page where the video is shown
+        self.tai = tai
 
         if isinstance(imgs,list):        
             self.imgs = imgs #image list
@@ -101,7 +102,7 @@ class TrackerDataHandler(tornado.web.RequestHandler):
         cts = self.get_argument('ts')
         sts = int(time.time())
         page = self.get_argument('page') #url decode
-        
+        tai = self.get_argument('tai') #tracker account id 
         cvid = None
 
         #On load the current video loaded in the player is logged
@@ -114,7 +115,7 @@ class TrackerDataHandler(tornado.web.RequestHandler):
             imgs = self.get_argument('img')
 
         cip = self.request.remote_ip
-        return TrackerData(action,id,ttype,cts,sts,page,cip,imgs,cvid)
+        return TrackerData(action,id,ttype,cts,sts,page,cip,imgs,tai,cvid)
 
 
 class LogLines(TrackerDataHandler):
@@ -154,6 +155,8 @@ class LogLines(TrackerDataHandler):
 class TestTracker(TrackerDataHandler):
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
+        _log.error("key=TestTracker msg=request data  "
+                "%r" %self.request)
         try:
             tracker_data = self.parse_tracker_data()
             cb = self.get_argument("callback")

@@ -92,8 +92,10 @@ class BrightcoveApi(object):
         req = tornado.httpclient.HTTPRequest(url = url, method = "GET", 
                 request_timeout = 60.0, connect_timeout = 10.0)
 
-        return BrightcoveApi.read_connection.send_request(req,
-                    find_vid_callback)
+        if not find_vid_callback:
+            return BrightcoveApi.read_connection.send_request(req)
+        else:
+            BrightcoveApi.read_connection.send_request(req,find_vid_callback)
 
     '''
     Add Image brightcove api helper method
@@ -707,6 +709,30 @@ class BrightcoveApi(object):
 
         self.process_publisher_feed(items_to_process,i_id)
 
+    def sync_individual_video_metadata(self,i_id):
+        '''
+        Sync the video metadata from brightcove to neon db
+
+        #TODO: make this more efficient
+        '''
+        bc = supportServices.neondata.BrightcovePlatform.get_account(
+            self.neon_api_key, i_id)
+        videos_processed = bc.get_videos() 
+
+        for vid in videos_processed:
+            response = self.find_video_by_id(vid,i_id)
+            item = tornado.escape.json_decode(response.body)
+            title = item['name']
+            job_id = bc.videos[vid]
+            req_data = supportServices.neondata.NeonApiRequest.get_request(
+                    self.neon_api_key,job_id)
+            vid_request = supportServices.neondata.NeonApiRequest.create(
+                    req_data)
+            pub_date = int(item['publishedDate']) if item['publishedDate'] else None
+            vid_request.publish_date = pub_date 
+            vid_request.title = title
+            #TODO: May be even save current thumbnail
+            vid_request.save()
 
     ############## NEON API INTERFACE ########### 
 

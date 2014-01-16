@@ -47,8 +47,14 @@ var reqGuid = imtrackerNeonDataSender._NeonPageRequestUUID();
 var NeonImageTracker = ( function ()  {
     var NeonTrackerURL = "http://tracker.neon-lab.com/track";
 	var neonTrackerTestMode = false;
+    var TrackerAccountId = "AccountIDNotSet";
 
 	return {
+	
+	setAccountId: function(aid){
+			NeonImageTracker.TrackerAccountId = aid;
+		},
+
 	trackerInit: function () {
 		$(document).ready(function () {
 			$(window).ready(function(){
@@ -61,14 +67,14 @@ var NeonImageTracker = ( function ()  {
 				for (var i = 0; i < imgTags.length; i++) {
 					imgs.push(imgTags[i].src);
 				}	
-				params = "a=" + action + "&id="+ reqGuid + "&imgs=" + imgs;
+				params = "a=" + action + "&id="+ reqGuid + "&imgs=" + imgs + "&tai=" + NeonImageTracker.TrackerAccountId;
 				imtrackerNeonDataSender.sendRequest(NeonTrackerURL,params);
 		});
     	$("img").mousedown(function(e) {
 	    	var action = "click";	
 			var imgSrc = $(this).attr('src');
 			var coordinates = e.pageX  + "," + e.pageY;
-			params = "a=" + action + "&id="+ reqGuid + "&img=" + encodeURIComponent(imgSrc) + "&xy=" + coordinates; 
+			params = "a=" + action + "&id="+ reqGuid + "&img=" + encodeURIComponent(imgSrc) + "&xy=" + coordinates + "&tai=" + NeonImageTracker.TrackerAccountId; 
 			imtrackerNeonDataSender.sendRequest(NeonTrackerURL,params);
 	  	}); 
 	});
