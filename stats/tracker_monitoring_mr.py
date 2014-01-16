@@ -101,7 +101,7 @@ class TrackerMonitoring(MRJob):
             else:
                 url = ''.join((url_chunks.netloc, url_chunks.path))
 
-            yield ((data['a'], url, data['tai']), data['sts'])
+            yield ((data['a'], url, data['tai']), int(data['sts']))
             
         except ValueError as e:
             _log.error('JSON could not be parsed: %s' % line)
