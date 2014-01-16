@@ -193,6 +193,13 @@ class OptionParser(object):
         '''Returns the config file name that is used by this parser.'''
         return self.cmd_options.config
 
+    def options_loaded(self):
+        '''Returns True if the options have been parsed and loaded.
+
+        If False, you need to run parse_options
+        '''
+        return self.cmd_options is not None
+
     @contextlib.contextmanager
     def _set_bounded(self, global_name, value):
         '''Sets the value of an option in a bounded region.
@@ -385,6 +392,8 @@ class OptionParser(object):
     def _get_main_prefix(self):
         for frame in inspect.stack():
             mod = inspect.getmodule(frame[0])
+            if mod is None:
+                return ''
             if (mod.__name__ == '__main__' or
                 mod.__name__.endswith('options_test')):
                 return self._get_option_prefix(mod.__file__)
@@ -444,6 +453,9 @@ def define(name, default=None, type=None, help=None):
 
 
 def parse_options(args=None, config_stream=None,
-                  usage='%prog [options]'):
+                  usage='%prog [options]', watch_file=True):
     return options.parse_options(args=args, config_stream=config_stream,
-                                 usage=usage)
+                                 usage=usage, watch_file=watch_file)
+
+def options_loaded():
+    return options.options_loaded()

@@ -300,11 +300,12 @@ class TrackerAccountIDMapper(object):
     This is needed to keep the tracker id => api_key
     '''
     def __init__(self,tai,account_id):
-        self.key = self.format_key(tai)
+        self.key = self.__class__.format_key(tai)
         self.value = account_id 
 
-    def format_key(self,tai):
-        return self.__class__.__name__.lower() + '_%s'%tai
+    @classmethod
+    def format_key(cls,tai):
+        return cls.__name__.lower() + '_%s'%tai
     
     def save(self,callback=None):
         db_connection = DBConnection(self)
@@ -312,17 +313,18 @@ class TrackerAccountIDMapper(object):
         if callback:
             db_connection.conn.set(self.key,self.value,callback)
         else:
-            return db_connection.blocking_conn.set(self.key,self.value)
+            return db_connection.blocking_conn.set(self.key, self.value)
     
     @classmethod
     def get_neon_account_id(cls,tai,callback=None):
-        key = cls.__name__.lower() + '_%s'%tai
+        key = cls.format_key(tai)
         db_connection = DBConnection(cls)
         
         if callback:
             db_connection.conn.get(key,callback)
         else:
             return db_connection.blocking_conn.get(key)
+        
 
 ''' NeonUserAccount
 
