@@ -300,11 +300,12 @@ class TrackerAccountIDMapper(object):
     This is needed to keep the tracker id => api_key
     '''
     def __init__(self,tai,account_id):
-        self.key = self.format_key(tai)
+        self.key = self.__class__.format_key(tai)
         self.value = account_id 
 
-    def format_key(self,tai):
-        return self.__class__.__name__.lower() + '_%s'%tai
+    @classmethod
+    def format_key(cls,tai):
+        return cls.__name__.lower() + '_%s'%tai
     
     def save(self,callback=None):
         db_connection = DBConnection(self)
@@ -312,17 +313,18 @@ class TrackerAccountIDMapper(object):
         if callback:
             db_connection.conn.set(self.key,self.value,callback)
         else:
-            return db_connection.blocking_conn.set(self.key,self.value)
+            return db_connection.blocking_conn.set(self.key, self.value)
     
     @classmethod
     def get_neon_account_id(cls,tai,callback=None):
-        key = cls.__name__.lower() + '_%s'%tai
+        key = cls.format_key(tai)
         db_connection = DBConnection(cls)
         
         if callback:
             db_connection.conn.get(key,callback)
         else:
             return db_connection.blocking_conn.get(key)
+        
 
 ''' NeonUserAccount
 
@@ -412,38 +414,6 @@ class NeonUserAccount(object):
             na.__dict__[key] = params[key]
         
         return na
-
-# TODO(Sunil): Fill out this stub
-class TrackerAccountIDMapper(object):
-    '''Maps from a tracker account id to a neon account id.'''
-    def __init__(self, tracker_account_id, neon_account_id):
-        self.neon_aid = neon_account_id
-        self.tracker_aid = tracker_account_id
-
-    def save(self, callback=None):
-        '''Saves the mapping to the database'''
-        raise NotImplementedError()
-
-    @classmethod
-    def get_neon_account_id(cls, tracker_account_id):
-        '''Retuns the neon_account_id for this tracker id
-
-        Throws a KeyError if it doesn't exist.
-        '''
-        raise NotImplementedError()
-
-    @classmethod
-    def get_neon_account(cls, tracker_account_id):
-        '''Returns the NeonUserAccount object for the tracker_account_id.
-
-        Throws a KeyError if it doesn't exist.
-        '''
-        account = NeonUserAccount.get_account(NeonApiKey.generate(
-            cls.get_neon_account_id))
-        if account:
-            return account
-        raise KeyError('No Neon account for tracker_account_id %s' %
-                       tracker_account_id)
     
 class AbstractPlatform(object):
     def __init__(self, abtest=False):

@@ -66,7 +66,8 @@ class TrackerMonitoring(MRJob):
     def load_options(self, args):
         super(TrackerMonitoring, self).load_options(args)
 
-        if self.options.neon_config is not None:
+        if (self.options.neon_config is not None and 
+            not utils.options.options_loaded()):
             with open(self.options.neon_config) as f:
                 utils.options.parse_options(args=[], config_stream=f)
 

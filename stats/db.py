@@ -14,6 +14,7 @@ import logging
 import re
 import string
 import sys
+import warnings
 
 from utils.options import define, options
 
@@ -29,25 +30,26 @@ _log = logging.getLogger(__name__)
 def create_tables(cursor):
     '''Creates all the tables needed in the stats database if they don't exist.
     '''
-    cursor.execute('''CREATE TABLE IF NOT EXISTS %s (
-                   thumbnail_id VARCHAR(32) NOT NULL,
-                   hour DATETIME NOT NULL,
-                   loads INT NOT NULL DEFAULT 0,
-                   clicks INT NOT NULL DEFAULT 0,
-                   UNIQUE (thumbnail_id, hour))''' % 
-                   options.hourly_events_table)
+    with warnings.catch_warnings():
+        cursor.execute('''CREATE TABLE IF NOT EXISTS %s (
+                       thumbnail_id VARCHAR(32) NOT NULL,
+                       hour DATETIME NOT NULL,
+                       loads INT NOT NULL DEFAULT 0,
+                       clicks INT NOT NULL DEFAULT 0,
+                       UNIQUE (thumbnail_id, hour))''' % 
+                       options.hourly_events_table)
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS %s (
-                   id INT AUTO_INCREMENT UNIQUE,
-                   neon_acct_id varchar(128) NOT NULL,
-                   page varchar(2048) NOT NULL,
-                   last_load DATETIME,
-                   last_click DATETIME)''' %
-                   options.pages_seen_table)
+        cursor.execute('''CREATE TABLE IF NOT EXISTS %s (
+                       id INT AUTO_INCREMENT UNIQUE,
+                       neon_acct_id varchar(128) NOT NULL,
+                       page varchar(2048) NOT NULL,
+                       last_load DATETIME,
+                       last_click DATETIME)''' %
+                       options.pages_seen_table)
     
-    cursor.execute('''CREATE TABLE IF NOT EXISTS last_update (
-                      tablename VARCHAR(256) NOT NULL UNIQUE,
-                      logtime DATETIME)''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS last_update (
+                       tablename VARCHAR(256) NOT NULL UNIQUE,
+                       logtime DATETIME)''')
 
 def get_hourly_events_table():
     return options.hourly_events_table

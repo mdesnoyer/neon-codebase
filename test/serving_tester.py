@@ -133,10 +133,10 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         # Turn off the annoying logs
         logging.getLogger('tornado.access').propagate = False
         logging.getLogger('tornado.application').propagate = False
-        logging.getLogger('mrjob.local').propagate = False
+        #logging.getLogger('mrjob.local').propagate = False
         logging.getLogger('mrjob.config').propagate = False
         logging.getLogger('mrjob.conf').propagate = False
-        #logging.getLogger('mrjob.runner').propagate = False
+        logging.getLogger('mrjob.runner').propagate = False
         logging.getLogger('mrjob.sim').propagate = False
 
         cls.redis.start()
@@ -223,7 +223,7 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
             if callback:
                 callback(response)
             return response
-        mock_im.side_effect = return_image
+        mock_im.side_effect = return_image 
 
 
     def tearDown(self):
@@ -378,6 +378,9 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         api_key = nu.neon_api_key
         nu.save()
 
+        # Register a tracker account id mapping
+        neondata.TrackerAccountIDMapper('na567', account_id).save()
+
         # create brightcove platform account
         bp = neondata.BrightcovePlatform(account_id, integration_id,
                                          abtest=True) 
@@ -463,11 +466,11 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
                 '''SELECT last_load, last_click from %s where
                 page = %%s and neon_acct_id = %%s''' % 
                 stats.db.get_pages_seen_table(),
-                ('neontest', 'na567'))
+                ('neontest', 'bad_stats0'))
             pages_results = cursor.fetchall()
             self.assertEqual(len(pages_results), 1)
-            self.assertNotNone(pages_results[0][0])
-            self.assertNotNone(pages_results[0][1])
+            self.assertIsNotNone(pages_results[0][0])
+            self.assertIsNotNone(pages_results[0][1])
 
     def _test_override_thumbnail(self):
         '''Manually choose a thumbnail.'''
@@ -538,6 +541,7 @@ class DirectiveCaptureHandler(tornado.web.RequestHandler):
 
 def ClearStatsDb():
     '''Clear the stats database'''
+    _log.info('Clearing the stats db with table: %s' %  stats.db.get_pages_seen_table())
     with contextlib.closing( 
             sqldb.connect(user=options.stats_db_user,
                           passwd=options.stats_db_pass,
@@ -634,36 +638,6 @@ def LaunchStatsProcessor():
         args=(_erase_local_log_dir, _activity_watcher))
     proc.start()
     _log.warn('Launching stats processor with pid %i' % proc.pid)
-
-def main():
-    signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
-    atexit.register(utils.ps.shutdown_children)
-
-    # Turn off the annoying logs
-    logging.getLogger('tornado.access').propagate = False
-    logging.getLogger('tornado.application').propagate = False
-    logging.getLogger('mrjob.local').propagate = False
-    logging.getLogger('mrjob.config').propagate = False
-    logging.getLogger('mrjob.conf').propagate = False
-    logging.getLogger('mrjob.runner').propagate = False
-    logging.getLogger('mrjob.sim').propagate = False
-
-    LaunchStatsDb()
-    LaunchVideoDb()
-    LaunchMastermind()
-    LaunchClickLogServer()
-    LaunchFakeS3()
-    LaunchStatsProcessor()
-
-    _activity_watcher.wait_for_idle()
-
-    suite = unittest.TestLoader().loadTestsFromTestCase(TestServingSystem)
-    result = unittest.TextTestRunner().run(suite)
-
-    if result.wasSuccessful():
-        sys.exit(0)
-    else:
-        sys.exit(1)
 
 if __name__ == "__main__":
     # This forces to output all of stdout

@@ -60,7 +60,7 @@ define('increment_stats', type=int, default=0,
        help='If true, stats are incremented. Otherwise, they are overwritten')
 
 # Options for TrackerMonitoring
-define('analytics_notify_host',default='api.neon-lab.com',
+define('analytics_notify_host', default='api.neon-lab.com',
        help='Host to notify of new analytics')
 
 _log = logging.getLogger(__name__)
@@ -170,7 +170,7 @@ def main(erase_local_data=None, activity_watcher=utils.ps.ActivityWatcher()):
         archive_name = tar_src_tree()
     try:
         with DataDirectory() as data_dir:
-            with activity_watcher.activate():
+            with activity_watcher.activate():                
                 hourly_events_job = HourlyEventStats(args=[
                     '-r', options.runner,
                     '--python-archive', archive_name,
@@ -183,7 +183,7 @@ def main(erase_local_data=None, activity_watcher=utils.ps.ActivityWatcher()):
                     '--increment_stats', str(options.increment_stats),
                     '--neon_config', options.get_config_file(),
                     data_dir.path])
-
+                
                 tracker_monitor_job = TrackerMonitoring(args=[
                     '-r', options.runner,
                     '--python-archive', archive_name,
@@ -192,8 +192,8 @@ def main(erase_local_data=None, activity_watcher=utils.ps.ActivityWatcher()):
                     '--user', options.stats_user,
                     '--password', options.stats_pass,
                     '--db', options.stats_db,
-                    '--notify_host', options.analytics_notify_host,
                     '--neon_config', options.get_config_file(),
+                    '--notify_host', options.analytics_notify_host,
                     data_dir.path])
 
             known_input_files = 0
