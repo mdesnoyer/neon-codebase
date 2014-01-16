@@ -42,8 +42,7 @@ def create_tables(cursor):
                    neon_acct_id varchar(128) NOT NULL,
                    page varchar(2048) NOT NULL,
                    last_load DATETIME,
-                   last_click DATETIME,
-                   UNIQUE(neon_acct_id, page))''' %
+                   last_click DATETIME)''' %
                    options.pages_seen_table)
     
     cursor.execute('''CREATE TABLE IF NOT EXISTS last_update (

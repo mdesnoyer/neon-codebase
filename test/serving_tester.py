@@ -39,6 +39,7 @@ import SimpleHTTPServer
 import SocketServer
 import stats.db
 import stats.stats_processor
+import string
 from StringIO import StringIO
 import subprocess
 from supportServices import neondata
@@ -111,8 +112,12 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
               "http://localhost:%i/directive" % directive_port
             params['stats']['db']['hourly_events_table'] = \
               ''.join(random.choice(string.ascii_lowercase) for x in range(20))
+            params['stats']['db']['pages_seen_table'] = \
+              ''.join(random.choice(string.ascii_lowercase) for x in range(20))
             params['clickTracker']['trackserver']['s3disk'] = cls.s3disk
             params['test']['serving_tester']['fakes3root'] = cls.fakes3root
+            params['stats']['stats_processor']['analytics_notify_host'] = \
+              'localhost'
 
             yaml.dump(params, cls.config_file)
             cls.config_file.flush()
@@ -131,7 +136,7 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         logging.getLogger('mrjob.local').propagate = False
         logging.getLogger('mrjob.config').propagate = False
         logging.getLogger('mrjob.conf').propagate = False
-        logging.getLogger('mrjob.runner').propagate = False
+        #logging.getLogger('mrjob.runner').propagate = False
         logging.getLogger('mrjob.sim').propagate = False
 
         cls.redis.start()
@@ -250,7 +255,8 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
             'ttype': 'flashonlyplayer',
             'id': 0,
             'page': "http://neontest",
-            'cvid': 0
+            'cvid': 0,
+            'tai': "na567"
             }
         events = []
         for url, n_loads, n_clicks in data:
@@ -275,7 +281,7 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
             req = format_get_request(event)
             response = urllib2.urlopen(req)
             if response.getcode() !=200 :
-                _log.debug("Tracker request not submitted")
+                _log.error("Tracker request not submitted")
 
     def waitToFinish(self):
         '''Waits until the processing is finished.'''
@@ -451,6 +457,18 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         self.assertEqual(self.getStats('bad_stats0_vid0_thumb2'),
                          (1500, 500))
 
+        with contextlib.closing( self.statsconn.cursor() ) as cursor:
+            stats.db.execute(
+                cursor,
+                '''SELECT last_load, last_click from %s where
+                page = %%s and neon_acct_id = %%s''' % 
+                stats.db.get_pages_seen_table(),
+                ('neontest', 'na567'))
+            pages_results = cursor.fetchall()
+            self.assertEqual(len(pages_results), 1)
+            self.assertNotNone(pages_results[0][0])
+            self.assertNotNone(pages_results[0][1])
+
     def _test_override_thumbnail(self):
         '''Manually choose a thumbnail.'''
         self.add_account_to_videodb('ch_thumb0', 'ch_thumb_int0', 1, 3)
@@ -534,6 +552,9 @@ def ClearStatsDb():
             stats.db.execute(statscursor,
                              '''DROP TABLE %s''' % 
                              stats.db.get_hourly_events_table())
+            stats.db.execute(statscursor,
+                             '''DROP TABLE %s''' %
+                             stats.db.get_pages_seen_table())
         conn.commit()
 
 def LaunchStatsDb():

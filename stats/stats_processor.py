@@ -19,6 +19,7 @@ import logging
 import os
 import re
 from stats.hourly_event_stats_mr import HourlyEventStats
+from stats.tracker_monitoring_mr import TrackerMonitoring
 import shutil
 import signal
 import stats.db
@@ -43,7 +44,8 @@ define('run_period', default=10800, type=int,
 define('min_new_files', default=1, type=int,
        help='Minimum number of new files in the input in order to run the job.')
 
-# Options for HourlyEventStats
+
+# Stats database to talk to
 define('stats_host', default='stats.cnvazyzlgq2v.us-east-1.rds.amazonaws.com',
        help='Host of the stats database')
 define('stats_port', type=int, default=3306,
@@ -52,8 +54,14 @@ define('stats_user', default='mrwriter', help='User for the stats database')
 define('stats_pass', default='kjge8924qm',
        help='Password for the stats database')
 define('stats_db', default='stats_dev', help='Stats database to connect to')
+
+# Options for HourlyEventStats
 define('increment_stats', type=int, default=0,
        help='If true, stats are incremented. Otherwise, they are overwritten')
+
+# Options for TrackerMonitoring
+define('analytics_notify_host',default='api.neon-lab.com',
+       help='Host to notify of new analytics')
 
 _log = logging.getLogger(__name__)
 
@@ -163,7 +171,7 @@ def main(erase_local_data=None, activity_watcher=utils.ps.ActivityWatcher()):
     try:
         with DataDirectory() as data_dir:
             with activity_watcher.activate():
-                job = HourlyEventStats(args=[
+                hourly_events_job = HourlyEventStats(args=[
                     '-r', options.runner,
                     '--python-archive', archive_name,
                     '--stats_host', options.stats_host,
@@ -176,8 +184,21 @@ def main(erase_local_data=None, activity_watcher=utils.ps.ActivityWatcher()):
                     '--neon_config', options.get_config_file(),
                     data_dir.path])
 
+                tracker_monitor_job = TrackerMonitoring(args=[
+                    '-r', options.runner,
+                    '--python-archive', archive_name,
+                    '--host', options.stats_host,
+                    '--port', str(options.stats_port),
+                    '--user', options.stats_user,
+                    '--password', options.stats_pass,
+                    '--db', options.stats_db,
+                    '--notify_host', options.analytics_notify_host,
+                    '--neon_config', options.get_config_file(),
+                    data_dir.path])
+
             known_input_files = 0
             while True:
+                run_extra_jobs = False
                 try:
                     if (erase_local_data is not None and 
                         erase_local_data.is_set()):
@@ -188,14 +209,22 @@ def main(erase_local_data=None, activity_watcher=utils.ps.ActivityWatcher()):
                     _log.info(('Looking for new log files to process '
                                'from %s') % options.input)
                     with activity_watcher.activate():
-                        with job.make_runner() as runner:
+                        with hourly_events_job.make_runner() as runner:
                             n_files = data_dir.count_files(runner)
                             if ((n_files - known_input_files) >= 
                                 options.min_new_files):
-                                _log.info('Running stats processing job')
+                                _log.info('Running Hourly Events job')
                                 runner.run()
                                 known_input_files = n_files
                                 runner.print_counters()
+                                run_extra_jobs = True
+
+                        if run_extra_jobs:
+                            _log.info('Running TrackerMonitor job')
+                            with tracker_monitor_job.make_runner() as \
+                              tracker_runner:
+                                tracker_runner.run()
+                                tracker_runner.print_counters()
                 except Exception as e:
                     _log.exception('Unhandled error when processing stats: %s'
                                    % e)

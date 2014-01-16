@@ -56,6 +56,9 @@ class TrackerMonitoring(MRJob):
                                     help='Password for the database')
         self.add_passthrough_option('--db', default='stats_dev',
                                     help='Database to connect to')
+        self.add_passthrough_option('--notify_host',
+                                    default='api.neon-lab.com',
+                                    help='Host to notify of new analytics')
         self.add_file_option(
             '--neon_config', default=None,
             help='Config file to parse for Neon options.')
@@ -184,8 +187,8 @@ class TrackerMonitoring(MRJob):
                 # account we're getting data from.
                 try:
                     response = urllib2.urlopen(urllib2.Request(
-                        'http://api.neon-lab.com/accounts/%s/analytics_received' %
-                        neon_account_id,
+                        'http://%s/accounts/%s/analytics_received' %
+                        (self.options.notify_host, neon_account_id),
                         headers={'X-Neon-API-Key': 
                                  neondata.NeonApiKey.generate(
                                      neon_account_id)}))
