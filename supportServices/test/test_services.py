@@ -275,6 +275,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         uri = self.get_url('/api/v1/accounts') 
         response = self.post_request(uri,vals,self.api_key)
         api_key = json.loads(response.body)["neon_api_key"]
+        tai = json.loads(response.body)["tracker_account_id"]
         return api_key
 
     def create_brightcove_account(self):
@@ -301,7 +302,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
    
     def _success_http_side_effect(self,*args,**kwargs):
         def _neon_submit_job_response():
-            job_id = random.random()
+            job_id = str(random.random())
             self.job_ids.append(job_id)
             request = HTTPRequest('http://google.com')
             response = HTTPResponse(request, 200,
@@ -467,7 +468,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
             #create brightcove account
             json_video_response = self.create_brightcove_account()
             video_response = json.loads(json_video_response)['items']
-            self.assertEqual(len(video_response),5) #TODO: Verify actual contents
+            self.assertEqual(len(video_response),5)
 
             #update brightcove account
             new_rtoken = ("newrtoken")
@@ -523,13 +524,18 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
 
             #update a thumbnail
             new_tids = [] 
-            for vid in videos:
+            for vid,job_id in zip(videos,self.job_ids):
                 i_vid = neondata.InternalVideoID.generate(self.api_key,vid)
                 vmdata= neondata.VideoMetadata.get(i_vid)
                 tids = vmdata.thumbnail_ids
                 new_tids.append(tids[1])
                 resp = self.update_brightcove_thumbnail(vid,tids[1]) #set neon rank 2 
                 self.assertEqual(resp.code,200)
+                
+                #assert request state
+                req_data = neondata.NeonApiRequest.get_request(self.api_key,job_id)
+                vid_request = neondata.NeonApiRequest.create(req_data)
+                self.assertEqual(vid_request.state,neondata.RequestState.ACTIVE)
 
             thumbs = []
             items = self._get_video_status_brightcove()
@@ -618,6 +624,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
             self._setup_initial_brightcove_state()
             vids = self._get_videos()
             vid  = vids[0]
+            job_id = self.job_ids[0]
             tids = self._get_thumbnails(vid)
             i_vid = neondata.InternalVideoID.generate(self.api_key,vid)
             tid  = tids[0]
@@ -627,7 +634,12 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
                             %(self.api_key,i_vid))
             vals = {'thumbnail_id' : tid }
             resp = self.post_request(url,vals,self.api_key)
-            self.assertEqual(resp.code,200) 
+            self.assertEqual(resp.code,200)
+
+            #assert request state is not updated to active
+            req_data = neondata.NeonApiRequest.get_request(self.api_key,job_id)
+            vid_request = neondata.NeonApiRequest.create(req_data)
+            self.assertEqual(vid_request.state,neondata.RequestState.FINISHED)
 
     def test_bh_check_thumbnail(self):
         with options._set_bounded('supportServices.neondata.dbPort',
@@ -680,11 +692,11 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
                 %(self.a_id,self.b_id,page_no,page_size))
         resp = self.get_request(url,self.api_key)
         items = json.loads(resp.body)['items']
-        self.assertEqual(len(items),page_size,"page size did not match")
+        self.assertEqual(len(items),page_size)
         result_vids = [ x['video_id'] for x in items ]
         
         self.assertItemsEqual(ordered_videos[:page_size],
-                result_vids,"result ordering doesnt match") 
+                result_vids)
 
         #test page no (initial # of vids populated =5)
         page_no = 1
@@ -732,12 +744,13 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
                         len(result_vids))
 
     def test_negative_inf_model_scores(self):
+        #TODO: Add NaN, null etc
         self._setup_initial_brightcove_state()
-
-        key = '8dab424867e8c12417a2f1796631c179_2323153341001_451f5b1dcd6d2953ed7863c2af31855c'
+        vid = self._get_videos()[0]
+        tid = self._get_thumbnails(vid)[0]
         
         #update in database the thumbnail to have -inf score
-        td = neondata.ThumbnailIDMapper.get_thumb_mappings([key])
+        td = neondata.ThumbnailIDMapper.get_thumb_mappings([tid])
         td[0].thumbnail_metadata['model_score'] = float('-inf')
         neondata.ThumbnailIDMapper.save_all(td)
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
@@ -752,6 +765,69 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
                 model_scores.append(t['model_score'])
 
         self.assertFalse(float('-inf') in model_scores)    
+   
+    def test_get_video_by_state(self):
+        self._setup_initial_brightcove_state()
+
+        ordered_videos = sorted(self._get_videos(),reverse=True)
+        
+        #recommended videos
+        page_no = 0
+        page_size = 2
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
+                '%s/videos/recommended?page_no=%s&page_size=%s'
+                %(self.a_id,self.b_id,page_no,page_size))
+        resp = self.get_request(url,self.api_key)
+        items = json.loads(resp.body)['items']
+        result_vids = [ x['video_id'] for x in items ]
+        self.assertItemsEqual(ordered_videos[:page_size],
+                result_vids)
+
+        #publish a couple of videos
+        vids = self._get_videos()[:page_size]
+        for vid in vids:
+            tid = self._get_thumbnails(vid)[0] 
+            update_response = self.update_brightcove_thumbnail(vid,tid)
+            self.assertEqual(update_response.code,200)
+
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
+                '%s/videos/published?page_no=%s&page_size=%s'
+                %(self.a_id,self.b_id,page_no,page_size))
+        resp = self.get_request(url,self.api_key)
+        items = json.loads(resp.body)['items']
+        result_vids = [ x['video_id'] for x in items ]
+        self.assertItemsEqual(vids,
+                result_vids)
+
+    def test_tracker_account_id_mapper(self):
+        '''
+        Test mapping between tracker account id => neon account id
+        '''
+        #account creation
+        vals = { 'account_id' : self.a_id }
+        uri = self.get_url('/api/v1/accounts') 
+        response = self.post_request(uri,vals,self.api_key)
+        api_key = json.loads(response.body)["neon_api_key"]
+        tai = json.loads(response.body)["tracker_account_id"]
+        a_id = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)   
+        self.assertEqual(self.a_id,a_id)
+
+        #query tai
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
+                '%s/tracker_account_id'%(self.a_id,self.b_id))
+        resp = self.get_request(url,self.api_key)
+        tai = json.loads(response.body)["tracker_account_id"]
+        a_id = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)   
+        self.assertEqual(self.a_id,a_id)
+
+
+    def _test_gzip_response(self):
+        pass
+        #response = self.fetch("/chunk", use_gzip=False,
+        #        headers={"Accept-Encoding": "gzip"})
+        #self.assertEqual(response.headers["Content-Encoding"], "gzip")
+    
+    #TODO: Check wrong urls, brightcove integration ids
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

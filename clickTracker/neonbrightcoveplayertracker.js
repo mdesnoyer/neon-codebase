@@ -48,12 +48,16 @@ var reqGuid = NeonDataSender._NeonPageRequestUUID();
 var NeonPlayerTracker = ( function () {
     var player, videoPlayer, content, exp, initialVideo;
     var NeonTrackerURL = "http://tracker.neon-lab.com/track";
-    //var NeonTrackerURL = "http://localhost:8888/track";
-    return {
+    var TrackerAccountId = "AccountIDNotSet";
+	return {
         onTemplateLoad: function (expID){                                           
 			NeonPlayerTracker.hookNeonTrackerToFlashPlayer(expID);
         },
-                                                       
+
+		setAccountId: function(aid){
+			NeonPlayerTracker.TrackerAccountId = aid;
+		},
+
 		hookNeonTrackerToFlashPlayer: function(expID) { 
 			player = brightcove.api.getExperience(expID);
 			if (player){
@@ -91,7 +95,7 @@ var NeonPlayerTracker = ( function () {
             	}
 			}
 			action = "load";
-			params = "a=" + action + "&id="+ reqGuid + "&imgs=" + encodeURIComponent(JSON.stringify(imageUrls)) + "&cvid="+initialVideo.id;
+			params = "a=" + action + "&id="+ reqGuid + "&imgs=" + encodeURIComponent(JSON.stringify(imageUrls)) + "&cvid="+initialVideo.id + "&tai=" + NeonPlayerTracker.TrackerAccountId;
 			if (PageLoadIDSeen == null){
 				PageLoadIDSeen = reqGuid;
 				NeonDataSender.sendRequest(NeonTrackerURL,params);			           
@@ -102,7 +106,7 @@ var NeonPlayerTracker = ( function () {
 		  	var vid    = evt.media.id;	
 			var action = "click";
 			var imgSrc = evt.media.thumbnailURL.split("?")[0]; //clean up
-			params = "a=" + action + "&id="+ reqGuid + "&img=" + encodeURIComponent(imgSrc);
+			params = "a=" + action + "&id="+ reqGuid + "&img=" + encodeURIComponent(imgSrc) + "&tai=" + NeonPlayerTracker.TrackerAccountId;
 			if(MediaPlayPageIDSeen == null){
 				MediaPlayPageIDSeen = reqGuid;
 				NeonDataSender.sendRequest(NeonTrackerURL,params);			         
@@ -115,12 +119,12 @@ var NeonPlayerTracker = ( function () {
 				var imageUrls = new Array();
 				imageUrls[0] = videoDTO.thumbnailURL.split("?")[0];
 				action = "load";
-				params = "a=" + action + "&id="+ reqGuid + "&imgs=" + encodeURIComponent(JSON.stringify(imageUrls)) + "&cvid="+initialVideo.id;
+				params = "a=" + action + "&id="+ reqGuid + "&imgs=" + encodeURIComponent(JSON.stringify(imageUrls)) + "&cvid="+initialVideo.id + "&tai=" + NeonPlayerTracker.TrackerAccountId;
 				NeonDataSender.sendRequest(NeonTrackerURL,params);
 
 				action = "click";
 				imgSrc = videoDTO.thumbnailURL.split("?")[0]; 
-				params = "a=" + action + "&id="+ reqGuid + "&img=" + encodeURIComponent(imgSrc);
+				params = "a=" + action + "&id="+ reqGuid + "&img=" + encodeURIComponent(imgSrc) + "&tai=" + NeonPlayerTracker.TrackerAccountId;
 				NeonDataSender.sendRequest(NeonTrackerURL,params);
 			});
 		} 

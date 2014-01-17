@@ -153,7 +153,7 @@ class OptionParser(object):
                                              type=type, help=help)
 
     def parse_options(self, args=None, config_stream=None,
-                      usage='%prog [options]'):
+                      usage='%prog [options]', watch_file=True):
         '''Parse the options.
 
         Inputs:
@@ -161,6 +161,8 @@ class OptionParser(object):
         config_stream - Specify a yaml stream to get arguments from. 
                         Otherwise looks for the --config flag in the arguments.
         usage - To display the usage.
+        watch_file - If true, the config file will be watched for changes 
+                     that will be incorporated on the fly.
         '''
         with self.__dict__['lock']:
             cmd_options, args = self._parse_command_line(args, usage)
@@ -172,7 +174,7 @@ class OptionParser(object):
                                           self.cmd_options.config)
 
             # Start the polling thread if there is a config file to read
-            if self.cmd_options.config is not None:
+            if watch_file and self.cmd_options.config is not None:
                 ConfigPoller(self).start()
 
         return self, args
@@ -190,6 +192,13 @@ class OptionParser(object):
     def get_config_file(self):
         '''Returns the config file name that is used by this parser.'''
         return self.cmd_options.config
+
+    def options_loaded(self):
+        '''Returns True if the options have been parsed and loaded.
+
+        If False, you need to run parse_options
+        '''
+        return self.cmd_options is not None
 
     @contextlib.contextmanager
     def _set_bounded(self, global_name, value):
@@ -216,10 +225,10 @@ class OptionParser(object):
         you can do:
         def setUp(self):
           self.old_variable = options.get('my.variable')
-          options.set('my.variable', 45)
+          options._set('my.variable', 45)
 
         def tearDown(self):
-          options.set('my.variable', self.old_variable)
+          options._set('my.variable', self.old_variable)
         '''
         with self.__dict__['lock']:
             try:
@@ -383,6 +392,8 @@ class OptionParser(object):
     def _get_main_prefix(self):
         for frame in inspect.stack():
             mod = inspect.getmodule(frame[0])
+            if mod is None:
+                return ''
             if (mod.__name__ == '__main__' or
                 mod.__name__.endswith('options_test')):
                 return self._get_option_prefix(mod.__file__)
@@ -442,6 +453,9 @@ def define(name, default=None, type=None, help=None):
 
 
 def parse_options(args=None, config_stream=None,
-                  usage='%prog [options]'):
+                  usage='%prog [options]', watch_file=True):
     return options.parse_options(args=args, config_stream=config_stream,
-                                 usage=usage)
+                                 usage=usage, watch_file=watch_file)
+
+def options_loaded():
+    return options.options_loaded()
