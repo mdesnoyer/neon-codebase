@@ -86,11 +86,13 @@ class TestDataParsing(neontest.TestCase):
         results, counters = test_utils.mr.run_single_step(self.mr,
             ('{"sts":19800, "a":"click" "img":"http://monkey.com"}\n'
             '{"sts":1900, "a":"click", "img":"http://monkey.com"\n'
-            '{"sts":1900, "a":"load", "imgs":["now.com"}\n'),
+            '{"sts":1900, "a":"load", "imgs":["now.com"}\n'
+            '{"sts":"fge", "ttype":"flashonly","a":"load","page":"here.com",'
+            '"imgs":["now.com"],"tai":"adsfe"}\n'),
             step=0, protocol=RawProtocol)
         self.assertEqual(results, [])
         self.assertEqual(
-            counters['TrackerMonitoringErrors']['JSONParseErrors'], 3)
+            counters['TrackerMonitoringErrors']['JSONParseErrors'], 4)
 
     def test_fields_missing(self):
         results, counters = test_utils.mr.run_single_step(self.mr,
@@ -105,6 +107,19 @@ class TestDataParsing(neontest.TestCase):
         self.assertEqual(results, [])
         self.assertEqual(
             counters['TrackerMonitoringErrors']['JSONFieldMissing'], 4)
+
+    def test_bad_action(self):
+        results, counters = test_utils.mr.run_single_step(self.mr,
+            ('{"sts":19800,"ttype":"flashonly", "a":"clicks", '
+             '"img":"http://monkey.com"}\n'
+            '{"sts":1900,"ttype":"flashonly", "a":"wow",'
+            '"img":"http://monkey.com"}\n'
+            '{"sts":1900,"ttype":"flashonly", "a":"loading",'
+            '"imgs":["now.com"]}\n'),
+            step=0, protocol=RawProtocol)
+        self.assertEqual(results, [])
+        self.assertEqual(
+            counters['TrackerMonitoringErrors']['InvalidData'], 3)
 
     def test_html5_player(self):
         '''We need to ignore entries for the html5 player.
@@ -323,6 +338,22 @@ class TestDatabaseWriting(neontest.TestCase):
 
     def test_notify_analytics_error(self):
         self.mock_urlopen.side_effect = urllib2.URLError('Oops')
+
+        results, counters = test_utils.mr.run_single_step(
+            self.mr,
+            encode([(('click', 'www.go.com/now', 'na4576'), 15600),
+                    (('load', 'www.go.com/now', 'na4576'), 15500),
+                    (('load', 'www.go.com/now', '4576na'), 15700),]),
+            step=2)
+
+        self.assertEqual(results, [])
+        self.assertEqual(self.mock_urlopen.call_count, 2)
+        self.assertEqual(
+            counters['TrackerMonitoringErrors']['NoNotificationSent'], 2)
+
+    def test_notify_analytics_error_code(self):
+        self.mock_urlopen().getcode.return_value = 302
+        self.mock_urlopen.reset_mock()
 
         results, counters = test_utils.mr.run_single_step(
             self.mr,
