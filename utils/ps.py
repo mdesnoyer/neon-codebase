@@ -27,7 +27,7 @@ def get_child_pids():
 
     elif platform.system() == 'Darwin':
         ps_command = subprocess.Popen(
-            "ps -o pid,ppid -ax | grep %s | cut -f 1 -d " " | tail -1" %
+            'ps -o pid,ppid -ax | grep %s | cut -f 1 -d " " | tail -1' %
             os.getpid(),
             shell=True,
             stdout=subprocess.PIPE)

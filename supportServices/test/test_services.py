@@ -744,6 +744,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
                         len(result_vids))
 
     def test_negative_inf_model_scores(self):
+        #TODO: Add NaN, null etc
         self._setup_initial_brightcove_state()
         vid = self._get_videos()[0]
         tid = self._get_thumbnails(vid)[0]

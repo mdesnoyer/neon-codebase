@@ -949,7 +949,7 @@ class HttpDownload(object):
         api_method = self.job_params['api_method'] 
         api_param =  self.job_params['api_param']
         MAX_T = 6
-
+        
         ''' Neon API section 
         '''
         if  api_method == properties.TOP_THUMBNAILS:

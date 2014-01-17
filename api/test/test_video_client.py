@@ -349,6 +349,9 @@ class TestVideoClient(unittest.TestCase):
         self.assertFalse(self.dl.tempfile.close_called)
         #verify size of temp file
 
+    def test_thumbnail_ordering(self):
+        pass
+
     #TODO: test intermittent DB/ processing failure cases
 
     #TODO: autosync enabled video processing
