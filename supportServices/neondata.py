@@ -37,6 +37,7 @@ from PIL import Image
 from StringIO import StringIO
 
 from utils.options import define, options
+import utils.sync
 
 import logging
 _log = logging.getLogger(__name__)
@@ -344,16 +345,49 @@ class NeonUserAccount(object):
         self.neon_api_key = NeonApiKey.generate(a_id)
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
-        self.videos = {} #phase out,should be stored in neon integration 
-        self.integrations = {} 
+        self.videos = {} #phase out,should be stored in neon integration
+        # a mapping from integration id -> get_ovp() string
+        self.integrations = {}
 
-    def add_integration(self,integration_id,itype):
+    def add_platform(self, platform):
+        '''Adds a platform object to the account.'''
         if len(self.integrations) ==0 :
             self.integrations = {}
 
-        self.integrations[integration_id] = itype 
+        self.integrations[platform.integration_id] = platform.get_ovp()
 
-    def get_ovp(self):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_platforms(self):
+        ovp_map = {}
+        for plat in [NeonPlatform, BrightcovePlatform, YoutubePlatform]:
+            ovp_map[plat.get_ovp()] = plat
+
+        calls = []
+        for integration_id, ovp_string in self.integrations.iteritems():
+            try:
+                plat_type = ovp_map[ovp_string]
+                if plat_type == NeonPlatform:
+                    calls.append(tornado.gen.Task(plat_type.get_account,
+                                                  self.neon_api_key))
+                else:
+                    calls.append(tornado.gen.Task(plat_type.get_account,
+                                                  self.neon_api_key,
+                                                  integration_id))
+                    
+            except KeyError:
+                _log.error('key=get_platforms msg=Invalid ovp string: %s' % 
+                           ovp_string)
+
+            except Exception as e:
+                _log.exception('key=get_platforms msg=Error getting platform '
+                               '%s' % e)
+
+        retval = yield calls
+        raise tornado.gen.Return(retval)
+
+    @classmethod
+    def get_ovp(cls):
         return "neon"
     
     def add_video(self,vid,job_id):
@@ -380,9 +414,9 @@ class NeonUserAccount(object):
         else:
             return db_connection.blocking_conn.set(self.key,self.to_json())
     
-    def save_integration(self,new_integration,callback=None):
+    def save_platform(self, new_integration, callback=None):
         '''
-        Save Neon User account and corresponding integration
+        Save Neon User account and corresponding platform object
         '''
         
         #temp: changing this to a blocking pipeline call   
@@ -393,7 +427,7 @@ class NeonUserAccount(object):
         callback(pipe.execute())
 
     @classmethod
-    def get_account(cls,api_key,callback=None):
+    def get_account(cls, api_key, callback=None):
         db_connection=DBConnection(cls)
         key = "neonuseraccount_%s" %api_key
         if callback:
@@ -422,12 +456,22 @@ class AbstractPlatform(object):
         self.integration_id = None # Unique platform ID to 
     
     def generate_key(self,i_id):
-        return self.__class__.__name__.lower()  + '_%s_%s' %(self.neon_api_key, i_id)
+        return '_'.join([self.__class__.__name__.lower(),
+                         self.neon_api_key, i_id])
     
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__) 
 
-    def get_ovp(self):
+    def save(self,callback=None):
+        db_connection=DBConnection(self)
+        value = self.to_json()
+        if callback:
+            db_connection.conn.set(self.key, value, callback)
+        else:
+            return db_connection.blocking_conn.set(self.key, value)
+
+    @classmethod
+    def get_ovp(cls):
         raise NotImplementedError
 
     @classmethod
@@ -491,15 +535,8 @@ class NeonPlatform(AbstractPlatform):
     def add_video(self,vid,job_id):
         self.videos[str(vid)] = job_id
 
-    def save(self,callback=None):
-        db_connection=DBConnection(self)
-        if callback:
-            db_connection.conn.set(self.key,self.to_json(),callback)
-        else:
-            value = self.to_json()
-            return db_connection.blocking_conn.set(self.key,value)
-
-    def get_ovp(self):
+    @classmethod
+    def get_ovp(cls):
         return "neon"
 
     @classmethod
@@ -538,7 +575,7 @@ class BrightcovePlatform(AbstractPlatform):
         ''' On every request, the job id is saved '''
         AbstractPlatform.__init__(self, abtest)
         self.neon_api_key = NeonApiKey.generate(a_id)
-        self.key = self.__class__.__name__.lower()  + '_%s_%s' %(self.neon_api_key, i_id)
+        self.key = self.generate_key(i_id)
         self.account_id = a_id
         self.integration_id = i_id
         self.publisher_id = p_id
@@ -549,7 +586,8 @@ class BrightcovePlatform(AbstractPlatform):
         self.linked_youtube_account = False
         self.account_created = time.time() #UTC timestamp of account creation
 
-    def get_ovp(self):
+    @classmethod
+    def get_ovp(cls):
         return "brightcove"
 
     def add_video(self,vid,job_id):
@@ -565,14 +603,6 @@ class BrightcovePlatform(AbstractPlatform):
             db_connection.conn.get(self.key,callback)
         else:
             return db_connection.blocking_conn.get(self.key)
-
-    def save(self,callback=None):
-        db_connection=DBConnection(self)
-        if callback:
-            db_connection.conn.set(self.key,self.to_json(),callback)
-        else:
-            value = self.to_json()
-            return db_connection.blocking_conn.set(self.key,value)
 
     @tornado.gen.engine
     def update_thumbnail(self,i_vid,new_tid,nosave=False,callback=None):
@@ -856,7 +886,8 @@ class YoutubePlatform(AbstractPlatform):
     
         self.channels = None
 
-    def get_ovp(self):
+    @classmethod
+    def get_ovp(cls):
         return "youtube"
     
     def add_video(self,vid,job_id):

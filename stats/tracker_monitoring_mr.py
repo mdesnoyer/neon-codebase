@@ -203,6 +203,19 @@ class TrackerMonitoring(MRJob):
                     self.increment_counter('TrackerMonitoringErrors',
                                            'NoNotificationSent', 1)
 
+                # Turn on A/B testing for this account
+                try:
+                    account = neondata.NeonUserAccount.get_account(
+                        neondata.NeonApiKey.generate(neon_account_id))
+                    for platform in account.get_platforms():
+                        platform.abtest = True
+                        platform.save()
+                except redis.exceptions.RedisError as e:
+                    _log.error('Error turning on the A/B test for account %s'
+                               ': %s' % (neon_account_id, e))
+                    self.increment_counter('TrackerMonitoringErrors',
+                                           'RedisError', 1)
+
             # Insert a new entry into the database
             stats.db.execute(self.cursor,
                              '''INSERT INTO %s (%s, neon_acct_id, page)

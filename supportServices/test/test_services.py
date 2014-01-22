@@ -408,10 +408,14 @@ class TestServices(AsyncHTTPTestCase):
         Setup the state of a brightcove account with 5 processed videos 
         '''
         #Setup Side effect for the http clients
-        self.bapi_mock_client().fetch.side_effect = self._success_http_side_effect
-        self.cp_mock_client().fetch.side_effect = self._success_http_side_effect 
-        self.bapi_mock_async_client().fetch.side_effect = self._success_http_side_effect
-        self.cp_mock_async_client().fetch.side_effect = self._success_http_side_effect
+        self.bapi_mock_client().fetch.side_effect = \
+          self._success_http_side_effect
+        self.cp_mock_client().fetch.side_effect = \
+          self._success_http_side_effect 
+        self.bapi_mock_async_client().fetch.side_effect = \
+          self._success_http_side_effect
+        self.cp_mock_async_client().fetch.side_effect = \
+          self._success_http_side_effect
     
         #set up account and video state for testing
         api_key = self.create_neon_account()
@@ -448,20 +452,42 @@ class TestServices(AsyncHTTPTestCase):
             self.assertEqual(api_key,neondata.NeonApiKey.generate(self.a_id))
 
             #Setup Side effect for the http clients
-            self.bapi_mock_client().fetch.side_effect = self._success_http_side_effect
-            self.cp_mock_client().fetch.side_effect = self._success_http_side_effect 
-            self.bapi_mock_async_client().fetch.side_effect = self._success_http_side_effect
-            self.cp_mock_async_client().fetch.side_effect = self._success_http_side_effect
+            self.bapi_mock_client().fetch.side_effect = \
+              self._success_http_side_effect
+            self.cp_mock_client().fetch.side_effect = \
+              self._success_http_side_effect 
+            self.bapi_mock_async_client().fetch.side_effect = \
+              self._success_http_side_effect
+            self.cp_mock_async_client().fetch.side_effect = \
+              self._success_http_side_effect
 
             #create brightcove account
             json_video_response = self.create_brightcove_account()
             video_response = json.loads(json_video_response)['items']
-            self.assertEqual(len(video_response),5) #TODO: Verify actual contents
+            self.assertEqual(len(video_response),5)
+
+            # Verify actual contents
+            platform = neondata.BrightcovePlatform.get_account(self.api_key,
+                                                               self.b_id)
+            self.assertFalse(platform.abtest) # Should default to False
+            self.assertEqual(platform.neon_api_key, self.api_key)
+            self.assertEqual(platform.integration_id, self.b_id)
+            self.assertEqual(platform.account_id, self.a_id)
+            self.assertEqual(platform.publisher_id, 'testpubid123')
+            self.assertEqual(platform.read_token, self.rtoken)
+            self.assertEqual(platform.write_token, self.wtoken)
+            self.assertFalse(platform.auto_update)
+            
 
             #update brightcove account
             new_rtoken = ("newrtoken")
             update_response = self.update_brightcove_account(new_rtoken)
             self.assertEqual(update_response.code,200)
+            platform = neondata.BrightcovePlatform.get_account(self.api_key,
+                                                               self.b_id)
+            self.assertEqual(platform.read_token, "newrtoken")
+            self.assertFalse(platform.auto_update)
+            self.assertEqual(platform.write_token, self.wtoken)
 
     def SSStest_autopublish_brightcove_account(self):
         with options._set_bounded('supportServices.neondata.dbPort',
@@ -472,10 +498,14 @@ class TestServices(AsyncHTTPTestCase):
             self.assertEqual(api_key,neondata.NeonApiKey.generate(self.a_id))
 
             #Setup Side effect for the http clients
-            self.bapi_mock_client().fetch.side_effect = self._success_http_side_effect
-            self.cp_mock_client().fetch.side_effect = self._success_http_side_effect 
-            self.bapi_mock_async_client().fetch.side_effect = self._success_http_side_effect
-            self.cp_mock_async_client().fetch.side_effect = self._success_http_side_effect
+            self.bapi_mock_client().fetch.side_effect = \
+              self._success_http_side_effect
+            self.cp_mock_client().fetch.side_effect = \
+              self._success_http_side_effect 
+            self.bapi_mock_async_client().fetch.side_effect = \
+              self._success_http_side_effect
+            self.cp_mock_async_client().fetch.side_effect = \
+              self._success_http_side_effect
 
             #create brightcove account
             json_video_response = self.create_brightcove_account()
@@ -490,7 +520,8 @@ class TestServices(AsyncHTTPTestCase):
             #auto publish test
             reqs = self._create_neon_api_requests()
             self._process_neon_api_requests(reqs)
-            self._check_video_status_brightcove(vstatus=neondata.RequestState.FINISHED)
+            self._check_video_status_brightcove(
+                vstatus=neondata.RequestState.FINISHED)
         
             update_response = self.update_brightcove_account(autoupdate = True)
             self.assertEqual(update_response.code,200)
