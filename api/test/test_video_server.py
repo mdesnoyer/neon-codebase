@@ -54,7 +54,7 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.neon_api_url = self.get_url(self.base_uri)
   
         self.redis = test_utils.redis.RedisServer()
-        self.redis.start() #TODO: May be have this in init for entire test
+        self.redis.start() 
 
         #create test account
         self.na = neondata.NeonPlatform("testaccountneonapi")

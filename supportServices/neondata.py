@@ -197,7 +197,7 @@ class DBConnectionCheck(threading.Thread):
                     DBConnection.update_instance(key)
                     value.blocking_conn.get("dummy")
             except Exception,e:
-                _log.exception("key=DBConnection msg=%s"%e)
+                _log.exception("key=DBConnection check msg=%s"%e)
             
             time.sleep(self.interval)
 
@@ -390,7 +390,6 @@ class NeonUserAccount(object):
         pipe = db_connection.blocking_conn.pipeline()
         pipe.set(self.key,self.to_json())
         pipe.set(new_integration.key,new_integration.to_json()) 
-        #pipe.set(tracker_account_mapper.key,tracker_account_mapper.value) 
         callback(pipe.execute())
 
     @classmethod
@@ -1151,6 +1150,14 @@ class YoutubeApiRequest(NeonApiRequest):
 ###############################################################################
 ## Thumbnail store T_URL => TID => Metadata
 ###############################################################################
+
+class ThumbnailType(object):
+    ''' Thumbnail type enumeration '''
+    NEON        = "neon"
+    CENTERFRAME = "centerframe"
+    BRIGHTCOVE  = "brightcove"
+    RANDOM      = "random"
+    FILTERED    = "filtered"
 
 class ThumbnailMetaData(object):
 

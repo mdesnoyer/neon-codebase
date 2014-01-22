@@ -60,6 +60,10 @@ def check_remote_ip(request):
             pass
     return is_remote
 
+def _verify_neon_auth(value):
+    #TODO: Implement the authentication token logic
+    return True
+
 ## ===================== API ===========================================#
 ## Internal Handlers and not be exposed externally
 ## ===================== API ===========================================#
@@ -79,6 +83,11 @@ class StatsHandler(tornado.web.RequestHandler):
 class DequeueHandler(tornado.web.RequestHandler):
     """ DEQUEUE JOB Handler - The queue stores data in json format already """
     def get(self, *args, **kwargs):
+        if self.request.headers.has_key('X-Neon-Auth'):
+            if not _verify_neon_auth(self.request.headers.get('X-Neon-Auth')):
+                raise tornado.web.HTTPError(400)
+        else:
+            raise tornado.web.HTTPError(400)
         
         try:
             element = global_api_work_queue.get_nowait()

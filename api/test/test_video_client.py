@@ -25,21 +25,26 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] <> base_path:
         sys.path.insert(0,base_path)
 
+from api import server
 import json
 import logging
 import mock
+import multiprocessing
 import os
 import pickle
-import subprocess
 import random
 import re
 import request_template
-import unittest
-import urllib
-import utils
+import subprocess
+import time
+import tempfile
 import test_utils
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.redis
+import tornado
+import unittest
+import urllib
+import utils
 
 from boto.s3.connection import S3Connection
 from mock import patch
@@ -49,6 +54,9 @@ from supportServices import neondata
 from StringIO import StringIO
 from api import client
 from utils.options import define, options
+from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
+from tornado.concurrent import Future
+from tornado.testing import AsyncHTTPTestCase,AsyncTestCase,AsyncHTTPClient
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 
 _log = logging.getLogger(__name__)
@@ -350,13 +358,79 @@ class TestVideoClient(unittest.TestCase):
         #verify size of temp file
 
     def test_thumbnail_ordering(self):
-        pass
+        ''' Test that thumbnails are still sorted and ordere
+            after filtering '''
+        res = self.pv.get_topn_thumbnails(5)
+        ranked_frames = [x[0] for x in res] 
 
     #TODO: test intermittent DB/ processing failure cases
 
     #TODO: autosync enabled video processing
     
-    #TODO: test videoclient class
+
+class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
+    '''
+    #NOTE: Need to start server using subprocess and can't use tornado 
+    asynctestcase because we can't bind the client and redis to the same
+    port 
+    '''
+    def setUp(self):
+        random.seed(1324)
+        super(TestVideoClientAndServerIntegration,self).setUp()
+        self.model_patcher = patch('api.client.model')
+        self.model = self.model_patcher.start()
+        self.model().load_model = [None]
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start() 
+        self.tmp_conf_file = tempfile.NamedTemporaryFile(delete=False)
+        self.create_temp_config_file(self.tmp_conf_file,self.redis.port)
+        server_path = os.path.join(base_path,"api/server.py -c %s" 
+                %self.tmp_conf_file.name)
+        self.proc = subprocess.Popen(server_path, shell=True, stdout=subprocess.PIPE)
+        time.sleep(1) #wait for proc to start
+        
+        #create test neon account
+        self.na = neondata.NeonPlatform("testaccountneonapi")
+        self.api_key = self.na.neon_api_key
+        self.na.save()
+
+    def tearDown(self):
+        self.model_patcher.stop()
+        self.proc.kill()
+        self.redis.stop()
+        if os.path.exists(self.tmp_conf_file.name):
+            os.unlink(self.tmp_conf_file.name)
+
+    def get_app(self):
+        return server.application
+    
+    def get_new_ioloop(self):
+        return tornado.ioloop.IOLoop.instance()
+   
+    def create_temp_config_file(self,conf_file,db_port):
+        conf_file.write("supportServices:\n  neondata:\n"
+                "    accountDB: \"127.0.0.1\"\n"
+                "    videoDB: \"127.0.0.1\"\n"
+                "    dbPort: %s \n"%db_port)
+        conf_file.flush() 
+
+    def test_dequeue_video_client(self):
+        model_file = "modelfile.model" 
+        vc = client.VideoClient(model_file)
+        vc.dequeue_url = "http://localhost:8081/dequeue"
+        res = vc.dequeue_job()
+        self.assertEqual(res,"{}") #empty queue result
+
+        params = {"api_key": self.api_key, 
+                   "video_url": "http://bunny.mp4","video_id": "testid124",
+                   "topn": 3, "callback_url": "http://localhost:8081/testcallback", 
+                   "video_title": "testtitle"}
+        
+        server_url = 'http://localhost:8081/api/v1/submitvideo/topn'
+        hc = tornado.httpclient.HTTPClient()
+        resp = hc.fetch(server_url,method="POST",body=json.dumps(params))
+        res = vc.dequeue_job()
+        self.assertFalse(res == "{}") 
 
 if __name__ == '__main__':
     unittest.main()
