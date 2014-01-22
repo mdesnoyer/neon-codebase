@@ -338,7 +338,8 @@ class AccountHandler(tornado.web.RequestHandler):
         '''
         nu = neondata.NeonUserAccount.get_account(self.api_key)
         if nu:
-            data = '{"tracker_account_id":"%s"}'%nu.tracker_account_id
+            data = ('{"tracker_account_id":"%s","staging_tracker_account_id":"%s"}'
+                    %(nu.tracker_account_id,nu.staging_tracker_account_id))
             self.send_json_response(data,200)
         else:
             data = '{"error":"account not found"}'
@@ -840,13 +841,21 @@ class AccountHandler(tornado.web.RequestHandler):
             user.add_platform(nplatform)
             res = yield tornado.gen.Task(user.save_platform, nplatform) 
             if res:
-                tai_mapper = neondata.TrackerAccountIDMapper(user.tracker_account_id, a_id)
+                tai_mapper = neondata.TrackerAccountIDMapper(
+                                    user.tracker_account_id, a_id, 
+                                    neondata.TrackerAccountIDMapper.PRODUCTION)
+                tai_staging_mapper = neondata.TrackerAccountIDMapper(
+                                    user.staging_tracker_account_id, a_id,
+                                    neondata.TrackerAccountIDMapper.STAGING)
+                staging_resp = yield tornado.gen.Task(tai_staging_mapper.save)
                 resp = yield tornado.gen.Task(tai_mapper.save)
-                if not resp:
+                if not (staging_resp and resp):
                     _log.error("key=create_neon_user "
                             " msg=failed to save tai %s" %user.tracker_account_id)
-                data = ('{ "neon_api_key": "%s", "tracker_account_id":"%s" }'
-                        %(user.neon_api_key,user.tracker_account_id)) 
+                data = ('{ "neon_api_key": "%s", "tracker_account_id":"%s",'
+                            '"staging_tracker_account_id": "%s" }'
+                            %(user.neon_api_key,user.tracker_account_id,
+                            user.staging_tracker_account_id)) 
                 self.send_json_response(data,200)
             else:
                 data = '{"error": "account not created"}'
@@ -855,8 +864,6 @@ class AccountHandler(tornado.web.RequestHandler):
         else:
             data = '{"error": "integration/ account already exists"}'
             self.send_json_response(data,409)
-
-
 
     ''' Create Brightcove Account for the Neon user
     Add the integration in to the neon user account

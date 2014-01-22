@@ -81,7 +81,6 @@ class TestVideoClient(unittest.TestCase):
         self.dl = None
         self.pv = None
 
-        
         #Redis
         self.redis = test_utils.redis.RedisServer()
         self.redis.start() 
@@ -91,8 +90,14 @@ class TestVideoClient(unittest.TestCase):
         mock_conn = self.s3patcher.start()
         self.s3conn = boto_mock.MockConnection()
         mock_conn.return_value = self.s3conn
-        
+       
+        #mock get_center_frame
+        self.gcf = patch('api.client.ProcessVideo.get_center_frame')
+        self.mock_gcf = self.gcf.start()
+        self.mock_gcf.return_value = Image.new("RGB",(360,480)) 
+
         #setup process video object
+        self.napi_request = None
         self.processvideo_setup()
 
     #ProcessVideo setup
@@ -108,8 +113,9 @@ class TestVideoClient(unittest.TestCase):
         '''
         j_id = "j123"
         api_key = "apikey123"
+        vid = "video1"
         jparams = request_template.neon_api_request %(
-                j_id,"v",api_key,"neon",api_key,j_id)
+                j_id,vid,api_key,"neon",api_key,j_id)
         params = json.loads(jparams)
         self.dl = client.HttpDownload(jparams, None, 
                 self.model, self.model_version)
@@ -118,16 +124,20 @@ class TestVideoClient(unittest.TestCase):
         self.dl.pv = self.pv
         nthumbs = params['api_param']
         self.pv.process_all(self.test_video_file,nthumbs)
-        
-        na = neondata.NeonApiRequest(j_id,api_key,None,None,None,None,None)
-        na.save()
+        self.dl.pv.center_frame = Image.new("RGB",(360,480))
+        self.pv.center_frame = Image.new("RGB",(360,480))
+        self.napi_request = neondata.NeonApiRequest(j_id,api_key,vid,"title",
+                            None,None,None)
+        self.napi_request.save()
         
 
     def tearDown(self):
         self.s3patcher.stop()
+        self.mock_gcf.stop()
         self.redis.stop()
 
     def _create_random_image(self):
+        ''' Image data as string '''
         h = 360
         w = 480
         pixels = [(0,0,0) for _w in range(h*w)]
@@ -165,24 +175,6 @@ class TestVideoClient(unittest.TestCase):
         self.assertFalse(float('-inf') in self.pv.valence_scores[1],
                 "discarded frames havent been filtered")
         
-    @patch('api.client.S3Connection')
-    def test_neon_request_process(self,mock_conntype):
-        '''
-        Test Neon api request
-        '''
-        #s3mocks to mock host_thumbnails_to_s3
-        conn = boto_mock.MockConnection()
-        mock_conntype.return_value = conn
-        conn.create_bucket('host-thumbnails')
-        conn.create_bucket('neon-beta-test')
-        
-        #HttpDownload
-
-        #send client response & verify
-        self.dl.send_client_response()
-        s3_keys = [x for x in conn.buckets['host-thumbnails'].get_all_keys()]
-        self.assertEqual(len(s3_keys), 5)
-    
     @patch('api.client.S3Connection')
     def test_save_data_to_s3(self,mock_conntype):
 
@@ -297,7 +289,7 @@ class TestVideoClient(unittest.TestCase):
         mock_conntype.return_value = conn
         conn.create_bucket('host-thumbnails')
         conn.create_bucket('neon-beta-test')
-        
+       
         self.dl.async_callback(response)
 
         #Assert error response
@@ -357,16 +349,63 @@ class TestVideoClient(unittest.TestCase):
         self.assertFalse(self.dl.tempfile.close_called)
         #verify size of temp file
 
-    def test_thumbnail_ordering(self):
-        ''' Test that thumbnails are still sorted and ordere
-            after filtering '''
-        res = self.pv.get_topn_thumbnails(5)
-        ranked_frames = [x[0] for x in res] 
+    #def test_thumbnail_ordering(self):
+    #    ''' Test that thumbnails are still sorted and ordere
+    #        after filtering '''
+    #    res = self.pv.get_topn_thumbnails(5)
+    #    ranked_frames = [x[0] for x in res] 
+    #    #TODO: Generate data for order check
+    
+    
+    @patch('api.client.S3Connection')
+    def test_neon_request_process(self,mock_conntype):
+        
+        conn = boto_mock.MockConnection()
+        mock_conntype.return_value = conn
+        conn.create_bucket('host-thumbnails')
+        conn.create_bucket('neon-beta-test')
+        
+        vid  = self.napi_request.video_id 
+        api_key = self.napi_request.api_key 
+        job_id = self.napi_request.job_id 
+
+        jparams = ('{"api_key": "%s", "video_url": "http://bunny.mp4",'
+                    '"video_id": "%s", "topn": 3, "callback_url": "http://callback",'
+                    '"video_title": "testtitle3", "request_type":"neon",'
+                    '"state":"submit", "job_id":"%s", "api_method":"topn",' 
+                    '"api_param": 3}'%(api_key,vid,job_id)) 
+        params = json.loads(jparams)
+        self.pv.request_map = params
+        self.pv.request = jparams
+        self.dl.job_params = params
+        
+        self.dl.send_client_response()
+        s3_keys = [x.name for x in conn.buckets['host-thumbnails'].get_all_keys()]
+        self.assertEqual(len(s3_keys), 6)
+        self.assertTrue( "%s/%s/centerframe.jpeg"%(api_key,job_id) in s3_keys)
+        #Assert naming of other thumbs too
+
+        #check api request state
+        japi_request = neondata.NeonApiRequest.get_request(api_key,job_id)
+        api_request = neondata.NeonApiRequest.create(japi_request)
+        self.assertEqual(api_request.state,neondata.RequestState.FINISHED)
+
+        #check thumbnail ids and videometadata
+        vm = neondata.VideoMetadata.get(neondata.InternalVideoID.generate(api_key,vid))
+        tids = vm.thumbnail_ids
+        thumb_mappings = neondata.ThumbnailIDMapper.get_thumb_mappings(tids)
+        self.assertFalse( None in thumb_mappings)
+       
+        s3prefix = "https://host-thumbnails.s3.amazonaws.com/"
+        for k in s3_keys:
+            key = s3prefix + k
+            self.assertIsNotNone(neondata.ThumbnailURLMapper.get_id(key))
 
     #TODO: test intermittent DB/ processing failure cases
 
     #TODO: autosync enabled video processing
-    
+   
+    #TODO: test client response formatting
 
 class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
     '''

@@ -443,7 +443,7 @@ class TestServices(AsyncHTTPTestCase):
     # Unit Tests
     ################################################################
 
-    def SSStest_create_update_brightcove_account(self):
+    def test_create_update_brightcove_account(self):
         with options._set_bounded('supportServices.neondata.dbPort',
                                   self.redis.port):
 
@@ -489,7 +489,7 @@ class TestServices(AsyncHTTPTestCase):
             self.assertFalse(platform.auto_update)
             self.assertEqual(platform.write_token, self.wtoken)
 
-    def SSStest_autopublish_brightcove_account(self):
+    def test_autopublish_brightcove_account(self):
         with options._set_bounded('supportServices.neondata.dbPort',
                                   self.redis.port):
 
@@ -533,7 +533,7 @@ class TestServices(AsyncHTTPTestCase):
                 videos.append(str(item['id']))                              
             self._check_neon_default_chosen(videos)
 
-    def SSStest_brightcove_web_account_flow(self):
+    def test_brightcove_web_account_flow(self):
         #Create Neon Account --> Bcove Integration --> update Integration --> 
         #query videos --> autopublish --> verify autopublish
         with options._set_bounded('supportServices.neondata.dbPort',
@@ -592,7 +592,7 @@ class TestServices(AsyncHTTPTestCase):
     #Database failure on account creation, updation
     #Brightcove API failures
 
-    def SSStest_update_thumbnail_fails(self):
+    def test_update_thumbnail_fails(self):
         with options._set_bounded('supportServices.neondata.dbPort',
                                   self.redis.port):
             self._setup_initial_brightcove_state()
@@ -661,7 +661,7 @@ class TestServices(AsyncHTTPTestCase):
     ######### BCOVE HANDLER Test cases ##########################
 
     #Brightcove support handler tests (check thumb/update thumb)
-    def SSStest_bh_update_thumbnail(self):
+    def test_bh_update_thumbnail(self):
         with options._set_bounded('supportServices.neondata.dbPort',
                                   self.redis.port):
             self._setup_initial_brightcove_state()
@@ -684,7 +684,7 @@ class TestServices(AsyncHTTPTestCase):
             vid_request = neondata.NeonApiRequest.create(req_data)
             self.assertEqual(vid_request.state,neondata.RequestState.FINISHED)
 
-    def SSStest_bh_check_thumbnail(self):
+    def test_bh_check_thumbnail(self):
         with options._set_bounded('supportServices.neondata.dbPort',
                                   self.redis.port):
             self._setup_initial_brightcove_state()
@@ -722,7 +722,7 @@ class TestServices(AsyncHTTPTestCase):
             #print rc.keys('im*') 
 
     #Test pagination of video requests
-    def SSStest_pagination_videos(self):
+    def test_pagination_videos(self):
         self._setup_initial_brightcove_state()
 
         ordered_videos = sorted(self._get_videos(),reverse=True)
@@ -855,17 +855,27 @@ class TestServices(AsyncHTTPTestCase):
         response = self.post_request(uri,vals,self.api_key)
         api_key = json.loads(response.body)["neon_api_key"]
         tai = json.loads(response.body)["tracker_account_id"]
-        a_id = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)   
+        s_tai = json.loads(response.body)["staging_tracker_account_id"]
+        a_id,itype = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)   
         self.assertEqual(self.a_id,a_id)
+        self.assertEqual(itype,neondata.TrackerAccountIDMapper.PRODUCTION)
+        a_id,itype = neondata.TrackerAccountIDMapper.get_neon_account_id(s_tai)   
+        self.assertEqual(self.a_id,a_id)
+        self.assertEqual(itype,neondata.TrackerAccountIDMapper.STAGING)
 
         #query tai
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
                 '%s/tracker_account_id'%(self.a_id,self.b_id))
-        resp = self.get_request(url,self.api_key)
+        response = self.get_request(url,self.api_key)
         tai = json.loads(response.body)["tracker_account_id"]
-        a_id = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)   
+        s_tai = json.loads(response.body)["staging_tracker_account_id"]
+        a_id,itype = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)   
         self.assertEqual(self.a_id,a_id)
-
+        self.assertEqual(itype,neondata.TrackerAccountIDMapper.PRODUCTION)
+        
+        a_id,itype = neondata.TrackerAccountIDMapper.get_neon_account_id(s_tai)   
+        self.assertEqual(self.a_id,a_id)
+        self.assertEqual(itype,neondata.TrackerAccountIDMapper.STAGING)
 
     def _test_gzip_response(self):
         pass
@@ -886,8 +896,8 @@ class TestServices(AsyncHTTPTestCase):
         vals = { 'video_url' : "http://test.mp4", "title": "test_title" }
         uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/create_video_request'%(self.a_id,"0"))
-        response = self.put_request(uri,vals,self.api_key)
-        print response    
+        #response = self.put_request(uri,vals,self.api_key)
+        #print response    
 
     #TODO: Check wrong urls, brightcove integration ids
 

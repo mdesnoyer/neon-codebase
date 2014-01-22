@@ -220,7 +220,7 @@ class ProcessVideo(object):
         try:
             mov = ffvideo.VideoStream(video_file)
             mid = int(mov.duration / 2)
-            mid_frame = vs.get_frame_at_sec(mid)
+            mid_frame = mov.get_frame_at_sec(mid)
             return mid_frame.image()
         except Exception,e:
             _log.debug("key=get_center_frame msg=%s"%e)
@@ -283,7 +283,6 @@ class ProcessVideo(object):
         result = sorted(secondary_sorted_list,
                         key=lambda tup: tup[1][0],
                         reverse=True)
-        #_log.debug("key=thumbnails msg=" + str(len(result)) + " -- " + str(nthumbnails) ) 
       
         if len(result) < nthumbnails: 
             nthumbnails = min(len(result),nthumbnails)
@@ -410,7 +409,7 @@ class ProcessVideo(object):
             enabled = None 
             width   = image.size[0]
             height  = image.size[1] 
-            ttype   = "neon" 
+            ttype   = ThumbnailType.NEON 
             rank    = i +1 
 
             #populate thumbnails
@@ -452,7 +451,6 @@ class ProcessVideo(object):
     ############# Request Finalizers ##############
     
     def valence_score(self,image):
-        
         im_array = np.array(image)
         im = im_array[:,:,::-1]
         score,attr = self.model.score(im)
@@ -497,18 +495,19 @@ class ProcessVideo(object):
 
         thumbnail_mapper_list = []
         thumbnail_url_mapper_list = []
-        for thumb in self.thumbnails:
-            tid = thumb["thumbnail_id"]
-            for t_url in thumb["urls"]:
-                uitem = ThumbnailURLMapper(t_url,tid)
-                thumbnail_url_mapper_list.append(uitem)
-                item = ThumbnailIDMapper(tid,i_vid,thumb)
-                thumbnail_mapper_list.append(item)
+        if len(self.thumbnails) > 0:
+            for thumb in self.thumbnails:
+                tid = thumb["thumbnail_id"]
+                for t_url in thumb["urls"]:
+                    uitem = ThumbnailURLMapper(t_url,tid)
+                    thumbnail_url_mapper_list.append(uitem)
+                    item = ThumbnailIDMapper(tid,i_vid,thumb)
+                    thumbnail_mapper_list.append(item)
 
-        retid = ThumbnailIDMapper.save_all(thumbnail_mapper_list)
-        returl = ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
-        
-        return retid and returl
+            retid = ThumbnailIDMapper.save_all(thumbnail_mapper_list)
+            returl = ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
+            
+            return (retid and returl)
 
     ''' Update the request state for Neon API Request '''
     def finalize_neon_request(self, result=None):
@@ -516,42 +515,44 @@ class ProcessVideo(object):
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
         video_id = self.request_map[properties.VIDEO_ID]
         api_request = NeonApiRequest.get(api_key,job_id)
-       
-        if api_request is None:
-            pass #TODO: erorr
-        else:
-            #Save the mid frame (Random) thumbnail
-            image = self.center_frame
-            if image:
-                score  = self.valence_score(image) 
-                s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
-                s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
-                s3bucket = s3conn.get_bucket(s3bucket_name)
-                s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
-                keyname = self.base_filename + "/centerframe.jpeg" 
-                s3fname = s3_url_prefix + "/" + keyname
-                self.save_thumbnail_to_s3_and_metadata(image,score,s3bucket,
-                          keyname,s3fname,ttype="centerframe",rank=0)
-            else:
-                _log.error("key=finalize_neon_request msg=center frame is NULL")
-        
+        if not api_request:
+            #TODO: more stuff ? 
+            _log.error("key=finalize_neon_request msg=api request is null")
+            return
+      
         #change the status to requeued, and don't store a response 
         if result is None:
             api_request.state = RequestState.REQUEUED 
+        elif len(self.thumbnails) == 0:
+            api_request.state = RequestState.INT_ERROR
         else:
+            
             try:
+                #try decoding result, if error then video failed
                 api_request.response = tornado.escape.json_decode(result)
                 api_request.state = RequestState.FINISHED 
+                api_request.publish_date = time.time() *1000.0 #ms
+                
+                #Save the mid frame (Random) thumbnail
+                image = self.center_frame
+                if image:
+                    score  = self.valence_score(image) 
+                    s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
+                    s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
+                    s3bucket = s3conn.get_bucket(s3bucket_name)
+                    s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
+                    keyname = self.base_filename + "/centerframe.jpeg" 
+                    s3fname = s3_url_prefix + "/" + keyname
+                    ttype = ThumbnailType.CENTERFRAME
+                    self.save_thumbnail_to_s3_and_metadata(image,score,s3bucket,
+                              keyname,s3fname,ttype,rank=0)
+                else:
+                    _log.error("key=finalize_neon_request msg=center frame is NULL")
+      
             except:
                 api_request.response = result 
                 api_request.state = RequestState.FAILED
             
-            api_request.thumbnails = self.thumbnails
-      
-        #If Thumbnails are empty, something went wrong internally
-        if len(api_request.thumbnails) == 0:
-            api_request.state = RequestState.INT_ERROR
-
         ret = api_request.save()
         if ret:
             self.save_video_metadata()
@@ -605,8 +606,9 @@ class ProcessVideo(object):
             s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
             keyname =  self.base_filename + "/brightcove.jpeg" 
             s3fname = s3_url_prefix + "/" + keyname
+            ttype = ThumbnailType.BRIGHTCOVE
             self.save_thumbnail_to_s3_and_metadata(image,score,s3bucket,
-                    keyname,s3fname,ttype="brightcove",rank=0)
+                    keyname,s3fname,ttype,rank=0)
             bc_request.previous_thumbnail = s3fname
         
         else:
@@ -907,7 +909,7 @@ class HttpDownload(object):
         ######
         
         #Save Center Frame
-        self.center_frame = self.pv.get_center_frame(self.tempfile.name)
+        self.pv.center_frame = self.pv.get_center_frame(self.tempfile.name)
 
         end_time = time.time()
         total_request_time =  end_time - float(self.pv.video_metadata[properties.VIDEO_PROCESS_TIME])
@@ -973,7 +975,6 @@ class HttpDownload(object):
             return
 
         # API Specific client response
-      
         request_type = self.job_params['request_type']
         api_method = self.job_params['api_method'] 
         api_param =  self.job_params['api_param']

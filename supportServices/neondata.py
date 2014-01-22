@@ -300,31 +300,48 @@ class TrackerAccountIDMapper(object):
 
     This is needed to keep the tracker id => api_key
     '''
-    def __init__(self,tai,account_id):
+    STAGING = "staging"
+    PRODUCTION = "production"
+
+    def __init__(self,tai,account_id,itype):
         self.key = self.__class__.format_key(tai)
         self.value = account_id 
+        self.itype = itype
 
     @classmethod
     def format_key(cls,tai):
         return cls.__name__.lower() + '_%s'%tai
     
+    def to_json(self):
+        return json.dumps(self, default=lambda o: o.__dict__)
+    
     def save(self,callback=None):
         db_connection = DBConnection(self)
-        
+        value = self.to_json()     
         if callback:
-            db_connection.conn.set(self.key,self.value,callback)
+            db_connection.conn.set(self.key,value,callback)
         else:
-            return db_connection.blocking_conn.set(self.key, self.value)
+            return db_connection.blocking_conn.set(self.key, value)
     
     @classmethod
     def get_neon_account_id(cls,tai,callback=None):
+        '''
+        returns tuple of account_id, type(staging/production)
+        '''
+        def format_tuple(result):
+            if result:
+                data = json.loads(result)
+                return data['value'],data['itype']
+
         key = cls.format_key(tai)
         db_connection = DBConnection(cls)
-        
+       
         if callback:
-            db_connection.conn.get(key,callback)
+            db_connection.conn.get(key,lambda x: callback(format_result(x)))
         else:
-            return db_connection.blocking_conn.get(key)
+            data = db_connection.blocking_conn.get(key)
+            return format_tuple(data)
+
         
 
 ''' NeonUserAccount
@@ -345,6 +362,8 @@ class NeonUserAccount(object):
         self.neon_api_key = NeonApiKey.generate(a_id)
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
+        self.staging_tracker_account_id = \
+                TrackerAccountID.generate(self.neon_api_key + "staging" ) 
         self.videos = {} #phase out,should be stored in neon integration
         # a mapping from integration id -> get_ovp() string
         self.integrations = {}
@@ -1211,7 +1230,7 @@ class ThumbnailMetaData(object):
         self.rank = 0 if not rank else rank  #int 
         self.model_score = model_score #float
         self.model_version = model_version #float
-        self.refid = refid #If referenceID exists as in case of a brightcove thumbnail
+        self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
 
     def to_dict(self):
         return self.__dict__
