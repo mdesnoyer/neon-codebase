@@ -775,6 +775,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
                         len(result_vids))
 
     def test_negative_inf_model_scores(self):
+        #TODO: Add NaN, null etc
         self._setup_initial_brightcove_state()
         vid = self._get_videos()[0]
         tid = self._get_thumbnails(vid)[0]
@@ -833,6 +834,7 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         '''
         Test mapping between tracker account id => neon account id
         '''
+        #account creation
         vals = { 'account_id' : self.a_id }
         uri = self.get_url('/api/v1/accounts') 
         response = self.post_request(uri,vals,self.api_key)
@@ -841,11 +843,22 @@ class TestBrightcoveServices(AsyncHTTPTestCase):
         a_id = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)   
         self.assertEqual(self.a_id,a_id)
 
+        #query tai
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
+                '%s/tracker_account_id'%(self.a_id,self.b_id))
+        resp = self.get_request(url,self.api_key)
+        tai = json.loads(response.body)["tracker_account_id"]
+        a_id = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)   
+        self.assertEqual(self.a_id,a_id)
+
+
     def _test_gzip_response(self):
         pass
         #response = self.fetch("/chunk", use_gzip=False,
         #        headers={"Accept-Encoding": "gzip"})
         #self.assertEqual(response.headers["Content-Encoding"], "gzip")
+    
+    #TODO: Check wrong urls, brightcove integration ids
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

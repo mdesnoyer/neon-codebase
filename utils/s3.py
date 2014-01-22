@@ -22,7 +22,7 @@ _log = logging.getLogger(__name__)
 
 def S3Connection(*args, **kwargs):
     '''Same as boto's S3Connection except using the neon defined parameters.'''
-
+    
     if options.s3host == 'localhost':
         # We are talking to a fake S3 server, which needs a couple of
         # extra options.
@@ -31,5 +31,4 @@ def S3Connection(*args, **kwargs):
 
     kwargs['port'] = options.s3port
     kwargs['host'] = options.s3host
-
     return boto.s3.connection.S3Connection(*args, **kwargs)

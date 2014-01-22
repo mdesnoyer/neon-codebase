@@ -47,9 +47,9 @@ def create_tables(cursor):
                        last_click DATETIME)''' %
                        options.pages_seen_table)
     
-        cursor.execute('''CREATE TABLE IF NOT EXISTS last_update (
-                       tablename VARCHAR(256) NOT NULL UNIQUE,
-                       logtime DATETIME)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS last_update (
+                      tablename VARCHAR(255) NOT NULL UNIQUE,
+                      logtime DATETIME)''')
 
 def get_hourly_events_table():
     return options.hourly_events_table

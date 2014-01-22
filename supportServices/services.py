@@ -159,6 +159,8 @@ class AccountHandler(tornado.web.RequestHandler):
         _log.info("Request %r" %self.request)
 
         uri_parts = self.request.uri.split('/')
+
+        #NOTE: compare string in parts[-1] since get args aren't cleaned up
         if "accounts" in self.request.uri:
             #Get account id
             try:

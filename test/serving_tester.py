@@ -163,8 +163,8 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         if cls._directive_cap.is_alive():
             try:
                 os.kill(cls._directive_cap.pid, signal.SIGKILL)
-            except OSError:
-                pass
+            except OSError,e:
+                print "Teardownclass error killing %s" %e
         cls.redis.stop()
         utils.ps.shutdown_children()
         ClearStatsDb()
