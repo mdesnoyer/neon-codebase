@@ -380,7 +380,9 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         nu.save()
 
         # Register a tracker account id mapping
-        neondata.TrackerAccountIDMapper('na567', account_id).save()
+        neondata.TrackerAccountIDMapper(
+            'na567', account_id,
+            neondata.TrackerAccountIDMapper.PRODUCTION).save()
 
         # create brightcove platform account
         bp = neondata.BrightcovePlatform(account_id, integration_id,

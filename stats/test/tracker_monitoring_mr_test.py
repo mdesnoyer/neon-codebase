@@ -149,7 +149,8 @@ class TestIDMapping(neontest.TestCase):
 
     @patch('stats.tracker_monitoring_mr.neondata.TrackerAccountIDMapper.get_neon_account_id')
     def test_valid_mapping(self, mock_mapper):
-        mock_mapper.return_value = "54s9dfewgvw9e8g9"
+        mock_mapper.return_value = ("54s9dfewgvw9e8g9",
+                                    neondata.TrackerAccountIDMapper.PRODUCTION)
         results, counters = test_utils.mr.run_single_step(self.mr,
             encode([(('click', 'first.com', 'tid'), 3)]),
             step=1)
@@ -158,7 +159,22 @@ class TestIDMapping(neontest.TestCase):
         cargs, kwargs = mock_mapper.call_args
         self.assertEqual(cargs[0], 'tid')
         self.assertItemsEqual(results[0],
-                              (('click', 'first.com', '54s9dfewgvw9e8g9'),
+                              (('click', 'first.com','54s9dfewgvw9e8g9',False),
+                               3))
+
+    @patch('stats.tracker_monitoring_mr.neondata.TrackerAccountIDMapper.get_neon_account_id')
+    def test_valid_staging_mapping(self, mock_mapper):
+        mock_mapper.return_value = ("54s9dfewgvw9e8g9",
+                                    neondata.TrackerAccountIDMapper.STAGING)
+        results, counters = test_utils.mr.run_single_step(self.mr,
+            encode([(('click', 'first.com', 'tid'), 3)]),
+            step=1)
+
+        self.assertEqual(mock_mapper.call_count, 1)
+        cargs, kwargs = mock_mapper.call_args
+        self.assertEqual(cargs[0], 'tid')
+        self.assertItemsEqual(results[0],
+                              (('click', 'first.com','54s9dfewgvw9e8g9',True),
                                3))
 
     @patch('stats.tracker_monitoring_mr.neondata.TrackerAccountIDMapper.get_neon_account_id')
@@ -230,10 +246,10 @@ class TestDatabaseWriting(neontest.TestCase):
         cursor = self.ramdb.cursor()
         cursor.execute('select * from %s' % stats.db.get_pages_seen_table())
         self.assertEqual(len(cursor.fetchall()), 0)
-        self.assertEqual(len(cursor.description), 5)
+        self.assertEqual(len(cursor.description), 6)
         self.assertEqual([x[0] for x in cursor.description],
-                         ['id', 'neon_acct_id', 'page', 'last_load',
-                          'last_click'])
+                         ['id', 'neon_acct_id', 'page', 'is_testing',
+                          'last_load', 'last_click'])
 
     def test_new_click_entry(self):
         self.mock_urlopen().getcode.return_value = 200
@@ -241,7 +257,7 @@ class TestDatabaseWriting(neontest.TestCase):
         
         garb, counters = test_utils.mr.run_single_step(
             self.mr,
-            encode([(('click', 'www.go.com/now', 'na4576'), 15600)]),
+            encode([(('click', 'www.go.com/now', 'na4576', False), 15600)]),
             step=2)
 
         # Make sure that there were no errors
@@ -249,10 +265,10 @@ class TestDatabaseWriting(neontest.TestCase):
 
         # Make sure that the entry in the database was updated
         cursor = self.ramdb.cursor()
-        cursor.execute('select neon_acct_id, page, last_click '
+        cursor.execute('select neon_acct_id, page, is_testing, last_click '
                        'from pages_seen')
         self.assertEqual(cursor.fetchall(),
-                         [('na4576', 'www.go.com/now', sec2str(15600))])
+                         [('na4576', 'www.go.com/now', False, sec2str(15600))])
 
         # Now ensure that an analytics received message was received
         self.assertEqual(self.mock_urlopen.call_count, 1)
@@ -277,9 +293,10 @@ class TestDatabaseWriting(neontest.TestCase):
 
         garb, counters = test_utils.mr.run_single_step(
             self.mr,
-            encode([(('click', 'www.go.com/now', 'na4576'), 15600),
-                    (('load', 'www.go.com/now', 'na4576'), 15500),
-                    (('load', 'www.go.com/later', 'na4576'), 15700),]),
+            encode([(('click', 'www.go.com/now', 'na4576', False), 15600),
+                    (('load', 'www.go.com/now', 'na4576', False), 15500),
+                    (('load', 'www.go.com/later', 'na4576', False), 15700),
+                    (('load', 'www.go.com/around', 'na4576', True), 14800),]),
             step=2)
 
         # Make sure that there were no errors
@@ -294,12 +311,40 @@ class TestDatabaseWriting(neontest.TestCase):
 
         # Check the database
         cursor = self.ramdb.cursor()
-        cursor.execute('select neon_acct_id, page, last_click, last_load '
-                       'from pages_seen')
+        cursor.execute('select neon_acct_id, page, is_testing, last_click, '
+                       'last_load from pages_seen')
         self.assertItemsEqual(
             cursor.fetchall(),
-            [('na4576', 'www.go.com/now', sec2str(15600), sec2str(15500)),
-             ('na4576', 'www.go.com/later', None, sec2str(15700))])
+            [('na4576','www.go.com/now',False,sec2str(15600),sec2str(15500)),
+             ('na4576', 'www.go.com/later', False, None, sec2str(15700)),
+             ('na4576', 'www.go.com/around', True, None, sec2str(14800))])
+
+    def test_only_staging_entries(self):
+        self.mock_urlopen().getcode.return_value = 200
+        self.mock_urlopen.reset_mock()
+
+        garb, counters = test_utils.mr.run_single_step(
+            self.mr,
+            encode([(('click', 'www.go.com/now', 'na4576', True), 15600),
+                    (('load', 'www.go.com/now', 'na4576', True), 15500)]),
+            step=2)
+
+        # Make sure that there were no errors
+        self.assertEqual(counters, {})
+
+        # Make sure that no analytics received message was sent
+        self.assertEqual(self.mock_urlopen.call_count, 0)
+
+        # Make sure that the ab testing was not turned on
+        self.assertEqual(self.get_account_mock.call_count, 0)
+
+        # Check the database
+        cursor = self.ramdb.cursor()
+        cursor.execute('select neon_acct_id, page, is_testing, last_click, '
+                       'last_load from pages_seen')
+        self.assertItemsEqual(
+            cursor.fetchall(),
+            [('na4576','www.go.com/now',True,sec2str(15600),sec2str(15500))])
 
     def test_update_entry(self):
         self.mock_urlopen().getcode.return_value = 200
@@ -307,7 +352,7 @@ class TestDatabaseWriting(neontest.TestCase):
         # Record some data first
         test_utils.mr.run_single_step(
             self.mr,
-            encode([(('load', 'www.go.com/now', 'na4576'), 15500)]),
+            encode([(('load', 'www.go.com/now', 'na4576', False), 15500)]),
             step=2)
 
         self.mock_urlopen.reset_mock()
@@ -316,8 +361,8 @@ class TestDatabaseWriting(neontest.TestCase):
         # Now send data that will update the entry
         garb, counters = test_utils.mr.run_single_step(
             self.mr,
-            encode([(('click', 'www.go.com/now', 'na4576'), 16600),
-                    (('load', 'www.go.com/now', 'na4576'), 16500)]),
+            encode([(('click', 'www.go.com/now', 'na4576', False), 16600),
+                    (('load', 'www.go.com/now', 'na4576', False), 16500)]),
             step=2)
 
         # Make sure that there were no errors
@@ -331,11 +376,12 @@ class TestDatabaseWriting(neontest.TestCase):
         
         # Make sure that the entry in the database was updated
         cursor = self.ramdb.cursor()
-        cursor.execute('select neon_acct_id, page, last_click, last_load '
-                       'from pages_seen')
+        cursor.execute('select neon_acct_id, page, is_testing, last_click, '
+                       'last_load from pages_seen')
         self.assertEqual(
             cursor.fetchall(),
-            [('na4576', 'www.go.com/now', sec2str(16600), sec2str(16500))])
+            [('na4576', 'www.go.com/now', False, sec2str(16600),
+              sec2str(16500))])
 
     def test_multiple_accounts(self):
         self.mock_urlopen().getcode.return_value = 200
@@ -343,9 +389,9 @@ class TestDatabaseWriting(neontest.TestCase):
 
         garb, counters = test_utils.mr.run_single_step(
             self.mr,
-            encode([(('click', 'www.go.com/now', 'na4576'), 15600),
-                    (('load', 'www.go.com/now', 'na4576'), 15500),
-                    (('load', 'www.go.com/now', '4576na'), 15700),]),
+            encode([(('click', 'www.go.com/now', 'na4576', False), 15600),
+                    (('load', 'www.go.com/now', 'na4576', False), 15500),
+                    (('load', 'www.go.com/now', '4576na', False), 15700),]),
             step=2)
 
         # Make sure that there were no errors
@@ -361,12 +407,12 @@ class TestDatabaseWriting(neontest.TestCase):
         
         # Check the database
         cursor = self.ramdb.cursor()
-        cursor.execute('select neon_acct_id, page, last_click, last_load '
-                       'from pages_seen')
+        cursor.execute('select neon_acct_id, page, last_click, last_load, '
+                       'is_testing from pages_seen')
         self.assertItemsEqual(
             cursor.fetchall(),
-            [('na4576', 'www.go.com/now', sec2str(15600), sec2str(15500)),
-             ('4576na', 'www.go.com/now', None, sec2str(15700))])
+            [('na4576', 'www.go.com/now', sec2str(15600),sec2str(15500),False),
+             ('4576na', 'www.go.com/now', None, sec2str(15700), False)])
 
     def test_update_account_lookup_error(self):
         self.mock_urlopen().getcode.return_value = 200
@@ -374,7 +420,7 @@ class TestDatabaseWriting(neontest.TestCase):
 
         results, counters = test_utils.mr.run_single_step(
             self.mr,
-            encode([(('load', 'www.go.com/now', 'na4576'), 15500)]),
+            encode([(('load', 'www.go.com/now', 'na4576', False), 15500)]),
             step=2)
 
         self.assertEqual(counters['TrackerMonitoringErrors']['RedisError'],
@@ -387,7 +433,7 @@ class TestDatabaseWriting(neontest.TestCase):
 
         results, counters = test_utils.mr.run_single_step(
             self.mr,
-            encode([(('load', 'www.go.com/now', 'na4576'), 15500)]),
+            encode([(('load', 'www.go.com/now', 'na4576', False), 15500)]),
             step=2)
 
         self.assertEqual(counters['TrackerMonitoringErrors']['RedisError'],
@@ -398,9 +444,9 @@ class TestDatabaseWriting(neontest.TestCase):
 
         results, counters = test_utils.mr.run_single_step(
             self.mr,
-            encode([(('click', 'www.go.com/now', 'na4576'), 15600),
-                    (('load', 'www.go.com/now', 'na4576'), 15500),
-                    (('load', 'www.go.com/now', '4576na'), 15700),]),
+            encode([(('click', 'www.go.com/now', 'na4576', False), 15600),
+                    (('load', 'www.go.com/now', 'na4576', False), 15500),
+                    (('load', 'www.go.com/now', '4576na', False), 15700),]),
             step=2)
 
         self.assertEqual(results, [])
@@ -414,9 +460,9 @@ class TestDatabaseWriting(neontest.TestCase):
 
         results, counters = test_utils.mr.run_single_step(
             self.mr,
-            encode([(('click', 'www.go.com/now', 'na4576'), 15600),
-                    (('load', 'www.go.com/now', 'na4576'), 15500),
-                    (('load', 'www.go.com/now', '4576na'), 15700),]),
+            encode([(('click', 'www.go.com/now', 'na4576', False), 15600),
+                    (('load', 'www.go.com/now', 'na4576', False), 15500),
+                    (('load', 'www.go.com/now', '4576na', False), 15700),]),
             step=2)
 
         self.assertEqual(results, [])
@@ -434,6 +480,7 @@ class TestDatabaseWriting(neontest.TestCase):
 class TestEndToEnd(neontest.TestCase):
     '''Tests database writing step.'''
     def setUp(self):
+        self.maxDiff = None
         self.mr = tm.TrackerMonitoring(['-r', 'inline', '--no-conf', '-'])
 
         self.idmapper_patch = patch(
@@ -507,8 +554,8 @@ class TestEndToEnd(neontest.TestCase):
 
         # Mock out the responses for tracker ids to neon account ids
         account_id_map = {
-            "lok": "49a8efg1ea98",
-            "pole": "2348598ewsfrwe"
+            "lok": ("49a8efg1ea98",neondata.TrackerAccountIDMapper.PRODUCTION),
+            "pole": ("2348598ewsfrwe",neondata.TrackerAccountIDMapper.STAGING)
         }
         self.idmapper_mock.side_effect = \
           lambda tai: account_id_map[tai]
@@ -523,24 +570,23 @@ class TestEndToEnd(neontest.TestCase):
         self.assertGreater(self.idmapper_mock.call_count, 0)
         self.assertGreater(MySQLdb.connect.call_count, 0)
 
-        # Make sure notifications were sent for the two accounts
-        self.assertEqual(self.mock_urlopen.call_count, 2)
+        # Make sure notification was only sent for the one account
+        self.assertEqual(self.mock_urlopen.call_count, 1)
 
-        # Verify that the A/B tests were turned on
+        # Verify that the A/B tests were turned on for only one account
         self.get_account_mock.assert_has_calls(
-            [mock.call(neondata.NeonApiKey.generate('49a8efg1ea98')),
-             mock.call(neondata.NeonApiKey.generate('2348598ewsfrwe'))], True)
+            [mock.call(neondata.NeonApiKey.generate('49a8efg1ea98'))], True)
 
         # Finally, check the database to make sure it says what we want
         cursor = self.ramdb.cursor()
-        cursor.execute('select neon_acct_id, page, last_click, last_load '
-                       'from pages_seen')
+        cursor.execute('select neon_acct_id, page, last_click, last_load, '
+                       'is_testing from pages_seen')
         self.assertItemsEqual(
             cursor.fetchall(),
-            [('49a8efg1ea98', 'here.com', sec2str(19810), sec2str(19801)),
-             ('49a8efg1ea98', 'here.com/now', sec2str(19805), None),
-             ('2348598ewsfrwe', 'there.com', None, sec2str(19795)),
-             ('2348598ewsfrwe', 'there.com/where', sec2str(19815), None)])
+            [('49a8efg1ea98', 'here.com',sec2str(19810),sec2str(19801),False),
+             ('49a8efg1ea98', 'here.com/now', sec2str(19805), None, False),
+             ('2348598ewsfrwe', 'there.com', None, sec2str(19795), True),
+             ('2348598ewsfrwe', 'there.com/where', sec2str(19815),None,True)])
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

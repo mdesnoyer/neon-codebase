@@ -35,6 +35,7 @@ import pickle
 import random
 import re
 import request_template
+import signal
 import subprocess
 import time
 import tempfile
@@ -45,6 +46,7 @@ import tornado
 import unittest
 import urllib
 import utils
+import utils.ps
 
 from boto.s3.connection import S3Connection
 from mock import patch
@@ -422,10 +424,11 @@ class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start() 
         self.tmp_conf_file = tempfile.NamedTemporaryFile(delete=False)
-        self.create_temp_config_file(self.tmp_conf_file,self.redis.port)
-        server_path = os.path.join(base_path,"api/server.py -c %s" 
-                %self.tmp_conf_file.name)
-        self.proc = subprocess.Popen(server_path, shell=True, stdout=subprocess.PIPE)
+        self.create_temp_config_file(self.tmp_conf_file, self.redis.port)
+        server_path = os.path.join(base_path, "api/server.py")
+        self.proc = subprocess.Popen([server_path, '-c', 
+                                      self.tmp_conf_file.name],
+                                     stdout=subprocess.PIPE)
         time.sleep(1) #wait for proc to start
         
         #create test neon account
@@ -435,8 +438,9 @@ class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
 
     def tearDown(self):
         self.model_patcher.stop()
-        self.proc.kill()
         self.redis.stop()
+        utils.ps.send_signal_and_wait(signal.SIGTERM, [self.proc.pid])
+        utils.ps.send_signal_and_wait(signal.SIGKILL, [self.proc.pid])
         if os.path.exists(self.tmp_conf_file.name):
             os.unlink(self.tmp_conf_file.name)
 
