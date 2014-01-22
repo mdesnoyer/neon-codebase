@@ -27,7 +27,7 @@ from tornado.concurrent import Future
 from tornado.testing import AsyncHTTPTestCase,AsyncTestCase,AsyncHTTPClient
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 
-from api import server
+from api import server,properties
 from supportServices import neondata
 import utils
 from utils.options import define, options
@@ -146,10 +146,10 @@ class TestVideoServer(AsyncHTTPTestCase):
             
         resp = self.add_request()
         self.assertEqual(resp.code,201)
-        
+        h = {'X-Neon-Auth' : properties.NEON_AUTH} 
         for i in range(10): #dequeue a bunch 
             self.real_asynchttpclient.fetch(self.get_url('/dequeue'), 
-                callback=self.stop, method="GET")
+                callback=self.stop, method="GET",headers=h)
             resp = self.wait()
             self.assertEqual(resp.code,200)
         
