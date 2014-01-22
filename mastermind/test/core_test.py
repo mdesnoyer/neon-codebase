@@ -83,7 +83,7 @@ class TestCurrentServingDirective(unittest.TestCase):
                       [build_thumb(origin='neon', rank=2, enabled=False)])))
 
     def test_no_ab_testing(self):
-        self.assertItemsEqual([('a', 0.0), ('b', 1.0)],
+        self.assertItemsEqual([('a', 1.0), ('b', 0.0)],
             self.mastermind._calculate_current_serving_directive(
                 VideoInfo(False,
                           [build_thumb(id='a', origin='bc'),
@@ -93,6 +93,12 @@ class TestCurrentServingDirective(unittest.TestCase):
                 VideoInfo(False,
                           [build_thumb(id='a', origin='bc', chosen=True),
                            build_thumb(id='b', origin='neon', rank=0)])))
+        self.assertItemsEqual([('a', 0.0), ('b', 1.0)],
+            self.mastermind._calculate_current_serving_directive(
+                VideoInfo(False,
+                          [build_thumb(id='a', origin='bc'),
+                           build_thumb(id='b', origin='neon', rank=0,
+                                       chosen=True)])))
 
     def test_no_default(self):
         self.assertItemsEqual([('a', 0.0), ('b', 1.0)],
@@ -110,6 +116,12 @@ class TestCurrentServingDirective(unittest.TestCase):
             self.mastermind._calculate_current_serving_directive(
                 VideoInfo(True,
                           [build_thumb(id='b', origin='bc', rank=0)])))
+        self.assertItemsEqual([('a', 0), ('aa', 0), ('b', 1.0)],
+            self.mastermind._calculate_current_serving_directive(
+                VideoInfo(True,
+                          [build_thumb(id='a', origin='neon', rank=0),
+                           build_thumb(id='aa', origin='neon', rank=1),
+                           build_thumb(id='b', origin='bc')])))
         
     def test_chosen_default(self):
         self.assertItemsEqual([('a', 0), ('b', 1.0)],
@@ -122,8 +134,16 @@ class TestCurrentServingDirective(unittest.TestCase):
         self.assertItemsEqual([('a', 0.85), ('aa', 0), ('b', 0.15)],
             self.mastermind._calculate_current_serving_directive(
                 VideoInfo(True,
-                          [build_thumb(id='a', origin='neon', rank=0),
+                          [build_thumb(id='a', origin='neon', rank=0,
+                                       chosen=True),
                            build_thumb(id='aa', origin='neon', rank=1),
+                           build_thumb(id='b', origin='bc')])))
+        self.assertItemsEqual([('a', 0), ('aa', 0.85), ('b', 0.15)],
+            self.mastermind._calculate_current_serving_directive(
+                VideoInfo(True,
+                          [build_thumb(id='a', origin='neon', rank=0),
+                           build_thumb(id='aa', origin='neon', rank=1,
+                                       chosen=True),
                            build_thumb(id='b', origin='bc')])))
 
     def test_chosen_did_bad(self):
@@ -131,7 +151,7 @@ class TestCurrentServingDirective(unittest.TestCase):
             self.mastermind._calculate_current_serving_directive(
                 VideoInfo(True,
                           [build_thumb(id='a', origin='neon', rank=0,
-                                       loads=1500, clicks=3),
+                                       loads=1500, clicks=3, chosen=True),
                            build_thumb(id='b', origin='bc',
                                        loads=1000, clicks=600)])))
         self.assertItemsEqual([('a', 0), ('aa', 0), ('b', 1.0)],
@@ -149,7 +169,16 @@ class TestCurrentServingDirective(unittest.TestCase):
             self.mastermind._calculate_current_serving_directive(
                 VideoInfo(True,
                           [build_thumb(id='a', origin='neon', rank=0,
-                                       enabled=False),
+                                       enabled=False, chosen=True),
+                           build_thumb(id='aa', origin='neon', rank=1,
+                                       chosen=True),
+                           build_thumb(id='b', origin='bc')])))
+        
+        self.assertItemsEqual([('a', 0.0), ('aa', 0.0), ('b', 1.0)],
+            self.mastermind._calculate_current_serving_directive(
+                VideoInfo(True,
+                          [build_thumb(id='a', origin='neon', rank=0,
+                                       enabled=False, chosen=True),
                            build_thumb(id='aa', origin='neon', rank=1),
                            build_thumb(id='b', origin='bc')])))
         
@@ -200,7 +229,7 @@ class TestStatUpdating(unittest.TestCase):
 
         # Initialize mastermind with some videos
         self.mastermind.update_video_info('vidA', True, [
-            build_thumb(id='a', origin='neon', rank=0),
+            build_thumb(id='a', origin='neon', rank=0, chosen=True),
             build_thumb(id='aa', origin='neon', rank=1),
             build_thumb(id='az', origin='bc')])
         self.mastermind.update_video_info('vidB', True, [
@@ -288,7 +317,7 @@ class TestVideoInfoUpdate(unittest.TestCase):
         # Insert a single video by default
         self.mastermind.update_video_info(
             'vidA', True, [
-                build_thumb(id='a', origin='neon', rank=0),
+                build_thumb(id='a', origin='neon', rank=0, chosen=True),
                 build_thumb(id='aa', origin='neon', rank=1),
                 build_thumb(id='az', origin='bc')])
 
@@ -308,7 +337,7 @@ class TestVideoInfoUpdate(unittest.TestCase):
     def test_add_new_thumbs(self):
         result = self.mastermind.update_video_info(
             'vidA', True, [
-                build_thumb(id='a', origin='neon', rank=0),
+                build_thumb(id='a', origin='neon', rank=0, chosen=True),
                 build_thumb(id='aa', origin='neon', rank=1),
                 build_thumb(id='aaa', origin='neon', rank=2),
                 build_thumb(id='az', origin='bc')])
@@ -335,7 +364,7 @@ class TestVideoInfoUpdate(unittest.TestCase):
         # Turning off A/B testing is the same as disabling the default.
         self.assertIsNone(self.mastermind.update_video_info(
             'vidA', False, [
-                build_thumb(id='a', origin='neon', rank=0),
+                build_thumb(id='a', origin='neon', rank=0, chosen=True),
                 build_thumb(id='aa', origin='neon', rank=1),
                 build_thumb(id='az', origin='bc')]))
 

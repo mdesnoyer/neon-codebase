@@ -625,8 +625,8 @@ class AccountHandler(tornado.web.RequestHandler):
         nuser_data = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,a_id)
         if not nuser_data:
             nplatform = neondata.NeonPlatform(a_id)
-            user.add_integration(nplatform.integration_id,"neon")
-            res = yield tornado.gen.Task(user.save_integration,nplatform) 
+            user.add_platform(nplatform)
+            res = yield tornado.gen.Task(user.save_platform, nplatform) 
             if res:
                 tai_mapper = neondata.TrackerAccountIDMapper(user.tracker_account_id, a_id)
                 resp = yield tornado.gen.Task(tai_mapper.save)
@@ -682,10 +682,10 @@ class AccountHandler(tornado.web.RequestHandler):
                 curtime = time.time() #account creation time
                 bc = neondata.BrightcovePlatform(a_id, i_id, p_id, rtoken, 
                                                  wtoken, autosync, curtime)
-                na.add_integration(bc.integration_id,"brightcove")
-                res = yield tornado.gen.Task(na.save_integration,bc) #save integration & update acnt
+                na.add_platform(bc)
+                res = yield tornado.gen.Task(na.save_platform,bc) #save platform & update acnt
                 
-                #Saved Integration
+                #Saved platform
                 if res:
                     response = bc.verify_token_and_create_requests_for_video(10)
                     
@@ -725,7 +725,7 @@ class AccountHandler(tornado.web.RequestHandler):
                     #data = tornado.escape.json_encode(video_response)
                     self.send_json_response(data,201)
                 else:
-                    data = '{"error": "integration was not added, account creation issue"}'
+                    data = '{"error": "platform was not added, account creation issue"}'
                     self.send_json_response(data,500)
                     return
         else:
@@ -871,8 +871,8 @@ class AccountHandler(tornado.web.RequestHandler):
        
         def neon_account(account):
             if account:
-                account.add_integration(yt.integration_id,yt.key) 
-                account.save_integration(yt,saved_account)
+                account.add_platform(yt) 
+                account.save_platofrm(yt,saved_account)
             else:
                 _log.error("key=create_youtube_integration msg=neon account not found")
                 data = '{"error": "account creation issue"}'

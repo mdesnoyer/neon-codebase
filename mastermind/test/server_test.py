@@ -202,11 +202,11 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         TMD = neondata.ThumbnailMetaData
         tid_meta = {
             't01': TMD('t01', 0,0,0,0,'brightcove',0,0,True,False,0),
-            't02': TMD('t02', 0,0,0,0,'neon',0,0,True,False,0),
+            't02': TMD('t02', 0,0,0,0,'neon',0,0,True,True,0),
             't03': TMD('t03', 0,0,0,0,'neon',1,0,True,False,0),
             't11': TMD('t11', 0,0,0,0,'brightcove',0,0,True,False,0),
             't21': TMD('t21', 0,0,0,0,'brightcove',0,0,True,False,0),
-            't22': TMD('t22', 0,0,0,0,'neon',0,0,True,False,0),
+            't22': TMD('t22', 0,0,0,0,'neon',0,0,True,True,0),
             't41': TMD('t41', 0,0,0,0,'neon',0,0,True,False,0),
             't42': TMD('t42', 0,0,0,0,'neon',1,0,True,False,0),
             }

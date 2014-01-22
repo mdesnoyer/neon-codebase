@@ -6,6 +6,7 @@ if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
 from datetime import datetime
+import mock
 from mock import MagicMock, patch
 from mrjob.protocol import *
 import MySQLdb
@@ -202,8 +203,18 @@ class TestDatabaseWriting(neontest.TestCase):
             'stats.tracker_monitoring_mr.urllib2.urlopen')
         self.mock_urlopen = self.urlopen_patcher.start()
 
+        self.account_patch = patch(
+            'stats.tracker_monitoring_mr.neondata.'
+            'NeonUserAccount.get_account')
+        self.get_account_mock = self.account_patch.start()
+        self.account_mock = MagicMock()
+        self.get_account_mock.return_value = self.account_mock
+        self.account_mock.get_platforms.return_value = [
+            MagicMock() for x in range(2)]
+
     def tearDown(self):
         self.urlopen_patcher.stop()
+        self.account_patch.stop()
         MySQLdb.connect = self.dbconnect
         try:
             cursor = self.ramdb.cursor()
@@ -252,6 +263,14 @@ class TestDatabaseWriting(neontest.TestCase):
         self.assertEqual(request.headers['X-neon-api-key'],
                          neondata.NeonApiKey.generate('na4576'))
 
+        # Make sure that the abtesting was turned on
+        self.get_account_mock.assert_called_once_with(
+            neondata.NeonApiKey.generate('na4576'))
+        for platform in self.account_mock.get_platforms():
+            self.assertTrue(platform.abtest)
+            platform.save.assert_called_once_with()
+        
+
     def test_many_entries_for_same_account(self):
         self.mock_urlopen().getcode.return_value = 200
         self.mock_urlopen.reset_mock()
@@ -268,6 +287,10 @@ class TestDatabaseWriting(neontest.TestCase):
 
         # Make sure that only one analytics received message was sent
         self.assertEqual(self.mock_urlopen.call_count, 1)
+
+        # Make sure that the ab testing was turned on only once
+        self.get_account_mock.assert_called_once_with(
+            neondata.NeonApiKey.generate('na4576'))
 
         # Check the database
         cursor = self.ramdb.cursor()
@@ -288,6 +311,7 @@ class TestDatabaseWriting(neontest.TestCase):
             step=2)
 
         self.mock_urlopen.reset_mock()
+        self.get_account_mock.reset_mock()
 
         # Now send data that will update the entry
         garb, counters = test_utils.mr.run_single_step(
@@ -301,6 +325,9 @@ class TestDatabaseWriting(neontest.TestCase):
 
         # Make sure that there was no analytics received message sent
         self.assertEqual(self.mock_urlopen.call_count, 0)
+
+        # Make sure that the ab testing wasn't changed
+        self.assertEqual(self.get_account_mock.call_count, 0)
         
         # Make sure that the entry in the database was updated
         cursor = self.ramdb.cursor()
@@ -326,6 +353,11 @@ class TestDatabaseWriting(neontest.TestCase):
 
         # Make sure that two analytics received message was sent
         self.assertEqual(self.mock_urlopen.call_count, 2)
+
+        # Make sure that abtesting was updated for both accounts
+        self.get_account_mock.assert_has_calls(
+            [mock.call(neondata.NeonApiKey.generate('na4576')),
+             mock.call(neondata.NeonApiKey.generate('4576na'))], True)
         
         # Check the database
         cursor = self.ramdb.cursor()
@@ -335,6 +367,31 @@ class TestDatabaseWriting(neontest.TestCase):
             cursor.fetchall(),
             [('na4576', 'www.go.com/now', sec2str(15600), sec2str(15500)),
              ('4576na', 'www.go.com/now', None, sec2str(15700))])
+
+    def test_update_account_lookup_error(self):
+        self.mock_urlopen().getcode.return_value = 200
+        self.get_account_mock.side_effect = redis.exceptions.RedisError
+
+        results, counters = test_utils.mr.run_single_step(
+            self.mr,
+            encode([(('load', 'www.go.com/now', 'na4576'), 15500)]),
+            step=2)
+
+        self.assertEqual(counters['TrackerMonitoringErrors']['RedisError'],
+                         1)
+
+    def test_get_platforms_error(self):
+        self.mock_urlopen().getcode.return_value = 200
+        self.account_mock.get_platforms.side_effect = \
+          redis.exceptions.RedisError
+
+        results, counters = test_utils.mr.run_single_step(
+            self.mr,
+            encode([(('load', 'www.go.com/now', 'na4576'), 15500)]),
+            step=2)
+
+        self.assertEqual(counters['TrackerMonitoringErrors']['RedisError'],
+                         1)
 
     def test_notify_analytics_error(self):
         self.mock_urlopen.side_effect = urllib2.URLError('Oops')
@@ -388,6 +445,15 @@ class TestEndToEnd(neontest.TestCase):
             'stats.tracker_monitoring_mr.urllib2.urlopen')
         self.mock_urlopen = self.urlopen_patcher.start()
 
+        self.account_patch = patch(
+            'stats.tracker_monitoring_mr.neondata.'
+            'NeonUserAccount.get_account')
+        self.get_account_mock = self.account_patch.start()
+        self.account_mock = MagicMock()
+        self.get_account_mock.return_value = self.account_mock
+        self.account_mock.get_platforms.side_effect = [[
+            MagicMock() for x in range(2)] for x in range(2)]
+
         # For some reason, the in memory database isn't shared, so use
         # a temporary file instead. It worked in the other test case....
         self.tempfile = tempfile.NamedTemporaryFile()
@@ -405,6 +471,7 @@ class TestEndToEnd(neontest.TestCase):
     def tearDown(self):
         self.idmapper_patch.stop()
         self.urlopen_patcher.stop()
+        self.account_patch.stop()
         MySQLdb.connect = self.dbconnect
         try:
             self.ramdb.execute('drop table pages_seen')
@@ -458,6 +525,11 @@ class TestEndToEnd(neontest.TestCase):
 
         # Make sure notifications were sent for the two accounts
         self.assertEqual(self.mock_urlopen.call_count, 2)
+
+        # Verify that the A/B tests were turned on
+        self.get_account_mock.assert_has_calls(
+            [mock.call(neondata.NeonApiKey.generate('49a8efg1ea98')),
+             mock.call(neondata.NeonApiKey.generate('2348598ewsfrwe'))], True)
 
         # Finally, check the database to make sure it says what we want
         cursor = self.ramdb.cursor()

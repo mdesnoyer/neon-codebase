@@ -12,10 +12,12 @@ import logging
 _log = logging.getLogger(__name__)
 import multiprocessing
 from mock import patch, MagicMock
+import test_utils.neontest
 import test_utils.redis
 import time
 import threading
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
+import tornado.ioloop
 from utils.options import define, options
 import unittest
 
@@ -24,14 +26,69 @@ from test_utils.redis import *
 
 #TODO: Test db connection stuff and more.....
 
-class TestNeondata(unittest.TestCase):
+class TestNeondata(test_utils.neontest.AsyncTestCase):
     def setUp(self):
+        super(TestNeondata, self).setUp()
         self.redis = RedisServer()
         self.redis.start()
 
     def tearDown(self):
         self.redis.stop()
+        super(TestNeondata, self).tearDown()
 
+    # TODO: It should be possible to run this with an IOLoop for each
+    # test, but it's not running. Need to figure out why.
+    def get_new_ioloop(self):
+        return tornado.ioloop.IOLoop.instance()
+
+    def test_default_bcplatform_settings(self):
+        bp = BrightcovePlatform('aid', 'iid')
+
+        self.assertFalse(bp.abtest)
+        self.assertFalse(bp.auto_update)
+        self.assertNotEqual(bp.neon_api_key, '')
+        self.assertEqual(bp.key, 'brightcoveplatform_%s_iid' % bp.neon_api_key)
+
+        # Make sure that save and regenerating creates the same object
+        bp.save()
+
+        bp2 = BrightcovePlatform.get_account(bp.neon_api_key, 'iid')
+        self.assertEqual(bp.__dict__, bp2.__dict__)
+
+    def test_neon_user_account(self):
+        na = NeonUserAccount('acct1')
+        bp = BrightcovePlatform('acct1', 'bp1')
+        bp.save()
+        np = NeonPlatform('acct1', 'np1')
+        np.save()
+        yp = YoutubePlatform('acct1', 'yp1')
+        yp.save()
+        na.add_platform(bp)
+        na.add_platform(np)
+        na.add_platform(yp)
+        na.save()
+
+        # Retrieve the account
+        NeonUserAccount.get_account(NeonApiKey.generate('acct1'),
+                                    callback=self.stop)
+        account = self.wait()
+        self.assertIsNotNone(account)
+        self.assertEqual(account.account_id, 'acct1')
+        self.assertEqual(account.tracker_account_id, na.tracker_account_id)
+
+        # Get the platforms
+        account.get_platforms(callback=self.stop)
+        platforms = self.wait()
+        self.assertItemsEqual([x.__dict__ for x in platforms],
+                              [x.__dict__ for x in [bp, np, yp]])
+
+        # Try retrieving the platforms synchronously
+        platforms = account.get_platforms()
+        self.assertItemsEqual([x.__dict__ for x in platforms],
+                              [x.__dict__ for x in [bp, np, yp]])
+
+    def test_add_platform_with_bad_account_id(self):
+        pass
     
     def test_dbconn_singleton(self):
         bp = BrightcovePlatform('2','3',4)
