@@ -20,12 +20,10 @@ if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
 import binascii
-import datetime
 import hashlib
 import json
 from multiprocessing.pool import ThreadPool
 import redis as blockingRedis
-import shortuuid
 import tornado.ioloop
 import tornado.gen
 import tornado.httpclient
@@ -33,7 +31,6 @@ import threading
 import time
 from api import brightcove_api #coz of cyclic import 
 import api.youtube_api
-from PIL import Image
 from StringIO import StringIO
 
 from utils.options import define, options
@@ -45,8 +42,8 @@ _log = logging.getLogger(__name__)
 define("accountDB", default="127.0.0.1", type=str,help="")
 define("videoDB", default="127.0.0.1", type=str,help="")
 define("thumbnailDB", default="127.0.0.1", type=str,help="")
-define("dbPort",default=6379,type=int,help="redis port")
-define("watchdogInterval",default=3,type=int,help="interval for watchdog thread")
+define("dbPort", default=6379, type=int, help="redis port")
+define("watchdogInterval", default=3, type=int, help="interval for watchdog thread")
 
 
 class DBConnection(object):
@@ -69,14 +66,14 @@ class DBConnection(object):
         port = options.dbPort 
         
         if cname:
-            if cname in ["AbstractPlatform","BrightcovePlatform",
-                    "YoutubePlatform","NeonUserAccount","NeonApiRequest"]:
+            if cname in ["AbstractPlatform", "BrightcovePlatform",
+                    "YoutubePlatform", "NeonUserAccount", "NeonApiRequest"]:
                 host = options.accountDB 
                 port = options.dbPort 
             elif cname == "VideoMetadata":
                 host = options.videoDB
                 port = options.dbPort 
-            elif cname in ["ThumbnailIDMapper","ThumbnailURLMapper"]:
+            elif cname in ["ThumbnailIDMapper", "ThumbnailURLMapper"]:
                 host = options.thumbnailDB 
                 port = options.dbPort 
         
@@ -203,8 +200,8 @@ class DBConnectionCheck(threading.Thread):
             time.sleep(self.interval)
 
 #start watchdog thread for the DB connection
-t = DBConnectionCheck()
-t.start()
+DBCHECK_THREAD = DBConnectionCheck()
+DBCHECK_THREAD.start()
 
 def _erase_all_data():
     '''Erases all the data from the redis databases.
@@ -234,12 +231,12 @@ class RedisClient(object):
     #blocking_client = blockingRedis.StrictRedis(connection_pool=pool)
     blocking_client = None
 
-    def __init__(self):
-        client = RedisAsyncWrapper(host,port)
-        blocking_client = blockingRedis.StrictRedis(host,port)
+    def __init__(self,host='127.0.0.1', port=6379):
+        client = RedisAsyncWrapper(host, port)
+        blocking_client = blockingRedis.StrictRedis(host, port)
     
     @staticmethod
-    def get_client(host=None,port=None):
+    def get_client(host=None, port=None):
         '''
         return connection objects (blocking and non blocking)
         '''
@@ -248,8 +245,8 @@ class RedisClient(object):
         if port is None:
             port = RedisClient.port
         
-        RedisClient.c = RedisAsyncWrapper(host,port)
-        RedisClient.bc = blockingRedis.StrictRedis(host,port,socket_timeout=10)
+        RedisClient.c = RedisAsyncWrapper(host, port)
+        RedisClient.bc = blockingRedis.StrictRedis(host, port, socket_timeout=10)
         return RedisClient.c,RedisClient.bc 
 
 ##############################################################################
@@ -342,7 +339,6 @@ class TrackerAccountIDMapper(object):
             data = db_connection.blocking_conn.get(key)
             return format_tuple(data)
 
-        
 
 ''' NeonUserAccount
 
@@ -553,6 +549,10 @@ class NeonPlatform(AbstractPlatform):
    
     def add_video(self,vid,job_id):
         self.videos[str(vid)] = job_id
+
+    def get_videos(self):
+        if len(self.videos) > 0:
+            return self.videos.keys()
 
     @classmethod
     def get_ovp(cls):
@@ -1048,7 +1048,6 @@ class NeonApiRequest(object):
     use static get method to get a json based response NeonApiRequest.get_request()
     '''
 
-    conn,blocking_conn = RedisClient.get_client()
     def __init__(self,job_id,api_key,vid,title,url,request_type,http_callback):
         self.key = generate_request_key(api_key,job_id) 
         self.job_id = job_id

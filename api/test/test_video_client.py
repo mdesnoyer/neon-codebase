@@ -25,7 +25,7 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] <> base_path:
         sys.path.insert(0,base_path)
 
-from api import server
+from api import server,client
 import json
 import logging
 import mock
@@ -54,7 +54,6 @@ from mock import MagicMock
 from PIL import Image
 from supportServices import neondata
 from StringIO import StringIO
-from api import client
 from utils.options import define, options
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 from tornado.concurrent import Future
@@ -383,9 +382,10 @@ class TestVideoClient(unittest.TestCase):
         
         self.dl.send_client_response()
         s3_keys = [x.name for x in conn.buckets['host-thumbnails'].get_all_keys()]
-        self.assertEqual(len(s3_keys), 6)
         self.assertTrue( "%s/%s/centerframe.jpeg"%(api_key,job_id) in s3_keys)
-        #Assert naming of other thumbs too
+        for i in range(len(s3_keys) -1):
+            key = "%s/%s/neon%s.jpeg"%(api_key,job_id,i)
+            self.assertTrue(key in s3_keys)
 
         #check api request state
         japi_request = neondata.NeonApiRequest.get_request(api_key,job_id)
@@ -468,9 +468,10 @@ class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
                    "video_url": "http://bunny.mp4","video_id": "testid124",
                    "topn": 3, "callback_url": "http://localhost:8081/testcallback", 
                    "video_title": "testtitle"}
-        
+    
         server_url = 'http://localhost:8081/api/v1/submitvideo/topn'
         hc = tornado.httpclient.HTTPClient()
+        #submit a job
         resp = hc.fetch(server_url,method="POST",body=json.dumps(params))
         res = vc.dequeue_job()
         self.assertFalse(res == "{}") 

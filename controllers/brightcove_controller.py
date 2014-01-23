@@ -25,7 +25,6 @@ import tornado.gen
 import tornado.httpclient
 import urllib
 import utils.neon
-from socket import *
 from heapq import *
 from supportServices.neondata import *
 
