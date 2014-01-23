@@ -42,6 +42,11 @@ _log = logging.getLogger(__name__)
 import api.properties
 import bcove_responses
 class TestServices(AsyncHTTPTestCase):
+        
+    @classmethod
+    def setUpClass(cls):
+        super(TestServices, cls).setUpClass()
+        random.seed(19449)
 
     def setUp(self):
         super(TestServices, self).setUp()
@@ -184,7 +189,6 @@ class TestServices(AsyncHTTPTestCase):
         return api_requests
 
     def _process_neon_api_requests(self,api_requests):
-        random.seed(194)
         #Create thumbnail metadata
         N_THUMBS = 5
         for api_request in api_requests:
@@ -538,8 +542,6 @@ class TestServices(AsyncHTTPTestCase):
         #query videos --> autopublish --> verify autopublish
         with options._set_bounded('supportServices.neondata.dbPort',
                                   self.redis.port):
-        
-            random.seed(1234)
         
             #create neon account
             api_key = self.create_neon_account()
