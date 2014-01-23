@@ -11,10 +11,13 @@ import unittest
 from controllers import brightcove_controller
 from supportServices.neondata import *
 
-#ab controller testing ( Schedule 10 videos, check if network calls made. And then scheduled again)
-#                    -- Next send updates and see if rescheduled
 
 class TestScheduler(unittest.TestCase):
+    '''
+    ABcontroller testing ( Schedule 10 videos, check if 
+    network calls made. And then scheduled again)
+    - Next send updates and see if rescheduled
+    '''
 
     def setUp(self):
         self.controller =\
@@ -128,7 +131,8 @@ class TestScheduler(unittest.TestCase):
         self._verify_task_map(task_map,new_video_distribution,expected_order)
         
         new_video_distribution = {"int_vid1": [('B',0.51),('A',0.49)]}
-        brightcove_controller.setup_controller_for_vids(json.dumps(new_video_distribution)) 
+        brightcove_controller.setup_controller_for_vids(
+                json.dumps(new_video_distribution)) 
        
         task_map = self.get_video_task_map() 
         expected_order = ["ThumbnailCheckTask","ThumbnailChangeTask_B",
