@@ -34,4 +34,4 @@ fi
 
 cd ${CURDIR}
 nosetests --with-coverage --with-xunit --cover-package . --cover-erase --exe --cover-xml || true
-pylint --rcfile .pylintrc -f parseable api clickTracker controllers mastermind model neonAbtest prodServerManagement stats supportServices test test_utils utils | tee pylint.out
+pylint --rcfile .pylintrc -f parseable api clickTracker controllers mastermind model neonAbtest prodServerManagement stats supportServices test test_utils utils > pylint.out
