@@ -302,12 +302,15 @@ class TrackerAccountIDMapper(object):
 
     @classmethod
     def format_key(cls,tai):
+        ''' format db key '''
         return cls.__name__.lower() + '_%s'%tai
     
     def to_json(self):
+        ''' to json '''
         return json.dumps(self, default=lambda o: o.__dict__)
     
-    def save(self,callback=None):
+    def save(self, callback=None):
+        ''' save trackerIDMapper instance '''
         db_connection = DBConnection(self)
         value = self.to_json()     
         if callback:
@@ -329,25 +332,23 @@ class TrackerAccountIDMapper(object):
         db_connection = DBConnection(cls)
        
         if callback:
-            db_connection.conn.get(key,lambda x: callback(format_result(x)))
+            db_connection.conn.get(key,lambda x: callback(format_tuple(x)))
         else:
             data = db_connection.blocking_conn.get(key)
             return format_tuple(data)
 
-
-''' NeonUserAccount
-
-Every user in the system has a neon account and all other integrations are 
-associated with this account. 
-
-Account usage aggregation, Billing information is computed here
-
-@videos: video id / jobid map of requests made directly through neon api
-@integrations: all the integrations associated with this acccount
-
-'''
-
 class NeonUserAccount(object):
+    ''' NeonUserAccount
+
+    Every user in the system has a neon account and all other integrations are 
+    associated with this account. 
+
+    Account usage aggregation, Billing information is computed here
+
+    @videos: video id / jobid map of requests made directly through neon api
+    @integrations: all the integrations associated with this acccount
+
+    '''
     def __init__(self, a_id):
         self.account_id = a_id
         self.neon_api_key = NeonApiKey.generate(a_id)
@@ -361,7 +362,7 @@ class NeonUserAccount(object):
 
     def add_platform(self, platform):
         '''Adds a platform object to the account.'''
-        if len(self.integrations) ==0 :
+        if len(self.integrations) == 0:
             self.integrations = {}
 
         self.integrations[platform.integration_id] = platform.get_ovp()
@@ -369,6 +370,8 @@ class NeonUserAccount(object):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_platforms(self):
+        ''' get all platform accounts for the user '''
+
         ovp_map = {}
         for plat in [NeonPlatform, BrightcovePlatform, YoutubePlatform]:
             ovp_map[plat.get_ovp()] = plat
@@ -398,32 +401,25 @@ class NeonUserAccount(object):
 
     @classmethod
     def get_ovp(cls):
+        ''' ovp string '''
         return "neon"
     
     def add_video(self, vid, job_id):
+        ''' vid,job_id in to vidoes'''
+
         self.videos[str(vid)] = job_id
     
-    def add_callback(self, result):
-        try:
-            items = json.loads(result)
-            for key in items.keys():
-                self.__dict__[key] = items[key]
-        except:
-            print "error decoding"
-
-        if self.external_callback:
-            self.external_callback(self)
-   
     def to_json(self):
+        ''' to json '''
         return json.dumps(self, default=lambda o: o.__dict__)
     
-    def save(self,callback=None):
+    def save(self, callback=None):
         ''' save instance'''
-        db_connection=DBConnection(self)
+        db_connection = DBConnection(self)
         if callback:
-            db_connection.conn.set(self.key,self.to_json(),callback)
+            db_connection.conn.set(self.key, self.to_json(), callback)
         else:
-            return db_connection.blocking_conn.set(self.key,self.to_json())
+            return db_connection.blocking_conn.set(self.key, self.to_json())
     
     def save_platform(self, new_integration, callback=None):
         '''
@@ -439,6 +435,7 @@ class NeonUserAccount(object):
 
     @classmethod
     def get_account(cls, api_key, callback=None):
+        ''' return neon useraccount instance'''
         db_connection=DBConnection(cls)
         key = "neonuseraccount_%s" %api_key
         if callback:
@@ -461,6 +458,8 @@ class NeonUserAccount(object):
         return na
     
 class AbstractPlatform(object):
+    ''' Abstract Platform/ Integration class '''
+
     def __init__(self, abtest=False):
         self.neon_api_key = ''
         self.videos = {} # External video id (Original Platform VID) => Job ID
@@ -468,14 +467,17 @@ class AbstractPlatform(object):
         self.integration_id = None # Unique platform ID to 
     
     def generate_key(self,i_id):
+        ''' generate db key '''
         return '_'.join([self.__class__.__name__.lower(),
                          self.neon_api_key, i_id])
     
     def to_json(self):
+        ''' to json '''
         return json.dumps(self, default=lambda o: o.__dict__) 
 
-    def save(self,callback=None):
-        db_connection=DBConnection(self)
+    def save(self, callback=None):
+        ''' save instance '''
+        db_connection = DBConnection(self)
         value = self.to_json()
         if callback:
             db_connection.conn.set(self.key, value, callback)
@@ -484,6 +486,7 @@ class AbstractPlatform(object):
 
     @classmethod
     def get_ovp(cls):
+        ''' ovp string '''
         raise NotImplementedError
 
     @classmethod

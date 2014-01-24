@@ -21,21 +21,20 @@ import tornado.ioloop
 import tornado.web
 import tornado.httpclient
 import json
-from StringIO import StringIO
-from mock import patch, MagicMock
-from tornado.concurrent import Future
-from tornado.testing import AsyncHTTPTestCase,AsyncTestCase,AsyncHTTPClient
+from mock import patch
+from tornado.testing import AsyncHTTPTestCase, AsyncTestCase
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 
 from api import server,properties
 from supportServices import neondata
-import utils
 from utils.options import define, options
 import logging
 _log = logging.getLogger(__name__)
 
 random.seed(1324)
 class TestVideoServer(AsyncHTTPTestCase):
+    ''' Video Server test'''
+
     def setUp(self):
         super(TestVideoServer, self).setUp()
         #create un-mocked httpclients for use of testcases later
@@ -61,11 +60,12 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.api_key = self.na.neon_api_key
         self.na.save()
     
-    def _db_side_effect(*args,**kwargs):
-        key = args[0]
-        cb  = args[1]
-        print key,cb
-        return "something"
+    #def _db_side_effect(*args, **kwargs):
+    #
+    #    key = args[0]
+    #    cb  = args[1]
+    #    print key,cb
+    #    return "something"
 
     def get_app(self):
         return server.application
@@ -149,7 +149,7 @@ class TestVideoServer(AsyncHTTPTestCase):
         h = {'X-Neon-Auth' : properties.NEON_AUTH} 
         for i in range(10): #dequeue a bunch 
             self.real_asynchttpclient.fetch(self.get_url('/dequeue'), 
-                callback=self.stop, method="GET",headers=h)
+                callback=self.stop, method="GET", headers=h)
             resp = self.wait()
             self.assertEqual(resp.code,200)
         
@@ -166,26 +166,26 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.real_asynchttpclient.fetch(self.get_url('/requeue'),
                 callback=self.stop, method="POST", body=jdata)
         resp = self.wait()
-        self.assertEqual(resp.code,200)
+        self.assertEqual(resp.code, 200)
 
     def test_job_status_handler(self):
         resp = self.add_request()
         job_id = json.loads(resp.body)['job_id']
         self.real_asynchttpclient.fetch(
                 self.get_url('/api/v1/jobstatus?api_key=%s&job_id=%s'
-                    %(self.api_key,job_id)),
+                    %(self.api_key, job_id)),
                 callback=self.stop, method="GET")
         resp = self.wait()
-        self.assertEqual(resp.code,200)
+        self.assertEqual(resp.code, 200)
         
         #wrong job_id
         job_id = 'dummyjobid'
         self.real_asynchttpclient.fetch(
                 self.get_url('/api/v1/jobstatus?api_key=%s&job_id=%s'
-                    %(self.api_key,job_id)),
+                    %(self.api_key, job_id)),
                 callback=self.stop, method="GET")
         resp = self.wait()
-        self.assertEqual(resp.code,400)
+        self.assertEqual(resp.code, 400)
 
     def test_get_results_handler(self):
         pass

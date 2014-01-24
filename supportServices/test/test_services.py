@@ -940,6 +940,14 @@ class TestServices(AsyncHTTPTestCase):
         self.assertEqual(self.a_id, a_id)
         self.assertEqual(itype, neondata.TrackerAccountIDMapper.STAGING)
 
+        r_a_id,r_itype = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)
+        self.assertEqual(r_a_id,a_id)
+        self.assertEqual(r_itype,neondata.TrackerAccountIDMapper.PRODUCTION)
+        
+        r_a_id,r_itype = neondata.TrackerAccountIDMapper.get_neon_account_id(s_tai)
+        self.assertEqual(r_a_id,a_id)
+        self.assertEqual(r_itype,neondata.TrackerAccountIDMapper.STAGING)
+
     def _test_gzip_response(self):
         pass
         #response = self.fetch("/chunk", use_gzip=False,

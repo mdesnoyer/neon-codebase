@@ -52,7 +52,7 @@ class DemoHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
         url = self.get_argument('url')
-        topn = self.get_argument('topn')
+        topn = 6 #self.get_argument('topn')
         if "vimeo" in url:
             self.vimeo_request(topn,url)
         else:
@@ -61,9 +61,9 @@ class DemoHandler(tornado.web.RequestHandler):
     def vimeo_request(self,topn,vid_url):
         def vimeo_callback(response):
             if response.error:
-		_log.error('Error getting video from %s: %s' % (response.request.url, response.error))
                 self.set_status(500)
                 self.finish()
+		        #_log.error('Error getting video from %s: %s' % (response.request.url, response.error))
                 return
             
             site = response.body
@@ -95,7 +95,10 @@ class DemoHandler(tornado.web.RequestHandler):
                 return
 
             _log.debug("download %s" %d_url)
-            self.create_neon_requests(topn,d_url)
+            print d_url 
+            self.write(d_url)
+            self.finish()
+            #self.create_neon_requests(topn,d_url)
             return
 
         vimeo_vid = vid_url.split('/')[-1]

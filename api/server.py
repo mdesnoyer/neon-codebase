@@ -19,14 +19,17 @@ import properties
 import os
 import utils.ps
 
-from supportServices.neondata import *
+from supportServices.neondata import NeonApiRequest, BrightcoveApiRequest
+from supportServices.neondata import NeonPlatform, YoutubePlatform, \
+        BrightcovePlatform, VideoMetadata, RequestState, InternalVideoID 
 import utils.neon
 
 #Tornado options
 from utils.options import define, options
 define("port", default=8081, help="run on the given port", type=int)
 MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
-    
+
+import logging
 _log = logging.getLogger(__name__)
 
 DIRNAME = os.path.dirname(__file__)
@@ -55,11 +58,12 @@ def _verify_neon_auth(value):
 ## ===================== API ===========================================#
 
 class StatsHandler(tornado.web.RequestHandler):
+    ''' Qsize handler '''
     def get(self, *args, **kwargs):
         size = -1
         try:
             size = global_api_work_queue.qsize() #Doesn't work on mac osX
-        except:
+        except Exception, e:
             pass
 
         if check_remote_ip(self.request) == False:
@@ -97,7 +101,6 @@ class RequeueHandler(tornado.web.RequestHandler):
         
         try:
             _log.info("key=requeue_handler msg=requeing ")
-            #data = tornado.escape.url_unescape(self.request.body, encoding='utf-8')
             data = self.request.body
             #TODO Verify data Format
             global_api_work_queue.put(data)
@@ -163,8 +166,9 @@ class JobStatusHandler(tornado.web.RequestHandler):
             _log.error("key=jobstatus_handler msg=exception " + e.__str__())
             raise tornado.web.HTTPError(400)
 
-
 class GetThumbnailsHandler(tornado.web.RequestHandler):
+    ''' Thumbnail API handler '''
+
     test_mode = False
     parsed_params = {}
 
@@ -174,7 +178,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
         #insert job in to user account
         def update_account(result):
             if not result:
-                _log.error("key=thumbnail_handler update account  msg=video not added to account")
+                _log.error("key=thumbnail_handler update account " 
+                            "  msg=video not added to account")
                 self.write(response_data)
                 self.set_status(201)
                 self.finish()
@@ -241,12 +246,10 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 title = params[properties.VIDEO_TITLE]
                 url = params[properties.VIDEO_DOWNLOAD_URL]
                 http_callback = params[properties.CALLBACK_URL]
-            except KeyError,e:
+            except KeyError, e:
                 raise Exception("params not set") #convert to custom exception
 
             #TODO Verify API Key
-            #if not self.verify_api_key(api_key):
-            #    raise Exception("API key invalid")
             
             #compare with supported api methods
             if params.has_key(properties.TOP_THUMBNAILS):
@@ -335,23 +338,11 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     self.write(response_data)
                     self.finish()
 
-        except Exception,e:
+        except Exception, e:
             _log.exception("key=thumbnail_handler msg= %s"%e)
             self.set_status(400)
             self.finish("<html><body>Bad Request " + e.__str__() + " </body></html>")
             return
-
-    def verify_api_key(selfi,key):
-        fname = os.path.join(DIRNAME,properties.API_KEY_FILE) 
-        with open(fname, 'r') as f:
-            json = f.readline()
-        
-        keys = tornado.escape.json_decode(json)
-        if key not in keys.values():
-            return False
-        
-        return True
-
 
 ###########################################
 # TEST Handlers 
