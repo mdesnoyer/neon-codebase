@@ -57,7 +57,7 @@ import youtube_api
 
 from supportServices.neondata import NeonApiRequest, BrightcoveApiRequest
 from supportServices.neondata import NeonPlatform, YoutubePlatform, \
-        BrightcovePlatform, VideoMetadata, RequestState, InternalVideoID, ThumbnailID
+        BrightcovePlatform, VideoMetadata, RequestState, InternalVideoID
 from supportServices.neondata import ThumbnailID, ThumbnailType, \
         ThumbnailURLMapper, ThumbnailMetaData, ThumbnailIDMapper
 
@@ -118,14 +118,15 @@ class ProcessVideo(object):
         self.center_frame = None
         self.frame_size_width = 256
         self.sec_to_extract = 1 
-        self.base_filename = request_map[properties.API_KEY] + "/" + request_map[properties.REQUEST_UUID_KEY]  #Used as direcrtory name
+        self.base_filename = request_map[properties.API_KEY] + "/" + \
+                request_map[properties.REQUEST_UUID_KEY]  #Used as direcrtory name
         self.sec_to_extract_offset = 1.0 
 
         if request_map.has_key(properties.THUMBNAIL_RATE):
-            self.sec_to_extract_offset = random.choice([0.20,0.25,0.5]) 
+            self.sec_to_extract_offset = random.choice([0.20, 0.25, 0.5]) 
 
         self.sec_to_extract_offset = 1
-        self.valence_scores = [[],[]] #x,y        
+        self.valence_scores = [[], []] #x,y 
 
         #Video Meta data
         self.video_metadata = {}
@@ -141,8 +142,8 @@ class ProcessVideo(object):
         self.s3conn = S3Connection(properties.S3_ACCESS_KEY,
                                    properties.S3_SECRET_KEY)
         self.s3bucket_name = properties.S3_BUCKET_NAME
-        self.s3bucket = Bucket(name = self.s3bucket_name,
-                               connection = self.s3conn)
+        self.s3bucket = Bucket(name=self.s3bucket_name,
+                               connection=self.s3conn)
         self.format = "JPEG" #"PNG"
 
         #AB Test Data
@@ -152,7 +153,7 @@ class ProcessVideo(object):
         self.thumbnails = [] # ThumbnailMetaData
         
         self.debug = debug
-        self.pid   = cur_pid
+        self.pid = cur_pid
 
     def process_all(self, video_file, n_thumbs=1):
         ''' process all the frames from the partial video downloaded '''
@@ -160,7 +161,7 @@ class ProcessVideo(object):
         try:
             mov = ffvideo.VideoStream(video_file)
             if self.video_metadata['codec_name'] is None:
-                self.video_metadata['codec_name'] =  mov.codec_name
+                self.video_metadata['codec_name'] = mov.codec_name
                 self.video_metadata['duration'] = mov.duration
                 self.video_metadata['framerate'] = mov.framerate
                 self.video_metadata['bitrate'] = mov.bitrate
@@ -194,7 +195,7 @@ class ProcessVideo(object):
                 self.valence_scores[0].append(timecode)
                 self.valence_scores[1].append(score)
                 self.timecodes[frame_no] = timecode
-                self.data_map[frame_no] = (score, image[:,:,::-1])
+                self.data_map[frame_no] = (score, image[:, :, ::-1])
                 self.attr_map[frame_no] = attribute
         
         #del reference to stream object
@@ -206,8 +207,8 @@ class ProcessVideo(object):
                     "time_processing=%s" %(end_process - start_process))
 
     def finalize(self, video_file):
-        ''' method that is run before the video is deleted after downloading '''
-        ''' use this to run cleanup code or misc methods '''
+        ''' method that is run before the video is deleted after downloading 
+        use this to run cleanup code or misc methods '''
         return
 
     ############# THUMBNAIL METHODS ##################
@@ -258,7 +259,7 @@ class ProcessVideo(object):
         # Sort according to frame numbers
         frames = sorted(data, key=lambda tup: tup[0], reverse=False) 
         frms = [ x[0] for x in frames ]
-
+        prev_intv = 0
         for i,intv in zip(range(len(intervals)), intervals):
             intv = int(intv / self.sec_to_extract_offset)
             if i > 0:
@@ -287,7 +288,7 @@ class ProcessVideo(object):
                         reverse=True)
       
         if len(result) < nthumbnails: 
-            nthumbnails = min(len(result),nthumbnails)
+            nthumbnails = min(len(result), nthumbnails)
             return result[:nthumbnails]
         else:
             # Fiter duplicates
@@ -441,7 +442,6 @@ class ProcessVideo(object):
                                                             video_id))
         urls.append(s3fname)
         created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        enabled = None 
         width   = image.size[0]
         height  = image.size[1] 
 
@@ -456,7 +456,7 @@ class ProcessVideo(object):
     def valence_score(self, image):
         ''' valence of pil.image '''
         im_array = np.array(image)
-        im = im_array[:,:,::-1]
+        im = im_array[:, :, ::-1]
         score,attr = self.model.score(im)
         return str(score)
 
@@ -483,13 +483,14 @@ class ProcessVideo(object):
         for thumb in self.thumbnails:
             tids.append(thumb["thumbnail_id"])
 
-        vmdata = VideoMetadata(i_vid,tids,job_id,url,duration,video_valence,model_version,i_id,frame_size)
+        vmdata = VideoMetadata(i_vid, tids, job_id, url, duration,
+                    video_valence, model_version, i_id, frame_size)
         ret = vmdata.save()
         if not ret:
             _log.error("key=save_video_metatada msg=failed to save")
 
 
-    def save_thumbnail_metadata(self,platform,i_id):
+    def save_thumbnail_metadata(self, platform, i_id):
         '''Save the Thumbnail URL and ID to Mapper DB '''
 
         api_key = self.request_map[properties.API_KEY] 
@@ -503,9 +504,9 @@ class ProcessVideo(object):
             for thumb in self.thumbnails:
                 tid = thumb["thumbnail_id"]
                 for t_url in thumb["urls"]:
-                    uitem = ThumbnailURLMapper(t_url,tid)
+                    uitem = ThumbnailURLMapper(t_url, tid)
                     thumbnail_url_mapper_list.append(uitem)
-                    item = ThumbnailIDMapper(tid,i_vid,thumb)
+                    item = ThumbnailIDMapper(tid, i_vid, thumb)
                     thumbnail_mapper_list.append(item)
 
             retid = ThumbnailIDMapper.save_all(thumbnail_mapper_list)
@@ -541,15 +542,15 @@ class ProcessVideo(object):
                 image = self.center_frame
                 if image:
                     score  = self.valence_score(image) 
-                    s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
+                    s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
                     s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
                     s3bucket = s3conn.get_bucket(s3bucket_name)
                     s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
                     keyname = self.base_filename + "/centerframe.jpeg" 
                     s3fname = s3_url_prefix + "/" + keyname
                     ttype = ThumbnailType.CENTERFRAME
-                    self.save_thumbnail_to_s3_and_metadata(image,score,s3bucket,
-                              keyname,s3fname,ttype,rank=0)
+                    self.save_thumbnail_to_s3_and_metadata(image, score, s3bucket,
+                              keyname, s3fname, ttype, rank=0)
                 else:
                     _log.error("key=finalize_neon_request msg=center frame is NULL")
       
@@ -560,7 +561,7 @@ class ProcessVideo(object):
         ret = api_request.save()
         if ret:
             self.save_video_metadata()
-            self.save_thumbnail_metadata("neon",0)
+            self.save_thumbnail_metadata("neon", 0)
         else:
             _log.error("key=finalize_neon_request msg=failed to save request")
         return
@@ -1233,8 +1234,10 @@ def main():
         properties.BASE_SERVER_URL = properties.LOCALHOST_URL
 
     #start video client
+    global workers
     vc = VideoClient(options.model_file,
                      options.debug, options.sync)
+    workers.append(vc)
     vc.run()
 
 if __name__ == "__main__":
