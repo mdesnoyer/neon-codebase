@@ -128,7 +128,7 @@ class AccountHandler(tornado.web.RequestHandler):
         if neondata.NeonApiKey.generate(a_id) == self.api_key:
             return True
         else:
-            data = '{"error":"invalid api key or account id doesnt match api key"}'
+            data = '{"error":"invalid api_key or account id"}'
             _log.warning(("key=verify_account "
                           "msg=api key doesn't match for account %s") % a_id)
             self.send_json_response(data,400)
@@ -152,7 +152,8 @@ class AccountHandler(tornado.web.RequestHandler):
     def get(self, *args, **kwargs):
         ''' 
         GET /accounts/:account_id/status
-        GET /accounts/:account_id/[brightcove_integrations|youtube_integrations]/:integration_id/videos
+        GET /accounts/:account_id/[brightcove_integrations|youtube_integrations] \
+                /:integration_id/videos
         '''
         
         _log.info("Request %r" %self.request)
@@ -214,10 +215,10 @@ class AccountHandler(tornado.web.RequestHandler):
                             pass
 
                 if itype  == "neon_integrations":
-                    self.get_video_status_neon(video_ids,video_state)
+                    self.get_video_status_neon(video_ids, video_state)
             
                 elif itype  == "brightcove_integrations":
-                    self.get_video_status_brightcove(i_id,video_ids,video_state)
+                    self.get_video_status_brightcove(i_id, video_ids, video_state)
 
                 elif itype == "youtube_integrations":
                     self.get_youtube_videos(i_id)
@@ -225,7 +226,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.write("API not supported")
                 _log.warning(('key=account_handler '
                               'msg=Invalid method in request %s method %s') 
-                              % (self.request.uri,method))
+                              % (self.request.uri, method))
                 self.set_status(400)
                 self.finish()
 
@@ -264,7 +265,8 @@ class AccountHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous
     def put(self, *args, **kwargs):
         '''
-        /accounts/:account_id/[brightcove_integrations|youtube_integrations]/:integration_id/{method}
+        /accounts/:account_id/[brightcove_integrations|youtube_integrations] \
+                /:integration_id/{method}
         '''
        
         uri_parts = self.request.uri.split('/')
@@ -297,14 +299,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.update_youtube_account(i_id)
             elif itype is None:
                 #Update basic neon account
-                try:
-                    pmins = self.get_argument("processing_minutes")
-                    pstart = self.get_argument("plan_start_date")
-                    self.update_account(a_id,pmins,pstart)
-                except Exception,e:
-                    _log.error('key=update account msg=' + e.message)
-                    self.set_status(400)
-                    self.finish()
+                self.method_not_supported()
             else:
                 self.method_not_supported()
 
@@ -312,7 +307,7 @@ class AccountHandler(tornado.web.RequestHandler):
         elif method == "videos":
             if len(uri_parts) == 9:
                 vid = uri_parts[-1]
-                i_vid = neondata.InternalVideoID.generate(self.api_key,vid)
+                i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
                 if "brightcove_integrations" == itype:
                     try:
                         new_tid = self.get_argument('thumbnail_id')
@@ -397,7 +392,23 @@ class AccountHandler(tornado.web.RequestHandler):
             self.send_json_response(data, 409)
 
         #note: job id gets inserted into Neon platform account on video server
-        self.send_json_response(result.body,200)
+        t_urls = [] ; thumbs = []
+        placeholder_url = 'http://www.neon-lab.com/assets/home/laptop_@2X-bb547cf3650b718e4ba5809b27e2cffb.jpg'
+        t_urls.append(placeholder_url)
+        ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        tm = neondata.ThumbnailMetaData(0, t_urls, ctime, 0, 0,
+                            neondata.ThumbnailType.CENTERFRAME, 0, 0)
+        thumbs.append(tm.to_dict())
+        vr = VideoResponse(video_id,
+                            neondata.RequestState.PROCESSING,
+                            "neon",
+                            "0",
+                            title,
+                            None, #duration
+                            time.time() * 1000,
+                            0, 
+                            thumbs)
+        self.send_json_response(vr.to_json(),200)
 
     @tornado.gen.engine
     def get_video_status_neon(self,vids,video_state=None):
@@ -1070,31 +1081,6 @@ class AccountHandler(tornado.web.RequestHandler):
             self.send_json_response(data,400)
    
 
-    '''
-    Get brightcove videos of a given state
-    '''
-
-    def get_brightcove_videos_by_state(self,i_id):
-
-        def get_account(account):
-            if account:
-                #TODO(sunil): Implement this
-                #Get all videos for this account
-                #Aggregate result based on state
-
-                #Get unprocessed list from brightcove 
-                pass
-            else:
-                _log.error("key=update_brightcove_integration" 
-                        " msg=no such account %s integration id %s" %(self.api_key,i_id))
-                data = '{"error": "Account doesnt exists" }'
-                self.send_json_response(data,400)
-
-        neondata.BrightcovePlatform.get_account(self.api_key,
-                                                i_id,
-                                                get_account)
-
-
     ##################################################################
     # Youtube methods
     ##################################################################
@@ -1418,22 +1404,24 @@ class AccountHandler(tornado.web.RequestHandler):
 
 class UtilHandler(tornado.web.RequestHandler):
     def prepare(self):
+        ''' image random seed'''
         random.seed(340)
 
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
-        
+        ''' get request '''
+
         width = 480
         height = 360
         try:
             width = int(self.get_argument("width"))
             height = (self.get_argument("height"))
-        except:
+        except Exception, e:
             pass
         
-        seed = int(hashlib.md5(self.request.uri).hexdigest(),16)
+        seed = int(hashlib.md5(self.request.uri).hexdigest(), 16)
         random.seed(seed)
-        im = self._create_random_image(height,width)
+        im = self._create_random_image(height, width)
         imgstream = StringIO() 
         im.save(imgstream, "jpeg", quality=100)
         imgstream.seek(0)
@@ -1441,12 +1429,14 @@ class UtilHandler(tornado.web.RequestHandler):
         self.finish(data)
 
     def _create_random_image(self, h, w):
+        ''' image data'''
+
         pixels = [(0,0,0) for _w in range(h*w)] 
-        r = random.randrange(0,255)
-        g = random.randrange(0,255)
-        b = random.randrange(0,255)
-        pixels[0] = (r,g,b)
-        im = Image.new("RGB",(h,w))
+        r = random.randrange(0, 255)
+        g = random.randrange(0, 255)
+        b = random.randrange(0, 255)
+        pixels[0] = (r, g, b)
+        im = Image.new("RGB",(h, w))
         im.putdata(pixels)
         return im
 
