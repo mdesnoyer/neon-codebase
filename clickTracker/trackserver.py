@@ -2,22 +2,21 @@
 ''''
 Server that logs data from the tracker in to S3
 
-Tornado server listens for http requests and puts in to the Q a TrackerData json obj
-A thread dequeues data and sends the data to s3
+Tornado server listens for http requests and puts in to the Q a
+TrackerData json object. A thread dequeues data and sends the data to s3
 '''
 
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 
 import json
 import os
 import Queue
 import re
-import multiprocessing
 import shortuuid
 import threading
 import time
@@ -50,8 +49,10 @@ define("flush_interval", default=120, type=float,
        help='Interval in seconds to force a flush to S3')
 define("max_concurrent_uploads", default=100, type=int,
        help='Maximum number of concurrent uploads')
-define("s3accesskey", default='AKIAJ5G2RZ6BDNBZ2VBA', help="s3 access key", type=str)
-define("s3secretkey", default='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', help="s3 secret key", type=str)
+define("s3accesskey", default='AKIAJ5G2RZ6BDNBZ2VBA', help="s3 access key",
+       type=str)
+define("s3secretkey", default='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',
+       help="s3 secret key", type=str)
 
 from utils import statemon
 statemon.define('qsize', int)
@@ -66,9 +67,10 @@ class TrackerData(object):
     '''
     Schema for click tracker data
     '''
-    def __init__(self,action,id,ttype,cts,sts,page,cip,imgs,tai,cvid=None):
+    def __init__(self, action, _id, ttype, cts, sts, page, cip, imgs, tai,
+                 cvid=None):
         self.a = action # load/ click
-        self.id = id    # page load id
+        self.id = _id    # page load id
         self.ttype = ttype #tracker type
         self.ts = cts #client timestamp
         self.sts = sts #server timestamp
@@ -76,13 +78,14 @@ class TrackerData(object):
         self.page = page # Page where the video is shown
         self.tai = tai
 
-        if isinstance(imgs,list):        
+        if isinstance(imgs, list):        
             self.imgs = imgs #image list
             self.cvid = cvid #current video in the player
         else:
             self.img = imgs  #clicked image
         
     def to_json(self):
+        '''Converts the object to a json string.'''
         return json.dumps(self, default=lambda o: o.__dict__)
 
 #############################################
@@ -90,6 +93,8 @@ class TrackerData(object):
 #############################################
 
 class TrackerDataHandler(tornado.web.RequestHandler):
+    '''Common class to handle http requests to the tracker.'''
+    
     def parse_tracker_data(self):
         '''Parses the tracker data from a GET request.
 
@@ -98,7 +103,7 @@ class TrackerDataHandler(tornado.web.RequestHandler):
         '''
         ttype = self.get_argument('ttype')
         action = self.get_argument('a')
-        id = self.get_argument('id')
+        _id = self.get_argument('id')
         cts = self.get_argument('ts')
         sts = int(time.time())
         page = self.get_argument('page') #url decode
@@ -115,23 +120,26 @@ class TrackerDataHandler(tornado.web.RequestHandler):
             imgs = self.get_argument('img')
 
         cip = self.request.remote_ip
-        return TrackerData(action,id,ttype,cts,sts,page,cip,imgs,tai,cvid)
+        return TrackerData(action, _id, ttype, cts, sts, page, cip, imgs, tai,
+                           cvid)
 
 
 class LogLines(TrackerDataHandler):
+    '''Handler for real tracking data that should be logged.'''
 
     def initialize(self, q, watcher):
+        '''Initialize the logger.'''
         self.q = q
         self.watcher = watcher
     
-    ''' Track call logger '''
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
+        '''Handle a tracking request.'''
         with self.watcher.activate():
             try:
                 tracker_data = self.parse_tracker_data()
-            except Exception, e:
-                _log.exception("key=get_track msg=%s" %e) 
+            except Exception, err:
+                _log.exception("key=get_track msg=%s", err) 
                 self.set_status(500)
                 self.finish()
                 return
@@ -141,27 +149,28 @@ class LogLines(TrackerDataHandler):
                 self.q.put(data)
                 statemon.state.qsize = self.q.qsize()
                 self.set_status(200)
-            except Exception, e:
-                _log.exception("key=loglines msg=Q error %s" %e)
+            except Exception, err:
+                _log.exception("key=loglines msg=Q error %s", err)
                 self.set_status(500)
             self.finish()
 
-    '''
-    Method to check memory on the node
-    '''
     def memory_check(self):
+        '''Method to check memory on the node'''
         return True
 
 class TestTracker(TrackerDataHandler):
+    '''Handler for test requests.'''
+    
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
-        _log.error("key=TestTracker msg=request data  "
-                "%r" %self.request)
+        '''Handle a test tracking request.'''
+        _log.error("key=TestTracker msg=request data  %r",
+                   self.request)
         try:
             tracker_data = self.parse_tracker_data()
             cb = self.get_argument("callback")
-        except Exception,e:
-            _log.exception("key=test_track msg=%s" %e) 
+        except Exception as err:
+            _log.exception("key=test_track msg=%s", err) 
             self.finish()
             return
         
@@ -174,6 +183,8 @@ class TestTracker(TrackerDataHandler):
 # S3 Handler thread 
 ###########################################
 class S3Handler(threading.Thread):
+    '''Thread that uploads data to S3.'''
+    
     def __init__(self, dataQ, watcher=utils.ps.ActivityWatcher()):
         super(S3Handler, self).__init__()
         self.dataQ = dataQ
@@ -181,22 +192,32 @@ class S3Handler(threading.Thread):
         self.daemon = True
         self.watcher = watcher
 
+        self.bucket_name = None
+        self.use_s3 = False
         self.s3conn = None
         self._mutex = threading.RLock()
         self._upload_limiter = \
           threading.Semaphore(options.max_concurrent_uploads)
 
-        self.check_output_location()
+        statemon.state.s3_connection_errors = 0
+        statemon.state.qsize = self.dataQ.qsize()
+        statemon.state.buffer_size = 0
 
-    def check_output_location(self):
+        self._check_output_location()
+
+    def _check_output_location(self):
+        '''Determine where to output the log file.
+
+        Directories are created as necessary.
+        '''
         # Make sure the s3 backup exists
         if not os.path.exists(options.s3disk):
             os.makedirs(options.s3disk)
         
         # Determine where the output will be and create the
         # directories if necessary
-        s3pathRe = re.compile('s3://([0-9a-zA-Z_\-]+)')
-        s3match = s3pathRe.match(options.output)
+        s3path_re = re.compile(r's3://([0-9a-zA-Z_-]+)')
+        s3match = s3path_re.match(options.output)
         self.use_s3 = False
         if s3match:
             self.bucket_name = s3match.groups()[0]
@@ -216,22 +237,23 @@ class S3Handler(threading.Thread):
                 raise IOError('The output directory: %s is not a directory' %
                               options.output)
 
-    def generate_log_filename(self):
+    def _generate_log_filename(self):
+        '''Create a new log filename.'''
         return '%s_%s_clicklog.log' % (
             time.strftime('%S%M%H%d%m%Y', time.gmtime()),
             shortuuid.uuid())
 
-    def send_to_output(self, data):
+    def _send_to_output(self, data):
         '''Sends the data to the appropriate output location.'''
-        filename = self.generate_log_filename()
-        self.check_output_location()
+        filename = self._generate_log_filename()
+        self._check_output_location()
         if self.use_s3:
-            thread = threading.Thread(target=self.save_to_s3,
+            thread = threading.Thread(target=self._save_to_s3,
                                       args=('\n'.join(data), self.bucket_name,
                                             filename, len(data)))
         else:
             thread = threading.Thread(
-                target=self.save_to_disk,
+                target=self._save_to_disk,
                 args=('\n'.join(data),
                       os.path.join(options.output, filename),
                       len(data)))
@@ -239,51 +261,65 @@ class S3Handler(threading.Thread):
         self._upload_limiter.acquire()
         thread.start()
 
-    def save_to_s3(self, data, bucket_name, key_name, nlines):
+    def _save_to_s3(self, data, bucket_name, key_name, nlines):
+        '''Saves some data to S3
+
+        Inputs:
+        data - data to save
+        bucket_name - Name of the S3 bucket to send to
+        key_name - S3 key to write the data in
+        nlines - Number of lines in the data
+        '''
         try:
             bucket = self.s3conn.get_bucket(bucket_name)
             key = bucket.new_key(key_name)
             key.set_contents_from_string(data)
 
-            self.upload_temp_logs_to_s3(bucket_name)
+            self._upload_temp_logs_to_s3(bucket_name)
 
             self._upload_limiter.release()
             
             for i in range(nlines):
                 self.dataQ.task_done()
                 
-        except boto.exception.BotoServerError as e:
-            _log.error("key=upload_to_s3 msg=S3 Error %s" % e)
+        except boto.exception.BotoServerError as err:
+            _log.error("key=upload_to_s3 msg=S3 Error %s", err)
             statemon.state.increment('s3_connection_errors')
-            self.save_to_disk(data, os.path.join(options.s3disk, key_name),
-                              nlines)
+            self._save_to_disk(data, os.path.join(options.s3disk, key_name),
+                               nlines)
             return
-        except IOError as e:
-            _log.error("key=upload_to_s3 msg=S3 I/O Error %s" % e)
+        except IOError as err:
+            _log.error("key=upload_to_s3 msg=S3 I/O Error %s", err)
             statemon.state.increment('s3_connection_errors')
-            self.save_to_disk(data, os.path.join(options.s3disk, key_name),
-                              nlines)
+            self._save_to_disk(data, os.path.join(options.s3disk, key_name),
+                               nlines)
             return
 
-    def save_to_disk(self, data, path, nlines):
+    def _save_to_disk(self, data, path, nlines):
+        '''Saves some data to a file on disk.
+
+        data - Data to save
+        path - path to the file. It is created if not there
+        nlines - Number of lines that are in the data.
+        '''
         try:
             if not os.path.exists(os.path.dirname(path)):
                 os.makedirs(os.path.dirname(path))
 
             if self.use_s3:
                 with self._mutex:
-                    with open(path,'a') as f:
-                        f.write(data)
+                    with open(path, 'a') as stream:
+                        stream.write(data)
             else:
-                with open(path,'a') as f:
-                    f.write(data)
+                with open(path, 'a') as stream:
+                    stream.write(data)
 
             for i in range(nlines):
                 self.dataQ.task_done()
         finally:
             self._upload_limiter.release()
 
-    def upload_temp_logs_to_s3(self, bucket_name):
+    def _upload_temp_logs_to_s3(self, bucket_name):
         '''Uploads temporary files to S3
 
         The temporary files were put there because the connection to
@@ -300,8 +336,8 @@ class S3Handler(threading.Thread):
                     os.remove(full_path)
 
     def run(self):
+        '''Main runner for the handler.'''
         data = []
-        statemon.state.s3_connection_errors = 0
         while True:
             try:
                 try:
@@ -318,14 +354,14 @@ class S3Handler(threading.Thread):
                     (self.last_upload_time + options.flush_interval <= 
                      time.time())):
                     if nlines > 0:
-                        _log.info('Sending %i lines to output %s' % 
-                                  (nlines, options.output))
+                        _log.info('Sending %i lines to output %s', 
+                                  nlines, options.output)
                         with self.watcher.activate():
-                            self.send_to_output(data)
+                            self._send_to_output(data)
                             data = []
                             self.last_upload_time = time.time()
-            except Exception as e:
-                _log.exception("key=s3_uploader msg=%s" % e)
+            except Exception as err:
+                _log.exception("key=s3_uploader msg=%s", err)
             
 
             statemon.state.qsize = self.dataQ.qsize()
@@ -364,9 +400,9 @@ class Server(threading.Thread):
             application = tornado.web.Application([
                 (r"/", LogLines, dict(q=self.event_queue, 
                                       watcher=self._watcher)),
-                (r"/track",LogLines, dict(q=self.event_queue,
-                                          watcher=self._watcher)),
-                (r"/test",TestTracker),
+                (r"/track", LogLines, dict(q=self.event_queue,
+                                           watcher=self._watcher)),
+                (r"/test", TestTracker),
                 ])
             server = tornado.httpserver.HTTPServer(application,
                                                    io_loop=self.io_loop)
@@ -389,9 +425,11 @@ class Server(threading.Thread):
         self.event_queue.join()
 
     def stop(self):
+        '''Stops the server'''
         self.io_loop.stop()
 
 def main(watcher=utils.ps.ActivityWatcher()):
+    '''Main function that runs the server.'''
     with watcher.activate():
         server = Server(watcher)
     server.run()

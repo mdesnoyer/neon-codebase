@@ -12,30 +12,25 @@ Test functionality of the click log server.
 
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
-                                         '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
+                                             '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 import __builtin__
 import boto
 import boto.exception
-from boto.s3.connection import S3Connection
 import test_utils.mock_boto_s3 as boto_mock
 import clickTracker.trackserver 
 import fake_filesystem
 import json
 import logging
-import mock
 from mock import patch
 from mock import MagicMock
-import multiprocessing
 import os
 import Queue
 import random
 import socket
-import threading
-import tornado.ioloop
 import time
 import unittest
 import urllib2
@@ -257,7 +252,7 @@ class TestS3Handler(unittest.TestCase):
 
                 if parsed['a'] == 'load':
                     self.assertEqual(parsed['cvid'], 'v1')
-                    self.assertEqual(parsed['imgs'], ['i1.jpg','i2.jpg'])
+                    self.assertEqual(parsed['imgs'], ['i1.jpg', 'i2.jpg'])
                 elif parsed['a'] == 'click':
                     self.assertEqual(parsed['img'], 'i1.jpg')
                 else:
@@ -367,7 +362,7 @@ class TestFullServer(unittest.TestCase):
     '''A set of tests that fire up the whole server and throws http requests at it.'''
 
     def setUp(self):
-        self.port = random.randint(9000,10000)
+        self.port = random.randint(9000, 10000)
 
         self.load_url = 'http://localhost:'+str(self.port)+'/track?a=load&id=288edb2d31c34507&imgs=%5B%22http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fd21%2Funsecured%2Fmedia%2F2294876105001%2F201310%2F34%2F2294876105001_2727914703001_thumbnail-2296855887001.jpg%22%2C%22http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fd21%2Funsecured%2Fmedia%2F2294876105001%2F201310%2F354%2F2294876105001_2727881607001_thumbnail-2369368872001.jpg%22%2C%22http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fd21%2Funsecured%2Fmedia%2F2294876105001%2F2294876105001_2660525568001_thumbnail-2296855886001.jpg%22%2C%22http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fe1%2Fpd%2F2294876105001%2F2294876105001_2617231423001_thumbnail-2323153341001.jpg%22%5D&cvid=2296855887001&ts=1381257030328&page=http%3A%2F%2Flocalhost%2Fbcove%2Ffplayerabtest.html&ttype=flashonlyplayer&tai=test&noCacheIE=1381257030328'
 
@@ -406,8 +401,8 @@ class TestFullServer(unittest.TestCase):
         # Fire requests to the server      
         nlines = 1000
         for i in range(nlines):
-            rd = random.randint(1,100)
-            if rd <2:
+            rd = random.randint(1, 100)
+            if rd < 2:
                 response = urllib2.urlopen(self.click_url) 
             else:
                 response = urllib2.urlopen(self.load_url)
