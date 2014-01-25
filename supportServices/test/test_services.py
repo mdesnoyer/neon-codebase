@@ -933,7 +933,7 @@ class TestServices(AsyncHTTPTestCase):
         tai = json.loads(response.body)["tracker_account_id"]
         s_tai = json.loads(response.body)["staging_tracker_account_id"]
         a_id,itype = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)   
-        self.assertEqual(self.a_id,a_id)
+        self.assertEqual(self.a_id, a_id)
         self.assertEqual(itype,neondata.TrackerAccountIDMapper.PRODUCTION)
         
         a_id,itype = neondata.TrackerAccountIDMapper.get_neon_account_id(s_tai)   
@@ -941,12 +941,12 @@ class TestServices(AsyncHTTPTestCase):
         self.assertEqual(itype, neondata.TrackerAccountIDMapper.STAGING)
 
         r_a_id,r_itype = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)
-        self.assertEqual(r_a_id,a_id)
+        self.assertEqual(r_a_id, a_id)
         self.assertEqual(r_itype,neondata.TrackerAccountIDMapper.PRODUCTION)
         
         r_a_id,r_itype = neondata.TrackerAccountIDMapper.get_neon_account_id(s_tai)
-        self.assertEqual(r_a_id,a_id)
-        self.assertEqual(r_itype,neondata.TrackerAccountIDMapper.STAGING)
+        self.assertEqual(r_a_id, a_id)
+        self.assertEqual(r_itype, neondata.TrackerAccountIDMapper.STAGING)
 
     def _test_gzip_response(self):
         pass
@@ -958,7 +958,7 @@ class TestServices(AsyncHTTPTestCase):
         api_key = self.create_neon_account()
         nuser = neondata.NeonUserAccount.get_account(api_key)
         neon_integration_id = "0"
-        self.assertTrue( neon_integration_id in nuser.integrations.keys()) 
+        self.assertTrue(neon_integration_id in nuser.integrations.keys()) 
 
     def test_create_neon_video_request(self):
         ''' verify that video request creation via services  ''' 

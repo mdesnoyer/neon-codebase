@@ -1234,7 +1234,7 @@ def main():
         properties.BASE_SERVER_URL = properties.LOCALHOST_URL
 
     #start video client
-    global workers
+    global workers; workers = []
     vc = VideoClient(options.model_file,
                      options.debug, options.sync)
     workers.append(vc)
