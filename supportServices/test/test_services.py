@@ -18,7 +18,6 @@ import json
 import random
 import unittest
 import urllib
-import tempfile
 import test_utils.redis
 import tornado.gen
 import tornado.ioloop
@@ -28,8 +27,7 @@ import datetime
 from StringIO import StringIO
 from mock import patch 
 from supportServices import services, neondata
-from api import client, server, brightcove_api
-from tornado.concurrent import Future
+from api import brightcove_api
 from tornado.testing import AsyncHTTPTestCase, AsyncTestCase, AsyncHTTPClient
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 from utils.options import define, options
@@ -39,6 +37,7 @@ _log = logging.getLogger(__name__)
 import api.properties
 import bcove_responses
 class TestServices(AsyncHTTPTestCase):
+    ''' Services Test '''
         
     @classmethod
     def setUpClass(cls):
@@ -69,7 +68,7 @@ class TestServices(AsyncHTTPTestCase):
         self.api_key = neondata.NeonApiKey.generate(self.a_id) 
         self.rtoken = "rtoken"
         self.wtoken = "wtoken"
-        self.b_id   = "i12345" #i_id bcove
+        self.b_id = "i12345" #i_id bcove
         self.pub_id = "p124"
         self.mock_image_url_prefix = "http://servicesunittest.mock.com/"
         self.thumbnail_url_to_image = {} # mock url => raw image buffer data
@@ -89,6 +88,7 @@ class TestServices(AsyncHTTPTestCase):
         super(TestServices, self).tearDown()
     
     def get_app(self):
+        ''' return services app '''
         return services.application
 
     # TODO: It should be possible to run this with an IOLoop for each
@@ -101,7 +101,7 @@ class TestServices(AsyncHTTPTestCase):
 
         http_client = AsyncHTTPClient(self.io_loop)
         headers = {'X-Neon-API-Key' : apikey, 
-                'Content-Type':'application/x-www-form-urlencoded' }
+                'Content-Type':'application/x-www-form-urlencoded'}
         body = urllib.urlencode(vals)
         http_client.fetch(url,
                      callback=self.stop,
@@ -265,7 +265,8 @@ class TestServices(AsyncHTTPTestCase):
         
         items = self._get_video_status_brightcove()
         for item in items['items']:
-            vr = services.VideoResponse(None, None, None, None, None, None, None, None, None)
+            vr = services.VideoResponse(None, None, None, None, None, 
+                                    None, None, None, None)
             vr.__dict__ = item
             status =  vr.status
             self.assertEqual(status, vstatus)
@@ -288,7 +289,7 @@ class TestServices(AsyncHTTPTestCase):
 
         vals = { 'account_id' : self.a_id }
         uri = self.get_url('/api/v1/accounts') 
-        response = self.post_request(uri,vals,self.api_key)
+        response = self.post_request(uri, vals, self.api_key)
         api_key = json.loads(response.body)["neon_api_key"]
         tai = json.loads(response.body)["tracker_account_id"]
         return api_key
@@ -296,10 +297,12 @@ class TestServices(AsyncHTTPTestCase):
     def create_brightcove_account(self):
         ''' create brightcove platform account '''
 
-        url = self.get_url('/api/v1/accounts/' + self.a_id + '/brightcove_integrations')
-        vals = { 'integration_id' : self.b_id, 'publisher_id' : 'testpubid123',
-                'read_token' : self.rtoken, 'write_token': self.wtoken,'auto_update': False}
-        resp = self.post_request(url,vals,self.api_key)
+        url = self.get_url('/api/v1/accounts/' + self.a_id + \
+                            '/brightcove_integrations')
+        vals = {'integration_id' : self.b_id, 'publisher_id' : 'testpubid123',
+                'read_token' : self.rtoken, 'write_token': self.wtoken, 
+                'auto_update': False}
+        resp = self.post_request(url, vals, self.api_key)
         return resp.body
 
     def update_brightcove_account(self, rtoken=None, wtoken=None, autoupdate=None):
@@ -309,8 +312,10 @@ class TestServices(AsyncHTTPTestCase):
         if wtoken is None: wtoken = self.wtoken
         if autoupdate == None: autoupdate = False
 
-        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/%s' %(self.a_id, self.b_id))
-        vals = {'read_token' : rtoken, 'write_token': wtoken,'auto_update': autoupdate}
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/%s' \
+                            %(self.a_id, self.b_id))
+        vals = {'read_token' : rtoken, 'write_token': wtoken, 
+                'auto_update': autoupdate}
         return self.put_request(url, vals, self.api_key)
 
     def update_brightcove_thumbnail(self, vid, tid):
@@ -446,10 +451,11 @@ class TestServices(AsyncHTTPTestCase):
         #set up account and video state for testing
         api_key = self.create_neon_account()
         json_video_response = self.create_brightcove_account()
+        self.assertNotEqual(json_video_response,'{}') # !empty json response
         
         #verify account id added to Neon user account
         nuser = neondata.NeonUserAccount.get_account(api_key)
-        self.assertTrue( self.b_id in nuser.integrations.keys()) 
+        self.assertTrue(self.b_id in nuser.integrations.keys()) 
         
         reqs = self._create_neon_api_requests()
         self._process_neon_api_requests(reqs)
@@ -474,39 +480,39 @@ class TestServices(AsyncHTTPTestCase):
     def test_invalid_get_rest_uri(self):
         ''' test uri parsing, invalid requests '''
         url = self.get_url('/api/v1/accounts/')
-        resp = self.get_request(url,self.api_key)
-        self.assertEqual(resp.code,400)
+        resp = self.get_request(url, self.api_key)
+        self.assertEqual(resp.code, 400)
         
         url = self.get_url('/api/v1/accounts/123/invalid_aid')
-        resp = self.get_request(url,self.api_key)
-        self.assertEqual(resp.code,400)
+        resp = self.get_request(url, self.api_key)
+        self.assertEqual(resp.code, 400)
         
         url = self.get_url('/api/v1/accounts/%s/dummy_integration' %self.a_id)
-        resp = self.get_request(url,self.api_key)
-        self.assertEqual(resp.code,400)
+        resp = self.get_request(url, self.api_key)
+        self.assertEqual(resp.code, 400)
         
         url = self.get_url('/api/v1/accounts/invalid_api_key/'\
                             'neon_integrations/0/videos')
-        resp = self.get_request(url,self.api_key)
-        self.assertEqual(resp.code,400)
+        resp = self.get_request(url, self.api_key)
+        self.assertEqual(resp.code, 400)
         
         url = self.get_url('/api/v1/accounts/%s/neon_integrations'\
                             '/0/bad_method' %self.a_id)
-        resp = self.get_request(url,self.api_key)
-        self.assertEqual(resp.code,400)
+        resp = self.get_request(url, self.api_key)
+        self.assertEqual(resp.code, 400)
 
     def test_invalid_put_rest_uri(self):
         ''' put requests'''
         
         url = self.get_url('/api/v1/accounts/%s/neon_integrations'\
                             '/0/videos' %self.a_id)
-        resp = self.put_request(url,{},self.api_key)
-        self.assertEqual(resp.code,400)
+        resp = self.put_request(url, {}, self.api_key)
+        self.assertEqual(resp.code, 400)
         
         url = self.get_url('/api/v1/accounts/%s/neon_integrations'\
                             '/0/invalid_method' %self.a_id)
-        resp = self.put_request(url,{},self.api_key)
-        self.assertEqual(resp.code,400)
+        resp = self.put_request(url, {}, self.api_key)
+        self.assertEqual(resp.code, 400)
 
 
     def test_create_update_brightcove_account(self):
@@ -514,7 +520,7 @@ class TestServices(AsyncHTTPTestCase):
 
         #create neon account
         api_key = self.create_neon_account()
-        self.assertEqual(api_key,neondata.NeonApiKey.generate(self.a_id))
+        self.assertEqual(api_key, neondata.NeonApiKey.generate(self.a_id))
 
         #Setup Side effect for the http clients
         self.bapi_mock_client().fetch.side_effect = \
@@ -529,7 +535,7 @@ class TestServices(AsyncHTTPTestCase):
         #create brightcove account
         json_video_response = self.create_brightcove_account()
         video_response = json.loads(json_video_response)['items']
-        self.assertEqual(len(video_response),5)
+        self.assertEqual(len(video_response), 5)
 
         # Verify actual contents
         platform = neondata.BrightcovePlatform.get_account(self.api_key,
@@ -547,7 +553,7 @@ class TestServices(AsyncHTTPTestCase):
         #update brightcove account
         new_rtoken = ("newrtoken")
         update_response = self.update_brightcove_account(new_rtoken)
-        self.assertEqual(update_response.code,200)
+        self.assertEqual(update_response.code, 200)
         platform = neondata.BrightcovePlatform.get_account(self.api_key,
                                                            self.b_id)
         self.assertEqual(platform.read_token, "newrtoken")
@@ -560,7 +566,7 @@ class TestServices(AsyncHTTPTestCase):
 
             #create neon account
             api_key = self.create_neon_account()
-            self.assertEqual(api_key,neondata.NeonApiKey.generate(self.a_id))
+            self.assertEqual(api_key, neondata.NeonApiKey.generate(self.a_id))
 
             #Setup Side effect for the http clients
             self.bapi_mock_client().fetch.side_effect = \
@@ -575,12 +581,12 @@ class TestServices(AsyncHTTPTestCase):
             #create brightcove account
             json_video_response = self.create_brightcove_account()
             video_response = json.loads(json_video_response)['items']
-            self.assertEqual(len(video_response),5)
+            self.assertEqual(len(video_response), 5)
 
             #update brightcove account
             new_rtoken = ("newrtoken")
             update_response = self.update_brightcove_account(new_rtoken)
-            self.assertEqual(update_response.code,200)
+            self.assertEqual(update_response.code, 200)
         
             #auto publish test
             reqs = self._create_neon_api_requests()
@@ -589,7 +595,7 @@ class TestServices(AsyncHTTPTestCase):
                 vstatus=neondata.RequestState.FINISHED)
         
             update_response = self.update_brightcove_account(autoupdate = True)
-            self.assertEqual(update_response.code,200)
+            self.assertEqual(update_response.code, 200)
 
             #Check Neon rank 1 thumbnail is the new thumbnail for the videos
             vitems = json.loads(bcove_responses.find_all_videos_response)
@@ -606,18 +612,22 @@ class TestServices(AsyncHTTPTestCase):
         
             #create neon account
             api_key = self.create_neon_account()
-            self.assertEqual(api_key,neondata.NeonApiKey.generate(self.a_id))
+            self.assertEqual(api_key, neondata.NeonApiKey.generate(self.a_id))
 
             #Setup Side effect for the http clients
-            self.bapi_mock_client().fetch.side_effect = self._success_http_side_effect
-            self.cp_mock_client().fetch.side_effect = self._success_http_side_effect 
-            self.bapi_mock_async_client().fetch.side_effect = self._success_http_side_effect
-            self.cp_mock_async_client().fetch.side_effect = self._success_http_side_effect
+            self.bapi_mock_client().fetch.side_effect = \
+                                self._success_http_side_effect
+            self.cp_mock_client().fetch.side_effect = \
+                                self._success_http_side_effect 
+            self.bapi_mock_async_client().fetch.side_effect = \
+                                self._success_http_side_effect
+            self.cp_mock_async_client().fetch.side_effect = \
+                                self._success_http_side_effect
 
             #create brightcove account
             json_video_response = self.create_brightcove_account()
             video_response = json.loads(json_video_response)['items']
-            self.assertEqual(len(video_response),5) 
+            self.assertEqual(len(video_response), 5) 
         
             #process requests
             reqs = self._create_neon_api_requests()
@@ -630,12 +640,13 @@ class TestServices(AsyncHTTPTestCase):
 
             #update a thumbnail
             new_tids = [] 
-            for vid,job_id in zip(videos,self.job_ids):
-                i_vid = neondata.InternalVideoID.generate(self.api_key,vid)
+            for vid,job_id in zip(videos, self.job_ids):
+                i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
                 vmdata= neondata.VideoMetadata.get(i_vid)
                 tids = vmdata.thumbnail_ids
                 new_tids.append(tids[1])
-                resp = self.update_brightcove_thumbnail(vid,tids[1]) #set neon rank 2 
+                #set neon rank 2 
+                resp = self.update_brightcove_thumbnail(vid, tids[1])
                 self.assertEqual(resp.code,200)
                 
                 #assert request state
@@ -645,11 +656,12 @@ class TestServices(AsyncHTTPTestCase):
 
             thumbs = []
             items = self._get_video_status_brightcove()
-            for item,tid in zip(items['items'],new_tids):
-                vr = services.VideoResponse(None,None,None,None,None,None,None,None,None)
+            for item,tid in zip(items['items'], new_tids):
+                vr = services.VideoResponse(None, None, None, None,
+                                        None, None, None, None, None)
                 vr.__dict__ = item
                 thumbs.append(vr.current_thumbnail)
-            self.assertItemsEqual(thumbs,new_tids)
+            self.assertItemsEqual(thumbs, new_tids)
 
     #Failure test cases
     #Database failure on account creation, updation
@@ -694,8 +706,8 @@ class TestServices(AsyncHTTPTestCase):
         #Failed to download Image; Expect internal error 500
         self.cp_mock_async_client().fetch.side_effect = \
                 _failure_http_side_effect
-        resp = self.update_brightcove_thumbnail(vid,tids[1]) 
-        self.assertEqual(resp.code,500) 
+        resp = self.update_brightcove_thumbnail(vid, tids[1]) 
+        self.assertEqual(resp.code, 500) 
 
         #Brightcove api error, gateway error 502
         self.cp_mock_async_client().fetch.side_effect = \
@@ -703,23 +715,21 @@ class TestServices(AsyncHTTPTestCase):
         self.cp_mock_client().fetch.side_effect =\
                 _failure_http_side_effect 
         resp = self.update_brightcove_thumbnail(vid,tids[1]) 
-        self.assertEqual(resp.code,502) 
+        self.assertEqual(resp.code, 502) 
 
         #Successful update of thumbnail
         self.cp_mock_client().fetch.side_effect =\
                 self._success_http_side_effect
-        resp = self.update_brightcove_thumbnail(vid,tids[1]) 
-        self.assertEqual(resp.code,200) 
+        resp = self.update_brightcove_thumbnail(vid, tids[1]) 
+        self.assertEqual(resp.code, 200) 
 
         #Induce Failure again, bcove api error
         self.cp_mock_client().fetch.side_effect =\
                 _failure_http_side_effect 
-        resp = self.update_brightcove_thumbnail(vid,tids[1]) 
-        self.assertEqual(resp.code,502) 
+        resp = self.update_brightcove_thumbnail(vid, tids[1]) 
+        self.assertEqual(resp.code, 502) 
 
     #TODO: Test creation of individual request
-    def test_create_brightcove_video_request(self):
-        pass
 
     ######### BCOVE HANDLER Test cases ##########################
 
@@ -731,20 +741,20 @@ class TestServices(AsyncHTTPTestCase):
         vid  = vids[0]
         job_id = self.job_ids[0]
         tids = self._get_thumbnails(vid)
-        i_vid = neondata.InternalVideoID.generate(self.api_key,vid)
+        i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
         tid  = tids[0]
         self.cp_mock_client().fetch.side_effect =\
             self._success_http_side_effect
         url = self.get_url('/api/v1/brightcovecontroller/%s/updatethumbnail/%s' 
-                        %(self.api_key,i_vid))
+                        %(self.api_key, i_vid))
         vals = {'thumbnail_id' : tid }
-        resp = self.post_request(url,vals,self.api_key)
-        self.assertEqual(resp.code,200)
+        resp = self.post_request(url, vals, self.api_key)
+        self.assertEqual(resp.code, 200)
 
         #assert request state is not updated to active
-        req_data = neondata.NeonApiRequest.get_request(self.api_key,job_id)
+        req_data = neondata.NeonApiRequest.get_request(self.api_key, job_id)
         vid_request = neondata.NeonApiRequest.create(req_data)
-        self.assertEqual(vid_request.state,neondata.RequestState.FINISHED)
+        self.assertEqual(vid_request.state, neondata.RequestState.FINISHED)
 
     def test_bh_check_thumbnail(self):
         ''' Brightcove support handler tests (check thumb/update thumb) '''
@@ -754,16 +764,16 @@ class TestServices(AsyncHTTPTestCase):
         vids = self._get_videos()
         vid  = vids[0]
         tids = self._get_thumbnails(vid)
-        i_vid = neondata.InternalVideoID.generate(self.api_key,vid)
+        i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
         tid  = tids[0]
         url = self.get_url('/api/v1/brightcovecontroller/%s/checkthumbnail/%s' 
-                        %(self.api_key,i_vid))
+                        %(self.api_key, i_vid))
         vals = {}
         
         # thumbnail md5 shouldnt be found since random image was returned
         # while creating the response for get_image()
-        resp = self.post_request(url,vals,self.api_key)
-        self.assertEqual(resp.code,502) 
+        resp = self.post_request(url, vals, self.api_key)
+        self.assertEqual(resp.code, 502) 
 
         #NOTE: ImageMD5 gets saved as part of image upload to brightcove
         #hence simulate that so as to create DB entry for check thumbnail run
@@ -772,7 +782,7 @@ class TestServices(AsyncHTTPTestCase):
         #HACK: all potential tids here are associated with single video 
         md5_objs = []
         for tid,image in self.images.iteritems():
-            t_md5 = neondata.ImageMD5Mapper(vid,image,tid)
+            t_md5 = neondata.ImageMD5Mapper(vid, image, tid)
             md5_objs.append(t_md5) 
         res = neondata.ImageMD5Mapper.save_all(md5_objs)
         
@@ -971,7 +981,7 @@ class TestServices(AsyncHTTPTestCase):
         self.cp_mock_async_client().fetch.side_effect = \
           self._success_http_side_effect
 
-        response = self.put_request(uri,vals,self.api_key)
+        response = self.post_request(uri,vals,self.api_key)
         self.assertTrue(response.code,200)
         response = json.loads(response.body)
         self.assertIsNotNone(response["video_id"])  

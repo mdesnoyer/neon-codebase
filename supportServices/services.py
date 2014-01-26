@@ -98,6 +98,7 @@ class VideoResponse(object):
 class AccountHandler(tornado.web.RequestHandler):
     
     def prepare(self):
+        ''' Called before every request is processed '''
         self.api_key = self.request.headers.get('X-Neon-API-Key') 
         if self.api_key == None:
             if self.request.uri.split('/')[-1] == "accounts" \
@@ -110,21 +111,22 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.send_json_response(data,400)
 
     @tornado.gen.engine
-    def async_sleep(self,secs):
+    def async_sleep(self, secs):
+        ''' async sleep'''
         yield tornado.gen.Task(tornado.ioloop.IOLoop.current().add_timeout, 
                 time.time() + secs)
 
     @tornado.gen.engine
-    def delayed_callback(self,secs,callback):
+    def delayed_callback(self, secs, callback):
+        ''' delay a callback by x secs'''
         yield tornado.gen.Task(tornado.ioloop.IOLoop.current().add_timeout, 
                 time.time() + secs)
         callback(secs)
 
     #### Support Functions #####
-    def verify_apikey(self):
-        return True
     
-    def verify_account(self,a_id):
+    def verify_account(self, a_id):
+        ''' verify account '''
         if neondata.NeonApiKey.generate(a_id) == self.api_key:
             return True
         else:
@@ -136,7 +138,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
     ######## HTTP Methods #########
 
-    def send_json_response(self,data,status=200):
+    def send_json_response(self, data, status=200):
         '''Send response to service client '''
         self.set_header("Content-Type", "application/json")
         self.set_status(status)
@@ -145,6 +147,7 @@ class AccountHandler(tornado.web.RequestHandler):
        
     
     def method_not_supported(self):
+        ''' unsupported method response'''
         data = '{"error":"api method not supported or REST URI is incorrect"}'
         self.send_json_response(data,400)
 
@@ -186,23 +189,6 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.get_tracker_account_id()
 
             elif method == "videos" or "videos" in method:
-                #videoids requested or state requested
-                #if len(uri_parts) == 9:
-                #    video_state = uri_parts[-1].split('?')[0]
-                #    if video_state in ['processing','recommended','published']:
-                #        self.get_video_status_brightcove(i_id,None,video_state)
-                #        return
-                #    else:
-                #        try:
-                #            ids = self.get_argument('video_ids')
-                #            vids = ids.split(',') 
-                #        except:
-                #            #Get all the videos from the account
-                #            self.get_video_status_brightcove(i_id,None)
-                #            return
-                #        self.get_video_status_brightcove(i_id,vids)
-                #        return
-                
                 video_state = None
                 video_ids = None
                 if len(uri_parts) == 9:
@@ -240,27 +226,59 @@ class AccountHandler(tornado.web.RequestHandler):
 
     @tornado.web.asynchronous
     def post(self, *args, **kwargs):
-        
-        #POST /accounts/:account_id/brightcove_integrations
-        if "brightcove_integrations" in self.request.uri:
-            self.create_brightcove_integration()
-        
-        #POST /accounts/:account_id/youtube_integrations
-        elif "youtube_integrations" in self.request.uri:
-            self.create_youtube_integration()
-        
+        ''' Post methods '''
+        uri_parts = self.request.uri.split('/')
+        a_id = None
+        method = None
+        itype = None
+        i_id = None
+        try:
+            a_id = uri_parts[4]
+            itype = uri_parts[5]
+            i_id = uri_parts[6]
+            method = uri_parts[7]
+        except Exception,e:
+            pass
+      
         #POST /accounts ##Crete neon user account
-        elif "accounts" in self.request.uri.split('/')[-1]:
+        if a_id is None and itype is None:
+            #len(ur_parts) == 4
             try:
                 a_id = self.get_argument("account_id") 
                 self.create_account_and_neon_integration(a_id)
             except:
                 data = '{"error":"account id not specified"}'
-                self.send_json_response(data,400)                
+                self.send_json_response(data, 400)                
+            return
 
-        else:
-            self.set_status(400)
-            self.finish()
+        #Account creation
+        if method is None:
+            #POST /accounts/:account_id/brightcove_integrations
+            if "brightcove_integrations" in self.request.uri:
+                self.create_brightcove_integration()
+        
+            #POST /accounts/:account_id/youtube_integrations
+            elif "youtube_integrations" in self.request.uri:
+                self.create_youtube_integration()
+
+        #Video Request creation   
+        elif method == 'create_video_request':
+            if i_id is None:
+                data = '{"error":"integration id not specified"}'
+                self.send_json_response(data, 400)
+                return
+
+            if "brightcove_integrations" == itype:
+                self.create_brightcove_video_request(i_id)
+            elif "youtube_integrations" == itype:
+                self.create_youtube_video_request(i_id)
+            elif "neon_integrations" == itype:
+                self.create_neon_video_request(i_id)
+            else:
+                self.method_not_supported()
+
+        #self.set_status(400)
+        #self.finish()
    
     @tornado.web.asynchronous
     def put(self, *args, **kwargs):
@@ -280,7 +298,8 @@ class AccountHandler(tornado.web.RequestHandler):
         except Exception,e:
             pass
 
-        #Create a new API request 
+        #Create a new API request
+        #TODO: remove, left here for temp backward compatibilty
         if method == 'create_video_request':
             if "brightcove_integrations" == itype:
                 self.create_brightcove_video_request(i_id)
