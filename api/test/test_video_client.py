@@ -116,19 +116,19 @@ class TestVideoClient(unittest.TestCase):
         api_key = "apikey123"
         vid = "video1"
         jparams = request_template.neon_api_request %(
-                j_id,vid,api_key,"neon",api_key,j_id)
+                j_id, vid, api_key, "neon", api_key, j_id)
         params = json.loads(jparams)
         self.dl = client.HttpDownload(jparams, None, 
                 self.model, self.model_version)
         self.pv = client.ProcessVideo(params, jparams, 
-                self.model, self.model_version, False,123)
+                self.model, self.model_version, False, 123)
         self.dl.pv = self.pv
         nthumbs = params['api_param']
-        self.pv.process_all(self.test_video_file,nthumbs)
-        self.dl.pv.center_frame = Image.new("RGB",(360,480))
-        self.pv.center_frame = Image.new("RGB",(360,480))
-        self.napi_request = neondata.NeonApiRequest(j_id,api_key,vid,"title",
-                            None,None,None)
+        self.pv.process_all(self.test_video_file, nthumbs)
+        self.dl.pv.center_frame = Image.new("RGB",(360, 480))
+        self.pv.center_frame = Image.new("RGB",(360, 480))
+        self.napi_request = neondata.NeonApiRequest(j_id, api_key, vid, "title",
+                            None, None, None)
         self.napi_request.save()
         
 
@@ -359,7 +359,7 @@ class TestVideoClient(unittest.TestCase):
     
     
     @patch('api.client.S3Connection')
-    def test_neon_request_process(self,mock_conntype):
+    def test_neon_request_process(self, mock_conntype):
         
         conn = boto_mock.MockConnection()
         mock_conntype.return_value = conn
@@ -374,7 +374,7 @@ class TestVideoClient(unittest.TestCase):
                     '"video_id": "%s", "topn": 3, "callback_url": "http://callback",'
                     '"video_title": "testtitle3", "request_type":"neon",'
                     '"state":"submit", "job_id":"%s", "api_method":"topn",' 
-                    '"api_param": 3}'%(api_key,vid,job_id)) 
+                    '"api_param": 3}'%(api_key, vid, job_id)) 
         params = json.loads(jparams)
         self.pv.request_map = params
         self.pv.request = jparams

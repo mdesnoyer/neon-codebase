@@ -11,7 +11,7 @@ import sys
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
                                          '..'))
 if sys.path[0] <> base_path:
-        sys.path.insert(0,base_path)
+        sys.path.insert(0, base_path)
 
 import Image
 import json
@@ -987,6 +987,17 @@ class TestServices(AsyncHTTPTestCase):
         self.assertIsNotNone(response["video_id"])  
         self.assertEqual(response["status"],neondata.RequestState.PROCESSING)
 
+    def test_empty_get_video_status_neonplatform(self):
+        ''' empty videos '''
+        api_key = self.create_neon_account()
+        page_no = 0
+        page_size = 2
+        url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/videos?page_no=%s&page_size=%s'
+                %(self.a_id, "0", page_no, page_size))
+        resp = self.get_request(url,self.api_key)
+        items = json.loads(resp.body)['items']
+        self.assertEqual(items,[])
 
     def test_get_video_status_neonplatform(self):
         '''
