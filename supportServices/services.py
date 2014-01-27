@@ -362,7 +362,7 @@ class AccountHandler(tornado.web.RequestHandler):
     def get_neon_videos(self):
         ''' Get Videos which were called from the Neon API '''
         self.send_json_response('{"msg":"not yet implemented"}', 200)
-
+    
     @tornado.gen.engine
     def create_neon_video_request(self, i_id):
         ''' neon platform request '''
@@ -375,6 +375,23 @@ class AccountHandler(tornado.web.RequestHandler):
             _log.error("key=create_neon_video_request "
                     "msg=malformed request or missing arguments")
             self.send_json_response('{"error":"missing video_url"}', 400)
+            return
+
+        #Validate link
+        invalid_content_types = ['text/html', 'text/plain', 'application/json',
+                    'application/x-www-form-urlencoded']
+        http_client = tornado.httpclient.AsyncHTTPClient()
+        headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
+            (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
+            Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
+        req = tornado.httpclient.HTTPRequest(url=video_url, headers=headers,
+                        use_gzip=False, request_timeout=1.5)
+
+        vresponse = yield tornado.gen.Task(http_client.fetch, req)
+        ctype = vresponse.headers.get('Content-Type')
+        if vresponse.error or ctype is None or ctype in invalid_content_types:
+            data = '{"error":"link given is invalid or not a video file"}'
+            self.send_json_response(data, 400)
             return
 
         video_id = hashlib.md5(video_url).hexdigest()
@@ -393,7 +410,7 @@ class AccountHandler(tornado.web.RequestHandler):
             request_body["callback_url"] = \
                     "http://thumbnails.neon-lab.com/testcallback"
         body = tornado.escape.json_encode(request_body)
-        hdr = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
+        hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
         req = tornado.httpclient.HTTPRequest(url=client_url,
                                              method="POST",
                                              headers=hdr,
@@ -401,7 +418,6 @@ class AccountHandler(tornado.web.RequestHandler):
                                              request_timeout=30.0,
                                              connect_timeout=10.0)
         
-        http_client = tornado.httpclient.AsyncHTTPClient()
         result = yield tornado.gen.Task(http_client.fetch, req)
         
         if result.error:
@@ -472,8 +488,10 @@ class AccountHandler(tornado.web.RequestHandler):
         result = {}
         incomplete_states = [
             neondata.RequestState.SUBMIT, neondata.RequestState.PROCESSING,
-            neondata.RequestState.REQUEUED, neondata.RequestState.INT_ERROR]
-        
+            neondata.RequestState.REQUEUED]
+        failed_states = [neondata.RequestState.INT_ERROR, 
+                    neondata.RequestState.FAILED]
+
         #1 Get job ids for the videos from account, get the request status
         nplatform = yield tornado.gen.Task(neondata.NeonPlatform.get_account,
                                        self.api_key)
@@ -530,7 +548,7 @@ class AccountHandler(tornado.web.RequestHandler):
                             neondata.ThumbnailType.CENTERFRAME, 0, 0)
                 thumbs.append(tm.to_dict())
                 p_videos.append(vid)
-            elif request.state is neondata.RequestState.FAILED:
+            elif request.state in failed_states:
                 f_videos.append(vid)
             else:
                 completed_videos.append(vid)

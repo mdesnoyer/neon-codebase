@@ -756,9 +756,9 @@ class ProcessVideo(object):
         '''
         pass
 
-#############################################################################################
+####################################################################################
 # HTTP Downloader client
-#############################################################################################
+####################################################################################
 
 class HttpDownload(object):
     ''' 
@@ -766,22 +766,25 @@ class HttpDownload(object):
     '''
     retry_codes = [403,500,502,503,504]
 
-    def __init__(self, json_params, ioloop, model, model_version, debug=False, cur_pid=None, sync=False):
+    def __init__(self, json_params, ioloop, model, model_version, 
+            debug=False, cur_pid=None, sync=False):
 
         params = tornado.escape.json_decode(json_params)
 
-        self.timeout = 300000.0 #long running tasks ##TODO - is this necessary ??? ###
+        self.timeout = 300000.0 #long running tasks ## -- is this necessary ???
         self.ioloop = ioloop
         self.tempfile = tempfile.NamedTemporaryFile(delete=False)
         self.job_params = params
         url = params[properties.VIDEO_DOWNLOAD_URL]
         headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
-            (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
+            (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
+            Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
 
-        req = tornado.httpclient.HTTPRequest(url = url, headers = headers,
-                        use_gzip =False, request_timeout = self.timeout)
+        req = tornado.httpclient.HTTPRequest(url=url, headers=headers,
+                        use_gzip=False, request_timeout=self.timeout)
         self.size_so_far = 0
-        self.pv = ProcessVideo(params, json_params, model, model_version, debug, cur_pid)
+        self.pv = ProcessVideo(params, json_params, model, model_version, 
+                                debug, cur_pid)
         self.error = None
         self.callback_data_size = 4096 * 1024 #4MB  --- TUNE 
         self.global_work_queue_url = properties.BASE_SERVER_URL + "/requeue"
@@ -796,12 +799,12 @@ class HttpDownload(object):
         self.debug_timestamps = {}
         self.debug_timestamps["streaming_callback"] = time.time()
         
-        self.http_client_pool = RequestPool() #TODO: use this for all outbound requests
+        self.http_client_pool = RequestPool() #may be use for all outbound requests
         if not sync:
             tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
-            req = tornado.httpclient.HTTPRequest(url = url, headers = headers,
-                        streaming_callback = self.streaming_callback, 
-                        use_gzip =False, request_timeout = self.timeout)
+            req = tornado.httpclient.HTTPRequest(url=url, headers=headers,
+                        streaming_callback=self.streaming_callback, 
+                        use_gzip=False, request_timeout=self.timeout)
             http_client = tornado.httpclient.AsyncHTTPClient()
             http_client.fetch(req, self.async_callback)
         else:
@@ -812,6 +815,7 @@ class HttpDownload(object):
         return 
         
     def streaming_callback(self, data):
+        ''' callback after nbyes '''
         self.size_so_far += len(data)
         self.total_size_so_far += len(data)
         

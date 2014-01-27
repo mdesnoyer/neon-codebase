@@ -368,6 +368,11 @@ class TestServices(AsyncHTTPTestCase):
         
         #################### HTTP request/responses #################
         http_request = args[0]
+        if kwargs.has_key("callback"):
+            callback = kwargs["callback"]
+        else:
+            callback = args[1] if len(args) >=2 else None
+
         if "/services/library?command=find_video_by_id" in http_request.url:
             request = HTTPRequest(http_request.url)
             response = HTTPResponse(request, 200,
@@ -408,31 +413,32 @@ class TestServices(AsyncHTTPTestCase):
 
         #neon api request
         elif "api/v1/submitvideo" in http_request.url:
-            if kwargs.has_key("callback"):
-                callback  = kwargs["callback"]
-            else:
-                callback = args[1] if len(args) >=2 else None
-
             response = _neon_submit_job_response()
             if callback:    
-                return self.io_loop.add_callback(callback,response)
+                return self.io_loop.add_callback(callback, response)
             return response
 
         elif "jpg" in http_request.url or "jpeg" in http_request.url:
             #downloading any image (create a random image response)
             response = self._create_random_image_response()
-            if kwargs.has_key("callback"):
-                callback = kwargs["callback"]
+            if callback:
                 return self.io_loop.add_callback(callback, response)
             else:
-                if len(args)>1:
-                    callback = args[1]
-                    return self.io_loop.add_callback(callback, response)
-                else:
-                    return response
+                return response
+
+        elif ".mp4" in http_request.url:
+            headers = {"Content-Type": "video/mp4"}
+            response = HTTPResponse(request, 200, headers=headers,
+                buffer=StringIO('videodata'))
+            if callback:
+                return self.io_loop.add_callback(callback, response)
         else:
-            print args[0].url,kwargs
-            raise
+            headers = {"Content-Type": "text/plain"}
+            response = HTTPResponse(request, 200, headers=headers,
+                buffer=StringIO('someplaindata'))
+            if callback:
+                return self.io_loop.add_callback(callback, response)
+            return response
 
     def _setup_initial_brightcove_state(self):
         '''
@@ -976,16 +982,31 @@ class TestServices(AsyncHTTPTestCase):
         api_key = self.create_neon_account()
         vals = { 'video_url' : "http://test.mp4", "title": "test_title" }
         uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
-                '%s/create_video_request'%(self.a_id,"0"))
+                '%s/create_video_request'%(self.a_id, "0"))
 
         self.cp_mock_async_client().fetch.side_effect = \
           self._success_http_side_effect
 
-        response = self.post_request(uri,vals,self.api_key)
-        self.assertTrue(response.code,200)
+        response = self.post_request(uri, vals, self.api_key)
+        self.assertTrue(response.code, 200)
         response = json.loads(response.body)
         self.assertIsNotNone(response["video_id"])  
-        self.assertEqual(response["status"],neondata.RequestState.PROCESSING)
+        self.assertEqual(response["status"], neondata.RequestState.PROCESSING)
+
+    def test_create_neon_video_request_invalid_url(self):
+        ''' invalid url test '''
+        api_key = self.create_neon_account()
+        vals = { 'video_url' : "http://not_a_video_link", "title": "test_title" }
+        uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/create_video_request'%(self.a_id, "0"))
+
+        self.cp_mock_async_client().fetch.side_effect = \
+          self._success_http_side_effect
+        response = self.post_request(uri, vals, self.api_key)
+        self.assertTrue(response.code, 200)
+        response = json.loads(response.body)
+        self.assertEqual(response['error'], 
+                'link given is invalid or not a video file')
 
     def test_empty_get_video_status_neonplatform(self):
         ''' empty videos '''
