@@ -39,10 +39,31 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
     # TODO: It should be possible to run this with an IOLoop for each
     # test, but it's not running. Need to figure out why.
     def get_new_ioloop(self):
+        ''' new ioloop '''
         return tornado.ioloop.IOLoop.instance()
 
+    def test_neon_api_key(self):
+        ''' test api key generation '''
+        #Test key is random on multiple generations
+        a_id = "testaccount"
+        api_key_1 = NeonApiKey.generate(a_id)
+        api_key_2 = NeonApiKey.generate(a_id)
+        self.assertNotEqual(api_key_1, api_key_2)
+
+        #create neon account and verify its api key
+        a_id = 'test_account1'
+        na = NeonUserAccount(a_id)
+        na.save()
+
+        api_key_from_db = NeonApiKey.get_api_key(a_id)
+        self.assertEqual(na.neon_api_key, api_key_from_db)
+
     def test_default_bcplatform_settings(self):
-        bp = BrightcovePlatform('aid', 'iid')
+        ''' brightcove defaults ''' 
+
+        na = NeonUserAccount('acct1')
+        na.save()
+        bp = BrightcovePlatform('aid', 'iid', na.neon_api_key)
 
         self.assertFalse(bp.abtest)
         self.assertFalse(bp.auto_update)
@@ -56,12 +77,14 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEqual(bp.__dict__, bp2.__dict__)
 
     def test_neon_user_account(self):
+        ''' nuser account '''
+
         na = NeonUserAccount('acct1')
-        bp = BrightcovePlatform('acct1', 'bp1')
+        bp = BrightcovePlatform('acct1', 'bp1', na.neon_api_key)
         bp.save()
-        np = NeonPlatform('acct1', 'np1')
+        np = NeonPlatform('acct1', na.neon_api_key)
         np.save()
-        yp = YoutubePlatform('acct1', 'yp1')
+        yp = YoutubePlatform('acct1', 'yp1', na.neon_api_key)
         yp.save()
         na.add_platform(bp)
         na.add_platform(np)
@@ -69,7 +92,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         na.save()
 
         # Retrieve the account
-        NeonUserAccount.get_account(NeonApiKey.generate('acct1'),
+        NeonUserAccount.get_account(na.neon_api_key,
                                     callback=self.stop)
         account = self.wait()
         self.assertIsNotNone(account)
@@ -91,23 +114,25 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         pass
     
     def test_dbconn_singleton(self):
-        bp = BrightcovePlatform('2','3',4)
+        bp = BrightcovePlatform('2','3', 'test')
         self.bp_conn = DBConnection(bp)
 
-        bp2 = BrightcovePlatform('12','13',4)
+        bp2 = BrightcovePlatform('12','13','test')
         self.bp_conn2 = DBConnection(bp2)
 
 
-        vm = VideoMetadata('test1',None,None,None,None,None,None,None)
+        vm = VideoMetadata('test1', None, None, None,
+                None, None, None, None)
         self.vm_conn = DBConnection(vm)
 
-        vm2 = VideoMetadata('test2',None,None,None,None,None,None,None)
+        vm2 = VideoMetadata('test2', None, None, None, 
+                None, None, None, None)
         self.vm_conn2 = DBConnection(vm2)
         
-        self.assertEqual(self.bp_conn,self.bp_conn2)
-        self.assertEqual(self.vm_conn,self.vm_conn2)
+        self.assertEqual(self.bp_conn, self.bp_conn2)
+        self.assertEqual(self.vm_conn, self.vm_conn2)
 
-        self.assertNotEqual(self.bp_conn,self.vm_conn)
+        self.assertNotEqual(self.bp_conn, self.vm_conn)
 
     #Verify that database connection is re-established after config change
     def test_db_connection_error(self):
@@ -195,7 +220,6 @@ class TestBrightcovePlatform(unittest.TestCase):
         self.redis.stop()
         super(TestBrightcovePlatform, self).tearDown()
 
-    #TODO
     def test_check_feed(self):
         def _side_effect(*args,**kwargs):
             request = args[0]
@@ -206,21 +230,28 @@ class TestBrightcovePlatform(unittest.TestCase):
             elif "submitvideo" in request.url:
                 return neon_api_response
 
-        bcove_request = HTTPRequest('http://api.brightcove.com/services/library?'
+        bcove_request = HTTPRequest(
+            'http://api.brightcove.com/services/library?'
             'get_item_count=true&command=find_all_videos&page_size=5&sort_by='
-            'publish_date&token=rtoken&page_number=0&output=json&media_delivery=http') #build the string
+            'publish_date&token=rtoken&page_number=0&\
+             output=json&media_delivery=http') 
         bcove_response = HTTPResponse(bcove_request, 200,
                 buffer=StringIO(bcove_responses.find_all_videos_response))
     
         neon_api_response = HTTPResponse(bcove_request, 200,
                 buffer=StringIO('{"job_id":"j123"}'))
 
-        bcove_find_modified_videos_response = HTTPResponse(bcove_request, 200,
+        bcove_find_modified_videos_response = \
+                HTTPResponse(bcove_request, 200,
                 buffer=StringIO(bcove_responses.find_modified_videos_response))
 
-        a_id = 'test' ; i_id = 'i123' ;
+        a_id = 'test' 
+        i_id = 'i123'
         nvideos = 6
-        bp = BrightcovePlatform(a_id,i_id,'p1','rt','wt',last_process_date=21492000000)
+        na = NeonUserAccount('acct1')
+        na.save()
+        bp = BrightcovePlatform(a_id, i_id, na.neon_api_key, 'p1', 'rt', 'wt', 
+                last_process_date=21492000000)
         bp.account_created = 21492000
         bp.save()
         self.cp_mock_client().fetch.side_effect = _side_effect 
@@ -228,7 +259,7 @@ class TestBrightcovePlatform(unittest.TestCase):
         bp.check_feed_and_create_api_requests()
 
         u_bp = BrightcovePlatform.create(bp.get())
-        self.assertEqual(len(u_bp.get_videos()),nvideos)
+        self.assertEqual(len(u_bp.get_videos()), nvideos)
 
 if __name__ == '__main__':
     

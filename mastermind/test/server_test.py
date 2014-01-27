@@ -172,18 +172,26 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
 
     def test_good_db_data(self, datamock):
         # Define platforms in the database
-        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', abtest=False)
+
+        #create neon user account 
+        nuser = neondata.NeonUserAccount('a1')
+        api_key = nuser.neon_api_key
+
+        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
+                                        abtest=False)
         bcPlatform.add_video(0, 'job11')
         bcPlatform.add_video(10, 'job12')
 
-        testPlatform = neondata.BrightcovePlatform('a2', 'i2', abtest=True)
+        testPlatform = neondata.BrightcovePlatform('a2', 'i2', api_key, 
+                                        abtest=True)
         testPlatform.add_video(1, 'job21')
         testPlatform.add_video(2, 'job22')
 
-        apiPlatform = neondata.NeonPlatform('a3', abtest=True)
+        apiPlatform = neondata.NeonPlatform('a3', api_key, abtest=True)
         apiPlatform.add_video(4, 'job31')
 
-        noVidPlatform = neondata.BrightcovePlatform('a4', 'i4', abtest=True)
+        noVidPlatform = neondata.BrightcovePlatform('a4', 'i4', api_key, 
+                                        abtest=True)
         
         datamock.AbstractPlatform.get_all_instances.return_value = \
           [bcPlatform, testPlatform, apiPlatform, noVidPlatform]
@@ -239,7 +247,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             self.watcher._process_db_data()
 
     def test_video_metadata_missing(self, datamock):
-        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', abtest=True)
+        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', 'api_key', 
+                abtest=True)
         bcPlatform.add_video(0, 'job11')
         bcPlatform.add_video(10, 'job12')
         
@@ -257,7 +266,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertTrue(self.watcher.is_loaded.is_set())
 
     def test_thumb_metadata_missing(self, datamock):
-        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', abtest=True)
+        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', 'api_key',  
+                abtest=True)
         bcPlatform.add_video(0, 'job11')
         bcPlatform.add_video(10, 'job12')
         

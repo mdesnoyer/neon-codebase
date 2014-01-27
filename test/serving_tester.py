@@ -385,7 +385,7 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
             neondata.TrackerAccountIDMapper.PRODUCTION).save()
 
         # create brightcove platform account
-        bp = neondata.BrightcovePlatform(account_id, integration_id,
+        bp = neondata.BrightcovePlatform(account_id, integration_id, api_key,
                                          abtest=abtest)
         nu.add_platform(bp)
         nu.save()
@@ -506,9 +506,9 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
     def _test_override_thumbnail(self):
         '''Manually choose a thumbnail.'''
         self.add_account_to_videodb('ch_thumb0', 'ch_thumb_int0', 1, 3)
-
+        #TODO: FIX api key generation
         account = neondata.BrightcovePlatform.get_account(
-            neondata.NeonApiKey.generate('ch_thumb0'),
+            neondata.NeonApiKey.get_api_key('ch_thumb0'),
             'ch_thumb_int0')
         
         account.update_thumbnail('vid0', 'ch_thumb0_vid0_thumb1',

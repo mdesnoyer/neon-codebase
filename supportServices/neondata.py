@@ -23,7 +23,10 @@ import binascii
 import hashlib
 import json
 from multiprocessing.pool import ThreadPool
+import random
 import redis as blockingRedis
+import string
+from StringIO import StringIO
 import tornado.ioloop
 import tornado.gen
 import tornado.httpclient
@@ -31,7 +34,6 @@ import threading
 import time
 from api import brightcove_api #coz of cyclic import 
 import api.youtube_api
-from StringIO import StringIO
 
 from utils.options import define, options
 import utils.sync
@@ -61,13 +63,14 @@ class DBConnection(object):
             if isinstance(otype, basestring):
                 cname = otype
             else:
-                cname = otype.__class__.__name__ if otype.__class__.__name__ != "type" else otype.__name__
+                cname = otype.__class__.__name__ \
+                        if otype.__class__.__name__ != "type" else otype.__name__
         
         host = options.accountDB 
         port = options.dbPort 
         
         if cname:
-            if cname in ["AbstractPlatform", "BrightcovePlatform",
+            if cname in ["AbstractPlatform", "BrightcovePlatform", "NeonApiKey"
                     "YoutubePlatform", "NeonUserAccount", "NeonApiRequest"]:
                 host = options.accountDB 
                 port = options.dbPort 
@@ -98,7 +101,8 @@ class DBConnection(object):
 
     @classmethod
     def update_instance(cls,cname):
-        ''' Method to update the connection object in case of db config update '''
+        ''' Method to update the connection object in case of 
+        db config update '''
         if cls._singleton_instance.has_key(cname):
             with cls.__singleton_lock:
                 if cls._singleton_instance.has_key(cname):
@@ -112,7 +116,8 @@ class DBConnection(object):
                 cname = otype
             else:
                 #handle the case for classmethod
-                cname = otype.__class__.__name__ if otype.__class__.__name__ != "type" else otype.__name__
+                cname = otype.__class__.__name__ \
+                      if otype.__class__.__name__ != "type" else otype.__name__
         
         if not cls._singleton_instance.has_key(cname):
             with cls.__singleton_lock:
@@ -274,15 +279,38 @@ class AbstractHashGenerator(object):
         ''' Abstract hash generator '''
         return hashlib.md5(_input).hexdigest()
 
-class NeonApiKey(AbstractHashGenerator):
+class NeonApiKey(object):
     ''' Static class to generate Neon API Key'''
-    salt = 'SUNIL'
-    
-    @staticmethod
-    def generate(_input):
+    @classmethod
+    def id_generator(cls, size=24, 
+            chars=string.ascii_lowercase + string.digits):
+        random.seed(time.time())
+        return ''.join(random.choice(chars) for x in range(size))
+
+    @classmethod
+    def format_key(cls, a_id):
+        ''' format db key '''
+        return cls.__name__.lower() + '_%s' %a_id
+        
+    @classmethod
+    def generate(cls, a_id):
         ''' generate api key hash'''
-        _input = NeonApiKey.salt + str(_input)
-        return NeonApiKey._api_hash_function(_input)
+        api_key = NeonApiKey.id_generator()
+        
+        #save api key mapping
+        db_connection = DBConnection(cls)
+        key = NeonApiKey.format_key(a_id)
+        if db_connection.blocking_conn.set(key, api_key):
+            return api_key
+
+    @classmethod
+    def get_api_key(cls, a_id, callback=None):
+        db_connection = DBConnection(cls)
+        key = NeonApiKey.format_key(a_id)
+        if callback:
+            db_connection.conn.get(key, callback) 
+        else:
+            return db_connection.blocking_conn.get(key) 
 
 class InternalVideoID(object):
     ''' Internal Video ID Generator '''
@@ -361,15 +389,14 @@ class NeonUserAccount(object):
     Every user in the system has a neon account and all other integrations are 
     associated with this account. 
 
-    Account usage aggregation, Billing information is computed here
-
     @videos: video id / jobid map of requests made directly through neon api
     @integrations: all the integrations associated with this acccount
 
     '''
-    def __init__(self, a_id):
+    def __init__(self, a_id, api_key=None):
         self.account_id = a_id
-        self.neon_api_key = NeonApiKey.generate(a_id)
+        self.neon_api_key = NeonApiKey.generate(a_id) if api_key is None \
+                            else api_key
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
         self.staging_tracker_account_id = \
@@ -447,14 +474,14 @@ class NeonUserAccount(object):
         #temp: changing this to a blocking pipeline call   
         db_connection = DBConnection(self)
         pipe = db_connection.blocking_conn.pipeline()
-        pipe.set(self.key,self.to_json())
-        pipe.set(new_integration.key,new_integration.to_json()) 
+        pipe.set(self.key, self.to_json())
+        pipe.set(new_integration.key, new_integration.to_json()) 
         callback(pipe.execute())
 
     @classmethod
     def get_account(cls, api_key, callback=None):
         ''' return neon useraccount instance'''
-        db_connection=DBConnection(cls)
+        db_connection = DBConnection(cls)
         key = "neonuseraccount_%s" %api_key
         if callback:
             db_connection.conn.get(key, lambda x: callback(cls.create(x))) 
@@ -468,13 +495,26 @@ class NeonUserAccount(object):
             return None
         params = json.loads(json_data)
         a_id = params['account_id']
-        na = cls(a_id)
+        api_key = params['neon_api_key']
+        na = cls(a_id, api_key)
        
         for key in params:
             na.__dict__[key] = params[key]
         
         return na
-    
+   
+    @classmethod 
+    def get_all_accounts(cls):
+        ''' Get all NeonUserAccount instances '''
+        nuser_accounts = []
+        db_connection = DBConnection(cls)
+        accounts = db_connection.blocking_conn.keys(cls.__name__.lower() + "*")
+        for accnt in accounts:
+            api_key = accnt.split('_')[-1]
+            nu = NeonUserAccount.get_account(api_key)
+            nuser_accounts.append(nu)
+        return nuser_accounts
+
 class AbstractPlatform(object):
     ''' Abstract Platform/ Integration class '''
 
@@ -533,7 +573,8 @@ class AbstractPlatform(object):
 
     @classmethod
     def get_all_platform_data(cls):
-        db_connection=DBConnection(cls)
+        ''' get all platform data '''
+        db_connection = DBConnection(cls)
         accounts = db_connection.blocking_conn.keys(cls.__name__.lower() + "*")
         platform_data = []
         for accnt in accounts:
@@ -543,12 +584,14 @@ class AbstractPlatform(object):
             if jdata:
                 platform_data.append(jdata)
             else:
-                _log.debug("key=get_all_platform data msg=no data for acc %s i_id %s" %(api_key,i_id))
+                _log.debug("key=get_all_platform data"
+                            " msg=no data for acc %s i_id %s" %(api_key, i_id))
         
         return platform_data
 
     @classmethod
     def _erase_all_data(cls):
+        ''' erase all data ''' 
         db_connection = DBConnection(cls)
         db_connection.clear_db()
 
@@ -556,29 +599,34 @@ class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
     '''
-    def __init__(self, a_id, abtest=False):
+    def __init__(self, a_id, api_key, abtest=False):
         AbstractPlatform.__init__(self, abtest=abtest)
-        self.neon_api_key = NeonApiKey.generate(a_id)
+        self.neon_api_key = api_key 
         self.integration_id = '0'
-        self.key = self.__class__.__name__.lower()  + '_%s_%s' %(self.neon_api_key,
-                    self.integration_id)
+        self.key = self.__class__.__name__.lower()  + '_%s_%s' \
+                %(self.neon_api_key, self.integration_id)
         self.account_id = a_id
         
-        #By default integration ID 0 represents Neon Platform Integration (via neon api)
+        #By default integration ID 0 represents 
+        #Neon Platform Integration (access via neon api)
    
     def add_video(self, vid, job_id):
+        ''' video => job_id '''
         self.videos[str(vid)] = job_id
 
     def get_videos(self):
+        ''' list of video ids '''
         if len(self.videos) > 0:
             return self.videos.keys()
 
     @classmethod
     def get_ovp(cls):
+        ''' ovp string '''
         return "neon"
 
     @classmethod
     def get_account(cls, api_key, callback=None):
+        ''' return NeonPlatform account object '''
         return super(NeonPlatform, cls).get_account(api_key, 0, callback)
 
     @classmethod
@@ -588,7 +636,7 @@ class NeonPlatform(AbstractPlatform):
             return None
 
         data_dict = json.loads(json_data)
-        obj = NeonPlatform("dummy")
+        obj = NeonPlatform("dummy", "dummy")
 
         #populate the object dictionary
         for key in data_dict.keys():
@@ -610,11 +658,12 @@ class NeonPlatform(AbstractPlatform):
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
     
-    def __init__(self, a_id, i_id, p_id=None, rtoken=None, wtoken=None,
-                 auto_update=False, last_process_date=None, abtest=False):
+    def __init__(self, a_id, i_id, api_key, p_id=None, rtoken=None, wtoken=None,
+                auto_update=False, last_process_date=None, abtest=False):
+
         ''' On every request, the job id is saved '''
         AbstractPlatform.__init__(self, abtest)
-        self.neon_api_key = NeonApiKey.generate(a_id)
+        self.neon_api_key = api_key
         self.key = self.generate_key(i_id)
         self.account_id = a_id
         self.integration_id = i_id
@@ -622,7 +671,8 @@ class BrightcovePlatform(AbstractPlatform):
         self.read_token = rtoken
         self.write_token = wtoken
         self.auto_update = auto_update 
-        self.last_process_date = last_process_date #The publish date of the last processed video - UTC timestamp 
+        #The publish date of the last processed video - UTC timestamp 
+        self.last_process_date = last_process_date 
         self.linked_youtube_account = False
         self.account_created = time.time() #UTC timestamp of account creation
 
@@ -640,11 +690,11 @@ class BrightcovePlatform(AbstractPlatform):
         if len(self.videos) > 0:
             return self.videos.keys()
     
-    def get(self,callback=None):
+    def get(self, callback=None):
         ''' get instance'''
-        db_connection=DBConnection(self)
+        db_connection = DBConnection(self)
         if callback:
-            db_connection.conn.get(self.key,callback)
+            db_connection.conn.get(self.key, callback)
         else:
             return db_connection.blocking_conn.get(self.key)
 
@@ -739,7 +789,8 @@ class BrightcovePlatform(AbstractPlatform):
             
             #get old thumbnail tid to revert to, this was the tid 
             #that was previously live before this request
-            old_tid = "no_thumb" if old_thumb is None else old_thumb.thumbnail_metadata["thumbnail_id"] 
+            old_tid = "no_thumb" if old_thumb is None \
+                    else old_thumb.thumbnail_metadata["thumbnail_id"] 
             new_thumb, old_thumb = ThumbnailIDMapper.enable_thumbnail(
                                     thumb_mappings, old_tid)
             modified_thumbs.append(new_thumb)
@@ -813,7 +864,6 @@ class BrightcovePlatform(AbstractPlatform):
             self.neon_api_key, self.publisher_id, self.read_token,
             self.write_token, self.auto_update, self.last_process_date)
         bc.create_brightcove_request_by_tag(self.integration_id)
-        
 
     def check_current_thumbnail_in_db(self,i_vid,callback=None):
         '''
@@ -869,8 +919,10 @@ class BrightcovePlatform(AbstractPlatform):
         rtoken = params['read_token']
         wtoken = params['write_token']
         auto_update = params['auto_update']
+        api_key = params['neon_api_key']
          
-        ba = BrightcovePlatform(a_id, i_id, p_id, rtoken, wtoken, auto_update)
+        ba = BrightcovePlatform(a_id, i_id, api_key, p_id, rtoken, 
+                wtoken, auto_update)
         ba.videos = params['videos']
         ba.last_process_date = params['last_process_date'] 
         ba.linked_youtube_account = params['linked_youtube_account']
@@ -892,9 +944,11 @@ class BrightcovePlatform(AbstractPlatform):
         ''' find all brightcove videos '''
 
         # Get the names and IDs of recently published videos:
-        url = 'http://api.brightcove.com/services/library?command=find_all_videos&sort_by=publish_date&token=' + token
+        url = 'http://api.brightcove.com/services/library?\
+                command=find_all_videos&sort_by=publish_date&token=' + token
         http_client = tornado.httpclient.AsyncHTTPClient()
-        req = tornado.httpclient.HTTPRequest(url = url, method = "GET", request_timeout = 60.0, connect_timeout = 10.0)
+        req = tornado.httpclient.HTTPRequest(url=url, method="GET", 
+                request_timeout=60.0, connect_timeout=10.0)
         http_client.fetch(req, callback)
 
     @classmethod
@@ -912,11 +966,12 @@ class BrightcovePlatform(AbstractPlatform):
 class YoutubePlatform(AbstractPlatform):
     ''' Youtube platform integration '''
 
-    def __init__(self, a_id, i_id, access_token=None, refresh_token=None,
-                 expires=None, auto_update=False, abtest=False):
+    def __init__(self, a_id, i_id, api_key, access_token=None, refresh_token=None,
+                expires=None, auto_update=False, abtest=False):
         AbstractPlatform.__init__(self)
         
-        self.key = self.__class__.__name__.lower()  + '_%s_%s' %(NeonApiKey.generate(a_id ), i_id)
+        self.key = self.__class__.__name__.lower()  + '_%s_%s' \
+                %(api_key, i_id) #TODO: fix
         self.account_id = a_id
         self.integration_id = i_id
         self.access_token = access_token
@@ -1029,7 +1084,8 @@ class YoutubePlatform(AbstractPlatform):
         params = json.loads(json_data)
         a_id = params['account_id']
         i_id = params['integration_id'] 
-        yt = YoutubePlatform(a_id,i_id)
+        api_key = params['neon_api_key'] 
+        yt = YoutubePlatform(a_id, i_id, api_key=api_key)
        
         for key in params:
             yt.__dict__[key] = params[key]
@@ -1045,8 +1101,6 @@ class YoutubePlatform(AbstractPlatform):
             instances.append(platform)
 
         return instances
-
-
 
 #######################
 # Request Blobs 

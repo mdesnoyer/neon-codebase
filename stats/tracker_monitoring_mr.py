@@ -198,7 +198,7 @@ class TrackerMonitoring(MRJob):
                             'http://%s/accounts/%s/analytics_received' %
                             (self.options.notify_host, neon_account_id),
                             headers={'X-Neon-API-Key': 
-                                     neondata.NeonApiKey.generate(
+                                     neondata.NeonApiKey.get_api_key(
                                          neon_account_id)}))
                         if response.getcode() != 200:
                             raise urllib2.URLError(
@@ -213,7 +213,7 @@ class TrackerMonitoring(MRJob):
                     # Turn on A/B testing for this account
                     try:
                         account = neondata.NeonUserAccount.get_account(
-                            neondata.NeonApiKey.generate(neon_account_id))
+                            neondata.NeonApiKey.get_api_key(neon_account_id))
                         for platform in account.get_platforms():
                             platform.abtest = True
                             platform.save()

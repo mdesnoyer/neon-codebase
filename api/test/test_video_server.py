@@ -56,8 +56,11 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.redis.start() 
 
         #create test account
-        self.na = neondata.NeonPlatform("testaccountneonapi")
-        self.api_key = self.na.neon_api_key
+        a_id = "testaccountneonapi"
+        self.nuser = neondata.NeonUserAccount(a_id)
+        self.nuser.save()
+        self.api_key = self.nuser.neon_api_key
+        self.na = neondata.NeonPlatform(a_id, self.api_key)
         self.na.save()
     
     #def _db_side_effect(*args, **kwargs):
@@ -114,9 +117,11 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.assertEqual(resp.code,409)
 
     def test_brightcove_request(self):
-        #create brightcove platform account
+        ''' create brightcove platform account '''
+
         i_id = "i125"
-        bp = neondata.BrightcovePlatform("testaccountneonapi",i_id)
+        bp = neondata.BrightcovePlatform("testaccountneonapi", i_id,
+               self.api_key)
         bp.save()
 
         vals = {"api_key": self.api_key, 
@@ -133,29 +138,32 @@ class TestVideoServer(AsyncHTTPTestCase):
                     "previous_thumbnail": "http://prev_thumb"
                     }
         url = self.get_url('/api/v1/submitvideo/brightcove')
-        resp = self.make_api_request(vals,url)
-        self.assertEqual(resp.code,201)
+        resp = self.make_api_request(vals, url)
+        self.assertEqual(resp.code, 201)
 
     def test_empty_request(self):
+        ''' test empty request '''
         self.real_asynchttpclient.fetch(self.neon_api_url, 
                 callback=self.stop, method="POST", body='')
         resp = self.wait()
-        self.assertEqual(resp.code,400)
+        self.assertEqual(resp.code, 400)
 
     def test_dequeue_handler(self):
-            
+        ''' Dequeue handler of server '''
+
         resp = self.add_request()
-        self.assertEqual(resp.code,201)
+        self.assertEqual(resp.code, 201)
         h = {'X-Neon-Auth' : properties.NEON_AUTH} 
         for i in range(10): #dequeue a bunch 
             self.real_asynchttpclient.fetch(self.get_url('/dequeue'), 
                 callback=self.stop, method="GET", headers=h)
             resp = self.wait()
-            self.assertEqual(resp.code,200)
+            self.assertEqual(resp.code, 200)
         
         self.assertEqual(resp.body,'{}')
         
     def test_requeue_handler(self):
+        ''' requeue handler '''
         self.add_request()
         vals = {"api_key": self.api_key, 
                     "video_url": "http://testurl/video.mp4", 

@@ -132,18 +132,21 @@ class AccountHandler(tornado.web.RequestHandler):
         callback(secs)
 
     #### Support Functions #####
-    
-    def verify_account(self, a_id):
+
+    @tornado.gen.engine 
+    def verify_account(self, a_id, callback=None):
         ''' verify account '''
-        if neondata.NeonApiKey.generate(a_id) == self.api_key:
-            return True
+
+        api_key = yield tornado.gen.Task(neondata.NeonApiKey.get_api_key, a_id)
+        if api_key == self.api_key:
+            callback(True)
         else:
             data = '{"error":"invalid api_key or account id"}'
             _log.warning(("key=verify_account "
                           "msg=api key doesn't match for account %s") % a_id)
-            self.send_json_response(data,400)
-            return False
-
+            self.send_json_response(data, 400)
+            callback(False)
+        
     ######## HTTP Methods #########
 
     def send_json_response(self, data, status=200):
@@ -160,6 +163,7 @@ class AccountHandler(tornado.web.RequestHandler):
         self.send_json_response(data,400)
 
     @tornado.web.asynchronous
+    @tornado.gen.engine
     def get(self, *args, **kwargs):
         ''' 
         GET /accounts/:account_id/status
@@ -186,7 +190,8 @@ class AccountHandler(tornado.web.RequestHandler):
                 return
             
             #Verify Account
-            if not self.verify_account(a_id):
+            is_verified = yield tornado.gen.Task(self.verify_account, a_id)
+            if not is_verified:
                 return
 
             if method == "status":
@@ -379,7 +384,8 @@ class AccountHandler(tornado.web.RequestHandler):
 
         #Validate link
         invalid_content_types = ['text/html', 'text/plain', 'application/json',
-                    'application/x-www-form-urlencoded']
+                    'application/x-www-form-urlencoded', 
+                    'text/html; charset=UTF-8']
         http_client = tornado.httpclient.AsyncHTTPClient()
         headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
@@ -622,7 +628,7 @@ class AccountHandler(tornado.web.RequestHandler):
         vresult = []
         for res in result:
             vres = result[res]
-            if vres.video_id in vids: #filter videos by state 
+            if vres and vres.video_id in vids: #filter videos by state 
                 vresult.append(vres.to_dict())
             
         c_processing = len(p_videos)
@@ -828,7 +834,7 @@ class AccountHandler(tornado.web.RequestHandler):
         vresult = []
         for res in result:
             vres = result[res]
-            if vres.video_id in vids: #filter videos by state 
+            if vres and vres.video_id in vids: #filter videos by state 
                 vresult.append(vres.to_dict())
             
         c_processing = len(p_videos)
@@ -921,7 +927,7 @@ class AccountHandler(tornado.web.RequestHandler):
         nuser_data = yield tornado.gen.Task(
                     neondata.NeonUserAccount.get_account, a_id)
         if not nuser_data:
-            nplatform = neondata.NeonPlatform(a_id)
+            nplatform = neondata.NeonPlatform(a_id, api_key)
             user.add_platform(nplatform)
             res = yield tornado.gen.Task(user.save_platform, nplatform) 
             if res:
@@ -984,8 +990,8 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.send_json_response(data, 409)
             else:
                 curtime = time.time() #account creation time
-                bc = neondata.BrightcovePlatform(a_id, i_id, p_id, rtoken, 
-                                                 wtoken, autosync, curtime)
+                bc = neondata.BrightcovePlatform(a_id, i_id, self.api_key, p_id, 
+                                                rtoken,wtoken, autosync, curtime) 
                 na.add_platform(bc)
                 #save & update acnt
                 res = yield tornado.gen.Task(na.save_platform, bc)

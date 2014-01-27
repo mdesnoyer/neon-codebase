@@ -227,6 +227,13 @@ class TestDatabaseWriting(neontest.TestCase):
         self.get_account_mock.return_value = self.account_mock
         self.account_mock.get_platforms.return_value = [
             MagicMock() for x in range(2)]
+        
+        self.api_key_patch = patch(
+            'stats.tracker_monitoring_mr.neondata.'
+            'NeonApiKey.get_api_key')
+        self.api_key_patcher = self.api_key_patch.start()
+        self.get_api_key = MagicMock()
+        self.get_api_key().return_value = "neon_api_key" 
 
     def tearDown(self):
         self.urlopen_patcher.stop()
@@ -259,7 +266,7 @@ class TestDatabaseWriting(neontest.TestCase):
             self.mr,
             encode([(('click', 'www.go.com/now', 'na4576', False), 15600)]),
             step=2)
-
+        
         # Make sure that there were no errors
         self.assertEqual(counters, {})
 
@@ -277,15 +284,14 @@ class TestDatabaseWriting(neontest.TestCase):
             request.get_full_url(),
             'http://api.neon-lab.com/accounts/na4576/analytics_received')
         self.assertEqual(request.headers['X-neon-api-key'],
-                         neondata.NeonApiKey.generate('na4576'))
+                         neondata.NeonApiKey.get_api_key('na4576'))
 
         # Make sure that the abtesting was turned on
         self.get_account_mock.assert_called_once_with(
-            neondata.NeonApiKey.generate('na4576'))
+            neondata.NeonApiKey.get_api_key('na4576'))
         for platform in self.account_mock.get_platforms():
             self.assertTrue(platform.abtest)
             platform.save.assert_called_once_with()
-        
 
     def test_many_entries_for_same_account(self):
         self.mock_urlopen().getcode.return_value = 200
@@ -307,7 +313,7 @@ class TestDatabaseWriting(neontest.TestCase):
 
         # Make sure that the ab testing was turned on only once
         self.get_account_mock.assert_called_once_with(
-            neondata.NeonApiKey.generate('na4576'))
+            neondata.NeonApiKey.get_api_key('na4576'))
 
         # Check the database
         cursor = self.ramdb.cursor()
@@ -402,8 +408,8 @@ class TestDatabaseWriting(neontest.TestCase):
 
         # Make sure that abtesting was updated for both accounts
         self.get_account_mock.assert_has_calls(
-            [mock.call(neondata.NeonApiKey.generate('na4576')),
-             mock.call(neondata.NeonApiKey.generate('4576na'))], True)
+            [mock.call(neondata.NeonApiKey.get_api_key('na4576')),
+             mock.call(neondata.NeonApiKey.get_api_key('4576na'))], True)
         
         # Check the database
         cursor = self.ramdb.cursor()
@@ -514,11 +520,19 @@ class TestEndToEnd(neontest.TestCase):
         MySQLdb.connect = dbmock
         self.ramdb = connect2db()
         
+        self.api_key_patch = patch(
+            'stats.tracker_monitoring_mr.neondata.'
+            'NeonApiKey.get_api_key')
+        self.api_key_patcher = self.api_key_patch.start()
+        self.get_api_key = MagicMock()
+        self.get_api_key().return_value = "neon_api_key" 
 
     def tearDown(self):
         self.idmapper_patch.stop()
         self.urlopen_patcher.stop()
         self.account_patch.stop()
+        self.api_key_patch.stop()
+
         MySQLdb.connect = self.dbconnect
         try:
             self.ramdb.execute('drop table pages_seen')
@@ -575,7 +589,7 @@ class TestEndToEnd(neontest.TestCase):
 
         # Verify that the A/B tests were turned on for only one account
         self.get_account_mock.assert_has_calls(
-            [mock.call(neondata.NeonApiKey.generate('49a8efg1ea98'))], True)
+            [mock.call(neondata.NeonApiKey.get_api_key('49a8efg1ea98'))], True)
 
         # Finally, check the database to make sure it says what we want
         cursor = self.ramdb.cursor()
