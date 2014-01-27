@@ -9,10 +9,13 @@
 NEON_ROOT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 echo "Creating the virtual environment"
-virtualenv ${NEON_ROOT_DIR}/pyenv
+virtualenv ${NEON_ROOT_DIR}/.pyenv
+
+# Clean up the old python virtual environment
+rm -rf ${NEON_ROOT_DIR}/pyenv
 
 echo "Switching to the virtual environment"
-VIRTUAL_ENV_DISABLE_PROMPT=yes source ${NEON_ROOT_DIR}/pyenv/bin/activate
+VIRTUAL_ENV_DISABLE_PROMPT=yes source ${NEON_ROOT_DIR}/.pyenv/bin/activate
 
 # Set the command prompt to make it obvious what virtual environment
 # we're in. This mimicks the python virtualenv behaviour.
