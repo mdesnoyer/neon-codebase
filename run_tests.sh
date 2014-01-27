@@ -38,4 +38,4 @@ cd ${CURDIR}
 COVER_DIRS=( `ls -d */ -1 | sed 's/\///g' | grep -v 'externalLibs' | grep -v 'lib' | grep -v 'bin'` )
 
 nosetests --with-coverage --with-xunit ${COVER_DIRS[@]/#/--cover-package } --cover-erase --exe --cover-xml || true
-pylint --rcfile .pylintrc -f parseable ${COVER_DIRS} > pylint.out
+pylint --rcfile .pylintrc -f parseable ${COVER_DIRS[*]} > pylint.out
