@@ -44,6 +44,7 @@ from StringIO import StringIO
 import subprocess
 from supportServices import neondata
 import tempfile
+import test_utils.net
 import test_utils.redis
 import time
 import tornado.httpclient
@@ -98,14 +99,15 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
 
             params['supportServices']['neondata']['dbPort'] = cls.redis.port
             params['supportServices']['services']['port'] = \
-              random.randint(10000,11000)
+              test_utils.net.find_free_port()
             params['mastermind']['server']['port'] = \
-              random.randint(10000,11000)
+              test_utils.net.find_free_port()
             params['clickTracker']['trackserver']['port'] = \
-              random.randint(10000,11000)
-            params['utils']['s3']['s3port'] = random.randint(10000,11000)
-            directive_port = random.randint(10000,11000)
-            params['test']['serving_tester']['bc_directive_port'] = directive_port
+              test_utils.net.find_free_port()
+            params['utils']['s3']['s3port'] = test_utils.net.find_free_port()
+            directive_port = test_utils.net.find_free_port()
+            params['test']['serving_tester']['bc_directive_port'] = \
+              directive_port
             params['controllers']['brightcove_controller']['port'] = \
               directive_port
             params['mastermind']['server']['bc_controller_url'] = \

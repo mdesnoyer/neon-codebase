@@ -31,6 +31,7 @@ import os
 import Queue
 import random
 import socket
+import test_utils.net
 import time
 import unittest
 import urllib2
@@ -362,7 +363,7 @@ class TestFullServer(unittest.TestCase):
     '''A set of tests that fire up the whole server and throws http requests at it.'''
 
     def setUp(self):
-        self.port = random.randint(9000, 10000)
+        self.port = test_utils.net.find_free_port()
 
         self.load_url = 'http://localhost:'+str(self.port)+'/track?a=load&id=288edb2d31c34507&imgs=%5B%22http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fd21%2Funsecured%2Fmedia%2F2294876105001%2F201310%2F34%2F2294876105001_2727914703001_thumbnail-2296855887001.jpg%22%2C%22http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fd21%2Funsecured%2Fmedia%2F2294876105001%2F201310%2F354%2F2294876105001_2727881607001_thumbnail-2369368872001.jpg%22%2C%22http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fd21%2Funsecured%2Fmedia%2F2294876105001%2F2294876105001_2660525568001_thumbnail-2296855886001.jpg%22%2C%22http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fe1%2Fpd%2F2294876105001%2F2294876105001_2617231423001_thumbnail-2323153341001.jpg%22%5D&cvid=2296855887001&ts=1381257030328&page=http%3A%2F%2Flocalhost%2Fbcove%2Ffplayerabtest.html&ttype=flashonlyplayer&tai=test&noCacheIE=1381257030328'
 

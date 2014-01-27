@@ -40,6 +40,7 @@ import time
 import tempfile
 import test_utils
 import test_utils.mock_boto_s3 as boto_mock
+import test_utils.net
 import test_utils.redis
 import tornado
 import unittest
@@ -419,9 +420,11 @@ class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
         self.model = self.model_patcher.start()
         self.model().load_model = [None]
         self.redis = test_utils.redis.RedisServer()
-        self.redis.start() 
+        self.redis.start()
+        self.server_port = test_utils.net.find_free_port()
         self.tmp_conf_file = tempfile.NamedTemporaryFile(delete=False)
-        self.create_temp_config_file(self.tmp_conf_file, self.redis.port)
+        self.create_temp_config_file(self.tmp_conf_file, self.redis.port,
+                                     self.server_port)
         server_path = os.path.join(base_path, "api/server.py")
         self.proc = subprocess.Popen([server_path, '-c', 
                                       self.tmp_conf_file.name],
@@ -438,9 +441,9 @@ class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
 
     def tearDown(self):
         self.model_patcher.stop()
-        self.redis.stop()
         utils.ps.send_signal_and_wait(signal.SIGTERM, [self.proc.pid])
         utils.ps.send_signal_and_wait(signal.SIGKILL, [self.proc.pid])
+        self.redis.stop()
         if os.path.exists(self.tmp_conf_file.name):
             os.unlink(self.tmp_conf_file.name)
 
@@ -450,17 +453,22 @@ class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
     def get_new_ioloop(self):
         return tornado.ioloop.IOLoop.instance()
    
-    def create_temp_config_file(self,conf_file,db_port):
-        conf_file.write("supportServices:\n  neondata:\n"
-                "    accountDB: \"127.0.0.1\"\n"
-                "    videoDB: \"127.0.0.1\"\n"
-                "    dbPort: %s \n"%db_port)
+    def create_temp_config_file(self, conf_file, db_port, server_port):
+        conf_file.write(
+            "supportServices:\n"
+            "  neondata:\n"
+            "    accountDB: \"127.0.0.1\"\n"
+            "    videoDB: \"127.0.0.1\"\n"
+            "    dbPort: %i \n" 
+            "api:\n"
+            "  server:\n"
+            "    port: %i\n" % (db_port, server_port))
         conf_file.flush() 
 
     def test_dequeue_video_client(self):
         model_file = "modelfile.model" 
         vc = client.VideoClient(model_file)
-        vc.dequeue_url = "http://localhost:8081/dequeue"
+        vc.dequeue_url = "http://localhost:%i/dequeue" % self.server_port
         res = vc.dequeue_job()
         self.assertEqual(res,"{}") #empty queue result
 
@@ -469,7 +477,8 @@ class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
                    "topn": 3, "callback_url": "http://localhost:8081/testcallback", 
                    "video_title": "testtitle"}
     
-        server_url = 'http://localhost:8081/api/v1/submitvideo/topn'
+        server_url = ('http://localhost:%i/api/v1/submitvideo/topn' 
+                      % self.server_port)
         hc = tornado.httpclient.HTTPClient()
         #submit a job
         resp = hc.fetch(server_url,method="POST",body=json.dumps(params))

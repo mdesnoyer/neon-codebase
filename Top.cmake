@@ -15,12 +15,12 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
 elseif(EXISTS $ENV{VIRTUAL_ENV})
   message("Installing python dependencies.")
   execute_process(
-    COMMAND ${CMAKE_SOURCE_DIR}/pyenv/bin/pip install -r ${CMAKE_SOURCE_DIR}/pre_requirements.txt --no-index --find-links http://s3-us-west-1.amazonaws.com/neon-dependencies/index.html
+    COMMAND ${CMAKE_SOURCE_DIR}/.pyenv/bin/pip install -r ${CMAKE_SOURCE_DIR}/pre_requirements.txt --no-index --find-links http://s3-us-west-1.amazonaws.com/neon-dependencies/index.html
     RESULT_VARIABLE FAILED_PY_INSTALL
     )
   if(NOT FAILED_PY_INSTALL)
     execute_process(
-      COMMAND ${CMAKE_SOURCE_DIR}/pyenv/bin/pip install -r ${CMAKE_SOURCE_DIR}/requirements.txt --no-index --find-links http://s3-us-west-1.amazonaws.com/neon-dependencies/index.html
+      COMMAND ${CMAKE_SOURCE_DIR}/.pyenv/bin/pip install -r ${CMAKE_SOURCE_DIR}/requirements.txt --no-index --find-links http://s3-us-west-1.amazonaws.com/neon-dependencies/index.html
     
       RESULT_VARIABLE FAILED_PY_INSTALL
       )
@@ -50,7 +50,7 @@ elseif(EXISTS $ENV{VIRTUAL_ENV})
     message(FATAL_ERROR "Could not find cv2.so. Did you install OpenCV globally yet? Log: " ${PYCV2_FILE})
   endif(NOTFOUND_PYCV2)
   execute_process(
-    COMMAND ${CMAKE_SOURCE_DIR}/pyenv/bin/python -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())"
+    COMMAND ${CMAKE_SOURCE_DIR}/.pyenv/bin/python -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())"
     OUTPUT_VARIABLE PY_PACKAGE_DIR
     OUTPUT_STRIP_TRAILING_WHITESPACE
     )
