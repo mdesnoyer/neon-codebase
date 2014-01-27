@@ -144,35 +144,51 @@ class RedisAsyncWrapper(object):
         self.client = blockingRedis.StrictRedis(host, port, socket_timeout=10)
 
     def get(self, key, callback):
+        ''' get key '''
         def _callback(result):
-            tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
+            ''' result callback'''
+            tornado.ioloop.IOLoop.instance().add_callback(
+                    lambda: callback(result))
         RedisAsyncWrapper._thread_pool.apply_async(
                 self.client.get, args=(key,), callback=_callback)
    
     def set(self,key,value,callback):
+        ''' set key '''
         def _callback(result):
-            tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
+            ''' result callback'''
+            tornado.ioloop.IOLoop.instance().add_callback(
+                    lambda: callback(result))
         RedisAsyncWrapper._thread_pool.apply_async(
-            self.client.set, args=(key,value,), callback=_callback)
+            self.client.set, args=(key, value,), callback=_callback)
     
     def pipeline(self):
+        ''' pipeline '''
         return self.client.pipeline()
 
-    def mget(self,keys,callback):
+    def mget(self, keys, callback):
+        ''' multi get '''
         def _callback(result):
-            tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
+            ''' result callback'''
+            tornado.ioloop.IOLoop.instance().add_callback(
+                    lambda: callback(result))
         RedisAsyncWrapper._thread_pool.apply_async(
             self.client.mget, args=(keys,), callback=_callback)
     
-    def mset(self,keys,callback):
+    def mset(self, keys, callback):
+        ''' multi set '''
         def _callback(result):
-            tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
+            ''' result callback'''
+            tornado.ioloop.IOLoop.instance().add_callback(
+                    lambda: callback(result))
         RedisAsyncWrapper._thread_pool.apply_async(
             self.client.mset, args=(keys,), callback=_callback)
     
-    def keys(self,prefix,callback):
+    def keys(self, prefix, callback):
+        ''' key regex match'''
         def _callback(result):
-            tornado.ioloop.IOLoop.instance().add_callback(lambda: callback(result))
+            ''' result callback'''
+            tornado.ioloop.IOLoop.instance().add_callback(
+                    lambda: callback(result))
         RedisAsyncWrapper._thread_pool.apply_async(
             self.client.keys, args=(prefix,), callback=_callback)
     
@@ -191,7 +207,7 @@ class DBConnectionCheck(threading.Thread):
                 for key, value in DBConnection._singleton_instance.iteritems():
                     DBConnection.update_instance(key)
                     value.blocking_conn.get("dummy")
-            except Exception,e:
+            except Exception, e:
                 _log.exception("key=DBConnection check msg=%s"%e)
             
             time.sleep(self.interval)
@@ -237,12 +253,13 @@ class RedisClient(object):
             port = RedisClient.port
         
         RedisClient.c = RedisAsyncWrapper(host, port)
-        RedisClient.bc = blockingRedis.StrictRedis(host, port, socket_timeout=10)
-        return RedisClient.c,RedisClient.bc 
+        RedisClient.bc = blockingRedis.StrictRedis(
+                            host, port, socket_timeout=10)
+        return RedisClient.c, RedisClient.bc 
 
 ##############################################################################
 
-def generate_request_key(api_key,job_id):
+def generate_request_key(api_key, job_id):
     ''' Format request key (with job_id) to find NeonApiRequest Object'''
     key = "request_" + api_key + "_" + job_id
     return key
@@ -253,19 +270,19 @@ class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
 
     @staticmethod
-    def _api_hash_function(input):
+    def _api_hash_function(_input):
         ''' Abstract hash generator '''
-        return hashlib.md5(input).hexdigest()
+        return hashlib.md5(_input).hexdigest()
 
 class NeonApiKey(AbstractHashGenerator):
     ''' Static class to generate Neon API Key'''
     salt = 'SUNIL'
     
     @staticmethod
-    def generate(input):
+    def generate(_input):
         ''' generate api key hash'''
-        input = NeonApiKey.salt + str(input)
-        return NeonApiKey._api_hash_function(input)
+        _input = NeonApiKey.salt + str(_input)
+        return NeonApiKey._api_hash_function(_input)
 
 class InternalVideoID(object):
     ''' Internal Video ID Generator '''
@@ -283,8 +300,8 @@ class InternalVideoID(object):
 
 class TrackerAccountID(object):
     @staticmethod
-    def generate(input):
-        return abs(binascii.crc32(input))
+    def generate(_input):
+        return abs(binascii.crc32(_input))
 
 class TrackerAccountIDMapper(object):
     '''
@@ -301,7 +318,7 @@ class TrackerAccountIDMapper(object):
         self.itype = itype
 
     @classmethod
-    def format_key(cls,tai):
+    def format_key(cls, tai):
         ''' format db key '''
         return cls.__name__.lower() + '_%s'%tai
     
@@ -324,9 +341,10 @@ class TrackerAccountIDMapper(object):
         returns tuple of account_id, type(staging/production)
         '''
         def format_tuple(result):
+            ''' format result tuple '''
             if result:
                 data = json.loads(result)
-                return data['value'],data['itype']
+                return data['value'], data['itype']
 
         key = cls.format_key(tai)
         db_connection = DBConnection(cls)
@@ -1264,27 +1282,27 @@ class ThumbnailID(AbstractHashGenerator):
     '''
     Static class to generate thumbnail id
 
-    input: String or Image stream. 
+    _input: String or Image stream. 
 
     Thumbnail ID is: <internal_video_id>_<md5 MD5 hash of image data>
     '''
 
     @staticmethod
-    def generate(input, internal_video_id):
-        return '%s_%s' % (internal_video_id, ThumbnailMD5.generate(input))
+    def generate(_input, internal_video_id):
+        return '%s_%s' % (internal_video_id, ThumbnailMD5.generate(_input))
 
 class ThumbnailMD5(AbstractHashGenerator):
     '''Static class to generate the thumbnail md5.
 
-    input: String or Image stream.
+    _input: String or Image stream.
     '''
     salt = 'Thumbn@il'
     
     @staticmethod
-    def generate_from_string(input):
+    def generate_from_string(_input):
         ''' generate hash from string '''
-        input = ThumbnailMD5.salt + str(input)
-        return AbstractHashGenerator._api_hash_function(input)
+        _input = ThumbnailMD5.salt + str(_input)
+        return AbstractHashGenerator._api_hash_function(_input)
 
     @staticmethod
     def generate_from_image(imstream):
@@ -1296,19 +1314,19 @@ class ThumbnailMD5(AbstractHashGenerator):
         return ThumbnailMD5.generate_from_string(filestream.buf)
 
     @staticmethod
-    def generate(input,):
+    def generate(_input):
         ''' generate hash method ''' 
-        if isinstance(input,basestring):
-            return ThumbnailMD5.generate_from_string(input)
+        if isinstance(_input, basestring):
+            return ThumbnailMD5.generate_from_string(_input)
         else:
-            return ThumbnailMD5.generate_from_image(input)
+            return ThumbnailMD5.generate_from_image(_input)
 
 
 class ThumbnailURLMapper(object):
     '''
     Schema to map thumbnail url to thumbnail ID. 
 
-    input - thumbnail url ( key ) , tid - string/image, converted to thumbnail ID
+    _input - thumbnail url ( key ) , tid - string/image, converted to thumbnail ID
             if imdata given, then generate tid 
     
     THUMBNAIL_URL => (tid)
@@ -1437,15 +1455,16 @@ class ThumbnailIDMapper(object):
         self.thumbnail_metadata = thumbnail_metadata #dict of ThumbnailMetadata obj
 
     @classmethod
-    def generate_key(cls,video_id,tid):
+    def generate_key(cls, video_id, tid):
+        ''' generate IDMapper key '''
         return video_id + '_' + tid 
 
     def get_account_id(self):
         ''' get account id '''
         return self.video_id.split('_')[0]
 
-    def _hash(self,input):
-        return hashlib.md5(input).hexdigest()
+    def _hash(self,_input):
+        return hashlib.md5(_input).hexdigest()
     
     def get_metadata(self):
         ''' get thumbnail metadata '''
@@ -1480,6 +1499,7 @@ class ThumbnailIDMapper(object):
             asscociated with tid'''
 
         def get_metadata(result):
+            ''' extract thumbnail metadata from obj '''
             vid = None
             if result:
                 obj = ThumbnailIDMapper.create(result)
@@ -1506,6 +1526,7 @@ class ThumbnailIDMapper(object):
         ThumbnailMetadata object.
         '''
         def get_metadata(result):
+            ''' extract thumbnail metadata from obj '''
             tmdata = None
             if result:
                 obj = ThumbnailIDMapper.create(result)
@@ -1546,8 +1567,8 @@ class ThumbnailIDMapper(object):
             return mappings
 
     @classmethod
-    def save_all(cls,thumbnailMapperList,
-                 callback=None):
+    def save_all(cls, thumbnailMapperList, callback=None):
+        ''' multi save '''
         db_connection = DBConnection(cls)
         data = {}
         for t in thumbnailMapperList:
@@ -1560,6 +1581,7 @@ class ThumbnailIDMapper(object):
 
     @staticmethod
     def enable_thumbnail(mapper_objs, new_tid):
+        ''' enable thumb in a list of mapper obj given a new thumb id '''
         new_thumb_obj = None; old_thumb_obj = None
         for mapper_obj in mapper_objs:
             #set new tid as chosen
@@ -1577,6 +1599,7 @@ class ThumbnailIDMapper(object):
 
     @classmethod
     def save_integration(cls, mapper_objs, callback=None):
+        ''' save integration '''
         db_connection = DBConnection(cls)
         if callback:
             pipe = db_connection.conn.pipeline()
@@ -1593,6 +1616,7 @@ class ThumbnailIDMapper(object):
 
     @classmethod
     def _erase_all_data(cls):
+        ''' clear db '''
         db_connection = DBConnection(cls)
         db_connection.clear_db()
 
@@ -1644,10 +1668,12 @@ class VideoMetadata(object):
             return db_connection.blocking_conn.set(self.key, value)
 
     @classmethod
-    def get(cls,internal_video_id, callback=None):
+    def get(cls, internal_video_id, callback=None):
         ''' get video metadata '''
-        db_connection=DBConnection(cls)
+        db_connection = DBConnection(cls)
+
         def create(jdata):
+            ''' create obj'''
             data_dict = json.loads(jdata) 
             obj = VideoMetadata(None, None, None, None, None, None, None, None)
             for key in data_dict.keys():
@@ -1671,6 +1697,7 @@ class VideoMetadata(object):
 
     @classmethod
     def multi_get(cls, internal_video_ids, callback=None):
+        ''' multi get '''
         db_connection = DBConnection(cls) 
         def create(jdata):
             data_dict = json.loads(jdata)
@@ -1680,6 +1707,7 @@ class VideoMetadata(object):
             return obj
 
         def cb(results):
+            ''' result callback '''
             if len(results) > 0:
                 vmdata = []
                 for result in results:

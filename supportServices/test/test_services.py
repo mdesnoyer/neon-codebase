@@ -1027,7 +1027,7 @@ class TestServices(AsyncHTTPTestCase):
         random.seed(1123)
         #Create thumbnail metadata
         N_THUMBS = 5
-        for api_request in api_requests:
+        for api_request in api_requests[:-1]:
             video_id = api_request.video_id
             job_id = api_request.job_id
             thumbnails = []
@@ -1091,39 +1091,39 @@ class TestServices(AsyncHTTPTestCase):
                 %(self.a_id, "0", page_no, page_size))
         resp = self.get_request(url, self.api_key)
         items = json.loads(resp.body)['items']
-        self.assertEqual(len(items),page_size)
-        result_vids = [ x['video_id'] for x in items ]
+        self.assertEqual(len(items), page_size)
+        result_vids = [x['video_id'] for x in items]
         
         #recommended
         page_size = 5
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos/recommended?page_no=%s&page_size=%s'
-                %(self.a_id,"0",page_no,page_size))
-        resp = self.get_request(url,self.api_key)
+                %(self.a_id, "0", page_no, page_size))
+        resp = self.get_request(url, self.api_key)
         items = json.loads(resp.body)['items']
-        self.assertEqual(len(items),page_size)
+        self.assertEqual(len(items), page_size)
         result_vids = [ x['video_id'] for x in items]
 
         #processing
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos/processing?page_no=%s&page_size=%s'
-                %(self.a_id,"0",page_no,page_size))
-        resp = self.get_request(url,self.api_key)
+                %(self.a_id, "0", page_no, page_size))
+        resp = self.get_request(url, self.api_key)
         items = json.loads(resp.body)['items']
-        self.assertEqual(len(items),0) #no videos in processing
-
+        self.assertEqual(len(items), 1) #1 video in processing
+        
         #invalid state
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos/invalid?page_no=%s&page_size=%s'
-                %(self.a_id,"0",page_no,page_size))
-        resp = self.get_request(url,self.api_key)
-        self.assertEqual(resp.code,400)
+                %(self.a_id, "0", page_no, page_size))
+        resp = self.get_request(url, self.api_key)
+        self.assertEqual(resp.code, 400)
     
     def test_utils_handler(self):
         ''' random image utils handler test '''
         url = self.get_url('/api/v1/utils/get_random_image')
-        resp = self.get_request(url,self.api_key)
-        self.assertEqual(resp.code,200)
+        resp = self.get_request(url, self.api_key)
+        self.assertEqual(resp.code, 200)
         image = Image.open(StringIO(resp.body))
         self.assertIsNotNone(image)
 
