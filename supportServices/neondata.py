@@ -109,6 +109,7 @@ class DBConnection(object):
                     cls._singleton_instance[cname] = cls(cname)
 
     def __new__(cls, *args, **kwargs):
+        ''' override new '''
         otype = args[0] #Arg pass can either be class name or class instance
         cname = None
         if otype:
@@ -206,7 +207,7 @@ class DBConnectionCheck(threading.Thread):
         self.daemon = True
 
     def run(self):
-        
+        ''' run loop ''' 
         while True:
             try:
                 for key, value in DBConnection._singleton_instance.iteritems():
@@ -305,6 +306,8 @@ class NeonApiKey(object):
 
     @classmethod
     def get_api_key(cls, a_id, callback=None):
+        #Add prefix to support web account namespacing
+        #a_id = "production_test1_%s" %a_id
         db_connection = DBConnection(cls)
         key = NeonApiKey.format_key(a_id)
         if callback:
@@ -329,6 +332,7 @@ class InternalVideoID(object):
 class TrackerAccountID(object):
     @staticmethod
     def generate(_input):
+        ''' Generate a CRC 32 for Tracker Account ID'''
         return abs(binascii.crc32(_input))
 
 class TrackerAccountIDMapper(object):

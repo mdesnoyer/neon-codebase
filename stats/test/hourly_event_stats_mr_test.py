@@ -173,7 +173,6 @@ class TestDatabaseWriting(unittest.TestCase):
     '''Tests database writing step.'''
     def setUp(self):
         self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
-        
         self.dbconnect = MySQLdb.connect
         dbmock = MagicMock()
         def connect2db(*args, **kwargs):
@@ -181,7 +180,12 @@ class TestDatabaseWriting(unittest.TestCase):
         dbmock.side_effect = connect2db
         MySQLdb.connect = dbmock
         self.ramdb = connect2db()
-
+        
+        self.sqlite_connect_patcher = \
+                patch('stats.hourly_event_stats_mr.sqldb.connect')
+        self.sqllite_mock = self.sqlite_connect_patcher.start()
+        self.sqllite_mock.return_value = connect2db()
+        
     def tearDown(self):
         MySQLdb.connect = self.dbconnect
         try:
@@ -192,7 +196,9 @@ class TestDatabaseWriting(unittest.TestCase):
         except Exception as e:
             pass
         self.ramdb.close()
-        os.remove('file::memory:?cache=shared')
+        f = 'file::memory:?cache=shared'
+        if os.path.exists(f):
+            os.remove(f)
 
     def test_table_creation(self):
         results, counters = test_utils.mr.run_single_step(self.mr, '', step=2,

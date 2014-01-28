@@ -219,7 +219,7 @@ class HourlyEventStats(MRJob):
             _log.exception('Error connecting to stats db: %s' % e)
             raise
         self.statscursor = self.statsdb.cursor()
-
+        
         stats.db.create_tables(self.statscursor)
 
     def statsdb_disconnect(self):

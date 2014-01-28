@@ -25,7 +25,6 @@ import stats.db
 from StringIO import StringIO
 from supportServices import neondata
 import test_utils.neontest
-import test_utils.redis
 import tornado.web
 import unittest
 import utils.neon
@@ -168,18 +167,15 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.ab_manager = MagicMock()
         self.watcher = mastermind.server.VideoDBWatcher(self.mastermind,
                                                         self.ab_manager)
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
 
     def tearDown(self):
-        self.redis.stop()
+        pass
 
+                
     def test_good_db_data(self, datamock):
         # Define platforms in the database
 
-        #create neon user account 
-        nuser = neondata.NeonUserAccount('a1')
-        api_key = nuser.neon_api_key
+        api_key = "neon_api_key"
 
         bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
                                         abtest=False)
@@ -319,22 +315,22 @@ class TestStatsDBWatcher(unittest.TestCase):
         self.server_log = mastermind.server._log
         mastermind.server._log = MagicMock()
 
-        self.dbconnect = MySQLdb.connect
-        dbmock = MagicMock()
         def connect2db(*args, **kwargs):
             return sqlite3.connect('file::memory:?cache=shared')
-        dbmock.side_effect = connect2db
-        MySQLdb.connect = dbmock
         self.ramdb = connect2db()
 
         cursor = self.ramdb.cursor()
         stats.db.create_tables(cursor)
         self.ramdb.commit()
 
+        #patch sqldb connect
+        self.sqlite_connect_patcher = patch('mastermind.server.sqldb.connect')
+        self.sqllite_mock = self.sqlite_connect_patcher.start()
+        self.sqllite_mock.return_value = self.ramdb 
+
     def tearDown(self):
         neondata.ThumbnailIDMapper.get_video_id = self.mod_get_video_id
         mastermind.server._log = self.server_log
-        MySQLdb.connect = self.dbconnect
         try:
             cursor = self.ramdb.cursor()
             cursor.execute('drop table hourly_events')
@@ -346,6 +342,7 @@ class TestStatsDBWatcher(unittest.TestCase):
         f = 'file::memory:?cache=shared'
         if os.path.exists(f):
             os.remove(f)
+        self.sqlite_connect_patcher.stop()
 
     def test_working_db(self):
         # Always say that the thumbnail id is part of the same video
@@ -363,10 +360,10 @@ class TestStatsDBWatcher(unittest.TestCase):
         [('thumbA', datetime(1980, 3, 20, 6), 300, 10),
          ('thumbB', datetime(1980, 3, 20, 6), 10, 0),
          ('thumbB', datetime(1980, 3, 20, 5), 600, 30)])
+        
         cursor.execute('''REPLACE INTO last_update
         (tablename, logtime) VALUES ('hourly_events', '1980-3-20 6:16:00')''')
         self.ramdb.commit()
-
         self.watcher._process_db_data()
 
         # Check that mastermind was updated properly
@@ -398,6 +395,7 @@ class TestStatsDBWatcher(unittest.TestCase):
         [('thumbA', datetime(1980, 3, 20, 6), 300, 10),
          ('thumbB', datetime(1980, 3, 20, 6), 110, 3),
          ('thumbB', datetime(1980, 3, 20, 5), 600, 30)])
+        
         cursor.execute('''REPLACE INTO last_update
         (tablename, logtime) VALUES ('hourly_events', '1980-3-20 6:27:00')''')
         self.ramdb.commit()

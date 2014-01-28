@@ -44,6 +44,8 @@ class RedisServer:
             self.port = net.find_free_port()
 
     def start(self):
+        ''' Start on a random port and set supportServices.neondata.dbPort '''
+
         self.config_file = tempfile.NamedTemporaryFile()
         self.config_file.write('port %i\n' % self.port)
         self.config_file.flush()
@@ -75,6 +77,8 @@ class RedisServer:
         
 
     def stop(self):
+        ''' stop redis instance '''
+
         self.config_file.close()
         options._set('supportServices.neondata.dbPort', self.old_port)
         self.proc.terminate()

@@ -543,9 +543,11 @@ class AccountHandler(tornado.web.RequestHandler):
                 result[vid] = None #indicate job not found
                 continue
 
+            thumbs = None
             status = neondata.RequestState.PROCESSING 
             if request.state in incomplete_states:
-                t_urls = []; thumbs = []
+                t_urls = []
+                thumbs = []
                 placeholder_url = random.choice(placeholder_images) 
                 t_urls.append(placeholder_url)
                 #Create TID 0 as a temp place holder for previous 
@@ -555,7 +557,8 @@ class AccountHandler(tornado.web.RequestHandler):
                 thumbs.append(tm.to_dict())
                 p_videos.append(vid)
             elif request.state in failed_states:
-                f_videos.append(vid)
+                status = "failed" 
+                thumbs = None
             else:
                 completed_videos.append(vid)
                 status = "finished"

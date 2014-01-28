@@ -231,9 +231,8 @@ class TestDatabaseWriting(neontest.TestCase):
         self.api_key_patch = patch(
             'stats.tracker_monitoring_mr.neondata.'
             'NeonApiKey.get_api_key')
-        self.api_key_patcher = self.api_key_patch.start()
-        self.get_api_key = MagicMock()
-        self.get_api_key.return_value = "neon_api_key" 
+        self.api_key_mock = self.api_key_patch.start()
+        self.api_key_mock.return_value = "neon_api_key"
 
     def tearDown(self):
         self.urlopen_patcher.stop()
@@ -247,7 +246,9 @@ class TestDatabaseWriting(neontest.TestCase):
         except Exception as e:
             pass
         self.ramdb.close()
-        os.remove('file::memory:?cache=shared')
+        f = 'file::memory:?cache=shared'
+        if os.path.exists(f):
+            os.remove(f)
 
     def test_table_creation(self):
         results, counters = test_utils.mr.run_single_step(self.mr, '', step=2)
@@ -277,7 +278,7 @@ class TestDatabaseWriting(neontest.TestCase):
                        'from pages_seen')
         self.assertEqual(cursor.fetchall(),
                          [('na4576', 'www.go.com/now', False, sec2str(15600))])
-
+        
         # Now ensure that an analytics received message was received
         self.assertEqual(self.mock_urlopen.call_count, 1)
         request = self.mock_urlopen.call_args[0][0]
@@ -524,9 +525,8 @@ class TestEndToEnd(neontest.TestCase):
         self.api_key_patch = patch(
             'stats.tracker_monitoring_mr.neondata.'
             'NeonApiKey.get_api_key')
-        self.api_key_patcher = self.api_key_patch.start()
-        self.get_api_key = MagicMock()
-        self.get_api_key().return_value = "neon_api_key" 
+        self.api_key_mock = self.api_key_patch.start()
+        self.api_key_mock.return_value = "neon_api_key"
 
     def tearDown(self):
         self.idmapper_patch.stop()

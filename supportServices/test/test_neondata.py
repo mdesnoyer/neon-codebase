@@ -58,6 +58,21 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         api_key_from_db = NeonApiKey.get_api_key(a_id)
         self.assertEqual(na.neon_api_key, api_key_from_db)
 
+    def test_get_all_accounts(self):
+        ''' test get all neonuser accounts '''
+
+        a_id_prefix = 'test_account_'
+        a_ids = []
+        for i in range(10):
+            a_id = a_id_prefix + str(i)
+            a_ids.append(a_id)
+            na = NeonUserAccount(a_id)
+            na.save()
+
+        nu_accounts = NeonUserAccount.get_all_accounts()
+        nu_a_ids = [nu.account_id for nu in nu_accounts]
+        self.assertItemsEqual(a_ids, nu_a_ids)
+
     def test_default_bcplatform_settings(self):
         ''' brightcove defaults ''' 
 

@@ -199,7 +199,7 @@ class StatsDBWatcher(threading.Thread):
             return
 
         cursor = conn.cursor()
-
+        
         # See if there are any new entries
         stats.db.execute(
             cursor,
