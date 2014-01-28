@@ -107,7 +107,7 @@ class TestServices(AsyncHTTPTestCase):
                      method="POST",
                      body=body,
                      headers=headers)
-        response = self.wait(timeout=100)
+        response = self.wait(timeout=10)
         return response
 
     def put_request(self, url, vals, apikey):
@@ -127,7 +127,7 @@ class TestServices(AsyncHTTPTestCase):
         headers = {'X-Neon-API-Key' :apikey} 
         http_client = AsyncHTTPClient(self.io_loop)
         http_client.fetch(url, self.stop, headers=headers)
-        resp = self.wait(timeout=100)
+        resp = self.wait(timeout=10)
         return resp
 
     ### Helper methods

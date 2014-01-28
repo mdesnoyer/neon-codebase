@@ -25,6 +25,7 @@ import stats.db
 from StringIO import StringIO
 from supportServices import neondata
 import test_utils.neontest
+import test_utils.redis
 import tornado.web
 import unittest
 import utils.neon
@@ -167,8 +168,11 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.ab_manager = MagicMock()
         self.watcher = mastermind.server.VideoDBWatcher(self.mastermind,
                                                         self.ab_manager)
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+
     def tearDown(self):
-        pass
+        self.redis.stop()
 
     def test_good_db_data(self, datamock):
         # Define platforms in the database

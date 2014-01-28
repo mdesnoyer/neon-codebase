@@ -233,11 +233,12 @@ class TestDatabaseWriting(neontest.TestCase):
             'NeonApiKey.get_api_key')
         self.api_key_patcher = self.api_key_patch.start()
         self.get_api_key = MagicMock()
-        self.get_api_key().return_value = "neon_api_key" 
+        self.get_api_key.return_value = "neon_api_key" 
 
     def tearDown(self):
         self.urlopen_patcher.stop()
         self.account_patch.stop()
+        self.api_key_patch.stop()
         MySQLdb.connect = self.dbconnect
         try:
             cursor = self.ramdb.cursor()
