@@ -116,29 +116,40 @@ class TestIDMapping(unittest.TestCase):
     '''Tests for mapping thumbnail urls to ids.'''
     def setUp(self):
         self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
-        self.real_mapper = neondata.ThumbnailURLMapper.get_id
-        self.mock_mapper = MagicMock()
-        neondata.ThumbnailURLMapper.get_id = self.mock_mapper
-        
+        self.url_patcher = patch('stats.hourly_event_stats_mr.'
+                                 'neondata.ThumbnailURLMapper'
+                                 '.get_id')
+        self.mock_mapper = self.url_patcher.start()
+
+        self.tai_patcher = patch('stats.hourly_event_stats_mr.'
+                                 'neondata.TrackerAccountIDMapper.'
+                                 'get_neon_account_id')
+        self.account_mapper = self.tai_patcher.start()
 
     def tearDown(self):
-        neondata.ThumbnailURLMapper.get_id = self.real_mapper
+        self.url_patcher.stop()
+        self.tai_patcher.stop()
 
     def test_valid_mapping(self):
         self.mock_mapper.return_value = "54s9dfewgvw9e8g9"
+        self.account_mapper.return_value = (
+            "acct1", neondata.TrackerAccountIDMapper.PRODUCTION)
+        
         results, counters = test_utils.mr.run_single_step(self.mr,
-            encode([(('click', 'http://first.jpg', 94), 3)]),
+            encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
             step=1)
 
         self.assertEqual(self.mock_mapper.call_count, 1)
-        cargs, kwargs = self.mock_mapper.call_args
-        self.assertEqual(cargs[0], 'http://first.jpg')
+        self.mock_mapper.assert_called_with('http://first.jpg')
         self.assertEqual(results[0], (('click', '54s9dfewgvw9e8g9', 94), 3))
 
     def test_mapping_too_short(self):
         self.mock_mapper.side_effect = "54s9"
+        self.account_mapper.return_value = (
+            "acct1", neondata.TrackerAccountIDMapper.PRODUCTION)
+        
         results, counters = test_utils.mr.run_single_step(self.mr,
-            encode([(('click', 'http://first.jpg', 94), 3)]),
+            encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
             step=1)
 
         self.assertEqual(results, [])
@@ -148,8 +159,11 @@ class TestIDMapping(unittest.TestCase):
 
     def test_no_thumb_mapping(self):
         self.mock_mapper.side_effect = [None]
+        self.account_mapper.return_value = (
+            "acct1", neondata.TrackerAccountIDMapper.PRODUCTION)
+        
         results, counters = test_utils.mr.run_single_step(self.mr,
-            encode([(('click', 'http://first.jpg', 94), 3)]),
+            encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
             step=1)
 
         self.assertEqual(results, [])
@@ -157,17 +171,57 @@ class TestIDMapping(unittest.TestCase):
         self.assertEqual(
             counters['HourlyEventStatsErrors']['UnknownThumbnailURL'], 1)
 
-    def test_redis_error(self):
+    def test_thumb_url_redis_error(self):
         self.mock_mapper.side_effect = redis.exceptions.RedisError
+        self.account_mapper.return_value = (
+            "acct1", neondata.TrackerAccountIDMapper.PRODUCTION)
+        
         results, counters = test_utils.mr.run_single_step(self.mr,
-            encode([(('click', 'http://first.jpg', 94), 3)]),
+            encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
             step=1)
 
         self.assertEqual(results, [])
         self.assertEqual(self.mock_mapper.call_count, 1)
-        self.assertEqual(
-            counters['HourlyEventStatsErrors']['RedisErrors'], 1)
+        self.assertEqual(counters['HourlyEventStatsErrors']['RedisErrors'], 1)
+
+    def test_filter_staging_tracker_id(self):
+        self.mock_mapper.return_value = "54s9dfewgvw9e8g9"
+        self.account_mapper.return_value = (
+            "acct1", neondata.TrackerAccountIDMapper.STAGING)
         
+        results, counters = test_utils.mr.run_single_step(self.mr,
+            encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
+            step=1)
+
+        self.assertEqual(results, [])
+        self.assertEqual(counters, {})
+        self.assertEqual(self.account_mapper.call_count, 1)
+        self.account_mapper.assert_called_with('tai1')
+
+    def test_unknown_tracker_id(self):
+        self.mock_mapper.return_value = "54s9dfewgvw9e8g9"
+        self.account_mapper.side_effect = [None]
+
+        results, counters = test_utils.mr.run_single_step(self.mr,
+            encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
+            step=1)
+        
+        self.assertEqual(results, [])
+        self.account_mapper.assert_called_with('tai1')
+        self.assertEqual(
+            counters['HourlyEventStatsErrors']['UnknownTrackerId'], 1)
+
+    def test_tracker_id_redis_error(self):
+        self.mock_mapper.return_value = "54s9dfewgvw9e8g9"
+        self.account_mapper.side_effect = redis.exceptions.RedisError
+
+        results, counters = test_utils.mr.run_single_step(self.mr,
+            encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
+            step=1)
+        
+        self.assertEqual(results, [])
+        self.account_mapper.assert_called_with('tai1')
+        self.assertEqual(counters['HourlyEventStatsErrors']['RedisErrors'], 1) 
 
 class TestDatabaseWriting(unittest.TestCase):
     '''Tests database writing step.'''
