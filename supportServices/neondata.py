@@ -318,7 +318,7 @@ class NeonApiKey(object):
 class InternalVideoID(object):
     ''' Internal Video ID Generator '''
     @staticmethod
-    def generate(api_key,vid):
+    def generate(api_key, vid):
         ''' external platform vid --> internal vid '''
         key = api_key + "_" + vid
         return key
@@ -330,6 +330,7 @@ class InternalVideoID(object):
         return vid
 
 class TrackerAccountID(object):
+    ''' Tracker Account ID generation '''
     @staticmethod
     def generate(_input):
         ''' Generate a CRC 32 for Tracker Account ID'''
@@ -382,7 +383,7 @@ class TrackerAccountIDMapper(object):
         db_connection = DBConnection(cls)
        
         if callback:
-            db_connection.conn.get(key,lambda x: callback(format_tuple(x)))
+            db_connection.conn.get(key, lambda x: callback(format_tuple(x)))
         else:
             data = db_connection.blocking_conn.get(key)
             return format_tuple(data)
@@ -404,7 +405,7 @@ class NeonUserAccount(object):
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
         self.staging_tracker_account_id = \
-                TrackerAccountID.generate(self.neon_api_key + "staging" ) 
+                TrackerAccountID.generate(self.neon_api_key + "staging") 
         self.videos = {} #phase out,should be stored in neon integration
         # a mapping from integration id -> get_ovp() string
         self.integrations = {}
@@ -523,6 +524,7 @@ class AbstractPlatform(object):
     ''' Abstract Platform/ Integration class '''
 
     def __init__(self, abtest=False):
+        self.key = None 
         self.neon_api_key = ''
         self.videos = {} # External video id (Original Platform VID) => Job ID
         self.abtest = abtest # Boolean on wether AB tests can run
@@ -541,6 +543,9 @@ class AbstractPlatform(object):
         ''' save instance '''
         db_connection = DBConnection(self)
         value = self.to_json()
+        if not self.key:
+            raise Exception("Key is empty")
+
         if callback:
             db_connection.conn.set(self.key, value, callback)
         else:
@@ -561,7 +566,7 @@ class AbstractPlatform(object):
           callback - If None, done asynchronously
         '''
         key = cls.__name__.lower()  + '_%s_%s' %(api_key, i_id) 
-        db_connection=DBConnection(cls)
+        db_connection = DBConnection(cls)
         if callback:
             db_connection.conn.get(key, lambda x: callback(cls.create(x))) 
         else:
@@ -773,7 +778,7 @@ class BrightcovePlatform(AbstractPlatform):
             callback(None)
             return
 
-        tref,sref = thumb_res[0],thumb_res[1]
+        tref, sref = thumb_res[0], thumb_res[1]
         if not sref:
             _log.error("key=update_thumbnail msg=brightcove error" 
                     " update video still for video %s %s" %(i_vid, new_tid))
@@ -849,7 +854,7 @@ class BrightcovePlatform(AbstractPlatform):
         bc = api.brightcove_api.BrightcoveApi(
             self.neon_api_key, self.publisher_id, self.read_token,
             self.write_token, self.auto_update)
-        bc.create_video_request(vid, bc.integration_id, created_job)
+        bc.create_video_request(vid, self.integration_id, created_job)
 
     def check_feed_and_create_api_requests(self):
         ''' Use this only after you retreive the object from DB '''
@@ -869,7 +874,7 @@ class BrightcovePlatform(AbstractPlatform):
             self.write_token, self.auto_update, self.last_process_date)
         bc.create_brightcove_request_by_tag(self.integration_id)
 
-    def check_current_thumbnail_in_db(self,i_vid,callback=None):
+    def check_current_thumbnail_in_db(self, i_vid, callback=None):
         '''
         Check if the current thumbnail for the given video on brightcove
         has been recorded in Neon DB. Returns True if it has
@@ -884,7 +889,7 @@ class BrightcovePlatform(AbstractPlatform):
         if callback:
             bc.async_check_thumbnail(p_vid, callback)
         else:
-            return bc.check_thumbnail(p_vid)
+            return bc.check_thumbnail(p_vid) #TODO: Impl
 
     def verify_token_and_create_requests_for_video(self, n, callback=None):
         ''' Method to verify brightcove token on account creation 
@@ -903,11 +908,12 @@ class BrightcovePlatform(AbstractPlatform):
             return bc.verify_token_and_create_requests(self.integration_id,n)
 
     def sync_individual_video_metadata(self):
-        ''' sync video metadata from bcove individually using find_video_id api '''
-        bc = api.brightcove_api.BrightcoveApi(
+        ''' sync video metadata from bcove individually using 
+        find_video_id api '''
+        bcove_api = api.brightcove_api.BrightcoveApi(
             self.neon_api_key, self.publisher_id, self.read_token,
             self.write_token, self.auto_update, self.last_process_date)
-        bc.sync_individual_video_metadata(self.integration_id)
+        bcove_api.sync_individual_video_metadata(self.integration_id)
 
     @classmethod
     def create(cls, json_data):
@@ -1018,7 +1024,7 @@ class YoutubePlatform(AbstractPlatform):
             #return current token
             callback(self.access_token)
    
-    def add_channels(self,callback):
+    def add_channels(self, callback):
         '''
         Add a list of channels that the user has
         Get a valid access token first
@@ -1040,7 +1046,7 @@ class YoutubePlatform(AbstractPlatform):
         self.get_access_token(atoken_exec)
 
 
-    def get_videos(self,callback,channel_id=None):
+    def get_videos(self, callback, channel_id=None):
         '''
         get list of videos from youtube
         '''
@@ -1420,16 +1426,16 @@ class ThumbnailURLMapper(object):
             data[t.key] = t.value 
 
         if callback:
-            db_connection.conn.mset(data,callback)
+            db_connection.conn.mset(data, callback)
         else:
             return db_connection.blocking_conn.mset(data)
 
     @classmethod
-    def get_id(cls,key,callback=None):
+    def get_id(cls, key, callback=None):
         ''' get thumbnail id '''
         db_connection = DBConnection(cls)
         if callback:
-            db_connection.conn.get(key,callback)
+            db_connection.conn.get(key, callback)
         else:
             return db_connection.blocking_conn.get(key)
 

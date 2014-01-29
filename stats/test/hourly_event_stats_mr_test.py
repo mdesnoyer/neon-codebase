@@ -180,12 +180,7 @@ class TestDatabaseWriting(unittest.TestCase):
         dbmock.side_effect = connect2db
         MySQLdb.connect = dbmock
         self.ramdb = connect2db()
-        
-        self.sqlite_connect_patcher = \
-                patch('stats.hourly_event_stats_mr.sqldb.connect')
-        self.sqllite_mock = self.sqlite_connect_patcher.start()
-        self.sqllite_mock.return_value = connect2db()
-        
+    
     def tearDown(self):
         MySQLdb.connect = self.dbconnect
         try:
