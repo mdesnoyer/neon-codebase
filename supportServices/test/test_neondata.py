@@ -19,12 +19,14 @@ import threading
 from tornado.httpclient import HTTPResponse, HTTPRequest
 import tornado.ioloop
 from utils.options import options
+from utils.imageutils import ImageUtils
 import unittest
 import test_utils.redis 
 from StringIO import StringIO
 from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         YoutubePlatform, NeonUserAccount, DBConnection, NeonApiKey, \
-        AbstractPlatform, VideoMetadata
+        AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
+        ImageMD5Mapper, ThumbnailMetaData, ThumbnailIDMapper
 
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     def setUp(self):
@@ -226,7 +228,11 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         #and did not have an exception
         self.assertTrue(None not in results) 
 
+
 class TestBrightcovePlatform(unittest.TestCase):
+    '''
+    Brightcove platform specific tests
+    '''
     def setUp(self):
         self.cp_sync_patcher = \
           patch('utils.http.tornado.httpclient.HTTPClient')
@@ -288,9 +294,45 @@ class TestBrightcovePlatform(unittest.TestCase):
         u_bp = BrightcovePlatform.create(bp.get())
         self.assertEqual(len(u_bp.get_videos()), nvideos)
 
+class TestThumbnailHelperClass(unittest.TestCase):
+    '''
+    Thumbnail ID Mapper and other thumbnail helper class tests 
+    '''
+    def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+
+    def tearDown(self):
+        self.redis.stop()
+
+    def test_thumbnail_mapper(self):
+        ''' Thumbnail mappings '''
+
+        url = "http://thumbnail.jpg"
+        vid = "v123"
+        image = ImageUtils.create_random_image(360, 480)
+        tid = ThumbnailID.generate(image, vid)
+        im_md5 = ImageMD5Mapper(vid, image, tid) 
+        im_md5.save()
+
+        res_tid = ImageMD5Mapper.get_tid(vid, im_md5)
+        #self.assertEqual(tid, res_tid)   
+    
+        tdata = ThumbnailMetaData(tid, [], 0, 480, 360,
+                        "ttype", 0, 1, 0)
+        idmapper = ThumbnailIDMapper(tid, vid, tdata.to_dict())
+        ThumbnailIDMapper.save_all([idmapper])
+        tmap = ThumbnailURLMapper(url, tid)
+        tmap.save()
+        
+        res_tid = ThumbnailURLMapper.get_id(url)
+        self.assertEqual(tid, res_tid)
+
+
 if __name__ == '__main__':
     
-    test_classes_to_run = [TestNeondata, TestBrightcovePlatform]
+    #test_classes_to_run = [TestNeondata, TestBrightcovePlatform]
+    test_classes_to_run = [TestThumbnailHelperClass]
     loader = unittest.TestLoader()
 
     suites_list = []

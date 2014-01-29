@@ -1413,7 +1413,7 @@ class ThumbnailURLMapper(object):
         if callback:
             db_connection.conn.set(self.key, self.value, callback)
         else:
-            return db_connection.blocking_conn.set(self.key, value)
+            return db_connection.blocking_conn.set(self.key, self.value)
 
     @classmethod
     def save_all(cls, thumbnailMapperList, callback=None):
@@ -1453,7 +1453,7 @@ class ImageMD5Mapper(object):
     videostills and thumbnails for any given video
 
     '''
-    def __init__(self, ext_video_id, imgdata,tid):
+    def __init__(self, ext_video_id, imgdata, tid):
         self.key = self.format_key(ext_video_id, imgdata)
         self.value = tid
 
@@ -1461,7 +1461,7 @@ class ImageMD5Mapper(object):
         ''' return md5 '''
         return self.key.split('_')[-1]
 
-    def format_key(self,video_id,imdata):
+    def format_key(self, video_id, imdata):
         ''' format key for ImageMD5Mapper '''
         if imdata:
             md5 = ThumbnailID.generate(imdata, video_id)
@@ -1469,7 +1469,7 @@ class ImageMD5Mapper(object):
         else:
             raise
 
-    def save(self,callback=None):
+    def save(self, callback=None):
         ''' save ''' 
         db_connection = DBConnection(self)
         

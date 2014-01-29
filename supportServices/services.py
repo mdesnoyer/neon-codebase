@@ -51,6 +51,16 @@ def CachePrimer():
     '''
     pass
 
+#Place holder images for processing
+placeholder_images = [
+                'http://cdn.neon-lab.com/webaccount/neon_processing_1.png',
+                'http://cdn.neon-lab.com/webaccount/neon_processing_2.png',
+                'http://cdn.neon-lab.com/webaccount/neon_processing_3.png',
+                'http://cdn.neon-lab.com/webaccount/neon_processing_4.png',
+                'http://cdn.neon-lab.com/webaccount/neon_processing_5.png',
+                'http://cdn.neon-lab.com/webaccount/neon_processing_6.png',
+                'http://cdn.neon-lab.com/webaccount/neon_processing_7.png',
+                ]
 ################################################################################
 # Helper classes  
 ################################################################################
@@ -395,8 +405,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
         vresponse = yield tornado.gen.Task(http_client.fetch, req)
         ctype = vresponse.headers.get('Content-Type')
-        ctype = ctype.lower()
-        if vresponse.error or ctype is None or ctype in invalid_content_types:
+        if vresponse.error or ctype is None or ctype.lower() in invalid_content_types:
             data = '{"error":"link given is invalid or not a video file"}'
             self.send_json_response(data, 400)
             return
@@ -442,7 +451,9 @@ class AccountHandler(tornado.web.RequestHandler):
         #note: job id gets inserted into Neon platform account on video server
         t_urls = [] 
         thumbs = []
-        placeholder_url = 'http://cdn.neon-lab.com/webaccount/neon_processing_1.png'
+        im_index = int(hashlib.md5(video_id).hexdigest(), 16) \
+                                        % len(placeholder_images)
+        placeholder_url = placeholder_images[im_index] 
         t_urls.append(placeholder_url)
         ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         tm = neondata.ThumbnailMetaData(0, t_urls, ctime, 0, 0,
@@ -462,15 +473,6 @@ class AccountHandler(tornado.web.RequestHandler):
     @tornado.gen.engine
     def get_video_status_neon(self, vids, video_state=None):
         ''' Get video status for Neon Platform videos'''
-        placeholder_images = [
-                'http://cdn.neon-lab.com/webaccount/neon_processing_1.png',
-                'http://cdn.neon-lab.com/webaccount/neon_processing_2.png',
-                'http://cdn.neon-lab.com/webaccount/neon_processing_3.png',
-                'http://cdn.neon-lab.com/webaccount/neon_processing_4.png',
-                'http://cdn.neon-lab.com/webaccount/neon_processing_5.png',
-                'http://cdn.neon-lab.com/webaccount/neon_processing_6.png',
-                'http://cdn.neon-lab.com/webaccount/neon_processing_7.png',
-                ]
 
         i_id = "0"
         #counters 
@@ -549,7 +551,9 @@ class AccountHandler(tornado.web.RequestHandler):
             if request.state in incomplete_states:
                 t_urls = []
                 thumbs = []
-                placeholder_url = random.choice(placeholder_images) 
+                im_index = int(hashlib.md5(vid).hexdigest(), 16) \
+                                        % len(placeholder_images)
+                placeholder_url = placeholder_images[im_index] 
                 t_urls.append(placeholder_url)
                 #Create TID 0 as a temp place holder for previous 
                 #thumbnail during processing stage
