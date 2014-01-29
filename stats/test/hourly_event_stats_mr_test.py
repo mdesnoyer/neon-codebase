@@ -40,27 +40,28 @@ class TestDataParsing(unittest.TestCase):
 
     def test_valid_click(self):
         results, counters = test_utils.mr.run_single_step(self.mr,
-            ('{"sts":19800, "a":"click", "page":"here.com",'
+            ('{"sts":19800, "a":"click", "tai":"t1", "page":"here.com",'
              '"ttype":"flashonly", "img":"http://monkey.com"}\n'
-             '{"sts":19800, "a":"click", "page":"here.com",'
+             '{"sts":19800, "a":"click", "tai":"t1", "page":"here.com",'
              '"ttype":"flashonly", "img":"http://panda.com"}\n'),
             protocol=RawProtocol)
         self.assertItemsEqual(results,
-                              [(('click', 'http://monkey.com', 5), 1),
-                              (('click', 'http://panda.com', 5), 1),
+                              [(('click', 'http://monkey.com', 't1', 5), 1),
+                              (('click', 'http://panda.com', 't1', 5), 1),
                               ('latest', 19800),
                               ('latest', 19800)])
 
     def test_valid_load(self):
         results, counters = test_utils.mr.run_single_step(self.mr,
           ('{"sts":19800, "a":"load", "page":"here.com", "ttype":"flashonly",'
-           '"imgs":["http://monkey.com","poprocks.jpg","pumpkin.wow"]}'),
+           '"imgs":["http://monkey.com","poprocks.jpg","pumpkin.wow"],'
+           '"tai":"t1"}'),
             protocol=RawProtocol)
                                             
         self.assertItemsEqual(results,
-                              [(('load', 'http://monkey.com', 5), 1),
-                               (('load', 'poprocks.jpg', 5), 1),
-                               (('load', 'pumpkin.wow', 5), 1),
+                              [(('load', 'http://monkey.com', 't1', 5), 1),
+                               (('load', 'poprocks.jpg', 't1', 5), 1),
+                               (('load', 'pumpkin.wow', 't1', 5), 1),
                                ('latest', 19800)])
 
     def test_invalid_json(self):
@@ -75,25 +76,32 @@ class TestDataParsing(unittest.TestCase):
 
     def test_fields_missing(self):
         results, counters = test_utils.mr.run_single_step(self.mr,
-            ('{"a":"click", "ttype":"flashonly", "img":"http://monkey.com"}\n'
-             '{"sts":19800, "a":"click", "img":"http://monkey.com"}\n'
-             '{"sts":19800, "ttype":"flashonly", "img":"http://monkey.com"}\n'
-             '{"sts":19800, "ttype":"flashonly", "a":"click"}\n'
-             '{"sts":19800, "ttype":"flashonly", "a":"click",'
+            ('{"a":"click", "tai":"t1", "ttype":"flashonly", '
+             '"img":"http://monkey.com"}\n'
+             '{"sts":19800,"tai":"t1","a":"click","img":"http://monkey.com"}\n'
+             '{"sts":19800, "tai":"t1", "ttype":"flashonly", '
+             '"img":"http://monkey.com"}\n'
+             '{"sts":19800, "tai":"t1", "ttype":"flashonly", "a":"click"}\n'
+             '{"sts":19800, "tai":"t1", "ttype":"flashonly", "a":"click",'
              '"imgs":"http://monkey.com"}\n'
-             '{"ttype":"flashonly", "a":"load", '
+             '{"ttype":"flashonly", "a":"load", "tai":"t1",'
              '"imgs":["a.com", "b.jpg", "c.png"]}\n'
-             '{"sts":1900, "a":"load", "imgs":["now.com"]}\n'
-             '{"sts":19800, "ttype":"flashonly",'
+             '{"sts":1900, "a":"load", "tai":"t1", "imgs":["now.com"]}\n'
+             '{"sts":19800, "ttype":"flashonly", "tai":"t1",'
              '"imgs":["a.com", "b.jpg", "c.png"]}\n'
-             '{"sts":19800, "ttype":"flashonly", "a":"load"}\n'
-             '{"sts":19800, "ttype":"flashonly", "a":"load", '
+             '{"sts":19800, "tai":"t1", "ttype":"flashonly", "a":"load"}\n'
+             '{"sts":19800, "tai":"t1", "ttype":"flashonly", "a":"load", '
              '"img":["a.com", "b.jpg", "c.png"]}\n'
-             '{"sts":19800,"ttype":"flashonly","a":"load","imgs":"a.com"}\n'),
+             '{"sts":19800, "tai":"t1", "ttype":"flashonly", "a":"load", '
+             '"imgs":"a.com"}\n'
+             '{"sts":19800, "a":"click", "page":"here.com",'
+             '"ttype":"flashonly", "img":"http://monkey.com"}\n'
+             '{"sts":19800, "a":"load", "page":"here.com","ttype":"flashonly",'
+             '"imgs":["http://monkey.com","poprocks.jpg","pumpkin.wow"]}\n'),
             protocol=RawProtocol)
         self.assertEqual(results, [])
         self.assertEqual(
-            counters['HourlyEventStatsErrors']['JSONFieldMissing'], 11)
+            counters['HourlyEventStatsErrors']['JSONFieldMissing'], 13)
 
     def test_html5_player(self):
         '''We need to ignore entries for the html5 player.
@@ -116,29 +124,40 @@ class TestIDMapping(unittest.TestCase):
     '''Tests for mapping thumbnail urls to ids.'''
     def setUp(self):
         self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
-        self.real_mapper = neondata.ThumbnailURLMapper.get_id
-        self.mock_mapper = MagicMock()
-        neondata.ThumbnailURLMapper.get_id = self.mock_mapper
-        
+        self.url_patcher = patch('stats.hourly_event_stats_mr.'
+                                 'neondata.ThumbnailURLMapper'
+                                 '.get_id')
+        self.mock_mapper = self.url_patcher.start()
+
+        self.tai_patcher = patch('stats.hourly_event_stats_mr.'
+                                 'neondata.TrackerAccountIDMapper.'
+                                 'get_neon_account_id')
+        self.account_mapper = self.tai_patcher.start()
 
     def tearDown(self):
-        neondata.ThumbnailURLMapper.get_id = self.real_mapper
+        self.url_patcher.stop()
+        self.tai_patcher.stop()
 
     def test_valid_mapping(self):
         self.mock_mapper.return_value = "54s9dfewgvw9e8g9"
+        self.account_mapper.return_value = (
+            "acct1", neondata.TrackerAccountIDMapper.PRODUCTION)
+        
         results, counters = test_utils.mr.run_single_step(self.mr,
-            encode([(('click', 'http://first.jpg', 94), 3)]),
+            encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
             step=1)
 
         self.assertEqual(self.mock_mapper.call_count, 1)
-        cargs, kwargs = self.mock_mapper.call_args
-        self.assertEqual(cargs[0], 'http://first.jpg')
+        self.mock_mapper.assert_called_with('http://first.jpg')
         self.assertEqual(results[0], (('click', '54s9dfewgvw9e8g9', 94), 3))
 
     def test_mapping_too_short(self):
         self.mock_mapper.side_effect = "54s9"
+        self.account_mapper.return_value = (
+            "acct1", neondata.TrackerAccountIDMapper.PRODUCTION)
+        
         results, counters = test_utils.mr.run_single_step(self.mr,
-            encode([(('click', 'http://first.jpg', 94), 3)]),
+            encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
             step=1)
 
         self.assertEqual(results, [])
@@ -148,8 +167,11 @@ class TestIDMapping(unittest.TestCase):
 
     def test_no_thumb_mapping(self):
         self.mock_mapper.side_effect = [None]
+        self.account_mapper.return_value = (
+            "acct1", neondata.TrackerAccountIDMapper.PRODUCTION)
+        
         results, counters = test_utils.mr.run_single_step(self.mr,
-            encode([(('click', 'http://first.jpg', 94), 3)]),
+            encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
             step=1)
 
         self.assertEqual(results, [])
@@ -157,43 +179,76 @@ class TestIDMapping(unittest.TestCase):
         self.assertEqual(
             counters['HourlyEventStatsErrors']['UnknownThumbnailURL'], 1)
 
-    def test_redis_error(self):
+    def test_thumb_url_redis_error(self):
         self.mock_mapper.side_effect = redis.exceptions.RedisError
+        self.account_mapper.return_value = (
+            "acct1", neondata.TrackerAccountIDMapper.PRODUCTION)
+        
         results, counters = test_utils.mr.run_single_step(self.mr,
-            encode([(('click', 'http://first.jpg', 94), 3)]),
+            encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
             step=1)
 
         self.assertEqual(results, [])
         self.assertEqual(self.mock_mapper.call_count, 1)
-        self.assertEqual(
-            counters['HourlyEventStatsErrors']['RedisErrors'], 1)
+        self.assertEqual(counters['HourlyEventStatsErrors']['RedisErrors'], 1)
+
+    def test_filter_staging_tracker_id(self):
+        self.mock_mapper.return_value = "54s9dfewgvw9e8g9"
+        self.account_mapper.return_value = (
+            "acct1", neondata.TrackerAccountIDMapper.STAGING)
         
+        results, counters = test_utils.mr.run_single_step(self.mr,
+            encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
+            step=1)
+
+        self.assertEqual(results, [])
+        self.assertEqual(counters, {})
+        self.assertEqual(self.account_mapper.call_count, 1)
+        self.account_mapper.assert_called_with('tai1')
+
+    def test_unknown_tracker_id(self):
+        self.mock_mapper.return_value = "54s9dfewgvw9e8g9"
+        self.account_mapper.side_effect = [None]
+
+        results, counters = test_utils.mr.run_single_step(self.mr,
+            encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
+            step=1)
+        
+        self.assertEqual(results, [])
+        self.account_mapper.assert_called_with('tai1')
+        self.assertEqual(
+            counters['HourlyEventStatsErrors']['UnknownTrackerId'], 1)
+
+    def test_tracker_id_redis_error(self):
+        self.mock_mapper.return_value = "54s9dfewgvw9e8g9"
+        self.account_mapper.side_effect = redis.exceptions.RedisError
+
+        results, counters = test_utils.mr.run_single_step(self.mr,
+            encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
+            step=1)
+        
+        self.assertEqual(results, [])
+        self.account_mapper.assert_called_with('tai1')
+        self.assertEqual(counters['HourlyEventStatsErrors']['RedisErrors'], 1) 
 
 class TestDatabaseWriting(unittest.TestCase):
     '''Tests database writing step.'''
     def setUp(self):
         self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
-        self.dbconnect = MySQLdb.connect
-        dbmock = MagicMock()
+
+        self.dbfile = tempfile.NamedTemporaryFile()
+
+        self.db_patcher = patch('stats.hourly_event_stats_mr.sqldb.connect')
+        dbmock = self.db_patcher.start()
         def connect2db(*args, **kwargs):
-            return sqlite3.connect('file::memory:?cache=shared')
+            return sqlite3.connect(self.dbfile.name)
         dbmock.side_effect = connect2db
-        MySQLdb.connect = dbmock
         self.ramdb = connect2db()
     
     def tearDown(self):
-        MySQLdb.connect = self.dbconnect
-        try:
-            cursor = self.ramdb.cursor()
-            cursor.execute('drop table hourly_events')
-            cursor.execute('drop table last_update')
-            self.ramdb.commit()
-        except Exception as e:
-            pass
+        self.db_patcher.stop()
         self.ramdb.close()
-        f = 'file::memory:?cache=shared'
-        if os.path.exists(f):
-            os.remove(f)
+        self.dbfile.close()
 
     def test_table_creation(self):
         results, counters = test_utils.mr.run_single_step(self.mr, '', step=2,
@@ -306,49 +361,49 @@ class TestEndToEnd(unittest.TestCase):
     '''Tests database writing step.'''
     def setUp(self):
         self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
-        self.real_urlmapper = neondata.ThumbnailURLMapper
-        self.mock_urlmapper = MagicMock()
-        neondata.ThumbnailURLMapper = self.mock_urlmapper
-        self.dbconnect = MySQLdb.connect
 
-        # For some reason, the in memory database isn't shared, so use
-        # a temporary file instead. It worked in the other test case....
-        self.tempfile = tempfile.NamedTemporaryFile()
-
-        # Replace the database with an in memory one.
-        dbmock = MagicMock()
+        self.url_patcher = patch('stats.hourly_event_stats_mr.'
+                                 'neondata.ThumbnailURLMapper'
+                                 '.get_id')
+        self.mock_urlmapper = self.url_patcher.start()
+        self.tai_patcher = patch('stats.hourly_event_stats_mr.'
+                                 'neondata.TrackerAccountIDMapper.'
+                                 'get_neon_account_id')
+        self.account_mapper = self.tai_patcher.start()
+        
+        self.dbfile = tempfile.NamedTemporaryFile()
+        self.db_patcher = patch('stats.hourly_event_stats_mr.sqldb.connect')
+        dbmock = self.db_patcher.start()
         def connect2db(*args, **kwargs):
-            return sqlite3.connect(self.tempfile.name)
-            #return sqlite3.connect('file::memory:?cache=shared')
+            return sqlite3.connect(self.dbfile.name)
         dbmock.side_effect = connect2db
-        MySQLdb.connect = dbmock
         self.ramdb = connect2db()
         
 
     def tearDown(self):
-        neondata.ThumbnailURLMapper = self.real_urlmapper
-        MySQLdb.connect = self.dbconnect
-        try:
-            self.ramdb.execute('drop table hourly_events')
-        except Exception as e:
-            pass
+        self.url_patcher.stop()
+        self.tai_patcher.stop()
+        self.db_patcher.stop()
         self.ramdb.close()
+        self.dbfile.close()
 
     def test_bunch_of_data(self):
         # Setup the input data
         input_data = (
-            '{"sts":19800, "a":"click", "page":"here.com",'
+            '{"sts":19800, "a":"click", "page":"here.com", "tai":"tai_prod",'
             '"ttype":"flashonly", "img":"http://monkey.com"}\n'
-            '{"sts":19795, "a":"load", "ttype":"flashonly",'
+            '{"sts":19795, "a":"load", "ttype":"flashonly", "tai":"tai_prod",'
             '"imgs":["http://monkey.com","http://panda.com","pumpkin.wow"]}\n'
-            '{"sts":19805, "a":"click", "page":"here.com",'
+            '{"sts":19805, "a":"click", "page":"here.com", "tai":"tai_prod",'
              '"ttype":"flashonly", "img":"http://panda.com"}\n'
-            '{"sts":19800, "a":"load", "page":"here.com", "ttype":"flashonly",'
-            '"imgs":["http://monkey.com","pumpkin.jpg"]}\n'
-            '{"sts":19810, "a":"click", "page":"here.com",'
+            '{"sts":19800, "a":"load", "page":"here.com", "tai":"tai_prod",'
+            '"ttype":"flashonly","imgs":["http://monkey.com","pumpkin.jpg"]}\n'
+            '{"sts":19810, "a":"click", "page":"here.com", "tai":"tai_prod",'
              '"ttype":"flashonly", "img":"http://panda.com"}\n'
-            '{"sts":19810, "a":"click", "page":"here.com",'
-             '"ttype":"flashonly", "img":"pumpkin.jpg"}')
+            '{"sts":19810, "a":"click", "page":"here.com", "tai":"tai_prod",'
+             '"ttype":"flashonly", "img":"pumpkin.jpg"}\n'
+            '{"sts":19820, "a":"click", "page":"here.com", "tai":"tai_stage",'
+            '"ttype":"flashonly", "img":"http://monkey.com"}\n')
         stdin = StringIO(input_data)
         self.mr.sandbox(stdin=stdin)
 
@@ -359,13 +414,24 @@ class TestEndToEnd(unittest.TestCase):
             "pumpkin.wow": "68367sgdhs",
             "pumpkin.jpg": "faefr42345dsfg"
         }
-        self.mock_urlmapper.get_id.side_effect = lambda url: tid_map[url]
+        self.mock_urlmapper.side_effect = lambda url: tid_map[url]
+
+        # Mock out the responses for getting the account id from tracker id
+        tai_map = {
+            "tai_prod": ("account1",
+                         neondata.TrackerAccountIDMapper.PRODUCTION),
+            "tai_stage": ("account1",
+                          neondata.TrackerAccountIDMapper.STAGING),
+            }
+        self.account_mapper.side_effect = lambda tai: tai_map[tai]
+        
 
         # Run the map reduce job
         runner = self.mr.make_runner()
         runner.run()
         
-        self.assertGreater(self.mock_urlmapper.get_id.call_count, 0)
+        self.assertGreater(self.mock_urlmapper.call_count, 0)
+        self.assertGreater(self.account_mapper.call_count, 0)
         self.assertGreater(MySQLdb.connect.call_count, 0)
 
         # Finally, check the database to make sure it says what we want
@@ -384,7 +450,7 @@ class TestEndToEnd(unittest.TestCase):
 
         cursor.execute('select logtime from last_update where '
                        'tablename = "hourly_events"')
-        self.assertEqual(cursor.fetchone()[0], sec2str(19810))
+        self.assertEqual(cursor.fetchone()[0], sec2str(19820))
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

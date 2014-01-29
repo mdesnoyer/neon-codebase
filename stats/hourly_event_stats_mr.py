@@ -75,7 +75,7 @@ class HourlyEventStats(MRJob):
 
         In particular, the output is:
 
-        ((event_type, img_url, hour), 1)
+        ((event_type, img_url, tracker_id, hour), 1)
         For counting on an hourly basis
 
         or
@@ -92,6 +92,8 @@ class HourlyEventStats(MRJob):
                     'HTML5_bc_load',
                     1)
                 return
+
+            tracker_id = data['tai']
             
             hour = data['sts'] / 3600
             if data['a'] == 'load':
@@ -99,9 +101,9 @@ class HourlyEventStats(MRJob):
                     raise KeyError('imgs')
                 for img in data['imgs']:
                     if img is not None:
-                        yield (('load', img, hour),  1)
+                        yield (('load', img, tracker_id, hour),  1)
             elif data['a'] == 'click':
-                yield(('click', data['img'], hour), 1)
+                yield(('click', data['img'], tracker_id, hour), 1)
 
             yield ('latest', data['sts'])
         except ValueError as e:
@@ -129,12 +131,38 @@ class HourlyEventStats(MRJob):
         pass
 
     def map_thumbnail_url2id(self, event, count):
-        '''Maps from the external thumbnail url to our internal id.'''
+        '''Maps from the external thumbnail url to our internal id.
+
+        Also filters those entries from non-production tracker ids.
+
+        Input:
+        ((event_type, img_url, tracker_id, hour), count)
+
+        Output:
+        ((event_type, thumb_id, hour), count)
+
+        or
+        
+        ('latest', time)
+        For tracking the last known event
+        '''
         if event == 'latest':
             yield (event, count)
             return
 
         try:
+            account_info = neondata.TrackerAccountIDMapper.get_neon_account_id(
+                event[2])
+            if account_info is None:
+                _log.warn('Tracker ID %s unknown', event[2])
+                self.increment_counter('HourlyEventStatsErrors',
+                                       'UnknownTrackerId', 1)
+                return
+            elif account_info[1] != neondata.TrackerAccountIDMapper.PRODUCTION:
+                # The tracker ID isn't flagged for production, so drop
+                # this entry
+                return
+            
             thumb_id = neondata.ThumbnailURLMapper.get_id(event[1])
 
             if thumb_id is None:
@@ -148,7 +176,7 @@ class HourlyEventStats(MRJob):
                                        'ThumbIDTooShort', 1)
                 
             else:
-                yield (event[0], thumb_id, event[2]), count
+                yield (event[0], thumb_id, event[3]), count
         except redis.exceptions.RedisError as e:
             _log.exception('Error getting data from Redis server: %s' % e)
             self.increment_counter('HourlyEventStatsErrors',
