@@ -11,25 +11,25 @@ import bcove_responses
 import logging
 _log = logging.getLogger(__name__)
 import multiprocessing
-from mock import patch, MagicMock
+from mock import patch
 import test_utils.neontest
 import test_utils.redis
 import time
 import threading
-from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
+from tornado.httpclient import HTTPResponse, HTTPRequest
 import tornado.ioloop
-from utils.options import define, options
+from utils.options import options
 import unittest
-
-from supportServices.neondata import *
-from test_utils.redis import * 
-
-#TODO: Test db connection stuff and more.....
+import test_utils.redis 
+from StringIO import StringIO
+from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
+        YoutubePlatform, NeonUserAccount, DBConnection, NeonApiKey, \
+        AbstractPlatform, VideoMetadata
 
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestNeondata, self).setUp()
-        self.redis = RedisServer()
+        self.redis = test_utils.redis.RedisServer()
         self.redis.start()
 
     def tearDown(self):
@@ -149,13 +149,14 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         self.assertNotEqual(self.bp_conn, self.vm_conn)
 
-    #Verify that database connection is re-established after config change
     def test_db_connection_error(self):
+        ''' #Verify that database connection is re-established 
+        after config change '''
         ap = AbstractPlatform()
         db = DBConnection(ap)
         key = "fookey"
         val = "fooval"
-        self.assertTrue(db.blocking_conn.set(key,val))
+        self.assertTrue(db.blocking_conn.set(key, val))
         self.redis.stop()
         
         #try fetching the key after db has been stopped
@@ -165,31 +166,38 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             print e
             #assert exception is ConnectionError 
 
-        self.redis = RedisServer()
+        self.redis = test_utils.redis.RedisServer()
         self.redis.start()
         
         #Trigger a change in the options, so that the watchdog thread 
         #can update the connection
-        options._set("supportServices.neondata.dbPort",self.redis.port)
+        options._set("supportServices.neondata.dbPort", self.redis.port)
         check_interval = options.get("supportServices.neondata.watchdogInterval")
         time.sleep(check_interval + 0.5)
         
         #try any db operation
-        self.assertTrue(db.blocking_conn.set(key,val))
+        self.assertTrue(db.blocking_conn.set(key, val))
 
     #TODO: Test Async DB Connection
     
     def test_db_connection(self):
+        ''' 
+        DB Connection test
+        '''
         ap = AbstractPlatform()
         db = DBConnection(ap)
         key = "fookey"
         val = "fooval"
-        self.assertTrue(db.blocking_conn.set(key,val))
-        self.assertEqual(db.blocking_conn.get(key),val)
+        self.assertTrue(db.blocking_conn.set(key, val))
+        self.assertEqual(db.blocking_conn.get(key), val)
         self.assertTrue(db.blocking_conn.delete(key))
 
     def test_concurrent_requests(self):
+        ''' Make concurrent requests to the db 
+            verify that singleton instance doesnt cause race condition
+        '''
         def db_operation(key):
+            ''' db op '''
             resultQ.put(db.blocking_conn.get(key))
 
         ap = AbstractPlatform()
@@ -198,12 +206,12 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         val = "fooval"*1000
         nkeys = 100
         for i in range(nkeys):
-            db.blocking_conn.set(key+"%s"%i,val+"%s"%i)
+            db.blocking_conn.set(key+"%s"%i, val+"%s"%i)
        
         resultQ =  multiprocessing.Queue()
         threads = []
         for n in range(nkeys):
-            thread = threading.Thread(target=db_operation,args=(key+"%s"%n,))
+            thread = threading.Thread(target=db_operation, args=(key+"%s"%n,))
             threads.append(thread)
             thread.start()
 
@@ -236,7 +244,11 @@ class TestBrightcovePlatform(unittest.TestCase):
         super(TestBrightcovePlatform, self).tearDown()
 
     def test_check_feed(self):
-        def _side_effect(*args,**kwargs):
+        ''' check brightcove feed '''
+
+        def _side_effect(*args, **kwargs):
+            ''' mock side effect '''
+
             request = args[0]
             if "find_modified_videos" in request.url:
                 return bcove_find_modified_videos_response 
@@ -278,7 +290,7 @@ class TestBrightcovePlatform(unittest.TestCase):
 
 if __name__ == '__main__':
     
-    test_classes_to_run = [TestNeondata,TestBrightcovePlatform]
+    test_classes_to_run = [TestNeondata, TestBrightcovePlatform]
     loader = unittest.TestLoader()
 
     suites_list = []

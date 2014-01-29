@@ -306,8 +306,7 @@ class NeonApiKey(object):
 
     @classmethod
     def get_api_key(cls, a_id, callback=None):
-        #Add prefix to support web account namespacing
-        #a_id = "production_test1_%s" %a_id
+        ''' get api key from db '''
         db_connection = DBConnection(cls)
         key = NeonApiKey.format_key(a_id)
         if callback:

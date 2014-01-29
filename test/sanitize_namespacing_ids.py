@@ -18,14 +18,26 @@ def main():
     for nuser in nuser_accounts:
         a_id = nuser.account_id.split('_')[-1]
         key = neondata.NeonApiKey.format_key(a_id)
+        new_integrations = {}
         db_connection.blocking_conn.set(key, nuser.neon_api_key)
         nuser.account_id = a_id
-        nuser.save()
         platforms = nuser.get_platforms() 
         for platform in platforms:
             #remove any prefixes
             platform.account_id = a_id 
-            platform.save()
+            platform.integration_id = platform.integration_id.split('_')[-1]
+            #recreate key
+            platform.key = platform.__class__.__name__.lower() +\
+                    '_%s_%s' %(platform.neon_api_key, platform.integration_id)
+            print a_id, platform.integration_id
+            platform.save() 
+        
+        #update integration ids
+        for key, value in nuser.integrations.iteritems():
+            k = key.split('_')[-1]
+            new_integrations[k] = value
+        nuser.integrations = new_integrations
+        nuser.save()
 
 if __name__ == "__main__":
     utils.neon.InitNeon()
