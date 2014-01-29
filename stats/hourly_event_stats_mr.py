@@ -92,6 +92,8 @@ class HourlyEventStats(MRJob):
                     'HTML5_bc_load',
                     1)
                 return
+
+            tracker_id = data['tai']
             
             hour = data['sts'] / 3600
             if data['a'] == 'load':
@@ -99,9 +101,9 @@ class HourlyEventStats(MRJob):
                     raise KeyError('imgs')
                 for img in data['imgs']:
                     if img is not None:
-                        yield (('load', img, hour),  1)
+                        yield (('load', img, tracker_id, hour),  1)
             elif data['a'] == 'click':
-                yield(('click', data['img'], hour), 1)
+                yield(('click', data['img'], tracker_id, hour), 1)
 
             yield ('latest', data['sts'])
         except ValueError as e:
@@ -152,7 +154,7 @@ class HourlyEventStats(MRJob):
             account_info = neondata.TrackerAccountIDMapper.get_neon_account_id(
                 event[2])
             if account_info is None:
-                _log.warn('Tracker ID %i unknown', event[2])
+                _log.warn('Tracker ID %s unknown', event[2])
                 self.increment_counter('HourlyEventStatsErrors',
                                        'UnknownTrackerId', 1)
                 return
