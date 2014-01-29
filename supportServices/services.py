@@ -385,7 +385,7 @@ class AccountHandler(tornado.web.RequestHandler):
         #Validate link
         invalid_content_types = ['text/html', 'text/plain', 'application/json',
                     'application/x-www-form-urlencoded', 
-                    'text/html; charset=UTF-8']
+                    'text/html; charset=utf-8']
         http_client = tornado.httpclient.AsyncHTTPClient()
         headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
@@ -395,6 +395,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
         vresponse = yield tornado.gen.Task(http_client.fetch, req)
         ctype = vresponse.headers.get('Content-Type')
+        ctype = ctype.lower()
         if vresponse.error or ctype is None or ctype in invalid_content_types:
             data = '{"error":"link given is invalid or not a video file"}'
             self.send_json_response(data, 400)
