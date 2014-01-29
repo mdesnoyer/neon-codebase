@@ -43,11 +43,12 @@ def create_tables(cursor):
                        id INT AUTO_INCREMENT UNIQUE,
                        neon_acct_id varchar(128) NOT NULL,
                        page varchar(2048) NOT NULL,
+                       is_testing BOOLEAN NOT NULL,
                        last_load DATETIME,
                        last_click DATETIME)''' %
                        options.pages_seen_table)
     
-    cursor.execute('''CREATE TABLE IF NOT EXISTS last_update (
+        cursor.execute('''CREATE TABLE IF NOT EXISTS last_update (
                       tablename VARCHAR(255) NOT NULL UNIQUE,
                       logtime DATETIME)''')
 

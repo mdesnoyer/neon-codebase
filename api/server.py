@@ -3,47 +3,36 @@ import os.path
 import sys
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+    sys.path.insert(0, base_path)
 
 import tornado.httpserver
 import tornado.ioloop
 import tornado.web
 import tornado.escape
 import tornado.httpclient
-import json
 import multiprocessing
 import Queue
-import signal
 import time
-import urllib
-import urlparse
-import youtube
 import hashlib
 import re
 import properties
 import os
 import utils.ps
 
-from boto.s3.connection import S3Connection
-from boto.exception import S3ResponseError
-from boto.s3.key import Key
-from boto.s3.bucket import Bucket
-from StringIO import StringIO
-
-from neon_apikey import APIKey
-from brightcove_metadata import BrightcoveMetadata
-
-from supportServices.neondata import *
+from supportServices.neondata import NeonApiRequest, BrightcoveApiRequest
+from supportServices.neondata import NeonPlatform, YoutubePlatform, \
+        BrightcovePlatform, VideoMetadata, RequestState, InternalVideoID 
 import utils.neon
 
 #Tornado options
 from utils.options import define, options
 define("port", default=8081, help="run on the given port", type=int)
 MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
-    
+
+import logging
 _log = logging.getLogger(__name__)
 
-dir = os.path.dirname(__file__)
+DIRNAME = os.path.dirname(__file__)
 
 #=============== Global Handlers ======================================#
 
@@ -60,16 +49,21 @@ def check_remote_ip(request):
             pass
     return is_remote
 
+def _verify_neon_auth(value):
+    #TODO: Implement the authentication token logic
+    return True
+
 ## ===================== API ===========================================#
 ## Internal Handlers and not be exposed externally
 ## ===================== API ===========================================#
 
 class StatsHandler(tornado.web.RequestHandler):
+    ''' Qsize handler '''
     def get(self, *args, **kwargs):
         size = -1
         try:
             size = global_api_work_queue.qsize() #Doesn't work on mac osX
-        except:
+        except Exception, e:
             pass
 
         if check_remote_ip(self.request) == False:
@@ -79,6 +73,11 @@ class StatsHandler(tornado.web.RequestHandler):
 class DequeueHandler(tornado.web.RequestHandler):
     """ DEQUEUE JOB Handler - The queue stores data in json format already """
     def get(self, *args, **kwargs):
+        if self.request.headers.has_key('X-Neon-Auth'):
+            if not _verify_neon_auth(self.request.headers.get('X-Neon-Auth')):
+                raise tornado.web.HTTPError(400)
+        else:
+            raise tornado.web.HTTPError(400)
         
         try:
             element = global_api_work_queue.get_nowait()
@@ -102,7 +101,6 @@ class RequeueHandler(tornado.web.RequestHandler):
         
         try:
             _log.info("key=requeue_handler msg=requeing ")
-            #data = tornado.escape.url_unescape(self.request.body, encoding='utf-8')
             data = self.request.body
             #TODO Verify data Format
             global_api_work_queue.put(data)
@@ -152,6 +150,7 @@ class JobStatusHandler(tornado.web.RequestHandler):
             if not result:
                 self.set_status(400)
                 resp = '{"status":"no such job"}'
+                self.write(resp)
                 self.finish()
                 return
 
@@ -161,14 +160,15 @@ class JobStatusHandler(tornado.web.RequestHandler):
         try:
             api_key = self.get_argument(properties.API_KEY)
             job_id  = self.get_argument(properties.REQUEST_UUID_KEY)
-            NeonApiRequest.get_request(api_key,job_id,db_callback)
+            NeonApiRequest.get_request(api_key,job_id, db_callback)
 
         except Exception,e:
             _log.error("key=jobstatus_handler msg=exception " + e.__str__())
             raise tornado.web.HTTPError(400)
 
-
 class GetThumbnailsHandler(tornado.web.RequestHandler):
+    ''' Thumbnail API handler '''
+
     test_mode = False
     parsed_params = {}
 
@@ -178,7 +178,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
         #insert job in to user account
         def update_account(result):
             if not result:
-                _log.error("key=thumbnail_handler update account  msg=video not added to account")
+                _log.error("key=thumbnail_handler update account " 
+                            "  msg=video not added to account")
                 self.write(response_data)
                 self.set_status(201)
                 self.finish()
@@ -192,9 +193,12 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             #For brightcove account, its saved
             if result:
                 if "youtubeaccount" in result:
-                    yt = Youtube.create(result)
-                    yt.add_video(vid,job_id)
-                    yt.save(update_account)
+                    #yt = Youtube.create(result)
+                    #yt.add_video(vid, job_id)
+                    #yt.save(update_account)
+                    self.write("NOT YET IMPL")
+                    self.finish()
+                    return
             else:
                 _log.error("key=thumbnail_handler update yt account" 
                         " msg=account not found or api key error")
@@ -204,7 +208,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                
         def get_platform(nplatform):
             if nplatform:
-                nplatform.add_video(vid,job_id)
+                nplatform.add_video(vid, job_id)
                 nplatform.save(update_account)
             else:
                 _log.error("key=thumbnail_handler update platform account" 
@@ -242,12 +246,10 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 title = params[properties.VIDEO_TITLE]
                 url = params[properties.VIDEO_DOWNLOAD_URL]
                 http_callback = params[properties.CALLBACK_URL]
-            except KeyError,e:
+            except KeyError, e:
                 raise Exception("params not set") #convert to custom exception
 
             #TODO Verify API Key
-            #if not self.verify_api_key(api_key):
-            #    raise Exception("API key invalid")
             
             #compare with supported api methods
             if params.has_key(properties.TOP_THUMBNAILS):
@@ -276,8 +278,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 autosync = params["autosync"]
                 request_type = "brightcove"
                 i_id = params[properties.INTEGRATION_ID]
-                api_request = BrightcoveApiRequest(job_id,api_key,vid,title,url,
-                                        rtoken,wtoken,pub_id,http_callback,i_id)
+                api_request = BrightcoveApiRequest(job_id, api_key, vid, title, url,
+                                        rtoken, wtoken, pub_id, http_callback, i_id)
                 api_request.previous_thumbnail = p_thumb 
                 api_request.autosync = autosync
 
@@ -287,17 +289,17 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 refresh_token = params["refresh_token"]
                 expiry = params["token_expiry"]
                 autosync = params["autosync"]
-                api_request = YoutubeApiRequest(job_id,api_key,vid,title,url,
-                                        access_token,refresh_token,expiry,http_callback)
+                api_request = YoutubeApiRequest(job_id, api_key, vid, title, url,
+                                        access_token, refresh_token, expiry, http_callback)
                 api_request.previous_thumbnail = "http://img.youtube.com/vi/" + vid + "maxresdefault.jpg"
 
             else:
                 request_type = "neon"
-                api_request = NeonApiRequest(job_id,api_key,vid,title,url,
-                        request_type,http_callback)
+                api_request = NeonApiRequest(job_id, api_key, vid, title, url,
+                        request_type, http_callback)
             
             #API Method
-            api_request.set_api_method(api_method,api_param)
+            api_request.set_api_method(api_method, api_param)
             api_request.submit_time = str(time.time())
             api_request.state = RequestState.SUBMIT
 
@@ -307,7 +309,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                                                 api_request.api_key,
                                                 api_request.job_id)
             if job_result is not None:
-                response_data = '{"error":"duplicate job"}' 
+                response_data = '{"error":"duplicate job %r" }'%job_result 
                 self.write(response_data)
                 self.set_status(409)
                 self.finish()
@@ -336,23 +338,11 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     self.write(response_data)
                     self.finish()
 
-        except Exception,e:
+        except Exception, e:
             _log.exception("key=thumbnail_handler msg= %s"%e)
             self.set_status(400)
             self.finish("<html><body>Bad Request " + e.__str__() + " </body></html>")
             return
-
-    def verify_api_key(selfi,key):
-        fname = os.path.join(dir,properties.API_KEY_FILE) 
-        with open(fname, 'r') as f:
-            json = f.readline()
-        
-        keys = tornado.escape.json_decode(json)
-        if key not in keys.values():
-            return False
-        
-        return True
-
 
 ###########################################
 # TEST Handlers 

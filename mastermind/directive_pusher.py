@@ -4,6 +4,12 @@ Module that handles the pushing serving directives to the controllers.
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright 2013 Neon Labs
 '''
+import os.path
+import sys
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
+    
 import concurrent.futures
 import json
 import logging

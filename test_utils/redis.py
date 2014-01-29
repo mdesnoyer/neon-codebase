@@ -4,12 +4,15 @@ Utilities to deal with redis in tests
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright 2013 Neon Labs
 '''
+
 import os.path
 import sys
-sys.path.insert(0,os.path.abspath(
-    os.path.join(os.path.dirname(__file__), '..', '..')))
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0,base_path)
 
 import logging
+from . import net
 import random
 import re
 import subprocess
@@ -38,9 +41,11 @@ class RedisServer:
     def __init__(self, port=None):
         self.port = port
         if self.port is None:
-            self.port = random.randint(10000,11000)
+            self.port = net.find_free_port()
 
     def start(self):
+        ''' Start on a random port and set supportServices.neondata.dbPort '''
+
         self.config_file = tempfile.NamedTemporaryFile()
         self.config_file.write('port %i\n' % self.port)
         self.config_file.flush()
@@ -72,7 +77,10 @@ class RedisServer:
         
 
     def stop(self):
+        ''' stop redis instance '''
+
         self.config_file.close()
         options._set('supportServices.neondata.dbPort', self.old_port)
         self.proc.terminate()
         self.proc.wait()
+        _log.info('Redis server on port %i stopped' % self.port)

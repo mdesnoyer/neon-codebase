@@ -6,6 +6,7 @@ if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
 from datetime import datetime
+import mock
 from mock import MagicMock, patch
 from mrjob.protocol import *
 import MySQLdb
@@ -148,7 +149,8 @@ class TestIDMapping(neontest.TestCase):
 
     @patch('stats.tracker_monitoring_mr.neondata.TrackerAccountIDMapper.get_neon_account_id')
     def test_valid_mapping(self, mock_mapper):
-        mock_mapper.return_value = "54s9dfewgvw9e8g9"
+        mock_mapper.return_value = ("54s9dfewgvw9e8g9",
+                                    neondata.TrackerAccountIDMapper.PRODUCTION)
         results, counters = test_utils.mr.run_single_step(self.mr,
             encode([(('click', 'first.com', 'tid'), 3)]),
             step=1)
@@ -157,7 +159,22 @@ class TestIDMapping(neontest.TestCase):
         cargs, kwargs = mock_mapper.call_args
         self.assertEqual(cargs[0], 'tid')
         self.assertItemsEqual(results[0],
-                              (('click', 'first.com', '54s9dfewgvw9e8g9'),
+                              (('click', 'first.com','54s9dfewgvw9e8g9',False),
+                               3))
+
+    @patch('stats.tracker_monitoring_mr.neondata.TrackerAccountIDMapper.get_neon_account_id')
+    def test_valid_staging_mapping(self, mock_mapper):
+        mock_mapper.return_value = ("54s9dfewgvw9e8g9",
+                                    neondata.TrackerAccountIDMapper.STAGING)
+        results, counters = test_utils.mr.run_single_step(self.mr,
+            encode([(('click', 'first.com', 'tid'), 3)]),
+            step=1)
+
+        self.assertEqual(mock_mapper.call_count, 1)
+        cargs, kwargs = mock_mapper.call_args
+        self.assertEqual(cargs[0], 'tid')
+        self.assertItemsEqual(results[0],
+                              (('click', 'first.com','54s9dfewgvw9e8g9',True),
                                3))
 
     @patch('stats.tracker_monitoring_mr.neondata.TrackerAccountIDMapper.get_neon_account_id')
@@ -202,8 +219,25 @@ class TestDatabaseWriting(neontest.TestCase):
             'stats.tracker_monitoring_mr.urllib2.urlopen')
         self.mock_urlopen = self.urlopen_patcher.start()
 
+        self.account_patch = patch(
+            'stats.tracker_monitoring_mr.neondata.'
+            'NeonUserAccount.get_account')
+        self.get_account_mock = self.account_patch.start()
+        self.account_mock = MagicMock()
+        self.get_account_mock.return_value = self.account_mock
+        self.account_mock.get_platforms.return_value = [
+            MagicMock() for x in range(2)]
+        
+        self.api_key_patch = patch(
+            'stats.tracker_monitoring_mr.neondata.'
+            'NeonApiKey.get_api_key')
+        self.api_key_mock = self.api_key_patch.start()
+        self.api_key_mock.return_value = "neon_api_key"
+
     def tearDown(self):
         self.urlopen_patcher.stop()
+        self.account_patch.stop()
+        self.api_key_patch.stop()
         MySQLdb.connect = self.dbconnect
         try:
             cursor = self.ramdb.cursor()
@@ -212,17 +246,19 @@ class TestDatabaseWriting(neontest.TestCase):
         except Exception as e:
             pass
         self.ramdb.close()
-        os.remove('file::memory:?cache=shared')
+        f = 'file::memory:?cache=shared'
+        if os.path.exists(f):
+            os.remove(f)
 
     def test_table_creation(self):
         results, counters = test_utils.mr.run_single_step(self.mr, '', step=2)
         cursor = self.ramdb.cursor()
         cursor.execute('select * from %s' % stats.db.get_pages_seen_table())
         self.assertEqual(len(cursor.fetchall()), 0)
-        self.assertEqual(len(cursor.description), 5)
+        self.assertEqual(len(cursor.description), 6)
         self.assertEqual([x[0] for x in cursor.description],
-                         ['id', 'neon_acct_id', 'page', 'last_load',
-                          'last_click'])
+                         ['id', 'neon_acct_id', 'page', 'is_testing',
+                          'last_load', 'last_click'])
 
     def test_new_click_entry(self):
         self.mock_urlopen().getcode.return_value = 200
@@ -230,19 +266,19 @@ class TestDatabaseWriting(neontest.TestCase):
         
         garb, counters = test_utils.mr.run_single_step(
             self.mr,
-            encode([(('click', 'www.go.com/now', 'na4576'), 15600)]),
+            encode([(('click', 'www.go.com/now', 'na4576', False), 15600)]),
             step=2)
-
+        
         # Make sure that there were no errors
         self.assertEqual(counters, {})
 
         # Make sure that the entry in the database was updated
         cursor = self.ramdb.cursor()
-        cursor.execute('select neon_acct_id, page, last_click '
+        cursor.execute('select neon_acct_id, page, is_testing, last_click '
                        'from pages_seen')
         self.assertEqual(cursor.fetchall(),
-                         [('na4576', 'www.go.com/now', sec2str(15600))])
-
+                         [('na4576', 'www.go.com/now', False, sec2str(15600))])
+        
         # Now ensure that an analytics received message was received
         self.assertEqual(self.mock_urlopen.call_count, 1)
         request = self.mock_urlopen.call_args[0][0]
@@ -250,7 +286,14 @@ class TestDatabaseWriting(neontest.TestCase):
             request.get_full_url(),
             'http://api.neon-lab.com/accounts/na4576/analytics_received')
         self.assertEqual(request.headers['X-neon-api-key'],
-                         neondata.NeonApiKey.generate('na4576'))
+                         neondata.NeonApiKey.get_api_key('na4576'))
+
+        # Make sure that the abtesting was turned on
+        self.get_account_mock.assert_called_once_with(
+            neondata.NeonApiKey.get_api_key('na4576'))
+        for platform in self.account_mock.get_platforms():
+            self.assertTrue(platform.abtest)
+            platform.save.assert_called_once_with()
 
     def test_many_entries_for_same_account(self):
         self.mock_urlopen().getcode.return_value = 200
@@ -258,9 +301,10 @@ class TestDatabaseWriting(neontest.TestCase):
 
         garb, counters = test_utils.mr.run_single_step(
             self.mr,
-            encode([(('click', 'www.go.com/now', 'na4576'), 15600),
-                    (('load', 'www.go.com/now', 'na4576'), 15500),
-                    (('load', 'www.go.com/later', 'na4576'), 15700),]),
+            encode([(('click', 'www.go.com/now', 'na4576', False), 15600),
+                    (('load', 'www.go.com/now', 'na4576', False), 15500),
+                    (('load', 'www.go.com/later', 'na4576', False), 15700),
+                    (('load', 'www.go.com/around', 'na4576', True), 14800),]),
             step=2)
 
         # Make sure that there were no errors
@@ -269,14 +313,46 @@ class TestDatabaseWriting(neontest.TestCase):
         # Make sure that only one analytics received message was sent
         self.assertEqual(self.mock_urlopen.call_count, 1)
 
+        # Make sure that the ab testing was turned on only once
+        self.get_account_mock.assert_called_once_with(
+            neondata.NeonApiKey.get_api_key('na4576'))
+
         # Check the database
         cursor = self.ramdb.cursor()
-        cursor.execute('select neon_acct_id, page, last_click, last_load '
-                       'from pages_seen')
+        cursor.execute('select neon_acct_id, page, is_testing, last_click, '
+                       'last_load from pages_seen')
         self.assertItemsEqual(
             cursor.fetchall(),
-            [('na4576', 'www.go.com/now', sec2str(15600), sec2str(15500)),
-             ('na4576', 'www.go.com/later', None, sec2str(15700))])
+            [('na4576','www.go.com/now',False,sec2str(15600),sec2str(15500)),
+             ('na4576', 'www.go.com/later', False, None, sec2str(15700)),
+             ('na4576', 'www.go.com/around', True, None, sec2str(14800))])
+
+    def test_only_staging_entries(self):
+        self.mock_urlopen().getcode.return_value = 200
+        self.mock_urlopen.reset_mock()
+
+        garb, counters = test_utils.mr.run_single_step(
+            self.mr,
+            encode([(('click', 'www.go.com/now', 'na4576', True), 15600),
+                    (('load', 'www.go.com/now', 'na4576', True), 15500)]),
+            step=2)
+
+        # Make sure that there were no errors
+        self.assertEqual(counters, {})
+
+        # Make sure that no analytics received message was sent
+        self.assertEqual(self.mock_urlopen.call_count, 0)
+
+        # Make sure that the ab testing was not turned on
+        self.assertEqual(self.get_account_mock.call_count, 0)
+
+        # Check the database
+        cursor = self.ramdb.cursor()
+        cursor.execute('select neon_acct_id, page, is_testing, last_click, '
+                       'last_load from pages_seen')
+        self.assertItemsEqual(
+            cursor.fetchall(),
+            [('na4576','www.go.com/now',True,sec2str(15600),sec2str(15500))])
 
     def test_update_entry(self):
         self.mock_urlopen().getcode.return_value = 200
@@ -284,16 +360,17 @@ class TestDatabaseWriting(neontest.TestCase):
         # Record some data first
         test_utils.mr.run_single_step(
             self.mr,
-            encode([(('load', 'www.go.com/now', 'na4576'), 15500)]),
+            encode([(('load', 'www.go.com/now', 'na4576', False), 15500)]),
             step=2)
 
         self.mock_urlopen.reset_mock()
+        self.get_account_mock.reset_mock()
 
         # Now send data that will update the entry
         garb, counters = test_utils.mr.run_single_step(
             self.mr,
-            encode([(('click', 'www.go.com/now', 'na4576'), 16600),
-                    (('load', 'www.go.com/now', 'na4576'), 16500)]),
+            encode([(('click', 'www.go.com/now', 'na4576', False), 16600),
+                    (('load', 'www.go.com/now', 'na4576', False), 16500)]),
             step=2)
 
         # Make sure that there were no errors
@@ -301,14 +378,18 @@ class TestDatabaseWriting(neontest.TestCase):
 
         # Make sure that there was no analytics received message sent
         self.assertEqual(self.mock_urlopen.call_count, 0)
+
+        # Make sure that the ab testing wasn't changed
+        self.assertEqual(self.get_account_mock.call_count, 0)
         
         # Make sure that the entry in the database was updated
         cursor = self.ramdb.cursor()
-        cursor.execute('select neon_acct_id, page, last_click, last_load '
-                       'from pages_seen')
+        cursor.execute('select neon_acct_id, page, is_testing, last_click, '
+                       'last_load from pages_seen')
         self.assertEqual(
             cursor.fetchall(),
-            [('na4576', 'www.go.com/now', sec2str(16600), sec2str(16500))])
+            [('na4576', 'www.go.com/now', False, sec2str(16600),
+              sec2str(16500))])
 
     def test_multiple_accounts(self):
         self.mock_urlopen().getcode.return_value = 200
@@ -316,9 +397,9 @@ class TestDatabaseWriting(neontest.TestCase):
 
         garb, counters = test_utils.mr.run_single_step(
             self.mr,
-            encode([(('click', 'www.go.com/now', 'na4576'), 15600),
-                    (('load', 'www.go.com/now', 'na4576'), 15500),
-                    (('load', 'www.go.com/now', '4576na'), 15700),]),
+            encode([(('click', 'www.go.com/now', 'na4576', False), 15600),
+                    (('load', 'www.go.com/now', 'na4576', False), 15500),
+                    (('load', 'www.go.com/now', '4576na', False), 15700),]),
             step=2)
 
         # Make sure that there were no errors
@@ -326,24 +407,54 @@ class TestDatabaseWriting(neontest.TestCase):
 
         # Make sure that two analytics received message was sent
         self.assertEqual(self.mock_urlopen.call_count, 2)
+
+        # Make sure that abtesting was updated for both accounts
+        self.get_account_mock.assert_has_calls(
+            [mock.call(neondata.NeonApiKey.get_api_key('na4576')),
+             mock.call(neondata.NeonApiKey.get_api_key('4576na'))], True)
         
         # Check the database
         cursor = self.ramdb.cursor()
-        cursor.execute('select neon_acct_id, page, last_click, last_load '
-                       'from pages_seen')
+        cursor.execute('select neon_acct_id, page, last_click, last_load, '
+                       'is_testing from pages_seen')
         self.assertItemsEqual(
             cursor.fetchall(),
-            [('na4576', 'www.go.com/now', sec2str(15600), sec2str(15500)),
-             ('4576na', 'www.go.com/now', None, sec2str(15700))])
+            [('na4576', 'www.go.com/now', sec2str(15600),sec2str(15500),False),
+             ('4576na', 'www.go.com/now', None, sec2str(15700), False)])
+
+    def test_update_account_lookup_error(self):
+        self.mock_urlopen().getcode.return_value = 200
+        self.get_account_mock.side_effect = redis.exceptions.RedisError
+
+        results, counters = test_utils.mr.run_single_step(
+            self.mr,
+            encode([(('load', 'www.go.com/now', 'na4576', False), 15500)]),
+            step=2)
+
+        self.assertEqual(counters['TrackerMonitoringErrors']['RedisError'],
+                         1)
+
+    def test_get_platforms_error(self):
+        self.mock_urlopen().getcode.return_value = 200
+        self.account_mock.get_platforms.side_effect = \
+          redis.exceptions.RedisError
+
+        results, counters = test_utils.mr.run_single_step(
+            self.mr,
+            encode([(('load', 'www.go.com/now', 'na4576', False), 15500)]),
+            step=2)
+
+        self.assertEqual(counters['TrackerMonitoringErrors']['RedisError'],
+                         1)
 
     def test_notify_analytics_error(self):
         self.mock_urlopen.side_effect = urllib2.URLError('Oops')
 
         results, counters = test_utils.mr.run_single_step(
             self.mr,
-            encode([(('click', 'www.go.com/now', 'na4576'), 15600),
-                    (('load', 'www.go.com/now', 'na4576'), 15500),
-                    (('load', 'www.go.com/now', '4576na'), 15700),]),
+            encode([(('click', 'www.go.com/now', 'na4576', False), 15600),
+                    (('load', 'www.go.com/now', 'na4576', False), 15500),
+                    (('load', 'www.go.com/now', '4576na', False), 15700),]),
             step=2)
 
         self.assertEqual(results, [])
@@ -357,9 +468,9 @@ class TestDatabaseWriting(neontest.TestCase):
 
         results, counters = test_utils.mr.run_single_step(
             self.mr,
-            encode([(('click', 'www.go.com/now', 'na4576'), 15600),
-                    (('load', 'www.go.com/now', 'na4576'), 15500),
-                    (('load', 'www.go.com/now', '4576na'), 15700),]),
+            encode([(('click', 'www.go.com/now', 'na4576', False), 15600),
+                    (('load', 'www.go.com/now', 'na4576', False), 15500),
+                    (('load', 'www.go.com/now', '4576na', False), 15700),]),
             step=2)
 
         self.assertEqual(results, [])
@@ -377,6 +488,7 @@ class TestDatabaseWriting(neontest.TestCase):
 class TestEndToEnd(neontest.TestCase):
     '''Tests database writing step.'''
     def setUp(self):
+        self.maxDiff = None
         self.mr = tm.TrackerMonitoring(['-r', 'inline', '--no-conf', '-'])
 
         self.idmapper_patch = patch(
@@ -387,6 +499,15 @@ class TestEndToEnd(neontest.TestCase):
         self.urlopen_patcher = patch(
             'stats.tracker_monitoring_mr.urllib2.urlopen')
         self.mock_urlopen = self.urlopen_patcher.start()
+
+        self.account_patch = patch(
+            'stats.tracker_monitoring_mr.neondata.'
+            'NeonUserAccount.get_account')
+        self.get_account_mock = self.account_patch.start()
+        self.account_mock = MagicMock()
+        self.get_account_mock.return_value = self.account_mock
+        self.account_mock.get_platforms.side_effect = [[
+            MagicMock() for x in range(2)] for x in range(2)]
 
         # For some reason, the in memory database isn't shared, so use
         # a temporary file instead. It worked in the other test case....
@@ -401,10 +522,18 @@ class TestEndToEnd(neontest.TestCase):
         MySQLdb.connect = dbmock
         self.ramdb = connect2db()
         
+        self.api_key_patch = patch(
+            'stats.tracker_monitoring_mr.neondata.'
+            'NeonApiKey.get_api_key')
+        self.api_key_mock = self.api_key_patch.start()
+        self.api_key_mock.return_value = "neon_api_key"
 
     def tearDown(self):
         self.idmapper_patch.stop()
         self.urlopen_patcher.stop()
+        self.account_patch.stop()
+        self.api_key_patch.stop()
+
         MySQLdb.connect = self.dbconnect
         try:
             self.ramdb.execute('drop table pages_seen')
@@ -440,8 +569,8 @@ class TestEndToEnd(neontest.TestCase):
 
         # Mock out the responses for tracker ids to neon account ids
         account_id_map = {
-            "lok": "49a8efg1ea98",
-            "pole": "2348598ewsfrwe"
+            "lok": ("49a8efg1ea98",neondata.TrackerAccountIDMapper.PRODUCTION),
+            "pole": ("2348598ewsfrwe",neondata.TrackerAccountIDMapper.STAGING)
         }
         self.idmapper_mock.side_effect = \
           lambda tai: account_id_map[tai]
@@ -456,19 +585,23 @@ class TestEndToEnd(neontest.TestCase):
         self.assertGreater(self.idmapper_mock.call_count, 0)
         self.assertGreater(MySQLdb.connect.call_count, 0)
 
-        # Make sure notifications were sent for the two accounts
-        self.assertEqual(self.mock_urlopen.call_count, 2)
+        # Make sure notification was only sent for the one account
+        self.assertEqual(self.mock_urlopen.call_count, 1)
+
+        # Verify that the A/B tests were turned on for only one account
+        self.get_account_mock.assert_has_calls(
+            [mock.call(neondata.NeonApiKey.get_api_key('49a8efg1ea98'))], True)
 
         # Finally, check the database to make sure it says what we want
         cursor = self.ramdb.cursor()
-        cursor.execute('select neon_acct_id, page, last_click, last_load '
-                       'from pages_seen')
+        cursor.execute('select neon_acct_id, page, last_click, last_load, '
+                       'is_testing from pages_seen')
         self.assertItemsEqual(
             cursor.fetchall(),
-            [('49a8efg1ea98', 'here.com', sec2str(19810), sec2str(19801)),
-             ('49a8efg1ea98', 'here.com/now', sec2str(19805), None),
-             ('2348598ewsfrwe', 'there.com', None, sec2str(19795)),
-             ('2348598ewsfrwe', 'there.com/where', sec2str(19815), None)])
+            [('49a8efg1ea98', 'here.com',sec2str(19810),sec2str(19801),False),
+             ('49a8efg1ea98', 'here.com/now', sec2str(19805), None, False),
+             ('2348598ewsfrwe', 'there.com', None, sec2str(19795), True),
+             ('2348598ewsfrwe', 'there.com/where', sec2str(19815),None,True)])
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

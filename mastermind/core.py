@@ -6,9 +6,9 @@ Copyright 2013 Neon Labs
 '''
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 import logging
 import math
@@ -341,16 +341,13 @@ class Mastermind(object):
                     _log.error('There were multiple thumbnails chosen for '
                                'video id: %s' % video_id)
                 chosen = thumb
-                chosen_flagged = False
+                chosen_flagged = True
 
             if thumb.origin == 'neon':
                 if neon_chosen is None or thumb.rank < neon_chosen.rank:
                     neon_chosen = thumb
 
-        if chosen is None:
-            chosen = neon_chosen
-
-        if default is None and chosen is None:
+        if default is None and chosen is None and neon_chosen is None:
             _log.error('Could not find any thumbnails to show for video %s'
                        % video_info)
             return []
@@ -358,7 +355,10 @@ class Mastermind(object):
         if default is None:
             _log.error('Could not find default thumbnail for video: %s' %
                        video_info)
-            run_frac[chosen.id] = 1.0
+            if chosen is None:
+                run_frac[neon_chosen.id] = 1.0
+            else:
+                run_frac[chosen.id] = 1.0
         elif chosen is None:
             run_frac[default.id] = 1.0
         elif default.id == chosen.id or not video_info.testing_enabled:

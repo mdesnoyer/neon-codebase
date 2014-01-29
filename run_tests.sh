@@ -33,4 +33,9 @@ if [ -f Testing/TAG ] ; then
 fi
 
 cd ${CURDIR}
-nosetests --with-coverage --with-xunit --cover-package . --cover-erase --exe --cover-xml || true
+
+# Get the list of directories/modules to cover
+COVER_DIRS=( `ls -d */ -1 | sed 's/\///g' | grep -v 'externalLibs' | grep -v 'lib' | grep -v 'bin'` )
+
+nosetests --with-coverage --with-xunit ${COVER_DIRS[@]/#/--cover-package } --cover-erase --exe --cover-xml || true
+pylint --rcfile .pylintrc -f parseable ${COVER_DIRS[*]} > pylint.out

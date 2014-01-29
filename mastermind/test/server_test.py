@@ -7,10 +7,10 @@ Copyright 2013 Neon Labs
 '''
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
-                                         '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
+                                             '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 import mastermind.server
 
 from datetime import datetime
@@ -167,23 +167,31 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.ab_manager = MagicMock()
         self.watcher = mastermind.server.VideoDBWatcher(self.mastermind,
                                                         self.ab_manager)
+
     def tearDown(self):
         pass
 
+                
     def test_good_db_data(self, datamock):
         # Define platforms in the database
-        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', abtest=False)
+
+        api_key = "neon_api_key"
+
+        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
+                                        abtest=False)
         bcPlatform.add_video(0, 'job11')
         bcPlatform.add_video(10, 'job12')
 
-        testPlatform = neondata.BrightcovePlatform('a2', 'i2', abtest=True)
+        testPlatform = neondata.BrightcovePlatform('a2', 'i2', api_key, 
+                                        abtest=True)
         testPlatform.add_video(1, 'job21')
         testPlatform.add_video(2, 'job22')
 
-        apiPlatform = neondata.NeonPlatform('a3', abtest=True)
+        apiPlatform = neondata.NeonPlatform('a3', api_key, abtest=True)
         apiPlatform.add_video(4, 'job31')
 
-        noVidPlatform = neondata.BrightcovePlatform('a4', 'i4', abtest=True)
+        noVidPlatform = neondata.BrightcovePlatform('a4', 'i4', api_key, 
+                                        abtest=True)
         
         datamock.AbstractPlatform.get_all_instances.return_value = \
           [bcPlatform, testPlatform, apiPlatform, noVidPlatform]
@@ -202,11 +210,11 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         TMD = neondata.ThumbnailMetaData
         tid_meta = {
             't01': TMD('t01', 0,0,0,0,'brightcove',0,0,True,False,0),
-            't02': TMD('t02', 0,0,0,0,'neon',0,0,True,False,0),
+            't02': TMD('t02', 0,0,0,0,'neon',0,0,True,True,0),
             't03': TMD('t03', 0,0,0,0,'neon',1,0,True,False,0),
             't11': TMD('t11', 0,0,0,0,'brightcove',0,0,True,False,0),
             't21': TMD('t21', 0,0,0,0,'brightcove',0,0,True,False,0),
-            't22': TMD('t22', 0,0,0,0,'neon',0,0,True,False,0),
+            't22': TMD('t22', 0,0,0,0,'neon',0,0,True,True,0),
             't41': TMD('t41', 0,0,0,0,'neon',0,0,True,False,0),
             't42': TMD('t42', 0,0,0,0,'neon',1,0,True,False,0),
             }
@@ -239,7 +247,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             self.watcher._process_db_data()
 
     def test_video_metadata_missing(self, datamock):
-        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', abtest=True)
+        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', 'api_key', 
+                abtest=True)
         bcPlatform.add_video(0, 'job11')
         bcPlatform.add_video(10, 'job12')
         
@@ -257,7 +266,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertTrue(self.watcher.is_loaded.is_set())
 
     def test_thumb_metadata_missing(self, datamock):
-        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', abtest=True)
+        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', 'api_key',  
+                abtest=True)
         bcPlatform.add_video(0, 'job11')
         bcPlatform.add_video(10, 'job12')
         
@@ -305,22 +315,22 @@ class TestStatsDBWatcher(unittest.TestCase):
         self.server_log = mastermind.server._log
         mastermind.server._log = MagicMock()
 
-        self.dbconnect = MySQLdb.connect
-        dbmock = MagicMock()
         def connect2db(*args, **kwargs):
             return sqlite3.connect('file::memory:?cache=shared')
-        dbmock.side_effect = connect2db
-        MySQLdb.connect = dbmock
         self.ramdb = connect2db()
 
         cursor = self.ramdb.cursor()
         stats.db.create_tables(cursor)
         self.ramdb.commit()
 
+        #patch sqldb connect
+        self.sqlite_connect_patcher = patch('mastermind.server.sqldb.connect')
+        self.sqllite_mock = self.sqlite_connect_patcher.start()
+        self.sqllite_mock.return_value = self.ramdb 
+
     def tearDown(self):
         neondata.ThumbnailIDMapper.get_video_id = self.mod_get_video_id
         mastermind.server._log = self.server_log
-        MySQLdb.connect = self.dbconnect
         try:
             cursor = self.ramdb.cursor()
             cursor.execute('drop table hourly_events')
@@ -332,6 +342,7 @@ class TestStatsDBWatcher(unittest.TestCase):
         f = 'file::memory:?cache=shared'
         if os.path.exists(f):
             os.remove(f)
+        self.sqlite_connect_patcher.stop()
 
     def test_working_db(self):
         # Always say that the thumbnail id is part of the same video
@@ -349,10 +360,10 @@ class TestStatsDBWatcher(unittest.TestCase):
         [('thumbA', datetime(1980, 3, 20, 6), 300, 10),
          ('thumbB', datetime(1980, 3, 20, 6), 10, 0),
          ('thumbB', datetime(1980, 3, 20, 5), 600, 30)])
+        
         cursor.execute('''REPLACE INTO last_update
         (tablename, logtime) VALUES ('hourly_events', '1980-3-20 6:16:00')''')
         self.ramdb.commit()
-
         self.watcher._process_db_data()
 
         # Check that mastermind was updated properly
@@ -384,6 +395,7 @@ class TestStatsDBWatcher(unittest.TestCase):
         [('thumbA', datetime(1980, 3, 20, 6), 300, 10),
          ('thumbB', datetime(1980, 3, 20, 6), 110, 3),
          ('thumbB', datetime(1980, 3, 20, 5), 600, 30)])
+        
         cursor.execute('''REPLACE INTO last_update
         (tablename, logtime) VALUES ('hourly_events', '1980-3-20 6:27:00')''')
         self.ramdb.commit()

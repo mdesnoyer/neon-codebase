@@ -7,9 +7,9 @@ Copyright 2013 Neon Labs
 '''
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 from mastermind.core import DistributionType, VideoInfo, ThumbnailInfo, \
      Mastermind
@@ -199,7 +199,7 @@ class StatsDBWatcher(threading.Thread):
             return
 
         cursor = conn.cursor()
-
+        
         # See if there are any new entries
         stats.db.execute(
             cursor,

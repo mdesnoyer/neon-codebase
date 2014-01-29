@@ -21,21 +21,20 @@ import tornado.ioloop
 import tornado.web
 import tornado.httpclient
 import json
-from StringIO import StringIO
-from mock import patch, MagicMock
-from tornado.concurrent import Future
-from tornado.testing import AsyncHTTPTestCase,AsyncTestCase,AsyncHTTPClient
+from mock import patch
+from tornado.testing import AsyncHTTPTestCase, AsyncTestCase
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 
-from api import server
+from api import server,properties
 from supportServices import neondata
-import utils
 from utils.options import define, options
 import logging
 _log = logging.getLogger(__name__)
 
 random.seed(1324)
 class TestVideoServer(AsyncHTTPTestCase):
+    ''' Video Server test'''
+
     def setUp(self):
         super(TestVideoServer, self).setUp()
         #create un-mocked httpclients for use of testcases later
@@ -54,18 +53,22 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.neon_api_url = self.get_url(self.base_uri)
   
         self.redis = test_utils.redis.RedisServer()
-        self.redis.start() #TODO: May be have this in init for entire test
+        self.redis.start() 
 
         #create test account
-        self.na = neondata.NeonPlatform("testaccountneonapi")
-        self.api_key = self.na.neon_api_key
+        a_id = "testaccountneonapi"
+        self.nuser = neondata.NeonUserAccount(a_id)
+        self.nuser.save()
+        self.api_key = self.nuser.neon_api_key
+        self.na = neondata.NeonPlatform(a_id, self.api_key)
         self.na.save()
     
-    def _db_side_effect(*args,**kwargs):
-        key = args[0]
-        cb  = args[1]
-        print key,cb
-        return "something"
+    #def _db_side_effect(*args, **kwargs):
+    #
+    #    key = args[0]
+    #    cb  = args[1]
+    #    print key,cb
+    #    return "something"
 
     def get_app(self):
         return server.application
@@ -114,9 +117,11 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.assertEqual(resp.code,409)
 
     def test_brightcove_request(self):
-        #create brightcove platform account
+        ''' create brightcove platform account '''
+
         i_id = "i125"
-        bp = neondata.BrightcovePlatform("testaccountneonapi",i_id)
+        bp = neondata.BrightcovePlatform("testaccountneonapi", i_id,
+               self.api_key)
         bp.save()
 
         vals = {"api_key": self.api_key, 
@@ -133,29 +138,32 @@ class TestVideoServer(AsyncHTTPTestCase):
                     "previous_thumbnail": "http://prev_thumb"
                     }
         url = self.get_url('/api/v1/submitvideo/brightcove')
-        resp = self.make_api_request(vals,url)
-        self.assertEqual(resp.code,201)
+        resp = self.make_api_request(vals, url)
+        self.assertEqual(resp.code, 201)
 
     def test_empty_request(self):
+        ''' test empty request '''
         self.real_asynchttpclient.fetch(self.neon_api_url, 
                 callback=self.stop, method="POST", body='')
         resp = self.wait()
-        self.assertEqual(resp.code,400)
+        self.assertEqual(resp.code, 400)
 
     def test_dequeue_handler(self):
-            
+        ''' Dequeue handler of server '''
+
         resp = self.add_request()
-        self.assertEqual(resp.code,201)
-        
+        self.assertEqual(resp.code, 201)
+        h = {'X-Neon-Auth' : properties.NEON_AUTH} 
         for i in range(10): #dequeue a bunch 
             self.real_asynchttpclient.fetch(self.get_url('/dequeue'), 
-                callback=self.stop, method="GET")
+                callback=self.stop, method="GET", headers=h)
             resp = self.wait()
-            self.assertEqual(resp.code,200)
+            self.assertEqual(resp.code, 200)
         
         self.assertEqual(resp.body,'{}')
         
     def test_requeue_handler(self):
+        ''' requeue handler '''
         self.add_request()
         vals = {"api_key": self.api_key, 
                     "video_url": "http://testurl/video.mp4", 
@@ -166,26 +174,26 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.real_asynchttpclient.fetch(self.get_url('/requeue'),
                 callback=self.stop, method="POST", body=jdata)
         resp = self.wait()
-        self.assertEqual(resp.code,200)
+        self.assertEqual(resp.code, 200)
 
     def test_job_status_handler(self):
         resp = self.add_request()
         job_id = json.loads(resp.body)['job_id']
         self.real_asynchttpclient.fetch(
                 self.get_url('/api/v1/jobstatus?api_key=%s&job_id=%s'
-                    %(self.api_key,job_id)),
+                    %(self.api_key, job_id)),
                 callback=self.stop, method="GET")
         resp = self.wait()
-        self.assertEqual(resp.code,200)
+        self.assertEqual(resp.code, 200)
         
         #wrong job_id
         job_id = 'dummyjobid'
         self.real_asynchttpclient.fetch(
                 self.get_url('/api/v1/jobstatus?api_key=%s&job_id=%s'
-                    %(self.api_key,job_id)),
+                    %(self.api_key, job_id)),
                 callback=self.stop, method="GET")
         resp = self.wait()
-        self.assertEqual(resp.code,400)
+        self.assertEqual(resp.code, 400)
 
     def test_get_results_handler(self):
         pass

@@ -44,6 +44,7 @@ from StringIO import StringIO
 import subprocess
 from supportServices import neondata
 import tempfile
+import test_utils.net
 import test_utils.redis
 import time
 import tornado.httpclient
@@ -98,14 +99,15 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
 
             params['supportServices']['neondata']['dbPort'] = cls.redis.port
             params['supportServices']['services']['port'] = \
-              random.randint(10000,11000)
+              test_utils.net.find_free_port()
             params['mastermind']['server']['port'] = \
-              random.randint(10000,11000)
+              test_utils.net.find_free_port()
             params['clickTracker']['trackserver']['port'] = \
-              random.randint(10000,11000)
-            params['utils']['s3']['s3port'] = random.randint(10000,11000)
-            directive_port = random.randint(10000,11000)
-            params['test']['serving_tester']['bc_directive_port'] = directive_port
+              test_utils.net.find_free_port()
+            params['utils']['s3']['s3port'] = test_utils.net.find_free_port()
+            directive_port = test_utils.net.find_free_port()
+            params['test']['serving_tester']['bc_directive_port'] = \
+              directive_port
             params['controllers']['brightcove_controller']['port'] = \
               directive_port
             params['mastermind']['server']['bc_controller_url'] = \
@@ -361,7 +363,8 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
     #Add helper functions to add stuff to the video database
     def add_account_to_videodb(self, account_id='acct0',
                                integration_id='testintegration1',
-                               n_vids=1, n_thumbs=3):
+                               n_vids=1, n_thumbs=3,
+                               abtest=True):
         '''Creates a basic account in the video db.
 
         This account has account id a_id, integration id i_id, a
@@ -379,11 +382,15 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         nu.save()
 
         # Register a tracker account id mapping
-        neondata.TrackerAccountIDMapper('na567', account_id).save()
+        neondata.TrackerAccountIDMapper(
+            'na567', account_id,
+            neondata.TrackerAccountIDMapper.PRODUCTION).save()
 
         # create brightcove platform account
-        bp = neondata.BrightcovePlatform(account_id, integration_id,
-                                         abtest=True) 
+        bp = neondata.BrightcovePlatform(account_id, integration_id, api_key,
+                                         abtest=abtest)
+        nu.add_platform(bp)
+        nu.save()
         bp.save()
 
         # Create Request objects  <-- not required? 
@@ -402,7 +409,7 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
                 urls = [] ; urls.append(url)
                 tdata = neondata.ThumbnailMetaData(
                     tid, urls, time.time(), 480, 360,
-                    ttype, 0, 0, True, False, rank=t)
+                    ttype, 0, 0, True, t==0, rank=t)
                 tids.append(tid)
                 
                 # ID Mappers (ThumbIDMapper,ImageMD5Mapper,URLMapper)
@@ -472,12 +479,37 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
             self.assertIsNotNone(pages_results[0][0])
             self.assertIsNotNone(pages_results[0][1])
 
+    def test_turn_on_abtesting_on_tracker_data(self):
+        self.add_account_to_videodb('abtest_toggle0', 'abtest_toggle_int0',
+                                    1, 3, abtest=False)
+
+        # Make sure we get the initial directive and that testing is off
+        self.assertDirectiveCaptured(('abtest_toggle0_vid0',
+                                      [('abtest_toggle0_vid0_thumb0', 1.00),
+                                       ('abtest_toggle0_vid0_thumb1', 0.00),
+                                       ('abtest_toggle0_vid0_thumb2', 0.00)]),
+                                       timeout=5)
+
+        # Simulate some tracking data
+        self.simulateEvents([
+            ('http://abtest_toggle0_vid0_thumb0.jpg', 30, 0),
+            ('http://abtest_toggle0_vid0_thumb1.jpg', 500, 400),
+            ('http://abtest_toggle0_vid0_thumb2.jpg', 50, 20)])
+
+        self.waitToFinish()
+
+        # A/B testing should be turned on now
+        self.assertDirectiveCaptured(('abtest_toggle0_vid0',
+                                      [('abtest_toggle0_vid0_thumb0', 0.85),
+                                       ('abtest_toggle0_vid0_thumb1', 0.00),
+                                       ('abtest_toggle0_vid0_thumb2', 0.15)]),
+                                       timeout=5)
+
     def _test_override_thumbnail(self):
         '''Manually choose a thumbnail.'''
         self.add_account_to_videodb('ch_thumb0', 'ch_thumb_int0', 1, 3)
-
         account = neondata.BrightcovePlatform.get_account(
-            neondata.NeonApiKey.generate('ch_thumb0'),
+            neondata.NeonApiKey.get_api_key('ch_thumb0'),
             'ch_thumb_int0')
         
         account.update_thumbnail('vid0', 'ch_thumb0_vid0_thumb1',

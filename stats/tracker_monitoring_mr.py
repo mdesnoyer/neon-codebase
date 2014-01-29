@@ -126,10 +126,10 @@ class TrackerMonitoring(MRJob):
 
         Expects: ((event_type, page, tracker_account), time)
 
-        Yields: ((event_type, page, neon_account_id), time)
+        Yields: ((event_type, page, neon_account_id, is_testing?), time)
         '''
         try:
-            neon_account_id = \
+            neon_account_result = \
               neondata.TrackerAccountIDMapper.get_neon_account_id(key[2])
         except redis.exceptions.RedisError as e:
             _log.exception('Error getting data from Redis server: %s' % e)
@@ -137,8 +137,11 @@ class TrackerMonitoring(MRJob):
                                    'RedisErrors', 1)
             return
         
-        if neon_account_id:
-            yield ((key[0], key[1], neon_account_id), time)
+        if neon_account_result:
+            neon_account_id = neon_account_result[0]
+            is_testing = neon_account_result[1] <> \
+              neondata.TrackerAccountIDMapper.PRODUCTION
+            yield ((key[0], key[1], neon_account_id, is_testing), time)
         else:
             _log.warn('Invalid tracker account id %s. Skipping' % key[2])
             self.increment_counter('TrackerMonitoringErrors',
@@ -164,60 +167,78 @@ class TrackerMonitoring(MRJob):
 
         Expects: ((event_type, page, neon_account_id), time)
         '''
-        event_type, page, neon_account_id = key
+        event_type, page, neon_account_id, is_testing = key
         time = datetime.utcfromtimestamp(time)
         event_col = 'last_click' if event_type == 'click' else 'last_load'
         
         stats.db.execute(self.cursor,
-                         '''SELECT last_click, last_load from %s
-                         where neon_acct_id = %%s and page = %%s''' %
+                         '''SELECT last_click, last_load from %s where
+                         neon_acct_id = %%s and page = %%s and 
+                         is_testing = %%s''' %
                          stats.db.get_pages_seen_table(),
-                         (neon_account_id, page))
+                         (neon_account_id, page, is_testing))
         result = self.cursor.fetchone()
         if result is None:
-            # There isn't an entry for this page yet so see if there
-            # is an entry from this account id
-            stats.db.execute(self.cursor,
-                             '''SELECT * from %s where neon_acct_id = %%s
-                             limit 1''' %
-                             stats.db.get_pages_seen_table(),
-                             (neon_account_id, ))
-            found_account_entry = self.cursor.fetchone()
-            if found_account_entry is None:
-                # Notify the external system that this is a new
-                # account we're getting data from.
-                try:
-                    response = urllib2.urlopen(urllib2.Request(
-                        'http://%s/accounts/%s/analytics_received' %
-                        (self.options.notify_host, neon_account_id),
-                        headers={'X-Neon-API-Key': 
-                                 neondata.NeonApiKey.generate(
-                                     neon_account_id)}))
-                    if response.getcode() != 200:
-                        raise urllib2.URLError(
-                            'Problem notifying. Error code: %i' %
-                            response.getcode())
-                except urllib2.URLError as e:
-                    _log.exception('Error notifying external system we have '
-                                   'a new account: %s' % e)
-                    self.increment_counter('TrackerMonitoringErrors',
-                                           'NoNotificationSent', 1)
+            # There isn't an entry for this page yet 
+
+            # If this is the first production result from this
+            # account, we have some extra work to do.
+            if not is_testing:
+                stats.db.execute(self.cursor,
+                                 '''SELECT * from %s where neon_acct_id = %%s
+                                 and is_testing = %%s limit 1''' %
+                                 stats.db.get_pages_seen_table(),
+                                 (neon_account_id, is_testing))
+                found_account_entry = self.cursor.fetchone()
+                if found_account_entry is None:
+                    # Notify the external system that this is a new
+                    # account we're getting data from.
+                    try:
+                        response = urllib2.urlopen(urllib2.Request(
+                            'http://%s/accounts/%s/analytics_received' %
+                            (self.options.notify_host, neon_account_id),
+                            headers={'X-Neon-API-Key': 
+                                     neondata.NeonApiKey.get_api_key(
+                                         neon_account_id)}))
+                        if response.getcode() != 200:
+                            raise urllib2.URLError(
+                                'Problem notifying. Error code: %i' %
+                                response.getcode())
+                    except urllib2.URLError as e:
+                        _log.exception('Error notifying external system we '
+                                       'have a new account: %s' % e)
+                        self.increment_counter('TrackerMonitoringErrors',
+                                               'NoNotificationSent', 1)
+
+                    # Turn on A/B testing for this account
+                    try:
+                        account = neondata.NeonUserAccount.get_account(
+                            neondata.NeonApiKey.get_api_key(neon_account_id))
+                        for platform in account.get_platforms():
+                            platform.abtest = True
+                            platform.save()
+                    except redis.exceptions.RedisError as e:
+                        _log.error('Error turning on the A/B test for account'
+                                   '%s: %s' % (neon_account_id, e))
+                        self.increment_counter('TrackerMonitoringErrors',
+                                               'RedisError', 1)
 
             # Insert a new entry into the database
             stats.db.execute(self.cursor,
-                             '''INSERT INTO %s (%s, neon_acct_id, page)
-                             VALUES (%%s, %%s, %%s)''' %
+                             '''INSERT INTO %s (%s, neon_acct_id, page,
+                             is_testing)
+                             VALUES (%%s, %%s, %%s, %%s)''' %
                              (stats.db.get_pages_seen_table(), event_col),
-                             (time, neon_account_id, page))
+                             (time, neon_account_id, page, is_testing))
 
         else:
             # There is already an entry from this page and account id,
             # so update it.
             stats.db.execute(self.cursor,
                              '''UPDATE %s set %s=%%s where neon_acct_id=%%s
-                             and page=%%s''' % 
+                             and page=%%s and is_testing=%%s''' % 
                              (stats.db.get_pages_seen_table(), event_col),
-                             (time, neon_account_id, page))
+                             (time, neon_account_id, page, is_testing))
                 
 
     def disconnect_db(self):

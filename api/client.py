@@ -14,7 +14,7 @@ post processing
 
 '''
 
-USAGE='%prog [options] <model_file> <local>'
+USAGE = '%prog [options] <model_file> <local>'
 
 import os
 import os.path
@@ -23,7 +23,6 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
-import copy
 import datetime
 import gzip
 import hashlib
@@ -43,8 +42,6 @@ import tornado.ioloop
 import time
 import numpy as np
 from PIL import Image
-from optparse import OptionParser
-import leargist
 import ffvideo 
 
 from boto.exception import S3ResponseError
@@ -58,7 +55,11 @@ import tarfile
 import brightcove_api
 import youtube_api
 
-from supportServices.neondata import *
+from supportServices.neondata import NeonApiRequest, BrightcoveApiRequest
+from supportServices.neondata import NeonPlatform, YoutubePlatform, \
+        BrightcovePlatform, VideoMetadata, RequestState, InternalVideoID
+from supportServices.neondata import ThumbnailID, ThumbnailType, \
+        ThumbnailURLMapper, ThumbnailMetaData, ThumbnailIDMapper
 
 import gc
 import pprint
@@ -68,7 +69,6 @@ _log = logging.getLogger(__name__)
 
 from pympler import summary
 from pympler import muppy
-from pympler import tracker
 from pympler.classtracker import ClassTracker
 import pickle
 
@@ -92,15 +92,13 @@ INTERNAL_PROCESSING_ERROR = "internal error"
 
 #=============== Global Handlers =======================#
 def sig_handler(sig, frame):
+    ''' signal handler '''
     _log.debug('Caught signal: ' + str(sig) )
-
     try:
         for worker in workers:
-            worker.kill_received = TrueQQQA
-    except:
+            worker.kill_received = True
+    except Exception, e:
         sys.exit(0)
-
-#=============== Global Handlers =======================#
 
 ###########################################################################
 # Process Video File
@@ -117,20 +115,22 @@ class ProcessVideo(object):
         self.data_map = {} # frameNo -> (score, image_rgb)
         self.attr_map = {}
         self.timecodes = {}
+        self.center_frame = None
         self.frame_size_width = 256
         self.sec_to_extract = 1 
-        self.base_filename = request_map[properties.API_KEY] + "/" + request_map[properties.REQUEST_UUID_KEY]  #Used as direcrtory name
-        self.sec_to_extract_offset = 1.0 #random.choice([0.9,1.0,1.1])
+        self.base_filename = request_map[properties.API_KEY] + "/" + \
+                request_map[properties.REQUEST_UUID_KEY]  #Used as direcrtory name
+        self.sec_to_extract_offset = 1.0 
 
         if request_map.has_key(properties.THUMBNAIL_RATE):
-            self.sec_to_extract_offset = random.choice([0.20,0.25,0.5]) #properties.MAX_SAMPLING_RATE
+            self.sec_to_extract_offset = random.choice([0.20, 0.25, 0.5]) 
 
         self.sec_to_extract_offset = 1
-        self.valence_scores = [[],[]] #x,y        
+        self.valence_scores = [[], []] #x,y 
 
         #Video Meta data
         self.video_metadata = {}
-        self.video_metadata['codec_name'] =  None
+        self.video_metadata['codec_name'] = None
         self.video_metadata['duration'] = None
         self.video_metadata['framerate'] = None
         self.video_metadata['bitrate'] = None
@@ -142,33 +142,34 @@ class ProcessVideo(object):
         self.s3conn = S3Connection(properties.S3_ACCESS_KEY,
                                    properties.S3_SECRET_KEY)
         self.s3bucket_name = properties.S3_BUCKET_NAME
-        self.s3bucket = Bucket(name = self.s3bucket_name,
-                               connection = self.s3conn)
+        self.s3bucket = Bucket(name=self.s3bucket_name,
+                               connection=self.s3conn)
         self.format = "JPEG" #"PNG"
 
         #AB Test Data
-        self.abtest_thumbnails= {}
+        self.abtest_thumbnails = {}
 
         #thumbnail list of maps
         self.thumbnails = [] # ThumbnailMetaData
         
         self.debug = debug
-        self.pid   = cur_pid
+        self.pid = cur_pid
 
-    ''' process all the frames from the partial video downloaded '''
     def process_all(self, video_file, n_thumbs=1):
+        ''' process all the frames from the partial video downloaded '''
         start_process = time.time()
         try:
             mov = ffvideo.VideoStream(video_file)
             if self.video_metadata['codec_name'] is None:
-                self.video_metadata['codec_name'] =  mov.codec_name
+                self.video_metadata['codec_name'] = mov.codec_name
                 self.video_metadata['duration'] = mov.duration
                 self.video_metadata['framerate'] = mov.framerate
                 self.video_metadata['bitrate'] = mov.bitrate
                 self.video_metadata['frame_size'] = mov.frame_size
                 self.video_size = mov.duration * mov.bitrate / 8 # in bytes
         except Exception, e:
-            _log.error("key=process_video worker[%s] msg=%s "  %(self.pid,e.message))
+            _log.error("key=process_video worker[%s] " 
+                        " msg=%s "  %(self.pid, e.message))
             return
 
         duration = mov.duration
@@ -194,7 +195,7 @@ class ProcessVideo(object):
                 self.valence_scores[0].append(timecode)
                 self.valence_scores[1].append(score)
                 self.timecodes[frame_no] = timecode
-                self.data_map[frame_no] = (score, image[:,:,::-1])
+                self.data_map[frame_no] = (score, image[:, :, ::-1])
                 self.attr_map[frame_no] = attribute
         
         #del reference to stream object
@@ -202,16 +203,17 @@ class ProcessVideo(object):
         
         end_process = time.time()
         if self.debug:
-            _log.info("key=streaming_callback msg=debug time_processing=%s" %(end_process - start_process))
+            _log.info("key=streaming_callback msg=debug " 
+                    "time_processing=%s" %(end_process - start_process))
 
-    ''' method that is run before the video is deleted after downloading '''
-    ''' use this to run cleanup code or misc methods '''
-    def finalize(self,video_file):
+    def finalize(self, video_file):
+        ''' method that is run before the video is deleted after downloading 
+        use this to run cleanup code or misc methods '''
         return
 
     ############# THUMBNAIL METHODS ##################
 
-    def get_center_frame(self,video_file):
+    def get_center_frame(self, video_file):
         '''approximation of brightcove logic 
          #Note: Its unclear the exact nature of brighcove thumbnailing,
          the images are close but this is not the exact frame
@@ -219,26 +221,28 @@ class ProcessVideo(object):
         try:
             mov = ffvideo.VideoStream(video_file)
             mid = int(mov.duration / 2)
-            mid_frame = vs.get_frame_at_sec(mid)
-            return mid_frame
+            mid_frame = mov.get_frame_at_sec(mid)
+            return mid_frame.image()
         except Exception,e:
             _log.debug("key=get_center_frame msg=%s"%e)
 
-    def get_timecodes(self,frames):
+    def get_timecodes(self, frames):
+        ''' frame -> timecode '''
         result = []
         for f in frames:
             result.append(self.timecodes[f])
         return result
 
-    def get_topn_thumbnails(self,n):
+    def get_topn_thumbnails(self, n):
+        ''' topn '''
         res = self.top_thumbnails_per_interval(nthumbnails = n)
         return res
 
-    def get_thumbnail_at_rate(self,rate):
-        #thumbnails per second 
+    def get_thumbnail_at_rate(self, rate):
+        ''' thumbnails per second ''' 
         # rate = 1 ; 1 thumbnail per sec
 
-        def get_intervals(interval,r):
+        def get_intervals(interval, r):
             for i in range(r):
                 if i % interval == 0:
                     yield i
@@ -255,8 +259,8 @@ class ProcessVideo(object):
         # Sort according to frame numbers
         frames = sorted(data, key=lambda tup: tup[0], reverse=False) 
         frms = [ x[0] for x in frames ]
-
-        for i,intv in zip(range(len(intervals)),intervals):
+        prev_intv = 0
+        for i,intv in zip(range(len(intervals)), intervals):
             intv = int(intv / self.sec_to_extract_offset)
             if i > 0:
                 data_slice = frames[prev_intv :intv]
@@ -267,17 +271,13 @@ class ProcessVideo(object):
             prev_intv = intv
         return res
 
-    ''' Get top n thumbnails per interval - used by topn '''
-    def top_thumbnails_per_interval(self,nthumbnails =1,interval =0):
-        #return array of top n sorted 
-        #top_indices = sorted(range(len(data)), key=lambda i: data[i])[ -1 * nthumbnails:]
+    def top_thumbnails_per_interval(self, nthumbnails =1, interval =0):
+        ''' Get top n thumbnails per interval - used by topn '''
 
         data_slice = self.data_map.items()
         if interval != 0:
             data_slice = self.data_map.items()  #TODO slice the interval
 
-        #result = sorted(data_slice, key=lambda tup: tup[1], reverse=True)
-        
         #Randomize if the scores are the same, generate hash to use as
         #the secondary key
         secondary_sorted_list = sorted(data_slice, 
@@ -286,10 +286,9 @@ class ProcessVideo(object):
         result = sorted(secondary_sorted_list,
                         key=lambda tup: tup[1][0],
                         reverse=True)
-        #_log.debug("key=thumbnails msg=" + str(len(result)) + " -- " + str(nthumbnails) ) 
       
         if len(result) < nthumbnails: 
-            nthumbnails = min(len(result),nthumbnails)
+            nthumbnails = min(len(result), nthumbnails)
             return result[:nthumbnails]
         else:
             # Fiter duplicates
@@ -318,7 +317,7 @@ class ProcessVideo(object):
             return spread_result
 
     def save_data_to_s3(self):
-       
+        ''' tar.gz a few thumbs to s3 ''' 
         s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
         s3bucket = s3conn.get_bucket(self.s3bucket_name)
 
@@ -375,9 +374,9 @@ class ProcessVideo(object):
             if self.debug:
                 raise
   
-    ''' Host images on s3 which is available publicly '''
     def host_images_s3(self, frames):
-        s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
+        ''' Host images on s3 which is available publicly '''
+        s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
         s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
         #s3bucket = Bucket(name = s3bucket_name,connection = s3conn)
         s3bucket = s3conn.get_bucket(s3bucket_name)
@@ -392,7 +391,6 @@ class ProcessVideo(object):
             filestream = StringIO()
             image = Image.fromarray(self.data_map[frames[i]][1])
             score = self.data_map[frames[i]][0]
-            #image.thumbnail(size,Image.ANTIALIAS)
             image.save(filestream, fmt, quality=100) 
             filestream.seek(0)
             imgdata = filestream.read()
@@ -414,21 +412,51 @@ class ProcessVideo(object):
             enabled = None 
             width   = image.size[0]
             height  = image.size[1] 
-            ttype   = "neon" 
+            ttype   = ThumbnailType.NEON 
             rank    = i +1 
 
             #populate thumbnails
-            tdata = ThumbnailMetaData(tid,urls,created,width,height,ttype,score,self.model_version,rank=rank)
+            tdata = ThumbnailMetaData(tid, urls, created, width, height,
+                        ttype, score, self.model_version, rank=rank)
             thumb = tdata.to_dict()
             self.thumbnails.append(thumb)
         return s3_urls
 
+    def save_thumbnail_to_s3_and_metadata(self, image, score, s3bucket,
+               keyname, s3fname, ttype, rank=0):
+        
+        fmt = 'jpeg'
+        filestream = StringIO()
+        image.save(filestream, fmt, quality=100) 
+        filestream.seek(0)
+        imgdata = filestream.read()
+        k = s3bucket.new_key(keyname)
+        k.set_contents_from_string(imgdata,{"Content-Type":"image/jpeg"})
+        s3bucket.set_acl('public-read',keyname)
+        
+        urls = []
+        api_key = self.request_map[properties.API_KEY] 
+        video_id = self.request_map[properties.VIDEO_ID]
+        tid = ThumbnailID.generate(imgdata,
+                                   InternalVideoID.generate(api_key,
+                                                            video_id))
+        urls.append(s3fname)
+        created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        width   = image.size[0]
+        height  = image.size[1] 
+
+        #populate thumbnails
+        tdata = ThumbnailMetaData(tid, urls, created, width, height, ttype,
+                score, self.model_version, rank=rank)
+        thumb = tdata.to_dict()
+        self.thumbnails.append(thumb)
+
     ############# Request Finalizers ##############
     
-    def valence_score(self,image):
-        
+    def valence_score(self, image):
+        ''' valence of pil.image '''
         im_array = np.array(image)
-        im = im_array[:,:,::-1]
+        im = im_array[:, :, ::-1]
         score,attr = self.model.score(im)
         return str(score)
 
@@ -455,13 +483,16 @@ class ProcessVideo(object):
         for thumb in self.thumbnails:
             tids.append(thumb["thumbnail_id"])
 
-        vmdata = VideoMetadata(i_vid,tids,job_id,url,duration,video_valence,model_version,i_id,frame_size)
+        vmdata = VideoMetadata(i_vid, tids, job_id, url, duration,
+                    video_valence, model_version, i_id, frame_size)
         ret = vmdata.save()
         if not ret:
             _log.error("key=save_video_metatada msg=failed to save")
 
 
-    def save_thumbnail_metadata(self,platform,i_id):
+    def save_thumbnail_metadata(self, platform, i_id):
+        '''Save the Thumbnail URL and ID to Mapper DB '''
+
         api_key = self.request_map[properties.API_KEY] 
         vid = self.request_map[properties.VIDEO_ID]
         job_id = self.request_map[properties.REQUEST_UUID_KEY]
@@ -469,62 +500,80 @@ class ProcessVideo(object):
 
         thumbnail_mapper_list = []
         thumbnail_url_mapper_list = []
-        for thumb in self.thumbnails:
-            tid = thumb["thumbnail_id"]
-            for t_url in thumb["urls"]:
-                uitem = ThumbnailURLMapper(t_url,tid)
-                thumbnail_url_mapper_list.append(uitem)
-                item = ThumbnailIDMapper(tid,i_vid,thumb)
-                thumbnail_mapper_list.append(item)
+        if len(self.thumbnails) > 0:
+            for thumb in self.thumbnails:
+                tid = thumb["thumbnail_id"]
+                for t_url in thumb["urls"]:
+                    uitem = ThumbnailURLMapper(t_url, tid)
+                    thumbnail_url_mapper_list.append(uitem)
+                    item = ThumbnailIDMapper(tid, i_vid, thumb)
+                    thumbnail_mapper_list.append(item)
 
-        retid = ThumbnailIDMapper.save_all(thumbnail_mapper_list)
-        returl = ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
-        
-        return retid and returl
+            retid = ThumbnailIDMapper.save_all(thumbnail_mapper_list)
+            returl = ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
+            
+            return (retid and returl)
 
-    ''' Update the request state for Neon API Request '''
     def finalize_neon_request(self, result=None):
+        ''' Update the request state for Neon API Request '''
         api_key = self.request_map[properties.API_KEY] 
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
+        video_id = self.request_map[properties.VIDEO_ID]
         api_request = NeonApiRequest.get(api_key,job_id)
-       
-        if api_request is None:
-            pass #TODO: erorr
-
+        if not api_request:
+            #TODO: more stuff ? 
+            _log.error("key=finalize_neon_request msg=api request is null")
+            return
+      
         #change the status to requeued, and don't store a response 
         if result is None:
             api_request.state = RequestState.REQUEUED 
+        elif len(self.thumbnails) == 0:
+            api_request.state = RequestState.INT_ERROR
         else:
+            
             try:
+                #try decoding result, if error then video failed
                 api_request.response = tornado.escape.json_decode(result)
                 api_request.state = RequestState.FINISHED 
+                api_request.publish_date = time.time() *1000.0 #ms
+                
+                #Save the mid frame (Random) thumbnail
+                image = self.center_frame
+                if image:
+                    score  = self.valence_score(image) 
+                    s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
+                    s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
+                    s3bucket = s3conn.get_bucket(s3bucket_name)
+                    s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
+                    keyname = self.base_filename + "/centerframe.jpeg" 
+                    s3fname = s3_url_prefix + "/" + keyname
+                    ttype = ThumbnailType.CENTERFRAME
+                    self.save_thumbnail_to_s3_and_metadata(image, score, s3bucket,
+                              keyname, s3fname, ttype, rank=0)
+                else:
+                    _log.error("key=finalize_neon_request msg=center frame is NULL")
+      
             except:
                 api_request.response = result 
                 api_request.state = RequestState.FAILED
             
-            api_request.thumbnails = self.thumbnails
-      
-        #If Thumbnails are empty, something went wrong internally
-        if len(api_request.thumbnails) == 0:
-            api_request.state = RequestState.INT_ERROR
-
         ret = api_request.save()
         if ret:
             self.save_video_metadata()
-            #self.save_thumbnail_metadata("neon",0)
+            self.save_thumbnail_metadata("neon", 0)
         else:
             _log.error("key=finalize_neon_request msg=failed to save request")
         return
 
 
-    '''
-    Brightcove handler
-
-    - host neon thumbs and also save bcove previous thumbnail in s3
-    - Get Account settings and replace default thumbnail if enabled 
-    - update request object with the thumbnails
-    '''
-    def finalize_brightcove_request(self,result,error=False):
+    def finalize_brightcove_request(self, result, error=False):
+        '''
+        Brightcove handler
+        - host neon thumbs and also save bcove previous thumbnail in s3
+        - Get Account settings and replace default thumbnail if enabled 
+        - update request object with the thumbnails
+        '''
         api_key = self.request_map[properties.API_KEY]  
         i_id = self.request_map[properties.INTEGRATION_ID]
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
@@ -554,42 +603,28 @@ class ProcessVideo(object):
             response = http_client.fetch(req)
             imgdata = response.body
             image = Image.open(StringIO(imgdata))
-            s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
+            score   = self.valence_score(image) 
+            s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
             s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
             s3bucket = s3conn.get_bucket(s3bucket_name)
             s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
             keyname =  self.base_filename + "/brightcove.jpeg" 
-            k = s3bucket.new_key(keyname)
-            k.set_contents_from_string(imgdata,{"Content-Type":"image/jpeg"})
-            s3bucket.set_acl('public-read',keyname)
             s3fname = s3_url_prefix + "/" + keyname
+            ttype = ThumbnailType.BRIGHTCOVE
+            self.save_thumbnail_to_s3_and_metadata(image, score, s3bucket,
+                    keyname, s3fname, ttype, rank=0)
             bc_request.previous_thumbnail = s3fname
         
-            #populate default brightcove thumbnail
-            urls = []
-            tid = ThumbnailID.generate(imgdata,
-                                       InternalVideoID.generate(api_key, video_id))
-            urls.append(p_url)
-            urls.append(s3fname)
-            created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            enabled = True 
-            width   = 480
-            height  = 360
-            ttype   = "brightcove" 
-            rank    = 0 
-            score   = self.valence_score(image) 
-            tdata = ThumbnailMetaData(tid,urls,created,width,height,ttype,score,self.model_version,enabled=enabled,rank=rank)
-            thumb = tdata.to_dict()
-            self.thumbnails.append(thumb)
-        
         else:
-            _log.debug("key=finalize_brightcove_request msg=no thumbnail for %s %s" %(api_key,video_id))
+            _log.debug("key=finalize_brightcove_request "
+                       " msg=no thumbnail for %s %s" %(api_key,video_id))
         
         #2 Push thumbnail in to brightcove account
         autosync = bc_request.autosync
         ba = BrightcovePlatform.get_account(api_key,i_id)
         if not ba:
-            _log.error("key=finalize_brightcove_request msg=Brightcove account doesnt exists a_id=%s i_id=%s"%(api_key,i_id))
+            _log.error("key=finalize_brightcove_request msg=Brightcove " 
+                    " account doesnt exists a_id=%s i_id=%s"%(api_key,i_id))
         else: 
             autosync = ba.auto_update 
         
@@ -625,18 +660,18 @@ class ProcessVideo(object):
         # A background check thumbnail job is run to get its url
 
         #4 Save the Thumbnail URL and ID to Mapper DB
-        self.save_thumbnail_metadata("brightcove",i_id)
+        self.save_thumbnail_metadata("brightcove", i_id)
 
         if ret:
             self.save_video_metadata()
         else:
             _log.error("key=finalize_brightcove_request msg=failed to save request")
 
-    '''
-    Final steps for youtube request
-    '''
 
     def finalize_youtube_request(self,result,error=False):
+        '''
+        Final steps for youtube request
+        '''
         '''
         api_key = self.request_map[properties.API_KEY]  
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
@@ -721,29 +756,35 @@ class ProcessVideo(object):
         '''
         pass
 
-#############################################################################################
+####################################################################################
 # HTTP Downloader client
-#############################################################################################
+####################################################################################
 
 class HttpDownload(object):
+    ''' 
+    HTTP Downloader class
+    '''
     retry_codes = [403,500,502,503,504]
 
-    def __init__(self, json_params, ioloop, model, model_version, debug=False, cur_pid=None, sync=False):
+    def __init__(self, json_params, ioloop, model, model_version, 
+            debug=False, cur_pid=None, sync=False):
 
         params = tornado.escape.json_decode(json_params)
 
-        self.timeout = 300000.0 #long running tasks ##TODO - is this necessary ??? ###
+        self.timeout = 300000.0 #long running tasks ## -- is this necessary ???
         self.ioloop = ioloop
         self.tempfile = tempfile.NamedTemporaryFile(delete=False)
         self.job_params = params
         url = params[properties.VIDEO_DOWNLOAD_URL]
         headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
-            (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
+            (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
+            Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
 
-        req = tornado.httpclient.HTTPRequest(url = url, headers = headers,
-                        use_gzip =False, request_timeout = self.timeout)
+        req = tornado.httpclient.HTTPRequest(url=url, headers=headers,
+                        use_gzip=False, request_timeout=self.timeout)
         self.size_so_far = 0
-        self.pv = ProcessVideo(params, json_params, model, model_version, debug, cur_pid)
+        self.pv = ProcessVideo(params, json_params, model, model_version, 
+                                debug, cur_pid)
         self.error = None
         self.callback_data_size = 4096 * 1024 #4MB  --- TUNE 
         self.global_work_queue_url = properties.BASE_SERVER_URL + "/requeue"
@@ -758,12 +799,12 @@ class HttpDownload(object):
         self.debug_timestamps = {}
         self.debug_timestamps["streaming_callback"] = time.time()
         
-        self.http_client_pool = RequestPool() #TODO: use this for all outbound requests
+        self.http_client_pool = RequestPool() #may be use for all outbound requests
         if not sync:
             tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
-            req = tornado.httpclient.HTTPRequest(url = url, headers = headers,
-                        streaming_callback = self.streaming_callback, 
-                        use_gzip =False, request_timeout = self.timeout)
+            req = tornado.httpclient.HTTPRequest(url=url, headers=headers,
+                        streaming_callback=self.streaming_callback, 
+                        use_gzip=False, request_timeout=self.timeout)
             http_client = tornado.httpclient.AsyncHTTPClient()
             http_client.fetch(req, self.async_callback)
         else:
@@ -774,6 +815,7 @@ class HttpDownload(object):
         return 
         
     def streaming_callback(self, data):
+        ''' callback after nbyes '''
         self.size_so_far += len(data)
         self.total_size_so_far += len(data)
         
@@ -805,8 +847,8 @@ class HttpDownload(object):
             
             self.pv.process_all(self.tempfile.name, n_thumbs=n_thumbs)
 
-    # After the request ends
     def async_callback(self, response):
+        ''' called after the request ends '''
         # if video size < the chunk size
         try:
             #TODO Check for content type (html,json,xml) which may be
@@ -878,6 +920,9 @@ class HttpDownload(object):
             n_thumbs = 2*int(self.job_params[properties.TOP_THUMBNAILS])
         self.pv.process_all(self.tempfile.name, n_thumbs=n_thumbs)
         ######
+        
+        #Save Center Frame
+        self.pv.center_frame = self.pv.get_center_frame(self.tempfile.name)
 
         end_time = time.time()
         total_request_time =  end_time - float(self.pv.video_metadata[properties.VIDEO_PROCESS_TIME])
@@ -892,7 +937,6 @@ class HttpDownload(object):
         ######### Final Phase - send client response to callback url, save images & request data to s3 ########
         if self.error == INTERNAL_PROCESSING_ERROR:
             client_response = self.send_client_response(error=True)
-        
         else:
             ## On Success 
             #Send client response
@@ -924,7 +968,8 @@ class HttpDownload(object):
             return False
         return True
 
-    def send_client_response(self,error=False):
+    def send_client_response(self, error=False):
+        ''' send callback response to client who submitted request '''
         s3_urls = None   
         
         #There was an error with processing the video
@@ -944,7 +989,6 @@ class HttpDownload(object):
             return
 
         # API Specific client response
-      
         request_type = self.job_params['request_type']
         api_method = self.job_params['api_method'] 
         api_param =  self.job_params['api_param']
@@ -1018,25 +1062,10 @@ class ClientCallbackResponse(object):
         #Add standard headers
         return
 
-    '''
-    def format_get(self, url, data=None):
-        if data is not None:
-            if isinstance(data, dict):
-                data = urlencode(data)
-            if '?' in url:
-                url += '&amp;%s' % data
-            else:
-                url += '?%s' % data
-        return url
-
-    def format_post(self, data):
-        if data is not None:
-            if isinstance(data, dict):
-                data = urlencode(data)
-        return data
-    '''
-
     def build_request(self):
+        '''
+        build callback response
+        '''
         response_body = {}
         response_body["job_id"] = self.job_params[properties.REQUEST_UUID_KEY] 
         response_body["video_id"] = self.job_params[properties.VIDEO_ID]
@@ -1060,13 +1089,15 @@ class ClientCallbackResponse(object):
         return self.response
 
     def send_response(self):
+        ''' send respone to callback url '''
         self.build_request()
 
         for i in range(self.retries):
             try:
                 response = self.http_client.fetch(self.client_request)
                 if response.error:
-                    _log.error("type=client_response msg=failed to send response to client")
+                    _log.error("type=client_response" 
+                            " msg=failed to send response to client")
                     continue
                 else:
                     _log.info("key=ClientCallbackResponse msg=sent client response")
@@ -1074,13 +1105,11 @@ class ClientCallbackResponse(object):
             except:
                 continue
 
-##############################################
-## Multi Processing worker class
-#############################################
-
-
 class VideoClient(object):
-    
+   
+    '''
+    Video Client processor
+    '''
     def __init__(self, model_file, debug=False, sync=False):
         self.model_file = model_file
         self.SLEEP_INTERVAL = 10
@@ -1093,28 +1122,44 @@ class VideoClient(object):
         self.sync = sync
         self.pid = os.getpid()
 
-    def read_version_from_file(self,fname):
-        with open(fname,'r') as f:
-            return int(f.readline())
-    
-    """ Blocking http call to global queue to dequeue work """
     def dequeue_job(self):
+        ''' Blocking http call to global queue to dequeue work
+            Change state to PROCESSING after dequeue
+        '''
         retries = 2
         
         http_client = tornado.httpclient.HTTPClient()
+        headers = {'X-Neon-Auth' : properties.NEON_AUTH} 
         result = None
         for i in range(retries):
             try:
-                response = http_client.fetch(self.dequeue_url)
+                response = http_client.fetch(self.dequeue_url,headers=headers)
                 result = response.body
                 break
             except tornado.httpclient.HTTPError, e:
                 _log.error("Dequeue Error %s" %e)
+                time.sleep(2)
                 continue
-        
+             
+        if result is not None and result != "{}":
+            try:
+                job_params = tornado.escape.json_decode(result)
+                #Change Job State
+                api_key = job_params[properties.API_KEY]
+                job_id  = job_params[properties.REQUEST_UUID_KEY]
+                api_request = NeonApiRequest.get(api_key,job_id)
+                if api_request.state == RequestState.SUBMIT:
+                    api_request.state = RequestState.PROCESSING
+                    api_request.model_version = self.model_version
+                    api_request.save()
+                _log.info("key=worker [%s] msg=processing request %s "
+                          %(self.pid,job_params[properties.REQUEST_UUID_KEY]))
+            except Exception,e:
+                _log.error("key=worker [%s] msg=db error %s" %(self.pid,e.message))
         return result
     
     def load_model(self):
+        ''' load model '''
         parts = self.model_file.split('/')[-1]
         version = parts.split('.model')[0]
         self.model_version = version
@@ -1126,72 +1171,61 @@ class VideoClient(object):
             exit(1)
 
     def run(self):
+        ''' run/start method '''
         _log.info("starting worker [%s] " %(self.pid))
         self.load_model()
         while not self.kill_received:
-            # get a task
-            try:
-                job = self.dequeue_job()
-                if not job or job == "{}": #string match
-                    raise Queue.Empty
-                
-                ## ===== ASYNC Code Starts ===== ##
-                ioloop = tornado.ioloop.IOLoop.instance()
-                dl = HttpDownload(job, ioloop, self.model,self.model_version,
-                                  self.debug, self.pid, self.sync)
-            
-                try:
-                    #Change Job State
-                    api_key = dl.job_params[properties.API_KEY]
-                    job_id = dl.job_params[properties.REQUEST_UUID_KEY]
-                    api_request = NeonApiRequest.get(api_key,job_id)
-                    if api_request.state == RequestState.SUBMIT:
-                        api_request.state = RequestState.PROCESSING
-                        api_request.model_version = self.model_version
-                        api_request.save()
-                    ts = str(time.time())
-                    _log.info("key=worker [%s] msg=processing request %s %s"
-                              %(self.pid,dl.job_params[properties.REQUEST_UUID_KEY],str(time.time())))
-        
-                except Exception,e:
-                    _log.error("key=worker [%s] msg=db error %s" %(self.pid,e.message))
-            
-                #profile
-                if options.profile:
-                    mem_tracker1 = summary.summarize(muppy.get_objects())
-                    ctracker = ClassTracker()
-                    ctracker.track_object(dl)
-                    ctracker.track_class(HttpDownload)
-                    ctracker.create_snapshot()
-        
-                ioloop.start()
-                
-                #delete http download object
-                del dl
-                gc.collect()
-                
-                if self.debug:
-                    un_objs = gc.collect()
-                    _log.debug('Unreachable objects:%r' %un_objs)
-                    pprint.pprint(gc.garbage)
-        
-                if options.profile:
-                    mem_tracker2 = summary.summarize(muppy.get_objects())
-                    mem_diff =  summary.get_diff(mem_tracker1,mem_tracker2)
-                    pr_ts = job_id #int(time.time())
-                    pickle.dump(mem_diff, open("muppy_profile."+str(pr_ts),"wb"))
-                    ctracker.create_snapshot()
-                    ctracker.stats.dump_stats('ctrackerprofile.'+str(pr_ts))
+            self.do_work()
 
-            except Queue.Empty:
-                _log.debug("Q,Empty")
-                time.sleep(self.SLEEP_INTERVAL * random.random())
+    def do_work(self):   
+        ''' do actual work here'''
+        try:
+            job = self.dequeue_job()
+            if not job or job == "{}": #string match
+                raise Queue.Empty
             
-            except Exception,e:
-                _log.exception("key=worker [%s] msg=exception %s" %(self.pid,e.message))
-                if self.debug:
-                    raise
-                time.sleep(self.SLEEP_INTERVAL)
+            ## ===== ASYNC Code Starts ===== ##
+            ioloop = tornado.ioloop.IOLoop.instance()
+            dl = HttpDownload(job, ioloop, self.model,self.model_version,
+                              self.debug, self.pid, self.sync)
+        
+            #profile
+            if options.profile:
+                mem_tracker1 = summary.summarize(muppy.get_objects())
+                ctracker = ClassTracker()
+                ctracker.track_object(dl)
+                ctracker.track_class(HttpDownload)
+                ctracker.create_snapshot()
+    
+            ioloop.start()
+            
+            #delete http download object
+            del dl
+            gc.collect()
+            
+            if self.debug:
+                un_objs = gc.collect()
+                _log.debug('Unreachable objects:%r' %un_objs)
+                pprint.pprint(gc.garbage)
+    
+            if options.profile:
+                mem_tracker2 = summary.summarize(muppy.get_objects())
+                mem_diff =  summary.get_diff(mem_tracker1,mem_tracker2)
+                pr_ts = job_id #int(time.time())
+                pickle.dump(mem_diff, open("muppy_profile."+str(pr_ts),"wb"))
+                ctracker.create_snapshot()
+                ctracker.stats.dump_stats('ctrackerprofile.'+str(pr_ts))
+
+        except Queue.Empty:
+            _log.debug("Q,Empty")
+            time.sleep(self.SLEEP_INTERVAL * random.random())
+        
+        except Exception,e:
+            _log.exception("key=worker [%s] "
+                    " msg=exception %s" %(self.pid, e.message))
+            if self.debug:
+                raise
+            time.sleep(self.SLEEP_INTERVAL)
 
 def main():
     utils.neon.InitNeon()
@@ -1204,8 +1238,10 @@ def main():
         properties.BASE_SERVER_URL = properties.LOCALHOST_URL
 
     #start video client
+    global workers; workers = []
     vc = VideoClient(options.model_file,
                      options.debug, options.sync)
+    workers.append(vc)
     vc.run()
 
 if __name__ == "__main__":
