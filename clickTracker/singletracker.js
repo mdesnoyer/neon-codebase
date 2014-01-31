@@ -1,4 +1,5 @@
 var PageLoadIDSeen = null; 
+var ImageTrackerLoadSeen = null; 
 if (typeof NeonDataSender == "undefined"){
 var NeonDataSender = (function() {
 		var loadRequests = new Array();	
@@ -230,15 +231,8 @@ if(typeof NeonImageTracker == "undefined"){
 				NeonImageTracker.TrackerAccountId = aid;
 				NeonPlayerTracker.TrackerAccountId = aid;
 			},
-
-		trackerInit: function () {
-			$(document).ready(function () {
-
-				if (initTracker) {
-					return;
-				}
-				initTracker = true;
-				$(window).load(function(){
+		checkWindowReady: function(){
+			if(document.readyState === "complete" || document.readyState === "interactive"){
 					var action = "load";
 					var imgTags = document.getElementsByTagName("img");
 					if (!imgTags) {
@@ -247,18 +241,30 @@ if(typeof NeonImageTracker == "undefined"){
 					var imageUrls = new Array();
 					for (var i = 0; i<imgTags.length; i++) {
 						imageUrls.push(imgTags[i].src);
-					}	
+					}
 					NeonDataSender.createRequest(action, imageUrls, 
 							NeonImageTracker.TrackerAccountId, null, NeonTrackerType);
-			});
-			$("img").mousedown(function(e) {
-				var action = "click";	
-				var imgSrc = $(this).attr('src');
-				var coordinates = e.pageX  + "," + e.pageY;
-				params = "&img=" + encodeURIComponent(imgSrc) + "&xy=" + coordinates 
-				NeonDataSender.createRequest(action, null, 
-						NeonImageTracker.TrackerAccountId, params, NeonTrackerType);
-			}); 
+					clearInterval(docReadyId);		
+			}
+		},
+
+		trackerInit: function () {
+			$(document).ready(function () {
+
+				if (initTracker) {
+					return;
+				}
+				initTracker = true;
+				// cease to use window.onload since it can be canceled or 
+				// not compatible with certain browsers
+				$("img").mousedown(function(e) {
+					var action = "click";	
+					var imgSrc = $(this).attr('src');
+					var coordinates = e.pageX  + "," + e.pageY;
+					params = "&img=" + encodeURIComponent(imgSrc) + "&xy=" + coordinates 
+					NeonDataSender.createRequest(action, null, 
+							NeonImageTracker.TrackerAccountId, params, NeonTrackerType);
+				}); 
 		});
 		}
 	   
@@ -266,6 +272,8 @@ if(typeof NeonImageTracker == "undefined"){
 	}());
 
 }
+
+var docReadyId = setInterval(NeonImageTracker.checkWindowReady, 100); //100ms
 
 // Only do anything if jQuery isn't defined
 if (typeof jQuery == 'undefined') {
