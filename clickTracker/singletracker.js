@@ -1,0 +1,311 @@
+var PageLoadIDSeen = null; 
+if (typeof NeonDataSender == "undefined"){
+var NeonDataSender = (function() {
+		var loadRequests = new Array();	
+		var NeonTrackerURL = "http://tracker.neon-lab.com/track";
+		var images = new Array(); 
+		var rParam = { 
+			action: 0,
+			ttype: 1,
+			tai: 2,
+			params: 3,
+			imageUrls: 4	
+		};
+
+		function JSONscriptRequest(fullUrl) {
+			this.fullUrl = fullUrl; 
+			this.noCacheIE = '&noCacheIE=' + (new Date()).getTime();
+			this.headLoc = document.getElementsByTagName("head").item(0);
+			this.scriptId = 'JscriptId' + JSONscriptRequest.scriptCounter++;
+		}
+
+		JSONscriptRequest.scriptCounter = 1;
+		JSONscriptRequest.prototype.buildScriptTag = function () {
+			this.scriptObj = document.createElement("script");
+			this.scriptObj.setAttribute("type", "text/javascript");
+			this.scriptObj.setAttribute("charset", "utf-8");
+			this.scriptObj.setAttribute("src", this.fullUrl + this.noCacheIE);
+			this.scriptObj.setAttribute("id", this.scriptId);
+		};
+		
+		JSONscriptRequest.prototype.removeScriptTag = function () {
+			this.headLoc.removeChild(this.scriptObj);  
+		};
+		
+		JSONscriptRequest.prototype.addScriptTag = function () {
+			this.headLoc.appendChild(this.scriptObj);
+		}
+
+		return{ 
+			createRequest: function(action, imgs, tai, params, ttype){
+				// On page load combine the player and image tracker requests
+				// build request
+				var pageURL = (document.URL).split('?')[0]; // Ignore any get params	
+				var ts = new Date().getTime();
+				if (action == "load") {
+					var request = new Array();
+					request[rParam.action] = action;
+					request[rParam.ttype] = ttype;
+					request[rParam.tai] = tai;
+					request[rParam.params] = params;
+					request[rParam.imageUrls] = imgs;
+					loadRequests.push(request);
+				}else{
+				// if click, then send immediately
+				var req = NeonTrackerURL + "?" + "a=" + action + "&ts=" + ts + "&id=" + reqGuid + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + ttype + "&tai=" + tai + params;
+				NeonDataSender.sendRequest(req);
+				}
+				
+			},
+		
+			checkRequestQueue: function(){
+				// Iterate through the queue and combine the load requests
+				var allImageUrls = new Array();
+				var ts = new Date().getTime();
+				var pageURL = (document.URL).split('?')[0]; // Ignore any get params
+				var request = null;
+				if (loadRequests.length == 0){
+					return;
+				}
+				for (var i=0; i<loadRequests.length; i++){
+					request = loadRequests[i];
+					allImageUrls.push(request[rParam.imageUrls]);
+				}
+				loadRequests = new Array(); // clear the load requeust Array 
+				image_urls = new Array();
+				for (var i=0; i<allImageUrls.length; i++){
+					imArr = allImageUrls[i];
+					for (var j=0; j<imArr.length; j++){
+						image_urls.push(imArr[j]);
+					}
+				}
+				var req = NeonTrackerURL + "?" + "a=" + request[rParam.action] + "&ts=" + ts + "&id=" + reqGuid + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + request[rParam.ttype] + "&tai=" + request[rParam.tai] ;
+				if (request[rParam.params] != null){ 
+					req += request[rParam.params];
+				}
+
+				imgs = encodeURIComponent(JSON.stringify(image_urls));
+				req += "&imgs=" + imgs;
+				NeonDataSender.sendRequest(req);
+
+			},
+
+			sendRequest: function(req){
+				try 
+				{ 
+					bObj = new JSONscriptRequest(req); 
+					bObj.buildScriptTag(); 
+					bObj.addScriptTag();  
+				}
+				catch(err){
+					console.log(err)
+				}
+				
+			},
+
+			_NeonPageRequestUUID: function(){
+				function genRandomHexChars() {
+					return Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1); 
+				}
+				return genRandomHexChars() + genRandomHexChars() + genRandomHexChars() + genRandomHexChars();
+			}
+		}
+	}());
+}
+
+var timerId = setInterval(NeonDataSender.checkRequestQueue, 1000); //1 second
+// Flush the Queue on exit 
+window.onbeforeunload = function (e) {
+	NeonDataSender.checkRequestQueue();	
+}
+
+var reqGuid = NeonDataSender._NeonPageRequestUUID();
+if (typeof NeonPlayerTracker == "undefined"){
+
+	var NeonPlayerTracker = ( function () {
+		var NeonTrackerType = "flashonlytracker";
+		var player, videoPlayer, content, exp, initialVideo;
+		var TrackerAccountId = "AccountIDNotSet";
+		return {
+			onTemplateLoad: function (expID){                                           
+				NeonPlayerTracker.hookNeonTrackerToFlashPlayer(expID);
+			},
+
+			setAccountId: function(aid){
+				NeonImageTracker.TrackerAccountId = aid;
+			},
+
+			hookNeonTrackerToFlashPlayer: function(expID) { 
+				player = brightcove.api.getExperience(expID);
+				if (player){
+					NeonTrackerType = "html5";
+				}else{
+					player = bcPlayer.getPlayer(expID);                                      
+					videoPlayer = player.getModule(APIModules.VIDEO_PLAYER);                 
+					content = player.getModule(APIModules.CONTENT);                         
+					exp     = player.getModule(APIModules.EXPERIENCE); 
+					videoPlayer.addEventListener(BCMediaEvent.BEGIN, 
+								NeonPlayerTracker.onMediaBegin);
+					exp.addEventListener(BCExperienceEvent.CONTENT_LOAD, 
+								NeonPlayerTracker.trackLoadedImageUrls);
+				}
+			 },                             
+	 
+			onTemplateReady: function (evt) {                                         
+				if (evt.target.experience) {
+					APIModules = brightcove.api.modules.APIModules;
+					videoPlayer = player.getModule(APIModules.VIDEO_PLAYER);
+					content = player.getModule(APIModules.CONTENT);
+					videoPlayer.addEventListener(brightcove.api.events.MediaEvent.BEGIN, 
+								NeonPlayerTracker.smartPlayerMediaBegin);
+					videoPlayer.getCurrentVideo(
+								function(videoDTO) { 
+									initialVideo = videoDTO;
+								}
+							);
+				}else{
+					initialVideo = videoPlayer.getCurrentVideo();
+					NeonPlayerTracker.trackLoadedImageUrls();
+				}
+			},
+			
+			trackLoadedImageUrls: function(){
+				var imageUrls = new Array();
+				var stillUrls = new Array();                                            
+				var mediaCollection = content.getAllMediaCollections();
+				if (mediaCollection.length >0 && mediaCollection[0].mediaCount > 0){
+					for(var i = 0; i < mediaCollection[0].mediaCount; i++) {
+							imageUrls[i] = content.getMedia(mediaCollection[0].mediaIds[i]) ["thumbnailURL"].split('?')[0]; 
+					}
+				}
+				action = "load";
+				params = "&cvid=" + initialVideo.id 
+				if (PageLoadIDSeen == null){
+					//avoid duplicate requests
+					PageLoadIDSeen = reqGuid;
+					NeonDataSender.createRequest(action, imageUrls, 
+							NeonPlayerTracker.TrackerAccountId, params, NeonTrackerType);			           
+				}
+			},
+																						 
+			onMediaBegin: function (evt) {
+				var vid    = evt.media.id;	
+				var action = "click";
+				var imgSrc = evt.media.thumbnailURL.split("?")[0]; //clean up
+				params = "&img=" + encodeURIComponent(imgSrc)
+				NeonDataSender.createRequest(action, null, 
+					NeonPlayerTracker.TrackerAccountId, params, NeonTrackerType);			           
+				
+			},
+
+			smartPlayerMediaBegin: function (evt){
+				videoPlayer.getCurrentVideo( function(videoDTO) {
+					var imageUrls = new Array();
+					imageUrls[0] = videoDTO.thumbnailURL.split("?")[0];
+					action = "load";
+					params = "&cvid=" + initialVideo.id 
+					NeonDataSender.createRequest(action, imageUrls, 
+						NeonPlayerTracker.TrackerAccountId, params, NeonTrackerType);
+
+					action = "click";
+					imgSrc = videoDTO.thumbnailURL.split("?")[0]; 
+					params = "&img=" + encodeURIComponent(imgSrc)
+					NeonDataSender.createRequest(action, null, 
+							NeonPlayerTracker.TrackerAccountId, params, NeonTrackerType);
+				});
+			} 
+
+		}
+	}());
+}
+
+if(typeof NeonImageTracker == "undefined"){
+	var NeonImageTracker = ( function ()  {
+		var initTracker = false;
+		var NeonTrackerType = "imagetracker";
+		var TrackerAccountId = NeonPlayerTracker.TrackerAccountId || "AccountIDNotSet";
+		return {
+		
+		setAccountId: function(aid){
+				NeonImageTracker.TrackerAccountId = aid;
+				NeonPlayerTracker.TrackerAccountId = aid;
+			},
+
+		trackerInit: function () {
+			$(document).ready(function () {
+
+				if (initTracker) {
+					return;
+				}
+				initTracker = true;
+				$(window).load(function(){
+					var action = "load";
+					var imgTags = document.getElementsByTagName("img");
+					if (!imgTags) {
+						imgTags = $(this).attr("img"); //use jquery
+					}
+					var imageUrls = new Array();
+					for (var i = 0; i<imgTags.length; i++) {
+						imageUrls.push(imgTags[i].src);
+					}	
+					NeonDataSender.createRequest(action, imageUrls, 
+							NeonImageTracker.TrackerAccountId, null, NeonTrackerType);
+			});
+			$("img").mousedown(function(e) {
+				var action = "click";	
+				var imgSrc = $(this).attr('src');
+				var coordinates = e.pageX  + "," + e.pageY;
+				params = "&img=" + encodeURIComponent(imgSrc) + "&xy=" + coordinates 
+				NeonDataSender.createRequest(action, null, 
+						NeonImageTracker.TrackerAccountId, params, NeonTrackerType);
+			}); 
+		});
+		}
+	   
+	}
+	}());
+
+}
+
+// Only do anything if jQuery isn't defined
+if (typeof jQuery == 'undefined') {
+
+	if (typeof $ == 'function') {
+		var thisPageUsingOtherJSLibrary = true;
+	}
+
+	//get script 		
+	function getScript(url, success) {
+	
+		var script = document.createElement('script');
+		script.src = url;
+		var head = document.getElementsByTagName('head')[0],
+		done = false;
+		// Attach handlers for all browsers
+		script.onload = script.onreadystatechange = function() {
+		if (!done && (!this.readyState || this.readyState == 'loaded' || this.readyState == 'complete')) {
+				done = true;
+				// callback function provided as param
+				success();
+				script.onload = script.onreadystatechange = null;
+				head.removeChild(script);
+			};
+		};
+		head.appendChild(script);
+	
+	};
+	getScript('http://ajax.googleapis.com/ajax/libs/jquery/1.3.1/jquery.min.js', function() {
+	if (typeof jQuery=='undefined') {
+			console.log("JQuery loading failed even after explicit load call");
+		} else {
+				// check if other conflicting library is present
+				// try { $.noConflict(true); } catch(err) {} 
+				NeonImageTracker.trackerInit();
+		}
+	});
+	
+} else { 
+	// jQuery was already loaded
+	NeonImageTracker.trackerInit();
+};
+

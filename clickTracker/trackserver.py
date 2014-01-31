@@ -168,7 +168,7 @@ class TestTracker(TrackerDataHandler):
                    self.request)
         try:
             tracker_data = self.parse_tracker_data()
-            cb = self.get_argument("callback")
+            #cb = self.get_argument("callback")
         except Exception as err:
             _log.exception("key=test_track msg=%s", err) 
             self.finish()

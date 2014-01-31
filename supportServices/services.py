@@ -384,8 +384,11 @@ class AccountHandler(tornado.web.RequestHandler):
 
         title = None
         try:
-            video_url = self.get_argument('video_url') #sanitize
+            video_url = self.get_argument('video_url')
             title = self.get_argument('title')
+            video_url = video_url.split('?')[0]
+            video_url = video_url.replace("www.dropbox.com", 
+                                "dl.dropboxusercontent.com")
         except:
             _log.error("key=create_neon_video_request "
                     "msg=malformed request or missing arguments")
@@ -400,10 +403,21 @@ class AccountHandler(tornado.web.RequestHandler):
         headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
             Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
-        req = tornado.httpclient.HTTPRequest(url=video_url, headers=headers,
-                        use_gzip=False, request_timeout=1.5)
+       
+        #Make an attempt to download partial file in 1.5 secs
+        #Most servers respond within this time, but on a slow connection it
+        #may timeout with 599 and no data
+        time_out = 1.5
+        tries = 0
+        response_code = 599
+        while response_code == 599 and tries <2:
+            tries +=1
+            req = tornado.httpclient.HTTPRequest(url=video_url, headers=headers,
+                        use_gzip=False, request_timeout=time_out)
+            vresponse = yield tornado.gen.Task(http_client.fetch, req)
+            response_code = vresponse.code
+            time_out += 2.0
 
-        vresponse = yield tornado.gen.Task(http_client.fetch, req)
         ctype = vresponse.headers.get('Content-Type')
         if vresponse.error or ctype is None or ctype.lower() in invalid_content_types:
             data = '{"error":"link given is invalid or not a video file"}'
@@ -436,16 +450,16 @@ class AccountHandler(tornado.web.RequestHandler):
         
         result = yield tornado.gen.Task(http_client.fetch, req)
         
+        if result.code == 409:
+            data = '{"error":"url already processed","video_id":"%s"}'%video_id
+            self.send_json_response(data, 409)
+            return
+        
         if result.error:
             _log.error("key=create_neon_video_request "
                     "msg=thumbnail api error %s" %result.error)
             data = '{"error":"neon thumbnail api error"}'
             self.send_json_response(data, 502)
-            return
-
-        if result.code == 409:
-            data = '{"error":"url already processed","video_id":"%s"}'%video_id
-            self.send_json_response(data, 409)
             return
 
         #note: job id gets inserted into Neon platform account on video server

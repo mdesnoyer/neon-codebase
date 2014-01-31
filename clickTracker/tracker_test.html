@@ -1,0 +1,106 @@
+<!-- Test page with various brightcove scenarios -->
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<title> Hybrid page with Images and Player </title>
+
+
+</head>
+<body style="font-family:Arial, Helvetica, sans-serif; font-size:12px">
+
+
+<!-- Start of Brightcove Player -->
+
+<div style="display:none">
+
+</div>
+<!--
+By use of this code snippet, I agree to the Brightcove Publisher T and C
+found at http://corp.brightcove.com/legal/terms_publisher.cfm.
+-->
+
+<script type="text/javascript" src="singletracker_min.js"> </script> 
+<!-- <script type="text/javascript" src="neonbrightcoveplayertracker.js"> </script> --> 
+<script type="text/javascript"> NeonPlayerTracker.setAccountId("sunil")</script>
+<script language="JavaScript" type="text/javascript" src="http://admin.brightcove.com/js/BrightcoveExperiences_all.js"></script>
+
+<object id="myExperience" class="BrightcoveExperience">
+  <param name="bgcolor" value="#FFFFFF" />
+  <param name="width" value="960" />
+  <param name="height" value="445" />
+  <param name="playerID" value="2296789947001" />
+  <param name="playerKey" value="AQ~~,AAACFlFGaSk~,KO63PfDvw1wvFttP8GayNl6qTtlGGc4J" />
+  <param name="isVid" value="true" />
+  <param name="isUI" value="true" />
+  <param name="dynamicStreaming" value="true" />	
+  <param name="@playlistTabs" value="2484337219001" />  
+  <param name="includeAPI" value="true" />
+  <param name="templateLoadHandler" value="NeonPlayerTracker.onTemplateLoad" />
+  <param name="templateReadyHandler" value="NeonPlayerTracker.onTemplateReady" />
+</object>
+<script type="text/javascript">brightcove.createExperiences();</script>
+
+<script type="text/javascript"> NeonImageTracker.setAccountId("im_sunil")</script>
+
+<br/>
+<br/>
+<img id="i1" src="http://d3gqasl9vmjfd8.cloudfront.net/9df6c9ee-3e17-4ebc-904c-5dd5498229f8.jpg"/> 
+<img id="i2" src = "http://resources2.news.com.au/images/2007/01/07/1111112/790502-rajan-2.jpg"/>
+<br/>
+<br/>
+
+<!-- Start of Brightcove Player -->
+
+<div style="display:none">
+
+</div>
+
+<!--
+By use of this code snippet, I agree to the Brightcove Publisher T and C 
+found at https://accounts.brightcove.com/en/terms-and-conditions/. 
+-->
+
+<script type="text/javascript" src="http://admin.brightcove.com/js/BrightcoveExperiences.js"></script>
+
+<object id="myExperience2" class="BrightcoveExperience">
+  <param name="bgcolor" value="#FFFFFF" />
+  <param name="width" value="486" />
+  <param name="height" value="412" />
+  <param name="playerID" value="2296789946001" />
+  <param name="playerKey" value="AQ~~,AAACFlFGaSk~,KO63PfDvw1xoWsUUJcHVipQ55EIrSrEO" />
+  <param name="isVid" value="true" />
+  <param name="dynamicStreaming" value="true" />
+  <param name="@videoPlayer"  value="2801877295001" />	    
+  <param name="includeAPI" value="true" />
+  <param name="templateLoadHandler" value="NeonPlayerTracker.onTemplateLoad" />
+  <param name="templateReadyHandler" value="NeonPlayerTracker.onTemplateReady" />
+    
+</object>
+
+<script type="text/javascript">brightcove.createExperiences();</script>
+
+<br/>
+<br/>
+
+<!-- Player with images at the end -->
+
+<object id="myExperience1918246172001" class="BrightcoveExperience">
+  <param name="bgcolor" value="#FFFFFF" />
+  <param name="width" value="480" />
+  <param name="height" value="270" />
+  <param name="playerID" value="1093954844001" />
+  <param name="playerKey" value="AQ~~,AAAA0vRfoQE~,baHF9-H5aHJUodkaM0GusBkxNM1y6JO-" />
+  <param name="isVid" value="true" />
+  <param name="isUI" value="true" />
+  <param name="dynamicStreaming" value="true" />
+  <param name="@videoPlayer" value="1918246172001" />
+  <param name="includeAPI" value="true" />
+  <param name="templateLoadHandler" value="NeonPlayerTracker.onTemplateLoad" />
+  <param name="templateReadyHandler" value="NeonPlayerTracker.onTemplateReady" />
+</object>
+
+</div>
+</body>
+</html>
+</body>
+</html>
