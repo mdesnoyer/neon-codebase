@@ -1315,7 +1315,7 @@ class ThumbnailMetaData(object):
         self.urls = urls  # All urls associated with single image
         self.created_time = created #Timestamp when thumbnail was created 
         self.enabled = enabled #boolen, indicates if this thumbnail can be displayed/ tested with 
-        self.chosen  = chosen #boolean, indicates this thumbnail is live
+        self.chosen = chosen #boolean, indicates this thumbnail is live
         self.width = width
         self.height = height
         self.type = ttype #neon1../ brightcove / youtube
@@ -1607,7 +1607,7 @@ class ThumbnailIDMapper(object):
 
 
     @classmethod
-    def get_thumb_mappings(cls,keys,callback=None):
+    def get_thumb_mappings(cls, keys, callback=None):
         ''' Returns list of thumbnail mappings for give thumb ids(keys)
         '''
         db_connection = DBConnection(cls)

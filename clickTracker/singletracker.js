@@ -133,7 +133,7 @@ if (typeof NeonPlayerTracker == "undefined"){
 			},
 
 			setAccountId: function(aid){
-				NeonImageTracker.TrackerAccountId = aid;
+				TrackerAccountId = aid;
 			},
 
 			hookNeonTrackerToFlashPlayer: function(expID) { 
@@ -185,7 +185,7 @@ if (typeof NeonPlayerTracker == "undefined"){
 					//avoid duplicate requests
 					PageLoadIDSeen = reqGuid;
 					NeonDataSender.createRequest(action, imageUrls, 
-							NeonPlayerTracker.TrackerAccountId, params, NeonTrackerType);			           
+							TrackerAccountId, params, NeonTrackerType);			           
 				}
 			},
 																						 
@@ -195,7 +195,7 @@ if (typeof NeonPlayerTracker == "undefined"){
 				var imgSrc = evt.media.thumbnailURL.split("?")[0]; //clean up
 				params = "&img=" + encodeURIComponent(imgSrc)
 				NeonDataSender.createRequest(action, null, 
-					NeonPlayerTracker.TrackerAccountId, params, NeonTrackerType);			           
+					TrackerAccountId, params, NeonTrackerType);			           
 				
 			},
 
@@ -206,13 +206,13 @@ if (typeof NeonPlayerTracker == "undefined"){
 					action = "load";
 					params = "&cvid=" + initialVideo.id 
 					NeonDataSender.createRequest(action, imageUrls, 
-						NeonPlayerTracker.TrackerAccountId, params, NeonTrackerType);
+						TrackerAccountId, params, NeonTrackerType);
 
 					action = "click";
 					imgSrc = videoDTO.thumbnailURL.split("?")[0]; 
 					params = "&img=" + encodeURIComponent(imgSrc)
 					NeonDataSender.createRequest(action, null, 
-							NeonPlayerTracker.TrackerAccountId, params, NeonTrackerType);
+							TrackerAccountId, params, NeonTrackerType);
 				});
 			} 
 
@@ -224,15 +224,30 @@ if(typeof NeonImageTracker == "undefined"){
 	var NeonImageTracker = ( function ()  {
 		var initTracker = false;
 		var NeonTrackerType = "imagetracker";
-		var TrackerAccountId = NeonPlayerTracker.TrackerAccountId || "AccountIDNotSet";
+		var TrackerAccountId = null; 	
+
 		return {
-		
+	
+		//getAccountId: function(){
+		//	var scriptTags = document.getElementsByTagName("script");
+		//	for (var i = 0; i<scriptTags.length; i++) {
+		//		stag = scriptTags[i];
+		//		if(stag.src == "http://localhost/bcove/singletracker.js"){
+		//			return stag.id;
+		//		} 		
+		//	}	
+		//},
+
 		setAccountId: function(aid){
-				NeonImageTracker.TrackerAccountId = aid;
-				NeonPlayerTracker.TrackerAccountId = aid;
-			},
+				TrackerAccountId = aid;
+				NeonPlayerTracker.setAccountId(aid);
+		},
+
 		checkWindowReady: function(){
 			if(document.readyState === "complete" || document.readyState === "interactive"){
+					//aid = NeonImageTracker.getAccountId();
+				 	//NeonImageTracker.setAccountId(aid);
+				 	//NeonPlayerTracker.setAccountId(aid);
 					var action = "load";
 					var imgTags = document.getElementsByTagName("img");
 					if (!imgTags) {
@@ -243,7 +258,7 @@ if(typeof NeonImageTracker == "undefined"){
 						imageUrls.push(imgTags[i].src);
 					}
 					NeonDataSender.createRequest(action, imageUrls, 
-							NeonImageTracker.TrackerAccountId, null, NeonTrackerType);
+							TrackerAccountId, null, NeonTrackerType);
 					clearInterval(docReadyId);		
 			}
 		},
@@ -263,7 +278,7 @@ if(typeof NeonImageTracker == "undefined"){
 					var coordinates = e.pageX  + "," + e.pageY;
 					params = "&img=" + encodeURIComponent(imgSrc) + "&xy=" + coordinates 
 					NeonDataSender.createRequest(action, null, 
-							NeonImageTracker.TrackerAccountId, params, NeonTrackerType);
+							TrackerAccountId, params, NeonTrackerType);
 				}); 
 		});
 		}
