@@ -404,25 +404,17 @@ class AccountHandler(tornado.web.RequestHandler):
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
             Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
        
-        #Make an attempt to download partial file in 1.5 secs
-        #Most servers respond within this time, but on a slow connection it
-        #may timeout with 599 and no data
-        time_out = 1.5
-        tries = 0
-        response_code = 599
-        while response_code == 599 and tries <2:
-            tries +=1
-            req = tornado.httpclient.HTTPRequest(url=video_url, headers=headers,
-                        use_gzip=False, request_timeout=time_out)
-            vresponse = yield tornado.gen.Task(http_client.fetch, req)
-            response_code = vresponse.code
-            time_out += 2.0
-
-        ctype = vresponse.headers.get('Content-Type')
-        if vresponse.error or ctype is None or ctype.lower() in invalid_content_types:
-            data = '{"error":"link given is invalid or not a video file"}'
-            self.send_json_response(data, 400)
-            return
+        req = tornado.httpclient.HTTPRequest(url=video_url, headers=headers,
+                        use_gzip=False, request_timeout=1.5)
+        vresponse = yield tornado.gen.Task(http_client.fetch, req)
+       
+        #If timeout, Ignore for now, may be a valid slow link.  
+        if vresponse.code != 599:
+            ctype = vresponse.headers.get('Content-Type')
+            if vresponse.error or ctype is None or ctype.lower() in invalid_content_types:
+                data = '{"error":"link given is invalid or not a video file"}'
+                self.send_json_response(data, 400)
+                return
 
         video_id = hashlib.md5(video_url).hexdigest()
         request_body = {}
