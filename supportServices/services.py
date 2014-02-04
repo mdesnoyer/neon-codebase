@@ -384,8 +384,11 @@ class AccountHandler(tornado.web.RequestHandler):
 
         title = None
         try:
-            video_url = self.get_argument('video_url') #sanitize
+            video_url = self.get_argument('video_url')
             title = self.get_argument('title')
+            video_url = video_url.split('?')[0]
+            video_url = video_url.replace("www.dropbox.com", 
+                                "dl.dropboxusercontent.com")
         except:
             _log.error("key=create_neon_video_request "
                     "msg=malformed request or missing arguments")
@@ -400,15 +403,18 @@ class AccountHandler(tornado.web.RequestHandler):
         headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
             Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
+       
         req = tornado.httpclient.HTTPRequest(url=video_url, headers=headers,
                         use_gzip=False, request_timeout=1.5)
-
         vresponse = yield tornado.gen.Task(http_client.fetch, req)
-        ctype = vresponse.headers.get('Content-Type')
-        if vresponse.error or ctype is None or ctype.lower() in invalid_content_types:
-            data = '{"error":"link given is invalid or not a video file"}'
-            self.send_json_response(data, 400)
-            return
+       
+        #If timeout, Ignore for now, may be a valid slow link.  
+        if vresponse.code != 599:
+            ctype = vresponse.headers.get('Content-Type')
+            if vresponse.error or ctype is None or ctype.lower() in invalid_content_types:
+                data = '{"error":"link given is invalid or not a video file"}'
+                self.send_json_response(data, 400)
+                return
 
         video_id = hashlib.md5(video_url).hexdigest()
         request_body = {}
@@ -436,16 +442,16 @@ class AccountHandler(tornado.web.RequestHandler):
         
         result = yield tornado.gen.Task(http_client.fetch, req)
         
+        if result.code == 409:
+            data = '{"error":"url already processed","video_id":"%s"}'%video_id
+            self.send_json_response(data, 409)
+            return
+        
         if result.error:
             _log.error("key=create_neon_video_request "
                     "msg=thumbnail api error %s" %result.error)
             data = '{"error":"neon thumbnail api error"}'
             self.send_json_response(data, 502)
-            return
-
-        if result.code == 409:
-            data = '{"error":"url already processed","video_id":"%s"}'%video_id
-            self.send_json_response(data, 409)
             return
 
         #note: job id gets inserted into Neon platform account on video server
