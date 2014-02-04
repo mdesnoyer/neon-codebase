@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__),
+                                             '..', '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 from datetime import datetime
 from mock import MagicMock, patch
@@ -41,13 +42,15 @@ class TestDataParsing(unittest.TestCase):
     def test_valid_click(self):
         results, counters = test_utils.mr.run_single_step(self.mr,
             ('{"sts":19800, "a":"click", "tai":"t1", "page":"here.com",'
-             '"ttype":"flashonly", "img":"http://monkey.com"}\n'
+             '"ttype":"flashonly", "id":"id3", "img":"http://monkey.com"}\n'
              '{"sts":19800, "a":"click", "tai":"t1", "page":"here.com",'
-             '"ttype":"flashonly", "img":"http://panda.com"}\n'),
+             '"ttype":"flashonly", "id":"id4", "img":"http://panda.com"}\n'),
             protocol=RawProtocol)
         self.assertItemsEqual(results,
-                              [(('click', 'http://monkey.com', 't1', 5), 1),
-                              (('click', 'http://panda.com', 't1', 5), 1),
+                              [(('click', 'id3', 'http://monkey.com', 't1'),
+                                (5, 1)),
+                              (('click', 'id4', 'http://panda.com', 't1'),
+                               (5, 1)),
                               ('latest', 19800),
                               ('latest', 19800)])
 
@@ -55,13 +58,16 @@ class TestDataParsing(unittest.TestCase):
         results, counters = test_utils.mr.run_single_step(self.mr,
           ('{"sts":19800, "a":"load", "page":"here.com", "ttype":"flashonly",'
            '"imgs":["http://monkey.com","poprocks.jpg","pumpkin.wow"],'
-           '"tai":"t1"}'),
+           '"tai":"t1", "id":"id3"}'),
             protocol=RawProtocol)
                                             
         self.assertItemsEqual(results,
-                              [(('load', 'http://monkey.com', 't1', 5), 1),
-                               (('load', 'poprocks.jpg', 't1', 5), 1),
-                               (('load', 'pumpkin.wow', 't1', 5), 1),
+                              [(('load', 'id3', 'http://monkey.com', 't1'),
+                                (5, 1)),
+                               (('load', 'id3', 'poprocks.jpg', 't1'),
+                                (5, 1)),
+                               (('load', 'id3', 'pumpkin.wow', 't1'),
+                                (5, 1)),
                                ('latest', 19800)])
 
     def test_invalid_json(self):
@@ -76,32 +82,39 @@ class TestDataParsing(unittest.TestCase):
 
     def test_fields_missing(self):
         results, counters = test_utils.mr.run_single_step(self.mr,
-            ('{"a":"click", "tai":"t1", "ttype":"flashonly", '
+            ('{"a":"click", "tai":"t1", "ttype":"flashonly", "id":"id3",'
              '"img":"http://monkey.com"}\n'
-             '{"sts":19800,"tai":"t1","a":"click","img":"http://monkey.com"}\n'
-             '{"sts":19800, "tai":"t1", "ttype":"flashonly", '
+             '{"sts":19800,"tai":"t1","id":"id3","a":"click",'
              '"img":"http://monkey.com"}\n'
-             '{"sts":19800, "tai":"t1", "ttype":"flashonly", "a":"click"}\n'
-             '{"sts":19800, "tai":"t1", "ttype":"flashonly", "a":"click",'
-             '"imgs":"http://monkey.com"}\n'
-             '{"ttype":"flashonly", "a":"load", "tai":"t1",'
+             '{"sts":19800, "tai":"t1", "ttype":"flashonly", "id":"id3",'
+             '"img":"http://monkey.com"}\n'
+             '{"sts":19800, "tai":"t1", "id":"id3", "ttype":"flashonly", '
+             '"a":"click"}\n'
+             '{"sts":19800, "tai":"t1", "id":"id3", "ttype":"flashonly", '
+             '"a":"click", "imgs":"http://monkey.com"}\n'
+             '{"ttype":"flashonly", "a":"load", "tai":"t1", "id":"id3",'
              '"imgs":["a.com", "b.jpg", "c.png"]}\n'
-             '{"sts":1900, "a":"load", "tai":"t1", "imgs":["now.com"]}\n'
-             '{"sts":19800, "ttype":"flashonly", "tai":"t1",'
+             '{"sts":1900, "a":"load", "id":"id3", "tai":"t1", '
+             '"imgs":["now.com"]}\n'
+             '{"sts":19800, "ttype":"flashonly", "tai":"t1", "id":"id3",'
              '"imgs":["a.com", "b.jpg", "c.png"]}\n'
-             '{"sts":19800, "tai":"t1", "ttype":"flashonly", "a":"load"}\n'
+             '{"sts":19800, "tai":"t1", "id":"id3", "ttype":"flashonly", '
+             '"a":"load"}\n'
+             '{"sts":19800, "tai":"t1", "id":"id3", "ttype":"flashonly", '
+             '"a":"load", "img":["a.com", "b.jpg", "c.png"]}\n'
              '{"sts":19800, "tai":"t1", "ttype":"flashonly", "a":"load", '
-             '"img":["a.com", "b.jpg", "c.png"]}\n'
-             '{"sts":19800, "tai":"t1", "ttype":"flashonly", "a":"load", '
-             '"imgs":"a.com"}\n'
-             '{"sts":19800, "a":"click", "page":"here.com",'
+             '"id":"id3", "imgs":"a.com"}\n'
+             '{"sts":19800, "a":"click", "page":"here.com", "id":"id3",'
              '"ttype":"flashonly", "img":"http://monkey.com"}\n'
-             '{"sts":19800, "a":"load", "page":"here.com","ttype":"flashonly",'
+             '{"sts":19800, "a":"click", "page":"here.com", '
+             '"ttype":"flashonly", "tai":"t1", "img":"http://monkey.com"}\n'
+             '{"sts":19800, "a":"load", "id":"id3", "page":"here.com",'
+             '"ttype":"flashonly",'
              '"imgs":["http://monkey.com","poprocks.jpg","pumpkin.wow"]}\n'),
             protocol=RawProtocol)
         self.assertEqual(results, [])
         self.assertEqual(
-            counters['HourlyEventStatsErrors']['JSONFieldMissing'], 13)
+            counters['HourlyEventStatsErrors']['JSONFieldMissing'], 14)
 
     def test_html5_player(self):
         '''We need to ignore entries for the html5 player.
@@ -119,6 +132,56 @@ class TestDataParsing(unittest.TestCase):
            counters['HourlyEventStatsErrors']['HTML5_bc_click'], 1)
         self.assertEqual(
            counters['HourlyEventStatsErrors']['HTML5_bc_load'], 1)
+
+class TestFilterDuplicateEvents(unittest.TestCase):
+    def setUp(self):
+        self.mr = HourlyEventStats(['-r', 'inline', '--no-conf', '-'])
+
+    def test_latest_time_update(self):
+        results, counters = test_utils.mr.run_single_step(self.mr,
+            encode([('latest', 3),
+                    ('latest', 8),
+                    ('latest', 1),]),
+            step_type='reducer')
+        self.assertItemsEqual(results, [('latest', 8)])
+        self.assertEqual(counters, {})
+
+    def test_duplicate_clicks(self):
+        results, counters = test_utils.mr.run_single_step(self.mr,
+            encode([(('click', 'id2', 'here.jpg', 'tai1'), (5, 1)),
+                    (('click', 'id2', 'here.jpg', 'tai1'), (6, 1)),
+                    (('click', 'id2', 'here.jpg', 'tai1'), (5, 1)),
+                    (('click', 'id2', 'there.jpg', 'tai1'), (5, 1)),
+                    (('click', 'id3', 'here.jpg', 'tai1'), (5, 1)),
+                    (('click', 'id2', 'here.jpg', 'test1'), (5, 1)),
+                    ]),
+            step_type='reducer')
+        self.assertItemsEqual(results, [
+            (('click', 'here.jpg', 'tai1', 5), 1),
+            (('click', 'there.jpg', 'tai1', 5), 1),
+            (('click', 'here.jpg', 'tai1', 5), 1), # This one has id3
+            (('click', 'here.jpg', 'test1', 5), 1),
+            ])
+        self.assertEqual(counters, {})
+
+    def test_duplicate_loads(self):
+        results, counters = test_utils.mr.run_single_step(self.mr,
+            encode([(('load', 'id2', 'here.jpg', 'tai1'), (5, 1)),
+                    (('load', 'id2', 'here.jpg', 'tai1'), (6, 1)),
+                    (('load', 'id2', 'here.jpg', 'tai1'), (5, 1)),
+                    (('load', 'id2', 'there.jpg', 'tai1'), (5, 1)),
+                    (('load', 'id3', 'here.jpg', 'tai1'), (5, 1)),
+                    (('load', 'id2', 'here.jpg', 'test1'), (5, 1)),
+                    ]),
+            step_type='reducer')
+        self.assertItemsEqual(results, [
+            (('load', 'here.jpg', 'tai1', 5), 1),
+            (('load', 'there.jpg', 'tai1', 5), 1),
+            (('load', 'here.jpg', 'tai1', 5), 1), # This one has id3
+            (('load', 'here.jpg', 'test1', 5), 1),
+            ])
+        self.assertEqual(counters, {})
+        
 
 class TestIDMapping(unittest.TestCase):
     '''Tests for mapping thumbnail urls to ids.'''
@@ -145,7 +208,7 @@ class TestIDMapping(unittest.TestCase):
         
         results, counters = test_utils.mr.run_single_step(self.mr,
             encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
-            step=1)
+            step=2)
 
         self.assertEqual(self.mock_mapper.call_count, 1)
         self.mock_mapper.assert_called_with('http://first.jpg')
@@ -158,7 +221,7 @@ class TestIDMapping(unittest.TestCase):
         
         results, counters = test_utils.mr.run_single_step(self.mr,
             encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
-            step=1)
+            step=2)
 
         self.assertEqual(results, [])
         self.assertEqual(self.mock_mapper.call_count, 1)
@@ -172,7 +235,7 @@ class TestIDMapping(unittest.TestCase):
         
         results, counters = test_utils.mr.run_single_step(self.mr,
             encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
-            step=1)
+            step=2)
 
         self.assertEqual(results, [])
         self.assertEqual(self.mock_mapper.call_count, 1)
@@ -186,7 +249,7 @@ class TestIDMapping(unittest.TestCase):
         
         results, counters = test_utils.mr.run_single_step(self.mr,
             encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
-            step=1)
+            step=2)
 
         self.assertEqual(results, [])
         self.assertEqual(self.mock_mapper.call_count, 1)
@@ -199,7 +262,7 @@ class TestIDMapping(unittest.TestCase):
         
         results, counters = test_utils.mr.run_single_step(self.mr,
             encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
-            step=1)
+            step=2)
 
         self.assertEqual(results, [])
         self.assertEqual(counters, {})
@@ -212,7 +275,7 @@ class TestIDMapping(unittest.TestCase):
 
         results, counters = test_utils.mr.run_single_step(self.mr,
             encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
-            step=1)
+            step=2)
         
         self.assertEqual(results, [])
         self.account_mapper.assert_called_with('tai1')
@@ -225,7 +288,7 @@ class TestIDMapping(unittest.TestCase):
 
         results, counters = test_utils.mr.run_single_step(self.mr,
             encode([(('click', 'http://first.jpg', 'tai1', 94), 3)]),
-            step=1)
+            step=2)
         
         self.assertEqual(results, [])
         self.account_mapper.assert_called_with('tai1')
@@ -239,10 +302,10 @@ class TestDatabaseWriting(unittest.TestCase):
         self.dbfile = tempfile.NamedTemporaryFile()
 
         self.db_patcher = patch('stats.hourly_event_stats_mr.sqldb.connect')
-        dbmock = self.db_patcher.start()
+        self.dbmock = self.db_patcher.start()
         def connect2db(*args, **kwargs):
             return sqlite3.connect(self.dbfile.name)
-        dbmock.side_effect = connect2db
+        self.dbmock.side_effect = connect2db
         self.ramdb = connect2db()
     
     def tearDown(self):
@@ -251,7 +314,7 @@ class TestDatabaseWriting(unittest.TestCase):
         self.dbfile.close()
 
     def test_table_creation(self):
-        results, counters = test_utils.mr.run_single_step(self.mr, '', step=2,
+        results, counters = test_utils.mr.run_single_step(self.mr, '', step=3,
                                             step_type='reducer')
         cursor = self.ramdb.cursor()
         cursor.execute('select * from hourly_events')
@@ -268,7 +331,7 @@ class TestDatabaseWriting(unittest.TestCase):
                     (('imgB', 56),(9, 'click')),
                     (('imgA', 54),(12, 'load')),
                     ('latest', 201600)]),
-            step=2,
+            step=3,
             step_type='reducer')
         cursor = self.ramdb.cursor()
         cursor.execute('select thumbnail_id, hour, loads, clicks '
@@ -294,7 +357,7 @@ class TestDatabaseWriting(unittest.TestCase):
                                 (('imgB', 56),(9, 'click')),
                                 (('imgA', 54),(12, 'load')),
                                 ('latest', 201600)]),
-                                step=2,
+                                step=3,
                                 step_type='reducer')
         test_utils.mr.run_single_step(self.mr,
                         encode([(('imgA', 56),(10, 'click')),
@@ -302,7 +365,7 @@ class TestDatabaseWriting(unittest.TestCase):
                                 (('imgB', 56),(9, 'click')),
                                 (('imgA', 54),(12, 'load')),
                                 ('latest', 201605)]),
-                                step=2,
+                                step=3,
                                 step_type='reducer')
         cursor = self.ramdb.cursor()
         cursor.execute('select thumbnail_id, hour, loads, clicks from '
@@ -329,13 +392,13 @@ class TestDatabaseWriting(unittest.TestCase):
                                 (('imgA', 56),(55, 'load')),
                                 (('imgB', 56),(9, 'click')),
                                 (('imgA', 54),(12, 'load'))]),
-                                step=2,
+                                step=3,
                                 step_type='reducer')
         test_utils.mr.run_single_step(self.mr,
                         encode([(('imgA', 56),(2, 'click')),
                                 (('imgA', 56),(10, 'load')),
                                 (('imgA', 59),(16, 'load'))]),
-                                step=2,
+                                step=3,
                                 step_type='reducer')
         cursor = self.ramdb.cursor()
         cursor.execute('select thumbnail_id, hour, loads, clicks from '
@@ -351,10 +414,11 @@ class TestDatabaseWriting(unittest.TestCase):
         self.assertEqual(results[('imgA', hr2str(59))], (16, 0))
 
     def test_connection_error(self):
-        MySQLdb.connect = MagicMock(
-            side_effect=[MySQLdb.Error('yikes')])
-        self.assertRaises(MySQLdb.Error, test_utils.mr.run_single_step,
-           self.mr, '', 'reducer', 2)
+        self.dbmock.side_effect = [
+            stats.hourly_event_stats_mr.sqldb.Error('yikes')]
+        self.assertRaises(stats.hourly_event_stats_mr.sqldb.Error,
+                          test_utils.mr.run_single_step,
+                          self.mr, '', 'reducer', 3)
 
 
 class TestEndToEnd(unittest.TestCase):
@@ -391,19 +455,32 @@ class TestEndToEnd(unittest.TestCase):
         # Setup the input data
         input_data = (
             '{"sts":19800, "a":"click", "page":"here.com", "tai":"tai_prod",'
-            '"ttype":"flashonly", "img":"http://monkey.com"}\n'
-            '{"sts":19795, "a":"load", "ttype":"flashonly", "tai":"tai_prod",'
+            '"ttype":"flashonly", "id":"id1", "img":"http://monkey.com"}\n'
+            '{"sts":19795, "a":"load", "id":"id1", "ttype":"imagetracker", '
+            '"tai":"tai_prod",'
             '"imgs":["http://monkey.com","http://panda.com","pumpkin.wow"]}\n'
+            '{"sts":19810, "a":"click", "page":"here.com", "tai":"tai_prod",'
+            '"ttype":"flashonly", "id":"id1", "img":"http://monkey.com"}\n'
+            '{"sts":19798, "a":"load", "id":"id1", "ttype":"flashonly", '
+            '"tai":"tai_prod",'
+            '"imgs":["http://panda.com"]}\n'
             '{"sts":19805, "a":"click", "page":"here.com", "tai":"tai_prod",'
-             '"ttype":"flashonly", "img":"http://panda.com"}\n'
-            '{"sts":19800, "a":"load", "page":"here.com", "tai":"tai_prod",'
-            '"ttype":"flashonly","imgs":["http://monkey.com","pumpkin.jpg"]}\n'
+             '"ttype":"flashonly", "id":"id1", "img":"http://panda.com"}\n'
+            '{"sts":19800, "a":"load", "id":"id2", "page":"here.com", '
+            '"tai":"tai_prod", "ttype":"flashonly", '
+            '"imgs":["http://monkey.com","pumpkin.jpg"]}\n'
+            '{"sts":19806, "a":"load", "id":"id3", "ttype":"flashonly", '
+            '"tai":"tai_prod",'
+            '"imgs":["http://monkey.com","http://panda.com","pumpkin.wow"]}\n'
+            '{"sts":19808, "a":"load", "id":"id4", "ttype":"flashonly", '
+            '"tai":"tai_stage",'
+            '"imgs":["http://monkey.com","http://panda.com","pumpkin.wow"]}\n'
             '{"sts":19810, "a":"click", "page":"here.com", "tai":"tai_prod",'
-             '"ttype":"flashonly", "img":"http://panda.com"}\n'
+             '"ttype":"flashonly", "id":"id3", "img":"http://panda.com"}\n'
             '{"sts":19810, "a":"click", "page":"here.com", "tai":"tai_prod",'
-             '"ttype":"flashonly", "img":"pumpkin.jpg"}\n'
+             '"ttype":"flashonly", "id":"id2", "img":"pumpkin.jpg"}\n'
             '{"sts":19820, "a":"click", "page":"here.com", "tai":"tai_stage",'
-            '"ttype":"flashonly", "img":"http://monkey.com"}\n')
+            '"ttype":"flashonly", "id":"id4", "img":"http://monkey.com"}\n')
         stdin = StringIO(input_data)
         self.mr.sandbox(stdin=stdin)
 
@@ -443,9 +520,9 @@ class TestEndToEnd(unittest.TestCase):
             results[(data[0], data[1])] = (data[2], data[3])
 
         self.assertEqual(len(results.items()), 4)
-        self.assertEqual(results[('49a8efg1ea98', hr2str(5))], (2, 1))
-        self.assertEqual(results[('2348598ewsfrwe', hr2str(5))], (1, 2))
-        self.assertEqual(results[('68367sgdhs', hr2str(5))], (1, 0))
+        self.assertEqual(results[('49a8efg1ea98', hr2str(5))], (3, 1))
+        self.assertEqual(results[('2348598ewsfrwe', hr2str(5))], (2, 2))
+        self.assertEqual(results[('68367sgdhs', hr2str(5))], (2, 0))
         self.assertEqual(results[('faefr42345dsfg', hr2str(5))], (1, 1))
 
         cursor.execute('select logtime from last_update where '

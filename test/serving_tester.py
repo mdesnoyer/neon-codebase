@@ -265,10 +265,12 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
             for i in range(n_loads):
                 if i < n_clicks:
                     event = copy.copy(base_event)
+                    event['id'] = i
                     event['a'] = 'click'
                     event['img'] = url
                     events.append(event)
                 event = copy.copy(base_event)
+                event['id'] = i - n_clicks
                 event['a'] = 'load'
                 event['imgs'] = [url, 'garbage.jpg']
                 events.append(event)
@@ -294,7 +296,8 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
             _activity_watcher.wait_for_idle()
 
         # Give the stats processor enough time to kick off
-        time.sleep(options.get('stats.stats_processor.run_period') + 0.1)
+        time.sleep(options.get('stats.stats_processor.run_period') + 
+                   random.random()/2)
 
         # Wait for activity to stop again
         _activity_watcher.wait_for_idle()

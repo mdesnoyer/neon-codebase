@@ -76,7 +76,7 @@ class TrackerData(object):
         self.sts = sts #server timestamp
         self.cip = cip #client IP
         self.page = page # Page where the video is shown
-        self.tai = tai
+        self.tai = tai # Tracker account id
 
         if isinstance(imgs, list):        
             self.imgs = imgs #image list
