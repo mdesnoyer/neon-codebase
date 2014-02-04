@@ -1,0 +1,44 @@
+<!-- Test page within a sandbox environment -->
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<title> Brightcove Player test with Optimization loop </title>
+
+
+</head>
+<body style="font-family:Arial, Helvetica, sans-serif; font-size:12px">
+
+<!-- Start of Brightcove Player -->
+
+<div style="display:none">
+
+</div>
+<script type="text/javascript" src="neonbrightcoveplayertracker_test.js"> </script> 
+<script language="JavaScript" type="text/javascript" src="http://admin.brightcove.com/js/BrightcoveExperiences_all.js"></script>
+
+<object id="myExperience" class="BrightcoveExperience">
+  <param name="bgcolor" value="#FFFFFF" />
+  <param name="width" value="960" />
+  <param name="height" value="445" />
+  <param name="playerID" value="2296789947001" />
+  <param name="playerKey" value="AQ~~,AAACFlFGaSk~,KO63PfDvw1wvFttP8GayNl6qTtlGGc4J" />
+  <param name="isVid" value="true" />
+  <param name="isUI" value="true" />
+  <param name="dynamicStreaming" value="true" />	
+  <param name="@playlistTabs" value="3133379031001" /> <!-- Videos to be tested --> 
+  <param name="includeAPI" value="true" />
+  <param name="templateLoadHandler" value="NeonPlayerTracker.onTemplateLoad" />
+  <param name="templateReadyHandler" value="NeonPlayerTracker.onTemplateReady" />
+</object>
+<script type="text/javascript">brightcove.createExperiences();</script>
+
+<br/>
+<br/>
+
+<!-- May be populate a bunch of images too ? -->
+
+
+</body>
+</html>
+</body>
+</html>
