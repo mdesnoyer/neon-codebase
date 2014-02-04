@@ -68,9 +68,13 @@ var NeonDataSender = (function() {
 				if (loadRequests.length == 0){
 					return;
 				}
+				var ttype = "imagetracker";
 				for (var i=0; i<loadRequests.length; i++){
 					request = loadRequests[i];
 					allImageUrls.push(request[rParam.imageUrls]);
+					if (request[rParam.ttype] != ttype){
+						ttype = request[rParam.ttype]
+					}
 				}
 				loadRequests = new Array(); // clear the load requeust Array 
 				image_urls = new Array();
@@ -80,7 +84,7 @@ var NeonDataSender = (function() {
 						image_urls.push(imArr[j]);
 					}
 				}
-				var req = NeonTrackerURL + "?" + "a=" + request[rParam.action] + "&ts=" + ts + "&id=" + reqGuid + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + request[rParam.ttype] + "&tai=" + request[rParam.tai] ;
+				var req = NeonTrackerURL + "?" + "a=" + request[rParam.action] + "&ts=" + ts + "&id=" + reqGuid + "&page=" + encodeURIComponent(pageURL) + "&ttype=" + ttype + "&tai=" + request[rParam.tai] ;
 				if (request[rParam.params] != null){ 
 					req += request[rParam.params];
 				}
@@ -126,7 +130,7 @@ if (typeof NeonPlayerTracker == "undefined"){
 	var NeonPlayerTracker = ( function () {
 		var NeonTrackerType = "flashonlytracker";
 		var player, videoPlayer, content, exp, initialVideo;
-		var TrackerAccountId = "AccountIDNotSet";
+		var TrackerAccountId = null;
 		return {
 			onTemplateLoad: function (expID){                                          
 				NeonPlayerTracker.hookNeonTrackerToFlashPlayer(expID);
@@ -232,7 +236,7 @@ if(typeof NeonImageTracker == "undefined"){
 			var scriptTags = document.getElementsByTagName("script");
 			for (var i = 0; i<scriptTags.length; i++) {
 				sTag = scriptTags[i];
-				if(sTtag.src.search("neonbcplayer.js") >= 0){
+				if(sTag.src.search("neonbctracker.js") >= 0){
 					return sTag.id;
 				} 		
 			}	
