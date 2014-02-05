@@ -551,11 +551,11 @@ class AbstractPlatform(object):
             return db_connection.blocking_conn.set(self.key, value)
 
     def add_video(self, vid, job_id):
-        ''' video => job_id '''
+        ''' external video id => job_id '''
         self.videos[str(vid)] = job_id
 
     def get_videos(self):
-        ''' list of video ids '''
+        ''' list of external video ids '''
         if len(self.videos) > 0:
             return self.videos.keys()
     
