@@ -1578,7 +1578,7 @@ class BcoveHandler(tornado.web.RequestHandler):
                 self.set_status(502)
         else:
             _log.error("key=bcove_handler "
-                    " msg=failed to fetch video metadata for "
+                    " msg=failed to fetch video metadata or video not present for "
                     "%s %s"%(self.internal_video_id, new_tid))
             self.set_status(502)
         self.finish()
@@ -1607,11 +1607,11 @@ class BcoveHandler(tornado.web.RequestHandler):
                     self.set_status(502)
             else:
                 _log.error("key=bcove_handler msg=failed to fetch" 
-                        " neondata.BrightcovePlatform %s i_id %s"%(self.a_id, i_id))
+                        " BrightcovePlatform %s i_id %s"%(self.a_id, i_id))
         else:
             _log.error("key=bcove_handler msg=failed to fetch video metadata " 
                         "for %s"%self.internal_video_id)
-            self.set_status(502)
+            self.set_status(500)
 
         self.finish()
 

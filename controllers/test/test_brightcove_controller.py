@@ -6,11 +6,17 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
-import json
-import unittest
 from controllers import brightcove_controller
-from supportServices.neondata import *
-
+import json
+from mock import patch, MagicMock
+from StringIO import StringIO
+import time
+import test_utils.neontest
+import tornado
+from tornado.gen import YieldPoint, Task
+from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
+from tornado.testing import AsyncHTTPTestCase, AsyncTestCase, AsyncHTTPClient
+import unittest
 
 class TestScheduler(unittest.TestCase):
     '''
@@ -185,15 +191,23 @@ class TestScheduler(unittest.TestCase):
         expected_order = ["ThumbnailCheckTask", "ThumbnailChangeTask_B"]
         self._verify_task_map(task_map, new_video_distribution, expected_order)
 
-    #TODO: Test controller logic for multiple thumbnails (>2)
-
+    def test_multiple_neon_thumbnails(self):
+        '''Test controller logic for multiple thumbnails (>2) '''
+        new_video_distribution = {"int_vid3": [('B', 0.40), 
+                                    ('A', 0.30), ('C', 0.30)]}
+        brightcove_controller.setup_controller_for_vids(
+                                json.dumps(new_video_distribution)) 
+        
+        #TODO: Test logic
     
-class TestDryRunBrighcoveController(unittest.TestCase):
+class TestDryRunBrighcoveController(AsyncHTTPTestCase):
+
     '''
     Dry Run - end to end with reduced time
     '''
 
     def setUp(self):
+        super(TestDryRunBrighcoveController, self).setUp()
         self.controller =\
                     brightcove_controller.BrightcoveABController(delay=0,
                             timeslice=20, cushion_time=0)
@@ -210,17 +224,49 @@ class TestDryRunBrighcoveController(unittest.TestCase):
                                 "int_vid2":[('B', 0.30), ('A', 0.70)] }
 
     def tearDown(self):
-        pass
+        super(TestDryRunBrighcoveController, self).tearDown()
+   
+    def get_app(self):
+        return brightcove_controller.application
+
+    def get_new_ioloop(self):
+        ''' new ioloop '''
+        return tornado.ioloop.IOLoop.instance() 
 
     def test_task_execution(self):
         #TODO: Recreate scheduler logic and exec task one by one; 
         #verify return value 
-        
+       
+        request = HTTPRequest('http://neon-lab.com')
+        response = HTTPResponse(request, 200,
+            buffer=StringIO('{"some response"}'))
+        def _sf(*args, **kwargs):
+            return response
+
         #setup video distribution
         brightcove_controller.setup_controller_for_vids(
                                 json.dumps(self.test_video_distribution), delay=0)
-        self.taskmgr.check_scheduler()
         
+        self.client_sync_patcher = patch(
+            'controllers.brightcove_controller.tornado.httpclient.HTTPClient') 
+        self.client_async_patcher = patch(
+          'controllers.brightcove_controller.tornado.httpclient.AsyncHTTPClient') 
+        self.client_mock_client = self.client_sync_patcher.start()
+        self.client_mock_async_client = self.client_async_patcher.start()
+        #genmock = MagicMock()
+        #genmock().is_ready().return_value = True
+        #genmock().get_result().return_value = [response]
+        self.client_mock_client().fetch.side_effect = _sf 
+        self.client_mock_async_client().fetch.side_effect = _sf 
+
+        #self.taskmgr.check_scheduler()
+        t, p = self.taskmgr.pop_task()
+        t, p = self.taskmgr.pop_task()
+        t.execute()
+
+        self.client_sync_patcher.stop()
+        self.client_async_patcher.stop()
+
 if __name__ == '__main__':
         unittest.main()
 
