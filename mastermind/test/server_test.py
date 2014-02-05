@@ -198,11 +198,14 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
 
         # Define the video meta data
         vid_meta = {
-            '0': neondata.VideoMetadata(0,['t01','t02','t03'],'','','','','',''),
-            '10': neondata.VideoMetadata(0,[],'','','','','',''),
-            '1': neondata.VideoMetadata(0,['t11'],'','','','','',''),
-            '2': neondata.VideoMetadata(0,['t21','t22'],'','','','','',''),
-            '4': neondata.VideoMetadata(0,['t41', 't42'],'','','','','','')
+            api_key + '_0': neondata.VideoMetadata(
+                            0,['t01','t02','t03'],'','','','','',''),
+            api_key + '_10': neondata.VideoMetadata(0,[],'','','','','',''),
+            api_key + '_1': neondata.VideoMetadata(0,['t11'],'','','','','',''),
+            api_key + '_2': neondata.VideoMetadata(
+                            0,['t21','t22'],'','','','','',''),
+            api_key + '_4': neondata.VideoMetadata(
+                            0,['t41', 't42'],'','','','','','')
             }
         datamock.VideoMetadata.get.side_effect = lambda vid: vid_meta[vid]
 
@@ -228,11 +231,11 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         # but there isn't an easy way to do recursive
         # assertItemsEqual, so I'm hard coding the order.
         expected = [
-            mock.call(('0', [('t03', 0.0), ('t02', 1.0), ('t01', 0.0)])),
-            mock.call(('10', [])),
-            mock.call(('1', [('t11', 1.0)])),
-            mock.call(('2', [('t21', 0.15), ('t22', 0.85)])),
-            mock.call(('4', [('t42', 0.0), ('t41', 1.0)]))]
+            mock.call((api_key + '_0', [('t03', 0.0), ('t02', 1.0), ('t01', 0.0)])),
+            mock.call((api_key + '_10', [])),
+            mock.call((api_key + '_1', [('t11', 1.0)])),
+            mock.call((api_key + '_2', [('t21', 0.15), ('t22', 0.85)])),
+            mock.call((api_key + '_4', [('t42', 0.0), ('t41', 1.0)]))]
         self.assertEqual(self.ab_manager.send.call_count, 5)
         self.maxDiff = 700
         self.assertItemsEqual(expected, self.ab_manager.send.call_args_list)
@@ -257,10 +260,10 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         datamock.VideoMetadata.get.return_value = None
 
         with self.assertLogExists(logging.ERROR,
-                                  'Could not find information about video 10'):
+                             'Could not find information about video api_key_10'):
             with self.assertLogExists(logging.ERROR,
                                       'Could not find information about '
-                                      'video 0'):
+                                      'video api_key_0'):
                 self.watcher._process_db_data()
         
         self.assertTrue(self.watcher.is_loaded.is_set())
@@ -275,8 +278,9 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
           [bcPlatform]
 
         vid_meta = {
-            '0': neondata.VideoMetadata(0,['t01','t02','t03'],'','','','','',''),
-            '10': neondata.VideoMetadata(0,[],'','','','','','')
+            'api_key_0': neondata.VideoMetadata(
+                            0,['t01','t02','t03'],'','','','','',''),
+            'api_key_10': neondata.VideoMetadata(0,[],'','','','','','')
             }
         datamock.VideoMetadata.get.side_effect = lambda vid: vid_meta[vid]
 
@@ -296,7 +300,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         # Make sure that there is a directive sent about the other
         # video in the account.
         self.assertEqual(self.ab_manager.send.call_count, 1)
-        self.ab_manager.send.assert_called_with(('10', []))
+        self.ab_manager.send.assert_called_with(('api_key_10', []))
 
         # Make sure that the processing gets flagged as done
         self.assertTrue(self.watcher.is_loaded.is_set())

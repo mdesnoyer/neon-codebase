@@ -401,8 +401,10 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         # Add fake video data in to DB
         for vid in video_ids:
             i_vid = '%s_%s' % (account_id, vid)
-            bp.add_video(i_vid,"dummy_request_id")
-            tids = []; thumbnail_url_mappers=[];thumbnail_id_mappers=[]  
+            bp.add_video(vid,"dummy_request_id")
+            tids = []
+            thumbnail_url_mappers=[]
+            thumbnail_id_mappers=[]  
             # fake thumbnails for videos
             for t in range(n_thumbs):
                 #Note: assume last image is bcove

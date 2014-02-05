@@ -113,7 +113,7 @@ class DBConnection(object):
         otype = args[0] #Arg pass can either be class name or class instance
         cname = None
         if otype:
-            if isinstance(otype,basestring):
+            if isinstance(otype, basestring):
                 cname = otype
             else:
                 #handle the case for classmethod
@@ -454,8 +454,8 @@ class NeonUserAccount(object):
         return "neon"
     
     def add_video(self, vid, job_id):
-        ''' vid,job_id in to vidoes'''
-
+        ''' vid,job_id in to videos'''
+        
         self.videos[str(vid)] = job_id
     
     def to_json(self):
@@ -550,6 +550,22 @@ class AbstractPlatform(object):
         else:
             return db_connection.blocking_conn.set(self.key, value)
 
+    def add_video(self, vid, job_id):
+        ''' video => job_id '''
+        self.videos[str(vid)] = job_id
+
+    def get_videos(self):
+        ''' list of video ids '''
+        if len(self.videos) > 0:
+            return self.videos.keys()
+    
+    def get_internal_video_ids(self):
+        ''' return list of internal video ids for the account ''' 
+        i_vids = [] 
+        for vid in self.videos.keys(): 
+            i_vids.append(InternalVideoID.generate(self.neon_api_key, vid))
+        return i_vids
+
     @classmethod
     def get_ovp(cls):
         ''' ovp string '''
@@ -618,15 +634,6 @@ class NeonPlatform(AbstractPlatform):
         #By default integration ID 0 represents 
         #Neon Platform Integration (access via neon api)
    
-    def add_video(self, vid, job_id):
-        ''' video => job_id '''
-        self.videos[str(vid)] = job_id
-
-    def get_videos(self):
-        ''' list of video ids '''
-        if len(self.videos) > 0:
-            return self.videos.keys()
-
     @classmethod
     def get_ovp(cls):
         ''' ovp string '''
@@ -689,15 +696,6 @@ class BrightcovePlatform(AbstractPlatform):
         ''' return ovp name'''
         return "brightcove"
 
-    def add_video(self, vid, job_id):
-        ''' add video,job_id in to videos '''
-        self.videos[str(vid)] = job_id
-    
-    def get_videos(self):
-        ''' return list of video ids'''
-        if len(self.videos) > 0:
-            return self.videos.keys()
-    
     def get(self, callback=None):
         ''' get instance'''
         db_connection = DBConnection(self)
@@ -1000,10 +998,6 @@ class YoutubePlatform(AbstractPlatform):
     def get_ovp(cls):
         ''' ovp '''
         return "youtube"
-    
-    def add_video(self, vid, job_id):
-        ''' add video, job_id '''
-        self.videos[str(vid)] = job_id
     
     def get_access_token(self, callback):
         ''' Get a valid access token, if not valid -- get new one and set expiry'''
@@ -1567,6 +1561,7 @@ class ThumbnailIDMapper(object):
             if result:
                 obj = ThumbnailIDMapper.create(result)
                 callback(obj.video_id)
+                return
             callback(vid)
 
         db_connection = DBConnection(cls)

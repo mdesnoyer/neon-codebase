@@ -18,6 +18,7 @@ import itertools
 import random
 import time
 import threading
+import tornado
 import tornado.ioloop
 import tornado.web
 import tornado.httpserver
@@ -30,9 +31,9 @@ from heapq import *
 from utils.options import define, options
 define("port", default=8888, help="run on the given port", type=int)
 define("delay", default=10, help="initial delay", type=int)
-define("service_url", default="http://localhost:8083/", 
+define("service_url", default="http://localhost:8083", 
         help="service url", type=str)
-define("mastermind_url", default="http://localhost:8080/", 
+define("mastermind_url", default="http://localhost:8086/get_directives", 
         help="mastermind url", type=str)
 
 import logging
@@ -101,28 +102,25 @@ class ThumbnailChangeTask(AbstractTask):
     def __init__(self,account_id, video_id, new_tid):
         self.video_id = video_id
         self.tid = new_tid
-        self.service_url = options.service_url + "/%s/updatethumbnail/%s" \
+        self.service_url = options.service_url + \
+                "/api/v1/brightcovecontroller/%s/updatethumbnail/%s" \
                 %(account_id, video_id)
     
-    def execute(self):
-        ''' execute '''
-        self.set_thumbnail()
-
     @tornado.gen.engine
-    def set_thumbnail(self):
-        ''' set thumbnail '''
-
+    def execute(self):
+        '''execute, set thumbnail '''
         http_client = tornado.httpclient.AsyncHTTPClient()
-        body = urllib.urlencode({'thumbnail_id':self.tid})
+        body = urllib.urlencode({'thumbnail_id': self.tid})
         req = tornado.httpclient.HTTPRequest(method='POST',
                         url=self.service_url, body=body,
                         request_timeout=10.0)
         result = yield tornado.gen.Task(http_client.fetch, req)
         if result.error:
-            _log.error("key=ThumbnailChangeTask msg=thumbnail change failed")
+            _log.error("key=ThumbnailChangeTask msg=thumbnail change failed" 
+                    " video %s tid %s"%(self.video_id, self.tid))
         else:
             _log.debug("key=ThumbnailChangeTask msg=thumbnail for video %s is %s"
-                        %(self.video_id, self.tid))
+                    %(self.video_id, self.tid))
 
 class TimesliceEndTask(AbstractTask):
 
@@ -149,18 +147,22 @@ class ThumbnailCheckTask(AbstractTask):
     def __init__(self, account_id, video_id):
 
         self.video_id = video_id
-        self.service_url = options.service_url + "/%s/checkthumbnail/%s"\
+        self.service_url = options.service_url + \
+                "/api/v1/brightcovecontroller/%s/checkthumbnail/%s"\
                 %(account_id, video_id)
     
     @tornado.gen.engine
     def execute(self):
         http_client = tornado.httpclient.AsyncHTTPClient()
         req = tornado.httpclient.HTTPRequest(method='POST', url=self.service_url,
-                        request_timeout=10.0)
+                        request_timeout=10.0, body="")
         result = yield tornado.gen.Task(http_client.fetch, req)
         if result.error:
             _log.error("key=ThumbnailCheckTask msg=service error for video %s"
                         %self.video_id)
+        else:
+            _log.info("key=ThumbnailCheckTask msg=run thumbnail check")
+
 
 class VideoTaskInfo(object):
     '''
@@ -427,18 +429,19 @@ def initialize_brightcove_controller():
     req = tornado.httpclient.HTTPRequest(method='GET',
                             url=options.mastermind_url,
                             request_timeout=10.0)
-    result = http_client.fetch(req)
-    if result.error:
-        _log.error("key=Initialize Controller msg=request to mastermind failed")
-    else:
-        setup_controller_for_vids(result.body, options.delay)
-
+    try:
+        result = http_client.fetch(req)
+        if not result.error:
+            setup_controller_for_vids(result.body, options.delay)
+    except Exception, e:
+        _log.error("key=Initialize Controller msg=failed to query mastermind")
+    
 ###################################################################################
 # MAIN
 ###################################################################################
 
 application = tornado.web.Application([
-    (r"/",GetData),
+    (r"/*",GetData),
 ])
 
 def main():
