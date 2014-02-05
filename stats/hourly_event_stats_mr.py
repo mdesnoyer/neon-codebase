@@ -106,7 +106,7 @@ class HourlyEventStats(MRJob):
                 for img in data['imgs']:
                     if img is not None:
                         yield (('load', page_load_id, img, tracker_id),
-                               (hour,  1))
+                               (hour, 1))
             elif data['a'] == 'click':
                 yield(('click', page_load_id, data['img'], tracker_id), 
                       (hour, 1))

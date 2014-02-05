@@ -1707,7 +1707,7 @@ class VideoMetadata(object):
         self.frame_size = frame_size #(w,h)
 
     def get_id(self):
-        ''' get video id '''
+        ''' get internal video id '''
         return self.key
 
     def get_frame_size(self):
