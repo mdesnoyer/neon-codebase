@@ -265,10 +265,12 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
             for i in range(n_loads):
                 if i < n_clicks:
                     event = copy.copy(base_event)
+                    event['id'] = i
                     event['a'] = 'click'
                     event['img'] = url
                     events.append(event)
                 event = copy.copy(base_event)
+                event['id'] = i - n_clicks
                 event['a'] = 'load'
                 event['imgs'] = [url, 'garbage.jpg']
                 events.append(event)
@@ -294,7 +296,8 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
             _activity_watcher.wait_for_idle()
 
         # Give the stats processor enough time to kick off
-        time.sleep(options.get('stats.stats_processor.run_period') + 0.1)
+        time.sleep(options.get('stats.stats_processor.run_period') + 
+                   random.random()/2)
 
         # Wait for activity to stop again
         _activity_watcher.wait_for_idle()
@@ -378,7 +381,9 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
 
         # create neon user account
         nu = neondata.NeonUserAccount(account_id)
-        api_key = nu.neon_api_key
+        #Reassign api_key as account_id (hacky mock) 
+        #TODO: return api_key to recreate video_id and thumbnail ids
+        nu.neon_api_key = api_key = account_id
         nu.save()
 
         # Register a tracker account id mapping
@@ -398,8 +403,10 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         # Add fake video data in to DB
         for vid in video_ids:
             i_vid = '%s_%s' % (account_id, vid)
-            bp.add_video(i_vid,"dummy_request_id")
-            tids = []; thumbnail_url_mappers=[];thumbnail_id_mappers=[]  
+            bp.add_video(vid, "dummy_request_id")
+            tids = []
+            thumbnail_url_mappers=[]
+            thumbnail_id_mappers=[]  
             # fake thumbnails for videos
             for t in range(n_thumbs):
                 #Note: assume last image is bcove
@@ -419,7 +426,7 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
                 thumbnail_url_mappers.append(url_mapper)
                 thumbnail_id_mappers.append(id_mapper)
 
-            vmdata = neondata.VideoMetadata(i_vid,tids,
+            vmdata = neondata.VideoMetadata(i_vid, tids,
                     "job_id","http://testvideo.mp4", 10, 0, 0, integration_id)
             retid = neondata.ThumbnailIDMapper.save_all(thumbnail_id_mappers)
             returl = neondata.ThumbnailURLMapper.save_all(

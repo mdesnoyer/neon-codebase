@@ -9,9 +9,9 @@ Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
     
 from datetime import datetime
 import json
@@ -23,17 +23,20 @@ import MySQLdb as sqldb
 import redis.exceptions
 import stats.db
 from supportServices import neondata
-import time
-import urllib
-import urllib2
 import utils.neon
 import utils.options
 
 _log = logging.getLogger(__name__)
 
 class HourlyEventStats(MRJob):
+    '''MapReduce job that gets statistics on an hourly basis for each thumb.'''
     INPUT_PROTOCOL = mrjob.protocol.RawProtocol
-    INTERNAL_PROTOCOL = mrjob.protocol.PickleProtocol 
+    INTERNAL_PROTOCOL = mrjob.protocol.PickleProtocol
+
+    def __init__(self, *args, **kwargs):
+        super(HourlyEventStats, self).__init__(*args, **kwargs)
+        self.statsdb = None
+        self.statscursor = None
 
     def configure_options(self):
         super(HourlyEventStats, self).configure_options()
@@ -75,7 +78,7 @@ class HourlyEventStats(MRJob):
 
         In particular, the output is:
 
-        ((event_type, img_url, tracker_id, hour), 1)
+        ((event_type, page_load_id, img_url, tracker_id), (hour, 1))
         For counting on an hourly basis
 
         or
@@ -94,6 +97,7 @@ class HourlyEventStats(MRJob):
                 return
 
             tracker_id = data['tai']
+            page_load_id = data['id']
             
             hour = data['sts'] / 3600
             if data['a'] == 'load':
@@ -101,9 +105,11 @@ class HourlyEventStats(MRJob):
                     raise KeyError('imgs')
                 for img in data['imgs']:
                     if img is not None:
-                        yield (('load', img, tracker_id, hour),  1)
+                        yield (('load', page_load_id, img, tracker_id),
+                               (hour, 1))
             elif data['a'] == 'click':
-                yield(('click', data['img'], tracker_id, hour), 1)
+                yield(('click', page_load_id, data['img'], tracker_id), 
+                      (hour, 1))
 
             yield ('latest', data['sts'])
         except ValueError as e:
@@ -116,19 +122,67 @@ class HourlyEventStats(MRJob):
             self.increment_counter('HourlyEventStatsErrors',
                                    'JSONFieldMissing', 1)
 
+    def combiner_merge_latest_time(self, event, values):
+        '''Combines the latest time for entries in the log.
+
+        If the entries are of the form:
+        ('latest', time)
+        They are combined, otherwise, they are ignored.
+        '''
+        if event == 'latest':
+            yield (event, max(values))
+        else:
+            for value in values:
+                yield event, value
+
+    def reducer_filter_duplicate_events(self, event, values):
+        '''Filters duplicate events in the log into a single one.
+
+        Clicks and loads for a given image could appear twice in the
+        log, so if it's the same image and same page load id, we
+        should combine into a single event.
+
+        Also identifies the latest known event.
+
+        Input:
+        ((event_type, page_load_id, img_url, tracker_id), (hour, 1))
+
+        or
+
+        ('latest', time)
+
+        Output:
+        ((event_type, img_url, tracker_id, hour), 1)
+
+        or
+
+        ('latest', time)
+        '''
+        if event == 'latest':
+            yield (event, max(values))
+            return
+
+        event_type, page_load_id, img_url, tracker_id = event
+        yield ((event_type, img_url, tracker_id, min([x[0] for x in values])),
+               1)
+
     def reducer_count_events(self, event, counts):
+        '''Sums up the counts for the events.
+
+        Expects entries of the form
+
+        ((event_type, img_url, tracker_id, hour), count)
+
+        or
+
+        ('latest', time)
+
+        and outputs the same, where count is the sum of all the counts.
+        '''
         if event == 'latest':
             yield (event, max(counts))
         else:
             yield (event, sum(counts))
-
-    def videodb_connect(self):
-        # We're not talking to a true database at the moment
-        pass
-
-    def videodb_disconnect(self):
-        # We're not talking to a true database at the moment
-        pass
 
     def map_thumbnail_url2id(self, event, count):
         '''Maps from the external thumbnail url to our internal id.
@@ -236,6 +290,7 @@ class HourlyEventStats(MRJob):
                 (img_id, hourdate, loads, clicks))
 
     def statsdb_connect(self):
+        '''Create connection to the stats DB and create tables if necessary.'''
         try:
             self.statsdb = sqldb.connect(
                 user=self.options.stats_user,
@@ -251,6 +306,7 @@ class HourlyEventStats(MRJob):
         stats.db.create_tables(self.statscursor)
 
     def statsdb_disconnect(self):
+        '''Disconnect from the stats DB'''
         self.statscursor.close()
         self.statsdb.commit()
         self.statsdb.close()
@@ -258,11 +314,11 @@ class HourlyEventStats(MRJob):
     def steps(self):
         return [
             self.mr(mapper=self.mapper_get_events,
-                    combiner=self.reducer_count_events,
+                    combiner=self.combiner_merge_latest_time,
+                    reducer=self.reducer_filter_duplicate_events),
+            self.mr(combiner=self.reducer_count_events,
                     reducer=self.reducer_count_events),
             self.mr(mapper=self.map_thumbnail_url2id,
-                    mapper_init=self.videodb_connect,
-                    mapper_final=self.videodb_disconnect,
                     reducer=self.reducer_count_events),
             self.mr(mapper=self.merge_events,
                     reducer_init=self.statsdb_connect,
@@ -270,6 +326,7 @@ class HourlyEventStats(MRJob):
                     reducer_final=self.statsdb_disconnect)]
 
 def main():
+    '''Main function for when running from the command line.'''
     # Setup a logger for dumping errors to stderr
     utils.logs.CreateLogger(__name__, stream=sys.stderr,
                             level=logging.WARNING)

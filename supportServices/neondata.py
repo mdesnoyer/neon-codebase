@@ -113,7 +113,7 @@ class DBConnection(object):
         otype = args[0] #Arg pass can either be class name or class instance
         cname = None
         if otype:
-            if isinstance(otype,basestring):
+            if isinstance(otype, basestring):
                 cname = otype
             else:
                 #handle the case for classmethod
@@ -454,8 +454,8 @@ class NeonUserAccount(object):
         return "neon"
     
     def add_video(self, vid, job_id):
-        ''' vid,job_id in to vidoes'''
-
+        ''' vid,job_id in to videos'''
+        
         self.videos[str(vid)] = job_id
     
     def to_json(self):
@@ -550,6 +550,22 @@ class AbstractPlatform(object):
         else:
             return db_connection.blocking_conn.set(self.key, value)
 
+    def add_video(self, vid, job_id):
+        ''' external video id => job_id '''
+        self.videos[str(vid)] = job_id
+
+    def get_videos(self):
+        ''' list of external video ids '''
+        if len(self.videos) > 0:
+            return self.videos.keys()
+    
+    def get_internal_video_ids(self):
+        ''' return list of internal video ids for the account ''' 
+        i_vids = [] 
+        for vid in self.videos.keys(): 
+            i_vids.append(InternalVideoID.generate(self.neon_api_key, vid))
+        return i_vids
+
     @classmethod
     def get_ovp(cls):
         ''' ovp string '''
@@ -618,15 +634,6 @@ class NeonPlatform(AbstractPlatform):
         #By default integration ID 0 represents 
         #Neon Platform Integration (access via neon api)
    
-    def add_video(self, vid, job_id):
-        ''' video => job_id '''
-        self.videos[str(vid)] = job_id
-
-    def get_videos(self):
-        ''' list of video ids '''
-        if len(self.videos) > 0:
-            return self.videos.keys()
-
     @classmethod
     def get_ovp(cls):
         ''' ovp string '''
@@ -689,15 +696,6 @@ class BrightcovePlatform(AbstractPlatform):
         ''' return ovp name'''
         return "brightcove"
 
-    def add_video(self, vid, job_id):
-        ''' add video,job_id in to videos '''
-        self.videos[str(vid)] = job_id
-    
-    def get_videos(self):
-        ''' return list of video ids'''
-        if len(self.videos) > 0:
-            return self.videos.keys()
-    
     def get(self, callback=None):
         ''' get instance'''
         db_connection = DBConnection(self)
@@ -754,18 +752,20 @@ class BrightcovePlatform(AbstractPlatform):
                     " msg=set thumbnail in DB %s tid %s"%(i_vid, new_tid))
         else:
             modified_thumbs.append(old_thumb)
-        
-        if new_thumb is not None:
-            res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
-                                        modified_thumbs)  
-            if not res:
-                _log.error("key=update_thumbnail msg=[pre-update]" 
-                        " ThumbnailIDMapper save_all failed for %s" %new_tid)
+      
+        #Don't reflect change in the DB
+        if nosave == False:
+            if new_thumb is not None:
+                res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
+                                            modified_thumbs)  
+                if not res:
+                    _log.error("key=update_thumbnail msg=[pre-update]" 
+                            " ThumbnailIDMapper save_all failed for %s" %new_tid)
+                    callback(False)
+                    return
+            else:
                 callback(False)
                 return
-        else:
-            callback(False)
-            return
 
         # Update the new_tid as the thumbnail for the video
         thumb_res = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,
@@ -817,7 +817,7 @@ class BrightcovePlatform(AbstractPlatform):
                             "DB not reverted" %(i_vid, new_tid, old_tid))
                     
                     #The tid that was passed to the method is reflected in the DB,
-                    #but not on Brightcove. the old_tid is the current bcove thumbnail
+                    #but not on Brightcove.the old_tid is the current bcove thumbnail
                     callback(False)
             else:
                 #Why was new_thumb None?
@@ -1000,10 +1000,6 @@ class YoutubePlatform(AbstractPlatform):
     def get_ovp(cls):
         ''' ovp '''
         return "youtube"
-    
-    def add_video(self, vid, job_id):
-        ''' add video, job_id '''
-        self.videos[str(vid)] = job_id
     
     def get_access_token(self, callback):
         ''' Get a valid access token, if not valid -- get new one and set expiry'''
@@ -1315,7 +1311,7 @@ class ThumbnailMetaData(object):
         self.urls = urls  # All urls associated with single image
         self.created_time = created #Timestamp when thumbnail was created 
         self.enabled = enabled #boolen, indicates if this thumbnail can be displayed/ tested with 
-        self.chosen  = chosen #boolean, indicates this thumbnail is live
+        self.chosen = chosen #boolean, indicates this thumbnail is live
         self.width = width
         self.height = height
         self.type = ttype #neon1../ brightcove / youtube
@@ -1413,7 +1409,7 @@ class ThumbnailURLMapper(object):
         if callback:
             db_connection.conn.set(self.key, self.value, callback)
         else:
-            return db_connection.blocking_conn.set(self.key, value)
+            return db_connection.blocking_conn.set(self.key, self.value)
 
     @classmethod
     def save_all(cls, thumbnailMapperList, callback=None):
@@ -1453,7 +1449,7 @@ class ImageMD5Mapper(object):
     videostills and thumbnails for any given video
 
     '''
-    def __init__(self, ext_video_id, imgdata,tid):
+    def __init__(self, ext_video_id, imgdata, tid):
         self.key = self.format_key(ext_video_id, imgdata)
         self.value = tid
 
@@ -1461,7 +1457,7 @@ class ImageMD5Mapper(object):
         ''' return md5 '''
         return self.key.split('_')[-1]
 
-    def format_key(self,video_id,imdata):
+    def format_key(self, video_id, imdata):
         ''' format key for ImageMD5Mapper '''
         if imdata:
             md5 = ThumbnailID.generate(imdata, video_id)
@@ -1469,7 +1465,7 @@ class ImageMD5Mapper(object):
         else:
             raise
 
-    def save(self,callback=None):
+    def save(self, callback=None):
         ''' save ''' 
         db_connection = DBConnection(self)
         
@@ -1567,6 +1563,7 @@ class ThumbnailIDMapper(object):
             if result:
                 obj = ThumbnailIDMapper.create(result)
                 callback(obj.video_id)
+                return
             callback(vid)
 
         db_connection = DBConnection(cls)
@@ -1607,7 +1604,7 @@ class ThumbnailIDMapper(object):
 
 
     @classmethod
-    def get_thumb_mappings(cls,keys,callback=None):
+    def get_thumb_mappings(cls, keys, callback=None):
         ''' Returns list of thumbnail mappings for give thumb ids(keys)
         '''
         db_connection = DBConnection(cls)
@@ -1707,7 +1704,7 @@ class VideoMetadata(object):
         self.frame_size = frame_size #(w,h)
 
     def get_id(self):
-        ''' get video id '''
+        ''' get internal video id '''
         return self.key
 
     def get_frame_size(self):

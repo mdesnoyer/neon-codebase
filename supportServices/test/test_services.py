@@ -766,6 +766,16 @@ class TestServices(AsyncHTTPTestCase):
         req_data = neondata.NeonApiRequest.get_request(self.api_key, job_id)
         vid_request = neondata.NeonApiRequest.create(req_data)
         self.assertEqual(vid_request.state, neondata.RequestState.FINISHED)
+        
+        #assert the previous thumbnail is still the thumb in DB
+        self.update_brightcove_thumbnail(vid, tid)
+        tid2 = tids[1]
+        vals = {'thumbnail_id' : tid2 }
+        resp = self.post_request(url, vals, self.api_key)
+        self.assertEqual(resp.code, 200)
+        tids = neondata.ThumbnailIDMapper.get_thumb_mappings([tid,tid2])
+        self.assertTrue(tids[0].thumbnail_metadata["chosen"])
+        self.assertFalse(tids[1].thumbnail_metadata["chosen"])
 
     def test_bh_check_thumbnail(self):
         ''' Brightcove support handler tests (check thumb/update thumb) '''

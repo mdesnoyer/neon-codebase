@@ -54,8 +54,8 @@ var reqGuid = NeonDataSender._NeonPageRequestUUID();
 /// Neon Tracker for Brightcove Flash Players
 var NeonPlayerTracker = ( function () {
     var player, videoPlayer, content, exp, initialVideo;
-    var NeonTrackerURL = "http://tracker.neon-lab.com/track";
-	//var NeonTrackerURL = "http://localhost:8888/track";
+    //var NeonTrackerURL = "http://tracker.neon-lab.com/track";
+	var NeonTrackerURL = "http://localhost:8888/track";
     return {
         onTemplateLoad: function (expID){                                           
             console.log( "template loaded " + new Date().getTime());                 
@@ -143,7 +143,7 @@ var NeonPlayerTracker = ( function () {
 
 		setTestMode: function(level){
     		NeonTrackerURL = "http://tracker.neon-lab.com/test";
-			//NeonTrackerURL = "http://localhost:8888/test"
+			NeonTrackerURL = "http://localhost:8888/test"
 			NeonDataSender.setTestMode(level)
 		},
 	

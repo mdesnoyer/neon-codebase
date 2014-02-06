@@ -51,6 +51,16 @@ def CachePrimer():
     '''
     pass
 
+#Place holder images for processing
+placeholder_images = [
+                'http://cdn.neon-lab.com/webaccount/neon_processing_1.png',
+                'http://cdn.neon-lab.com/webaccount/neon_processing_2.png',
+                'http://cdn.neon-lab.com/webaccount/neon_processing_3.png',
+                'http://cdn.neon-lab.com/webaccount/neon_processing_4.png',
+                'http://cdn.neon-lab.com/webaccount/neon_processing_5.png',
+                'http://cdn.neon-lab.com/webaccount/neon_processing_6.png',
+                'http://cdn.neon-lab.com/webaccount/neon_processing_7.png',
+                ]
 ################################################################################
 # Helper classes  
 ################################################################################
@@ -374,8 +384,11 @@ class AccountHandler(tornado.web.RequestHandler):
 
         title = None
         try:
-            video_url = self.get_argument('video_url') #sanitize
+            video_url = self.get_argument('video_url')
             title = self.get_argument('title')
+            video_url = video_url.split('?')[0]
+            video_url = video_url.replace("www.dropbox.com", 
+                                "dl.dropboxusercontent.com")
         except:
             _log.error("key=create_neon_video_request "
                     "msg=malformed request or missing arguments")
@@ -390,16 +403,18 @@ class AccountHandler(tornado.web.RequestHandler):
         headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
             Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
+       
         req = tornado.httpclient.HTTPRequest(url=video_url, headers=headers,
                         use_gzip=False, request_timeout=1.5)
-
         vresponse = yield tornado.gen.Task(http_client.fetch, req)
-        ctype = vresponse.headers.get('Content-Type')
-        ctype = ctype.lower()
-        if vresponse.error or ctype is None or ctype in invalid_content_types:
-            data = '{"error":"link given is invalid or not a video file"}'
-            self.send_json_response(data, 400)
-            return
+       
+        #If timeout, Ignore for now, may be a valid slow link.  
+        if vresponse.code != 599:
+            ctype = vresponse.headers.get('Content-Type')
+            if vresponse.error or ctype is None or ctype.lower() in invalid_content_types:
+                data = '{"error":"link given is invalid or not a video file"}'
+                self.send_json_response(data, 400)
+                return
 
         video_id = hashlib.md5(video_url).hexdigest()
         request_body = {}
@@ -427,6 +442,11 @@ class AccountHandler(tornado.web.RequestHandler):
         
         result = yield tornado.gen.Task(http_client.fetch, req)
         
+        if result.code == 409:
+            data = '{"error":"url already processed","video_id":"%s"}'%video_id
+            self.send_json_response(data, 409)
+            return
+        
         if result.error:
             _log.error("key=create_neon_video_request "
                     "msg=thumbnail api error %s" %result.error)
@@ -434,15 +454,12 @@ class AccountHandler(tornado.web.RequestHandler):
             self.send_json_response(data, 502)
             return
 
-        if result.code == 409:
-            data = '{"error":"url already processed","video_id":"%s"}'%video_id
-            self.send_json_response(data, 409)
-            return
-
         #note: job id gets inserted into Neon platform account on video server
         t_urls = [] 
         thumbs = []
-        placeholder_url = 'http://cdn.neon-lab.com/webaccount/neon_processing_1.png'
+        im_index = int(hashlib.md5(video_id).hexdigest(), 16) \
+                                        % len(placeholder_images)
+        placeholder_url = placeholder_images[im_index] 
         t_urls.append(placeholder_url)
         ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         tm = neondata.ThumbnailMetaData(0, t_urls, ctime, 0, 0,
@@ -462,15 +479,6 @@ class AccountHandler(tornado.web.RequestHandler):
     @tornado.gen.engine
     def get_video_status_neon(self, vids, video_state=None):
         ''' Get video status for Neon Platform videos'''
-        placeholder_images = [
-                'http://cdn.neon-lab.com/webaccount/neon_processing_1.png',
-                'http://cdn.neon-lab.com/webaccount/neon_processing_2.png',
-                'http://cdn.neon-lab.com/webaccount/neon_processing_3.png',
-                'http://cdn.neon-lab.com/webaccount/neon_processing_4.png',
-                'http://cdn.neon-lab.com/webaccount/neon_processing_5.png',
-                'http://cdn.neon-lab.com/webaccount/neon_processing_6.png',
-                'http://cdn.neon-lab.com/webaccount/neon_processing_7.png',
-                ]
 
         i_id = "0"
         #counters 
@@ -549,7 +557,9 @@ class AccountHandler(tornado.web.RequestHandler):
             if request.state in incomplete_states:
                 t_urls = []
                 thumbs = []
-                placeholder_url = random.choice(placeholder_images) 
+                im_index = int(hashlib.md5(vid).hexdigest(), 16) \
+                                        % len(placeholder_images)
+                placeholder_url = placeholder_images[im_index] 
                 t_urls.append(placeholder_url)
                 #Create TID 0 as a temp place holder for previous 
                 #thumbnail during processing stage
@@ -1540,12 +1550,13 @@ class BcoveHandler(tornado.web.RequestHandler):
 
         try:
             new_tid = self.get_argument('thumbnail_id')
+            nosave = self.get_argument('nosavedb', True)
         except:
             self.set_status(400)
             self.finish()
             return
         vmdata = yield tornado.gen.Task(
-                 neondata.VideoMetadata.get,self.internal_video_id)
+                 neondata.VideoMetadata.get, self.internal_video_id)
         if vmdata:
             i_id = vmdata.integration_id
             ba  = yield tornado.gen.Task(
@@ -1554,13 +1565,14 @@ class BcoveHandler(tornado.web.RequestHandler):
                 bcove_vid = neondata.InternalVideoID.to_external(
                             self.internal_video_id) 
                 result = yield tornado.gen.Task(
-                            ba.update_thumbnail,self.internal_video_id,new_tid,True)
+                            ba.update_thumbnail,
+                            self.internal_video_id, new_tid, True) #nosave true
                 if result:
                     self.set_status(200)
                 else:
                     _log.error("key=bcove_handler "
                             " msg=failed to update thumbnail for" 
-                            " %s %s"%(self.internal_video_id,new_tid))
+                            " %s %s"%(self.internal_video_id, new_tid))
                     self.set_status(502)
             else:
                 _log.error("key=bcove_handler msg=failed to fetch " 
@@ -1568,7 +1580,7 @@ class BcoveHandler(tornado.web.RequestHandler):
                 self.set_status(502)
         else:
             _log.error("key=bcove_handler "
-                    " msg=failed to fetch video metadata for "
+                    " msg=failed to fetch video metadata or video not present for "
                     "%s %s"%(self.internal_video_id, new_tid))
             self.set_status(502)
         self.finish()
@@ -1583,12 +1595,13 @@ class BcoveHandler(tornado.web.RequestHandler):
         if vmdata:
             i_id = vmdata.integration_id
             ba = yield tornado.gen.Task(
-                neondata.BrightcovePlatform.get_account,
-                self.a_id,
-                i_id)
+                    neondata.BrightcovePlatform.get_account,
+                    self.a_id,
+                    i_id)
             if ba:
                 result = yield tornado.gen.Task(
-                    ba.check_current_thumbnail_in_db,self.internal_video_id)
+                        ba.check_current_thumbnail_in_db, 
+                        self.internal_video_id)
                 if result:
                     self.set_status(200)
                 else:
@@ -1597,11 +1610,11 @@ class BcoveHandler(tornado.web.RequestHandler):
                     self.set_status(502)
             else:
                 _log.error("key=bcove_handler msg=failed to fetch" 
-                        " neondata.BrightcovePlatform %s i_id %s"%(self.a_id, i_id))
+                        " BrightcovePlatform %s i_id %s"%(self.a_id, i_id))
         else:
             _log.error("key=bcove_handler msg=failed to fetch video metadata " 
                         "for %s"%self.internal_video_id)
-            self.set_status(502)
+            self.set_status(500)
 
         self.finish()
 

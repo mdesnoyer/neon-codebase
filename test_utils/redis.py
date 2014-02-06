@@ -15,9 +15,11 @@ import logging
 from . import net
 import random
 import re
+import signal
 import subprocess
 from supportServices import neondata
 import tempfile
+import utils.ps
 from utils.options import define, options
 
 _log = logging.getLogger(__name__)
@@ -81,6 +83,11 @@ class RedisServer:
 
         self.config_file.close()
         options._set('supportServices.neondata.dbPort', self.old_port)
-        self.proc.terminate()
+        still_running = utils.ps.send_signal_and_wait(signal.SIGTERM,
+                                                      [self.proc.pid],
+                                                      timeout=10)
+        if still_running:
+            self.proc.kill()
+        
         self.proc.wait()
         _log.info('Redis server on port %i stopped' % self.port)
