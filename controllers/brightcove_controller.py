@@ -26,7 +26,7 @@ import tornado.gen
 import tornado.httpclient
 import urllib
 import utils.neon
-from heapq import *
+from heapq import heappush, heappop
 
 from utils.options import define, options
 define("port", default=8888, help="run on the given port", type=int)
@@ -453,7 +453,9 @@ def initialize_brightcove_controller():
     try:
         result = http_client.fetch(req)
         if not result.error:
-            setup_controller_for_video(result.body, options.delay)
+            directives = result.body.split('\n')
+            for directive in directives:
+                setup_controller_for_video(directive, options.delay)
     except Exception, e:
         _log.error("key=Initialize Controller msg=failed to query mastermind %s" %e)
    
