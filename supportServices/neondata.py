@@ -752,18 +752,20 @@ class BrightcovePlatform(AbstractPlatform):
                     " msg=set thumbnail in DB %s tid %s"%(i_vid, new_tid))
         else:
             modified_thumbs.append(old_thumb)
-        
-        if new_thumb is not None:
-            res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
-                                        modified_thumbs)  
-            if not res:
-                _log.error("key=update_thumbnail msg=[pre-update]" 
-                        " ThumbnailIDMapper save_all failed for %s" %new_tid)
+      
+        #Don't reflect change in the DB
+        if nosave == False:
+            if new_thumb is not None:
+                res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
+                                            modified_thumbs)  
+                if not res:
+                    _log.error("key=update_thumbnail msg=[pre-update]" 
+                            " ThumbnailIDMapper save_all failed for %s" %new_tid)
+                    callback(False)
+                    return
+            else:
                 callback(False)
                 return
-        else:
-            callback(False)
-            return
 
         # Update the new_tid as the thumbnail for the video
         thumb_res = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,
@@ -815,7 +817,7 @@ class BrightcovePlatform(AbstractPlatform):
                             "DB not reverted" %(i_vid, new_tid, old_tid))
                     
                     #The tid that was passed to the method is reflected in the DB,
-                    #but not on Brightcove. the old_tid is the current bcove thumbnail
+                    #but not on Brightcove.the old_tid is the current bcove thumbnail
                     callback(False)
             else:
                 #Why was new_thumb None?

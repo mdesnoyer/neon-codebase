@@ -38,6 +38,7 @@ define("mastermind_url", default="http://localhost:8086/get_directives",
 
 import logging
 _log = logging.getLogger(__name__)
+random.seed(25110)
 
 ###################################################################################
 ## Priority Q Impl
@@ -74,7 +75,7 @@ class PriorityQ(object):
             priority, count, task = heappop(self.pq)
             if task is not self.REMOVED:
                 del self.entry_finder[task]
-                return task,priority
+                return task, priority
         raise KeyError('pop from an empty priority queue')
 
     def peek_task(self):
@@ -119,7 +120,7 @@ class ThumbnailChangeTask(AbstractTask):
             _log.error("key=ThumbnailChangeTask msg=thumbnail change failed" 
                     " video %s tid %s"%(self.video_id, self.tid))
         else:
-            _log.debug("key=ThumbnailChangeTask msg=thumbnail for video %s is %s"
+            _log.info("key=ThumbnailChangeTask msg=thumbnail for video %s is %s"
                     %(self.video_id, self.tid))
 
 class TimesliceEndTask(AbstractTask):
@@ -217,8 +218,9 @@ class TaskManager(object):
             vminfo.remove_task(task)
         return task, priority
 
-    #If already present, then clear the old tasks
     def clear_taskinfo_for_video(self,vid):
+        ''' #If already present, then clear the old tasks'''
+
         vtinfo = self.video_map[vid]
         for task in vtinfo.tasks:
             self.taskQ.remove_task(task)
@@ -262,12 +264,9 @@ class TaskManager(object):
 class BrightcoveABController(object):
     ''' Brightcove AB controller '''
 
-    seed = 25110
-
     def __init__(self, delay=0, timeslice=4260, cushion_time=600):
         self.neon_service_url = options.service_url 
         self.max_update_delay = delay
-        random.seed(BrightcoveABController.seed)
         
         self.timeslice = timeslice 
         self.cushion_time = cushion_time 
@@ -283,8 +282,12 @@ class BrightcoveABController(object):
         active_thumbs = 0
         for thumb, thumb_time in time_dist:
             if thumb_time > 0.0:
-                active_thumbs += 1 
-        
+                active_thumbs += 1
+
+        #No thumbs are active, skip
+        if active_thumbs == 0:
+            return
+
         #Make a decision based on the current state of the video data
         delay = random.randint(0, self.max_update_delay)
         cur_time = time.time()
@@ -327,7 +330,7 @@ class BrightcoveABController(object):
 
         #schedule A - The Majority run thumbnail at the start of time slice 
         taskA = ThumbnailChangeTask(account_id, video_id, thumbA[0]) 
-        taskmgr.add_task(taskA,timeslice_start) 
+        taskmgr.add_task(taskA, timeslice_start) 
         _log.info("Sched A %s %s" % ((time_to_exec_task - cur_time - delay), 
                     time_dist))
 
@@ -360,12 +363,14 @@ class BrightcoveABController(object):
         else:
             #Dont need to end the timeslice since the majority thumbnail is 
             #designated to run until mastermind sends a changed directive
+            _log.info("key=thumbnail_change_scheduler"
+                    " msg=less than 1 active thumbnail for video %s" %video_id)
             pass
 
     def convert_from_percentages(self, pd):
         ''' Convert from fraction(%) to time '''
         
-        total_pcnt = sum([tup[1] for tup in pd])
+        total_pcnt = sum([float(tup[1]) for tup in pd])
         time_dist = []
 
         for tup in pd:
@@ -393,9 +398,7 @@ class GetData(tornado.web.RequestHandler):
     def post(self,*args,**kwargs):
         
         data = self.request.body
-        #TODO: verify data format
-
-        setup_controller_for_vids(data)
+        setup_controller_for_video(data)
         self.set_status(201)
         self.finish()
 
@@ -403,23 +406,27 @@ class GetData(tornado.web.RequestHandler):
 # Initialize AB Controller  
 ###################################################################################
 
-def setup_controller_for_vids(jsondata, delay=0):
+def setup_controller_for_video(jsondata, delay=0):
     '''
+    Data from Mastermind is sent as {'d': (video_id, [(thumb_id, fraction)])}
+    
     Setup the controller given json data as
     (video_id, [(thumb_id, fraction)] ...)
     '''
     controller = BrightcoveABController(delay=delay)
-    vids = tornado.escape.json_decode(jsondata)
-    for vid, tid_dists in vids.iteritems():
-        taskmgr.add_video_info(vid, tid_dists) #store vid,tdist info 
-        controller.thumbnail_change_scheduler(vid, tid_dists)
-    
+    directive = tornado.escape.json_decode(jsondata)
+    vid_tuple = directive["d"]
+    vid = vid_tuple[0]
+    tid_dists = vid_tuple[1]
+    taskmgr.add_video_info(vid, tid_dists) #store vid,tdist info 
+    controller.thumbnail_change_scheduler(vid, tid_dists)
     return True
 
 def initialize_brightcove_controller():
     '''
     Populate data from mastermind 
     Fetch the video id => [(Tid,%)] mappings and populate the data
+    
     '''
     
     #Send Push request to Mastermind
@@ -432,16 +439,16 @@ def initialize_brightcove_controller():
     try:
         result = http_client.fetch(req)
         if not result.error:
-            setup_controller_for_vids(result.body, options.delay)
+            setup_controller_for_video(result.body, options.delay)
     except Exception, e:
-        _log.error("key=Initialize Controller msg=failed to query mastermind")
+        _log.error("key=Initialize Controller msg=failed to query mastermind %s" %e)
     
 ###################################################################################
 # MAIN
 ###################################################################################
 
 application = tornado.web.Application([
-    (r"/*",GetData),
+    (r"/(.*)",GetData),
 ])
 
 def main():
@@ -455,7 +462,7 @@ def main():
     tornado.ioloop.PeriodicCallback(taskmgr.check_scheduler,
             SCHED_CHECK_INTERVAL).start()
     tornado.ioloop.IOLoop.instance().start()
-
+    
 # ============= MAIN ======================== #
 if __name__ == "__main__":
     utils.neon.InitNeon()
