@@ -121,20 +121,21 @@ class TestScheduler(unittest.TestCase):
                 if "ThumbnailChangeTask" == tname: 
                     tname = task.__class__.__name__ + '_' + task.tid
                 task_order.append((tname, priority))
-            
+           
             for etask, (task, p), interval in zip(expected_order,
                     task_order, expected_time_interval):
-                
+               
                     self.assertEqual(etask, task)
-                    self.assertGreaterEqual(p, interval[0])
-                    self.assertGreaterEqual(interval[1], p + 0.5) #grace
+                    self.assertGreaterEqual(p, interval[0] - 0.5) #delay 
+                    self.assertGreaterEqual(interval[1] + 0.5, p) #grace
 
     def test_new_directive(self):
         '''send new directive, check if task updated for a video.
             Also test the case when scheduling of minority thumbnail
             exceeds the timeslice, hence the abtest start time is corrected
         '''
-        new_video_distribution = {"d": ("int_vid1", [('B', 0.9), ('A', 0.1)])}
+        new_video_distribution =\
+                {"d": ("int_vid1", [('B', 0.9), ('A', 0.1), ('C', 0.0)])}
         brightcove_controller.setup_controller_for_video(
                                 json.dumps(new_video_distribution)) 
         

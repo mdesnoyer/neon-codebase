@@ -1550,6 +1550,7 @@ class BcoveHandler(tornado.web.RequestHandler):
 
         try:
             new_tid = self.get_argument('thumbnail_id')
+            nosave = self.get_argument('nosavedb', True)
         except:
             self.set_status(400)
             self.finish()

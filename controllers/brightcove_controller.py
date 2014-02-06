@@ -70,7 +70,7 @@ class PriorityQ(object):
         entry[-1] = self.REMOVED
 
     def pop_task(self):
-        'Remove and return the lowest priority task. Raise KeyError if empty.'
+        'Remove and return the highest priority task. Raise KeyError if empty'
         while self.pq:
             priority, count, task = heappop(self.pq)
             if task is not self.REMOVED:
@@ -98,20 +98,29 @@ class AbstractTask(object):
 
 class ThumbnailChangeTask(AbstractTask):
     
-    ''' Task to change the thumbnail for a given video '''
+    ''' Task to change the thumbnail for a given video 
+        nosave flag indicates that thumbnail state should not
+        be changed to chosen=true
+
+        #special case to save the thumbnail state is when mastermind
+        #sends command to revert to a particular thumbnail, the directive
+        #will have only a single thumbnail with fraction=1.0
+    '''
     
-    def __init__(self,account_id, video_id, new_tid):
+    def __init__(self,account_id, video_id, new_tid, nosave=True):
         self.video_id = video_id
         self.tid = new_tid
         self.service_url = options.service_url + \
                 "/api/v1/brightcovecontroller/%s/updatethumbnail/%s" \
                 %(account_id, video_id)
-    
+        self.nosave = nosave
+
     @tornado.gen.engine
     def execute(self):
         '''execute, set thumbnail '''
         http_client = tornado.httpclient.AsyncHTTPClient()
-        body = urllib.urlencode({'thumbnail_id': self.tid})
+        body = urllib.urlencode(
+                {'thumbnail_id': self.tid, 'nosavedb': self.nosave})
         req = tornado.httpclient.HTTPRequest(method='POST',
                         url=self.service_url, body=body,
                         request_timeout=10.0)
@@ -208,7 +217,7 @@ class TaskManager(object):
         ''' pop '''
         try:
             task, priority = self.taskQ.pop_task()
-        except:
+        except Exception, e:
             _log.error("key=TaskManager msg=trying to pop from empty Q")
             return
 
@@ -329,7 +338,8 @@ class BrightcoveABController(object):
         #TODO: Randomize the minority thumbnail scheduling
 
         #schedule A - The Majority run thumbnail at the start of time slice 
-        taskA = ThumbnailChangeTask(account_id, video_id, thumbA[0]) 
+        taskA = ThumbnailChangeTask(account_id, video_id, 
+                            thumbA[0], active_thumbs==1) 
         taskmgr.add_task(taskA, timeslice_start) 
         _log.info("Sched A %s %s" % ((time_to_exec_task - cur_time - delay), 
                     time_dist))
@@ -339,6 +349,10 @@ class BrightcoveABController(object):
             #schedule the B's - the lower % thumbnails
             time_to_exec_task += abtest_start_time
             for tup in time_dist:
+                #Avoid scheduling if time allocated is 0
+                if tup[1] <= 0.0:
+                    continue
+
                 task = ThumbnailChangeTask(account_id, video_id, tup[0]) 
                 taskmgr.add_task(task, time_to_exec_task)
                 #print "---" , cur_time,delay,abtest_start_time
@@ -442,13 +456,13 @@ def initialize_brightcove_controller():
             setup_controller_for_video(result.body, options.delay)
     except Exception, e:
         _log.error("key=Initialize Controller msg=failed to query mastermind %s" %e)
-    
+   
 ###################################################################################
 # MAIN
 ###################################################################################
 
 application = tornado.web.Application([
-    (r"/(.*)",GetData),
+    (r"/(.*)", GetData),
 ])
 
 def main():
