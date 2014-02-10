@@ -77,7 +77,7 @@ class TrackerData(object):
         self.cip = cip #client IP
         self.page = page # Page where the video is shown
         self.tai = tai # Tracker account id
-
+        #TODO: handle unicode data too 
         if isinstance(imgs, list):        
             self.imgs = imgs #image list
             self.cvid = cvid #current video in the player
@@ -168,7 +168,7 @@ class TestTracker(TrackerDataHandler):
                    self.request)
         try:
             tracker_data = self.parse_tracker_data()
-            #cb = self.get_argument("callback")
+            cb = self.get_argument("callback")
         except Exception as err:
             _log.exception("key=test_track msg=%s", err) 
             self.finish()

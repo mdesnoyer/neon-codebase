@@ -37,12 +37,16 @@ class TestScheduler(unittest.TestCase):
         brightcove_controller.taskmgr = self.taskmgr
         brightcove_controller.SERVICE_URL = "http://localhost:8083"
         
-        self.test_video_distribution = {"int_vid1":[('B', 0.2), ('A', 0.8)],
-                                "int_vid2":[('B', 0.30), ('A', 0.70)] }
+        self.test_video_distribution = {'d': ("int_vid1", [('B', 0.2), ('A', 0.8)])}
 
         #setup video distribution
-        brightcove_controller.setup_controller_for_vids(
+        brightcove_controller.setup_controller_for_video(
                                 json.dumps(self.test_video_distribution), delay=10)
+                                
+        self.test_video_distribution2 =\
+                {'d': ("int_vid2", [('B', 0.30), ('A', 0.70)]) }
+        brightcove_controller.setup_controller_for_video(
+                                json.dumps(self.test_video_distribution2), delay=10)
 
     def get_video_task_map(self):
         task_map = {} 
@@ -90,7 +94,8 @@ class TestScheduler(unittest.TestCase):
 
         #inspect TaskQ for expeted task ordering
         task_map = self.get_video_task_map() 
-        cur_time = time.time() - 0.5 # actual schedulinge happened a lil earlier
+        #add correction since the actual scheduling of task happend earlier
+        cur_time = time.time() - 0.5 
         cushion_time = self.controller.cushion_time
         abtest_start = self.controller.timeslice - cushion_time
 
@@ -116,20 +121,22 @@ class TestScheduler(unittest.TestCase):
                 if "ThumbnailChangeTask" == tname: 
                     tname = task.__class__.__name__ + '_' + task.tid
                 task_order.append((tname, priority))
-            
+           
             for etask, (task, p), interval in zip(expected_order,
                     task_order, expected_time_interval):
-                
+               
                     self.assertEqual(etask, task)
-                    self.assertTrue(p>=interval[0] and p<=interval[1])
+                    self.assertGreaterEqual(p, interval[0] - 0.5) #delay 
+                    self.assertGreaterEqual(interval[1] + 0.5, p) #grace
 
     def test_new_directive(self):
         '''send new directive, check if task updated for a video.
             Also test the case when scheduling of minority thumbnail
             exceeds the timeslice, hence the abtest start time is corrected
         '''
-        new_video_distribution = {"int_vid1": [('B', 0.9), ('A', 0.1)]}
-        brightcove_controller.setup_controller_for_vids(
+        new_video_distribution =\
+                {"d": ("int_vid1", [('B', 0.9), ('A', 0.1), ('C', 0.0)])}
+        brightcove_controller.setup_controller_for_video(
                                 json.dumps(new_video_distribution)) 
         
         task_map = self.get_video_task_map() 
@@ -138,8 +145,8 @@ class TestScheduler(unittest.TestCase):
                 "TimesliceEndTask"]
         self._verify_task_map(task_map, new_video_distribution, expected_order)
         
-        new_video_distribution = {"int_vid1":[('B', 0.51), ('A', 0.49)]}
-        brightcove_controller.setup_controller_for_vids(
+        new_video_distribution = {"d": ("int_vid1", [('B', 0.51), ('A', 0.49)])}
+        brightcove_controller.setup_controller_for_video(
                 json.dumps(new_video_distribution)) 
        
         task_map = self.get_video_task_map() 
@@ -150,9 +157,10 @@ class TestScheduler(unittest.TestCase):
 
     def _verify_task_map(self, task_map, new_video_distribution, expected_order):
         ''' Helper method to verify task map '''
-        for vid,tasks in task_map.iteritems():
+        for vid, tasks in task_map.iteritems():
             
-            if vid in new_video_distribution.keys():
+            #if vid in new_video_distribution.keys():
+            if vid == new_video_distribution["d"][0]:
                 task_order = []
                 for (task, priority) in tasks:
                     tname = task.__class__.__name__
@@ -183,8 +191,8 @@ class TestScheduler(unittest.TestCase):
         Test when a new directive where only a signle thumbnail is 
         scheduled to run. all other thumbs have 0.0 % of timeslice 
         '''
-        new_video_distribution = {"int_vid1": [('B', 1.0), ('A', 0.0)]}
-        brightcove_controller.setup_controller_for_vids(
+        new_video_distribution = {"d": ("int_vid1", [('B', 1.0), ('A', 0.0)])}
+        brightcove_controller.setup_controller_for_video(
                                 json.dumps(new_video_distribution)) 
         
         task_map = self.get_video_task_map() 
@@ -193,13 +201,14 @@ class TestScheduler(unittest.TestCase):
 
     def test_multiple_neon_thumbnails(self):
         '''Test controller logic for multiple thumbnails (>2) '''
-        new_video_distribution = {"int_vid3": [('B', 0.40), 
-                                    ('A', 0.30), ('C', 0.30)]}
-        brightcove_controller.setup_controller_for_vids(
-                                json.dumps(new_video_distribution)) 
+        #new_video_distribution = {"d": ("int_vid3", [('B', 0.5), ('A', 0.3), 
+        #                                                    ('C',0.2)])}
+        #brightcove_controller.setup_controller_for_video(
+        #                        json.dumps(new_video_distribution)) 
         
         #TODO: Test logic
-    
+        pass
+
 class TestDryRunBrighcoveController(AsyncHTTPTestCase):
 
     '''
@@ -219,9 +228,7 @@ class TestDryRunBrighcoveController(AsyncHTTPTestCase):
 
         brightcove_controller.taskmgr = self.taskmgr
         brightcove_controller.SERVICE_URL = "http://localhost:8083"
-        
-        self.test_video_distribution = {"int_vid1":[('B', 0.2), ('A', 0.8)],
-                                "int_vid2":[('B', 0.30), ('A', 0.70)] }
+        self.test_video_distribution = {'d': ("int_vid1", [('B', 0.2), ('A', 0.8)])}
 
     def tearDown(self):
         super(TestDryRunBrighcoveController, self).tearDown()
@@ -244,7 +251,7 @@ class TestDryRunBrighcoveController(AsyncHTTPTestCase):
             return response
 
         #setup video distribution
-        brightcove_controller.setup_controller_for_vids(
+        brightcove_controller.setup_controller_for_video(
                                 json.dumps(self.test_video_distribution), delay=0)
         
         self.client_sync_patcher = patch(

@@ -131,7 +131,7 @@ class Mastermind(object):
                 with self.lock:
                     directive = self._calculate_current_serving_directive(
                         self.video_info[video_id], video_id)
-                yield directive
+                yield (video_id, directive)
             except KeyError:
                 # Some other thread changed the data so we don't have
                 # information about this video id anymore. Oh well.

@@ -32,7 +32,7 @@ def create_tables(cursor):
     '''
     with warnings.catch_warnings():
         cursor.execute('''CREATE TABLE IF NOT EXISTS %s (
-                       thumbnail_id VARCHAR(32) NOT NULL,
+                       thumbnail_id VARCHAR(128) NOT NULL,
                        hour DATETIME NOT NULL,
                        loads INT NOT NULL DEFAULT 0,
                        clicks INT NOT NULL DEFAULT 0,

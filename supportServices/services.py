@@ -1550,12 +1550,13 @@ class BcoveHandler(tornado.web.RequestHandler):
 
         try:
             new_tid = self.get_argument('thumbnail_id')
+            nosave = self.get_argument('nosavedb', True)
         except:
             self.set_status(400)
             self.finish()
             return
         vmdata = yield tornado.gen.Task(
-                 neondata.VideoMetadata.get,self.internal_video_id)
+                 neondata.VideoMetadata.get, self.internal_video_id)
         if vmdata:
             i_id = vmdata.integration_id
             ba  = yield tornado.gen.Task(
@@ -1564,13 +1565,14 @@ class BcoveHandler(tornado.web.RequestHandler):
                 bcove_vid = neondata.InternalVideoID.to_external(
                             self.internal_video_id) 
                 result = yield tornado.gen.Task(
-                            ba.update_thumbnail,self.internal_video_id,new_tid,True)
+                            ba.update_thumbnail,
+                            self.internal_video_id, new_tid, True) #nosave true
                 if result:
                     self.set_status(200)
                 else:
                     _log.error("key=bcove_handler "
                             " msg=failed to update thumbnail for" 
-                            " %s %s"%(self.internal_video_id,new_tid))
+                            " %s %s"%(self.internal_video_id, new_tid))
                     self.set_status(502)
             else:
                 _log.error("key=bcove_handler msg=failed to fetch " 
@@ -1593,12 +1595,13 @@ class BcoveHandler(tornado.web.RequestHandler):
         if vmdata:
             i_id = vmdata.integration_id
             ba = yield tornado.gen.Task(
-                neondata.BrightcovePlatform.get_account,
-                self.a_id,
-                i_id)
+                    neondata.BrightcovePlatform.get_account,
+                    self.a_id,
+                    i_id)
             if ba:
                 result = yield tornado.gen.Task(
-                    ba.check_current_thumbnail_in_db,self.internal_video_id)
+                        ba.check_current_thumbnail_in_db, 
+                        self.internal_video_id)
                 if result:
                     self.set_status(200)
                 else:
