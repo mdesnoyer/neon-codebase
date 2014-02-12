@@ -4,6 +4,7 @@ if (typeof NeonDataSender == "undefined"){
 var NeonDataSender = (function() {
 		var loadRequests = new Array();	
 		var NeonTrackerURL = "http://tracker.neon-lab.com/track";
+		//var NeonTrackerURL = "http://localhost:8888/track";
 		var images = new Array(); 
 		var rParam = { 
 			action: 0,
@@ -153,9 +154,18 @@ if (typeof NeonPlayerTracker == "undefined"){
 								NeonPlayerTracker.onMediaBegin);
 					exp.addEventListener(BCExperienceEvent.CONTENT_LOAD, 
 								NeonPlayerTracker.trackLoadedImageUrls);
+					
+					//videoPlayer.addEventListener(BCMediaEvent.PLAY, 
+					//			NeonPlayerTracker.onMediaBegin);
+					//advertising = player.getModule(APIModules.ADVERTISING);
+					//advertising.addEventListener(BCAdvertisingEvent.AD_START, NeonPlayerTracker.onAdStart);
 				}
 			 },                             
-	 
+
+	   		//onAdStart: function(evt){
+			//	console.log(evt);
+			//},	
+			
 			onTemplateReady: function (evt) {                                        
 				if (evt.target.experience) {
 					APIModules = brightcove.api.modules.APIModules;
@@ -255,7 +265,7 @@ if(typeof NeonImageTracker == "undefined"){
 					var action = "load";
 					var imgTags = document.getElementsByTagName("img");
 					if (!imgTags) {
-						imgTags = $(this).attr("img"); //use jquery
+						imgTags = jQuery(this).attr("img"); //use jquery
 					}
 					var imageUrls = new Array();
 					for (var i = 0; i<imgTags.length; i++) {
@@ -268,7 +278,7 @@ if(typeof NeonImageTracker == "undefined"){
 		},
 
 		trackerInit: function () {
-			$(document).ready(function () {
+			jQuery(document).ready(function () {
 
 				if (initTracker) {
 					return;
@@ -276,9 +286,9 @@ if(typeof NeonImageTracker == "undefined"){
 				initTracker = true;
 				// cease to use window.onload since it can be canceled or 
 				// not compatible with certain browsers
-				$("img").mousedown(function(e) {
+				jQuery("img").click(function(e) {
 					var action = "click";	
-					var imgSrc = $(this).attr('src');
+					var imgSrc = jQuery(this).attr('src');
 					var coordinates = e.pageX  + "," + e.pageY;
 					params = "&img=" + encodeURIComponent(imgSrc) + "&xy=" + coordinates 
 					NeonDataSender.createRequest(action, null, 
@@ -326,7 +336,9 @@ if (typeof jQuery == 'undefined') {
 			console.log("JQuery loading failed even after explicit load call");
 		} else {
 				// check if other conflicting library is present
-				// try { $.noConflict(true); } catch(err) {} 
+				// try { $.noConflict(true); } catch(err) {}
+				var $jq = jQuery.noConflict();
+				//console.log("[debug] tracker jquery running in a sandbox");
 				NeonImageTracker.trackerInit();
 		}
 	});

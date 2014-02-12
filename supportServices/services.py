@@ -31,7 +31,7 @@ import utils.neon
 from StringIO import StringIO
 from supportServices import neondata
 from utils.inputsanitizer import InputSanitizer
-
+from utils import statemon
 from utils.options import define, options
 define("port", default=8083, help="run on the given port", type=int)
 define("local", default=0, help="call local service", type=int)
@@ -50,6 +50,12 @@ def CachePrimer():
     #Load important blobs that don't change with TTL From storage in to cache
     '''
     pass
+
+#Monitoring variables
+statemon.define('bad_request', int) #HTTP 400s
+statemon.define('bad_gateway', int) #HTTP 502s
+statemon.define('internal_err', int) #HTTP 500s
+statemon.define('total_requests', int) #all requests 
 
 #Place holder images for processing
 placeholder_images = [
@@ -126,7 +132,7 @@ class AccountHandler(tornado.web.RequestHandler):
             else:
                 _log.exception("key=initialize msg=api header missing")
                 data = '{"error": "missing or invalid api key" }'
-                self.send_json_response(data,400)
+                self.send_json_response(data, 400)
 
     @tornado.gen.engine
     def async_sleep(self, secs):
@@ -161,16 +167,24 @@ class AccountHandler(tornado.web.RequestHandler):
 
     def send_json_response(self, data, status=200):
         '''Send response to service client '''
+       
+        statemon.state.increment('total_requests')
+        if status == 400 or status == 409:
+            statemon.state.increment('bad_request')
+        elif status == 502:
+            statemon.state.increment('bad_gateway')
+        else:
+            statemon.state.increment('internal_err')
+
         self.set_header("Content-Type", "application/json")
         self.set_status(status)
         self.write(data)
         self.finish()
-       
     
     def method_not_supported(self):
         ''' unsupported method response'''
         data = '{"error":"api method not supported or REST URI is incorrect"}'
-        self.send_json_response(data,400)
+        self.send_json_response(data, 400)
 
     @tornado.web.asynchronous
     @tornado.gen.engine
@@ -232,20 +246,16 @@ class AccountHandler(tornado.web.RequestHandler):
                 elif itype == "youtube_integrations":
                     self.get_youtube_videos(i_id)
             else:
-                self.write("API not supported")
                 _log.warning(('key=account_handler '
                               'msg=Invalid method in request %s method %s') 
                               % (self.request.uri, method))
-                self.set_status(400)
-                self.finish()
+                self.send_json_response("API not supported", 400)
 
         else:
-            self.write("API not supported")
             _log.warning(('key=account_handler '
                           'msg=Account missing in request %s')
                           % self.request.uri)
-            self.set_status(400)
-            self.finish()
+            self.send_json_response("API not supported", 400)
 
     @tornado.web.asynchronous
     def post(self, *args, **kwargs):

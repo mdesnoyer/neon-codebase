@@ -145,6 +145,10 @@ class State(object):
 
         with self._vars[global_name].get_lock():
             self._vars[global_name].value -= diff
+    
+    def get_all_variables(self):
+        ''' return dict of all variables being monitored '''
+        return self._vars
 
 state = State()
 '''Global state variable object'''

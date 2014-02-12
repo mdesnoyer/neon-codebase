@@ -1,5 +1,5 @@
 '''
-Input sanitizer module to clean up inputs and convert to particular datatype
+Input sanitizer module to clean up _inputs and convert to particular datatype
 '''
 
 import logging
@@ -9,56 +9,59 @@ import tornado.httpclient
 _log = logging.getLogger(__name__)
 
 class InputSanitizer(object):
+    '''
+    Sanitize inputs. String helper class
+    '''
     def __init__(self):
         pass
 
     @classmethod
-    def html_safe(cls,input):
-        return input.encode('ascii', 'xmlcharrefreplace')
+    def html_safe(cls, _input):
+        return _input.encode('ascii', 'xmlcharrefreplace')
 
     @classmethod
-    def to_list(cls,input):
-        if isinstance(input,basestring):
+    def to_list(cls, _input):
+        if isinstance(_input, basestring):
            pass
 
     @classmethod
-    def to_bool(cls,input):
+    def to_bool(cls, _input):
 
-        if input is None:
-            raise Exception("Missing input or None")
+        if _input is None:
+            raise Exception("Missing _input or None")
         
-        if isinstance(input,basestring):
-            if input.lower() == 'false':
+        if isinstance(_input, basestring):
+            if _input.lower() == 'false':
                return False 
-            if input.lower() == 'true':
+            if _input.lower() == 'true':
                return True
         
-        elif isinstance(input,bool):
-            return input
+        elif isinstance(_input, bool):
+            return _input
 
         else:
             raise Exception("Conversion not supported")
 
     @classmethod
-    def to_string(cls,input):
-        if isinstance(input,basestring):
-            return input
+    def to_string(cls, _input):
+        if isinstance(_input, basestring):
+            return _input
 
-        elif isinstance(input,list): 
-           return "".join(input)
+        elif isinstance(_input, list): 
+           return "".join(_input)
        
-        elif isinstance(input,map): 
-           return "".join((map(str,input)))
+        elif isinstance(_input, map): 
+           return "".join((map(str, _input)))
        
         else:
            raise Exception("Conversion not supported")
 
     @classmethod
-    def to_alphanumeric(cls,input):
+    def to_alphanumeric(cls, _input):
         OK_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
         out = ''
-        if isinstance(input,basestring):
-            for x in input:
+        if isinstance(_input, basestring):
+            for x in _input:
                 if x in OK_CHARS:
                     out += x
             return out
@@ -66,11 +69,14 @@ class InputSanitizer(object):
            raise Exception("Conversion not supported")
 
     @classmethod
-    def to_urlchars(cls,input):
+    def to_urlchars(cls, _input):
         OK_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789 .,!?:"
         out = ''
-        for x in input:
+        for x in _input:
             if x in OK_CHARS:
                 out += x
         return out
 
+    @classmethod
+    def to_no_unicode(cls, _input):
+        return _input.encode('punycode')

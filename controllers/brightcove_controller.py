@@ -400,7 +400,6 @@ class BrightcoveABController(object):
         sorted_time_dist = sorted(time_dist, key=lambda tup: tup[1], reverse=True)
         return sorted_time_dist 
 
-
 ###################################################################################
 # Create Tornado server application
 ###################################################################################

@@ -1792,12 +1792,15 @@ class VideoMetadata(object):
                 vmdata.append(vm)
             return vmdata
 
-    @staticmethod
-    def get_video_metadata(internal_accnt_id, internal_video_id):
-        ''' get video metadata '''
-        jdata = NeonApiRequest.get_request(internal_accnt_id, internal_video_id)
-        nreq = NeonApiRequest.create(jdata)
-        return nreq
+    @classmethod
+    def get_video_request(cls, internal_video_id, callback=None):
+        ''' get video request data '''
+        if not callback:
+            vm = cls.get(internal_video_id)
+            api_key = vm.key.split('_')[0]
+            jdata = NeonApiRequest.get_request(api_key, vm.job_id)
+            nreq = NeonApiRequest.create(jdata)
+            return nreq
 
     @classmethod
     def _erase_all_data(cls):

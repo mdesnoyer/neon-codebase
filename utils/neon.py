@@ -11,6 +11,7 @@ Copyright 2013 Neon Labs
 import logging
 
 from . import logs
+import monitor
 from . import options
 
 def InitNeon(usage='%prog [options]'):
@@ -21,6 +22,8 @@ def InitNeon(usage='%prog [options]'):
     garb, args = options.parse_options(usage=usage)
     logs.AddConfiguredLogger()
 
+    magent = monitor.MonitoringAgent()
+    magent.start()
     return args
 
 def InitNeonTest():

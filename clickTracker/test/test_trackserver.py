@@ -369,6 +369,8 @@ class TestFullServer(unittest.TestCase):
 
         self.click_url = 'http://localhost:'+str(self.port)+'/track?a=click&id=14b150ad6a59e93c&img=http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fd21%2Funsecured%2Fmedia%2F2294876105001%2F201310%2F34%2F2294876105001_2727914703001_thumbnail-2296855887001.jpg&ts=1381264478544&page=http%3A%2F%2Flocalhost%2Fbcove%2Ffplayerabtest.html&ttype=flashonlyplayer&tai=test'
 
+        self.image_click_url = 'http://localhost:'+str(self.port)+'/track?a=click&id=14b150ad6a59e93c&img=http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fd21%2Funsecured%2Fmedia%2F2294876105001%2F201310%2F34%2F2294876105001_2727914703001_thumbnail-2296855887001.jpg&ts=1381264478544&page=http%3A%2F%2Flocalhost%2Fbcove%2Ffplayerabtest.html&ttype=imagetracker&tai=test&xy=100,100'
+
         random.seed(168984)
 
         self.filesystem = fake_filesystem.FakeFilesystem()
@@ -405,6 +407,8 @@ class TestFullServer(unittest.TestCase):
             rd = random.randint(1, 100)
             if rd < 2:
                 response = urllib2.urlopen(self.click_url) 
+            elif rd >=2 and rd <10:
+                response = urllib2.urlopen(self.image_click_url) 
             else:
                 response = urllib2.urlopen(self.load_url)
             self.assertEqual(response.getcode(), 200)
