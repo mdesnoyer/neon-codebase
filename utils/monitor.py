@@ -7,7 +7,7 @@ import time
 import statemon
 from options import options, define
 
-define("carbon_server", default="127.0.0.1", help="Montioring server", type=int)
+define("carbon_server", default="127.0.0.1", help="Montioring server", type=str)
 define("carbon_port", default=8090, help="Monitoring port", type=int)
 
 SLEEP_INTERVAL = 10
