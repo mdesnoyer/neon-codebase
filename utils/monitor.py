@@ -58,3 +58,4 @@ class MonitoringAgent(threading.Thread):
 
             for variable, m_value in m_vars.iteritems():
                 self.send_data(variable, m_value.value) 
+                statemon.state.reset(variable)

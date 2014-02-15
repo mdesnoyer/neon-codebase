@@ -213,6 +213,10 @@ class DBConnectionCheck(threading.Thread):
                 for key, value in DBConnection._singleton_instance.iteritems():
                     DBConnection.update_instance(key)
                     value.blocking_conn.get("dummy")
+            except RuntimeError, e:
+                #ignore if dict size changes while iterating
+                #a new class just created its own dbconn object
+                pass
             except Exception, e:
                 _log.exception("key=DBConnection check msg=%s"%e)
             
@@ -1106,6 +1110,23 @@ class YoutubePlatform(AbstractPlatform):
             instances.append(platform)
 
         return instances
+
+class OoyalaPlatform(AbstractPlatform):
+    '''
+    OOYALA Platform
+    '''
+    def __init__(self):
+        AbstractPlatform.__init__(self)
+    
+    @classmethod
+    def get_ovp(cls):
+        ''' return ovp name'''
+        return "ooyala"
+    
+    #check feed and create requests
+    #verify token and create requests on signup
+    #update thumbnail
+
 
 #######################
 # Request Blobs 

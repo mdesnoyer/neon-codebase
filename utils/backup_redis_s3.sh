@@ -131,10 +131,11 @@ for instance in `ls $REDIS_CONF/redis-prod*.conf`; do
 	AOF=`echo ${REDIS_BASE}/${AOF}`
 	RDB=`echo ${REDIS_BASE}/${RDB}`
 	AOFEXT=`echo ${AOF}|awk -F . '{print $NF}'`
+	RDBEXT=`echo ${RDB}|awk -F . '{print $NF}'`
 	## build tarball
 	f_INFO "${INSTANCENAME}  Begin Tarball"
 	cd ${REDIS_BASE}
-	tar cvzf ${TS}_${INSTANCENAME}.tar.gz -C ${REDIS_BASE} *.${AOFEXT} > /dev/null
+	tar cvzf ${TS}_${INSTANCENAME}.tar.gz -C ${REDIS_BASE} *.${AOFEXT} *.rdb > /dev/null
 	f_INFO "${INSTANCENAME}  Complete Tarball"
 
 	## upload tarball to s3

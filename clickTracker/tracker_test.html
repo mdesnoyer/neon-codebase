@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-<title> Hybrid page with Images and Player </title>
+<title> Hybrid test page with Images and Player </title>
 
 
 </head>
@@ -19,9 +19,8 @@ By use of this code snippet, I agree to the Brightcove Publisher T and C
 found at http://corp.brightcove.com/legal/terms_publisher.cfm.
 -->
 
-<script type="text/javascript" src="singletracker_min.js"> </script> 
-<!-- <script type="text/javascript" src="neonbrightcoveplayertracker.js"> </script> --> 
-<script type="text/javascript"> NeonPlayerTracker.setAccountId("sunil")</script>
+<script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.10.1/jquery.min.js"> </script>
+<script type="text/javascript" src="neonbctracker.js" id="tester"> </script> 
 <script language="JavaScript" type="text/javascript" src="http://admin.brightcove.com/js/BrightcoveExperiences_all.js"></script>
 
 <object id="myExperience" class="BrightcoveExperience">
@@ -99,6 +98,11 @@ found at https://accounts.brightcove.com/en/terms-and-conditions/.
   <param name="templateReadyHandler" value="NeonPlayerTracker.onTemplateReady" />
 </object>
 
+<br/> <br/>
+<div id="div1"> CLICK ME TO VERIFY JQUERY 1.10 LOAD </div>
+<script type="text/javascript">
+	$("div").on( "click", function() {alert( $( this ).text() );});
+</script>
 </div>
 </body>
 </html>

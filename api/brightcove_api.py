@@ -65,8 +65,8 @@ class BrightcoveApi(object):
         else:
             self.neon_uri = "http://thumbnails.neon-lab.com/api/v1/submitvideo/" 
         
-        self.THUMB_SIZE = 120,90
-        self.STILL_SIZE = 480,360
+        self.THUMB_SIZE = 120, 90
+        self.STILL_SIZE = 480, 360
         self.account_created = account_created
 
     def format_get(self, url, data=None):
@@ -88,8 +88,8 @@ class BrightcoveApi(object):
                     '&token=%s&media_delivery=http&output=json&' 
                     'video_id=%s' %(self.read_token, video_id)) 
 
-        req = tornado.httpclient.HTTPRequest(url = url, method = "GET", 
-                request_timeout = 60.0, connect_timeout = 10.0)
+        req = tornado.httpclient.HTTPRequest(url=url, method="GET", 
+                request_timeout=60.0, connect_timeout=10.0)
 
         if not find_vid_callback:
             return BrightcoveApi.read_connection.send_request(req)
@@ -1035,6 +1035,7 @@ class BrightcoveApi(object):
         def check_image_md5_db(thumb_url, thumbnail, callback):
             ''' check if imagemd5 already is in the DB'''
             if thumbnail:
+                #valid image
                 t_md5 = supportServices.neondata.ThumbnailMD5.generate(
                     thumbnail)
                 tid = yield tornado.gen.Task(
@@ -1060,20 +1061,27 @@ class BrightcoveApi(object):
                     else:
                         _log.info("key=async_check_thumbnail"
                                 " msg=entry for url %s exists already"%thumb_url)
+                        callback(False) #indicate thumb not saved
+                        return
                 else:
                     #TODO: Should this entry be saved, perhaps its a new image 
                     #that the customer may have overriden ?
                     _log.error("key=async_check_thumbnail"
                             " msg=failed to fetch tid for image url" 
                             " %s md5 %s"%(thumb_url, t_md5)) 
+                    callback(False)
+                    return
             else:
                 _log.error("key=async_check_thumbnail" 
                         " msg=thumbnail not downloaded %s" %thumb_url)
             
-            callback(False)
+            callback(None)
 
         @tornado.gen.engine
         def result_callback(response):
+            '''
+            Make a call to Brightcove, Download the image and process the result
+            '''
             if not response.error:
                 resp = tornado.escape.json_decode(response.body)
                 try:
@@ -1092,6 +1100,8 @@ class BrightcoveApi(object):
                 stret = yield tornado.gen.Task(
                         check_image_md5_db,still_url, videostill.body)
                 callback(tret and stret)
+            else:
+                callback(None)
 
         url = 'http://api.brightcove.com/services/library?' \
                 'command=find_video_by_id&token=%s&media_delivery=http'\

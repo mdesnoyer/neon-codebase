@@ -396,7 +396,7 @@ class AccountHandler(tornado.web.RequestHandler):
         try:
             video_url = self.get_argument('video_url')
             title = self.get_argument('title')
-            video_url = video_url.split('?')[0]
+            #video_url = video_url.split('?')[0]
             video_url = video_url.replace("www.dropbox.com", 
                                 "dl.dropboxusercontent.com")
         except:
@@ -1612,7 +1612,7 @@ class BcoveHandler(tornado.web.RequestHandler):
                 result = yield tornado.gen.Task(
                         ba.check_current_thumbnail_in_db, 
                         self.internal_video_id)
-                if result:
+                if result is not None:
                     self.set_status(200)
                 else:
                     _log.error("key=bcove_handler msg=failed to check thumbnail " 
