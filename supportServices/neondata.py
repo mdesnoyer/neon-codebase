@@ -19,6 +19,7 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
+import base64
 import binascii
 import hashlib
 import json
@@ -37,6 +38,7 @@ import api.youtube_api
 
 from utils.options import define, options
 import utils.sync
+import urllib
 
 import logging
 _log = logging.getLogger(__name__)
@@ -1123,6 +1125,17 @@ class OoyalaPlatform(AbstractPlatform):
         ''' return ovp name'''
         return "ooyala"
     
+    @classmethod
+    def generate_signature(cls, secret_key, http_method, 
+                    request_path, query_params, request_body=''):
+        ''' Generate signature for ooyala requests'''
+        signature = secret_key + http_method.upper() + request_path
+        for key, value in query_params.iteritems():
+            signature += key + '=' + value
+            signature = base64.b64encode(hashlib.sha256(signature).digest())[0:43]
+            signature = urllib.quote_plus(signature)
+            return signature
+
     #check feed and create requests
     #verify token and create requests on signup
     #update thumbnail
@@ -1507,7 +1520,7 @@ class ImageMD5Mapper(object):
             return db_connection.blocking_conn.get(key)
     
     @classmethod
-    def save_all(cls,objs,callback=None):
+    def save_all(cls, objs, callback=None):
         ''' multi save ''' 
         db_connection = DBConnection(cls)
         data = {}

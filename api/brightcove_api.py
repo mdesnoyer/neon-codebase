@@ -9,6 +9,7 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
+import datetime
 from poster.encode import multipart_encode
 import poster.encode
 import properties
@@ -1064,10 +1065,25 @@ class BrightcoveApi(object):
                         callback(False) #indicate thumb not saved
                         return
                 else:
-                    #TODO: Should this entry be saved, perhaps its a new image 
-                    #that the customer may have overriden ?
-                    _log.error("key=async_check_thumbnail"
-                            " msg=failed to fetch tid for image url" 
+                    #Should this entry be saved, perhaps its a new image 
+                    #that the customer may have overriden ? 
+                    #-- should this be saved in db as chosen=true?
+                    i_vid = supportServices.neondata.InternalVideoID.generate(
+                                self.neon_api_key, video_id) 
+                    tid = supportServices.neondata.ThumbnailID.generate(
+                                thumbnail, i_vid)
+                    created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    urls = [thumb_url]
+                    td = supportServices.neondata.ThumbnailMetaData(
+                                tid, urls, created, 480, 360, "brightcove", 0, 0, rank=0)
+                    tm = supportServices.neondata.ThumbnailIDMapper(
+                                tid, i_vid, td.to_dict())
+                    ret = supportServices.neondata.ThumbnailIDMapper.save_all([tm])
+                    if ret:
+                        tmap = supportServices.neondata.ThumbnailURLMapper(thumb_url, tid)
+                        ret = supportServices.neondata.ThumbnailURLMapper.save_all([tmap])
+                    _log.info("key=async_check_thumbnail"
+                            " msg=saved mapping for image url" 
                             " %s md5 %s"%(thumb_url, t_md5)) 
                     callback(False)
                     return
