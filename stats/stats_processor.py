@@ -141,6 +141,11 @@ class DataDirectory:
                 if fnmatch.fnmatch(key.name, key_match):
                     local_fn = os.path.join(self.localdir, key.name)
                     if not os.path.exists(local_fn):
+                        dir_path = os.path.dirname(local_fn) 
+                        try:
+                            os.makedirs(dir_path)
+                        except OSError, e:
+                            pass
                         key.get_contents_to_filename(local_fn)
         except S3ResponseError as e:
             if e.status == '404':
@@ -151,8 +156,6 @@ class DataDirectory:
                     _log.warn('Could not find bucket %s' % bucket)
             else:
                 raise
-
-    
 
 def main(erase_local_data=None, activity_watcher=utils.ps.ActivityWatcher()):
     '''The main routine.

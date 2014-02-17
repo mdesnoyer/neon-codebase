@@ -1,6 +1,10 @@
 '''
 Module that handles the pushing serving directives to the controllers.
 
+The directive will be sent as a json of the form:
+
+    {'d': (video_id, [(thumb_id, fraction)])}
+
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright 2013 Neon Labs
 '''

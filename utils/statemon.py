@@ -44,6 +44,7 @@ class State(object):
     def __init__(self):
         self._lock = multiprocessing.RLock()
         self._vars = {}
+        self._enable_reset = False #default 
 
         # Find the root directory of the source tree
         cur_dir = os.path.abspath(os.path.dirname(__file__))
@@ -145,6 +146,20 @@ class State(object):
 
         with self._vars[global_name].get_lock():
             self._vars[global_name].value -= diff
+    
+    def get_all_variables(self):
+        ''' return dict of all variables being monitored '''
+        return self._vars
+   
+    def enable_reset(self):
+        ''' Enable reset of state variables '''
+        self._enable_reset = True
+
+    def reset(self, global_name):
+        ''' reset the state variable '''
+        if self.enable_reset:
+            with self._vars[global_name].get_lock():
+                self._vars[global_name].value = 0 
 
 state = State()
 '''Global state variable object'''

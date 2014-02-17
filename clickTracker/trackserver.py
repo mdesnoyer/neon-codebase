@@ -68,7 +68,9 @@ class TrackerData(object):
     Schema for click tracker data
     '''
     def __init__(self, action, _id, ttype, cts, sts, page, cip, imgs, tai,
-                 cvid=None):
+                 cvid=None, xy=None):
+        #TODO: handle unicode data too 
+        
         self.a = action # load/ click
         self.id = _id    # page load id
         self.ttype = ttype #tracker type
@@ -77,13 +79,14 @@ class TrackerData(object):
         self.cip = cip #client IP
         self.page = page # Page where the video is shown
         self.tai = tai # Tracker account id
-        #TODO: handle unicode data too 
         if isinstance(imgs, list):        
             self.imgs = imgs #image list
             self.cvid = cvid #current video in the player
         else:
             self.img = imgs  #clicked image
-        
+            if xy:
+                self.xy = xy 
+    
     def to_json(self):
         '''Converts the object to a json string.'''
         return json.dumps(self, default=lambda o: o.__dict__)
@@ -119,9 +122,10 @@ class TrackerDataHandler(tornado.web.RequestHandler):
         else:
             imgs = self.get_argument('img')
 
+        xy = self.get_argument('xy', None) #click on image
         cip = self.request.remote_ip
         return TrackerData(action, _id, ttype, cts, sts, page, cip, imgs, tai,
-                           cvid)
+                           cvid, xy)
 
 
 class LogLines(TrackerDataHandler):
@@ -164,8 +168,6 @@ class TestTracker(TrackerDataHandler):
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
         '''Handle a test tracking request.'''
-        _log.error("key=TestTracker msg=request data  %r",
-                   self.request)
         try:
             tracker_data = self.parse_tracker_data()
             cb = self.get_argument("callback")
@@ -438,4 +440,6 @@ def main(watcher=utils.ps.ActivityWatcher()):
 # ============= MAIN ======================== #
 if __name__ == "__main__":
     utils.neon.InitNeon()
+    #Turn off Access logs for tornado
+    logging.getLogger('tornado.access').propagate = False
     main()

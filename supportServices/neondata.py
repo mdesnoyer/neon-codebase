@@ -19,6 +19,7 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
+import base64
 import binascii
 import hashlib
 import json
@@ -37,6 +38,7 @@ import api.youtube_api
 
 from utils.options import define, options
 import utils.sync
+import urllib
 
 import logging
 _log = logging.getLogger(__name__)
@@ -213,6 +215,10 @@ class DBConnectionCheck(threading.Thread):
                 for key, value in DBConnection._singleton_instance.iteritems():
                     DBConnection.update_instance(key)
                     value.blocking_conn.get("dummy")
+            except RuntimeError, e:
+                #ignore if dict size changes while iterating
+                #a new class just created its own dbconn object
+                pass
             except Exception, e:
                 _log.exception("key=DBConnection check msg=%s"%e)
             
@@ -1107,6 +1113,34 @@ class YoutubePlatform(AbstractPlatform):
 
         return instances
 
+class OoyalaPlatform(AbstractPlatform):
+    '''
+    OOYALA Platform
+    '''
+    def __init__(self):
+        AbstractPlatform.__init__(self)
+    
+    @classmethod
+    def get_ovp(cls):
+        ''' return ovp name'''
+        return "ooyala"
+    
+    @classmethod
+    def generate_signature(cls, secret_key, http_method, 
+                    request_path, query_params, request_body=''):
+        ''' Generate signature for ooyala requests'''
+        signature = secret_key + http_method.upper() + request_path
+        for key, value in query_params.iteritems():
+            signature += key + '=' + value
+            signature = base64.b64encode(hashlib.sha256(signature).digest())[0:43]
+            signature = urllib.quote_plus(signature)
+            return signature
+
+    #check feed and create requests
+    #verify token and create requests on signup
+    #update thumbnail
+
+
 #######################
 # Request Blobs 
 ######################
@@ -1486,7 +1520,7 @@ class ImageMD5Mapper(object):
             return db_connection.blocking_conn.get(key)
     
     @classmethod
-    def save_all(cls,objs,callback=None):
+    def save_all(cls, objs, callback=None):
         ''' multi save ''' 
         db_connection = DBConnection(cls)
         data = {}
@@ -1792,12 +1826,15 @@ class VideoMetadata(object):
                 vmdata.append(vm)
             return vmdata
 
-    @staticmethod
-    def get_video_metadata(internal_accnt_id, internal_video_id):
-        ''' get video metadata '''
-        jdata = NeonApiRequest.get_request(internal_accnt_id, internal_video_id)
-        nreq = NeonApiRequest.create(jdata)
-        return nreq
+    @classmethod
+    def get_video_request(cls, internal_video_id, callback=None):
+        ''' get video request data '''
+        if not callback:
+            vm = cls.get(internal_video_id)
+            api_key = vm.key.split('_')[0]
+            jdata = NeonApiRequest.get_request(api_key, vm.job_id)
+            nreq = NeonApiRequest.create(jdata)
+            return nreq
 
     @classmethod
     def _erase_all_data(cls):

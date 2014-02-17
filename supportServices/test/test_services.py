@@ -794,7 +794,7 @@ class TestServices(AsyncHTTPTestCase):
         # thumbnail md5 shouldnt be found since random image was returned
         # while creating the response for get_image()
         resp = self.post_request(url, vals, self.api_key)
-        self.assertEqual(resp.code, 502) 
+        self.assertEqual(resp.code, 200) 
 
         #NOTE: ImageMD5 gets saved as part of image upload to brightcove
         #hence simulate that so as to create DB entry for check thumbnail run

@@ -74,6 +74,11 @@ import pickle
 
 import utils.neon
 from utils.http import RequestPool
+from utils import statemon
+
+#Monitoring
+statemon.define('processed_video', int)
+statemon.define('processing_error', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -318,18 +323,18 @@ class ProcessVideo(object):
 
     def save_data_to_s3(self):
         ''' tar.gz a few thumbs to s3 ''' 
-        s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
+        s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
         s3bucket = s3conn.get_bucket(self.s3bucket_name)
 
         try:
             # Save images to S3 
             tmp_tar_file = tempfile.NamedTemporaryFile(delete=True)
-            tar_file = tarfile.TarFile(tmp_tar_file.name,"w")
+            tar_file = tarfile.TarFile(tmp_tar_file.name, "w")
             
             samples = 50
             nframes = len(self.data_map)
             sample_size = nframes if nframes < samples else samples 
-            frame_nos = random.sample(self.data_map,sample_size)
+            frame_nos = random.sample(self.data_map, sample_size)
 
             for frame_no in frame_nos:
                 score = self.data_map[frame_no][0]
@@ -368,9 +373,9 @@ class ProcessVideo(object):
             gzip_file.close()
 
         except S3ResponseError,e:
-            _log.error("key=save_to_s3 msg=s3 response error " + e.__str__() )
+            _log.error("key=save_to_s3 msg=s3 response error %s"%e)
         except Exception,e:
-            _log.error("key=save_to_s3 msg=general exception " + e.__str__() )
+            _log.error("key=save_to_s3 msg=general exception %s"%e)
             if self.debug:
                 raise
   
@@ -457,7 +462,7 @@ class ProcessVideo(object):
         ''' valence of pil.image '''
         im_array = np.array(image)
         im = im_array[:, :, ::-1]
-        score,attr = self.model.score(im)
+        score, attr = self.model.score(im)
         return str(score)
 
     def save_video_metadata(self):
@@ -978,15 +983,19 @@ class HttpDownload(object):
             #If Internal error, requeue and dont send response to client yet
             #Send response to client that job failed due to the last reason
             #And Log the response we send to the client
+            statemon.state.increment('processing_error') 
             res = self.requeue_job()
             if res == False:
                 #error_msg = self.response.error.message
                 #self.error = error_msg
                 error_msg = self.error
-                cr = ClientCallbackResponse(self.job_params,None,error_msg)
+                cr = ClientCallbackResponse(self.job_params, None, error_msg)
                 cr.send_response() 
                 self.pv.finalize_neon_request(cr.response)
             return
+
+        # Prcocessed video successfully
+        statemon.state.increment('processed_video') 
 
         # API Specific client response
         request_type = self.job_params['request_type']
@@ -1024,7 +1033,7 @@ class HttpDownload(object):
             ## Brightcove secion 
             elif request_type == "brightcove":
                 #Update Brightcove
-                self.pv.finalize_brightcove_request(cr.response,error)
+                self.pv.finalize_brightcove_request(cr.response, error)
             
             elif request_type == "youtube":
                 pass

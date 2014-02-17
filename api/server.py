@@ -23,6 +23,7 @@ from supportServices.neondata import NeonApiRequest, BrightcoveApiRequest
 from supportServices.neondata import NeonPlatform, YoutubePlatform, \
         BrightcovePlatform, VideoMetadata, RequestState, InternalVideoID 
 import utils.neon
+from utils import statemon
 
 #Tornado options
 from utils.options import define, options
@@ -33,6 +34,11 @@ import logging
 _log = logging.getLogger(__name__)
 
 DIRNAME = os.path.dirname(__file__)
+
+#Monitoring variables
+statemon.define('server_queue', int)
+statemon.define('duplicate_requests', int)
+statemon.state.enable_reset()
 
 #=============== Global Handlers ======================================#
 
@@ -175,6 +181,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous
     @tornado.gen.engine
     def post(self, *args, **kwargs):
+        #TODO: Refactor to have a single exit point, add counters
+
         #insert job in to user account
         def update_account(result):
             if not result:
@@ -313,6 +321,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 self.write(response_data)
                 self.set_status(409)
                 self.finish()
+                statemon.state.increment('duplicate_requests')
                 return
             
             #TODO: insert in to work queue after saving request in db
@@ -337,6 +346,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     self.set_status(201)
                     self.write(response_data)
                     self.finish()
+                    statemon.state.increment('server_queue')
 
         except Exception, e:
             _log.exception("key=thumbnail_handler msg= %s"%e)
