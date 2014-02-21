@@ -190,8 +190,8 @@ class BrightcoveApi(object):
         #(not used currently)
 
         if isinstance(image,basestring):
-            rt = self.add_image(video_id,remote_url = image,atype='thumbnail')
-            rv = self.add_image(video_id,remote_url = image,atype='videostill')
+            rt = self.add_image(video_id, remote_url=image, atype='thumbnail')
+            rv = self.add_image(video_id, remote_url=image, atype='videostill')
         else:
             #Always save the Image with the aspect ratio of the video
             if frame_size is None:
@@ -514,6 +514,8 @@ class BrightcoveApi(object):
                 still  = item['videoStillURL']
                 d_url  = item['FLVURL']
                 length = item['length']
+                if still is None:
+                    still = thumb
 
                 if thumb is None or still is None or length <0:
                     _log.info("key=process_publisher_feed" 
@@ -1050,7 +1052,7 @@ class BrightcoveApi(object):
                     if not url_mapper:
                         #entry for the given thumbnail url doesn't exist, Save it !
                         mapper = supportServices.neondata.ThumbnailURLMapper(
-                            thumb_url,tid)
+                            thumb_url, tid)
                         res = yield tornado.gen.Task(mapper.save)
                         if res:
                             callback(True)

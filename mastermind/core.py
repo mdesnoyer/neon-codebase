@@ -417,10 +417,6 @@ class Mastermind(object):
             for thumb in self.video_info[video_id].thumbnails:
                 if thumb.id == thumb_id:
                     return thumb
-            if not foundThumb:
-                _log.warn('Could not find thumbnail %s for video %s' %
-                          (thumb_id, video_id))
-                return None
         except KeyError:
             _log.warn('Could not find information for video %s' % video_id)
             return None

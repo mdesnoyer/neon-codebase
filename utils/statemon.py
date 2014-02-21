@@ -157,7 +157,7 @@ class State(object):
 
     def reset(self, global_name):
         ''' reset the state variable '''
-        if self.enable_reset:
+        if self._enable_reset:
             with self._vars[global_name].get_lock():
                 self._vars[global_name].value = 0 
 

@@ -746,7 +746,7 @@ class AccountHandler(tornado.web.RequestHandler):
         requests = yield tornado.gen.Task(
                     neondata.NeonApiRequest.get_requests, job_ids) 
         ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        for request,vid in zip(requests, vids):
+        for request, vid in zip(requests, vids):
             if not request:
                 result[vid] = None #indicate job not found
                 continue
