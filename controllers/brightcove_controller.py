@@ -299,14 +299,13 @@ class BrightcoveABController(object):
         
         #If Active thumbnail ==1 and is brightcove
         #and no thumb is chosen, then skip. 
-        #TODO: ADD TEST
         if active_thumbs ==1:
             vm = VideoMetadata.get(video_id)
             tids = vm.thumbnail_ids 
             tmaps = ThumbnailIDMapper.get_thumb_mappings([tids])
             chosen = False
             for tmap in tmaps:
-                if tmap.thumbnail_metadata["chosen"] == True:
+                if tmap and tmap.thumbnail_metadata["chosen"] == True:
                     chosen = True
             
             if not chosen:
