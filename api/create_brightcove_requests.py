@@ -24,7 +24,7 @@ logging.basicConfig(level=logging.DEBUG,
         filename='/mnt/logs/neon/brightcovecron.log',
         filemode='a')
 _log = logging.getLogger(__name__)
-
+skip_accounts = ["brightcoveplatform_4b33788e970266fefb74153dcac00f94_31"]
 try:
     # Get all Brightcove accounts
     host = '127.0.0.1'
@@ -32,6 +32,8 @@ try:
     rclient = blockingRedis.StrictRedis(host,port)
     accounts = rclient.keys('brightcoveplatform*')
     for accnt in accounts:
+        if accnt in skip_accounts:
+            continue
         api_key = accnt.split('_')[-2]
         i_id = accnt.split('_')[-1]
         _log.debug("key=brightcove_request msg= internal account %s i_id %s" %(api_key,i_id))

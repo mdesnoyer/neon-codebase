@@ -617,7 +617,7 @@ class ProcessVideo(object):
             s3fname = s3_url_prefix + "/" + keyname
             ttype = ThumbnailType.BRIGHTCOVE
             self.save_thumbnail_to_s3_and_metadata(image, score, s3bucket,
-                    keyname, s3fname, ttype, rank=0)
+                    keyname, s3fname, ttype, rank=1)
             bc_request.previous_thumbnail = s3fname
         
         else:

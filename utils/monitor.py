@@ -9,8 +9,7 @@ from options import options, define
 
 define("carbon_server", default="127.0.0.1", help="Montioring server", type=str)
 define("carbon_port", default=8090, help="Monitoring port", type=int)
-
-SLEEP_INTERVAL = 10
+define("sleep_interval", default=60, help="time between stats", type=int)
 
 class MonitoringAgent(threading.Thread):
     '''
@@ -48,7 +47,7 @@ class MonitoringAgent(threading.Thread):
         '''
         while True:
             self._run()
-            time.sleep(SLEEP_INTERVAL)
+            time.sleep(options.sleep_interval)
     
     def _run(self):        
             m_vars = statemon.state.get_all_variables()
