@@ -173,7 +173,7 @@ class AccountHandler(tornado.web.RequestHandler):
             statemon.state.increment('bad_request')
         elif status == 502:
             statemon.state.increment('bad_gateway')
-        else:
+        elif status > 201:
             statemon.state.increment('internal_err')
 
         self.set_header("Content-Type", "application/json")
@@ -404,11 +404,18 @@ class AccountHandler(tornado.web.RequestHandler):
                     "msg=malformed request or missing arguments")
             self.send_json_response('{"error":"missing video_url"}', 400)
             return
+        
+        invalid_url_links = ["youtube.com", "youtu.be"]
+        for invalid_url_link in invalid_url_links:
+            if invalid_url_link in video_url:
+                data = '{"error":"link given is invalid or not a video file"}'
+                self.send_json_response(data, 400)
+                return
 
         #Validate link
         invalid_content_types = ['text/html', 'text/plain', 'application/json',
                     'application/x-www-form-urlencoded', 
-                    'text/html; charset=utf-8']
+                    'text/html; charset=utf-8', 'text/html;charset=utf-8']
         http_client = tornado.httpclient.AsyncHTTPClient()
         headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \

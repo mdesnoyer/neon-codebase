@@ -27,7 +27,7 @@ import tornado.httpclient
 import urllib
 import utils.neon
 from heapq import heappush, heappop
-
+from supportServices.neondata import ThumbnailIDMapper, VideoMetadata, ThumbnailMetaData
 from utils.options import define, options
 define("port", default=8888, help="run on the given port", type=int)
 define("delay", default=10, help="initial delay", type=int)
@@ -296,6 +296,21 @@ class BrightcoveABController(object):
         #No thumbs are active, skip
         if active_thumbs == 0:
             return
+        
+        #If Active thumbnail ==1 and is brightcove
+        #and no thumb is chosen, then skip. 
+        #TODO: ADD TEST
+        if active_thumbs ==1:
+            vm = VideoMetadata.get(video_id)
+            tids = vm.thumbnail_ids 
+            tmaps = ThumbnailIDMapper.get_thumb_mappings([tids])
+            chosen = False
+            for tmap in tmaps:
+                if tmap.thumbnail_metadata["chosen"] == True:
+                    chosen = True
+            
+            if not chosen:
+                return
 
         #Make a decision based on the current state of the video data
         delay = random.randint(0, self.max_update_delay)

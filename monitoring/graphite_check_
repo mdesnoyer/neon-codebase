@@ -1,0 +1,13 @@
+#!/bin/bash
+ 
+# monit does not allow sending parameters to programs
+# so we need a thin wrapper to run the python graphite_check
+#
+# This is a generic wrapper that takes anything after `graphite_check_`
+# and passes it to the python script as arg
+#
+# all we need is softlink to this wrapper with the correct param name
+# e.g. ln -s graphite_check_ graphite_check_carbon
+ 
+SCRIPT_DIR=$(dirname `readlink -f $0`)
+echo $SCRIPT_DIR/graphite_check `basename $0 | sed 's/graphite_check_//g'`

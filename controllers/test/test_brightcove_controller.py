@@ -191,13 +191,81 @@ class TestScheduler(unittest.TestCase):
         Test when a new directive where only a signle thumbnail is 
         scheduled to run. all other thumbs have 0.0 % of timeslice 
         '''
-        new_video_distribution = {"d": ("int_vid1", [('B', 1.0), ('A', 0.0)])}
+        i_vid = 'int_vid1'
+        new_video_distribution = {"d": (i_vid, [('B', 1.0), ('A', 0.0)])}
+        
+        #patch VideoMetadata & ThumbnailIDMapper
+        vm = brightcove_controller.VideoMetadata('int_vid1', None, None, None,
+                None, None, None, None)
+        tdataB = brightcove_controller.ThumbnailMetaData('B', 
+                        ["http://img1"], None, None, None,
+                        'brightcove', 0, 0, rank=0)
+        tdataA = brightcove_controller.ThumbnailMetaData('A',
+                        ["http://img2"], None, None, None,
+                        'neon', 0, 0, rank=1)
+        thumbB = tdataB.to_dict()
+        thumbA = tdataA.to_dict()
+        tmapB = brightcove_controller.ThumbnailIDMapper('tidB', i_vid, thumbB)
+        tmapA = brightcove_controller.ThumbnailIDMapper('tidA', i_vid, thumbA)
+        tmaps = [tmapB, tmapA] 
+        
+        vm_patcher = patch('controllers.brightcove_controller.VideoMetadata')
+        vm_patch = vm_patcher.start()
+        vm_patch().get.side_effect = [vm] 
+        
+        tmap_patcher = patch('controllers.brightcove_controller.ThumbnailIDMapper')
+        tmap_patch = tmap_patcher.start()
+        tmap_patch().get_thumb_mappings.side_effect = [tmaps] 
+        
         brightcove_controller.setup_controller_for_video(
                                 json.dumps(new_video_distribution)) 
         
         task_map = self.get_video_task_map() 
-        expected_order = ["ThumbnailCheckTask", "ThumbnailChangeTask_B"]
+        #Verify no task created for i_vid 
+        self.assertFalse(task_map.has_key(i_vid))
+        vm_patcher.stop()
+        tmap_patcher.stop()
+    
+    def test_new_directive_with_0_percentage_chosen(self):
+        '''
+        Test when a new directive where only a signle thumbnail is 
+        scheduled to run. all other thumbs have 0.0 % of timeslice 
+        where a thumbnail is Chosen
+        '''
+        i_vid = 'int_vid1'
+        new_video_distribution = {"d": (i_vid, [('A', 1.0), ('B', 0.0)])}
+        
+        #patch VideoMetadata & ThumbnailIDMapper
+        vm = brightcove_controller.VideoMetadata('int_vid1', None, None, None,
+                None, None, None, None)
+        tdataB = brightcove_controller.ThumbnailMetaData('B', 
+                        ["http://img1"], None, None, None,
+                        'brightcove', 0, 0, rank=0)
+        tdataA = brightcove_controller.ThumbnailMetaData('A',
+                        ["http://img2"], None, None, None,
+                        'neon', 0, 0, chosen=True, rank=1)
+        thumbB = tdataB.to_dict()
+        thumbA = tdataA.to_dict()
+        tmapB = brightcove_controller.ThumbnailIDMapper('tidB', i_vid, thumbB)
+        tmapA = brightcove_controller.ThumbnailIDMapper('tidA', i_vid, thumbA)
+        tmaps = [tmapB, tmapA] 
+        
+        vm_patcher = patch('controllers.brightcove_controller.VideoMetadata')
+        vm_patch = vm_patcher.start()
+        vm_patch.get.return_value = vm 
+        
+        tmap_patcher = patch('controllers.brightcove_controller.ThumbnailIDMapper')
+        tmap_patch = tmap_patcher.start()
+        tmap_patch.get_thumb_mappings.return_value = tmaps 
+        
+        brightcove_controller.setup_controller_for_video(
+                                json.dumps(new_video_distribution)) 
+        
+        task_map = self.get_video_task_map()
+        expected_order = ["ThumbnailCheckTask", "ThumbnailChangeTask_A"]
         self._verify_task_map(task_map, new_video_distribution, expected_order)
+        vm_patcher.stop()
+        tmap_patcher.stop()
 
     def test_multiple_neon_thumbnails(self):
         '''Test controller logic for multiple thumbnails (>2) '''
