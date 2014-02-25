@@ -65,7 +65,7 @@ class PILImageUtils(object):
     @classmethod
     def from_cv(cls, im):
         '''Converts an OpenCV BGR image into a PIL image.'''
-        if len(im.shape, 3):
+        if len(im.shape) == 3:
             return Image.fromarray(im[:,:,::-1])
         else:
             return Image.fromarray(im)
