@@ -1576,15 +1576,16 @@ class ThumbnailIDMapper(object):
     def create(json_data):
         ''' create object '''
 
-        data_dict = json.loads(json_data)
-        #create basic object
-        obj = ThumbnailIDMapper(None, None, None)
+        if json_data:
+            data_dict = json.loads(json_data)
+            #create basic object
+            obj = ThumbnailIDMapper(None, None, None)
 
-        #populate the object dictionary
-        for key in data_dict.keys():
-            obj.__dict__[key] = data_dict[key]
+            #populate the object dictionary
+            for key in data_dict.keys():
+                obj.__dict__[key] = data_dict[key]
         
-        return obj
+            return obj
 
     @classmethod
     def get_video_id(cls, tid, callback=None):
