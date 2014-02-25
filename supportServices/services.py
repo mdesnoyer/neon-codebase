@@ -1490,48 +1490,6 @@ class AccountHandler(tornado.web.RequestHandler):
         '''
         pass
 
-###########################################################
-## Util Handler 
-###########################################################
-
-class UtilHandler(tornado.web.RequestHandler):
-    def prepare(self):
-        ''' image random seed'''
-        random.seed(340)
-
-    @tornado.web.asynchronous
-    def get(self, *args, **kwargs):
-        ''' get request '''
-
-        width = 480
-        height = 360
-        try:
-            width = int(self.get_argument("width"))
-            height = (self.get_argument("height"))
-        except Exception, e:
-            pass
-        
-        seed = int(hashlib.md5(self.request.uri).hexdigest(), 16)
-        random.seed(seed)
-        im = self._create_random_image(height, width)
-        imgstream = StringIO() 
-        im.save(imgstream, "jpeg", quality=100)
-        imgstream.seek(0)
-        data = imgstream.read()
-        self.finish(data)
-
-    def _create_random_image(self, h, w):
-        ''' image data'''
-
-        pixels = [(0,0,0) for _w in range(h*w)] 
-        r = random.randrange(0, 255)
-        g = random.randrange(0, 255)
-        b = random.randrange(0, 255)
-        pixels[0] = (r, g, b)
-        im = Image.new("RGB",(h, w))
-        im.putdata(pixels)
-        return im
-
 
 ######################################################################
 ## Brightcove support handler -- Mainly used by brigthcovecontroller 
@@ -1641,8 +1599,8 @@ class BcoveHandler(tornado.web.RequestHandler):
 
 application = tornado.web.Application([
         (r'/api/v1/accounts(.*)', AccountHandler),
-        (r'/api/v1/brightcovecontroller(.*)', BcoveHandler),
-        (r'/api/v1/utils(.*)', UtilHandler)], debug=True, gzip=True)
+        (r'/api/v1/brightcovecontroller(.*)', BcoveHandler)],
+        debug=True, gzip=True)
 
 def main():
     
