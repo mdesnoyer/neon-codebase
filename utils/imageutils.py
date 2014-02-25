@@ -1,41 +1,32 @@
 '''
-Image utility methods
+Image utility methods for PIL images.
+
+For OpenCV images see utils/pycvutils.py
+
+Author: Sunil Mallya (mallya@neon-lab.com)
+Copyright 2013 Neon Labs
 '''
 
-from PIL import Image
+import logging
 import numpy as np
+from PIL import Image
 import random
 
-class ImageUtils(object):
+_log = logging.getLogger(__name__)
+
+class PILImageUtils(object):
+    '''Utilities for dealing with PIL images.'''
 
     def __init__(self):
         pass
 
-    #@classmethod
-    #def crop_and_resize(cls, im, im_h, im_w):
-    #    ''' crop and resize image '''
-    #    image_size = (im_h, im_w)
-    #    image = np.array(im)
-    #
-    #    '''Returns a version of the image resized & cropped to the target size.'''
-    #    scaling = max(float(image_size[0]) / image.shape[0],
-    #                  float(image_size[1]) / image.shape[1])
-    #
-    #    newsize = np.round(np.array([image.shape[0], image.shape[1]])*scaling)
-    #    big_image = cv2.resize(image, (int(newsize[1]), int(newsize[0])))
-    #
-    #    sr = np.floor((newsize[0] - image_size[0])/2)
-    #    sc = np.floor((newsize[1] - image_size[1])/2)
-    #
-    #    im_array = big_image[sr:sr + image_size[0],
-    #                     sc:sc + image_size[1],
-    #                     :]
-    #
-    #    return Image.fromarray(im_array)
-
     @classmethod
     def resize(cls, im, im_h=None, im_w=None):
-        ''' Resize image '''
+        ''' Resize image.
+
+        If either the desired height or the desired width are not
+        specified, the aspect ratio is preserved.
+        '''
 
         #TODO: instance check, PIL.Image check is ambigous, 
         #type is JpegImagePlugin?
@@ -58,11 +49,24 @@ class ImageUtils(object):
     @classmethod
     def create_random_image(cls, h, w):
         ''' return a random image '''
-        pixels = [(0, 0, 0) for _w in range(h*w)] 
-        r = random.randrange(0, 255)
-        g = random.randrange(0, 255)
-        b = random.randrange(0, 255)
-        pixels[0] = (r, g, b)
-        im = Image.new("RGB",(h, w))
-        im.putdata(pixels)
-        return im
+        return Image.new("RGB", (w, h), None)
+
+    @classmethod
+    def to_cv(cls, im):
+        '''Convert a PIL image to an OpenCV one in BGR format.'''
+        if im.mode == 'RGB':
+            return np.array(im)[:,:,::-1]
+        elif im.mode in ['L', 'I', 'F']:
+            return np.array(im)
+        
+        raise NotImplementedError(
+            'Conversion for mode %s is not implemented' % im.mode)
+
+    @classmethod
+    def from_cv(cls, im):
+        '''Converts an OpenCV BGR image into a PIL image.'''
+        if len(im.shape) == 3:
+            return Image.fromarray(im[:,:,::-1])
+        else:
+            return Image.fromarray(im)
+            

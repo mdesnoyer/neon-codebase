@@ -19,7 +19,7 @@ import threading
 from tornado.httpclient import HTTPResponse, HTTPRequest
 import tornado.ioloop
 from utils.options import options
-from utils.imageutils import ImageUtils
+from utils.imageutils import PILImageUtils
 import unittest
 import test_utils.redis 
 from StringIO import StringIO
@@ -307,7 +307,7 @@ class TestThumbnailHelperClass(unittest.TestCase):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
 
-        self.image = ImageUtils.create_random_image(360, 480)
+        self.image = PILImageUtils.create_random_image(360, 480)
 
     def tearDown(self):
         self.redis.stop()
@@ -317,8 +317,9 @@ class TestThumbnailHelperClass(unittest.TestCase):
 
         url = "http://thumbnail.jpg"
         vid = "v123"
-        tid = ThumbnailID.generate(self.image, vid)
-        im_md5 = ImageMD5Mapper(vid, self.image, tid) 
+        image = PILImageUtils.create_random_image(360, 480)
+        tid = ThumbnailID.generate(image, vid)
+        im_md5 = ImageMD5Mapper(vid, image, tid) 
         im_md5.save()
 
         res_tid = ImageMD5Mapper.get_tid(vid, im_md5)
