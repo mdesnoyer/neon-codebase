@@ -199,8 +199,10 @@ class BrightcoveApi(object):
                 bcove_thumb = image.resize(self.THUMB_SIZE)
                 bcove_still = image.resize(self.STILL_SIZE)
             else:
-                bcove_thumb = PILImageUtils.resize(image, im_w=self.THUMB_SIZE[0])
-                bcove_still = PILImageUtils.resize(image, im_w=self.STILL_SIZE[0])
+                bcove_thumb = PILImageUtils.resize(image,
+                                                   im_w=self.THUMB_SIZE[0])
+                bcove_still = PILImageUtils.resize(image,
+                                                   im_w=self.STILL_SIZE[0])
 
             t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
                                                             bcove_thumb,

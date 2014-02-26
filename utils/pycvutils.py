@@ -34,29 +34,6 @@ def resize_and_crop(image, h, w):
     sc = np.floor((newsize[1] - w)/2)
 
     return big_image[sr:sr + h, sc:sc + w, :]
-
-def hsv_image_difference(imA, imB, w_h=0.25, w_s=0.25, w_v=0.5):
-    '''Calculates the normalized difference between image A and B.
-
-    The difference is normalized per pixel and ranges from 0 -> sum(w_*)
-
-    Inputs:
-    imA, imB - The two images to compare. OpenCV in BGR format.
-    w_* - Weights for the difference in (h)ue (s)aturation and (v)alue
-    '''
-    if imA.shape != imB.shape:
-        return float('inf')
-    
-    hsvA = np.array(cv2.cvtColor(imA, cv2.COLOR_BGR2HSV), np.float)
-    hsvB = np.array(cv2.cvtColor(imB, cv2.COLOR_BGR2HSV), np.float) 
-
-    diff = np.abs(hsvA - hsvB)
-    if imA.dtype == np.uint8:
-        diff = np.array(diff, np.float) / 255.
-
-    return (np.sum(w_h*diff[0] + w_s*diff[1] + w_v*diff[2]) / 
-            (imA.shape[0] * imA.shape[1]))
-    
     
 
 def to_pil(im):
