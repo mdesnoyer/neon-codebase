@@ -256,7 +256,7 @@ class S3Handler(threading.Thread):
         else:
             thread = threading.Thread(
                 target=self._save_to_disk,
-                args=('\n'.join(data),
+                args=('\n'.join(data) + "\n",
                       os.path.join(options.output, filename),
                       len(data)))
 

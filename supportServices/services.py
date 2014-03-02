@@ -347,11 +347,16 @@ class AccountHandler(tornado.web.RequestHandler):
         elif method == "videos":
             if len(uri_parts) == 9:
                 vid = uri_parts[-1]
+                if vid == "null":
+                    self.send_json_response('{"error": "video id null" }', 400)
+                    return
+
                 i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
                 if "brightcove_integrations" == itype:
                     try:
                         new_tid = self.get_argument('thumbnail_id')
-                    except:
+                        #new_tid = self.get_argument('thumbnail_id', None)
+                    except Exception, e:
                         data = '{"error": "missing thumbnail_id argument"}'
                         self.send_json_response(data, 400)
                         return
@@ -916,7 +921,7 @@ class AccountHandler(tornado.web.RequestHandler):
                                                 get_account_callback)
         
     @tornado.gen.engine
-    def update_video_brightcove(self,i_id,i_vid,new_tid):
+    def update_video_brightcove(self, i_id, i_vid, new_tid):
         ''' update thumbnail for a brightcove video '''
         #TODO : Check for the linked youtube account 
         

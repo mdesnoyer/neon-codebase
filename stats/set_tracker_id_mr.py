@@ -8,7 +8,7 @@ from a specific domain, and then writes the logs to an output bucket.
 You will probably run this from the command line with something like:
 
 ./set_tracker_id_mr.py -c /path/to/mr/conf --runner emr 
---tracker_id 1483115066 --domain post-gazette.com -o s3://output-bucket 
+--tracker_id 1483115066 --domain post-gazette.com -o s3://output-bucket/folder/ 
 s3://input-bucket
 
 Copyright: 2013 Neon Labs
