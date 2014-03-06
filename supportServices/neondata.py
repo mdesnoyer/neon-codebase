@@ -1695,7 +1695,7 @@ class ThumbnailIDMapper(object):
                     old_thumb_obj = mapper_obj 
 
         #return only the modified thumbnail objs
-        return new_thumb_obj,old_thumb_obj 
+        return new_thumb_obj, old_thumb_obj 
 
     @classmethod
     def save_integration(cls, mapper_objs, callback=None):
