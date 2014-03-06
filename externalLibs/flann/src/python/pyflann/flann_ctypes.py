@@ -26,7 +26,7 @@
 
 from ctypes import *
 #from ctypes.util import find_library
-from numpy import float32, float64, uint8, int32, matrix, array, empty, reshape, require
+from numpy import float32, float64, uint8, int32, uint32, matrix, array, empty, reshape, require
 from numpy.ctypeslib import load_library, ndpointer
 import os
 import sys
@@ -292,6 +292,21 @@ flannlib.flann_find_nearest_neighbors_double.argtypes = [
 ]
 flann.find_nearest_neighbors[float64] = flannlib.flann_find_nearest_neighbors_double
 
+flann.find_nearest_neighbors_hamming = {}                       
+flannlib.flann_find_nearest_neighbors_hamming_byte.restype = c_int
+flannlib.flann_find_nearest_neighbors_hamming_byte.argtypes = [ 
+        ndpointer(uint8, ndim = 2, flags='aligned, c_contiguous'), # dataset
+        c_int, # rows
+        c_int, # cols
+        ndpointer(uint8, ndim = 2, flags='aligned, c_contiguous'), # testset
+        c_int,  # tcount
+        ndpointer(int32, ndim = 2, flags='aligned, c_contiguous, writeable'), # result
+        ndpointer(uint32, ndim = 2, flags='aligned, c_contiguous, writeable'), # dists
+        c_int, # nn
+        POINTER(FLANNParameters)  # flann_params
+]
+flann.find_nearest_neighbors_hamming[uint8] = flannlib.flann_find_nearest_neighbors_hamming_byte
+
 
 flann.find_nearest_neighbors_index = {}
 define_functions(r"""
@@ -320,6 +335,19 @@ flannlib.flann_find_nearest_neighbors_index_double.argtypes = [
 ]
 flann.find_nearest_neighbors_index[float64] = flannlib.flann_find_nearest_neighbors_index_double
 
+flann.find_nearest_neighbors_index_hamming = {}
+flannlib.flann_find_nearest_neighbors_index_hamming_byte.restype = c_int
+flannlib.flann_find_nearest_neighbors_index_hamming_byte.argtypes = [ 
+        FLANN_INDEX, # index_id
+        ndpointer(uint8, ndim = 2, flags='aligned, c_contiguous'), # testset
+        c_int,  # tcount
+        ndpointer(int32, ndim = 2, flags='aligned, c_contiguous, writeable'), # result
+        ndpointer(uint32, ndim = 2, flags='aligned, c_contiguous, writeable'), # dists
+        c_int, # nn
+        POINTER(FLANNParameters) # flann_params
+]
+flann.find_nearest_neighbors_index_hamming[uint8] = flannlib.flann_find_nearest_neighbors_index_hamming_byte
+
 flann.radius_search = {}
 define_functions(r"""
 flannlib.flann_radius_search_%(C)s.restype = c_int
@@ -347,6 +375,19 @@ flannlib.flann_radius_search_double.argtypes = [
 ]
 flann.radius_search[float64] = flannlib.flann_radius_search_double
 
+flann.radius_search_hamming = {}
+flannlib.flann_radius_search_hamming_byte.restype = c_int
+flannlib.flann_radius_search_hamming_byte.argtypes = [ 
+        FLANN_INDEX, # index_id
+        ndpointer(uint8, ndim = 1, flags='aligned, c_contiguous'), # query
+        ndpointer(int32, ndim = 1, flags='aligned, c_contiguous, writeable'), # indices
+        ndpointer(uint32, ndim = 1, flags='aligned, c_contiguous, writeable'), # dists
+        c_int, # max_nn
+        c_float, # radius
+        POINTER(FLANNParameters) # flann_params
+]
+flann.radius_search_hamming[uint8] = flannlib.flann_radius_search_hamming_byte
+
 
 flann.compute_cluster_centers = {}
 define_functions(r"""
@@ -372,7 +413,6 @@ flannlib.flann_compute_cluster_centers_double.argtypes = [
         POINTER(FLANNParameters)  # flann_params
 ]
 flann.compute_cluster_centers[float64] = flannlib.flann_compute_cluster_centers_double
-
 
 flann.free_index = {}
 define_functions(r"""

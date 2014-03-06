@@ -55,7 +55,24 @@ class TestImHashIndex(unittest.TestCase):
             self.assertEqual(results[0][0], hashes[image_fn])
             self.assertEqual(results[0][1], 0)
 
-    def _test_jpeg_compression_same(self):
+    def test_build_index_at_once(self):
+        hashes = {}
+        for image_fn in self._get_test_image_files():
+            hashes[image_fn] = self.index.hash_pil_image(
+                PIL.Image.open(image_fn))
+
+        self.index.build_index(hashes.itervalues())
+
+        # Make sure we find the images again
+        for image_fn in self._get_test_image_files():
+            results = self.index.pil_image_radius_search(
+                PIL.Image.open(image_fn),
+                radius=1)
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0][0], hashes[image_fn])
+            self.assertEqual(results[0][1], 0)
+
+    def test_jpeg_compression_same(self):
         '''Test that applying different JPEG compression gives the same image.
         '''
         

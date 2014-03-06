@@ -248,6 +248,9 @@ flann_index_t _flann_build_index(T* dataset, int rows, int cols, float* speedup,
     else if (flann_distance_type==FLANN_DIST_KULLBACK_LEIBLER) {
         return __flann_build_index<KL_Divergence<T> >(dataset, rows, cols, speedup, flann_params);
     }
+    else if (flann_distance_type==FLANN_DIST_HAMMING) {
+        return __flann_build_index<Hamming<T> >(dataset, rows, cols, speedup, flann_params);
+    }
     else {
         Logger::error( "Distance type unsupported in the C bindings, use the C++ bindings instead\n");
         return NULL;
@@ -322,6 +325,9 @@ int _flann_save_index(flann_index_t index_ptr, char* filename)
     else if (flann_distance_type==FLANN_DIST_KULLBACK_LEIBLER) {
         return __flann_save_index<KL_Divergence<T> >(index_ptr, filename);
     }
+    else if (flann_distance_type==FLANN_DIST_HAMMING) {
+        return __flann_save_index<Hamming<T> >(index_ptr, filename);
+    }
     else {
         Logger::error( "Distance type unsupported in the C bindings, use the C++ bindings instead\n");
         return -1;
@@ -391,6 +397,9 @@ flann_index_t _flann_load_index(char* filename, T* dataset, int rows, int cols)
     }
     else if (flann_distance_type==FLANN_DIST_KULLBACK_LEIBLER) {
         return __flann_load_index<KL_Divergence<T> >(filename, dataset, rows, cols);
+    }
+    else if (flann_distance_type==FLANN_DIST_HAMMING) {
+        return __flann_load_index<Hamming<T> >(filename, dataset, rows, cols);
     }
     else {
         Logger::error( "Distance type unsupported in the C bindings, use the C++ bindings instead\n");
@@ -484,6 +493,9 @@ int _flann_add_points(flann_index_t index_ptr, T* dataset,
     else if (flann_distance_type==FLANN_DIST_KULLBACK_LEIBLER) {
         return __flann_add_points<KL_Divergence<T> >(index_ptr, dataset, rows, rebuild_threshold, speedup, flann_params);
     }
+    else if (flann_distance_type==FLANN_DIST_HAMMING) {
+        return __flann_add_points<Hamming<T> >(index_ptr, dataset, rows, rebuild_threshold, speedup, flann_params);
+    }
     else {
         Logger::error( "Distance type unsupported in the C bindings, use the C++ bindings instead\n");
         return -1;
@@ -536,11 +548,12 @@ int __flann_find_nearest_neighbors(typename Distance::ElementType* dataset,  int
         Matrix<int> m_indices(result,tcount, nn);
         Matrix<DistanceType> m_dists(dists,tcount, nn);
         SearchParams search_params = create_search_params(flann_params);
-        index->knnSearch(Matrix<ElementType>(testset, tcount, index->veclen()),
-                         m_indices,
-                         m_dists, nn, search_params );
+        int count = index->knnSearch(Matrix<ElementType>(testset, tcount,
+                                                         index->veclen()),
+                                     m_indices,
+                                     m_dists, nn, search_params );
         delete index;
-        return 0;
+        return count;
     }
     catch (std::runtime_error& e) {
         Logger::error("Caught exception: %s\n",e.what());
@@ -606,6 +619,10 @@ int flann_find_nearest_neighbors_int(int* dataset,  int rows, int cols, int* tes
     return _flann_find_nearest_neighbors(dataset, rows, cols, testset, tcount, result, dists, nn, flann_params);
 }
 
+int flann_find_nearest_neighbors_hamming_byte(unsigned char* dataset,  int rows, int cols, unsigned char* testset, int tcount, int* result, unsigned int* dists, int nn, FLANNParameters* flann_params) {
+  return __flann_find_nearest_neighbors<Hamming<unsigned char> >(dataset, rows, cols, testset, tcount, result, dists, nn, flann_params);
+}
+
 
 template<typename Distance>
 int __flann_find_nearest_neighbors_index(flann_index_t index_ptr, typename Distance::ElementType* testset, int tcount,
@@ -625,11 +642,15 @@ int __flann_find_nearest_neighbors_index(flann_index_t index_ptr, typename Dista
         Matrix<DistanceType> m_dists(dists, tcount, nn);
 
         SearchParams search_params = create_search_params(flann_params);
-        index->knnSearch(Matrix<ElementType>(testset, tcount, index->veclen()),
-                         m_indices,
-                         m_dists, nn, search_params );
+        int count = index->knnSearch(Matrix<ElementType>(testset, 
+                                                         tcount,
+                                                         index->veclen()),
+                                     m_indices,
+                                     m_dists,
+                                     nn,
+                                     search_params );
 
-        return 0;
+        return count;
     }
     catch (std::runtime_error& e) {
         Logger::error("Caught exception: %s\n",e.what());
@@ -694,6 +715,11 @@ int flann_find_nearest_neighbors_index_byte(flann_index_t index_ptr, unsigned ch
 int flann_find_nearest_neighbors_index_int(flann_index_t index_ptr, int* testset, int tcount, int* result, float* dists, int nn, FLANNParameters* flann_params)
 {
     return _flann_find_nearest_neighbors_index(index_ptr, testset, tcount, result, dists, nn, flann_params);
+}
+
+int flann_find_nearest_neighbors_index_hamming_byte(flann_index_t index_ptr, unsigned char* testset, int tcount, int* result, unsigned int* dists, int nn, FLANNParameters* flann_params)
+{
+  return __flann_find_nearest_neighbors_index<Hamming<unsigned char> >(index_ptr, testset, tcount, result, dists, nn, flann_params);
 }
 
 
@@ -823,6 +849,17 @@ int flann_radius_search_int(flann_index_t index_ptr,
     return _flann_radius_search(index_ptr, query, indices, dists, max_nn, radius, flann_params);
 }
 
+int flann_radius_search_hamming_byte(flann_index_t index_ptr,
+                                     unsigned char* query,
+                                     int* indices,
+                                     unsigned int* dists,
+                                     int max_nn,
+                                     float radius,
+                                     FLANNParameters* flann_params)
+{
+    return __flann_radius_search<Hamming<unsigned char> >(index_ptr, query, indices, dists, max_nn, radius, flann_params);
+}
+
 
 template<typename Distance>
 int __flann_free_index(flann_index_t index_ptr, FLANNParameters* flann_params)
@@ -866,6 +903,9 @@ int _flann_free_index(flann_index_t index_ptr, FLANNParameters* flann_params)
     }
     else if (flann_distance_type==FLANN_DIST_KULLBACK_LEIBLER) {
         return __flann_free_index<KL_Divergence<T> >(index_ptr, flann_params);
+    }
+    else if (flann_distance_type==FLANN_DIST_HAMMING) {
+        return __flann_free_index<Hamming<T> >(index_ptr, flann_params);
     }
     else {
         Logger::error( "Distance type unsupported in the C bindings, use the C++ bindings instead\n");
@@ -977,4 +1017,3 @@ int flann_compute_cluster_centers_int(int* dataset, int rows, int cols, int clus
 {
     return _flann_compute_cluster_centers(dataset, rows, cols, clusters, result, flann_params);
 }
-

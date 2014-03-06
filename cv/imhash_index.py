@@ -32,7 +32,11 @@ class ImHashIndex:
         min_flann_size - Minimum number of entries before using flann to be
                          fast
         '''
-        self.flann = pyflann.FLANN()
+        self.flann = pyflann.FLANN(
+            algorithm='lsh',
+            table_number_=12,
+            key_size_=20,
+            multi_probe_level_=2)
         self.flann.set_distance_type("hamming")
         self.params = None
         hashfuncs = {
@@ -58,6 +62,23 @@ class ImHashIndex:
     def add_pil_image(self, image):
         '''Add a PIL image to the index.'''
         self.add_hash(self.hash_pil_image(image))
+
+    def build_index(self, hashvals):
+        '''Build an index from a sequence of hash values.
+
+        This is more efficient than just calling add_hash many
+        times. Anything that was entered in this index before it was
+        built is thrown out.
+
+        Input:
+        hashvals - list or generator of hash integers
+        '''
+        self.flann_index = self.binary_array_to_uint8_array(np.array(
+            [self.int_to_binary_array(h) for h in hashvals],
+            np.bool))
+
+        self.params = self.flann.build_index(self.flann_index)        
+        
 
     def add_hash(self, hashval):
         '''Add an image hash integer to the index.'''
@@ -88,11 +109,7 @@ class ImHashIndex:
                 self.flann_index,
                 self.binary_array_to_uint8_array(self.overflow_hash_index)))
         self.params = self.flann.build_index(
-            self.flann_index,
-            algorithm='lsh',
-            table_number_=12,
-            key_size_=20,
-            multi_probe_level_=2)
+            self.flann_index)
         self.overflow_hash_index = None
                 
 
@@ -100,8 +117,7 @@ class ImHashIndex:
         '''Return all the (hash, dist) < radius from the hashval.'''
         query = self.int_to_binary_array(hashval)
 
-        dists = []
-        hashes = []
+        results = {} # hash -> dist
 
         # Find entries in the overflow index
         if self.overflow_hash_index is not None:
@@ -109,22 +125,29 @@ class ImHashIndex:
             o_dists = np.sum(np.bitwise_xor(self.overflow_hash_index, query),
                              axis=1)
             idx = np.nonzero(o_dists < radius)[0]
-            dists.extend(o_dists[idx])
-            hashes.extend([
+            dists = o_dists[idx]
+            hashes = [
                 self.binary_array_to_int(self.overflow_hash_index[i,:]) for
-                i in idx])
+                i in idx]
+            results = dict(zip(hashes, dists))
             
 
         # Find entries in the flann index
         if self.params is not None:
-            idx, f_dists = self.flann.nn_radius(
+            # Normally, we'd do a radius search, but the flann radius
+            # search looks broken for lsh indicies. So we're going to
+            # do a nn search and check the resulting distances.
+            idx, f_dists = self.flann.nn_index(
                 self.binary_array_to_uint8_array(query),
-                radius=radius)
-            dists.extend(f_dists)
-            hashes.extend([
-                self.uint8_row_to_int(self.overflow_hash_index[i,:]) for
-                i in idx])
-        return zip(hashes, dists)
+                5)
+            idx = np.nonzero(f_dists < radius)[0]
+            dists = f_dists[idx]
+            hashes = [
+                self.uint8_row_to_int(self.flann_index[i,:]) for
+                i in idx]
+            results.update(dict(zip(hashes, dists)))
+            
+        return sorted(results.iteritems(), key=lambda x: x[1])
 
     def pil_image_radius_search(self, image, radius=5):
         '''Returns all the (hash, dist) < radius from the PIL image.'''

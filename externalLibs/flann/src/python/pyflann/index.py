@@ -34,7 +34,7 @@ index_type = int32
 def set_distance_type(distance_type, order = 0):
     """
     Sets the distance type used. Possible values: euclidean, manhattan, minkowski, max_dist, 
-    hik, hellinger, cs, kl.
+    hik, hellinger, cs, kl, hamming.
     """
     
     distance_translation = { "euclidean" : 1, 
@@ -47,6 +47,7 @@ def set_distance_type(distance_type, order = 0):
                             "cs" : 7,
                             "kullback_leibler" : 8,
                             "kl" : 8,
+                            "hamming" : 9,
                             }
     if type(distance_type)==str:
         distance_type = distance_translation[distance_type]
@@ -84,9 +85,19 @@ class FLANN:
         
         self.__flann_parameters = FLANNParameters()        
         self.__flann_parameters.update(kwargs)
+        self.set_distance_type("euclidean")
 
     def __del__(self):
         self.delete_index()
+
+    def set_distance_type(self, distance_type, order = 0):
+        """
+        Sets the distance type used. Possible values: euclidean, manhattan, 
+        minkowski, max_dist, hik, hellinger, cs, kl, hamming.
+        
+        """
+        self.__distance_type = distance_type
+        set_distance_type(distance_type)
 
         
     ################################################################################
@@ -117,21 +128,28 @@ class FLANN:
         assert(npts >= num_neighbors)
 
         result = empty( (nqpts, num_neighbors), dtype=index_type)
-        if pts.dtype==float64:
+        if self.__distance_type == 'hamming':
+            dists = empty( (nqpts, num_neighbors), dtype=uint32)
+        elif pts.dtype==float64:
             dists = empty( (nqpts, num_neighbors), dtype=float64)
         else:
             dists = empty( (nqpts, num_neighbors), dtype=float32)
                 
         self.__flann_parameters.update(kwargs)
 
-        flann.find_nearest_neighbors[pts.dtype.type](pts, npts, dim, 
-                                                     qpts, nqpts, result, dists, num_neighbors, 
-                                                     pointer(self.__flann_parameters))
+        if self.__distance_type == 'hamming':
+            nn = flann.find_nearest_neighbors_hamming[pts.dtype.type](
+                pts, npts, dim, qpts, nqpts, result, dists, num_neighbors, 
+                pointer(self.__flann_parameters))
+        else:
+            nn = flann.find_nearest_neighbors[pts.dtype.type](
+                pts, npts, dim, qpts, nqpts, result, dists, num_neighbors, 
+                pointer(self.__flann_parameters))
 
         if num_neighbors == 1:
             return (result.reshape( nqpts ), dists.reshape(nqpts))
         else:
-            return (result,dists)
+            return (result[:,0:nn], dists[:,0:nn])
 
 
     def build_index(self, pts, **kwargs):
@@ -156,6 +174,10 @@ class FLANN:
         self.__ensureRandomSeed(kwargs)
         
         self.__flann_parameters.update(kwargs)
+
+        if self.__flann_parameters['algorithm'] == 'lsh':
+            # lsh indicies must be hamming distances
+            self.set_distance_type('hamming')
 
         if self.__curindex != None:
             flann.free_index[self.__curindex_type](self.__curindex, pointer(self.__flann_parameters))
@@ -246,22 +268,32 @@ class FLANN:
         assert(npts >= num_neighbors)
         
         result = empty( (nqpts, num_neighbors), dtype=index_type)
-        if self.__curindex_type==float64:
+        if self.__distance_type == 'hamming':
+            dists = empty( (nqpts, num_neighbors), dtype=uint32)
+        elif self.__curindex_type==float64:
             dists = empty( (nqpts, num_neighbors), dtype=float64)
         else:
             dists = empty( (nqpts, num_neighbors), dtype=float32)
 
         self.__flann_parameters.update(kwargs)
 
-        flann.find_nearest_neighbors_index[self.__curindex_type](self.__curindex, 
-                    qpts, nqpts,
-                    result, dists, num_neighbors,
-                    pointer(self.__flann_parameters))
+        if self.__distance_type == 'hamming':
+            nn = flann.find_nearest_neighbors_index_hamming[self.__curindex_type](
+                self.__curindex, 
+                qpts, nqpts,
+                result, dists, num_neighbors,
+                pointer(self.__flann_parameters))
+        else:
+            nn = flann.find_nearest_neighbors_index[self.__curindex_type](
+                self.__curindex, 
+                qpts, nqpts,
+                result, dists, num_neighbors,
+                pointer(self.__flann_parameters))
 
         if num_neighbors == 1:
             return (result.reshape( nqpts ), dists.reshape( nqpts ))
         else:
-            return (result,dists)
+            return (result[:,0:nn], dists[:,0:nn])
         
         
     def nn_radius(self, query, radius, **kwargs):
@@ -279,16 +311,25 @@ class FLANN:
         assert(query.shape[0]==dim)
         
         result = empty( npts, dtype=index_type)
-        if self.__curindex_type==float64:
+        if self.__distance_type == 'hamming':
+            dists = empty( npts, dtype=uint32)
+        elif self.__curindex_type==float64:
             dists = empty( npts, dtype=float64)
         else:
             dists = empty( npts, dtype=float32)
         
         self.__flann_parameters.update(kwargs)
 
-        nn = flann.radius_search[self.__curindex_type](self.__curindex, query, 
-                                         result, dists, npts,
-                                         radius, pointer(self.__flann_parameters))
+        if self.__distance_type == 'hamming':
+            nn = flann.radius_search_hamming[self.__curindex_type](
+                self.__curindex, query, 
+                result, dists, npts,
+                radius, pointer(self.__flann_parameters))
+        else:
+            nn = flann.radius_search[self.__curindex_type](
+                self.__curindex, query, 
+                result, dists, npts,
+                radius, pointer(self.__flann_parameters))
         
         
         return (result[0:nn],dists[0:nn])
@@ -396,9 +437,10 @@ class FLANN:
         
         self.__flann_parameters.update(params)
         
-        numclusters = flann.compute_cluster_centers[pts.dtype.type](pts, npts, dim,
-                                        num_clusters, result, 
-                                        pointer(self.__flann_parameters))
+        numclusters = flann.compute_cluster_centers[pts.dtype.type](
+            pts, npts, dim,
+            num_clusters, result, 
+            pointer(self.__flann_parameters))
         if numclusters <= 0:
             raise FLANNException('Error occured during clustering procedure.')
 
