@@ -182,7 +182,7 @@ class TestServices(AsyncHTTPTestCase):
                     self.wtoken, self.pub_id, "http://callback", self.b_id)
             api_request.previous_thumbnail = p_thumb 
             api_request.autosync = False
-            api_request.set_api_method("topn",5)
+            api_request.set_api_method("topn", 5)
             api_request.submit_time = str(time.time())
             api_request.state = neondata.RequestState.SUBMIT
             self.assertTrue(api_request.save())
@@ -267,7 +267,7 @@ class TestServices(AsyncHTTPTestCase):
             vr = services.VideoResponse(None, None, None, None, None, 
                                     None, None, None, None)
             vr.__dict__ = item
-            status =  vr.status
+            status = vr.status
             self.assertEqual(status, vstatus)
 
     def _check_neon_default_chosen(self, videos): 
@@ -385,7 +385,7 @@ class TestServices(AsyncHTTPTestCase):
                 callback = kwargs["callback"]
                 return self.io_loop.add_callback(callback, response)
             else:
-                if len(args)>1:
+                if len(args) > 1:
                     callback = args[1]
                     return self.io_loop.add_callback(callback, response)
                 else:
@@ -461,7 +461,7 @@ class TestServices(AsyncHTTPTestCase):
         #set up account and video state for testing
         self.api_key = self.create_neon_account()
         json_video_response = self.create_brightcove_account()
-        self.assertNotEqual(json_video_response,'{}') # !empty json response
+        self.assertNotEqual(json_video_response, '{}') # !empty json response
         
         #verify account id added to Neon user account
         nuser = neondata.NeonUserAccount.get_account(self.api_key)

@@ -459,7 +459,31 @@ class BrightcoveApi(object):
     # Feed Processors
     ################################################################################
 
-    def get_publisher_feed(self,command='find_all_videos', output='json',
+    def get_video_url_to_download(self, b_json_item, frame_width=None):
+        '''
+        Return a video url to download from a brightcove json item 
+        
+        if frame_width is specified, get the closest one  
+        '''
+
+        video_urls = {}
+        d_url  = b_json_item['FLVURL']
+        renditions = b_json_item['renditions']
+        for rend in renditions:
+            f_width = rend["frameWidth"]
+            url = rend["url"]
+            video_urls[f_width] = url 
+        
+        if frame_width:
+            if video_urls.has_key(frame_width):
+                return video_urls[frame_width] 
+            closest_f_width = min(video_urls.keys(),
+                                key=lambda x:abs(x-frame_width))
+            return video_urls[closest_f_width]
+        else:
+            return d_url
+
+    def get_publisher_feed(self, command='find_all_videos', output='json',
                            page_no=0, page_size=100, callback=None):
     
         '''Get videos after the signup date, Iterate until you hit 
@@ -481,10 +505,10 @@ class BrightcoveApi(object):
         data['get_item_count'] = "true"
 
         url = self.format_get(self.read_url, data)
-        req = tornado.httpclient.HTTPRequest(url = url,
-                                             method = "GET",
-                                             request_timeout = 60.0,
-                                             connect_timeout = 10.0)
+        req = tornado.httpclient.HTTPRequest(url=url,
+                                             method="GET",
+                                             request_timeout=60.0,
+                                             connect_timeout=10.0)
         return BrightcoveApi.read_connection.send_request(req, callback)
 
     def process_publisher_feed(self, items, i_id):
@@ -514,6 +538,12 @@ class BrightcoveApi(object):
                 still  = item['videoStillURL']
                 d_url  = item['FLVURL']
                 length = item['length']
+
+                #if frame width is set, select the resolution to process
+                if bc.rendition_frame_width:
+                    d_url = self.get_video_url_to_download(item, 
+                                    bc.rendition_frame_width)
+
                 if still is None:
                     still = thumb
 
@@ -557,7 +587,7 @@ class BrightcoveApi(object):
                 vid_request.video_title = title
                 vid_request.save()
 
-    def sync_neondb_with_brightcovedb(self,items,i_id):
+    def sync_neondb_with_brightcovedb(self, items, i_id):
         ''' sync neondb with brightcove metadata '''        
         bc = supportServices.neondata.BrightcovePlatform.get_account(
             self.neon_api_key, i_id)
@@ -566,7 +596,7 @@ class BrightcoveApi(object):
             videos_processed = [] 
         
         for item in items:
-            vid   = str(item['id'])
+            vid = str(item['id'])
             title = item['name']
             if vid in videos_processed:
                 job_id = bc.videos[vid]
@@ -587,11 +617,11 @@ class BrightcoveApi(object):
         request_body = {}
         #brightcove tokens
         request_body["write_token"] = self.write_token
-        request_body["read_token"]  = self.read_token
-        request_body["api_key"]     = self.neon_api_key 
-        request_body["video_id"]    = str(id)
+        request_body["read_token"] = self.read_token
+        request_body["api_key"] = self.neon_api_key 
+        request_body["video_id"] = str(id)
         request_body["video_title"] = str(id) if title is None else title 
-        request_body["video_url"]   = video_download_url
+        request_body["video_url"] = video_download_url
         if self.local:
             request_body["callback_url"] = "http://localhost:8081/testcallback"
         else:
@@ -670,11 +700,13 @@ class BrightcoveApi(object):
             if count < total or psize * (pno +1) > total:
                 done = True
 
-        self.sync_neondb_with_brightcovedb(items_processed,i_id)
+        #Sync video metadata of processed videos
+        self.sync_neondb_with_brightcovedb(items_processed, i_id)
+
         if len(items_to_process) < 1 :
             return
 
-        self.process_publisher_feed(items_to_process,i_id)
+        self.process_publisher_feed(items_to_process, i_id)
         return
 
 
@@ -1131,6 +1163,8 @@ class BrightcoveApi(object):
                                              connect_timeout=10.0)
         response = BrightcoveApi.read_connection.send_request(req,
                                                               result_callback)
+
+    
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()

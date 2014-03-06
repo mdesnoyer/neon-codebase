@@ -160,7 +160,7 @@ class RedisAsyncWrapper(object):
         RedisAsyncWrapper._thread_pool.apply_async(
                 self.client.get, args=(key,), callback=_callback)
    
-    def set(self,key,value,callback):
+    def set(self, key, value, callback):
         ''' set key '''
         def _callback(result):
             ''' result callback'''
@@ -696,6 +696,7 @@ class BrightcovePlatform(AbstractPlatform):
         self.last_process_date = last_process_date 
         self.linked_youtube_account = False
         self.account_created = time.time() #UTC timestamp of account creation
+        self.rendition_frame_width = None #Resolution of video to process
 
     @classmethod
     def get_ovp(cls):
@@ -832,7 +833,7 @@ class BrightcovePlatform(AbstractPlatform):
                 callback(False)
         else:
             #Success      
-            #Updaate the request state to Active to facilitate faster filtering
+            #Update the request state to Active to facilitate faster filtering
             req_data = NeonApiRequest.get_request(self.neon_api_key, vmdata.job_id) 
             vid_request = NeonApiRequest.create(req_data)
             vid_request.state = RequestState.ACTIVE
@@ -919,6 +920,10 @@ class BrightcovePlatform(AbstractPlatform):
             self.neon_api_key, self.publisher_id, self.read_token,
             self.write_token, self.auto_update, self.last_process_date)
         bcove_api.sync_individual_video_metadata(self.integration_id)
+
+    def set_rendition_frame_width(f_width):
+        ''' Set framewidth of the video resolution to process '''
+        self.rendition_frame_width = f_width
 
     @classmethod
     def create(cls, json_data):

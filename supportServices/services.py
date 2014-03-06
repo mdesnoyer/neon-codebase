@@ -940,7 +940,7 @@ class AccountHandler(tornado.web.RequestHandler):
         result = yield tornado.gen.Task(ba.update_thumbnail, i_vid, new_tid)
         
         if result:
-            _log.debug("key=update_video_brightcove" 
+            _log.info("key=update_video_brightcove" 
                         " msg=thumbnail updated for video=%s tid=%s"\
                         %(p_vid, new_tid))
             data = ''
@@ -1508,6 +1508,13 @@ class UtilHandler(tornado.web.RequestHandler):
     def get(self, *args, **kwargs):
         ''' get request '''
 
+        #call to utils/videoinfo
+        #call to utils/image
+        if "videoinfo" in self.request.uri:
+            image_url = self.get_argument("image_url", None)
+            self.image_to_video_info(image_url)
+            return
+
         width = 480
         height = 360
         try:
@@ -1537,6 +1544,31 @@ class UtilHandler(tornado.web.RequestHandler):
         im.putdata(pixels)
         return im
 
+    def image_to_video_info(self, im_url):
+        ''' Given a image url, return video info '''
+
+        cb = self.get_argument("callback", "response")
+        info = {}
+        #video_url, video_title, video_process_time, video_id
+        data = '{"vinfo":{}}'
+
+        if im_url:
+            tid = neondata.ThumbnailURLMapper.get_id(im_url)
+            if tid:
+                vid = neondata.ThumbnailIDMapper.get_video_id(tid)
+                if vid:
+                    req = neondata.VideoMetadata.get_video_request(vid)
+                if req:
+                    info["video_url"] = req.video_url
+                    info["video_title"] = req.video_title
+                    info["video_process_time"] = float(req.response["timestamp"]) - float(req.submit_time)
+                    info["video_id"] = req.video_id
+                    data = '{"vinfo":%s}' %json.dumps(info)
+
+        self.set_header("Content-Type", "application/json")
+        self.set_status(200)
+        self.write(cb + "("+ data + ")") #wrap json data in callback
+        self.finish()
 
 ######################################################################
 ## Brightcove support handler -- Mainly used by brigthcovecontroller 
