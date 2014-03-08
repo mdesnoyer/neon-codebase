@@ -49,7 +49,9 @@ class PILImageUtils(object):
     @classmethod
     def create_random_image(cls, h, w):
         ''' return a random image '''
-        return Image.new("RGB", (w, h), None)
+        return Image.fromarray(np.array(
+            np.random.random_integers(0, 255, (h, w, 3)),
+            np.uint8))
 
     @classmethod
     def to_cv(cls, im):

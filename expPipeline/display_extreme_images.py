@@ -45,8 +45,8 @@ if __name__ == '__main__':
         frame = plt.subplot(IMAGES_PER_ROW, IMAGES_PER_ROW, i+1)
         frame.axes.get_xaxis().set_ticks([])
         frame.axes.get_yaxis().set_visible(False)
-        plt.imshow(image)
-        #plt.imshow(image.transpose(PIL.Image.FLIP_TOP_BOTTOM))
+        #plt.imshow(image)
+        plt.imshow(image.transpose(PIL.Image.FLIP_TOP_BOTTOM))
         plt.xlabel('%5.4f' % data[i][1])
 
         # Copy the image to a new directory
