@@ -27,7 +27,7 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         random.seed(198948)
 
-        self.images = [imageutils.PILImageUtils.create_random_image() for x in range(5)]
+        self.images = [imageutils.PILImageUtils.create_random_image(640, 480) for x in range(5)]
 
         # Create some simple entries in the account database
         self.redis = test_utils.redis.RedisServer()
@@ -41,21 +41,24 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
             neondata.InternalVideoID.generate('api_1', 'v1'), ['t1', 't2'], 
             '', '', 0, 0.0, 1, '')
         v1.save()
-        t1 = ThumbnailIDMapper('t1', v1.key,
-                          ThumbnailMetaData('t1', ['one.jpg', 'one_cmp.jpg'],
-                                            None,None,None,None,None,None))
+        t1 = neondata.ThumbnailIDMapper(
+            't1', v1.key,
+            neondata.ThumbnailMetaData('t1', ['one.jpg', 'one_cmp.jpg'],
+                                       None,None,None,None,None,None))
         t1.save()
-        t2 = ThumbnailIDMapper('t2', v1.key,
-                          ThumbnailMetaData('t2', ['two.jpg'],
-                                            None,None,None,None,None,None))
+        t2 = neondata.ThumbnailIDMapper(
+            't2', v1.key,
+            neondata.ThumbnailMetaData('t2', ['two.jpg'],
+                                       None,None,None,None,None,None))
         t2.save()
         v2 = neondata.VideoMetadata(
             neondata.InternalVideoID.generate('api_1', 'v2'), ['t3'], 
             '', '', 0, 0.0, 1, '')
         v2.save()
-        t3 = ThumbnailIDMapper('t3', v2.key,
-                          ThumbnailMetaData('t3', ['three.jpg',],
-                                            None,None,None,None,None,None))
+        t3 = neondata.ThumbnailIDMapper(
+            't3', v2.key,
+            neondata.ThumbnailMetaData('t3', ['three.jpg',],
+                                       None,None,None,None,None,None))
         t3.save()
 
         acct2 = neondata.BrightcovePlatform('acct_2', 'i_2', 'api_2')
@@ -65,15 +68,16 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
             neondata.InternalVideoID.generate('api_2', 'v3'), ['t1', 't2'], 
             '', '', 0, 0.0, 1, '')
         v3.save()
-        t4 = ThumbnailIDMapper('t4', v3.key,
-                          ThumbnailMetaData('t4', ['four.jpg'],
-                                            None,None,None,None,None,None))
+        t4 = neondata.ThumbnailIDMapper(
+             't4', v3.key,
+             neondata.ThumbnailMetaData('t4', ['four.jpg'],
+                                        None,None,None,None,None,None))
         t4.save()
         
         # Define the mapping that will be mocked out from url to images. 
         self.url2img = {}
         self.get_img_patcher = \
-          mock.patch('supportServices.url2thumbnail.utils.http.send_request')
+          patch('supportServices.url2thumbnail.utils.http.send_request')
         self.get_img_mock = self.get_img_patcher.start()
         self.get_img_mock.side_effect = \
           lambda x, callback: self.io_loop.add_callback(

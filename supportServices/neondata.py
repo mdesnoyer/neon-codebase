@@ -1674,6 +1674,17 @@ class ThumbnailIDMapper(object):
         else:
             return db_connection.blocking_conn.mset(data)
 
+    def save(self, callback=None):
+        ''' save instance '''
+        db_connection = DBConnection(self)
+        value = self.to_json()
+        if self.key is None:
+            raise Exception("key not set")
+        if callback:
+            db_connection.conn.set(self.key, value, callback)
+        else:
+            return db_connection.blocking_conn.set(self.key, value)
+
     @staticmethod
     def enable_thumbnail(mapper_objs, new_tid):
         ''' enable thumb in a list of mapper obj given a new thumb id '''
