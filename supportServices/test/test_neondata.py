@@ -19,7 +19,7 @@ import threading
 from tornado.httpclient import HTTPResponse, HTTPRequest
 import tornado.ioloop
 from utils.options import options
-from utils.imageutils import ImageUtils
+from utils.imageutils import PILImageUtils
 import unittest
 import test_utils.redis 
 from StringIO import StringIO
@@ -314,7 +314,7 @@ class TestThumbnailHelperClass(unittest.TestCase):
 
         url = "http://thumbnail.jpg"
         vid = "v123"
-        image = ImageUtils.create_random_image(360, 480)
+        image = PILImageUtils.create_random_image(360, 480)
         tid = ThumbnailID.generate(image, vid)
         im_md5 = ImageMD5Mapper(vid, image, tid) 
         im_md5.save()

@@ -1710,6 +1710,32 @@ class ThumbnailIDMapper(object):
             return pipe.execute()
 
     @classmethod
+    def iterate_all_thumbnails(cls):
+        '''Iterates through all of the thumbnails in the system.
+
+        ***WARNING*** This function is a best effort iteration. There
+           is a good chance that the database changes while the
+           iteration occurs. Given that we only ever add thumbnails to
+           the system, this means that it is likely that some
+           thumbnails will be missing.
+
+        Returns - A generator that does the iteration and produces 
+                  ThumbnailIDMapper objects.
+        '''
+
+        for platform in AbstractPlatform.get_all_instances():
+            for video_id in platform.get_internal_video_ids():
+                video_metadata = VideoMetadata.get(video_id)
+                if video_metadata is None:
+                    _log.error('Could not find information about video %s' %
+                               video_id)
+                    continue
+
+                for thumb in ThumbnailIDMapper.get_thumb_mappings(
+                        video_metadata.thumbnail_ids):
+                    yield thumb
+
+    @classmethod
     def _erase_all_data(cls):
         ''' clear db '''
         db_connection = DBConnection(cls)

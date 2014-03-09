@@ -372,7 +372,7 @@ struct MaxDistance
 struct HammingLUT
 {
     typedef unsigned char ElementType;
-    typedef int ResultType;
+    typedef unsigned int ResultType;
 
     /** this will count the bits in a ^ b
      */
@@ -471,7 +471,7 @@ template<class T>
 struct HammingPopcnt
 {
     typedef T ElementType;
-    typedef int ResultType;
+    typedef unsigned int ResultType;
 
     template<typename Iterator1, typename Iterator2>
     ResultType operator()(Iterator1 a, Iterator2 b, size_t size, ResultType /*worst_dist*/ = -1) const
@@ -573,6 +573,11 @@ struct Hamming
 #endif
         return result;
     }
+};
+
+// Specialize the hamming type to use LUT for unsigned chars
+template <>
+struct Hamming <unsigned char> : public HammingLUT {
 };
 
 

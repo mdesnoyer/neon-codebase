@@ -202,6 +202,42 @@ FLANN_EXPORT flann_index_t flann_load_index_int(char* filename,
                                                 int cols);
 
 
+FLANN_EXPORT int flann_add_points(flann_index_t index_ptr,
+                                  float* dataset,
+                                  int rows,
+                                  float rebuild_threshold,
+                                  float *speedup,
+                                  struct FLANNParameters *flann_params);
+
+FLANN_EXPORT int flann_add_points_float(flann_index_t index_ptr,
+                                        float* dataset,
+                                        int rows,
+                                        float rebuild_threshold,
+                                        float *speedup,
+                                        struct FLANNParameters *flann_params);
+
+FLANN_EXPORT int flann_add_points_double(flann_index_t index_ptr,
+                                         double* dataset,
+                                         int rows,
+                                         float rebuild_threshold,
+                                         float *speedup,
+                                         struct FLANNParameters *flann_params);
+
+FLANN_EXPORT int flann_add_points_byte(flann_index_t index_ptr,
+                                       unsigned char* dataset,
+                                       int rows,
+                                       float rebuild_threshold,
+                                       float *speedup,
+                                       struct FLANNParameters *flann_params);
+
+FLANN_EXPORT int flann_add_points_int(flann_index_t index_ptr,
+                                      int* dataset,
+                                      int rows,
+                                      float rebuild_threshold,
+                                      float *speedup,
+                                      struct FLANNParameters *flann_params);
+
+
 /**
    Builds an index and uses it to find nearest neighbors.
 
@@ -268,6 +304,16 @@ FLANN_EXPORT int flann_find_nearest_neighbors_int(int* dataset,
                                                   int nn,
                                                   struct FLANNParameters* flann_params);
 
+FLANN_EXPORT int flann_find_nearest_neighbors_hamming_byte(unsigned char* dataset,
+                                                           int rows,
+                                                           int cols,
+                                                           unsigned char* testset,
+                                                           int trows,
+                                                           int* indices,
+                                                           unsigned int* dists,
+                                                           int nn,
+                                                           struct FLANNParameters* flann_params);
+
 
 /**
    Searches for nearest neighbors using the index provided
@@ -325,6 +371,15 @@ FLANN_EXPORT int flann_find_nearest_neighbors_index_int(flann_index_t index_id,
                                                         int nn,
                                                         struct FLANNParameters* flann_params);
 
+FLANN_EXPORT int flann_find_nearest_neighbors_index_hamming_byte(
+    flann_index_t index_id,
+    unsigned char* testset,
+    int trows,
+    int* indices,
+    unsigned int* dists,
+    int nn,
+    struct FLANNParameters* flann_params);
+
 
 /**
  * Performs an radius search using an already constructed index.
@@ -379,6 +434,14 @@ FLANN_EXPORT int flann_radius_search_int(flann_index_t index_ptr, /* the index *
                                          int max_nn,  /* size of arrays indices and dists */
                                          float radius, /* search radius (squared radius for euclidian metric) */
                                          struct FLANNParameters* flann_params);
+
+FLANN_EXPORT int flann_radius_search_hamming_byte(flann_index_t index_ptr, /* the index */
+                                          unsigned char* query, /* query point */
+                                          int* indices, /* array for storing the indices found (will be modified) */
+                                          unsigned int* dists, /* similar, but for storing distances */
+                                          int max_nn,  /* size of arrays indices and dists */
+                                          float radius, /* search radius (squared radius for euclidian metric) */
+                                          struct FLANNParameters* flann_params);
 
 /**
    Deletes an index and releases the memory used by it.
@@ -457,6 +520,7 @@ FLANN_EXPORT int flann_compute_cluster_centers_int(int* dataset,
                                                    int clusters,
                                                    float* result,
                                                    struct FLANNParameters* flann_params);
+
 
 
 #ifdef __cplusplus

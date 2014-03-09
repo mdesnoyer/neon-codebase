@@ -30,6 +30,7 @@ from supportServices import services, neondata
 from api import brightcove_api
 from tornado.testing import AsyncHTTPTestCase, AsyncTestCase, AsyncHTTPClient
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
+from utils.imageutils import PILImageUtils
 from utils.options import define, options
 import logging
 _log = logging.getLogger(__name__)
@@ -151,19 +152,6 @@ class TestServices(AsyncHTTPTestCase):
         tids = vmdata.thumbnail_ids
         return tids
 
-    def _create_random_image(self):
-        ''' create random image data for http response'''
-        h = 360
-        w = 480
-        pixels = [(0, 0, 0) for _w in range(h*w)] 
-        r = random.randrange(0, 255)
-        g = random.randrange(0, 255)
-        b = random.randrange(0, 255)
-        pixels[0] = (r, g, b)
-        im = Image.new("RGB", (h, w))
-        im.putdata(pixels)
-        return im
-
     def _create_neon_api_requests(self):
         ''' create neon api requests '''
 
@@ -199,7 +187,7 @@ class TestServices(AsyncHTTPTestCase):
             job_id = api_request.job_id
             thumbnails = []
             for t in range(N_THUMBS):
-                image = self._create_random_image() 
+                image = PILImageUtils.create_random_image(360, 480) 
                 filestream = StringIO()
                 image.save(filestream, "JPEG", quality=100) 
                 filestream.seek(0)
@@ -474,7 +462,7 @@ class TestServices(AsyncHTTPTestCase):
         '''http image response''' 
         
         request = HTTPRequest("http://someimageurl/image.jpg")
-        im = self.images.values()[0]#self._create_random_image()
+        im = PILImageUtils.create_random_image(360, 480)
         imgstream = StringIO()
         im.save(imgstream, "jpeg", quality=100)
         imgstream.seek(0)
@@ -1068,7 +1056,7 @@ class TestServices(AsyncHTTPTestCase):
             job_id = api_request.job_id
             thumbnails = []
             for t in range(N_THUMBS):
-                image = self._create_random_image() 
+                image = PILImageUtils.create_random_image(360, 480) 
                 filestream = StringIO()
                 image.save(filestream, "JPEG", quality=100) 
                 filestream.seek(0)
@@ -1155,13 +1143,6 @@ class TestServices(AsyncHTTPTestCase):
         resp = self.get_request(url, api_key)
         self.assertEqual(resp.code, 400)
     
-    def test_utils_handler(self):
-        ''' random image utils handler test '''
-        url = self.get_url('/api/v1/utils/get_random_image')
-        resp = self.get_request(url, '')
-        self.assertEqual(resp.code, 200)
-        image = Image.open(StringIO(resp.body))
-        self.assertIsNotNone(image)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
