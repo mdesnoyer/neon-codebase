@@ -243,6 +243,9 @@ class AccountHandler(tornado.web.RequestHandler):
                 elif itype  == "brightcove_integrations":
                     self.get_video_status_brightcove(i_id, video_ids, video_state)
 
+                #elif itype == "ooyala_integrations":
+                #    self.get_ooyala_videos(i_id)
+                
                 elif itype == "youtube_integrations":
                     self.get_youtube_videos(i_id)
             else:
@@ -293,6 +296,9 @@ class AccountHandler(tornado.web.RequestHandler):
             #POST /accounts/:account_id/youtube_integrations
             elif "youtube_integrations" in self.request.uri:
                 self.create_youtube_integration()
+            
+            #elif "ooyala_integrations" in self.request.uri:
+            #    self.create_ooyala_integration()
 
         #Video Request creation   
         elif method == 'create_video_request':
@@ -307,12 +313,11 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.create_youtube_video_request(i_id)
             elif "neon_integrations" == itype:
                 self.create_neon_video_request(i_id)
+            #elif "ooyala_integrations" == itype:
+            #    self.create_ooyala_video_request(i_id)
             else:
                 self.method_not_supported()
 
-        #self.set_status(400)
-        #self.finish()
-   
     @tornado.web.asynchronous
     def put(self, *args, **kwargs):
         '''
@@ -337,6 +342,8 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.update_brightcove_integration(i_id)
             elif "youtube_integrations" == itype:
                 self.update_youtube_account(i_id)
+            #elif "ooyala_integrations" == itype:
+            #    self.update_ooyala_account(i_id)
             elif itype is None:
                 #Update basic neon account
                 self.method_not_supported()
@@ -366,6 +373,10 @@ class AccountHandler(tornado.web.RequestHandler):
                 elif "youtube_integrations" == itype:
                     self.update_youtube_video(i_id, i_vid)
                     return
+                
+                #elif "ooyala_integrations" == itype:
+                #    self.update_ooyala_video(i_id, i_vid)
+                #    return
             else:
                 self.method_not_supported()
         else:

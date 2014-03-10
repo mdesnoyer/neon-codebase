@@ -113,7 +113,7 @@ class BrightcoveApi(object):
         
         reference_id = kwargs.get('reference_id', None)
         remote_url = kwargs.get('remote_url', None)
-        
+
         outer = {}
         params = {}
         params["token"] = self.write_token 
@@ -140,6 +140,10 @@ class BrightcoveApi(object):
 
         body = tornado.escape.json_encode(outer)
         
+        #use this keyword to identify if it is a neon image or not
+        image_suffix = kwargs.get('image_suffix', '')
+        image_fname = 'neonthumbnail%s-%s.jpg'%(image_suffix, video_id) 
+        
         if remote_url:
             post_param = []
             args = poster.encode.MultipartParam("JSONRPC", value=body)
@@ -158,7 +162,7 @@ class BrightcoveApi(object):
                 "filePath",
                 value=image_data,
                 filetype='image/jpeg',
-                filename='neonthumbnail-' + str(video_id) + '.jpeg')
+                filename=image_fname)
             args = poster.encode.MultipartParam("JSONRPC", value=body)
             post_param.append(args)
             post_param.append(fileparam)
@@ -172,7 +176,7 @@ class BrightcoveApi(object):
                                              headers=headers, 
                                              body=body,
                                              request_timeout=60.0,
-                                             connect_timeout = 10.0)
+                                             connect_timeout=10.0)
             
         return BrightcoveApi.write_connection.send_request(req, callback)
     
@@ -189,7 +193,7 @@ class BrightcoveApi(object):
         #If url is passed, then set thumbnail using the remote url 
         #(not used currently)
 
-        if isinstance(image,basestring):
+        if isinstance(image, basestring):
             rt = self.add_image(video_id, remote_url=image, atype='thumbnail')
             rv = self.add_image(video_id, remote_url=image, atype='videostill')
         else:
@@ -218,11 +222,11 @@ class BrightcoveApi(object):
             rt = self.add_image(video_id,
                                 bcove_thumb,
                                 atype='thumbnail',
-                                reference_id = ref_id)
+                                reference_id=ref_id)
             rv = self.add_image(video_id,
                                 bcove_still,
                                 atype='videostill',
-                                reference_id = 'still-' + ref_id)
+                                reference_id='still-' + ref_id)
         
         tref_id = None ; vref_id = None
         #Get thumbnail name, referenceId params
@@ -259,7 +263,7 @@ class BrightcoveApi(object):
                                 still = res["result"]["referenceId"]
                 except:
                     pass
-                callback_value = thumb,still
+                callback_value = (thumb, still)
                 callback(callback_value)
 
             self.update_image_with_refid(video_id,
@@ -367,7 +371,9 @@ class BrightcoveApi(object):
     
 
     def async_enable_thumbnail_from_url(self, video_id, img_url, 
-                                       thumbnail_id, frame_size=None, callback=None):
+                                       thumbnail_id, frame_size=None,
+                                       image_suffix="",
+                                       callback=None):
         '''
         Enable thumbnail async
         '''
@@ -398,7 +404,7 @@ class BrightcoveApi(object):
                 except:
                     pass
 
-                callback_value = thumb,still
+                callback_value = (thumb, still)
                 callback(callback_value)
 
         @tornado.gen.engine
@@ -438,11 +444,13 @@ class BrightcoveApi(object):
                                bcove_thumb,
                                atype='thumbnail', 
                                reference_id=reference_id,
+                               image_suffix=image_suffix,
                                callback=add_image_callback)
                 self.add_image(video_id,
                                bcove_still,
                                atype='videostill',
                                reference_id=srefid,
+                               image_suffix=image_suffix,
                                callback=add_image_callback)
             else:
                 _log.error('key=async_update_thumbnail' 

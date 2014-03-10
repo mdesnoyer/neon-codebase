@@ -736,11 +736,16 @@ class BrightcovePlatform(AbstractPlatform):
         thumb_mappings = yield tornado.gen.Task(
                 ThumbnailIDMapper.get_thumb_mappings, tids)
         t_url = None
-       
+        
+        # Get the type of thumbnail (Neon/ Brighcove)
+        thumb_type = "" #type_rank
+
         #Check if the new tid exists
         for thumb_mapping in thumb_mappings:
-            if thumb_mapping.thumbnail_metadata["thumbnail_id"] == new_tid:
-                t_url = thumb_mapping.thumbnail_metadata["urls"][0]
+            tmdata = thumb_mapping.thumbnail_metadata
+            if tmdata["thumbnail_id"] == new_tid:
+                t_url = tmdata["urls"][0]
+                thumb_type = "bc" if tmdata["type"] == "brightcove" else ""
         
         if not t_url:
             _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
@@ -760,7 +765,7 @@ class BrightcovePlatform(AbstractPlatform):
         else:
             modified_thumbs.append(old_thumb)
       
-        #Don't reflect change in the DB
+        #Don't reflect change in the DB, used by AB Controller methods
         if nosave == False:
             if new_thumb is not None:
                 res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
@@ -773,13 +778,15 @@ class BrightcovePlatform(AbstractPlatform):
             else:
                 callback(False)
                 return
+        
 
         # Update the new_tid as the thumbnail for the video
         thumb_res = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,
                                            platform_vid,
                                            t_url,
                                            new_tid,
-                                           fsize)
+                                           fsize,
+                                           image_suffix=thumb_type)
         if thumb_res is None:
             callback(None)
             return
@@ -1122,8 +1129,25 @@ class OoyalaPlatform(AbstractPlatform):
     '''
     OOYALA Platform
     '''
-    def __init__(self):
+    def __init__(self, a_id, i_id, api_key, o_api_key, api_secret, 
+                                auto_update=False):
+        '''
+        Init ooyala platform 
+        
+        Partner code, o_api_key & api_secret are essential 
+        for api calls to ooyala 
+
+        '''
         AbstractPlatform.__init__(self)
+        self.neon_api_key = api_key
+        self.key = self.generate_key(i_id)
+        self.account_id = a_id
+        self.integration_id = i_id
+        self.partner_code = p_code
+        self.ooyala_api_key = o_api_key
+        self.api_secret = api_secret 
+        self.auto_update = auto_update 
+        self.last_process_date = last_process_date 
     
     @classmethod
     def get_ovp(cls):
@@ -1142,8 +1166,25 @@ class OoyalaPlatform(AbstractPlatform):
             return signature
 
     #check feed and create requests
+    def check_feed_and_create_requests(self):
+        pass
+
     #verify token and create requests on signup
+    def verify_token_and_create_requests_for_video(self, n, callback=None):
+        ''' Method to verify ooyala token on account creation 
+            And create requests for processing
+            @return: Callback returns job id, along with ooyala vid metadata
+        '''
+        #oo = oo()
+        #if callback:
+        #    oo.async_verify_token_and_create_requests(self.integration_id,..)
+        #else:
+        #    return bc.verify_token_and_create_requests(self.integration_id,n)
+        pass
+
     #update thumbnail
+    def update_thumbnail(self, tid):
+        pass
 
 
 #######################
@@ -1657,7 +1698,7 @@ class ThumbnailIDMapper(object):
             callback(mappings)
 
         if callback:
-            db_connection.conn.mget(keys,process)
+            db_connection.conn.mget(keys, process)
         else:
             mappings = [] 
             items = db_connection.blocking_conn.mget(keys)
@@ -1848,3 +1889,62 @@ class VideoMetadata(object):
         db_connection = DBConnection(cls)
         db_connection.clear_db()
 
+class InMemoryCache(object):
+
+    '''
+    Class to keep data in memory cache to avoid
+    fetching the key from redis db every time
+
+    Every timeout period the cache data is refetched
+    from the DB
+
+    NOTE: Use this only for read only data
+    Currently no timeout for each key
+
+    '''
+    def __init__(self, classname, timeout=3):
+        self.classname = classname
+        self.timeout = timeout
+        self.data = {} # key => object of classname
+        self._thread_pool = ThreadPool(1)
+        self._thread_pool.apply_async(
+            self.update_thread, callback=self._callback)
+        self.rlock = threading.RLock()
+
+    def add_key(self, key):
+        '''
+        Add a key to the cache
+        '''
+        with self.rlock:
+            db_connection = DBConnection(self.classname)
+            value = db_connection.blocking_conn.get(key)
+            cls = eval(self.classname)
+            if cls:
+                try:
+                    f_create = getattr(cls, "create")
+                    self.data[key] = f_create(value)
+                    return True
+                except AttributeError, e:
+                    return 
+
+    def get_key(self, key):
+        '''
+        Retrieve key from the cache
+        '''
+        if self.data.has_key(key):
+            return self.data[key] 
+
+    def update_thread(self):
+        '''
+        Update the value of each key
+        '''
+        while True:
+            for key in self.data.keys():
+                self.add_key(key)
+            time.sleep(self.timeout)
+
+    def _callback(self):
+        '''
+        Dummy callback
+        '''
+        print "callback done"
