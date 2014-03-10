@@ -331,7 +331,11 @@ class TestVideoClient(unittest.TestCase):
         clientp.stop()
 
     def test_streaming_callback(self):
-        
+    
+        '''
+        Tornado streaming callback
+        '''
+
         j_id = "j123"
         api_key = "apikey123"
         jparams = request_template.neon_api_request %(j_id, "v",

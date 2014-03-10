@@ -27,7 +27,7 @@ import tornado.httpclient
 import urllib
 import utils.neon
 from heapq import heappush, heappop
-from supportServices.neondata import ThumbnailIDMapper, VideoMetadata, ThumbnailMetaData
+from supportServices.neondata import ThumbnailIDMapper, VideoMetadata, ThumbnailMetaData, InMemoryCache
 from utils.options import define, options
 define("port", default=8888, help="run on the given port", type=int)
 define("delay", default=10, help="initial delay", type=int)
@@ -455,10 +455,8 @@ def initialize_brightcove_controller():
     Fetch the video id => [(Tid,%)] mappings and populate the data
     
     '''
-    
     #Send Push request to Mastermind
     #Set alerts on Mastermind
-    
     http_client = tornado.httpclient.HTTPClient()
     req = tornado.httpclient.HTTPRequest(method='GET',
                             url=options.mastermind_url,

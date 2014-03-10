@@ -256,7 +256,7 @@ class S3Handler(threading.Thread):
         else:
             thread = threading.Thread(
                 target=self._save_to_disk,
-                args=('\n'.join(data),
+                args=('\n'.join(data) + "\n",
                       os.path.join(options.output, filename),
                       len(data)))
 
@@ -369,6 +369,16 @@ class S3Handler(threading.Thread):
             statemon.state.qsize = self.dataQ.qsize()
             statemon.state.buffer_size = nlines
 
+class HealthCheckHandler(TrackerDataHandler):
+    '''Handler for health check ''' 
+    
+    @tornado.web.asynchronous
+    def get(self, *args, **kwargs):
+        '''Handle a test tracking request.'''
+
+        self.write("<html> Server OK </html>")
+        self.finish()
+
 ###########################################
 # Create Tornado server application
 ###########################################
@@ -405,6 +415,7 @@ class Server(threading.Thread):
                 (r"/track", LogLines, dict(q=self.event_queue,
                                            watcher=self._watcher)),
                 (r"/test", TestTracker),
+                (r"/healthcheck", HealthCheckHandler),
                 ])
             server = tornado.httpserver.HTTPServer(application,
                                                    io_loop=self.io_loop)

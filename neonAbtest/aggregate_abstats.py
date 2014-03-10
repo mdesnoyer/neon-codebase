@@ -39,9 +39,20 @@ data = [
     ['Pose3',3608,13,3480,7]]
 
 def main(options):
-    ctr_base = np.array([float(x[2])/x[1] for x in data])
+    if options.filename:
+        global data
+        data = []
+        with open(options.filename, 'r') as f:
+            for line in f.readlines():
+                d = line.split(' ')
+                d[-1] = d[-1].rstrip('\n')
+                for i in range(len(d)):
+                    d[i] = float(d[i])
+                data.append(d)
+
+    ctr_base = np.array([float(x[2])/float(x[1]) for x in data])
     n_base = np.array([x[1] for x in data])
-    ctr_neon = np.array([float(x[4])/x[3] for x in data])
+    ctr_neon = np.array([float(x[4])/float(x[3]) for x in data])
     n_neon = np.array([x[3] for x in data])
 
     log_ratio = np.log(np.divide(ctr_neon, ctr_base))
@@ -83,7 +94,9 @@ def main(options):
 
 if __name__ == '__main__':
     parser = OptionParser()
-    
+    parser.add_option("-f", "--file", dest="filename",
+                              help="write report to FILE", metavar="FILE")
+
     options, args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
