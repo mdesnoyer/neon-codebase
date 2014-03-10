@@ -79,7 +79,7 @@ class DBConnection(object):
             elif cname == "VideoMetadata":
                 host = options.videoDB
                 port = options.dbPort 
-            elif cname in ["ThumbnailIDMapper", "ThumbnailURLMapper"]:
+            elif cname in ["ThumbnailMetaData", "ThumbnailURLMapper"]:
                 host = options.thumbnailDB 
                 port = options.dbPort 
         
@@ -1579,36 +1579,46 @@ class ImageMD5Mapper(object):
             return db_connection.blocking_conn.mset(data)
 
 
-class ThumbnailIDMapper(object):
+class ThumbnailMetadata(object):
     '''
-    Class schema for Thumbnail URL to thumbnail metadata map
-    Thumbnail ID  => (Internal Video ID, ThumbnailMetadata) 
-    
-    Primary source for all the data associated with the thumbnail
-    contains the dictionary of thumbnail_metadata
-    '''
-    def __init__(self, tid, internal_vid, thumbnail_metadata):
-        super(ThumbnailIDMapper,self).__init__()
-        self.key = tid
-        self.video_id = internal_vid #api_key + platform video id
-        self.thumbnail_metadata = thumbnail_metadata #dict of ThumbnailMetadata obj
+    Class schema for Thumbnail information.
 
-    @classmethod
-    def generate_key(cls, video_id, tid):
-        ''' generate IDMapper key '''
-        return video_id + '_' + tid 
+    Keyed by thumbnail id
+    '''
+    def __init__(self, tid, internal_vid, urls, created, width, height, ttype,
+                 model_score, model_version, enabled=True, chosen=False,
+                 rank=None, refid=None):
+        super(ThumbnailIDMapper,self).__init__()
+        self.thumbnail_id = tid
+        self.video_id = internal_vid #api_key + platform video id
+        self.urls = urls  # List of all urls associated with single image
+        self.created_time = created # Timestamp when thumbnail was created 
+        self.enabled = enabled #boolen, indicates if this thumbnail can be displayed/ tested with 
+        self.chosen = chosen #boolean, indicates this thumbnail is chosen by the user as the primary one
+        self.width = width
+        self.height = height
+        self.type = ttype #neon1../ brightcove / youtube
+        self.rank = 0 if not rank else rank  #int 
+        self.model_score = model_score #float
+        self.model_version = model_version #float
+        self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
+        
+
+    #@classmethod
+        #def generate_key(cls, video_id, tid):
+        #''' generate thumbnail key '''
+        #return video_id + '_' + tid 
 
     def get_account_id(self):
-        ''' get account id '''
+        ''' get the internal account id. aka api key '''
         return self.video_id.split('_')[0]
-
-    def _hash(self,_input):
-        return hashlib.md5(_input).hexdigest()
     
     def get_metadata(self):
-        ''' get thumbnail metadata '''
-        return self.thumbnail_metadata
-        #return only specific fields
+        ''' get a dictionary of the thumbnail metadata
+
+        This function is deprecated and is kept only for backwards compatibility
+        '''
+        return self.to_dict()
 
     def to_dict(self):
         ''' to dict '''
@@ -1625,11 +1635,20 @@ class ThumbnailIDMapper(object):
         if json_data:
             data_dict = json.loads(json_data)
             #create basic object
-            obj = ThumbnailIDMapper(None, None, None)
+            obj = ThumbnailMetadata(None, None, None, None, None, None, None,
+                                    None, None)
+
+            # For backwards compatibility, check to see if there is a
+            # json entry for thumbnail_metadata. If so, grab all
+            # entries from there.
+            if 'thumbnail_metadata' in data_dict:
+                for key, value in data_dict:
+                    obj.__dict__[key] = value
+                del data_dict['thumbnail_metadata']
 
             #populate the object dictionary
-            for key in data_dict.keys():
-                obj.__dict__[key] = data_dict[key]
+            for key, value in data_dict:
+                obj.__dict__[key] = value
         
             return obj
 
