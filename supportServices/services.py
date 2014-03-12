@@ -227,15 +227,10 @@ class AccountHandler(tornado.web.RequestHandler):
 
             elif method == "videos" or "videos" in method:
                 video_state = None
-                video_ids = None
+                ids = self.get_argument('video_ids', None)
+                video_ids = None if ids is None else ids.split(',') 
                 if len(uri_parts) == 9:
                     video_state = uri_parts[-1].split('?')[0] 
-                    if video_state not in ['processing','recommended','published']:
-                        try:
-                            ids = self.get_argument('video_ids')
-                            video_ids = ids.split(',') 
-                        except:
-                            pass
 
                 if itype  == "neon_integrations":
                     self.get_video_status_neon(video_ids, video_state)

@@ -773,7 +773,7 @@ class TestServices(AsyncHTTPTestCase):
         vals = {'thumbnail_id' : tid2 }
         resp = self.post_request(url, vals, self.api_key)
         self.assertEqual(resp.code, 200)
-        tids = neondata.ThumbnailIDMapper.get_thumb_mappings([tid,tid2])
+        tids = neondata.ThumbnailIDMapper.get_thumb_mappings([tid, tid2])
         self.assertTrue(tids[0].thumbnail_metadata["chosen"])
         self.assertFalse(tids[1].thumbnail_metadata["chosen"])
 
@@ -824,7 +824,7 @@ class TestServices(AsyncHTTPTestCase):
         resp = self.get_request(url,self.api_key)
         items = json.loads(resp.body)['items']
         self.assertEqual(len(items),page_size)
-        result_vids = [ x['video_id'] for x in items ]
+        result_vids = [x['video_id'] for x in items]
         
         self.assertEqual(ordered_videos[:page_size],
                 result_vids)
@@ -836,8 +836,8 @@ class TestServices(AsyncHTTPTestCase):
                 %(self.a_id,self.b_id,page_no,page_size))
         resp = self.get_request(url,self.api_key)
         items = json.loads(resp.body)['items']
-        self.assertEqual(len(items),page_size,"page number did not match")
-        result_vids = [ x['video_id'] for x in items ]
+        self.assertEqual(len(items), page_size, "page number did not match")
+        result_vids = [x['video_id'] for x in items]
         self.assertItemsEqual(
                 ordered_videos[page_no*page_size:(page_no+1)*page_size],
                 result_vids)
@@ -847,11 +847,11 @@ class TestServices(AsyncHTTPTestCase):
         page_size = 1000
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
                 '%s/videos?page_no=%s&page_size=%s'
-                %(self.a_id,self.b_id,page_no,page_size))
-        resp = self.get_request(url,self.api_key)
+                %(self.a_id, self.b_id, page_no,page_size))
+        resp = self.get_request(url, self.api_key)
         response = json.loads(resp.body)
         items = response['items']
-        result_vids = [ x['video_id'] for x in items ]
+        result_vids = [x['video_id'] for x in items]
         
         #Check videos are sorted by publish date or video ids ? 
         self.assertEqual(len(ordered_videos),len(result_vids),
@@ -874,6 +874,23 @@ class TestServices(AsyncHTTPTestCase):
         self.assertEqual(len(ordered_videos) - (page_no*page_size),
                         len(result_vids))
 
+    def test_request_by_video_ids_brightcove(self):
+        ''' test video ids of brightcove integration '''
+
+        self._setup_initial_brightcove_state()
+
+        ordered_videos = sorted(self._get_videos(), reverse=True)
+        test_video_ids = ordered_videos[:2]
+        video_ids = ",".join(test_video_ids)
+
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
+                '%s/videos?video_ids=%s'
+                %(self.a_id, self.b_id, video_ids))
+        resp = self.get_request(url, self.api_key)
+        items = json.loads(resp.body)['items']
+        result_vids = [x['video_id'] for x in items]
+        self.assertItemsEqual(result_vids, test_video_ids)
+    
     def test_invalid_model_scores(self):
         ''' test filtering of invalid model scores like -inf, nan '''
 
@@ -1162,6 +1179,7 @@ class TestServices(AsyncHTTPTestCase):
         self.assertEqual(resp.code, 200)
         image = Image.open(StringIO(resp.body))
         self.assertIsNotNone(image)
+
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
