@@ -8,6 +8,7 @@ Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright 2013 Neon Labs
 '''
 
+import os
 import logging
 
 from . import logs
@@ -42,3 +43,11 @@ def InitNeonTest():
     logs.CreateLogger(logfile='/dev/null')
 
     logging.captureWarnings(True)
+
+def WritePid(pidfile):
+    '''Write the pid of the current process to the pidfile
+    '''
+    pid = str(os.getpid())
+    file(pidfile, 'w').write(pid)
+
+

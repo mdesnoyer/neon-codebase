@@ -1,0 +1,71 @@
+<html> 
+<head>
+	<title>  GET VIDEO INFO </title>
+</head>
+<script type="text/javascript">
+
+// Service call
+function JSONscriptRequest(fullUrl) {
+	this.fullUrl = fullUrl; 
+	this.noCacheIE = '&noCacheIE=' + (new Date()).getTime();
+	this.headLoc = document.getElementsByTagName("head").item(0);
+	this.scriptId = 'JscriptId' + JSONscriptRequest.scriptCounter++;
+}
+JSONscriptRequest.scriptCounter = 1;
+JSONscriptRequest.prototype.buildScriptTag = function () {
+	this.scriptObj = document.createElement("script");
+	this.scriptObj.setAttribute("type", "text/javascript");
+	this.scriptObj.setAttribute("charset", "utf-8");
+	this.scriptObj.setAttribute("src", this.fullUrl + this.noCacheIE);
+	this.scriptObj.setAttribute("id", this.scriptId);
+}
+JSONscriptRequest.prototype.removeScriptTag = function () {
+	this.headLoc.removeChild(this.scriptObj);  
+}
+JSONscriptRequest.prototype.addScriptTag = function () {
+	this.headLoc.appendChild(this.scriptObj);
+}
+// end of section ///
+
+
+function sendRequest(){
+	var imgUrl = document.getElementById('imgUrl').value
+	curl = "http://services.neon-lab.com/api/v1/utils/videoinfo"
+	var req = curl + "?&image_url=" + encodeURIComponent(imgUrl) + "&callback=responseCallback" ;
+	try { bObj = new JSONscriptRequest(req); bObj.buildScriptTag(); bObj.addScriptTag();  } catch(err) {  }
+	// Display error on the screen	
+}
+
+function responseCallback(jsonData){
+	var cnt = 0; 
+	for (var key in jsonData.vinfo){	
+		var p = document.createElement("p");	
+		p.innerHTML = key + " : " + jsonData.vinfo[key];
+		document.body.appendChild(p);		
+		var br = document.createElement('br');
+		document.body.appendChild(br);	
+		cnt = cnt + 1	
+	}
+	if (cnt == 0 ){
+		var p = document.createElement("p");	
+		p.innerHTML = "invalid neon url"; 
+		document.body.appendChild(p);	
+	}	
+}
+
+</script>
+
+<div style="font-weight:bold;font-size:24"> VIDEO INFO <div>
+<br/>
+
+<table style="width:50%">
+	<tr><td>  Image url  </td><td><input id="imgUrl" size="120" type="text"/></td></tr>
+</td></tr> 
+</table>
+<button id="submitButton" onclick="sendRequest()">Submit</button> <br/> 
+<br/>
+<br/><br/>
+
+
+</html>
+

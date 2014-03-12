@@ -17,7 +17,7 @@ import MySQLdb as sqldb
 from supportServices import neondata
 import urllib2
 import urllib
-from utils.options import define
+from utils.options import options, define
 
 define("stats_host", default="stats.cnvazyzlgq2v.us-east-1.rds.amazonaws.com",
         type=str, help="")

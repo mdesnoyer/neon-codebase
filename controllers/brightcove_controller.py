@@ -27,7 +27,7 @@ import tornado.httpclient
 import urllib
 import utils.neon
 from heapq import heappush, heappop
-from supportServices.neondata import ThumbnailIDMapper, VideoMetadata, ThumbnailMetaData
+from supportServices.neondata import ThumbnailIDMapper, VideoMetadata, ThumbnailMetaData, InMemoryCache
 from utils.options import define, options
 define("port", default=8888, help="run on the given port", type=int)
 define("delay", default=10, help="initial delay", type=int)
@@ -39,6 +39,13 @@ define("mastermind_url", default="http://localhost:8086/get_directives",
 import logging
 _log = logging.getLogger(__name__)
 random.seed(25110)
+
+#Monitoring vars
+from utils import statemon
+statemon.define('pqsize', int)
+statemon.define('thumbchangetask', int)
+statemon.define('thumbchangetask_fail', int)
+statemon.define('thumbchecktask_fail', int)
 
 ###################################################################################
 ## Priority Q Impl
@@ -63,11 +70,13 @@ class PriorityQ(object):
         entry = [priority, count, task]
         self.entry_finder[task] = entry
         heappush(self.pq, entry)
+        statemon.state.pqsize = len(self.pq)
 
     def remove_task(self,task):
         'Mark an existing task as REMOVED.  Raise KeyError if not found.'
         entry = self.entry_finder.pop(task)
         entry[-1] = self.REMOVED
+        statemon.state.pqsize = len(self.pq)
 
     def pop_task(self):
         'Remove and return the highest priority task. Raise KeyError if empty'
@@ -75,6 +84,7 @@ class PriorityQ(object):
             priority, count, task = heappop(self.pq)
             if task is not self.REMOVED:
                 del self.entry_finder[task]
+                statemon.state.pqsize = len(self.pq)
                 return task, priority
         raise KeyError('pop from an empty priority queue')
 
@@ -128,9 +138,11 @@ class ThumbnailChangeTask(AbstractTask):
         if result.error:
             _log.error("key=ThumbnailChangeTask msg=thumbnail change failed" 
                     " video %s tid %s"%(self.video_id, self.tid))
+            statemon.state.increment('thumbchangetask_fail')
         else:
             _log.info("key=ThumbnailChangeTask msg=thumbnail for video %s is %s"
                     %(self.video_id, self.tid))
+            statemon.state.increment('thumbchangetask')
 
 class TimesliceEndTask(AbstractTask):
 
@@ -170,6 +182,7 @@ class ThumbnailCheckTask(AbstractTask):
         if result.error:
             _log.error("key=ThumbnailCheckTask msg=service error for video %s"
                         %self.video_id)
+            statemon.state.increment('thumbchecktask_fail')
         else:
             _log.info("key=ThumbnailCheckTask msg=run thumbnail check")
 
@@ -299,14 +312,13 @@ class BrightcoveABController(object):
         
         #If Active thumbnail ==1 and is brightcove
         #and no thumb is chosen, then skip. 
-        #TODO: ADD TEST
         if active_thumbs ==1:
             vm = VideoMetadata.get(video_id)
             tids = vm.thumbnail_ids 
             tmaps = ThumbnailIDMapper.get_thumb_mappings([tids])
             chosen = False
             for tmap in tmaps:
-                if tmap.thumbnail_metadata["chosen"] == True:
+                if tmap and tmap.thumbnail_metadata["chosen"] == True:
                     chosen = True
             
             if not chosen:
@@ -425,6 +437,9 @@ class GetData(tornado.web.RequestHandler):
     @tornado.gen.engine
     def post(self,*args,**kwargs):
         
+        '''
+        Handler that recieves data from mastermind
+        '''
         data = self.request.body
         setup_controller_for_video(data)
         self.set_status(201)
@@ -456,10 +471,8 @@ def initialize_brightcove_controller():
     Fetch the video id => [(Tid,%)] mappings and populate the data
     
     '''
-    
     #Send Push request to Mastermind
     #Set alerts on Mastermind
-    
     http_client = tornado.httpclient.HTTPClient()
     req = tornado.httpclient.HTTPRequest(method='GET',
                             url=options.mastermind_url,

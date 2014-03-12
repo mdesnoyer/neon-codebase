@@ -133,7 +133,7 @@ if (typeof NeonPlayerTracker == "undefined"){
 		var player, videoPlayer, content, exp, initialVideo;
 		var TrackerAccountId = null;
 		return {
-			onTemplateLoad: function (expID){                                          
+			onTemplateLoad: function (expID){                                         
 				NeonPlayerTracker.hookNeonTrackerToFlashPlayer(expID);
 			},
 
@@ -142,11 +142,11 @@ if (typeof NeonPlayerTracker == "undefined"){
 			},
 
 			hookNeonTrackerToFlashPlayer: function(expID) { 
-				try { player = brightcove.api.getExperience(expID);} catch(err) {}
+				try { player = brightcove.api.getExperience(expID);} catch(err) {console.log(err);}
 				if (player){
 					NeonTrackerType = "html5";
 				}else{
-					player = bcPlayer.getPlayer(expID);                                      
+					player = bcPlayer.getPlayer(expID);                                     
 					videoPlayer = player.getModule(APIModules.VIDEO_PLAYER);                 
 					content = player.getModule(APIModules.CONTENT);                         
 					exp     = player.getModule(APIModules.EXPERIENCE); 
@@ -154,9 +154,6 @@ if (typeof NeonPlayerTracker == "undefined"){
 								NeonPlayerTracker.onMediaBegin);
 					exp.addEventListener(BCExperienceEvent.CONTENT_LOAD, 
 								NeonPlayerTracker.trackLoadedImageUrls);
-					
-					//videoPlayer.addEventListener(BCMediaEvent.PLAY, 
-					//			NeonPlayerTracker.onMediaBegin);
 					//advertising = player.getModule(APIModules.ADVERTISING);
 					//advertising.addEventListener(BCAdvertisingEvent.AD_START, NeonPlayerTracker.onAdStart);
 				}
@@ -174,7 +171,7 @@ if (typeof NeonPlayerTracker == "undefined"){
 					videoPlayer.addEventListener(brightcove.api.events.MediaEvent.BEGIN, 
 								NeonPlayerTracker.smartPlayerMediaBegin);
 					videoPlayer.getCurrentVideo(
-								function(videoDTO) { 
+								function(videoDTO) {
 									initialVideo = videoDTO;
 								}
 							);
@@ -194,7 +191,11 @@ if (typeof NeonPlayerTracker == "undefined"){
 					}
 				}
 				action = "load";
-				params = "&cvid=" + initialVideo.id 
+				if (initialVideo){
+					params = "&cvid=" + initialVideo.id;
+				}else{
+					params = "&cvid=null";
+				}	
 				if (PageLoadIDSeen == null){
 					//avoid duplicate requests since template ready can get fired twice
 					PageLoadIDSeen = reqGuid;
@@ -269,7 +270,8 @@ if(typeof NeonImageTracker == "undefined"){
 					}
 					var imageUrls = new Array();
 					for (var i = 0; i<imgTags.length; i++) {
-						imageUrls.push(imgTags[i].src);
+						//imageUrls.push(imgTags[i].src.split('?')[0]);
+						imageUrls.push(imgTags[i]);
 					}
 					NeonDataSender.createRequest(action, imageUrls, 
 							TrackerAccountId, null, NeonTrackerType);
@@ -331,7 +333,7 @@ if (typeof jQuery == 'undefined') {
 		head.appendChild(script);
 	
 	};
-	getScript('http://ajax.googleapis.com/ajax/libs/jquery/1.3.1/jquery.min.js', function() {
+	getScript('http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js', function() {
 	if (typeof jQuery=='undefined') {
 			console.log("JQuery loading failed even after explicit load call");
 		} else {

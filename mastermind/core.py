@@ -301,6 +301,12 @@ class Mastermind(object):
         try:
             if self.last_serving_directive[video_id] == new_directive:
                 return None
+            else:
+                #Establish that there is only 1 thumb chosen (1,0,0)
+                thumb_id, fraction = max(new_directive, key=lambda tup:tup[1])
+                if fraction == 1.0:
+                    _log.info("Only showing thumbnail %s for video id %s"
+                        %(video_id, thumb_id))
         except KeyError:
             pass
             

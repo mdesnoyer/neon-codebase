@@ -240,7 +240,11 @@ class ProcessVideo(object):
 
     def get_topn_thumbnails(self, n):
         ''' topn '''
-        res = self.top_thumbnails_per_interval(nthumbnails = n)
+        res = self.top_thumbnails_per_interval(nthumbnails=n)
+        #return at least 1 thumb, 
+        #if self.data_map may be empty if there was an internal error
+        if len(res) == 0 and self.data_map != {}:
+            res = self.data_map.items()[0]
         return res
 
     def get_thumbnail_at_rate(self, rate):
@@ -323,6 +327,7 @@ class ProcessVideo(object):
 
     def save_data_to_s3(self):
         ''' tar.gz a few thumbs to s3 ''' 
+        
         s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
         s3bucket = s3conn.get_bucket(self.s3bucket_name)
 
@@ -381,6 +386,7 @@ class ProcessVideo(object):
   
     def host_images_s3(self, frames):
         ''' Host images on s3 which is available publicly '''
+        
         s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
         s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
         #s3bucket = Bucket(name = s3bucket_name,connection = s3conn)
@@ -445,6 +451,11 @@ class ProcessVideo(object):
         tid = ThumbnailID.generate(imgdata,
                                    InternalVideoID.generate(api_key,
                                                             video_id))
+
+        #If tid already exists, then skip saving metadata
+        if ThumbnailIDMapper.get_thumb_metadata(tid) is not None:
+            return
+
         urls.append(s3fname)
         created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         width   = image.size[0]
@@ -1008,7 +1019,7 @@ class HttpDownload(object):
         if  api_method == properties.TOP_THUMBNAILS:
             n = topn = int(api_param)
             '''
-            Always save 5 thumbnails for any request and host them on s3 
+            Always save MAX_T thumbnails for any request and host them on s3 
             '''
             if topn < MAX_T:
                 n = MAX_T
@@ -1020,7 +1031,8 @@ class HttpDownload(object):
             
             #host top MAX_T images on s3
             s3_urls = self.pv.host_images_s3(ranked_frames[:MAX_T])
-            cr = ClientCallbackResponse(self.job_params,data,self.error,urls=s3_urls[:topn])
+            cr = ClientCallbackResponse(self.job_params, data, 
+                                    self.error, urls=s3_urls[:topn])
             cr.send_response()  
            
             ## Neon section
