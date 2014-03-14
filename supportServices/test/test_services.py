@@ -28,6 +28,7 @@ from StringIO import StringIO
 from mock import patch 
 from supportServices import services, neondata
 from api import brightcove_api
+#from api import ooyala_api 
 from tornado.testing import AsyncHTTPTestCase, AsyncTestCase, AsyncHTTPClient
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 from utils.options import define, options
@@ -36,6 +37,8 @@ _log = logging.getLogger(__name__)
 
 import api.properties
 import bcove_responses
+import ooyala_responses
+
 class TestServices(AsyncHTTPTestCase):
     ''' Services Test '''
         
@@ -1180,6 +1183,188 @@ class TestServices(AsyncHTTPTestCase):
         image = Image.open(StringIO(resp.body))
         self.assertIsNotNone(image)
 
+
+    ##### OOYALA PLATFORM TEST ######
+
+class TestOoyalaServices(AsyncHTTPTestCase):
+    ''' Ooyala services Test '''
+        
+    @classmethod
+    def setUpClass(cls):
+        super(TestOoyalaServices, cls).setUpClass()
+        random.seed(1949)
+
+    def setUp(self):
+        super(TestOoyalaServices, self).setUp()
+
+        #Ooyala api http mock
+        #Http Connection pool Mock
+        self.cp_sync_patcher = \
+          patch('utils.http.tornado.httpclient.HTTPClient')
+        self.cp_async_patcher = \
+          patch('utils.http.tornado.httpclient.AsyncHTTPClient')
+        self.cp_mock_client = self.cp_sync_patcher.start()
+        self.cp_mock_async_client = self.cp_async_patcher.start()
+
+        self.oo_api_key = 's0Y3YxOp0XTCL2hFlfFS1S2MRmaY.nxNs0'
+        self.oo_api_secret = 'uwTrMevYq54eani8ViRn6Ar5-rwmmmvKwq1HDtCn'
+       
+        self.a_id = "oo_test"
+        self.i_id = "oo_iid_1"
+        self.job_ids = [] 
+
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+        
+    def tearDown(self):
+        self.cp_sync_patcher.stop()
+        self.cp_async_patcher.stop()
+        self.redis.stop()
+    
+    def get_app(self):
+        ''' return services app '''
+        return services.application
+
+    def get_new_ioloop(self):
+        return tornado.ioloop.IOLoop.instance()
+
+    def get_request(self, url, apikey):
+        ''' get request to the app '''
+
+        headers = {'X-Neon-API-Key' :apikey} 
+        http_client = AsyncHTTPClient(self.io_loop)
+        http_client.fetch(url, self.stop, headers=headers)
+        resp = self.wait(timeout=10)
+
+    def post_request(self, url, vals, apikey):
+        ''' post request to the app '''
+
+        http_client = AsyncHTTPClient(self.io_loop)
+        headers = {'X-Neon-API-Key' : apikey, 
+                'Content-Type':'application/x-www-form-urlencoded'}
+        body = urllib.urlencode(vals)
+        http_client.fetch(url,
+                     callback=self.stop,
+                     method="POST",
+                     body=body,
+                     headers=headers)
+        response = self.wait(timeout=10)
+        return response
+
+    def create_neon_account(self):
+        ''' create neon user account '''
+
+        vals = { 'account_id' : self.a_id }
+        uri = self.get_url('/api/v1/accounts') 
+        response = self.post_request(uri, vals, "")
+        api_key = json.loads(response.body)["neon_api_key"]
+        tai = json.loads(response.body)["tracker_account_id"]
+        return api_key
+
+    def create_ooyala_account(self):
+        ''' create ooyala platform account '''
+
+        #create a neon account first
+        self.api_key = self.create_neon_account()
+        self.assertEqual(self.api_key, 
+                neondata.NeonApiKey.get_api_key(self.a_id))
+
+        url = self.get_url('/api/v1/accounts/' + self.a_id + \
+                            '/ooyala_integrations')
+
+        vals = {'integration_id' : self.i_id, 'partner_code' : 'partner123',
+                'oo_api_key' : self.oo_api_key, 'oo_secret_key': self.oo_api_secret, 
+                'auto_update': False}
+        resp = self.post_request(url, vals, self.api_key)
+        return resp.body
+
+    def _success_http_side_effect(self, *args, **kwargs):
+        ''' generic sucess http side effects for all patched http calls 
+            for this test ''' 
+        
+        print args[0].__dict__
+
+        def _neon_submit_job_response():
+            ''' video server response on job submit '''
+            job_id = str(random.random())
+            self.job_ids.append(job_id)
+            request = HTTPRequest('http://thumbnails.neon-lab.com')
+            response = HTTPResponse(request, 200,
+                buffer=StringIO('{"job_id":"%s"}'%job_id))
+            return response
+        
+        #################### HTTP request/responses #################
+        #mock ooyala api call
+        ooyala_request = HTTPRequest('http://api.ooyala.com')
+        ooyala_response = HTTPResponse(ooyala_request, 200,
+                buffer=StringIO(ooyala_responses.assets))
+        
+        #mock neon api call
+        request = HTTPRequest('http://neon-lab.com')
+        response = HTTPResponse(request, 200,
+                buffer=StringIO('{"job_id":"j123"}'))
+        
+        #################### HTTP request/responses #################
+        http_request = args[0]
+        if kwargs.has_key("callback"):
+            callback = kwargs["callback"]
+        else:
+            callback = args[1] if len(args) >=2 else None
+        
+        if "/streams" in http_request.url:
+            request = HTTPRequest(http_request.url)
+            response = HTTPResponse(request, 200,
+                    buffer=StringIO(ooyala_responses.streams))
+            if kwargs.has_key("callback"):
+                callback = kwargs["callback"]
+                return self.io_loop.add_callback(callback, response)
+            else:
+                if len(args) > 1:
+                    callback = args[1]
+                    return self.io_loop.add_callback(callback, response)
+                else:
+                    return response
+
+        if "/v2/assets" in http_request.url:
+            if kwargs.has_key("callback"):
+                callback = kwargs["callback"]
+                return self.io_loop.add_callback(callback, ooyala_response)
+            else:
+                if len(args) > 1:
+                    callback = args[1]
+                    return self.io_loop.add_callback(callback, ooyala_response)
+                else:
+                    return ooyala_response
+
+        #Download image from Ooyala CDN
+        #elif "http://ak.c.ooyala" in http_request.url:
+        #    return create_random_image_response()
+            
+        #neon api request
+        elif "api/v1/submitvideo" in http_request.url:
+            response = _neon_submit_job_response()
+            if callback:    
+                return self.io_loop.add_callback(callback, response)
+            return response
+
+        else:
+            headers = {"Content-Type": "text/plain"}
+            response = HTTPResponse(request, 200, headers=headers,
+                buffer=StringIO('someplaindata'))
+
+    def test_create_request_from_feed(self):
+        self.create_ooyala_account()
+
+        #Get ooyala account 
+        oo_account = neondata.OoyalaPlatform.get_account(self.api_key, self.i_id)
+        
+        self.cp_mock_client().fetch.side_effect = \
+          self._success_http_side_effect 
+        self.cp_mock_async_client().fetch.side_effect = \
+          self._success_http_side_effect
+        
+        #create feed request
+        oo_account.check_feed_and_create_requests()
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

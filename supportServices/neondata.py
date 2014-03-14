@@ -1,4 +1,4 @@
-#/usr/bin/env python
+#!/usr/bin/env python
 '''
 Data Model classes 
 
@@ -21,6 +21,7 @@ if sys.path[0] <> base_path:
 
 import base64
 import binascii
+import copy
 import hashlib
 import json
 from multiprocessing.pool import ThreadPool
@@ -35,6 +36,7 @@ import threading
 import time
 from api import brightcove_api #coz of cyclic import 
 import api.youtube_api
+from api import ooyala_api
 
 from utils.options import define, options
 import utils.sync
@@ -275,6 +277,16 @@ def generate_request_key(api_key, job_id):
     ''' Format request key (with job_id) to find NeonApiRequest Object'''
     key = "request_" + api_key + "_" + job_id
     return key
+
+def id_generator(size=32, 
+            chars=string.ascii_lowercase + string.digits):
+    ''' Generate a random alpha numeric string to be used as 
+        unique ids
+    '''
+
+    random.seed(time.time())
+    return ''.join(random.choice(chars) for x in range(size))
+
 ##############################################################################
 
 
@@ -1129,8 +1141,8 @@ class OoyalaPlatform(AbstractPlatform):
     '''
     OOYALA Platform
     '''
-    def __init__(self, a_id, i_id, api_key, o_api_key, api_secret, 
-                                auto_update=False):
+    def __init__(self, a_id, i_id, api_key, p_code, 
+                            o_api_key, api_secret, auto_update=False): 
         '''
         Init ooyala platform 
         
@@ -1147,7 +1159,6 @@ class OoyalaPlatform(AbstractPlatform):
         self.ooyala_api_key = o_api_key
         self.api_secret = api_secret 
         self.auto_update = auto_update 
-        self.last_process_date = last_process_date 
     
     @classmethod
     def get_ovp(cls):
@@ -1165,9 +1176,12 @@ class OoyalaPlatform(AbstractPlatform):
             signature = urllib.quote_plus(signature)
             return signature
 
-    #check feed and create requests
     def check_feed_and_create_requests(self):
-        pass
+        '''
+        #check feed and create requests
+        '''
+        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret)
+        oo.process_publisher_feed(copy.deepcopy(self)) 
 
     #verify token and create requests on signup
     def verify_token_and_create_requests_for_video(self, n, callback=None):
@@ -1185,7 +1199,20 @@ class OoyalaPlatform(AbstractPlatform):
     #update thumbnail
     def update_thumbnail(self, tid):
         pass
-
+    
+    @classmethod
+    def create(cls, json_data):
+        if json_data is None:
+            return None
+        
+        params = json.loads(json_data)
+        a_id = params['account_id']
+        i_id = params['integration_id'] 
+        api_key = params['neon_api_key'] 
+        oo= OoyalaPlatform(a_id, i_id, api_key, None, None, None)
+        for key in params:
+            oo.__dict__[key] = params[key]
+        return oo
 
 #######################
 # Request Blobs 
@@ -1350,6 +1377,22 @@ class BrightcoveApiRequest(NeonApiRequest):
         super(BrightcoveApiRequest,self).__init__(job_id, api_key, vid, title, url,
                 request_type, callback)
 
+class OoyalaApiRequest(NeonApiRequest):
+    '''
+    Ooyala API Request class
+    '''
+    def __init__(self, job_id, api_key, i_id, vid, title, url, 
+                        oo_api_key, oo_secret_key,
+                        p_thumb, http_callback):
+        self.oo_api_key = oo_api_key
+        self.oo_secret_key = oo_secret_key
+        self.integration_id = i_id 
+        self.previous_thumbnail = p_thumb 
+        self.autosync = False
+        request_type = "ooyala"
+        super(OoyalaApiRequest, self).__init__(job_id, api_key, vid, title, url,
+                request_type, http_callback)
+
 class YoutubeApiRequest(NeonApiRequest):
     '''
     Youtube API Request class
@@ -1374,6 +1417,7 @@ class ThumbnailType(object):
     NEON        = "neon"
     CENTERFRAME = "centerframe"
     BRIGHTCOVE  = "brightcove"
+    OOYALA      = "ooyala"
     RANDOM      = "random"
     FILTERED    = "filtered"
 

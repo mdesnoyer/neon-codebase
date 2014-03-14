@@ -47,7 +47,7 @@ def send_request(request, ntries=5, callback=None, cur_try=0):
         if not response.error:
             try:
                 data = tornado.escape.json_decode(response.body)
-                if data['error']:
+                if isinstance(data, dict) and data['error']:
                     _log.warning(('key=http_response_error '
                                   'msg=Response err from %s: %s') %
                                   (request.url, data['error']))

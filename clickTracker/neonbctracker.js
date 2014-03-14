@@ -4,6 +4,7 @@ if (typeof NeonDataSender == "undefined"){
 var NeonDataSender = (function() {
 		var loadRequests = new Array();	
 		var NeonTrackerURL = "http://tracker.neon-lab.com/track";
+		//var NeonTrackerURL = "http://tracker-1719142472.us-east-1.elb.amazonaws.com/track";
 		//var NeonTrackerURL = "http://localhost:8888/track";
 		var images = new Array(); 
 		var rParam = { 

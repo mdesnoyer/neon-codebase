@@ -59,7 +59,7 @@ from supportServices.neondata import NeonApiRequest, BrightcoveApiRequest
 from supportServices.neondata import NeonPlatform, YoutubePlatform, \
         BrightcovePlatform, VideoMetadata, RequestState, InternalVideoID
 from supportServices.neondata import ThumbnailID, ThumbnailType, \
-        ThumbnailURLMapper, ThumbnailMetaData, ThumbnailIDMapper
+        ThumbnailURLMapper, ThumbnailMetaData, ThumbnailIDMapper, OoyalaApiRequest
 
 import gc
 import pprint
@@ -668,7 +668,6 @@ class ProcessVideo(object):
                 self.thumbnails[0]["refid"] = tid
 
         #3 Update Request State
-        #bc_request.thumbnails = self.thumbnails
         bc_request.state = RequestState.FINISHED 
         ret = bc_request.save()
 
@@ -683,8 +682,97 @@ class ProcessVideo(object):
         else:
             _log.error("key=finalize_brightcove_request msg=failed to save request")
 
+    def finalize_ooyala_request(self, result, error=False):
+        ''' Ooyala request
 
-    def finalize_youtube_request(self,result,error=False):
+        - host neon thumbs and also save bcove previous thumbnail in s3
+        - Get Account settings and replace default thumbnail if enabled 
+        - update request object with the thumbnails
+        '''
+        api_key = self.request_map[properties.API_KEY]  
+        i_id = self.request_map[properties.INTEGRATION_ID]
+        job_id  = self.request_map[properties.REQUEST_UUID_KEY]
+        video_id = self.request_map[properties.VIDEO_ID]
+        oo_request = OoyalaApiRequest.get(api_key, job_id)
+        oo_request.response = tornado.escape.json_decode(result)
+        oo_request.publish_date = time.time() *1000.0 #ms
+
+        if error:
+            oo_request.save()
+            return
+        
+        if len(self.thumbnails) == 0 :
+            oo_request.state = RequestState.INT_ERROR
+            oo_request.save()
+        
+        #Save previous thumbnail to s3
+        if  oo_request.previous_thumbnail:
+            p_url = oo_request.previous_thumbnail.split('?')[0]
+
+            http_client = tornado.httpclient.HTTPClient()
+            req = tornado.httpclient.HTTPRequest(url=p_url,
+                                                method="GET",
+                                                request_timeout=60.0,
+                                                connect_timeout=10.0)
+            response = http_client.fetch(req)
+            imgdata = response.body
+            image = Image.open(StringIO(imgdata))
+            score = self.valence_score(image) 
+            s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
+            s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
+            s3bucket = s3conn.get_bucket(s3bucket_name)
+            s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
+            keyname =  self.base_filename + "/oooyala.jpeg" 
+            s3fname = s3_url_prefix + "/" + keyname
+            ttype = ThumbnailType.OOYALA
+            self.save_thumbnail_to_s3_and_metadata(image, score, s3bucket,
+                    keyname, s3fname, ttype, rank=1)
+            oo_request.previous_thumbnail = s3fname
+        
+        else:
+            _log.error("key=finalize_ooyala_request "
+                       " msg=no thumbnail for %s %s" %(api_key,video_id))
+        
+        #2 Push thumbnail in to ooyala account
+        autosync = oo_request.autosync
+        oo_account = OoyalaPlatform.get_account(api_key, i_id)
+        if not oo_account:
+            _log.error("key=finalize_ooyala_request msg=Ooyala" 
+                    " account doesnt exists a_id=%s i_id=%s"%(api_key, i_id))
+        else: 
+            autosync = oo_account.auto_update 
+        
+        if autosync:
+            #rtoken  = self.request_map[properties.BCOVE_READ_TOKEN]
+            #wtoken  = self.request_map[properties.BCOVE_WRITE_TOKEN]
+            #pid = self.request_map[properties.PUBLISHER_ID]
+            #fno = bc_request.response["data"][0]
+            #img = Image.fromarray(self.data_map[fno][1])
+            #tid = self.thumbnails[0]["thumbnail_id"] 
+            
+            #frame_size = self.video_metadata['frame_size']
+            #ret = oo_api.update_thumbnail(video_id, img, tid, frame_size)
+            #if ret[0]:
+                #update enabled time & reference ID
+                #NOTE: By default Neon rank 1 is always uploaded
+            #    self.thumbnails[0]["chosen"] = True 
+            #    self.thumbnails[0]["refid"] = tid
+            pass
+
+        #3 Update Request State
+        oo_request.state = RequestState.FINISHED 
+        ret = oo_request.save()
+
+        #4 Save the Thumbnail URL and ID to Mapper DB
+        self.save_thumbnail_metadata("ooyala", i_id)
+
+        if ret:
+            self.save_video_metadata()
+        else:
+            _log.error("key=finalize_ooyala_request "
+                        "msg=failed to save videometadata for %s" %video_id)
+
+    def finalize_youtube_request(self, result, error=False):
         '''
         Final steps for youtube request
         '''
@@ -1047,6 +1135,11 @@ class HttpDownload(object):
                 #Update Brightcove
                 self.pv.finalize_brightcove_request(cr.response, error)
             
+            # Ooyala section
+            elif request_type == "ooyala":
+                #update ooyala
+                self.pv.finalize_ooyala_request(cr.response, error)
+
             elif request_type == "youtube":
                 pass
             else:
