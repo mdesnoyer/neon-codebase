@@ -343,7 +343,13 @@ class InternalVideoID(object):
     @staticmethod
     def to_external(internal_vid):
         ''' internal vid -> external platform vid'''
-        vid = internal_vid.split('_')[-1]
+        
+        #first part of the key doesn't have _, hence use this below to 
+        #generate the internal vid. 
+        #note: found later that Ooyala can have _ in their video ids
+
+        vid = "_".join(internal_vid.split('_')[1:])
+
         return vid
 
 class TrackerAccountID(object):
@@ -725,7 +731,11 @@ class BrightcovePlatform(AbstractPlatform):
 
     @tornado.gen.engine
     def update_thumbnail(self, i_vid, new_tid, nosave=False, callback=None):
-        ''' method to keep video metadata and thumbnail data consistent '''
+        ''' method to keep video metadata and thumbnail data consistent 
+        callback(None): bad request
+        callback(False): internal error
+        callback(True): success
+        '''
         bc = api.brightcove_api.BrightcoveApi(
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update)
@@ -1184,21 +1194,102 @@ class OoyalaPlatform(AbstractPlatform):
         oo.process_publisher_feed(copy.deepcopy(self)) 
 
     #verify token and create requests on signup
-    def verify_token_and_create_requests_for_video(self, n, callback=None):
+    def create_video_requests_on_signup(self, n, callback=None):
         ''' Method to verify ooyala token on account creation 
             And create requests for processing
             @return: Callback returns job id, along with ooyala vid metadata
         '''
-        #oo = oo()
-        #if callback:
-        #    oo.async_verify_token_and_create_requests(self.integration_id,..)
-        #else:
-        #    return bc.verify_token_and_create_requests(self.integration_id,n)
-        pass
+        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret)
+        oo._create_video_requests_on_signup(copy.deepcopy(self), n, callback) 
 
-    #update thumbnail
-    def update_thumbnail(self, tid):
-        pass
+    @tornado.gen.engine
+    def update_thumbnail(self, i_vid, new_tid, callback=None):
+        '''
+        Update the Preview image on Ooyala video 
+        
+        callback(None): bad request/ Gateway error
+        callback(False): internal error
+        callback(True): success
+
+        '''
+        #Get video metadata
+        platform_vid = InternalVideoID.to_external(i_vid)
+        
+        vmdata = yield tornado.gen.Task(VideoMetadata.get, i_vid)
+        if not vmdata:
+            _log.error("key=ooyala update_thumbnail msg=vid %s not found" %i_vid)
+            callback(None)
+            return
+        
+        #Thumbnail ids for the video
+        tids = vmdata.thumbnail_ids
+        
+        #Aspect ratio of the video 
+        fsize = vmdata.get_frame_size()
+
+        #Get all thumbnails
+        thumb_mappings = yield tornado.gen.Task(
+                ThumbnailIDMapper.get_thumb_mappings, tids)
+        t_url = None
+        
+        #Check if the new tid exists
+        for thumb_mapping in thumb_mappings:
+            tmdata = thumb_mapping.thumbnail_metadata
+            if tmdata["thumbnail_id"] == new_tid:
+                t_url = tmdata["urls"][0]
+        
+        if not t_url:
+            _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
+            callback(None)
+            return
+        
+        # Update the new_tid as the thumbnail for the video
+        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret)
+        update_result = yield tornado.gen.Task(oo.update_thumbnail_from_url,
+                                           platform_vid,
+                                           t_url,
+                                           new_tid,
+                                           fsize)
+        #check if thumbnail was updated 
+        if not update_result:
+            callback(None)
+            return
+      
+        #Update the database with video
+        #Get previous thumbnail and new thumb
+        modified_thumbs = [] 
+        new_thumb, old_thumb = ThumbnailIDMapper.enable_thumbnail(
+                                    thumb_mappings, new_tid)
+        modified_thumbs.append(new_thumb)
+        if old_thumb is None:
+            #old_thumb can be None if there was no neon thumb before
+            _log.debug("key=update_thumbnail" 
+                    " msg=set thumbnail in DB %s tid %s"%(i_vid, new_tid))
+        else:
+            modified_thumbs.append(old_thumb)
+       
+        #Verify that new_thumb data is not empty 
+        if new_thumb is not None:
+            res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
+                                            modified_thumbs)  
+            if not res:
+                _log.error("key=update_thumbnail msg=ThumbnailIDMapper save_all"
+                                " failed for %s" %new_tid)
+                callback(False)
+                return
+        else:
+            _log.error("key=oo_update_thumbnail msg=new_thumb is None %s"%new_tid)
+            callback(False)
+            return
+
+        req_data = NeonApiRequest.get_request(self.neon_api_key, vmdata.job_id) 
+        vid_request = NeonApiRequest.create(req_data)
+        vid_request.state = RequestState.ACTIVE
+        ret = vid_request.save()
+        if not ret:
+            _log.error("key=update_thumbnail msg=%s state not updated to active"
+                        %vid_request.key)
+        callback(True)
     
     @classmethod
     def create(cls, json_data):

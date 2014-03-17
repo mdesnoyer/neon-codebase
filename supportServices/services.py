@@ -369,9 +369,10 @@ class AccountHandler(tornado.web.RequestHandler):
                     self.update_youtube_video(i_id, i_vid)
                     return
                 
-                #elif "ooyala_integrations" == itype:
-                #    self.update_ooyala_video(i_id, i_vid)
-                #    return
+                elif "ooyala_integrations" == itype:
+                    new_tid = self.get_argument('thumbnail_id', None)
+                    self.update_video_ooyala(i_id, i_vid, new_tid)
+                    return
             else:
                 self.method_not_supported()
         else:
@@ -1078,7 +1079,7 @@ class AccountHandler(tornado.web.RequestHandler):
                         video_response.append(vr.to_dict())
                         
                     vstatus_response = GetVideoStatusResponse(
-                                        video_response,len(video_response))
+                                        video_response, len(video_response))
                     data = vstatus_response.to_json() 
                     #data = tornado.escape.json_encode(video_response)
                     self.send_json_response(data, 201)
@@ -1196,13 +1197,15 @@ class AccountHandler(tornado.web.RequestHandler):
         try:
             a_id = self.request.uri.split('/')[-2]
             i_id = InputSanitizer.to_string(self.get_argument("integration_id"))
-            partner_code = InputSanitizer.to_string(self.get_argument("partner_code"))
+            partner_code = InputSanitizer.to_string(
+                                self.get_argument("partner_code"))
             oo_api_key = InputSanitizer.to_string(self.get_argument("oo_api_key"))
-            oo_secret_key = InputSanitizer.to_string(self.get_argument("oo_secret_key"))
+            oo_secret_key = InputSanitizer.to_string(
+                                self.get_argument("oo_secret_key"))
             autosync = InputSanitizer.to_bool(self.get_argument("auto_update"))
 
         except Exception,e:
-            _log.error("key=create ooyla account msg= %s" %e)
+            _log.error("key=create_ooyla_account msg= %s" %e)
             data = '{"error": "API Params missing"}'
             self.send_json_response(data, 400)
             return 
@@ -1225,7 +1228,41 @@ class AccountHandler(tornado.web.RequestHandler):
                 #save & update acnt
                 res = yield tornado.gen.Task(na.save_platform, oo_account)
                 if res:
-                    self.send_json_response('', 201) 
+                    response = yield tornado.gen.Task(
+                            oo_account.create_video_requests_on_signup, 10)
+                    ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    video_response = []
+                    if not response:
+                        _log.error("key=create_ooyala_account " 
+                                    " msg=ooyala api call failed or token error")
+                        data = '{"error": "invalid api key or secret"}'
+                        self.send_json_response(data, 502)
+                        return
+                   
+                    #if reponse is empty? no videos in the account
+                    #Build video response
+                    for item in response:
+                        t_urls = []
+                        thumbs = []
+                        t_urls.append(item['preview_image_url'])
+                        tm = neondata.ThumbnailMetaData(
+                                0, t_urls, ctime, 0, 0, "ooyala", 0, 0)
+                        thumbs.append(tm.to_dict())
+                        vr = VideoResponse(item["embed_code"],
+                              "processing",
+                              "ooyala",
+                              i_id,
+                              item['name'],
+                              None,
+                              None,
+                              0, #current tid,add fake tid
+                              thumbs)
+                        video_response.append(vr.to_dict())
+                        
+                    vstatus_response = GetVideoStatusResponse(
+                                        video_response, len(video_response))
+                    data = vstatus_response.to_json() 
+                    self.send_json_response(data, 201) 
                 else:
                     data = '{"error": "platform was not added,\
                                 account creation issue"}'
@@ -1264,7 +1301,7 @@ class AccountHandler(tornado.web.RequestHandler):
         #1 Get job ids for the videos from account, get the request status
         oo = yield tornado.gen.Task(neondata.OoyalaPlatform.get_account,
                                        self.api_key, i_id)
-        if not ba:
+        if not oo:
             _log.error("key=get_video_status_ooyala msg=account not found")
             self.send_json_response("ooyala account not found", 400)
             return
@@ -1272,7 +1309,7 @@ class AccountHandler(tornado.web.RequestHandler):
         #return all videos in the account
         if vids is None:
             vids = oo.get_videos()
-        
+       
         # No videos in the account
         if not vids:
             data = '[]'
@@ -1343,7 +1380,7 @@ class AccountHandler(tornado.web.RequestHandler):
                               0, #current tid,add fake tid
                               thumbs)
             result[vid] = vr
-        
+       
         #2b Filter videos based on state as requested
         if video_state:
             if video_state == "published": #active
@@ -1427,6 +1464,39 @@ class AccountHandler(tornado.web.RequestHandler):
         data = vstatus_response.to_json() 
         self.send_json_response(data, 200)
 
+
+    @tornado.gen.engine
+    def update_video_ooyala(self, i_id, i_vid, new_tid):
+        ''' update thumbnail for a Ooyala video '''
+        
+        p_vid = neondata.InternalVideoID.to_external(i_vid)
+        
+        #Get account/integration
+        oo = yield tornado.gen.Task(neondata.OoyalaPlatform.get_account,
+                self.api_key,i_id)
+        if not oo:
+            _log.error("key=update_video_ooyala" 
+                    " msg=account doesnt exist api key=%s " 
+                    "i_id=%s"%(self.api_key,i_id))
+            data = '{"error": "no such account"}'
+            self.send_json_response(data, 400)
+            return
+
+        result = yield tornado.gen.Task(oo.update_thumbnail, i_vid, new_tid)
+        
+        if result:
+            _log.info("key=update_video_brightcove" 
+                        " msg=thumbnail updated for video=%s tid=%s"\
+                        %(p_vid, new_tid))
+            data = ''
+            self.send_json_response(data, 200)
+        else:
+            if result is None:
+                data = '{"error": "ooyala api failure"}'
+                self.send_json_response(data, 502)
+            else:
+                data = '{"error": "internal error"}'
+                self.send_json_response(data, 500)
 
     ##################################################################
     # Youtube methods

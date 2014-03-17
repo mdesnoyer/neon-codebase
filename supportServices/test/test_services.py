@@ -39,6 +39,98 @@ import api.properties
 import bcove_responses
 import ooyala_responses
 
+
+### Global helper methods
+TIME_OUT = 100
+mock_image_url_prefix = "http://servicesunittest.mock.com/"
+
+def create_random_image():
+    ''' create random image data for http response'''
+    h = 360
+    w = 480
+    pixels = [(0, 0, 0) for _w in range(h*w)] 
+    r = random.randrange(0, 255)
+    g = random.randrange(0, 255)
+    b = random.randrange(0, 255)
+    pixels[0] = (r, g, b)
+    im = Image.new("RGB", (h, w))
+    im.putdata(pixels)
+    return im
+
+def create_random_image_response():
+        '''http image response''' 
+        
+        request = HTTPRequest("http://someimageurl/image.jpg")
+        im = create_random_image()
+        imgstream = StringIO()
+        im.save(imgstream, "jpeg", quality=100)
+        imgstream.seek(0)
+
+        response = HTTPResponse(request, 200,
+                    buffer=imgstream)
+        return response
+    
+def process_neon_api_requests(api_requests, api_key, i_id, t_type):
+    #Create thumbnail metadata
+    N_THUMBS = 5
+    images = {} 
+    thumbnail_url_to_image = {}
+    for api_request in api_requests:
+        video_id = api_request.video_id
+        job_id = api_request.job_id
+        thumbnails = []
+        for t in range(N_THUMBS):
+            image = create_random_image() 
+            filestream = StringIO()
+            image.save(filestream, "JPEG", quality=100) 
+            filestream.seek(0)
+            imgdata = filestream.read()
+            tid = neondata.ThumbnailID.generate(imgdata,
+                            neondata.InternalVideoID.generate(api_key,
+                            video_id))
+            images[tid] = image
+            urls = []
+            url = mock_image_url_prefix + "/thumb-%s"%t
+            urls.append(url)
+            thumbnail_url_to_image[url] = imgdata
+            created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if t == N_THUMBS -1:
+                tdata = neondata.ThumbnailMetaData(tid, urls, created, 480, 360,
+                    t_type, 2, "test", enabled=True, rank=0)
+            else:
+                tdata = neondata.ThumbnailMetaData(tid, urls, created, 480, 360,
+                    "neon", 2, "test", enabled=True, rank=t+1)
+            thumbnails.append(tdata)
+    
+        i_vid = neondata.InternalVideoID.generate(api_key, video_id)
+        thumbnail_mapper_list = []
+        thumbnail_url_mapper_list = []
+        for thumb in thumbnails:
+            tid = thumb.thumbnail_id
+            for t_url in thumb.urls:
+                uitem = neondata.ThumbnailURLMapper(t_url, tid)
+                thumbnail_url_mapper_list.append(uitem)
+                item = neondata.ThumbnailIDMapper(tid, i_vid, thumb)
+                thumbnail_mapper_list.append(item)
+        retid = neondata.ThumbnailIDMapper.save_all(thumbnail_mapper_list)
+        returl = neondata.ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
+
+        #Update request state to FINISHED
+        api_request.state = neondata.RequestState.FINISHED 
+        api_request.save()
+        tids = []
+        for thumb in thumbnails:
+            tids.append(thumb.thumbnail_id)
+    
+        vmdata = neondata.VideoMetadata(i_vid, tids, job_id, url,
+                    10, 5, "test", i_id)
+        vmdata.save()
+
+###############################################
+# Test Services
+###############################################
+
+
 class TestServices(AsyncHTTPTestCase):
     ''' Services Test '''
         
@@ -154,18 +246,6 @@ class TestServices(AsyncHTTPTestCase):
         tids = vmdata.thumbnail_ids
         return tids
 
-    def _create_random_image(self):
-        ''' create random image data for http response'''
-        h = 360
-        w = 480
-        pixels = [(0, 0, 0) for _w in range(h*w)] 
-        r = random.randrange(0, 255)
-        g = random.randrange(0, 255)
-        b = random.randrange(0, 255)
-        pixels[0] = (r, g, b)
-        im = Image.new("RGB", (h, w))
-        im.putdata(pixels)
-        return im
 
     def _create_neon_api_requests(self):
         ''' create neon api requests '''
@@ -202,7 +282,7 @@ class TestServices(AsyncHTTPTestCase):
             job_id = api_request.job_id
             thumbnails = []
             for t in range(N_THUMBS):
-                image = self._create_random_image() 
+                image = create_random_image() 
                 filestream = StringIO()
                 image.save(filestream, "JPEG", quality=100) 
                 filestream.seek(0)
@@ -608,7 +688,7 @@ class TestServices(AsyncHTTPTestCase):
             self._check_video_status_brightcove(
                 vstatus=neondata.RequestState.FINISHED)
         
-            update_response = self.update_brightcove_account(autoupdate = True)
+            update_response = self.update_brightcove_account(autoupdate=True)
             self.assertEqual(update_response.code, 200)
 
             #Check Neon rank 1 thumbnail is the new thumbnail for the videos
@@ -661,7 +741,7 @@ class TestServices(AsyncHTTPTestCase):
                 new_tids.append(tids[1])
                 #set neon rank 2 
                 resp = self.update_brightcove_thumbnail(vid, tids[1])
-                self.assertEqual(resp.code,200)
+                self.assertEqual(resp.code, 200)
                 
                 #assert request state
                 req_data = neondata.NeonApiRequest.get_request(self.api_key,job_id)
@@ -688,7 +768,7 @@ class TestServices(AsyncHTTPTestCase):
             self._test_update_thumbnail_fails()
     
     def _test_update_thumbnail_fails(self):
-        def _failure_http_side_effect(*args,**kwargs):
+        def _failure_http_side_effect(*args, **kwargs):
             http_request = args[0]
             if self.mock_image_url_prefix in http_request.url:
                 request = HTTPRequest(http_request.url)
@@ -728,7 +808,7 @@ class TestServices(AsyncHTTPTestCase):
                 self._success_http_side_effect
         self.cp_mock_client().fetch.side_effect =\
                 _failure_http_side_effect 
-        resp = self.update_brightcove_thumbnail(vid,tids[1]) 
+        resp = self.update_brightcove_thumbnail(vid, tids[1]) 
         self.assertEqual(resp.code, 502) 
 
         #Successful update of thumbnail
@@ -773,7 +853,7 @@ class TestServices(AsyncHTTPTestCase):
         #assert the previous thumbnail is still the thumb in DB
         self.update_brightcove_thumbnail(vid, tid)
         tid2 = tids[1]
-        vals = {'thumbnail_id' : tid2 }
+        vals = {'thumbnail_id' : tid2}
         resp = self.post_request(url, vals, self.api_key)
         self.assertEqual(resp.code, 200)
         tids = neondata.ThumbnailIDMapper.get_thumb_mappings([tid, tid2])
@@ -816,17 +896,17 @@ class TestServices(AsyncHTTPTestCase):
 
         self._setup_initial_brightcove_state()
 
-        ordered_videos = sorted(self._get_videos(),reverse=True)
+        ordered_videos = sorted(self._get_videos(), reverse=True)
         
         #get videos in pages
         page_no = 0
         page_size = 2
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
                 '%s/videos?page_no=%s&page_size=%s'
-                %(self.a_id,self.b_id,page_no,page_size))
-        resp = self.get_request(url,self.api_key)
+                %(self.a_id, self.b_id, page_no, page_size))
+        resp = self.get_request(url, self.api_key)
         items = json.loads(resp.body)['items']
-        self.assertEqual(len(items),page_size)
+        self.assertEqual(len(items), page_size)
         result_vids = [x['video_id'] for x in items]
         
         self.assertEqual(ordered_videos[:page_size],
@@ -850,7 +930,7 @@ class TestServices(AsyncHTTPTestCase):
         page_size = 1000
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
                 '%s/videos?page_no=%s&page_size=%s'
-                %(self.a_id, self.b_id, page_no,page_size))
+                %(self.a_id, self.b_id, page_no, page_size))
         resp = self.get_request(url, self.api_key)
         response = json.loads(resp.body)
         items = response['items']
@@ -861,19 +941,19 @@ class TestServices(AsyncHTTPTestCase):
                 "number of videos returned dont match")
     
         #re-create response
-        self.assertEqual(response['published_count'],0)
-        self.assertEqual(response['processing_count'],0)
-        self.assertEqual(response['recommended_count'],len(ordered_videos))
+        self.assertEqual(response['published_count'], 0)
+        self.assertEqual(response['processing_count'], 0)
+        self.assertEqual(response['recommended_count'], len(ordered_videos))
 
         #request last page with page_size > #of videos available in the page
         page_no = 1 
         page_size = 3 
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
                 '%s/videos?page_no=%s&page_size=%s'
-                %(self.a_id,self.b_id,page_no,page_size))
-        resp = self.get_request(url,self.api_key)
+                %(self.a_id, self.b_id, page_no, page_size))
+        resp = self.get_request(url, self.api_key)
         items = json.loads(resp.body)['items']
-        result_vids = [ x['video_id'] for x in items ]
+        result_vids = [x['video_id'] for x in items]
         self.assertEqual(len(ordered_videos) - (page_no*page_size),
                         len(result_vids))
 
@@ -929,17 +1009,17 @@ class TestServices(AsyncHTTPTestCase):
         '''
         self._setup_initial_brightcove_state()
 
-        ordered_videos = sorted(self._get_videos(),reverse=True)
+        ordered_videos = sorted(self._get_videos(), reverse=True)
         
         #recommended videos
         page_no = 0
         page_size = 2
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
                 '%s/videos/recommended?page_no=%s&page_size=%s'
-                %(self.a_id,self.b_id,page_no,page_size))
+                %(self.a_id, self.b_id, page_no, page_size))
         resp = self.get_request(url,self.api_key)
         items = json.loads(resp.body)['items']
-        result_vids = [ x['video_id'] for x in items ]
+        result_vids = [x['video_id'] for x in items]
         self.assertEqual(ordered_videos[:page_size],
                 result_vids)
 
@@ -947,15 +1027,15 @@ class TestServices(AsyncHTTPTestCase):
         vids = self._get_videos()[:page_size]
         for vid in vids:
             tid = self._get_thumbnails(vid)[0] 
-            update_response = self.update_brightcove_thumbnail(vid,tid)
-            self.assertEqual(update_response.code,200)
+            update_response = self.update_brightcove_thumbnail(vid, tid)
+            self.assertEqual(update_response.code, 200)
 
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
                 '%s/videos/published?page_no=%s&page_size=%s'
-                %(self.a_id,self.b_id,page_no,page_size))
-        resp = self.get_request(url,self.api_key)
+                %(self.a_id, self.b_id, page_no, page_size))
+        resp = self.get_request(url, self.api_key)
         items = json.loads(resp.body)['items']
-        result_vids = [ x['video_id'] for x in items ]
+        result_vids = [x['video_id'] for x in items]
         self.assertItemsEqual(vids,
                 result_vids)
 
@@ -1088,7 +1168,7 @@ class TestServices(AsyncHTTPTestCase):
             job_id = api_request.job_id
             thumbnails = []
             for t in range(N_THUMBS):
-                image = self._create_random_image() 
+                image = create_random_image() 
                 filestream = StringIO()
                 image.save(filestream, "JPEG", quality=100) 
                 filestream.seek(0)
@@ -1205,6 +1285,11 @@ class TestOoyalaServices(AsyncHTTPTestCase):
           patch('utils.http.tornado.httpclient.AsyncHTTPClient')
         self.cp_mock_client = self.cp_sync_patcher.start()
         self.cp_mock_async_client = self.cp_async_patcher.start()
+        
+        self.cp_mock_client().fetch.side_effect = \
+          self._success_http_side_effect 
+        self.cp_mock_async_client().fetch.side_effect = \
+          self._success_http_side_effect
 
         self.oo_api_key = 's0Y3YxOp0XTCL2hFlfFS1S2MRmaY.nxNs0'
         self.oo_api_secret = 'uwTrMevYq54eani8ViRn6Ar5-rwmmmvKwq1HDtCn'
@@ -1234,8 +1319,9 @@ class TestOoyalaServices(AsyncHTTPTestCase):
         headers = {'X-Neon-API-Key' :apikey} 
         http_client = AsyncHTTPClient(self.io_loop)
         http_client.fetch(url, self.stop, headers=headers)
-        resp = self.wait(timeout=10)
-
+        resp = self.wait(timeout=TIME_OUT)
+        return resp
+    
     def post_request(self, url, vals, apikey):
         ''' post request to the app '''
 
@@ -1248,7 +1334,18 @@ class TestOoyalaServices(AsyncHTTPTestCase):
                      method="POST",
                      body=body,
                      headers=headers)
-        response = self.wait(timeout=10)
+        response = self.wait(timeout=TIME_OUT)
+        return response
+    
+    def put_request(self, url, vals, apikey):
+        ''' put request to the app '''
+
+        http_client = AsyncHTTPClient(self.io_loop)
+        headers = {'X-Neon-API-Key' : apikey, 
+                'Content-Type':'application/x-www-form-urlencoded' }
+        body = urllib.urlencode(vals)
+        http_client.fetch(url, self.stop,method="PUT", body=body, headers=headers)
+        response = self.wait(timeout=TIME_OUT)
         return response
 
     def create_neon_account(self):
@@ -1282,8 +1379,6 @@ class TestOoyalaServices(AsyncHTTPTestCase):
         ''' generic sucess http side effects for all patched http calls 
             for this test ''' 
         
-        print args[0].__dict__
-
         def _neon_submit_job_response():
             ''' video server response on job submit '''
             job_id = str(random.random())
@@ -1310,31 +1405,45 @@ class TestOoyalaServices(AsyncHTTPTestCase):
             callback = kwargs["callback"]
         else:
             callback = args[1] if len(args) >=2 else None
-        
+       
+        print "----> ",http_request.url, callback
+
+        #video stream call
         if "/streams" in http_request.url:
             request = HTTPRequest(http_request.url)
             response = HTTPResponse(request, 200,
                     buffer=StringIO(ooyala_responses.streams))
-            if kwargs.has_key("callback"):
-                callback = kwargs["callback"]
+            if callback:
                 return self.io_loop.add_callback(callback, response)
             else:
-                if len(args) > 1:
-                    callback = args[1]
-                    return self.io_loop.add_callback(callback, response)
-                else:
-                    return response
+                return response
 
-        if "/v2/assets" in http_request.url:
-            if kwargs.has_key("callback"):
-                callback = kwargs["callback"]
+        #PUT call to set primary image or POST call to upload image
+        elif "primary_preview_image" in http_request.url or "/preview_image_files" in http_request.url:
+            request = HTTPRequest('http://ooyala.com')
+            response = HTTPResponse(request, 200,
+                    buffer=StringIO(''))
+        
+            if callback:
+                return self.io_loop.add_callback(callback, response)
+            else:
+                return response
+       
+        #generic asset call
+        elif "/v2/assets" in http_request.url:
+            if callback:
                 return self.io_loop.add_callback(callback, ooyala_response)
             else:
-                if len(args) > 1:
-                    callback = args[1]
-                    return self.io_loop.add_callback(callback, ooyala_response)
-                else:
-                    return ooyala_response
+                return ooyala_response
+        
+        elif "jpg" in http_request.url or "jpeg" in http_request.url or \
+                    "http://servicesunittest.mock.com" in http_request.url:
+            #downloading any image (create a random image response)
+            response = create_random_image_response()
+            if callback:
+                return self.io_loop.add_callback(callback, response)
+            else:
+                return response
 
         #Download image from Ooyala CDN
         #elif "http://ak.c.ooyala" in http_request.url:
@@ -1351,20 +1460,107 @@ class TestOoyalaServices(AsyncHTTPTestCase):
             headers = {"Content-Type": "text/plain"}
             response = HTTPResponse(request, 200, headers=headers,
                 buffer=StringIO('someplaindata'))
+            return response
 
-    def test_create_request_from_feed(self):
+    def _create_request_from_feed(self):
+        '''
+        Create requests from ooyala feed 
+        '''
         self.create_ooyala_account()
 
         #Get ooyala account 
         oo_account = neondata.OoyalaPlatform.get_account(self.api_key, self.i_id)
         
-        self.cp_mock_client().fetch.side_effect = \
-          self._success_http_side_effect 
-        self.cp_mock_async_client().fetch.side_effect = \
-          self._success_http_side_effect
         
         #create feed request
         oo_account.check_feed_and_create_requests()
+  
+    def _process_neon_api_requests(self):
+        '''
+        Mock process the neon api requests
+        '''
+        oo_account = neondata.OoyalaPlatform.get_account(self.api_key, self.i_id)
+        api_request_keys = []
+        for vid, job_id in oo_account.videos.iteritems():
+            key = neondata.generate_request_key(self.api_key, job_id)
+            api_request_keys.append(key)
+            api_request = neondata.OoyalaApiRequest(job_id, self.api_key, 
+                                            self.i_id, vid, 'title', 'url',
+                                            'oo_api_key', 'oo_secret_key', 
+                                            'p_thumb', 'http_callback')
+            api_request.autosync = False
+            api_request.set_api_method("topn", 5)
+            api_request.submit_time = str(time.time())
+            api_request.state = neondata.RequestState.SUBMIT
+            self.assertTrue(api_request.save())
+        
+        api_requests = neondata.NeonApiRequest.get_requests(api_request_keys)
+        process_neon_api_requests(api_requests, self.api_key, self.i_id, "ooyala")
+
+    def test_create_ooyala_requests(self):
+
+        self._create_request_from_feed()
+
+        #Assert the job ids in the ooyala account
+        oo_account = neondata.OoyalaPlatform.get_account(self.api_key, self.i_id)
+        self.assertTrue(len(oo_account.videos) >0)
+
+    def test_ooyala_signup_flow(self):
+        '''
+        Test account creations and creation of requests for first n videos
+        '''
+         
+        signup_response = self.create_ooyala_account()
+        vresponse = json.loads(signup_response)
+        self.assertTrue(vresponse["total_count"] > 0)
+        #verify that all items are in processing state, integration_type etc
+
+
+    def test_pagination_videos_ooyala(self):
+        ''' test pagination of ooyala integration '''
+
+        self._create_request_from_feed()
+        self._process_neon_api_requests()
+
+        #get videos in pages
+        page_no = 0
+        page_size = 2
+        url = self.get_url('/api/v1/accounts/%s/ooyala_integrations/'
+                '%s/videos?page_no=%s&page_size=%s'
+                %(self.a_id, self.i_id, page_no, page_size))
+        resp = self.get_request(url, self.api_key)
+        items = json.loads(resp.body)['items']
+        result_vids = [x['video_id'] for x in items]
+        self.assertEqual(len(result_vids), page_size)
+
+    def _update_ooyala_thumbnail(self, vid, tid):    
+        '''
+        Services request to update the thumbnail 
+        '''
+        url = self.get_url("/api/v1/accounts/%s/ooyala_integrations"
+                    "/%s/videos/%s" %(self.a_id, self.i_id, vid))
+        vals = {'thumbnail_id' : tid}
+        return self.put_request(url, vals, self.api_key)
+    
+    def test_update_thumbnail(self):
+        '''
+        Test updating thumbnail in ooyala account
+        '''
+
+        self._create_request_from_feed()
+        self._process_neon_api_requests()
+        
+        oo_account = neondata.OoyalaPlatform.get_account(self.api_key, self.i_id)
+        
+        new_tids = [] 
+        for vid, job_id in oo_account.videos.iteritems(): 
+            i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
+            vmdata= neondata.VideoMetadata.get(i_vid)
+            tids = vmdata.thumbnail_ids
+            new_tids.append(tids[1])
+            #set neon rank 2 
+        resp = self._update_ooyala_thumbnail(vid, tids[1])
+        self.assertEqual(resp.code, 200)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

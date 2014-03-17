@@ -19,6 +19,7 @@ from utils.http import RequestPool
 import utils.http
 import time
 import tornado.escape
+import tornado.gen
 import tornado.httpclient
 import utils.logs
 import utils.neon
@@ -104,7 +105,8 @@ class OoyalaAPI(object):
         if (body is not None):
             json_body = json.dumps(body) if type(body) is not str else body
 
-        url = self.build_path_with_authentication_params(http_method, path, params, json_body)
+        url = self.build_path_with_authentication_params(
+                                http_method, path, params, json_body)
         if url is None:
             return None
        
@@ -218,7 +220,8 @@ class OoyalaAPI(object):
         signature = str(self.secret_key) + http_method.upper() + path
         for key, value in sorted(params.iteritems()):
             signature += key + '=' + str(value)
-        # This is neccesary on python 2.7. if missing, signature+=body with raise an exception when body are bytes (image data)
+        # This is neccesary on python 2.7. if missing, 
+        # signature+=body with raise an exception when body are bytes (image data)
         signature = signature.encode('ascii')
         signature += body
         signature = base64.b64encode(hashlib.sha256(signature).digest())[0:43]
@@ -259,8 +262,6 @@ class OoyalaAPI(object):
         authentication_params['expires'] = str(self.expires)
         authentication_params['signature'] = self.generate_signature(http_method, path, authentication_params, body)
         return self.build_path(path, authentication_params)
-
-
 
     @property
     def response_headers(self):
@@ -396,13 +397,12 @@ class OoyalaAPI(object):
 
     
     def get_video_url(self, video_id, callback=None):
-        #http://ak.c.ooyala.com/l2djJvazrgOdtAiOtaWrZejpYgsdH8zc/DOcJ-FxaFrRg4gtDEwOmY1OjBrO_V8SW
         '''
-        [{"profile":"high","video_height":360,"video_width":640,"is_source":true,"file_size":15496954,"audio_codec":"aac","video_codec":"h264","average_video_bitrate":598,"stream_type":"single","url":"http://cms.ooyala.com/l2djJvazrgOdtAiOtaWrZejpYgsdH8zc%2F0000000000000-0000015496953?Signature=cOOamzp%2FHCz6U06kSQAUH4tdTOs%3D&Expires=1394932277&AWSAccessKeyId=AKIAJUAIW2RNELHXXF2Q&","audio_bitrate":119,"muxing_format":"NA"},{"profile":"baseline","video_height":360,"video_width":640,"is_source":false,"file_size":13210787,"audio_codec":"aac","video_codec":"h264","average_video_bitrate":500,"stream_type":"single","url":"http://ak.c.ooyala.com/l2djJvazrgOdtAiOtaWrZejpYgsdH8zc/DOcJ-FxaFrRg4gtDEwOmY1OjBrO_V8SW","audio_bitrate":128,"muxing_format":"MP4"}]
-
-        '''
+        Get video url to download the video from the asset streams response
         
         #TODO: find the muxing format to choose, is MP4 always available?
+        '''
+        #http://ak.c.ooyala.com/l2djJvazrgOdtAiOtaWrZejpYgsdH8zc/DOcJ-FxaFrRg4gtDEwOmY1OjBrO_V8SW
 
         video_data = self.get('assets/%s/streams'%video_id)
         #profiles = {} 
@@ -412,24 +412,59 @@ class OoyalaAPI(object):
             if p['muxing_format'] != "NA":
                 return p['url']
 
+    @tornado.gen.engine
+    def _create_video_requests_on_signup(self, oo_account, limit=10, callback=None):
+        '''
+        http://support.ooyala.com/developers/documentation/api/query.html
+        '''
+
+        qs = {} 
+        qs["orderby"] = "created_at+DESCENDING"
+        feed = yield tornado.gen.Task(self.get, 'assets/', qs)
+        items = feed["items"]
+        response = self.create_neon_request_from_asset_feed(oo_account, items, limit)
+        if callback:
+            callback(response)
+        else:
+            raise Exception("Sync method not permitted currently")
+
     def process_publisher_feed(self, oo_account):
         ''' 
         process ooyala feed and create neon requests 
         '''
        
-        vids_to_process = [] 
+        #Get all assets for the customer
+        qs = {} 
+        qs["orderby"] = "created_at+DESCENDING"
+        feed = self.get('assets/', qs)
+        items = feed["items"]
+        self.create_neon_request_from_asset_feed(oo_account, items)
+
+    def create_neon_request_from_asset_feed(self, oo_account, items, limit=None): 
+        '''
+        oo_account: ooyala platform account
+        items: [] of dict objects with asset information
+        limit: # of videos to create requests
+
+        No async http calls in this method. There was a bug with creating async calls 
+        to the neon server in brightcove api, hence resorting to sync http calls here
+        The bug to be re-explored soon and the code to be made synci & async compatible
+        '''
+
+        items_processed = [] 
         videos_processed = oo_account.get_videos() 
         if videos_processed is None:
             videos_processed = {} 
-      
-        #Get all assets for the customer
-        feed = self.get('assets/')
-
+        
         #parse and get video ids to process
-        items = feed["items"]
+        count = 0
         for item in items:
             if item['asset_type'] == "video":
-                to_process = False
+                count += 1
+                #limit the #of videos to process
+                if limit is not None and count >= limit:
+                    break
+                
                 vid = str(item['embed_code']) #video id is embed_code
                 if vid in videos_processed:
                     continue
@@ -454,12 +489,15 @@ class OoyalaAPI(object):
                                                   i_id=oo_account.integration_id,
                                                   autosync=oo_account.auto_update)
                 if resp is not None and not resp.error:
+                    items_processed.append(item)
                     #update customer inbox
-                    #TODO: get ooyala account
+                    #TODO: get ooyala account, rather using local copy  
                     response = tornado.escape.json_decode(resp.body)
                     j_id = response['job_id']
                     oo_account.videos[vid] = j_id
                     oo_account.save()
+
+        return items_processed 
 
     def send_neon_api_request(self, neon_api_key, vid, title, video_download_url, 
                                 prev_thumbnail=None, request_type='topn',
@@ -506,5 +544,83 @@ class OoyalaAPI(object):
             _log.error("Neon api request failed")
         return response
 
-    def update_thumbnail_from_url(self, image_url):
-        pass
+    @tornado.gen.engine 
+    def update_thumbnail_from_url(self, video_id, image_url, 
+                                        tid, fsize, callback):
+        '''
+        Async method, no sync version currently
+
+        DOC: http://support.ooyala.com/developers/documentation/api/asset_video.html
+        Upload Custom Preview Image
+            [POST] /v2/assets/asset_id/preview_image_files
+            <file_contents>
+           
+        Set Primary Preview Image Configuration
+        Set the type of the primary preview image of an asset to one of the following
+        
+        generated: use the autogenerated preview image
+        uploaded_file: use the uploaded custom preview image
+        remote_url: URL for the preview image
+            [PUT] /v2/assets/asset_id/primary_preview_image
+            {
+               "type" : "generated" | "uploaded_file" | "remote_url"
+            }
+
+        '''
+
+        def handle_response(resp):
+            '''
+            resp is json response 
+            common response handler for the states below
+            '''
+            current_state = state
+            if resp is None:
+                msg = "failed to %s for video %s" %(current_state, video_id)        
+                _log.error("update_thumbnail_from_url msg=%s"%msg)
+                callback(None)
+                return
+            else:
+                if isinstance(resp, tornado.httpclient.HTTPResponse):
+                    return resp.body
+                return resp
+ 
+        states = ["download_image", "upload_thumbnail", "set_primary"] 
+ 
+        state = states[0] 
+        req = tornado.httpclient.HTTPRequest(url=image_url,
+                                             method="GET",
+                                             request_timeout=60.0,
+                                             connect_timeout=10.0)
+        image_response = yield tornado.gen.Task(
+                            self.http_request_pool.send_request, req) 
+        image_body = handle_response(image_response)
+        
+        #Upload the image
+        state = states[1] 
+        upload_response = yield tornado.gen.Task(
+                            self.post, 
+                            'assets/%s/preview_image_files'%video_id, 
+                            image_body)
+
+        up_response = handle_response(upload_response)
+        #verify body ? doc on this missing --       
+ 
+        #Set as primary image
+        state = states[2] 
+        body = {}
+        body["type"] = "uploaded_file"
+        set_response = yield tornado.gen.Task(
+                                self.put, 
+                                'assets/%s/primary_preview_image'%video_id, 
+                                body)
+
+        set_resp = handle_response(set_response)
+        #if set_resp["status"] == "uploading":
+        #    callback(True)
+        #    return
+        if set_resp:
+            callback(True)
+            return
+
+        #something went wrong ?
+        callback(False) 
