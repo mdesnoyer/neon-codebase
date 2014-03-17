@@ -1406,7 +1406,7 @@ class TestOoyalaServices(AsyncHTTPTestCase):
         else:
             callback = args[1] if len(args) >=2 else None
        
-        print "----> ",http_request.url, callback
+        #print "----> ",http_request.url, callback
 
         #video stream call
         if "/streams" in http_request.url:
