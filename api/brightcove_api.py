@@ -51,7 +51,7 @@ class BrightcoveApi(object):
     
     def __init__(self, neon_api_key, publisher_id=0, read_token=None,
                  write_token=None, autosync=False, publish_date=None,
-                 local=True,account_created=None):
+                 local=True, account_created=None):
         self.publisher_id = publisher_id
         self.neon_api_key = neon_api_key
         self.read_token = read_token
@@ -69,6 +69,14 @@ class BrightcoveApi(object):
         self.THUMB_SIZE = 120, 90
         self.STILL_SIZE = 480, 360
         self.account_created = account_created
+
+    def update_still_width(self, sz):
+        '''
+        Set the still width
+        Ignore the height as we scale the image based on aspect ratio of the 
+        original image
+        '''
+        self.STILL_SIZE = (width, self.STILL_SIZE[1])
 
     def format_get(self, url, data=None):
         if data is not None:

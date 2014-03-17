@@ -52,6 +52,8 @@ define("dbPort", default=6379, type=int, help="redis port")
 define("watchdogInterval", default=3, type=int, 
         help="interval for watchdog thread")
 
+#constants 
+BCOVE_STILL_WIDTH = 480
 
 class DBConnection(object):
     '''Connection to the database.'''
@@ -715,6 +717,7 @@ class BrightcovePlatform(AbstractPlatform):
         self.linked_youtube_account = False
         self.account_created = time.time() #UTC timestamp of account creation
         self.rendition_frame_width = None #Resolution of video to process
+        self.video_still_width = 480 #default brightcove still width
 
     @classmethod
     def get_ovp(cls):
@@ -739,7 +742,11 @@ class BrightcovePlatform(AbstractPlatform):
         bc = api.brightcove_api.BrightcoveApi(
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update)
-       
+      
+        #update the default still size
+        #if self.video_still_width != BCOVE_STILL_WIDTH:
+        #    bc.update_still_width(self.video_still_width) 
+
         #Get video metadata
         platform_vid = InternalVideoID.to_external(i_vid)
         vmdata = yield tornado.gen.Task(VideoMetadata.get, i_vid)
@@ -950,9 +957,14 @@ class BrightcovePlatform(AbstractPlatform):
             self.write_token, self.auto_update, self.last_process_date)
         bcove_api.sync_individual_video_metadata(self.integration_id)
 
-    def set_rendition_frame_width(f_width):
+    def set_rendition_frame_width(self, f_width):
         ''' Set framewidth of the video resolution to process '''
         self.rendition_frame_width = f_width
+
+    def set_video_still_width(self, width):
+        ''' Set framewidth of the video still to be used 
+            when the still is updated in the brightcove account '''
+        self.video_still_width = width
 
     @classmethod
     def create(cls, json_data):
