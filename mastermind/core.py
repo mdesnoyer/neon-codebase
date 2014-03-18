@@ -77,7 +77,7 @@ class ThumbnailInfo(object):
         Inputs:
         data - A neondata.ThumbnailMetaData object
         '''
-        return ThumbnailInfo(data.thumbnail_id,
+        return ThumbnailInfo(data.key,
                              data.type,
                              data.rank,
                              data.enabled,

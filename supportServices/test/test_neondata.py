@@ -26,7 +26,7 @@ from StringIO import StringIO
 from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         YoutubePlatform, NeonUserAccount, DBConnection, NeonApiKey, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
-        ImageMD5Mapper, ThumbnailMetaData, ThumbnailIDMapper
+        ImageMD5Mapper, ThumbnailMetadata, InternalVideoID
 
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
@@ -306,6 +306,8 @@ class TestThumbnailHelperClass(unittest.TestCase):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
 
+        self.image = ImageUtils.create_random_image(360, 480)
+
     def tearDown(self):
         self.redis.stop()
 
@@ -314,23 +316,55 @@ class TestThumbnailHelperClass(unittest.TestCase):
 
         url = "http://thumbnail.jpg"
         vid = "v123"
-        image = ImageUtils.create_random_image(360, 480)
-        tid = ThumbnailID.generate(image, vid)
-        im_md5 = ImageMD5Mapper(vid, image, tid) 
+        tid = ThumbnailID.generate(self.image, vid)
+        im_md5 = ImageMD5Mapper(vid, self.image, tid) 
         im_md5.save()
 
         res_tid = ImageMD5Mapper.get_tid(vid, im_md5)
         #self.assertEqual(tid, res_tid)   
     
-        tdata = ThumbnailMetaData(tid, [], 0, 480, 360,
+        tdata = ThumbnailMetadata(tid, vid, [], 0, 480, 360,
                         "ttype", 0, 1, 0)
-        idmapper = ThumbnailIDMapper(tid, vid, tdata.to_dict())
-        ThumbnailIDMapper.save_all([idmapper])
+        tdata.save()
         tmap = ThumbnailURLMapper(url, tid)
         tmap.save()
         
         res_tid = ThumbnailURLMapper.get_id(url)
         self.assertEqual(tid, res_tid)
+
+    def test_thumbnail_get_data(self):
+
+        vid = InternalVideoID.generate('api1', 'vid1')
+        tid = ThumbnailID.generate(self.image, vid)
+        tdata = ThumbnailMetadata(tid, vid, ['one.jpg', 'two.jpg'],
+                                  None, self.image.size[1], self.image.size[0],
+                                  'brightcove', 1.0, '1.2')
+        tdata.save()
+        self.assertEqual(tdata.get_account_id(), 'api1')
+        self.assertEqual(ThumbnailMetadata.get_video_id(tid), vid)
+        self.assertEqual(tdata.rank, 0)
+        self.assertEqual(tdata.urls, ['one.jpg', 'two.jpg'])
+
+    def test_read_thumbnail_old_format(self):
+        # Make sure that we're backwards compatible
+        thumb = ThumbnailMetadata.create("{\"video_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001\", \"thumbnail_metadata\": {\"chosen\": false, \"thumbnail_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\", \"model_score\": 4.1698684091322846, \"enabled\": true, \"rank\": 5, \"height\": 232, \"width\": 416, \"model_version\": \"20130924\", \"urls\": [\"https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg\"], \"created_time\": \"2013-12-02 09:55:19\", \"type\": \"neon\", \"refid\": null}, \"key\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\"}")
+
+        self.assertEqual(thumb.key, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15')
+        self.assertEqual(thumb.video_id, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001')
+        self.assertEqual(thumb.chosen, False)
+        self.assertAlmostEqual(thumb.model_score, 4.1698684091322846)
+        self.assertEqual(thumb.enabled, True)
+        self.assertEqual(thumb.rank, 5)
+        self.assertEqual(thumb.height, 232)
+        self.assertEqual(thumb.width, 416)
+        self.assertEqual(thumb.model_version, '20130924')
+        self.assertEqual(thumb.type, 'neon')
+        self.assertEqual(thumb.created_time, '2013-12-02 09:55:19')
+        self.assertIsNone(thumb.refid)
+        self.assertEqual(thumb.urls, ["https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg"])
+        
+        with self.assertRaises(AttributeError):
+            thumb.thumbnail_id
 
 
 if __name__ == '__main__':

@@ -13,7 +13,7 @@ if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
     
 from supportServices.neondata import NeonApiRequest, ThumbnailURLMapper,\
-        VideoMetadata, ThumbnailIDMapper
+        VideoMetadata, ThumbnailMetadata
 import utils
 from utils.options import define, options
 
@@ -30,7 +30,7 @@ def main():
     if not tid:
         print "Image URL not found in DB"
 
-    vid = ThumbnailIDMapper.get_video_id(tid)
+    vid = ThumbnailMetadata.get_video_id(tid)
     if not vid:
         print "ThumbnailID %s not found"%tid
 

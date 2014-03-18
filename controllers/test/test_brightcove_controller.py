@@ -197,25 +197,21 @@ class TestScheduler(unittest.TestCase):
         #patch VideoMetadata & ThumbnailIDMapper
         vm = brightcove_controller.VideoMetadata('int_vid1', None, None, None,
                 None, None, None, None)
-        tdataB = brightcove_controller.ThumbnailMetaData('B', 
+        tdataB = brightcove_controller.ThumbnailMetadata('tidB', 'int_vid1',
                         ["http://img1"], None, None, None,
                         'brightcove', 0, 0, rank=0)
-        tdataA = brightcove_controller.ThumbnailMetaData('A',
+        tdataA = brightcove_controller.ThumbnailMetadata('tidA', 'int_vid1',
                         ["http://img2"], None, None, None,
                         'neon', 0, 0, rank=1)
-        thumbB = tdataB.to_dict()
-        thumbA = tdataA.to_dict()
-        tmapB = brightcove_controller.ThumbnailIDMapper('tidB', i_vid, thumbB)
-        tmapA = brightcove_controller.ThumbnailIDMapper('tidA', i_vid, thumbA)
-        tmaps = [tmapB, tmapA] 
+        thumbnails = [tdataB, tdataA]
         
         vm_patcher = patch('controllers.brightcove_controller.VideoMetadata')
         vm_patch = vm_patcher.start()
         vm_patch().get.side_effect = [vm] 
         
-        tmap_patcher = patch('controllers.brightcove_controller.ThumbnailIDMapper')
+        tmap_patcher = patch('controllers.brightcove_controller.ThumbnailMetadata')
         tmap_patch = tmap_patcher.start()
-        tmap_patch().get_thumb_mappings.side_effect = [tmaps] 
+        tmap_patch().get_many.side_effect = [thumbnails] 
         
         brightcove_controller.setup_controller_for_video(
                                 json.dumps(new_video_distribution)) 
@@ -238,25 +234,20 @@ class TestScheduler(unittest.TestCase):
         #patch VideoMetadata & ThumbnailIDMapper
         vm = brightcove_controller.VideoMetadata('int_vid1', None, None, None,
                 None, None, None, None)
-        tdataB = brightcove_controller.ThumbnailMetaData('B', 
+        tdataB = brightcove_controller.ThumbnailMetadata('B', 'int_vid1',
                         ["http://img1"], None, None, None,
                         'brightcove', 0, 0, rank=0)
-        tdataA = brightcove_controller.ThumbnailMetaData('A',
+        tdataA = brightcove_controller.ThumbnailMetadata('A', 'int_vid1',
                         ["http://img2"], None, None, None,
-                        'neon', 0, 0, chosen=True, rank=1)
-        thumbB = tdataB.to_dict()
-        thumbA = tdataA.to_dict()
-        tmapB = brightcove_controller.ThumbnailIDMapper('tidB', i_vid, thumbB)
-        tmapA = brightcove_controller.ThumbnailIDMapper('tidA', i_vid, thumbA)
-        tmaps = [tmapB, tmapA] 
+                        'neon', 0, 0, chosen=True, rank=1) 
         
         vm_patcher = patch('controllers.brightcove_controller.VideoMetadata')
         vm_patch = vm_patcher.start()
         vm_patch.get.return_value = vm 
         
-        tmap_patcher = patch('controllers.brightcove_controller.ThumbnailIDMapper')
+        tmap_patcher = patch('controllers.brightcove_controller.ThumbnailMetadata')
         tmap_patch = tmap_patcher.start()
-        tmap_patch.get_thumb_mappings.return_value = tmaps 
+        tmap_patch.get_many.return_value = [tdataB, tdataA] 
         
         brightcove_controller.setup_controller_for_video(
                                 json.dumps(new_video_distribution)) 

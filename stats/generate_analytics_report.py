@@ -75,26 +75,26 @@ class ABTestData(object):
             self.cursor.execute(self.query_template %tid)
             rows = self.cursor.fetchall()
             vmdata = neondata.VideoMetadata.get(i_vid)
-            all_tids = neondata.ThumbnailIDMapper.get_thumb_mappings(vmdata.thumbnail_ids)
+            all_tids = neondata.ThumbnailMetadata.get_many(vmdata.thumbnail_ids)
             for row in rows:
                 loads = row[0]
                 clicks = row[1]
                 tid = row[2]
-                tdata = neondata.ThumbnailIDMapper.get_thumb_mappings([tid])
+                tdata = neondata.ThumbnailMetadata.get_many([tid])
                 tdata = tdata[0].thumbnail_metadata
-                url = tdata['urls'][0]
-                ttype = tdata['type']
+                url = tdata.urls[0]
+                ttype = tdata.type
                 print loads, clicks, url ,ttype, vid 
                 image_urls[url] = [vid, ttype]
 
             if len(rows) == 1:
                 other_thumb = None
                 for t in all_tids:
-                    if t.thumbnail_metadata['type'] != ttype:
+                    if t.type != ttype:
                         other_thumb = t
                 
-                url = other_thumb.thumbnail_metadata['urls'][0]
-                ttype = other_thumb.thumbnail_metadata['type']
+                url = other_thumb.urls[0]
+                ttype = other_thumb.type
                 image_urls[url] = [vid, ttype]
 
                 print "0", "0", url, ttype, vid 

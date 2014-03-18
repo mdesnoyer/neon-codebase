@@ -83,7 +83,7 @@ class DBConnection(object):
             elif cname == "VideoMetadata":
                 host = options.videoDB
                 port = options.dbPort 
-            elif cname in ["ThumbnailIDMapper", "ThumbnailURLMapper"]:
+            elif cname in ["ThumbnailMetadata", "ThumbnailURLMapper"]:
                 host = options.thumbnailDB 
                 port = options.dbPort 
         
@@ -239,9 +239,8 @@ def _erase_all_data():
     '''
     _log.warn('Erasing all the data. I hope this is a test.')
     AbstractPlatform._erase_all_data()
-    ThumbnailMetaData._erase_all_data()
+    ThumbnailMetadata._erase_all_data()
     ThumbnailURLMapper._erase_all_data()
-    ThumbnailIDMapper._erase_all_data()
     VideoMetadata._erase_all_data()
 
 class RedisClient(object):
@@ -762,19 +761,18 @@ class BrightcovePlatform(AbstractPlatform):
         fsize = vmdata.get_frame_size()
 
         #Get all thumbnails
-        thumb_mappings = yield tornado.gen.Task(
-                ThumbnailIDMapper.get_thumb_mappings, tids)
+        thumbnails = yield tornado.gen.Task(
+                ThumbnailMetadata.get_many, tids)
         t_url = None
         
         # Get the type of thumbnail (Neon/ Brighcove)
         thumb_type = "" #type_rank
 
         #Check if the new tid exists
-        for thumb_mapping in thumb_mappings:
-            tmdata = thumb_mapping.thumbnail_metadata
-            if tmdata["thumbnail_id"] == new_tid:
-                t_url = tmdata["urls"][0]
-                thumb_type = "bc" if tmdata["type"] == "brightcove" else ""
+        for thumbnail in thumbnails:
+            if thumbnail.key == new_tid:
+                t_url = thumbnail.urls[0]
+                thumb_type = "bc" if thumbnail.type == "brightcove" else ""
         
         if not t_url:
             _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
@@ -784,8 +782,8 @@ class BrightcovePlatform(AbstractPlatform):
         #Update the database with video first
         #Get previous thumbnail and new thumb
         modified_thumbs = [] 
-        new_thumb, old_thumb = ThumbnailIDMapper.enable_thumbnail(
-                                    thumb_mappings, new_tid)
+        new_thumb, old_thumb = ThumbnailMetadata.enable_thumbnail(
+            thumbnails, new_tid)
         modified_thumbs.append(new_thumb)
         if old_thumb is None:
             #old_thumb can be None if there was no neon thumb before
@@ -797,11 +795,11 @@ class BrightcovePlatform(AbstractPlatform):
         #Don't reflect change in the DB, used by AB Controller methods
         if nosave == False:
             if new_thumb is not None:
-                res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
-                                            modified_thumbs)  
+                res = yield tornado.gen.Task(ThumbnailMetadata.save_all,
+                                             modified_thumbs)  
                 if not res:
                     _log.error("key=update_thumbnail msg=[pre-update]" 
-                            " ThumbnailIDMapper save_all failed for %s" %new_tid)
+                            " ThumbnailMetadata save_all failed for %s" %new_tid)
                     callback(False)
                     return
             else:
@@ -841,21 +839,21 @@ class BrightcovePlatform(AbstractPlatform):
             #get old thumbnail tid to revert to, this was the tid 
             #that was previously live before this request
             old_tid = "no_thumb" if old_thumb is None \
-                    else old_thumb.thumbnail_metadata["thumbnail_id"] 
-            new_thumb, old_thumb = ThumbnailIDMapper.enable_thumbnail(
-                                    thumb_mappings, old_tid)
+                    else old_thumb.key
+            new_thumb, old_thumb = ThumbnailMetadata.enable_thumbnail(
+                                    thumbnails, old_tid)
             modified_thumbs.append(new_thumb)
             if old_thumb: 
                 modified_thumbs.append(old_thumb)
             
             if new_thumb is not None:
-                res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
+                res = yield tornado.gen.Task(ThumbnailMetadata.save_all,
                                              modified_thumbs)  
                 if res:
                     callback(False) #return False coz bcove thumb not updated
                     return
                 else:
-                    _log.error("key=update_thumbnail msg=ThumbnailIDMapper save_all" 
+                    _log.error("key=update_thumbnail msg=ThumbnailMetadata save_all" 
                             "failed for video=%s cur_db_tid=%s cur_bcove_tid=%s," 
                             "DB not reverted" %(i_vid, new_tid, old_tid))
                     
@@ -1524,46 +1522,6 @@ class ThumbnailType(object):
     RANDOM      = "random"
     FILTERED    = "filtered"
 
-class ThumbnailMetaData(object):
-
-    '''
-    Schema for storing thumbnail metadata
-    A single thumbnail id maps to all its urls 
-    [Neon, OVP name space ones, other associated ones] 
-    '''
-    def __init__(self, tid, urls, created, width, height, ttype, model_score,
-                 model_version, enabled=True, chosen=False, rank=None, 
-                 refid=None):
-        self.thumbnail_id = tid
-        self.urls = urls  # All urls associated with single image
-        self.created_time = created #Timestamp when thumbnail was created 
-        self.enabled = enabled #boolen, indicates if this thumbnail can be displayed/ tested with 
-        self.chosen = chosen #boolean, indicates this thumbnail is live
-        self.width = width
-        self.height = height
-        self.type = ttype #neon1../ brightcove / youtube
-        self.rank = 0 if not rank else rank  #int 
-        self.model_score = model_score #float
-        self.model_version = model_version #float
-        self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
-
-    def to_dict(self):
-        ''' to dict '''
-        return self.__dict__
-
-    @staticmethod
-    def create(params_dict):
-        ''' create object '''
-        obj = ThumbnailMetaData(0 ,0 ,0 ,0 ,0 ,0 ,0 ,0)
-        for key in params_dict:
-            obj.__dict__[key] = params_dict[key]
-        return obj 
-    
-    @classmethod
-    def _erase_all_data(cls):
-        db_connection = DBConnection(cls)
-        db_connection.clear_db()
-
 class ThumbnailID(AbstractHashGenerator):
     '''
     Static class to generate thumbnail id
@@ -1726,36 +1684,46 @@ class ImageMD5Mapper(object):
             return db_connection.blocking_conn.mset(data)
 
 
-class ThumbnailIDMapper(object):
+class ThumbnailMetadata(object):
     '''
-    Class schema for Thumbnail URL to thumbnail metadata map
-    Thumbnail ID  => (Internal Video ID, ThumbnailMetadata) 
-    
-    Primary source for all the data associated with the thumbnail
-    contains the dictionary of thumbnail_metadata
-    '''
-    def __init__(self, tid, internal_vid, thumbnail_metadata):
-        super(ThumbnailIDMapper,self).__init__()
-        self.key = tid
-        self.video_id = internal_vid #api_key + platform video id
-        self.thumbnail_metadata = thumbnail_metadata #dict of ThumbnailMetadata obj
+    Class schema for Thumbnail information.
 
-    @classmethod
-    def generate_key(cls, video_id, tid):
-        ''' generate IDMapper key '''
-        return video_id + '_' + tid 
+    Keyed by thumbnail id
+    '''
+    def __init__(self, tid, internal_vid, urls, created, width, height, ttype,
+                 model_score, model_version, enabled=True, chosen=False,
+                 rank=None, refid=None):
+        super(ThumbnailMetadata,self).__init__()
+        self.key = tid # Thumbnail id
+        self.video_id = internal_vid #api_key + platform video id
+        self.urls = urls  # List of all urls associated with single image
+        self.created_time = created # Timestamp when thumbnail was created 
+        self.enabled = enabled #boolen, indicates if this thumbnail can be displayed/ tested with 
+        self.chosen = chosen #boolean, indicates this thumbnail is chosen by the user as the primary one
+        self.width = width
+        self.height = height
+        self.type = ttype #neon1../ brightcove / youtube
+        self.rank = 0 if not rank else rank  #int 
+        self.model_score = model_score #float
+        self.model_version = model_version #string
+        self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
+        
+
+    #@classmethod
+        #def generate_key(cls, video_id, tid):
+        #''' generate thumbnail key '''
+        #return video_id + '_' + tid 
 
     def get_account_id(self):
-        ''' get account id '''
+        ''' get the internal account id. aka api key '''
         return self.video_id.split('_')[0]
-
-    def _hash(self,_input):
-        return hashlib.md5(_input).hexdigest()
     
     def get_metadata(self):
-        ''' get thumbnail metadata '''
-        return self.thumbnail_metadata
-        #return only specific fields
+        ''' get a dictionary of the thumbnail metadata
+
+        This function is deprecated and is kept only for backwards compatibility
+        '''
+        return self.to_dict()
 
     def to_dict(self):
         ''' to dict '''
@@ -1772,24 +1740,35 @@ class ThumbnailIDMapper(object):
         if json_data:
             data_dict = json.loads(json_data)
             #create basic object
-            obj = ThumbnailIDMapper(None, None, None)
+            obj = ThumbnailMetadata(None, None, None, None, None, None, None,
+                                    None, None)
+
+            # For backwards compatibility, check to see if there is a
+            # json entry for thumbnail_metadata. If so, grab all
+            # entries from there.
+            if 'thumbnail_metadata' in data_dict:
+                for key, value in data_dict['thumbnail_metadata'].items():
+                    if key != 'thumbnail_id':
+                        obj.__dict__[key] = value
+                del data_dict['thumbnail_metadata']
 
             #populate the object dictionary
-            for key in data_dict.keys():
-                obj.__dict__[key] = data_dict[key]
+            for key, value in data_dict.iteritems():
+                obj.__dict__[key] = value
         
             return obj
 
     @classmethod
     def get_video_id(cls, tid, callback=None):
-        '''Given a thumbnail id, retrieves the video id 
-            asscociated with tid'''
+        '''Given a thumbnail id, retrieves the internal video id 
+            asscociated with thumbnail
+        '''
 
         def get_metadata(result):
             ''' extract thumbnail metadata from obj '''
             vid = None
             if result:
-                obj = ThumbnailIDMapper.create(result)
+                obj = ThumbnailMetadata.create(result)
                 callback(obj.video_id)
                 return
             callback(vid)
@@ -1800,47 +1779,39 @@ class ThumbnailIDMapper(object):
         else:
             result = db_connection.blocking_conn.get(tid)
             if result:
-                obj = ThumbnailIDMapper.create(result)
+                obj = ThumbnailMetadata.create(result)
                 return obj.video_id
 
     @classmethod
-    def get_thumb_metadata(cls, id, callback=None):
-        '''Given a thumbnail id, retrieves the thumbnail metadata.
-
-        Inputs:
-        id - The thumbnail id 
-
-        Returns:
-        ThumbnailMetadata object.
-        '''
-        def get_metadata(result):
-            ''' extract thumbnail metadata from obj '''
-            tmdata = None
-            if result:
-                obj = ThumbnailIDMapper.create(result)
-                tmdata = ThumbnailMetaData.create(obj.thumbnail_metadata)
-            callback(tmdata)
-
+    def get(cls, thumbnail_id, callback=None):
         db_connection = DBConnection(cls)
-        if callback:
-            db_connection.conn.get(id, get_metadata)
-        else:
-            result = db_connection.blocking_conn.get(id)
+
+        def cb(result):
             if result:
-                obj = ThumbnailIDMapper.create(result)
-                return ThumbnailMetaData.create(obj.thumbnail_metadata)
+                obj = create(result)
+                callback(obj)
+            else:
+                callback(None)
+
+        if callback:
+            db_connection.conn.get(thumbnail_id, cb)
+        else:
+            jdata = db_connection.blocking_conn.get(thumbnail_id)
+            if jdata is None:
+                return None
+            return cls.create(jdata)
 
 
     @classmethod
-    def get_thumb_mappings(cls, keys, callback=None):
-        ''' Returns list of thumbnail mappings for give thumb ids(keys)
+    def get_many(cls, keys, callback=None):
+        ''' Returns list of thumbnail metadata for give thumb ids(keys)
         '''
         db_connection = DBConnection(cls)
 
         def process(results):
             mappings = [] 
             for item in results:
-                obj = ThumbnailIDMapper.create(item)
+                obj = ThumbnailMetadata.create(item)
                 mappings.append(obj)
             callback(mappings)
 
@@ -1850,16 +1821,16 @@ class ThumbnailIDMapper(object):
             mappings = [] 
             items = db_connection.blocking_conn.mget(keys)
             for item in items:
-                obj = ThumbnailIDMapper.create(item)
+                obj = ThumbnailMetadata.create(item)
                 mappings.append(obj)
             return mappings
 
     @classmethod
-    def save_all(cls, thumbnailMapperList, callback=None):
+    def save_all(cls, thumbnails, callback=None):
         ''' multi save '''
         db_connection = DBConnection(cls)
         data = {}
-        for t in thumbnailMapperList:
+        for t in thumbnails:
             data[t.key] = t.to_json()
 
         if callback:
@@ -1867,35 +1838,47 @@ class ThumbnailIDMapper(object):
         else:
             return db_connection.blocking_conn.mset(data)
 
+    def save(self, callback=None):
+        ''' save  '''
+        db_connection = DBConnection(self)
+        value = self.to_json()
+        if callback:
+            db_connection.conn.set(self.key, value, callback)
+        else:
+            return db_connection.blocking_conn.set(self.key, value)
+
     @staticmethod
-    def enable_thumbnail(mapper_objs, new_tid):
-        ''' enable thumb in a list of mapper obj given a new thumb id '''
+    def enable_thumbnail(thumbnails, new_tid):
+        ''' enable thumb in a list of thumbnails given a new thumb id '''
         new_thumb_obj = None; old_thumb_obj = None
-        for mapper_obj in mapper_objs:
+        for thumb in thumbnails:
             #set new tid as chosen
-            if mapper_obj.thumbnail_metadata["thumbnail_id"] == new_tid: 
-                mapper_obj.thumbnail_metadata["chosen"] = True
-                new_thumb_obj = mapper_obj 
+            if thumb.key == new_tid: 
+                thumb.chosen = True
+                new_thumb_obj = thumb 
             else:
                 #set chosen=False for old tid
-                if mapper_obj.thumbnail_metadata["chosen"] == True:
-                    mapper_obj.thumbnail_metadata["chosen"] = False 
-                    old_thumb_obj = mapper_obj 
+                if thumb.chosen == True:
+                    thumb.chosen = False 
+                    old_thumb_obj = thumb 
 
         #return only the modified thumbnail objs
         return new_thumb_obj, old_thumb_obj 
 
     @classmethod
-    def save_integration(cls, mapper_objs, callback=None):
-        ''' save integration '''
+    def save_integration(cls, thumbnails, callback=None):
+        ''' save integration 
+
+        TODO(sunil): Explain what this is for
+        '''
         db_connection = DBConnection(cls)
         if callback:
             pipe = db_connection.conn.pipeline()
         else:
             pipe = db_connection.blocking_conn.pipeline() 
 
-        for mapper_obj in mapper_objs:
-            pipe.set(mapper_obj.key, mapper_obj.to_json())
+        for thumbnail in thumbnails:
+            pipe.set(thumbnail.key, thumbnail.to_json())
         
         if callback:
             pipe.execute(callback)
