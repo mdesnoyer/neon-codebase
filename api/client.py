@@ -59,7 +59,7 @@ from supportServices.neondata import NeonApiRequest, BrightcoveApiRequest
 from supportServices.neondata import NeonPlatform, YoutubePlatform, \
         BrightcovePlatform, VideoMetadata, RequestState, InternalVideoID
 from supportServices.neondata import ThumbnailID, ThumbnailType, \
-        ThumbnailURLMapper, ThumbnailMetaData, ThumbnailIDMapper
+        ThumbnailURLMapper, ThumbnailMetadata
 
 import gc
 import pprint
@@ -427,10 +427,10 @@ class ProcessVideo(object):
             rank    = i +1 
 
             #populate thumbnails
-            tdata = ThumbnailMetaData(tid, urls, created, width, height,
-                        ttype, score, self.model_version, rank=rank)
-            thumb = tdata.to_dict()
-            self.thumbnails.append(thumb)
+            tdata = ThumbnailMetadata(tid, video_id, urls, created, width,
+                                      height, ttype, score,
+                                      self.model_version, rank=rank)
+            self.thumbnails.append(tdata)
         return s3_urls
 
     def save_thumbnail_to_s3_and_metadata(self, image, score, s3bucket,
@@ -453,7 +453,7 @@ class ProcessVideo(object):
                                                             video_id))
 
         #If tid already exists, then skip saving metadata
-        if ThumbnailIDMapper.get_thumb_metadata(tid) is not None:
+        if ThumbnailMetadata.get(tid) is not None:
             return
 
         urls.append(s3fname)
@@ -462,10 +462,9 @@ class ProcessVideo(object):
         height  = image.size[1] 
 
         #populate thumbnails
-        tdata = ThumbnailMetaData(tid, urls, created, width, height, ttype,
-                score, self.model_version, rank=rank)
-        thumb = tdata.to_dict()
-        self.thumbnails.append(thumb)
+        tdata = ThumbnailMetadata(tid, video_id, urls, created, width, height,
+                                  ttype, score, self.model_version, rank=rank)
+        self.thumbnails.append(tdata)
 
     ############# Request Finalizers ##############
     
@@ -493,11 +492,7 @@ class ProcessVideo(object):
         model_version = self.model_version 
         frame_size = self.video_metadata['frame_size']
 
-        tids = []
-
-        #add thumbnail ids
-        for thumb in self.thumbnails:
-            tids.append(thumb["thumbnail_id"])
+        tids = [x.key for x in self.thumbnails]
 
         vmdata = VideoMetadata(i_vid, tids, job_id, url, duration,
                     video_valence, model_version, i_id, frame_size)
@@ -514,18 +509,15 @@ class ProcessVideo(object):
         job_id = self.request_map[properties.REQUEST_UUID_KEY]
         i_vid = InternalVideoID.generate(api_key,vid)
 
-        thumbnail_mapper_list = []
         thumbnail_url_mapper_list = []
         if len(self.thumbnails) > 0:
             for thumb in self.thumbnails:
-                tid = thumb["thumbnail_id"]
-                for t_url in thumb["urls"]:
+                tid = thumb.key
+                for t_url in thumb.urls:
                     uitem = ThumbnailURLMapper(t_url, tid)
                     thumbnail_url_mapper_list.append(uitem)
-                    item = ThumbnailIDMapper(tid, i_vid, thumb)
-                    thumbnail_mapper_list.append(item)
 
-            retid = ThumbnailIDMapper.save_all(thumbnail_mapper_list)
+            retid = ThumbnailMetadata.save_all(self.thumbnails)
             returl = ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
             
             return (retid and returl)
@@ -651,7 +643,7 @@ class ProcessVideo(object):
             fno = bc_request.response["data"][0]
             img = Image.fromarray(self.data_map[fno][1])
             #img_url = self.thumbnails[0]["urls"][0]
-            tid = self.thumbnails[0]["thumbnail_id"] 
+            tid = self.thumbnails[0].key
             bcove   = brightcove_api.BrightcoveApi(
                 neon_api_key=api_key,
                 publisher_id=pid,
@@ -664,8 +656,8 @@ class ProcessVideo(object):
             if ret[0]:
                 #update enabled time & reference ID
                 #NOTE: By default Neon rank 1 is always uploaded
-                self.thumbnails[0]["chosen"] = True 
-                self.thumbnails[0]["refid"] = tid
+                self.thumbnails[0].chosen = True 
+                self.thumbnails[0].refid = tid
 
         #3 Update Request State
         #bc_request.thumbnails = self.thumbnails

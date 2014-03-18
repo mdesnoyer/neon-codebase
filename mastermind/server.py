@@ -129,8 +129,7 @@ class VideoDBWatcher(threading.Thread):
                 thumbnails = []
                 data_missing = False
                 for thumb_id in video_metadata.thumbnail_ids:
-                    meta = neondata.ThumbnailIDMapper.get_thumb_metadata(
-                        thumb_id)
+                    meta = neondata.ThumbnailMetadata.get(thumb_id)
                     if meta is None:
                         _log.error('Could not find metadata for thumb %s' %
                                    thumb_id)
@@ -241,7 +240,7 @@ class StatsDBWatcher(threading.Thread):
         try:
             video_id = self.video_id_cache[thumb_id]
         except KeyError:
-            video_id = neondata.ThumbnailIDMapper.get_video_id(thumb_id)
+            video_id = neondata.ThumbnailMetadata.get_video_id(thumb_id)
             self.video_id_cache[thumb_id] = video_id
         return video_id
 

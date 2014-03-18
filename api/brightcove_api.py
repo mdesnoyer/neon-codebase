@@ -1116,13 +1116,14 @@ class BrightcoveApi(object):
                                 thumbnail, i_vid)
                     created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     urls = [thumb_url]
-                    td = supportServices.neondata.ThumbnailMetaData(
-                                tid, urls, created, 480, 360, "brightcove", 0, 0, rank=0)
-                    tm = supportServices.neondata.ThumbnailIDMapper(
-                                tid, i_vid, td.to_dict())
-                    ret = supportServices.neondata.ThumbnailIDMapper.save_all([tm])
+                    td = supportServices.neondata.ThumbnailMetadata(
+                                tid, i_vid, urls, created, 480, 360,
+                                "brightcove", 0, 0, rank=0)
+                    ret = td.save()
+                    
                     if ret:
-                        tmap = supportServices.neondata.ThumbnailURLMapper(thumb_url, tid)
+                        tmap = supportServices.neondata.ThumbnailURLMapper(
+                            thumb_url, tid)
                         ret = supportServices.neondata.ThumbnailURLMapper.save_all([tmap])
                     _log.info("key=async_check_thumbnail"
                             " msg=saved mapping for image url" 

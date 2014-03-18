@@ -495,8 +495,9 @@ class AccountHandler(tornado.web.RequestHandler):
         placeholder_url = placeholder_images[im_index] 
         t_urls.append(placeholder_url)
         ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        tm = neondata.ThumbnailMetaData(0, t_urls, ctime, 0, 0,
-                            neondata.ThumbnailType.CENTERFRAME, 0, 0)
+        tm = neondata.ThumbnailMetadata(0, video_id, t_urls, ctime, 0, 0,
+                                        neondata.ThumbnailType.CENTERFRAME,
+                                        0, 0)
         thumbs.append(tm.to_dict())
         vr = VideoResponse(video_id,
                             neondata.RequestState.PROCESSING,
@@ -596,7 +597,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 t_urls.append(placeholder_url)
                 #Create TID 0 as a temp place holder for previous 
                 #thumbnail during processing stage
-                tm = neondata.ThumbnailMetaData(0, t_urls, ctime, 0, 0,
+                tm = neondata.ThumbnailMetadata(0, vid, t_urls, ctime, 0, 0,
                             neondata.ThumbnailType.CENTERFRAME, 0, 0)
                 thumbs.append(tm.to_dict())
                 p_videos.append(vid)
@@ -660,11 +661,11 @@ class AccountHandler(tornado.web.RequestHandler):
         
             #Get all the thumbnail data for videos that are done
             thumbnails = yield tornado.gen.Task(
-                        neondata.ThumbnailIDMapper.get_thumb_mappings,tids)
+                        neondata.ThumbnailMetadata.get_many,tids)
             for thumb in thumbnails:
                 if thumb:
                     vid = neondata.InternalVideoID.to_external(thumb.video_id)
-                    tdata = thumb.get_metadata() #to_dict()
+                    tdata = thumb.to_dict()
                     if not result.has_key(vid):
                         _log.debug("key=get_video_status_neon "
                                 " msg=video deleted %s"%vid)
@@ -781,8 +782,8 @@ class AccountHandler(tornado.web.RequestHandler):
                 t_urls.append(request.previous_thumbnail)
                 #Create TID 0 as a temp place holder for previous thumbnail 
                 #during processing stage
-                tm = neondata.ThumbnailMetaData(
-                            0, t_urls, ctime, 0, 0, "brightcove", 0, 0)
+                tm = neondata.ThumbnailMetadata(
+                            0, vid, t_urls, ctime, 0, 0, "brightcove", 0, 0)
                 thumbs.append(tm.to_dict())
                 p_videos.append(vid)
             elif request.state is neondata.RequestState.FAILED:
@@ -850,11 +851,11 @@ class AccountHandler(tornado.web.RequestHandler):
         
             #Get all the thumbnail data for videos that are done
             thumbnails = yield tornado.gen.Task(
-                         neondata.ThumbnailIDMapper.get_thumb_mappings, tids)
+                         neondata.ThumbnailMetadata.get_many, tids)
             for thumb in thumbnails:
                 if thumb:
                     vid = neondata.InternalVideoID.to_external(thumb.video_id)
-                    tdata = thumb.get_metadata() #to_dict()
+                    tdata = thumb.to_dict()
                     if not result.has_key(vid):
                         _log.debug("key=get_video_status_brightcove "
                                     " msg=video deleted %s"%vid)
@@ -867,12 +868,12 @@ class AccountHandler(tornado.web.RequestHandler):
             bcove_thumb_id = None
             for thumb in vres.thumbnails:
                 if thumb["chosen"] == True:
-                    vres.current_thumbnail = thumb["thumbnail_id"]
+                    vres.current_thumbnail = thumb["key"]
                     if "neon" in thumb["type"]:
                         vres.status = "active"
 
                 if thumb["type"] == neondata.ThumbnailType.BRIGHTCOVE:
-                    bcove_thumb_id = thumb["thumbnail_id"]
+                    bcove_thumb_id = thumb["key"]
 
             if vres.status == "finished" and vres.current_thumbnail == 0:
                 vres.current_thumbnail = bcove_thumb_id
@@ -1068,8 +1069,9 @@ class AccountHandler(tornado.web.RequestHandler):
                     for item in response:
                         t_urls =[]; thumbs = []
                         t_urls.append(item['videoStillURL'])
-                        tm = neondata.ThumbnailMetaData(
-                                0, t_urls, ctime, 0, 0, "brightcove", 0, 0)
+                        tm = neondata.ThumbnailMetadata(
+                                0, item["id"], t_urls, ctime, 0, 0,
+                                "brightcove", 0, 0)
                         thumbs.append(tm.to_dict())
                         vr = VideoResponse(item["id"],
                               "processing",
@@ -1143,12 +1145,12 @@ class AccountHandler(tornado.web.RequestHandler):
                     
                     #Get all the thumbnail data for videos that are done
                     thumbnails = yield tornado.gen.Task(
-                            neondata.ThumbnailIDMapper.get_thumb_mappings, tids)
+                            neondata.ThumbnailMetadata.get_many, tids)
                     for thumb in thumbnails:
                         if thumb:
                             vid = thumb.video_id
                             #neondata.InternalVideoID.to_external(thumb.video_id)
-                            tdata = thumb.get_metadata()
+                            tdata = thumb.to_dict()
                             video_thumb_mappings[vid].append(tdata)
                 
                 # Check if Neon thumbnail is set as the top rank neon thumbnail
@@ -1159,7 +1161,7 @@ class AccountHandler(tornado.web.RequestHandler):
                         if thumb["chosen"] == True and thumb["type"] == 'neon':
                             update = False
                         if thumb["type"] == 'neon' and thumb["rank"] == 1:
-                            neon_tid = thumb["thumbnail_id"]
+                            neon_tid = thumb["key"]
                     
                     if update and neon_tid is not None:
                         update_videos[vid] = neon_tid
@@ -1566,7 +1568,7 @@ class UtilHandler(tornado.web.RequestHandler):
         if im_url:
             tid = neondata.ThumbnailURLMapper.get_id(im_url)
             if tid:
-                vid = neondata.ThumbnailIDMapper.get_video_id(tid)
+                vid = neondata.ThumbnailMetadata.get_video_id(tid)
                 if vid:
                     req = neondata.VideoMetadata.get_video_request(vid)
                 if req:

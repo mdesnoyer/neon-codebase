@@ -177,9 +177,10 @@ class TestServices(AsyncHTTPTestCase):
             video_download_url = item['FLVURL']
             job_id = str(self.job_ids[i]) #str(random.random())
             p_thumb = item['videoStillURL']
-            api_request = neondata.BrightcoveApiRequest(job_id, self.api_key, vid,
-                    title, video_download_url, self.rtoken,
-                    self.wtoken, self.pub_id, "http://callback", self.b_id)
+            api_request = neondata.BrightcoveApiRequest(
+                job_id, self.api_key, vid,
+                title, video_download_url, self.rtoken,
+                self.wtoken, self.pub_id, "http://callback", self.b_id)
             api_request.previous_thumbnail = p_thumb 
             api_request.autosync = False
             api_request.set_api_method("topn", 5)
@@ -196,6 +197,8 @@ class TestServices(AsyncHTTPTestCase):
         N_THUMBS = 5
         for api_request in api_requests:
             video_id = api_request.video_id
+            internal_video_id = neondata.InternalVideoID.generate(self.api_key,
+                                                                  video_id)
             job_id = api_request.job_id
             thumbnails = []
             for t in range(N_THUMBS):
@@ -204,33 +207,30 @@ class TestServices(AsyncHTTPTestCase):
                 image.save(filestream, "JPEG", quality=100) 
                 filestream.seek(0)
                 imgdata = filestream.read()
-                tid = neondata.ThumbnailID.generate(imgdata,
-                                neondata.InternalVideoID.generate(self.api_key,
-                                video_id))
+                tid = neondata.ThumbnailID.generate(imgdata, internal_video_id)
                 self.images[tid] = image
                 urls = [] ; url = self.mock_image_url_prefix + "/thumb-%s"%t
                 urls.append(url)
                 self.thumbnail_url_to_image[url] = imgdata
                 created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 if t == N_THUMBS -1:
-                    tdata = neondata.ThumbnailMetaData(tid, urls, created, 480, 360,
-                        "brightcove", 2, "test", enabled=True, rank=0)
+                    tdata = neondata.ThumbnailMetadata(
+                        tid, internal_video_id,
+                        urls, created, 480, 360, "brightcove", 2,
+                        "test", enabled=True, rank=0)
                 else:
-                    tdata = neondata.ThumbnailMetaData(tid, urls, created, 480, 360,
+                    tdata = neondata.ThumbnailMetadata(
+                        tid, internal_video_id, urls, created, 480, 360,
                         "neon", 2, "test", enabled=True, rank=t+1)
                 thumbnails.append(tdata)
         
-            i_vid = neondata.InternalVideoID.generate(self.api_key, video_id)
-            thumbnail_mapper_list = []
             thumbnail_url_mapper_list = []
             for thumb in thumbnails:
-                tid = thumb.thumbnail_id
+                tid = thumb.key
                 for t_url in thumb.urls:
                     uitem = neondata.ThumbnailURLMapper(t_url, tid)
                     thumbnail_url_mapper_list.append(uitem)
-                    item = neondata.ThumbnailIDMapper(tid, i_vid, thumb)
-                    thumbnail_mapper_list.append(item)
-            retid = neondata.ThumbnailIDMapper.save_all(thumbnail_mapper_list)
+            retid = neondata.ThumbnailMetadata.save_all(thumbnails)
             returl = neondata.ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
             self.assertTrue(retid)
             self.assertTrue(returl)
@@ -240,10 +240,10 @@ class TestServices(AsyncHTTPTestCase):
             api_request.save()
             tids = []
             for thumb in thumbnails:
-                tids.append(thumb.thumbnail_id)
+                tids.append(thumb.key)
         
-            vmdata = neondata.VideoMetadata(i_vid, tids, job_id, url,
-                        10, 5, "test", self.b_id)
+            vmdata = neondata.VideoMetadata(internal_video_id, tids, job_id,
+                                            url, 10, 5, "test", self.b_id)
             self.assertTrue(vmdata.save())
 
 
@@ -276,12 +276,11 @@ class TestServices(AsyncHTTPTestCase):
         for vid in videos:
             i_vid = neondata.InternalVideoID.generate(self.api_key, vid) 
             vmdata = neondata.VideoMetadata.get(i_vid)
-            thumbnails = neondata.ThumbnailIDMapper.get_thumb_mappings(
-                            vmdata.thumbnail_ids)
-            for thumbnail in thumbnails:
-                thumb = thumbnail.get_metadata()
-                if thumb["chosen"] == True and thumb["type"] == 'neon':
-                    self.assertEqual(thumb["rank"],1)
+            thumbnails = neondata.ThumbnailMetadata.get_many(
+                vmdata.thumbnail_ids)
+            for thumb in thumbnails:
+                if thumb.chosen == True and thumb.type == 'neon':
+                    self.assertEqual(thumb.rank, 1)
 
     def create_neon_account(self):
         ''' create neon user account '''
@@ -773,9 +772,9 @@ class TestServices(AsyncHTTPTestCase):
         vals = {'thumbnail_id' : tid2 }
         resp = self.post_request(url, vals, self.api_key)
         self.assertEqual(resp.code, 200)
-        tids = neondata.ThumbnailIDMapper.get_thumb_mappings([tid,tid2])
-        self.assertTrue(tids[0].thumbnail_metadata["chosen"])
-        self.assertFalse(tids[1].thumbnail_metadata["chosen"])
+        tids = neondata.ThumbnailMetadata.get_many([tid,tid2])
+        self.assertTrue(tids[0].chosen)
+        self.assertFalse(tids[1].chosen)
 
     def test_bh_check_thumbnail(self):
         ''' Brightcove support handler tests (check thumb/update thumb) '''
@@ -882,11 +881,11 @@ class TestServices(AsyncHTTPTestCase):
         tids = self._get_thumbnails(vid)
         
         #update in database the thumbnail to have -inf score
-        td = neondata.ThumbnailIDMapper.get_thumb_mappings(tids)
-        td[0].thumbnail_metadata['model_score'] = float('-inf')
-        td[1].thumbnail_metadata['model_score'] = float('nan')
-        td[2].thumbnail_metadata['model_score'] = None 
-        neondata.ThumbnailIDMapper.save_all(td)
+        td = neondata.ThumbnailMetadata.get_many(tids)
+        td[0].model_score = float('-inf')
+        td[1].model_score = float('nan')
+        td[2].model_score = None 
+        neondata.ThumbnailMetadata.save_all(td)
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
                 '%s/videos?page_no=%s&page_size=%s'
                 %(self.a_id,self.b_id,0,100))
@@ -1040,8 +1039,8 @@ class TestServices(AsyncHTTPTestCase):
         Test retreiving video responses for neonplatform
         '''
 
-        api_key = self.create_neon_account()
-        nplatform = neondata.NeonPlatform.get_account(api_key)
+        self.api_key = self.create_neon_account()
+        nplatform = neondata.NeonPlatform.get_account(self.api_key)
         nvids = 10 
         api_requests = [] 
         for i in range(nvids):
@@ -1049,7 +1048,7 @@ class TestServices(AsyncHTTPTestCase):
             title = "title%s"%i 
             video_download_url = "http://video%s.mp4" %i 
             job_id = "job_id%s"%i 
-            api_request = neondata.NeonApiRequest(job_id, api_key, vid,
+            api_request = neondata.NeonApiRequest(job_id, self.api_key, vid,
                     title, video_download_url, "neon", "http://callback")
             api_request.set_api_method("topn",5)
             api_request.publish_time = str(time.time() *1000)
@@ -1061,71 +1060,15 @@ class TestServices(AsyncHTTPTestCase):
 
         nplatform.save()
         random.seed(1123)
-        #Create thumbnail metadata
-        N_THUMBS = 5
-        for api_request in api_requests[:-1]:
-            video_id = api_request.video_id
-            job_id = api_request.job_id
-            thumbnails = []
-            for t in range(N_THUMBS):
-                image = self._create_random_image() 
-                filestream = StringIO()
-                image.save(filestream, "JPEG", quality=100) 
-                filestream.seek(0)
-                imgdata = filestream.read()
-                tid = neondata.ThumbnailID.generate(imgdata,
-                                neondata.InternalVideoID.generate(api_key,
-                                video_id))
-                self.images[tid] = image
-                urls = [] ; url = self.mock_image_url_prefix + "/thumb-%s"%t
-                urls.append(url)
-                self.thumbnail_url_to_image[url] = imgdata
-                created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                score = random.random()
-                if t == N_THUMBS -1:
-                    tdata = neondata.ThumbnailMetaData(tid, urls, created,
-                            480, 360, neondata.ThumbnailType.CENTERFRAME,
-                            score, "test", enabled=True, rank=0)
-                else:
-                    tdata = neondata.ThumbnailMetaData(tid, urls,
-                            created, 480, 360,
-                            neondata.ThumbnailType.NEON, score,
-                            "test", enabled=True, rank=t+1)
-                thumbnails.append(tdata)
-        
-            i_vid = neondata.InternalVideoID.generate(api_key, video_id)
-            thumbnail_mapper_list = []
-            thumbnail_url_mapper_list = []
-            for thumb in thumbnails:
-                tid = thumb.thumbnail_id
-                for t_url in thumb.urls:
-                    uitem = neondata.ThumbnailURLMapper(t_url, tid)
-                    thumbnail_url_mapper_list.append(uitem)
-                    item = neondata.ThumbnailIDMapper(tid, i_vid, thumb)
-                    thumbnail_mapper_list.append(item)
-            retid = neondata.ThumbnailIDMapper.save_all(thumbnail_mapper_list)
-            returl = neondata.ThumbnailURLMapper.save_all(
-                    thumbnail_url_mapper_list)
-            self.assertTrue(retid)
-            self.assertTrue(returl)
 
-            #Update request state to FINISHED
-            api_request.state = neondata.RequestState.FINISHED 
-            api_request.save()
-            tids = []
-            for thumb in thumbnails:
-                tids.append(thumb.thumbnail_id)
-        
-            vmdata = neondata.VideoMetadata(i_vid, tids, job_id, url,
-                        10, 5, "test", self.b_id)
-            self.assertTrue(vmdata.save())
+        self._process_neon_api_requests(api_requests[:-1])
 
         page_no = 0
         page_size = 2
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos?page_no=%s&page_size=%s'
                 %(self.a_id, "0", page_no, page_size))
-        resp = self.get_request(url, api_key)
+        resp = self.get_request(url, self.api_key)
         items = json.loads(resp.body)['items']
         self.assertEqual(len(items), page_size)
         result_vids = [x['video_id'] for x in items]
@@ -1135,7 +1078,7 @@ class TestServices(AsyncHTTPTestCase):
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos/recommended?page_no=%s&page_size=%s'
                 %(self.a_id, "0", page_no, page_size))
-        resp = self.get_request(url, api_key)
+        resp = self.get_request(url, self.api_key)
         items = json.loads(resp.body)['items']
         self.assertEqual(len(items), page_size)
         result_vids = [ x['video_id'] for x in items]
@@ -1144,7 +1087,7 @@ class TestServices(AsyncHTTPTestCase):
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos/processing?page_no=%s&page_size=%s'
                 %(self.a_id, "0", page_no, page_size))
-        resp = self.get_request(url, api_key)
+        resp = self.get_request(url, self.api_key)
         items = json.loads(resp.body)['items']
         self.assertEqual(len(items), 1) #1 video in processing
         
@@ -1152,7 +1095,7 @@ class TestServices(AsyncHTTPTestCase):
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos/invalid?page_no=%s&page_size=%s'
                 %(self.a_id, "0", page_no, page_size))
-        resp = self.get_request(url, api_key)
+        resp = self.get_request(url, self.api_key)
         self.assertEqual(resp.code, 400)
     
     def test_utils_handler(self):
