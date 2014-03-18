@@ -189,7 +189,7 @@ class BrightcoveApi(object):
         return BrightcoveApi.write_connection.send_request(req, callback)
     
     def update_thumbnail_and_videostill(self, video_id, image, ref_id, 
-            frame_size=None): 
+            frame_size=None, resize=True): 
     
         ''' add thumbnail and videostill in to brightcove account.  used
             by neon client to update thumbnail, Image gets sent to the
@@ -205,14 +205,19 @@ class BrightcoveApi(object):
             rt = self.add_image(video_id, remote_url=image, atype='thumbnail')
             rv = self.add_image(video_id, remote_url=image, atype='videostill')
         else:
+            #initialize thumb and still with image, use the original image that
+            #is not resized
+            bcove_thumb = bcove_still = image
+
             #Always save the Image with the aspect ratio of the video
-            if frame_size is None:
-                #resize to brightcove default size
-                bcove_thumb = image.resize(self.THUMB_SIZE)
-                bcove_still = image.resize(self.STILL_SIZE)
-            else:
-                bcove_thumb = ImageUtils.resize(image, im_w=self.THUMB_SIZE[0])
-                bcove_still = ImageUtils.resize(image, im_w=self.STILL_SIZE[0])
+            if resize:
+                if frame_size is None:
+                    #resize to brightcove default size
+                    bcove_thumb = image.resize(self.THUMB_SIZE)
+                    bcove_still = image.resize(self.STILL_SIZE)
+                else:
+                    bcove_thumb = ImageUtils.resize(image, im_w=self.THUMB_SIZE[0])
+                    bcove_still = ImageUtils.resize(image, im_w=self.STILL_SIZE[0])
 
             t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
                                                             bcove_thumb,
@@ -221,7 +226,8 @@ class BrightcoveApi(object):
                                                             bcove_still,
                                                             ref_id)
             md5_objs = []
-            md5_objs.append(t_md5); md5_objs.append(s_md5)
+            md5_objs.append(t_md5)
+            md5_objs.append(s_md5)
             res = supportServices.neondata.ImageMD5Mapper.save_all(md5_objs)
             if not res:
                 _log.error('key=update_thumbnail msg=failed to' 
@@ -440,8 +446,8 @@ class BrightcoveApi(object):
                 md5_objs.append(t_md5)
                 md5_objs.append(s_md5)
                 res = yield tornado.gen.Task(
-                    supportServices.neondata.ImageMD5Mapper.save_all,
-                    md5_objs)
+                            supportServices.neondata.ImageMD5Mapper.save_all,
+                            md5_objs)
                 if not res:
                     _log.error('key=async_update_thumbnail' 
                         'msg=failed to save ImageMD5Mapper for %s' %thumbnail_id)
@@ -465,10 +471,10 @@ class BrightcoveApi(object):
                         'msg=failed to download image for %s' %thumbnail_id)
                 callback(None)
 
-        req = tornado.httpclient.HTTPRequest(url = img_url,
-                                             method = "GET",
-                                             request_timeout = 60.0,
-                                             connect_timeout = 5.0)
+        req = tornado.httpclient.HTTPRequest(url=img_url,
+                                             method="GET",
+                                             request_timeout=60.0,
+                                             connect_timeout=5.0)
         utils.http.send_request(req, callback=image_data_callback)
 
     ################################################################################

@@ -119,7 +119,6 @@ def check_services_bad_request():
     m_var = 'bad_request'
     check_module(module, program, m_var)
 
-
 def main():
     ''' main '''
 

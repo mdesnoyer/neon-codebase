@@ -611,10 +611,10 @@ class ProcessVideo(object):
             p_url = bc_request.previous_thumbnail.split('?')[0]
 
             http_client = tornado.httpclient.HTTPClient()
-            req = tornado.httpclient.HTTPRequest(url = p_url,
-                                                method = "GET",
-                                                request_timeout = 60.0,
-                                                connect_timeout = 10.0)
+            req = tornado.httpclient.HTTPRequest(url=p_url,
+                                                method="GET",
+                                                request_timeout=60.0,
+                                                connect_timeout=10.0)
 
             response = http_client.fetch(req)
             imgdata = response.body
@@ -633,14 +633,14 @@ class ProcessVideo(object):
         
         else:
             _log.debug("key=finalize_brightcove_request "
-                       " msg=no thumbnail for %s %s" %(api_key,video_id))
+                       " msg=no thumbnail for %s %s" %(api_key, video_id))
         
         #2 Push thumbnail in to brightcove account
         autosync = bc_request.autosync
         ba = BrightcovePlatform.get_account(api_key,i_id)
         if not ba:
             _log.error("key=finalize_brightcove_request msg=Brightcove " 
-                    " account doesnt exists a_id=%s i_id=%s"%(api_key,i_id))
+                    " account doesnt exists a_id=%s i_id=%s"%(api_key, i_id))
         else: 
             autosync = ba.auto_update 
         
@@ -652,14 +652,15 @@ class ProcessVideo(object):
             img = Image.fromarray(self.data_map[fno][1])
             #img_url = self.thumbnails[0]["urls"][0]
             tid = self.thumbnails[0]["thumbnail_id"] 
-            bcove   = brightcove_api.BrightcoveApi(
+            bcove = brightcove_api.BrightcoveApi(
                 neon_api_key=api_key,
                 publisher_id=pid,
                 read_token=rtoken,
                 write_token=wtoken)
             
             frame_size = self.video_metadata['frame_size']
-            ret = bcove.update_thumbnail_and_videostill(video_id, img, tid, frame_size)
+            ret = bcove.update_thumbnail_and_videostill(
+                                video_id, img, tid, frame_size)
 
             if ret[0]:
                 #update enabled time & reference ID

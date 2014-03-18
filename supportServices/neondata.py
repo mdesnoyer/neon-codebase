@@ -743,9 +743,9 @@ class BrightcovePlatform(AbstractPlatform):
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update)
       
-        #update the default still size
-        #if self.video_still_width != BCOVE_STILL_WIDTH:
-        #    bc.update_still_width(self.video_still_width) 
+        #update the default still size, if set
+        if self.video_still_width != BCOVE_STILL_WIDTH:
+            bc.update_still_width(self.video_still_width) 
 
         #Get video metadata
         platform_vid = InternalVideoID.to_external(i_vid)
