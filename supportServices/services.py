@@ -577,7 +577,7 @@ class AccountHandler(tornado.web.RequestHandler):
         requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_requests,
                     job_request_keys) 
         ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        for request,vid in zip(requests, vids):
+        for request, vid in zip(requests, vids):
             if not request:
                 result[vid] = None #indicate job not found
                 continue
@@ -779,7 +779,9 @@ class AccountHandler(tornado.web.RequestHandler):
                 #Create TID 0 as a temp place holder for previous thumbnail 
                 #during processing stage
                 tm = neondata.ThumbnailMetadata(
-                            0, vid, t_urls, ctime, 0, 0, "brightcove", 0, 0)
+                    0,
+                    neondata.InternalVideoID.generate(self.api_key, vid),
+                    t_urls, ctime, 0, 0, "brightcove", 0, 0)
                 thumbs.append(tm.to_dict())
                 p_videos.append(vid)
             elif request.state is neondata.RequestState.FAILED:
@@ -1068,8 +1070,8 @@ class AccountHandler(tornado.web.RequestHandler):
                         t_urls.append(item['videoStillURL'])
                         tm = neondata.ThumbnailMetadata(
                                 0,
-                                InternalVideoID.generate(self.api_key,
-                                                         item["id"]),
+                                neondata.InternalVideoID.generate(self.api_key,
+                                                                  item["id"]),
                                 t_urls, ctime, 0, 0,
                                 "brightcove", 0, 0)
                         thumbs.append(tm.to_dict())
@@ -1253,8 +1255,8 @@ class AccountHandler(tornado.web.RequestHandler):
                         t_urls.append(item['preview_image_url'])
                         tm = neondata.ThumbnailMetadata(
                                 0,
-                                InternalVideoID.generate(self.api_key,
-                                                         item["embed_code"]),
+                                neondata.InternalVideoID.generate(self.api_key,
+                                                                  item["embed_code"]),
                                 t_urls, ctime, 0, 0, "ooyala", 0, 0)
                         thumbs.append(tm.to_dict())
                         vr = VideoResponse(item["embed_code"],
@@ -1444,20 +1446,20 @@ class AccountHandler(tornado.web.RequestHandler):
                         _log.error("key=get_video_status_ooyala "
                                     " msg=video deleted %s" % vid)
                     else:
-                        result[vid].thumbnails.append(thumb) 
+                        result[vid].thumbnails.append(thumb.to_dict()) 
         
         #4. Set the default thumbnail for each of the video
         for res in result:
             vres = result[res]
             ooyala_thumb_id = None
             for thumb in vres.thumbnails:
-                if thumb.chosen == True:
-                    vres.current_thumbnail = thumb.key
-                    if "neon" in thumb.type:
+                if thumb['chosen'] == True:
+                    vres.current_thumbnail = thumb['key']
+                    if "neon" in thumb['type']:
                         vres.status = "active"
 
-                if thumb.type == neondata.ThumbnailType.OOYALA:
-                    ooyala_thumb_id = thumb.key
+                if thumb['type'] == neondata.ThumbnailType.OOYALA:
+                    ooyala_thumb_id = thumb['key']
 
             if vres.status == "finished" and vres.current_thumbnail == 0:
                 vres.current_thumbnail = ooyala_thumb_id

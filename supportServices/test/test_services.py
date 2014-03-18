@@ -62,10 +62,7 @@ def create_random_image_response():
 # Test Services
 ###############################################
 
-def process_neon_api_requests(api_requests,
-                              api_key=None,
-                              i_id=None,
-                              t_type='brightcove'):
+def process_neon_api_requests(api_requests, api_key, i_id, t_type):
     #Create thumbnail metadata
     images = {}
     thumbnail_url_to_image = {}
@@ -119,7 +116,7 @@ def process_neon_api_requests(api_requests,
                                         url, 10, 5, "test", i_id)
         vmdata.save()
 
-        return thumbnail_url_to_image
+    return images, thumbnail_url_to_image
 
 
 class TestServices(AsyncHTTPTestCase):
@@ -237,7 +234,7 @@ class TestServices(AsyncHTTPTestCase):
         return tids
 
     def _process_neon_api_requests(self, api_requests):
-        self.thumbnail_url_to_image = process_neon_api_requests(
+        self.images, self.thumbnail_url_to_image = process_neon_api_requests(
             api_requests,self.api_key, self.b_id, 'brightcove')
 
 
@@ -660,7 +657,7 @@ class TestServices(AsyncHTTPTestCase):
 
             #update a thumbnail
             new_tids = [] 
-            for vid,job_id in zip(videos, self.job_ids):
+            for vid, job_id in zip(videos, self.job_ids):
                 i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
                 vmdata= neondata.VideoMetadata.get(i_vid)
                 tids = vmdata.thumbnail_ids
@@ -947,7 +944,7 @@ class TestServices(AsyncHTTPTestCase):
         items = json.loads(resp.body)['items']
         result_vids = [x['video_id'] for x in items]
         self.assertEqual(ordered_videos[:page_size],
-                result_vids)
+                         result_vids)
 
         #publish a couple of videos
         vids = self._get_videos()[:page_size]
@@ -1161,8 +1158,8 @@ class TestOoyalaServices(AsyncHTTPTestCase):
         self.cp_mock_async_client().fetch.side_effect = \
           self._success_http_side_effect
 
-        self.oo_api_key = 's0Y3YxOp0XTCL2hFlfFS1S2MRmaY.nxNs0'
-        self.oo_api_secret = 'uwTrMevYq54eani8ViRn6Ar5-rwmmmvKwq1HDtCn'
+        self.oo_api_key = 'oo_api_key_now'
+        self.oo_api_secret = 'oo_secret'
        
         self.a_id = "oo_test"
         self.i_id = "oo_iid_1"
@@ -1339,17 +1336,19 @@ class TestOoyalaServices(AsyncHTTPTestCase):
         self.create_ooyala_account()
 
         #Get ooyala account 
-        oo_account = neondata.OoyalaPlatform.get_account(self.api_key, self.i_id)
+        oo_account = neondata.OoyalaPlatform.get_account(self.api_key,
+                                                         self.i_id)
         
         
         #create feed request
         oo_account.check_feed_and_create_requests()
   
-    def _process_ooyala_neon_api_requests(self):
+    def _process_neon_api_requests(self):
         '''
         Mock process the neon api requests
         '''
-        oo_account = neondata.OoyalaPlatform.get_account(self.api_key, self.i_id)
+        oo_account = neondata.OoyalaPlatform.get_account(self.api_key,
+                                                         self.i_id)
         api_request_keys = []
         for vid, job_id in oo_account.videos.iteritems():
             key = neondata.generate_request_key(self.api_key, job_id)
@@ -1365,8 +1364,8 @@ class TestOoyalaServices(AsyncHTTPTestCase):
             self.assertTrue(api_request.save())
         
         api_requests = neondata.NeonApiRequest.get_requests(api_request_keys)
-        self._process_neon_api_requests(api_requests, self.api_key,
-                                        self.i_id, "ooyala")
+        process_neon_api_requests(api_requests, self.api_key,
+                                  self.i_id, "ooyala")
 
     def test_create_ooyala_requests(self):
 
@@ -1391,7 +1390,7 @@ class TestOoyalaServices(AsyncHTTPTestCase):
         ''' test pagination of ooyala integration '''
 
         self._create_request_from_feed()
-        self._process_ooyala_neon_api_requests()
+        self._process_neon_api_requests()
 
         #get videos in pages
         page_no = 0
@@ -1419,9 +1418,10 @@ class TestOoyalaServices(AsyncHTTPTestCase):
         '''
 
         self._create_request_from_feed()
-        self._process_ooyala_neon_api_requests()
+        self._process_neon_api_requests()
         
-        oo_account = neondata.OoyalaPlatform.get_account(self.api_key, self.i_id)
+        oo_account = neondata.OoyalaPlatform.get_account(self.api_key,
+                                                         self.i_id)
         
         new_tids = [] 
         for vid, job_id in oo_account.videos.iteritems(): 

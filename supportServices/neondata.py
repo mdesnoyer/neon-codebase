@@ -338,7 +338,7 @@ class InternalVideoID(object):
     @staticmethod
     def generate(api_key, vid):
         ''' external platform vid --> internal vid '''
-        key = api_key + "_" + vid
+        key = '%s_%s' % (api_key, vid)
         return key
 
     @staticmethod
@@ -1238,15 +1238,14 @@ class OoyalaPlatform(AbstractPlatform):
         fsize = vmdata.get_frame_size()
 
         #Get all thumbnails
-        thumb_mappings = yield tornado.gen.Task(
-                ThumbnailIDMapper.get_thumb_mappings, tids)
+        thumbnails = yield tornado.gen.Task(
+                ThumbnailMetadata.get_many, tids)
         t_url = None
         
         #Check if the new tid exists
-        for thumb_mapping in thumb_mappings:
-            tmdata = thumb_mapping.thumbnail_metadata
-            if tmdata["thumbnail_id"] == new_tid:
-                t_url = tmdata["urls"][0]
+        for thumb in thumbnails:
+            if thumb.key == new_tid:
+                t_url = thumb.urls[0]
         
         if not t_url:
             _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
@@ -1268,8 +1267,8 @@ class OoyalaPlatform(AbstractPlatform):
         #Update the database with video
         #Get previous thumbnail and new thumb
         modified_thumbs = [] 
-        new_thumb, old_thumb = ThumbnailIDMapper.enable_thumbnail(
-                                    thumb_mappings, new_tid)
+        new_thumb, old_thumb = ThumbnailMetadata.enable_thumbnail(
+                                    thumbnails, new_tid)
         modified_thumbs.append(new_thumb)
         if old_thumb is None:
             #old_thumb can be None if there was no neon thumb before
@@ -1280,10 +1279,10 @@ class OoyalaPlatform(AbstractPlatform):
        
         #Verify that new_thumb data is not empty 
         if new_thumb is not None:
-            res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
+            res = yield tornado.gen.Task(ThumbnailMetadata.save_all,
                                             modified_thumbs)  
             if not res:
-                _log.error("key=update_thumbnail msg=ThumbnailIDMapper save_all"
+                _log.error("key=update_thumbnail msg=ThumbnailMetadata save_all"
                                 " failed for %s" %new_tid)
                 callback(False)
                 return
