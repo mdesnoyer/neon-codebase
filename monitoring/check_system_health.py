@@ -2,6 +2,8 @@
 
 '''
 Check system vitals and send metrics to carbon agent /monitoring server
+
+Run this script to send data to carbon server
 '''
 
 import sys
@@ -13,7 +15,7 @@ import resource
 import socket
 import subprocess
 
-CARBON_SERVER = '54.225.235.97'
+CARBON_SERVER = '54.225.235.97' #10.171.5.3
 CARBON_PORT = 8090
 
 def get_proc_memory():

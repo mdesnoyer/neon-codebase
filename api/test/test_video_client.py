@@ -331,7 +331,11 @@ class TestVideoClient(unittest.TestCase):
         clientp.stop()
 
     def test_streaming_callback(self):
-        
+    
+        '''
+        Tornado streaming callback
+        '''
+
         j_id = "j123"
         api_key = "apikey123"
         jparams = request_template.neon_api_request %(j_id, "v",
@@ -393,7 +397,7 @@ class TestVideoClient(unittest.TestCase):
         #check thumbnail ids and videometadata
         vm = neondata.VideoMetadata.get(neondata.InternalVideoID.generate(api_key, vid))
         tids = vm.thumbnail_ids
-        thumb_mappings = neondata.ThumbnailIDMapper.get_thumb_mappings(tids)
+        thumb_mappings = neondata.ThumbnailMetadata.get_many(tids)
         self.assertFalse( None in thumb_mappings)
        
         s3prefix = "https://host-thumbnails.s3.amazonaws.com/"

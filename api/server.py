@@ -21,7 +21,8 @@ import utils.ps
 
 from supportServices.neondata import NeonApiRequest, BrightcoveApiRequest
 from supportServices.neondata import NeonPlatform, YoutubePlatform, \
-        BrightcovePlatform, VideoMetadata, RequestState, InternalVideoID 
+        BrightcovePlatform, VideoMetadata, RequestState, \
+        InternalVideoID, OoyalaApiRequest 
 import utils.neon
 from utils import statemon
 
@@ -296,9 +297,24 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 refresh_token = params["refresh_token"]
                 expiry = params["token_expiry"]
                 autosync = params["autosync"]
-                api_request = YoutubeApiRequest(job_id, api_key, vid, title, url,
-                                        access_token, refresh_token, expiry, http_callback)
+                api_request = YoutubeApiRequest(job_id, api_key, vid, 
+                                                title, url,
+                                                access_token, refresh_token, 
+                                                expiry, http_callback)
                 api_request.previous_thumbnail = "http://img.youtube.com/vi/" + vid + "maxresdefault.jpg"
+            
+            elif "ooyala" in self.request.uri:
+                request_type = "ooyala"
+                oo_api_key = params["oo_api_key"]
+                oo_secret_key = params["oo_secret_key"]
+                autosync = params["autosync"]
+                i_id = params[properties.INTEGRATION_ID]
+                p_thumb = params[properties.PREV_THUMBNAIL]
+                api_request = OoyalaApiRequest(job_id, api_key, 
+                                            i_id, vid, title, url,
+                                            oo_api_key, oo_secret_key, 
+                                            p_thumb, http_callback)
+                api_request.autosync = autosync
 
             else:
                 request_type = "neon"
@@ -338,9 +354,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 self.set_status(502)
             else:
                 if request_type == 'youtube':
-                    YoutubePlatform.get_account(api_key,get_yt_account) #i_id ?  
+                    YoutubePlatform.get_account(api_key, get_yt_account) #i_id ?  
                 elif request_type == 'neon':
-                    NeonPlatform.get_account(api_key,get_platform) 
+                    NeonPlatform.get_account(api_key, get_platform) 
                 else:
                     self.set_status(201)
                     self.write(response_data)
