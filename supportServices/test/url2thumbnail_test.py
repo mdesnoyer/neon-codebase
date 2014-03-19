@@ -15,82 +15,95 @@ import logging
 from mock import patch, MagicMock
 from supportServices import neondata
 import random
+from StringIO import StringIO
 from supportServices.url2thumbnail import URL2ThumbnailIndex
 import test_utils.neontest
 import test_utils.redis
+import tornado.httpclient
+import tornado.ioloop
 import unittest
 from utils import imageutils
 
 _log = logging.getLogger(__name__)
 
-class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
+class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):    
     def setUp(self):
+        super(TestURL2ThumbIndex, self).setUp()
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+        
         random.seed(198948)
 
         self.images = [imageutils.PILImageUtils.create_random_image(640, 480) for x in range(5)]
 
         # Create some simple entries in the account database
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-
-        acct1 = neondata.BrightcovePlatform('acct_1', 'i_1', 'api_1')
+        acct1 = neondata.BrightcovePlatform('acct1', 'i1', 'api1')
         acct1.add_video('v1', 'j1')
         acct1.add_video('v2', 'j2')
         acct1.save()
         v1 = neondata.VideoMetadata(
-            neondata.InternalVideoID.generate('api_1', 'v1'), ['t1', 't2'], 
+            neondata.InternalVideoID.generate('api1', 'v1'), ['t1', 't2'], 
             '', '', 0, 0.0, 1, '')
         v1.save()
-        t1 = neondata.ThumbnailIDMapper(
-            't1', v1.key,
-            neondata.ThumbnailMetaData('t1', ['one.jpg', 'one_cmp.jpg'],
-                                       None,None,None,None,None,None))
+        t1 = neondata.ThumbnailMetadata(
+            't1', v1.key, ['one.jpg', 'one_cmp.jpg'],
+            None, None, None, None, None, None)
         t1.save()
-        t2 = neondata.ThumbnailIDMapper(
-            't2', v1.key,
-            neondata.ThumbnailMetaData('t2', ['two.jpg'],
-                                       None,None,None,None,None,None))
+        neondata.ThumbnailURLMapper('one.jpg', 't1').save()
+        neondata.ThumbnailURLMapper('one_cmp.jpg', 't1').save()
+        t2 = neondata.ThumbnailMetadata(
+            't2', v1.key,  ['two.jpg'],
+            None, None, None, None, None, None)
         t2.save()
+        neondata.ThumbnailURLMapper('two.jpg', 't2').save()
         v2 = neondata.VideoMetadata(
-            neondata.InternalVideoID.generate('api_1', 'v2'), ['t3'], 
+            neondata.InternalVideoID.generate('api1', 'v2'), ['t3'], 
             '', '', 0, 0.0, 1, '')
         v2.save()
-        t3 = neondata.ThumbnailIDMapper(
-            't3', v2.key,
-            neondata.ThumbnailMetaData('t3', ['three.jpg',],
-                                       None,None,None,None,None,None))
+        t3 = neondata.ThumbnailMetadata(
+            't3', v2.key, ['three.jpg',],
+            None, None, None, None, None, None)
         t3.save()
+        neondata.ThumbnailURLMapper('three.jpg', 't3').save()
 
-        acct2 = neondata.BrightcovePlatform('acct_2', 'i_2', 'api_2')
+        acct2 = neondata.BrightcovePlatform('acct2', 'i2', 'api2')
         acct2.add_video('v3', 'j3')
         acct2.save()
         v3 = neondata.VideoMetadata(
-            neondata.InternalVideoID.generate('api_2', 'v3'), ['t1', 't2'], 
+            neondata.InternalVideoID.generate('api2', 'v3'), ['t4'], 
             '', '', 0, 0.0, 1, '')
         v3.save()
-        t4 = neondata.ThumbnailIDMapper(
-             't4', v3.key,
-             neondata.ThumbnailMetaData('t4', ['four.jpg'],
-                                        None,None,None,None,None,None))
+        t4 = neondata.ThumbnailMetadata(
+             't4', v3.key, ['four.jpg'],
+             None, None, None, None, None, None)
         t4.save()
+        neondata.ThumbnailURLMapper('four.jpg', 't4').save()
         
         # Define the mapping that will be mocked out from url to images. 
         self.url2img = {}
         self.get_img_patcher = \
           patch('supportServices.url2thumbnail.utils.http.send_request')
         self.get_img_mock = self.get_img_patcher.start()
-        self.get_img_mock.side_effect = \
-          lambda x, callback: self.io_loop.add_callback(
-              callback,
-              self._returnValidImage(x))
+        self.get_img_mock.side_effect = self._returnImageCallback
 
     def tearDown(self):
         self.get_img_patcher.stop()
         self.redis.stop()
+        
+        super(TestURL2ThumbIndex, self).tearDown()
 
-    def _returnValidImage(self, http_request):
-        response = tornado.httpclient.HTTPResponse(request, 200)
+    def _returnImageCallback(self, request, callback=None):
+        image = self._returnValidImage(request)
+        if callback:
+            self.io_loop.add_callback(callback, image)
+        else:
+            return image
+
+    def _returnValidImage(self, request):
+        response = tornado.httpclient.HTTPResponse(request, 200,
+                                                   buffer=StringIO())
         self.url2img[request.url].save(response.buffer, 'JPEG')
+        response.buffer.seek(0)
         return response
 
     def setURLImageMapping(self, mapping):
@@ -100,7 +113,7 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
         '''
         self.url2img = mapping
 
-    def test_all_different_images(self):
+    def test_all_known_image_urls(self):
         self.setURLImageMapping({'one.jpg' : self.images[0],
                                  'one_cmp.jpg' : self.images[0],
                                  'two.jpg' : self.images[1],
@@ -108,17 +121,168 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
                                  'four.jpg' : self.images[3]})
         index = URL2ThumbnailIndex()
 
-        
-        self.assertEqual(index.get_thumbnail_info('one.jpg').key,
-                         't1')
+        self.assertEqual(index.get_thumbnail_info('one.jpg').key, 't1')
         self.assertEqual(index.get_thumbnail_info('one_cmp.jpg').key,
                          't1')
-        self.assertEqual(index.get_thumbnail_info('two.jpg').key,
-                         't2')
-        self.assertEqual(index.get_thumbnail_info('three.jpg').key,
-                         't3')
-        self.assertEqual(index.get_thumbnail_info('four.jpg').key,
-                         't4')
+        self.assertEqual(index.get_thumbnail_info('two.jpg').key, 't2')
+        self.assertEqual(index.get_thumbnail_info('three.jpg').key, 't3')
+        self.assertEqual(index.get_thumbnail_info('four.jpg').key, 't4')
+
+    def test_async_ability(self):
+        self.setURLImageMapping({'one.jpg' : self.images[0],
+                                 'one_cmp.jpg' : self.images[0],
+                                 'two.jpg' : self.images[1],
+                                 'three.jpg' : self.images[2],
+                                 'four.jpg' : self.images[3],
+                                 'unknown.jpg' : self.images[1]})
+        index = URL2ThumbnailIndex()
+
+        index.get_thumbnail_info('three.jpg', callback=self.stop)
+        self.assertEqual(self.wait().key, 't3')
+        index.get_thumbnail_info('four.jpg', callback=self.stop)
+        self.assertEqual(self.wait().key, 't4')
+        index.get_thumbnail_info('unknown.jpg', callback=self.stop)
+        thumb_info = self.wait()
+        self.assertEqual(thumb_info.key, 't2')
+        self.assertIn('unknown.jpg', thumb_info.urls)
+
+        # Make sure that the new url was recorded
+        self.assertIn('unknown.jpg', neondata.ThumbnailMetadata.get('t2').urls)
+
+
+    def test_unknown_url_of_same_image(self):
+        self.setURLImageMapping({'one.jpg' : self.images[0],
+                                 'one_cmp.jpg' : self.images[0],
+                                 'two.jpg' : self.images[1],
+                                 'three.jpg' : self.images[2],
+                                 'four.jpg' : self.images[3],
+                                 'unknown.jpg' : self.images[1]})
+        index = URL2ThumbnailIndex()
+
+
+        thumb_info = index.get_thumbnail_info('unknown.jpg')
+        self.assertEqual(thumb_info.key, 't2')
+        self.assertIn('unknown.jpg', thumb_info.urls)
+
+        # Make sure that the new url was recorded
+        self.assertIn('unknown.jpg', neondata.ThumbnailMetadata.get('t2').urls)
+
+    def test_unknown_url_of_unknown_image(self):
+        self.setURLImageMapping({'one.jpg' : self.images[0],
+                                 'one_cmp.jpg' : self.images[0],
+                                 'two.jpg' : self.images[1],
+                                 'three.jpg' : self.images[2],
+                                 'four.jpg' : self.images[3],
+                                 'unknown.jpg' : self.images[4]})
+        index = URL2ThumbnailIndex()
+
+        self.assertIsNone(index.get_thumbnail_info('unknown.jpg'))
+
+    def test_same_image_in_different_account(self):
+        v3 = neondata.ThumbnailMetadata.get(
+            neondata.InternalVideoID.generate('api2', 'v3'))
+        v3.thumbnail_ids.append('t5')
+        v3.save()
+        t5 = neondata.ThumbnailMetadata(
+             't5', v3.key, ['five.jpg'],
+             None, None, None, None, None, None)
+        t5.save()
+        
+        self.setURLImageMapping({'one.jpg' : self.images[0],
+                                 'one_cmp.jpg' : self.images[0],
+                                 'two.jpg' : self.images[1],
+                                 'three.jpg' : self.images[2],
+                                 'four.jpg' : self.images[3],
+                                 'five.jpg' : self.images[0]})
+
+        index = URL2ThumbnailIndex()
+
+        self.assertIsNone(index.get_thumbnail_info('five.jpg'))
+        self.assertEqual(index.get_thumbnail_info('five.jpg',
+                                                  account_api_key='api2').key,
+                                                  't5')
+        index.get_thumbnail_info('five.jpg', callback=self.stop,
+                                 account_api_key='api1')
+        self.assertEqual(
+            index.get_thumbnail_info('five.jpg', account_api_key='api1').key,
+            't1')
+        self.assertEqual(
+            't1',
+            index.get_thumbnail_info(
+            'five.jpg',
+            internal_video_id=neondata.InternalVideoID.generate('api1',
+                                                                'v1')).key)
+        self.assertEqual(
+            't5',
+            index.get_thumbnail_info('five.jpg',
+                                     internal_video_id=v3.key).key)
+
+    def test_same_image_in_different_video(self):
+        v2 = neondata.ThumbnailMetadata.get(
+            neondata.InternalVideoID.generate('api1', 'v2'))
+        v2.thumbnail_ids.append('t5')
+        v2.save()
+        t5 = neondata.ThumbnailMetadata(
+             't5', v2.key, ['five.jpg'],
+             None, None, None, None, None, None)
+        t5.save()
+
+        self.setURLImageMapping({'one.jpg' : self.images[0],
+                                 'one_cmp.jpg' : self.images[0],
+                                 'two.jpg' : self.images[1],
+                                 'three.jpg' : self.images[2],
+                                 'four.jpg' : self.images[3],
+                                 'five.jpg' : self.images[0]})
+
+        index = URL2ThumbnailIndex()
+
+        self.assertIsNone(index.get_thumbnail_info('five.jpg'))
+        self.assertIsNone(index.get_thumbnail_info('five.jpg',
+                                                   account_api_key='api1'))
+        self.assertEqual(
+            't5',
+            index.get_thumbnail_info('five.jpg', internal_video_id=v2.key).key)
+        self.assertEqual(
+            't1',
+            index.get_thumbnail_info(
+                'five.jpg',
+                internal_video_id=neondata.InternalVideoID.generate(
+                    'api1', 'v1')).key)
+
+    def test_thumbnail_metadata_missing(self):
+        neondata.ThumbnailURLMapper('unknown.jpg', 'no_tid').save()
+        self.setURLImageMapping({'one.jpg' : self.images[0],
+                                 'one_cmp.jpg' : self.images[0],
+                                 'two.jpg' : self.images[1],
+                                 'three.jpg' : self.images[2],
+                                 'four.jpg' : self.images[3]})
+        
+        index = URL2ThumbnailIndex()
+
+        with self.assertLogExists(
+                logging.ERROR,
+                'Could not find thumbnail information for id: no_tid'):
+            index.get_thumbnail_info('unknown.jpg')
+
+    def test_image_not_available(self):
+        self.setURLImageMapping({'one.jpg' : self.images[0],
+                                 'one_cmp.jpg' : self.images[0],
+                                 'two.jpg' : self.images[1],
+                                 'three.jpg' : self.images[2],
+                                 'four.jpg' : self.images[3]})
+        index = URL2ThumbnailIndex()
+
+        def return_error(x, callback=None):
+            callback(tornado.httpclient.HTTPResponse(
+                x, 200, error=tornado.httpclient.HTTPError(404)))
+
+        self.get_img_mock.side_effect = return_error
+
+        with self.assertLogExists(
+                logging.ERROR,
+                'Error retrieving image from: unknown.jpg'):
+            index.get_thumbnail_info('unknown.jpg')
+        
 
     
 

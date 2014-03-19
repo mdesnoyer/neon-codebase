@@ -17,6 +17,7 @@ import PIL.Image
 import tornado.httpclient
 import tornado.gen
 import utils.http
+import utils.sync
 
 _log = logging.getLogger(__name__)
 
@@ -40,21 +41,22 @@ class URL2ThumbnailIndex:
     def _build_index(self):
         '''Builds the index from the neondata database.'''
         _log.info('Collecting all the images in the database.')
-        hashes = []
-        for thumb_info in neondata.ThumbnailIDMapper.iterate_all_thumbnails():
+        hashes = set()
+        for thumb_info in neondata.ThumbnailMetadata.iterate_all_thumbnails():
             # Go grab the thumbnail and compute its perceptual hash
-            for url in thumb_info.thumbnail_metadata.urls:
+            for url in thumb_info.urls:
                 response = utils.http.send_request(
                     tornado.httpclient.HTTPRequest(url))
-                if not response.error:
-                    _log.error('Error retrieving image from: %s' % url)
+                if response.error:
+                    _log.error('Error retrieving image from: %s. %s' % 
+                               (url, response.error))
                     continue
 
                 image = PIL.Image.open(response.buffer)
                 cur_hash = self.hash_index.hash_pil_image(image)
 
                 # Record the hash value
-                hashes.append(cur_hash)
+                hashes.add(cur_hash)
                 try:
                     self.phash_map[cur_hash].append(thumb_info)
                 except KeyError:
@@ -66,10 +68,11 @@ class URL2ThumbnailIndex:
         _log.info('Building perceptual image index.')
         self.hash_index.build_index(hashes)
 
+    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_thumbnail_info(self, url, internal_video_id=None,
                            account_api_key=None):
-        '''Retrieves the ThumbnailIDMapper object for the given url.
+        '''Retrieves the ThumbnailMetadata object for the given url.
 
         If we don't know the url, we fetch the image and try to match
         it to a known url with a perceptual hash. This is important
@@ -86,10 +89,11 @@ class URL2ThumbnailIndex:
         '''
 
         # First look for the URL in our mapper
-        thumb_id = neondata.ThumbnailURLMapper(url)
+        thumb_id = yield tornado.gen.Task(neondata.ThumbnailURLMapper.get_id,
+                                          url)
         if thumb_id is not None:
-            thumb_info = neondata.ThumbnailIDMapper.get_thumb_mappings(
-                [thumb_id])[0]
+            thumb_info = yield tornado.gen.Task(neondata.ThumbnailMetadata.get,
+                                                thumb_id)
             if thumb_info is None:
                 _log.error('Could not find thumbnail information for id: %s' %
                            thumb_id)
@@ -98,11 +102,12 @@ class URL2ThumbnailIndex:
         # TODO(mdesnoyer): Once our image urls contain a thumbnail id,
         # we can try to extract that directly first.
 
-        # We don't know abou this url so get the image
-        response = yield tornado.gen.Task(utils.http.send_request(
-            tornado.httpclient.HTTPRequest(url)))
-        if not response.error:
-            _log.error('Error retrieving image from: %s' % url)
+        # We don't know about this url so get the image
+        response = yield tornado.gen.Task(utils.http.send_request,
+            tornado.httpclient.HTTPRequest(url))
+        if response.error:
+            _log.error('Error retrieving image from: %s: %s' %
+                       (url, response.error))
             raise tornado.gen.Return(None)
         image = PIL.Image.open(response.buffer)
         
@@ -122,16 +127,17 @@ class URL2ThumbnailIndex:
             except KeyError:
                 pass
             
-            
-
         possible_thumbs = sorted(possible_thumbs)
-        if (len(possible_thumbs) == 0 or 
+        if (len(possible_thumbs) == 1 or 
             (len(possible_thumbs) > 1 and 
              possible_thumbs[0][0] < possible_thumbs[1][0])):
-            # We found a unique enough match, so record It
+            # We found a unique enough match for the url, so record it
             found_thumb = possible_thumbs[0][1]
-            found_thumb.thumbnail_metadata.append(url)
-            ThumbnailIDMapper.save_all([found_thumb])
+            found_thumb.urls.append(url)
+
+            # We don't need to wait for the save to happen here, but
+            # it simplifies testing, so do it.
+            yield tornado.gen.Task(found_thumb.save)
 
             raise tornado.gen.Return(found_thumb)
 

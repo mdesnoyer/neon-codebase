@@ -26,7 +26,7 @@ from StringIO import StringIO
 from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         YoutubePlatform, NeonUserAccount, DBConnection, NeonApiKey, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
-        ImageMD5Mapper, ThumbnailMetadata, InternalVideoID
+        ImageMD5Mapper, ThumbnailMetadata, InternalVideoID, OoyalaPlatform
 
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
@@ -230,7 +230,59 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         #Make sure that each of the thread retrieved a key
         #and did not have an exception
-        self.assertTrue(None not in results) 
+        self.assertTrue(None not in results)
+
+    def test_iterate_all_thumbnails(self):
+
+        # Build up a database structure
+        na = NeonUserAccount('acct1')
+        bp = BrightcovePlatform('acct1', 'bp1', na.neon_api_key)
+        op = OoyalaPlatform('acct1', 'op1', na.neon_api_key, 'p_code', 'o_key',
+                            'o_secret')
+        na.add_platform(bp)
+        na.add_platform(op)
+        na.save()
+
+        vids = [
+            InternalVideoID.generate(na.neon_api_key, 'v0'),
+            InternalVideoID.generate(na.neon_api_key, 'v1'),
+            InternalVideoID.generate(na.neon_api_key, 'v2')
+            ]
+            
+        thumbs = [
+            ThumbnailMetadata('t1', vids[0], ['t1.jpg'], None, None, None,
+                              None, None, None),
+            ThumbnailMetadata('t2', vids[0], ['t2.jpg'], None, None, None,
+                              None, None, None),
+            ThumbnailMetadata('t3', vids[1], ['t3.jpg'], None, None, None,
+                              None, None, None),
+            ThumbnailMetadata('t4', vids[2], ['t4.jpg'], None, None, None,
+                              None, None, None),
+            ThumbnailMetadata('t5', vids[2], ['t5.jpg'], None, None, None,
+                              None, None, None)]
+        ThumbnailMetadata.save_all(thumbs)
+
+        v0 = VideoMetadata(vids[0], [thumbs[0].key, thumbs[1].key],
+                           'r0', 'v0.mp4', 0, 0, None, bp.integration_id)
+        v0.save()
+        v1 = VideoMetadata(vids[1], [thumbs[2].key],
+                           'r1', 'v1.mp4', 0, 0, None, bp.integration_id)
+        v1.save()
+        v2 = VideoMetadata(vids[2], [thumbs[3].key, thumbs[4].key],
+                           'r2', 'v2.mp4', 0, 0, None, op.integration_id)
+        v2.save()
+
+
+        bp.add_video('v0', 'r0')
+        bp.add_video('v1', 'r1')
+        bp.save()
+        op.add_video('v2', 'r2')
+        op.save()
+
+        # Now make sure that the iteration goes through all the thumbnails
+        found_thumb_ids = [x.key for x in  
+                           ThumbnailMetadata.iterate_all_thumbnails()]
+        self.assertItemsEqual(found_thumb_ids, [x.key for x in thumbs])
 
 
 class TestBrightcovePlatform(unittest.TestCase):
@@ -306,7 +358,7 @@ class TestThumbnailHelperClass(unittest.TestCase):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
 
-        self.image = ImageUtils.create_random_image(360, 480)
+        self.image = PILImageUtils.create_random_image(360, 480)
 
     def tearDown(self):
         self.redis.stop()

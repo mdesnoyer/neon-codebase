@@ -139,9 +139,10 @@ class ImHashIndex:
             # do a nn search and check the resulting distances.
             idx, f_dists = self.flann.nn_index(
                 self.binary_array_to_uint8_array(query),
-                5)
-            idx = np.nonzero(f_dists < radius)[0]
-            dists = f_dists[idx]
+                min(5, self.flann_index.shape[0]))
+            valid_idx = np.nonzero(f_dists < radius)
+            idx = idx[valid_idx]
+            dists = f_dists[valid_idx]
             hashes = [
                 self.uint8_row_to_int(self.flann_index[i,:]) for
                 i in idx]

@@ -151,7 +151,7 @@ add_subdirectory( cmake )
 add_subdirectory( src )
 #add_subdirectory( examples )
 add_subdirectory( test )
-add_subdirectory( doc )
+#add_subdirectory( doc )
 
 
 # CPACK options

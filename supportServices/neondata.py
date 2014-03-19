@@ -157,18 +157,20 @@ class RedisAsyncWrapper(object):
 
     def get(self, key, callback):
         ''' get key '''
+        io_loop = tornado.ioloop.IOLoop.current()
         def _callback(result):
             ''' result callback'''
-            tornado.ioloop.IOLoop.instance().add_callback(
+            io_loop.add_callback(
                     lambda: callback(result))
         RedisAsyncWrapper._thread_pool.apply_async(
                 self.client.get, args=(key,), callback=_callback)
    
     def set(self, key, value, callback):
         ''' set key '''
+        io_loop = tornado.ioloop.IOLoop.current()
         def _callback(result):
             ''' result callback'''
-            tornado.ioloop.IOLoop.instance().add_callback(
+            io_loop.add_callback(
                     lambda: callback(result))
         RedisAsyncWrapper._thread_pool.apply_async(
             self.client.set, args=(key, value,), callback=_callback)
@@ -179,27 +181,30 @@ class RedisAsyncWrapper(object):
 
     def mget(self, keys, callback):
         ''' multi get '''
+        io_loop = tornado.ioloop.IOLoop.current()
         def _callback(result):
             ''' result callback'''
-            tornado.ioloop.IOLoop.instance().add_callback(
+            io_loop.add_callback(
                     lambda: callback(result))
         RedisAsyncWrapper._thread_pool.apply_async(
             self.client.mget, args=(keys,), callback=_callback)
     
     def mset(self, keys, callback):
         ''' multi set '''
+        io_loop = tornado.ioloop.IOLoop.current()
         def _callback(result):
             ''' result callback'''
-            tornado.ioloop.IOLoop.instance().add_callback(
+            io_loop.add_callback(
                     lambda: callback(result))
         RedisAsyncWrapper._thread_pool.apply_async(
             self.client.mset, args=(keys,), callback=_callback)
     
     def keys(self, prefix, callback):
         ''' key regex match'''
+        io_loop = tornado.ioloop.IOLoop.current()
         def _callback(result):
             ''' result callback'''
-            tornado.ioloop.IOLoop.instance().add_callback(
+            io_loop.add_callback(
                     lambda: callback(result))
         RedisAsyncWrapper._thread_pool.apply_async(
             self.client.keys, args=(prefix,), callback=_callback)
@@ -618,6 +623,18 @@ class AbstractPlatform(object):
         instances = []
         instances.extend(NeonPlatform.get_all_instances())
         instances.extend(BrightcovePlatform.get_all_instances())
+        instances.extend(OoyalaPlatform.get_all_instances())
+        return instances
+
+    @classmethod
+    def _get_all_instances_impl(cls, callback=None):
+        '''Implements get_all_instances for a single platform type.'''
+        platforms = cls.get_all_platform_data()
+        instances = [] 
+        for pdata in platforms:
+            platform = cls.create(pdata)
+            if platform:
+                instances.append(platform)
         return instances
 
     @classmethod
@@ -684,16 +701,11 @@ class NeonPlatform(AbstractPlatform):
         
         return obj
 
+    
     @classmethod
     def get_all_instances(cls, callback=None):
-        ''' get all instances [NeonPlatform..]''' 
-        platforms = NeonPlatform.get_all_platform_data()
-        instances = [] 
-        for pdata in platforms:
-            platform = NeonPlatform.create(pdata)
-            instances.append(platform)
-
-        return instances
+        ''' get all brightcove instances'''
+        return cls._get_all_instances_impl()
 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
@@ -1013,14 +1025,7 @@ class BrightcovePlatform(AbstractPlatform):
     @classmethod
     def get_all_instances(cls, callback=None):
         ''' get all brightcove instances'''
-
-        platforms = BrightcovePlatform.get_all_platform_data()
-        instances = [] 
-        for pdata in platforms:
-            platform = BrightcovePlatform.create(pdata)
-            if platform:
-                instances.append(platform)
-        return instances
+        return cls._get_all_instances_impl()
 
 class YoutubePlatform(AbstractPlatform):
     ''' Youtube platform integration '''
@@ -1146,23 +1151,18 @@ class YoutubePlatform(AbstractPlatform):
             yt.__dict__[key] = params[key]
 
         return yt
-    
+
     @classmethod
     def get_all_instances(cls, callback=None):
-        platforms = YoutubePlatform.get_all_platform_data()
-        instances = [] 
-        for pdata in platforms:
-            platform = YoutubePlatform.create(pdata)
-            instances.append(platform)
-
-        return instances
+        ''' get all brightcove instances'''
+        return cls._get_all_instances_impl()
 
 class OoyalaPlatform(AbstractPlatform):
     '''
     OOYALA Platform
     '''
     def __init__(self, a_id, i_id, api_key, p_code, 
-                            o_api_key, api_secret, auto_update=False): 
+                 o_api_key, api_secret, auto_update=False): 
         '''
         Init ooyala platform 
         
@@ -1313,6 +1313,11 @@ class OoyalaPlatform(AbstractPlatform):
         for key in params:
             oo.__dict__[key] = params[key]
         return oo
+
+    @classmethod
+    def get_all_instances(cls, callback=None):
+        ''' get all brightcove instances'''
+        return cls._get_all_instances_impl()
 
 #######################
 # Request Blobs 
@@ -1787,7 +1792,7 @@ class ThumbnailMetadata(object):
 
         def cb(result):
             if result:
-                obj = create(result)
+                obj = cls.create(result)
                 callback(obj)
             else:
                 callback(None)
@@ -1897,7 +1902,7 @@ class ThumbnailMetadata(object):
            thumbnails will be missing.
 
         Returns - A generator that does the iteration and produces 
-                  ThumbnailIDMapper objects.
+                  ThumbnailMetadata objects.
         '''
 
         for platform in AbstractPlatform.get_all_instances():
@@ -1908,7 +1913,7 @@ class ThumbnailMetadata(object):
                                video_id)
                     continue
 
-                for thumb in ThumbnailIDMapper.get_thumb_mappings(
+                for thumb in ThumbnailMetadata.get_many(
                         video_metadata.thumbnail_ids):
                     yield thumb
 
