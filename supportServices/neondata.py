@@ -77,7 +77,7 @@ class DBConnection(object):
         
         if cname:
             if cname in ["AbstractPlatform", "BrightcovePlatform", "NeonApiKey"
-                    "YoutubePlatform", "NeonUserAccount", "NeonApiRequest"]:
+                    "YoutubePlatform", "NeonUserAccount", "OoyalaPlatform", "NeonApiRequest"]:
                 host = options.accountDB 
                 port = options.dbPort 
             elif cname == "VideoMetadata":
@@ -229,8 +229,10 @@ class DBConnectionCheck(threading.Thread):
             time.sleep(self.interval)
 
 #start watchdog thread for the DB connection
-DBCHECK_THREAD = DBConnectionCheck()
-DBCHECK_THREAD.start()
+#Disable for now, some issue with connection pool, throws reconnection
+#error, I think its due to each object having too many stored connections
+#DBCHECK_THREAD = DBConnectionCheck()
+#DBCHECK_THREAD.start()
 
 def _erase_all_data():
     '''Erases all the data from the redis databases.
@@ -619,6 +621,7 @@ class AbstractPlatform(object):
         instances = []
         instances.extend(NeonPlatform.get_all_instances())
         instances.extend(BrightcovePlatform.get_all_instances())
+        instances.extend(OoyalaPlatform.get_all_instances())
         return instances
 
     @classmethod
