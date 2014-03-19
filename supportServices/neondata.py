@@ -1316,6 +1316,18 @@ class OoyalaPlatform(AbstractPlatform):
         for key in params:
             oo.__dict__[key] = params[key]
         return oo
+    
+    @classmethod
+    def get_all_instances(cls, callback=None):
+        ''' get all ooyala instances'''
+
+        platforms = OoyalaPlatform.get_all_platform_data()
+        instances = [] 
+        for pdata in platforms:
+            platform = OoyalaPlatform.create(pdata)
+            if platform:
+                instances.append(platform)
+        return instances
 
 #######################
 # Request Blobs 
