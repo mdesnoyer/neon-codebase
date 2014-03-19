@@ -446,9 +446,12 @@ class OoyalaAPI(object):
         items: [] of dict objects with asset information
         limit: # of videos to create requests
 
-        No async http calls in this method. There was a bug with creating async calls 
-        to the neon server in brightcove api, hence resorting to sync http calls here
-        The bug to be re-explored soon and the code to be made synci & async compatible
+        No async http calls in this method. There was a bug with
+        creating async calls to the neon server in brightcove api,
+        hence resorting to sync http calls here The bug to be
+        re-explored soon and the code to be made synci & async
+        compatible 
+
         '''
 
         items_processed = [] 
