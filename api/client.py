@@ -398,6 +398,10 @@ class ProcessVideo(object):
         fmt = 'jpeg'
         s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
         s3_urls = []
+        
+        api_key = self.request_map[properties.API_KEY] 
+        video_id = self.request_map[properties.VIDEO_ID]
+        i_vid = InternalVideoID.generate(api_key, video_id)
 
         #upload the images to s3
         for i in range(len(frames)):
@@ -415,11 +419,7 @@ class ProcessVideo(object):
             s3_urls.append(s3fname)
             
             urls = []
-            api_key = self.request_map[properties.API_KEY] 
-            video_id = self.request_map[properties.VIDEO_ID]
-            tid = ThumbnailID.generate(imgdata,
-                                       InternalVideoID.generate(api_key,
-                                                                video_id))
+            tid = ThumbnailID.generate(imgdata, i_vid)
             urls.append(s3fname)
             created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             enabled = None 
@@ -429,7 +429,7 @@ class ProcessVideo(object):
             rank    = i +1 
 
             #populate thumbnails
-            tdata = ThumbnailMetadata(tid, video_id, urls, created, width,
+            tdata = ThumbnailMetadata(tid, i_vid, urls, created, width,
                                       height, ttype, score,
                                       self.model_version, rank=rank)
             self.thumbnails.append(tdata)
@@ -450,9 +450,8 @@ class ProcessVideo(object):
         urls = []
         api_key = self.request_map[properties.API_KEY] 
         video_id = self.request_map[properties.VIDEO_ID]
-        tid = ThumbnailID.generate(imgdata,
-                                   InternalVideoID.generate(api_key,
-                                                            video_id))
+        i_vid = InternalVideoID.generate(api_key, video_id)
+        tid = ThumbnailID.generate(imgdata, i_vid)
 
         #If tid already exists, then skip saving metadata
         if ThumbnailMetadata.get(tid) is not None:
@@ -464,7 +463,7 @@ class ProcessVideo(object):
         height  = image.size[1] 
 
         #populate thumbnails
-        tdata = ThumbnailMetadata(tid, video_id, urls, created, width, height,
+        tdata = ThumbnailMetadata(tid, i_vid, urls, created, width, height,
                                   ttype, score, self.model_version, rank=rank)
         self.thumbnails.append(tdata)
 
@@ -509,7 +508,7 @@ class ProcessVideo(object):
         api_key = self.request_map[properties.API_KEY] 
         vid = self.request_map[properties.VIDEO_ID]
         job_id = self.request_map[properties.REQUEST_UUID_KEY]
-        i_vid = InternalVideoID.generate(api_key,vid)
+        i_vid = InternalVideoID.generate(api_key, vid)
 
         thumbnail_url_mapper_list = []
         if len(self.thumbnails) > 0:
@@ -614,7 +613,7 @@ class ProcessVideo(object):
             response = http_client.fetch(req)
             imgdata = response.body
             image = Image.open(StringIO(imgdata))
-            score   = self.valence_score(image) 
+            score = self.valence_score(image) 
             s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
             s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
             s3bucket = s3conn.get_bucket(s3bucket_name)

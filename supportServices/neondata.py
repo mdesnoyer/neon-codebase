@@ -350,9 +350,12 @@ class InternalVideoID(object):
         #first part of the key doesn't have _, hence use this below to 
         #generate the internal vid. 
         #note: found later that Ooyala can have _ in their video ids
+                
+        if "_" not in internal_vid:
+            _log.error('key=InternalVideoID msg=Invalid internal id %s' %internal_vid)
+            return internal_vid
 
         vid = "_".join(internal_vid.split('_')[1:])
-
         return vid
 
 class TrackerAccountID(object):

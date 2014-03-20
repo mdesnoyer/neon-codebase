@@ -70,7 +70,7 @@ class BrightcoveApi(object):
         self.STILL_SIZE = 480, 360
         self.account_created = account_created
 
-    def update_still_width(self, sz):
+    def update_still_width(self, width):
         '''
         Set the still width
         Ignore the height as we scale the image based on aspect ratio of the 
