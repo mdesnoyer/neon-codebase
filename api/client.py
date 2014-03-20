@@ -1255,10 +1255,14 @@ class SendNotification(object):
         req = tornado.httpclient.HTTPRequest(url=notification_url, method = "POST",
                 headers = h, body=body, request_timeout=60.0, connect_timeout=10.0)
         http_client = tornado.httpclient.HTTPClient()
-        response = http_client.fetch(req)
-        if response.error:
-            _log.error("type=send_notifaction" 
-                    " msg=failed to send notification")
+        try:
+            response = http_client.fetch(req)
+            if response.error:
+                _log.error("type=send_notifaction" 
+                        " msg=failed to send notification")
+        except tornado.httpclient.HTTPError:
+                _log.error("type=send_notifaction" 
+                        " msg=tornado exception 404 or 599")
 
 class VideoClient(object):
    
