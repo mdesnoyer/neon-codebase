@@ -210,18 +210,18 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         datamock.VideoMetadata.get.side_effect = lambda vid: vid_meta[vid]
 
         # Define the thumbnail meta data
-        TMD = neondata.ThumbnailMetaData
+        TMD = neondata.ThumbnailMetadata
         tid_meta = {
-            't01': TMD('t01', 0,0,0,0,'brightcove',0,0,True,False,0),
-            't02': TMD('t02', 0,0,0,0,'neon',0,0,True,True,0),
-            't03': TMD('t03', 0,0,0,0,'neon',1,0,True,False,0),
-            't11': TMD('t11', 0,0,0,0,'brightcove',0,0,True,False,0),
-            't21': TMD('t21', 0,0,0,0,'brightcove',0,0,True,False,0),
-            't22': TMD('t22', 0,0,0,0,'neon',0,0,True,True,0),
-            't41': TMD('t41', 0,0,0,0,'neon',0,0,True,False,0),
-            't42': TMD('t42', 0,0,0,0,'neon',1,0,True,False,0),
+            't01': TMD('t01','vid',0,0,0,0,'brightcove',0,0,True,False,0),
+            't02': TMD('t02','vid',0,0,0,0,'neon',0,0,True,True,0),
+            't03': TMD('t03','vid',0,0,0,0,'neon',1,0,True,False,0),
+            't11': TMD('t11','vid',0,0,0,0,'brightcove',0,0,True,False,0),
+            't21': TMD('t21','vid',0,0,0,0,'brightcove',0,0,True,False,0),
+            't22': TMD('t22','vid',0,0,0,0,'neon',0,0,True,True,0),
+            't41': TMD('t41','vid',0,0,0,0,'neon',0,0,True,False,0),
+            't42': TMD('t42','vid',0,0,0,0,'neon',1,0,True,False,0),
             }
-        datamock.ThumbnailIDMapper.get_thumb_metadata.side_effect = \
+        datamock.ThumbnailMetadata.get.side_effect = \
           lambda tid: tid_meta[tid]
 
         # Process the data
@@ -284,13 +284,13 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             }
         datamock.VideoMetadata.get.side_effect = lambda vid: vid_meta[vid]
 
-        TMD = neondata.ThumbnailMetaData
+        TMD = neondata.ThumbnailMetadata
         tid_meta = {
-            't01': TMD('t01', 0,0,0,0,'brightcove',0,0,True,False,0),
-            't02': TMD('t02', 0,0,0,0,'neon',0,0,True,False,0),
+            't01': TMD('t01','vid',0,0,0,0,'brightcove',0,0,True,False,0),
+            't02': TMD('t02','vid',0,0,0,0,'neon',0,0,True,False,0),
             't03': None,
             }
-        datamock.ThumbnailIDMapper.get_thumb_metadata.side_effect = \
+        datamock.ThumbnailMetadata.get.side_effect = \
           lambda tid: tid_meta[tid]
 
         with self.assertLogExists(logging.ERROR,
@@ -313,8 +313,8 @@ class TestStatsDBWatcher(unittest.TestCase):
                                                         self.ab_manager)
 
         self.tid_mapper = MagicMock()
-        self.mod_get_video_id = neondata.ThumbnailIDMapper.get_video_id
-        neondata.ThumbnailIDMapper.get_video_id = self.tid_mapper
+        self.mod_get_video_id = neondata.ThumbnailMetadata.get_video_id
+        neondata.ThumbnailMetadata.get_video_id = self.tid_mapper
 
         self.server_log = mastermind.server._log
         mastermind.server._log = MagicMock()
@@ -333,7 +333,7 @@ class TestStatsDBWatcher(unittest.TestCase):
         self.sqllite_mock.return_value = self.ramdb 
 
     def tearDown(self):
-        neondata.ThumbnailIDMapper.get_video_id = self.mod_get_video_id
+        neondata.ThumbnailMetadata.get_video_id = self.mod_get_video_id
         mastermind.server._log = self.server_log
         try:
             cursor = self.ramdb.cursor()

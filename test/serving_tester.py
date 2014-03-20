@@ -414,24 +414,21 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
                 tid = '%s_%s_thumb%i' % (account_id, vid, t) 
                 url = 'http://%s.jpg' % tid 
                 urls = [] ; urls.append(url)
-                tdata = neondata.ThumbnailMetaData(
-                    tid, urls, time.time(), 480, 360,
+                tdata = neondata.ThumbnailMetadata(
+                    tid, i_vid, urls, time.time(), 480, 360,
                     ttype, 0, 0, True, t==0, rank=t)
+                tdata.save()
                 tids.append(tid)
                 
-                # ID Mappers (ThumbIDMapper,ImageMD5Mapper,URLMapper)
+                # ID Mappers (ImageMD5Mapper, URLMapper)
                 url_mapper = neondata.ThumbnailURLMapper(url, tid)
-                id_mapper = neondata.ThumbnailIDMapper(
-                    tid, i_vid, tdata.to_dict())
                 thumbnail_url_mappers.append(url_mapper)
-                thumbnail_id_mappers.append(id_mapper)
 
             vmdata = neondata.VideoMetadata(i_vid, tids,
                     "job_id","http://testvideo.mp4", 10, 0, 0, integration_id)
-            retid = neondata.ThumbnailIDMapper.save_all(thumbnail_id_mappers)
             returl = neondata.ThumbnailURLMapper.save_all(
                 thumbnail_url_mappers)
-            if not vmdata.save() or retid or returl:
+            if not vmdata.save() or returl:
                 _log.debug("Didnt save data to the DB, DB error")
             
         # Update Brightcove account with videos

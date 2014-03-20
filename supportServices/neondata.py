@@ -1,4 +1,4 @@
-#/usr/bin/env python
+#!/usr/bin/env python
 '''
 Data Model classes 
 
@@ -21,6 +21,7 @@ if sys.path[0] <> base_path:
 
 import base64
 import binascii
+import copy
 import hashlib
 import json
 from multiprocessing.pool import ThreadPool
@@ -35,6 +36,7 @@ import threading
 import time
 from api import brightcove_api #coz of cyclic import 
 import api.youtube_api
+from api import ooyala_api
 
 from utils.options import define, options
 import utils.sync
@@ -50,6 +52,8 @@ define("dbPort", default=6379, type=int, help="redis port")
 define("watchdogInterval", default=3, type=int, 
         help="interval for watchdog thread")
 
+#constants 
+BCOVE_STILL_WIDTH = 480
 
 class DBConnection(object):
     '''Connection to the database.'''
@@ -73,13 +77,13 @@ class DBConnection(object):
         
         if cname:
             if cname in ["AbstractPlatform", "BrightcovePlatform", "NeonApiKey"
-                    "YoutubePlatform", "NeonUserAccount", "NeonApiRequest"]:
+                    "YoutubePlatform", "NeonUserAccount", "OoyalaPlatform", "NeonApiRequest"]:
                 host = options.accountDB 
                 port = options.dbPort 
             elif cname == "VideoMetadata":
                 host = options.videoDB
                 port = options.dbPort 
-            elif cname in ["ThumbnailIDMapper", "ThumbnailURLMapper"]:
+            elif cname in ["ThumbnailMetadata", "ThumbnailURLMapper"]:
                 host = options.thumbnailDB 
                 port = options.dbPort 
         
@@ -225,8 +229,10 @@ class DBConnectionCheck(threading.Thread):
             time.sleep(self.interval)
 
 #start watchdog thread for the DB connection
-DBCHECK_THREAD = DBConnectionCheck()
-DBCHECK_THREAD.start()
+#Disable for now, some issue with connection pool, throws reconnection
+#error, I think its due to each object having too many stored connections
+#DBCHECK_THREAD = DBConnectionCheck()
+#DBCHECK_THREAD.start()
 
 def _erase_all_data():
     '''Erases all the data from the redis databases.
@@ -235,9 +241,8 @@ def _erase_all_data():
     '''
     _log.warn('Erasing all the data. I hope this is a test.')
     AbstractPlatform._erase_all_data()
-    ThumbnailMetaData._erase_all_data()
+    ThumbnailMetadata._erase_all_data()
     ThumbnailURLMapper._erase_all_data()
-    ThumbnailIDMapper._erase_all_data()
     VideoMetadata._erase_all_data()
 
 class RedisClient(object):
@@ -275,6 +280,16 @@ def generate_request_key(api_key, job_id):
     ''' Format request key (with job_id) to find NeonApiRequest Object'''
     key = "request_" + api_key + "_" + job_id
     return key
+
+def id_generator(size=32, 
+            chars=string.ascii_lowercase + string.digits):
+    ''' Generate a random alpha numeric string to be used as 
+        unique ids
+    '''
+
+    random.seed(time.time())
+    return ''.join(random.choice(chars) for x in range(size))
+
 ##############################################################################
 
 
@@ -325,13 +340,22 @@ class InternalVideoID(object):
     @staticmethod
     def generate(api_key, vid):
         ''' external platform vid --> internal vid '''
-        key = api_key + "_" + vid
+        key = '%s_%s' % (api_key, vid)
         return key
 
     @staticmethod
     def to_external(internal_vid):
         ''' internal vid -> external platform vid'''
-        vid = internal_vid.split('_')[-1]
+        
+        #first part of the key doesn't have _, hence use this below to 
+        #generate the internal vid. 
+        #note: found later that Ooyala can have _ in their video ids
+                
+        if "_" not in internal_vid:
+            _log.error('key=InternalVideoID msg=Invalid internal id %s' %internal_vid)
+            return internal_vid
+
+        vid = "_".join(internal_vid.split('_')[1:])
         return vid
 
 class TrackerAccountID(object):
@@ -599,6 +623,7 @@ class AbstractPlatform(object):
         instances = []
         instances.extend(NeonPlatform.get_all_instances())
         instances.extend(BrightcovePlatform.get_all_instances())
+        instances.extend(OoyalaPlatform.get_all_instances())
         return instances
 
     @classmethod
@@ -697,6 +722,7 @@ class BrightcovePlatform(AbstractPlatform):
         self.linked_youtube_account = False
         self.account_created = time.time() #UTC timestamp of account creation
         self.rendition_frame_width = None #Resolution of video to process
+        self.video_still_width = 480 #default brightcove still width
 
     @classmethod
     def get_ovp(cls):
@@ -713,11 +739,19 @@ class BrightcovePlatform(AbstractPlatform):
 
     @tornado.gen.engine
     def update_thumbnail(self, i_vid, new_tid, nosave=False, callback=None):
-        ''' method to keep video metadata and thumbnail data consistent '''
+        ''' method to keep video metadata and thumbnail data consistent 
+        callback(None): bad request
+        callback(False): internal error
+        callback(True): success
+        '''
         bc = api.brightcove_api.BrightcoveApi(
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update)
-       
+      
+        #update the default still size, if set
+        if self.video_still_width != BCOVE_STILL_WIDTH:
+            bc.update_still_width(self.video_still_width) 
+
         #Get video metadata
         platform_vid = InternalVideoID.to_external(i_vid)
         vmdata = yield tornado.gen.Task(VideoMetadata.get, i_vid)
@@ -733,19 +767,18 @@ class BrightcovePlatform(AbstractPlatform):
         fsize = vmdata.get_frame_size()
 
         #Get all thumbnails
-        thumb_mappings = yield tornado.gen.Task(
-                ThumbnailIDMapper.get_thumb_mappings, tids)
+        thumbnails = yield tornado.gen.Task(
+                ThumbnailMetadata.get_many, tids)
         t_url = None
         
         # Get the type of thumbnail (Neon/ Brighcove)
         thumb_type = "" #type_rank
 
         #Check if the new tid exists
-        for thumb_mapping in thumb_mappings:
-            tmdata = thumb_mapping.thumbnail_metadata
-            if tmdata["thumbnail_id"] == new_tid:
-                t_url = tmdata["urls"][0]
-                thumb_type = "bc" if tmdata["type"] == "brightcove" else ""
+        for thumbnail in thumbnails:
+            if thumbnail.key == new_tid:
+                t_url = thumbnail.urls[0]
+                thumb_type = "bc" if thumbnail.type == "brightcove" else ""
         
         if not t_url:
             _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
@@ -755,8 +788,8 @@ class BrightcovePlatform(AbstractPlatform):
         #Update the database with video first
         #Get previous thumbnail and new thumb
         modified_thumbs = [] 
-        new_thumb, old_thumb = ThumbnailIDMapper.enable_thumbnail(
-                                    thumb_mappings, new_tid)
+        new_thumb, old_thumb = ThumbnailMetadata.enable_thumbnail(
+            thumbnails, new_tid)
         modified_thumbs.append(new_thumb)
         if old_thumb is None:
             #old_thumb can be None if there was no neon thumb before
@@ -768,11 +801,11 @@ class BrightcovePlatform(AbstractPlatform):
         #Don't reflect change in the DB, used by AB Controller methods
         if nosave == False:
             if new_thumb is not None:
-                res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
-                                            modified_thumbs)  
+                res = yield tornado.gen.Task(ThumbnailMetadata.save_all,
+                                             modified_thumbs)  
                 if not res:
                     _log.error("key=update_thumbnail msg=[pre-update]" 
-                            " ThumbnailIDMapper save_all failed for %s" %new_tid)
+                            " ThumbnailMetadata save_all failed for %s" %new_tid)
                     callback(False)
                     return
             else:
@@ -812,21 +845,21 @@ class BrightcovePlatform(AbstractPlatform):
             #get old thumbnail tid to revert to, this was the tid 
             #that was previously live before this request
             old_tid = "no_thumb" if old_thumb is None \
-                    else old_thumb.thumbnail_metadata["thumbnail_id"] 
-            new_thumb, old_thumb = ThumbnailIDMapper.enable_thumbnail(
-                                    thumb_mappings, old_tid)
+                    else old_thumb.key
+            new_thumb, old_thumb = ThumbnailMetadata.enable_thumbnail(
+                                    thumbnails, old_tid)
             modified_thumbs.append(new_thumb)
             if old_thumb: 
                 modified_thumbs.append(old_thumb)
             
             if new_thumb is not None:
-                res = yield tornado.gen.Task(ThumbnailIDMapper.save_all,
+                res = yield tornado.gen.Task(ThumbnailMetadata.save_all,
                                              modified_thumbs)  
                 if res:
                     callback(False) #return False coz bcove thumb not updated
                     return
                 else:
-                    _log.error("key=update_thumbnail msg=ThumbnailIDMapper save_all" 
+                    _log.error("key=update_thumbnail msg=ThumbnailMetadata save_all" 
                             "failed for video=%s cur_db_tid=%s cur_bcove_tid=%s," 
                             "DB not reverted" %(i_vid, new_tid, old_tid))
                     
@@ -928,9 +961,14 @@ class BrightcovePlatform(AbstractPlatform):
             self.write_token, self.auto_update, self.last_process_date)
         bcove_api.sync_individual_video_metadata(self.integration_id)
 
-    def set_rendition_frame_width(f_width):
+    def set_rendition_frame_width(self, f_width):
         ''' Set framewidth of the video resolution to process '''
         self.rendition_frame_width = f_width
+
+    def set_video_still_width(self, width):
+        ''' Set framewidth of the video still to be used 
+            when the still is updated in the brightcove account '''
+        self.video_still_width = width
 
     @classmethod
     def create(cls, json_data):
@@ -1129,8 +1167,8 @@ class OoyalaPlatform(AbstractPlatform):
     '''
     OOYALA Platform
     '''
-    def __init__(self, a_id, i_id, api_key, o_api_key, api_secret, 
-                                auto_update=False):
+    def __init__(self, a_id, i_id, api_key, p_code, 
+                            o_api_key, api_secret, auto_update=False): 
         '''
         Init ooyala platform 
         
@@ -1147,7 +1185,6 @@ class OoyalaPlatform(AbstractPlatform):
         self.ooyala_api_key = o_api_key
         self.api_secret = api_secret 
         self.auto_update = auto_update 
-        self.last_process_date = last_process_date 
     
     @classmethod
     def get_ovp(cls):
@@ -1165,27 +1202,135 @@ class OoyalaPlatform(AbstractPlatform):
             signature = urllib.quote_plus(signature)
             return signature
 
-    #check feed and create requests
     def check_feed_and_create_requests(self):
-        pass
+        '''
+        #check feed and create requests
+        '''
+        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret)
+        oo.process_publisher_feed(copy.deepcopy(self)) 
 
     #verify token and create requests on signup
-    def verify_token_and_create_requests_for_video(self, n, callback=None):
+    def create_video_requests_on_signup(self, n, callback=None):
         ''' Method to verify ooyala token on account creation 
             And create requests for processing
             @return: Callback returns job id, along with ooyala vid metadata
         '''
-        #oo = oo()
-        #if callback:
-        #    oo.async_verify_token_and_create_requests(self.integration_id,..)
-        #else:
-        #    return bc.verify_token_and_create_requests(self.integration_id,n)
-        pass
+        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret)
+        oo._create_video_requests_on_signup(copy.deepcopy(self), n, callback) 
 
-    #update thumbnail
-    def update_thumbnail(self, tid):
-        pass
+    @tornado.gen.engine
+    def update_thumbnail(self, i_vid, new_tid, callback=None):
+        '''
+        Update the Preview image on Ooyala video 
+        
+        callback(None): bad request/ Gateway error
+        callback(False): internal error
+        callback(True): success
 
+        '''
+        #Get video metadata
+        platform_vid = InternalVideoID.to_external(i_vid)
+        
+        vmdata = yield tornado.gen.Task(VideoMetadata.get, i_vid)
+        if not vmdata:
+            _log.error("key=ooyala update_thumbnail msg=vid %s not found" %i_vid)
+            callback(None)
+            return
+        
+        #Thumbnail ids for the video
+        tids = vmdata.thumbnail_ids
+        
+        #Aspect ratio of the video 
+        fsize = vmdata.get_frame_size()
+
+        #Get all thumbnails
+        thumbnails = yield tornado.gen.Task(
+                ThumbnailMetadata.get_many, tids)
+        t_url = None
+        
+        #Check if the new tid exists
+        for thumb in thumbnails:
+            if thumb.key == new_tid:
+                t_url = thumb.urls[0]
+        
+        if not t_url:
+            _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
+            callback(None)
+            return
+        
+        # Update the new_tid as the thumbnail for the video
+        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret)
+        update_result = yield tornado.gen.Task(oo.update_thumbnail_from_url,
+                                           platform_vid,
+                                           t_url,
+                                           new_tid,
+                                           fsize)
+        #check if thumbnail was updated 
+        if not update_result:
+            callback(None)
+            return
+      
+        #Update the database with video
+        #Get previous thumbnail and new thumb
+        modified_thumbs = [] 
+        new_thumb, old_thumb = ThumbnailMetadata.enable_thumbnail(
+                                    thumbnails, new_tid)
+        modified_thumbs.append(new_thumb)
+        if old_thumb is None:
+            #old_thumb can be None if there was no neon thumb before
+            _log.debug("key=update_thumbnail" 
+                    " msg=set thumbnail in DB %s tid %s"%(i_vid, new_tid))
+        else:
+            modified_thumbs.append(old_thumb)
+       
+        #Verify that new_thumb data is not empty 
+        if new_thumb is not None:
+            res = yield tornado.gen.Task(ThumbnailMetadata.save_all,
+                                            modified_thumbs)  
+            if not res:
+                _log.error("key=update_thumbnail msg=ThumbnailMetadata save_all"
+                                " failed for %s" %new_tid)
+                callback(False)
+                return
+        else:
+            _log.error("key=oo_update_thumbnail msg=new_thumb is None %s"%new_tid)
+            callback(False)
+            return
+
+        req_data = NeonApiRequest.get_request(self.neon_api_key, vmdata.job_id) 
+        vid_request = NeonApiRequest.create(req_data)
+        vid_request.state = RequestState.ACTIVE
+        ret = vid_request.save()
+        if not ret:
+            _log.error("key=update_thumbnail msg=%s state not updated to active"
+                        %vid_request.key)
+        callback(True)
+    
+    @classmethod
+    def create(cls, json_data):
+        if json_data is None:
+            return None
+        
+        params = json.loads(json_data)
+        a_id = params['account_id']
+        i_id = params['integration_id'] 
+        api_key = params['neon_api_key'] 
+        oo= OoyalaPlatform(a_id, i_id, api_key, None, None, None)
+        for key in params:
+            oo.__dict__[key] = params[key]
+        return oo
+    
+    @classmethod
+    def get_all_instances(cls, callback=None):
+        ''' get all ooyala instances'''
+
+        platforms = OoyalaPlatform.get_all_platform_data()
+        instances = [] 
+        for pdata in platforms:
+            platform = OoyalaPlatform.create(pdata)
+            if platform:
+                instances.append(platform)
+        return instances
 
 #######################
 # Request Blobs 
@@ -1350,6 +1495,22 @@ class BrightcoveApiRequest(NeonApiRequest):
         super(BrightcoveApiRequest,self).__init__(job_id, api_key, vid, title, url,
                 request_type, callback)
 
+class OoyalaApiRequest(NeonApiRequest):
+    '''
+    Ooyala API Request class
+    '''
+    def __init__(self, job_id, api_key, i_id, vid, title, url, 
+                        oo_api_key, oo_secret_key,
+                        p_thumb, http_callback):
+        self.oo_api_key = oo_api_key
+        self.oo_secret_key = oo_secret_key
+        self.integration_id = i_id 
+        self.previous_thumbnail = p_thumb 
+        self.autosync = False
+        request_type = "ooyala"
+        super(OoyalaApiRequest, self).__init__(job_id, api_key, vid, title, url,
+                request_type, http_callback)
+
 class YoutubeApiRequest(NeonApiRequest):
     '''
     Youtube API Request class
@@ -1374,48 +1535,9 @@ class ThumbnailType(object):
     NEON        = "neon"
     CENTERFRAME = "centerframe"
     BRIGHTCOVE  = "brightcove"
+    OOYALA      = "ooyala"
     RANDOM      = "random"
     FILTERED    = "filtered"
-
-class ThumbnailMetaData(object):
-
-    '''
-    Schema for storing thumbnail metadata
-    A single thumbnail id maps to all its urls 
-    [Neon, OVP name space ones, other associated ones] 
-    '''
-    def __init__(self, tid, urls, created, width, height, ttype, model_score,
-                 model_version, enabled=True, chosen=False, rank=None, 
-                 refid=None):
-        self.thumbnail_id = tid
-        self.urls = urls  # All urls associated with single image
-        self.created_time = created #Timestamp when thumbnail was created 
-        self.enabled = enabled #boolen, indicates if this thumbnail can be displayed/ tested with 
-        self.chosen = chosen #boolean, indicates this thumbnail is live
-        self.width = width
-        self.height = height
-        self.type = ttype #neon1../ brightcove / youtube
-        self.rank = 0 if not rank else rank  #int 
-        self.model_score = model_score #float
-        self.model_version = model_version #float
-        self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
-
-    def to_dict(self):
-        ''' to dict '''
-        return self.__dict__
-
-    @staticmethod
-    def create(params_dict):
-        ''' create object '''
-        obj = ThumbnailMetaData(0 ,0 ,0 ,0 ,0 ,0 ,0 ,0)
-        for key in params_dict:
-            obj.__dict__[key] = params_dict[key]
-        return obj 
-    
-    @classmethod
-    def _erase_all_data(cls):
-        db_connection = DBConnection(cls)
-        db_connection.clear_db()
 
 class ThumbnailID(AbstractHashGenerator):
     '''
@@ -1579,40 +1701,58 @@ class ImageMD5Mapper(object):
             return db_connection.blocking_conn.mset(data)
 
 
-class ThumbnailIDMapper(object):
+class ThumbnailMetadata(object):
     '''
-    Class schema for Thumbnail URL to thumbnail metadata map
-    Thumbnail ID  => (Internal Video ID, ThumbnailMetadata) 
-    
-    Primary source for all the data associated with the thumbnail
-    contains the dictionary of thumbnail_metadata
-    '''
-    def __init__(self, tid, internal_vid, thumbnail_metadata):
-        super(ThumbnailIDMapper,self).__init__()
-        self.key = tid
-        self.video_id = internal_vid #api_key + platform video id
-        self.thumbnail_metadata = thumbnail_metadata #dict of ThumbnailMetadata obj
+    Class schema for Thumbnail information.
 
-    @classmethod
-    def generate_key(cls, video_id, tid):
-        ''' generate IDMapper key '''
-        return video_id + '_' + tid 
+    Keyed by thumbnail id
+    '''
+    def __init__(self, tid, internal_vid, urls, created, width, height, ttype,
+                 model_score, model_version, enabled=True, chosen=False,
+                 rank=None, refid=None):
+        super(ThumbnailMetadata,self).__init__()
+        self.key = tid # Thumbnail id
+        self.video_id = internal_vid #api_key + platform video id
+        self.urls = urls  # List of all urls associated with single image
+        self.created_time = created # Timestamp when thumbnail was created 
+        self.enabled = enabled #boolen, indicates if this thumbnail can be displayed/ tested with 
+        self.chosen = chosen #boolean, indicates this thumbnail is chosen by the user as the primary one
+        self.width = width
+        self.height = height
+        self.type = ttype #neon1../ brightcove / youtube
+        self.rank = 0 if not rank else rank  #int 
+        self.model_score = model_score #float
+        self.model_version = model_version #string
+        self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
+        
+
+    #@classmethod
+        #def generate_key(cls, video_id, tid):
+        #''' generate thumbnail key '''
+        #return video_id + '_' + tid 
 
     def get_account_id(self):
-        ''' get account id '''
+        ''' get the internal account id. aka api key '''
         return self.video_id.split('_')[0]
-
-    def _hash(self,_input):
-        return hashlib.md5(_input).hexdigest()
     
     def get_metadata(self):
-        ''' get thumbnail metadata '''
-        return self.thumbnail_metadata
-        #return only specific fields
+        ''' get a dictionary of the thumbnail metadata
+
+        This function is deprecated and is kept only for backwards compatibility
+        '''
+        return self.to_dict()
 
     def to_dict(self):
         ''' to dict '''
         return self.__dict__
+    
+    def to_dict_for_video_response(self):
+        ''' to dict for video response object
+            replace key to thumbnail_id 
+        '''
+        new_dict = self.__dict__
+        new_dict["thumbnail_id"] = new_dict.pop("key")
+        return new_dict 
     
     def to_json(self):
         ''' to json '''
@@ -1625,24 +1765,35 @@ class ThumbnailIDMapper(object):
         if json_data:
             data_dict = json.loads(json_data)
             #create basic object
-            obj = ThumbnailIDMapper(None, None, None)
+            obj = ThumbnailMetadata(None, None, None, None, None, None, None,
+                                    None, None)
+
+            # For backwards compatibility, check to see if there is a
+            # json entry for thumbnail_metadata. If so, grab all
+            # entries from there.
+            if 'thumbnail_metadata' in data_dict:
+                for key, value in data_dict['thumbnail_metadata'].items():
+                    if key != 'thumbnail_id':
+                        obj.__dict__[key] = value
+                del data_dict['thumbnail_metadata']
 
             #populate the object dictionary
-            for key in data_dict.keys():
-                obj.__dict__[key] = data_dict[key]
+            for key, value in data_dict.iteritems():
+                obj.__dict__[key] = value
         
             return obj
 
     @classmethod
     def get_video_id(cls, tid, callback=None):
-        '''Given a thumbnail id, retrieves the video id 
-            asscociated with tid'''
+        '''Given a thumbnail id, retrieves the internal video id 
+            asscociated with thumbnail
+        '''
 
         def get_metadata(result):
             ''' extract thumbnail metadata from obj '''
             vid = None
             if result:
-                obj = ThumbnailIDMapper.create(result)
+                obj = ThumbnailMetadata.create(result)
                 callback(obj.video_id)
                 return
             callback(vid)
@@ -1653,47 +1804,39 @@ class ThumbnailIDMapper(object):
         else:
             result = db_connection.blocking_conn.get(tid)
             if result:
-                obj = ThumbnailIDMapper.create(result)
+                obj = ThumbnailMetadata.create(result)
                 return obj.video_id
 
     @classmethod
-    def get_thumb_metadata(cls, id, callback=None):
-        '''Given a thumbnail id, retrieves the thumbnail metadata.
-
-        Inputs:
-        id - The thumbnail id 
-
-        Returns:
-        ThumbnailMetadata object.
-        '''
-        def get_metadata(result):
-            ''' extract thumbnail metadata from obj '''
-            tmdata = None
-            if result:
-                obj = ThumbnailIDMapper.create(result)
-                tmdata = ThumbnailMetaData.create(obj.thumbnail_metadata)
-            callback(tmdata)
-
+    def get(cls, thumbnail_id, callback=None):
         db_connection = DBConnection(cls)
-        if callback:
-            db_connection.conn.get(id, get_metadata)
-        else:
-            result = db_connection.blocking_conn.get(id)
+
+        def cb(result):
             if result:
-                obj = ThumbnailIDMapper.create(result)
-                return ThumbnailMetaData.create(obj.thumbnail_metadata)
+                obj = create(result)
+                callback(obj)
+            else:
+                callback(None)
+
+        if callback:
+            db_connection.conn.get(thumbnail_id, cb)
+        else:
+            jdata = db_connection.blocking_conn.get(thumbnail_id)
+            if jdata is None:
+                return None
+            return cls.create(jdata)
 
 
     @classmethod
-    def get_thumb_mappings(cls, keys, callback=None):
-        ''' Returns list of thumbnail mappings for give thumb ids(keys)
+    def get_many(cls, keys, callback=None):
+        ''' Returns list of thumbnail metadata for give thumb ids(keys)
         '''
         db_connection = DBConnection(cls)
 
         def process(results):
             mappings = [] 
             for item in results:
-                obj = ThumbnailIDMapper.create(item)
+                obj = ThumbnailMetadata.create(item)
                 mappings.append(obj)
             callback(mappings)
 
@@ -1703,16 +1846,16 @@ class ThumbnailIDMapper(object):
             mappings = [] 
             items = db_connection.blocking_conn.mget(keys)
             for item in items:
-                obj = ThumbnailIDMapper.create(item)
+                obj = ThumbnailMetadata.create(item)
                 mappings.append(obj)
             return mappings
 
     @classmethod
-    def save_all(cls, thumbnailMapperList, callback=None):
+    def save_all(cls, thumbnails, callback=None):
         ''' multi save '''
         db_connection = DBConnection(cls)
         data = {}
-        for t in thumbnailMapperList:
+        for t in thumbnails:
             data[t.key] = t.to_json()
 
         if callback:
@@ -1720,35 +1863,47 @@ class ThumbnailIDMapper(object):
         else:
             return db_connection.blocking_conn.mset(data)
 
+    def save(self, callback=None):
+        ''' save  '''
+        db_connection = DBConnection(self)
+        value = self.to_json()
+        if callback:
+            db_connection.conn.set(self.key, value, callback)
+        else:
+            return db_connection.blocking_conn.set(self.key, value)
+
     @staticmethod
-    def enable_thumbnail(mapper_objs, new_tid):
-        ''' enable thumb in a list of mapper obj given a new thumb id '''
+    def enable_thumbnail(thumbnails, new_tid):
+        ''' enable thumb in a list of thumbnails given a new thumb id '''
         new_thumb_obj = None; old_thumb_obj = None
-        for mapper_obj in mapper_objs:
+        for thumb in thumbnails:
             #set new tid as chosen
-            if mapper_obj.thumbnail_metadata["thumbnail_id"] == new_tid: 
-                mapper_obj.thumbnail_metadata["chosen"] = True
-                new_thumb_obj = mapper_obj 
+            if thumb.key == new_tid: 
+                thumb.chosen = True
+                new_thumb_obj = thumb 
             else:
                 #set chosen=False for old tid
-                if mapper_obj.thumbnail_metadata["chosen"] == True:
-                    mapper_obj.thumbnail_metadata["chosen"] = False 
-                    old_thumb_obj = mapper_obj 
+                if thumb.chosen == True:
+                    thumb.chosen = False 
+                    old_thumb_obj = thumb 
 
         #return only the modified thumbnail objs
         return new_thumb_obj, old_thumb_obj 
 
     @classmethod
-    def save_integration(cls, mapper_objs, callback=None):
-        ''' save integration '''
+    def save_integration(cls, thumbnails, callback=None):
+        ''' save integration 
+
+        TODO(sunil): Explain what this is for
+        '''
         db_connection = DBConnection(cls)
         if callback:
             pipe = db_connection.conn.pipeline()
         else:
             pipe = db_connection.blocking_conn.pipeline() 
 
-        for mapper_obj in mapper_objs:
-            pipe.set(mapper_obj.key, mapper_obj.to_json())
+        for thumbnail in thumbnails:
+            pipe.set(thumbnail.key, thumbnail.to_json())
         
         if callback:
             pipe.execute(callback)
@@ -1948,3 +2103,24 @@ class InMemoryCache(object):
         Dummy callback
         '''
         print "callback done"
+
+class VideoResponse(object):
+    ''' VideoResponse object that contains list of thumbs for a video '''
+    def __init__(self, vid, status, i_type, i_id, title, duration,
+            pub_date, cur_tid, thumbs):
+        self.video_id = vid
+        self.status = status
+        self.integration_type = i_type
+        self.integration_id = i_id
+        self.title = title
+        self.duration = duration
+        self.publish_date = pub_date
+        self.current_thumbnail = cur_tid
+        #list of ThumbnailMetdata dicts 
+        self.thumbnails = thumbs if thumbs else []  
+    
+    def to_dict(self):
+        return self.__dict__
+
+    def to_json(self):
+        return json.dumps(self, default=lambda o: o.__dict__)
