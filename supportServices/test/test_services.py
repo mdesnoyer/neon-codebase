@@ -43,14 +43,14 @@ import ooyala_responses
 
 
 ### Global helper methods
-TIME_OUT = 100
+TIME_OUT = 10
 mock_image_url_prefix = "http://servicesunittest.mock.com/"
 
 def create_random_image_response():
     '''http image response''' 
         
     request = HTTPRequest("http://someimageurl/image.jpg")
-    im = utils.imageutils.ImageUtils.create_random_image(360, 480)
+    im = utils.imageutils.PILImageUtils.create_random_image(360, 480)
     imgstream = StringIO()
     im.save(imgstream, "jpeg", quality=100)
     imgstream.seek(0)
@@ -75,7 +75,8 @@ def process_neon_api_requests(api_requests, api_key, i_id, t_type):
         job_id = api_request.job_id
         thumbnails = []
         for t in range(N_THUMBS):
-            image =  utils.imageutils.ImageUtils.create_random_image(360, 480)
+            image =  utils.imageutils.PILImageUtils.create_random_image(360,
+                                                                        480)
             filestream = StringIO()
             image.save(filestream, "JPEG", quality=100) 
             filestream.seek(0)
@@ -210,7 +211,7 @@ class TestServices(AsyncHTTPTestCase):
         headers = {'X-Neon-API-Key' :apikey} 
         http_client = AsyncHTTPClient(self.io_loop)
         http_client.fetch(url, self.stop, headers=headers)
-        resp = self.wait(timeout=10)
+        resp = self.wait(timeout=TIME_OUT)
         return resp
 
     ### Helper methods
@@ -672,7 +673,7 @@ class TestServices(AsyncHTTPTestCase):
 
             thumbs = []
             items = self._get_video_status_brightcove()
-            for item,tid in zip(items['items'], new_tids):
+            for item, tid in zip(items['items'], new_tids):
                 vr = services.VideoResponse(None, None, None, None,
                                         None, None, None, None, None)
                 vr.__dict__ = item

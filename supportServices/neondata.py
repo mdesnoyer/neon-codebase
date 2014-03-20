@@ -77,7 +77,7 @@ class DBConnection(object):
         
         if cname:
             if cname in ["AbstractPlatform", "BrightcovePlatform", "NeonApiKey"
-                    "YoutubePlatform", "NeonUserAccount", "NeonApiRequest"]:
+                    "YoutubePlatform", "NeonUserAccount", "OoyalaPlatform", "NeonApiRequest"]:
                 host = options.accountDB 
                 port = options.dbPort 
             elif cname == "VideoMetadata":
@@ -234,8 +234,10 @@ class DBConnectionCheck(threading.Thread):
             time.sleep(self.interval)
 
 #start watchdog thread for the DB connection
-DBCHECK_THREAD = DBConnectionCheck()
-DBCHECK_THREAD.start()
+#Disable for now, some issue with connection pool, throws reconnection
+#error, I think its due to each object having too many stored connections
+#DBCHECK_THREAD = DBConnectionCheck()
+#DBCHECK_THREAD.start()
 
 def _erase_all_data():
     '''Erases all the data from the redis databases.
@@ -635,6 +637,7 @@ class AbstractPlatform(object):
             platform = cls.create(pdata)
             if platform:
                 instances.append(platform)
+
         return instances
 
     @classmethod
@@ -1313,6 +1316,18 @@ class OoyalaPlatform(AbstractPlatform):
         for key in params:
             oo.__dict__[key] = params[key]
         return oo
+    
+    @classmethod
+    def get_all_instances(cls, callback=None):
+        ''' get all ooyala instances'''
+
+        platforms = OoyalaPlatform.get_all_platform_data()
+        instances = [] 
+        for pdata in platforms:
+            platform = OoyalaPlatform.create(pdata)
+            if platform:
+                instances.append(platform)
+        return instances
 
     @classmethod
     def get_all_instances(cls, callback=None):
@@ -1629,64 +1644,6 @@ class ThumbnailURLMapper(object):
         db_connection = DBConnection(cls)
         db_connection.clear_db()
 
-class ImageMD5Mapper(object):
-    '''
-    Maps a given Image MD5 to Thumbnail ID
-
-    This is needed to keep the mapping of individual image md5's to tid
-    A single image can exist is different sizes, for example brightcove has 
-    videostills and thumbnails for any given video
-
-    '''
-    def __init__(self, ext_video_id, imgdata, tid):
-        self.key = self.format_key(ext_video_id, imgdata)
-        self.value = tid
-
-    def get_md5(self):
-        ''' return md5 '''
-        return self.key.split('_')[-1]
-
-    def format_key(self, video_id, imdata):
-        ''' format key for ImageMD5Mapper '''
-        if imdata:
-            md5 = ThumbnailID.generate(imdata, video_id)
-            return self.__class__.__name__.lower() + '_' + md5
-        else:
-            raise
-
-    def save(self, callback=None):
-        ''' save ''' 
-        db_connection = DBConnection(self)
-        
-        if callback:
-            db_connection.conn.set(self.key, self.value, callback)
-        else:
-            db_connection.blocking_conn.set(self.key, self.value)
-
-    @classmethod   
-    def get_tid(cls, ext_video_id, image_md5, callback=None):
-        ''' get tid for the image md5 '''
-        db_connection = DBConnection(cls)
-        
-        key = "ImageMD5Mapper".lower() + '_%s_%s' %(ext_video_id, image_md5)
-        if callback:
-            db_connection.conn.get(key, callback)
-        else:
-            return db_connection.blocking_conn.get(key)
-    
-    @classmethod
-    def save_all(cls, objs, callback=None):
-        ''' multi save ''' 
-        db_connection = DBConnection(cls)
-        data = {}
-        for obj in objs:
-            data[obj.key] = obj.value
-
-        if callback:
-            db_connection.conn.mset(data,callback)
-        else:
-            return db_connection.blocking_conn.mset(data)
-
 
 class ThumbnailMetadata(object):
     '''
@@ -1732,6 +1689,14 @@ class ThumbnailMetadata(object):
     def to_dict(self):
         ''' to dict '''
         return self.__dict__
+    
+    def to_dict_for_video_response(self):
+        ''' to dict for video response object
+            replace key to thumbnail_id 
+        '''
+        new_dict = self.__dict__
+        new_dict["thumbnail_id"] = new_dict.pop("key")
+        return new_dict 
     
     def to_json(self):
         ''' to json '''

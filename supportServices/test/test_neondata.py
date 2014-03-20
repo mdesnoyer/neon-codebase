@@ -155,6 +155,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         self.assertNotEqual(self.bp_conn, self.vm_conn)
 
+    @unittest.skip("DBconn check disabled")
     def test_db_connection_error(self):
         ''' #Verify that database connection is re-established 
         after config change '''

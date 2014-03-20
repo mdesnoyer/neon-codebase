@@ -842,15 +842,15 @@ class BrightcoveApi(object):
 
         url = 'http://api.brightcove.com/services/library?command=find_video_by_id' \
                 '&token=%s&media_delivery=http&output=json&video_id=%s' %(self.read_token,video_id) 
-        req = tornado.httpclient.HTTPRequest(url = url,
-                                             method = "GET",
-                                             request_timeout = 60.0,
-                                             connect_timeout = 10.0)
+        req = tornado.httpclient.HTTPRequest(url=url,
+                                             method="GET",
+                                             request_timeout=60.0,
+                                             connect_timeout=10.0)
         response = BrightcoveApi.read_connection.send_request(req)
         if response.error:
             _log.error('key=create_request_by_video_id msg=Unable to get %s'
                        % url)
-            return
+            return False
             
         resp = tornado.escape.json_decode(response.body)
         still = resp['videoStillURL']
@@ -864,7 +864,7 @@ class BrightcoveApi(object):
             _log.error(('key=create_request_by_video_id '
                         'msg=Unable to create request for video %s')
                         % video_id)
-            return
+            return False
         
         jid = tornado.escape.json_decode(response.body)
         job_id = jid["job_id"]
@@ -872,6 +872,7 @@ class BrightcoveApi(object):
             self.neon_api_key, i_id)
         bc.videos[video_id] = job_id
         bc.save()
+        return True
 
     def async_get_n_videos(self, n, callback):
         ''' async get n vids '''
