@@ -24,6 +24,7 @@ if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
 import datetime
+import json
 import gzip
 import hashlib
 import model
@@ -57,7 +58,8 @@ import youtube_api
 
 from supportServices.neondata import NeonApiRequest, BrightcoveApiRequest
 from supportServices.neondata import NeonPlatform, YoutubePlatform, \
-        BrightcovePlatform, VideoMetadata, RequestState, InternalVideoID
+        BrightcovePlatform, VideoMetadata, RequestState, \
+        InternalVideoID, VideoResponse
 from supportServices.neondata import ThumbnailID, ThumbnailType, \
         ThumbnailURLMapper, ThumbnailMetadata, OoyalaApiRequest
 
@@ -586,7 +588,8 @@ class ProcessVideo(object):
         i_id = self.request_map[properties.INTEGRATION_ID]
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
         video_id = self.request_map[properties.VIDEO_ID]
-        bc_request = BrightcoveApiRequest.get(api_key,job_id)
+        title = self.request_map[properties.VIDEO_TITLE]
+        bc_request = BrightcoveApiRequest.get(api_key, job_id)
         bc_request.response = tornado.escape.json_decode(result)
         bc_request.publish_date = time.time() *1000.0 #ms
 
@@ -629,7 +632,7 @@ class ProcessVideo(object):
         
         #2 Push thumbnail in to brightcove account
         autosync = bc_request.autosync
-        ba = BrightcovePlatform.get_account(api_key,i_id)
+        ba = BrightcovePlatform.get_account(api_key, i_id)
         if not ba:
             _log.error("key=finalize_brightcove_request msg=Brightcove " 
                     " account doesnt exists a_id=%s i_id=%s"%(api_key, i_id))
@@ -672,6 +675,22 @@ class ProcessVideo(object):
 
         if ret:
             self.save_video_metadata()
+           
+            #Send notification that the video completed processing
+            thumbs = [t.to_dict_for_video_response() for t in self.thumbnails]
+            vr = VideoResponse(video_id,
+                            "processed",
+                            "brightcove",
+                            i_id,
+                            title,
+                            None, 
+                            None,
+                            0, #current_tid
+                            thumbs)
+
+            sn = SendNotification(api_key, i_id, vr.to_dict())
+            sn.send(ba.account_id)
+
         else:
             _log.error("key=finalize_brightcove_request msg=failed to save request")
 
@@ -1127,7 +1146,7 @@ class HttpDownload(object):
             elif request_type == "brightcove":
                 #Update Brightcove
                 self.pv.finalize_brightcove_request(cr.response, error)
-            
+
             # Ooyala section
             elif request_type == "ooyala":
                 #update ooyala
@@ -1211,6 +1230,36 @@ class ClientCallbackResponse(object):
                     break
             except:
                 continue
+
+class SendNotification(object):
+    '''
+    Send notifications to heroku app api 
+    '''
+
+    def __init__(self, api_key, i_id, video_json, event="processing_complete"):
+        self.api_key = api_key
+        self.integration_id = i_id
+        self.video = video_json
+        self.event = event
+
+    def to_json(self):
+        ''' to json '''
+        return json.dumps(self, default=lambda o: o.__dict__)
+    
+    def send(self, a_id):
+        ''' send respone to notification url '''
+       
+        notification_url = 'http://neon-lab.com/api/accounts/%s/events'%a_id
+        notification_url = 'http://staging.neon-lab.com/api/accounts/%s/events'%a_id 
+        body = self.to_json()
+        h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
+        req = tornado.httpclient.HTTPRequest(url=notification_url, method = "POST",
+                headers = h, body=body, request_timeout=60.0, connect_timeout=10.0)
+        http_client = tornado.httpclient.HTTPClient()
+        response = http_client.fetch(req)
+        if response.error:
+            _log.error("type=send_notifaction" 
+                    " msg=failed to send notification")
 
 class VideoClient(object):
    

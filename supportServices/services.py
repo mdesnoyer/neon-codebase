@@ -93,27 +93,6 @@ class GetVideoStatusResponse(object):
 
         return json.dumps(self, default=lambda o: o.__dict__)
 
-class VideoResponse(object):
-    ''' VideoResponse object that contains list of thumbs for a video '''
-    def __init__(self, vid, status, i_type, i_id, title, duration,
-            pub_date, cur_tid, thumbs):
-        self.video_id = vid
-        self.status = status
-        self.integration_type = i_type
-        self.integration_id = i_id
-        self.title = title
-        self.duration = duration
-        self.publish_date = pub_date
-        self.current_thumbnail = cur_tid
-        #list of ThumbnailMetdata dicts 
-        self.thumbnails = thumbs if thumbs else []  
-    
-    def to_dict(self):
-        return self.__dict__
-
-    def to_json(self):
-        return json.dumps(self, default=lambda o: o.__dict__)
-
 ################################################################################
 # Account Handler
 ################################################################################
@@ -499,7 +478,7 @@ class AccountHandler(tornado.web.RequestHandler):
                                         neondata.ThumbnailType.CENTERFRAME,
                                         0, 0)
         thumbs.append(tm.to_dict_for_video_response())
-        vr = VideoResponse(video_id,
+        vr = neondata.VideoResponse(video_id,
                             neondata.RequestState.PROCESSING,
                             "neon",
                             "0",
@@ -647,7 +626,7 @@ class AccountHandler(tornado.web.RequestHandler):
             pub_date = None if not request.__dict__.has_key('publish_date') \
                             else request.publish_date
             pub_date = int(pub_date) if pub_date else None #type
-            vr = VideoResponse(vid,
+            vr = neondata.VideoResponse(vid,
                               status,
                               request.request_type,
                               i_id,
@@ -735,6 +714,7 @@ class AccountHandler(tornado.web.RequestHandler):
             
         c_processing = len(p_videos)
         c_recommended = len(r_videos)
+        c_published = len(a_videos)
 
         if i_type == "brightcove":
             #Sort brightcove videos by video_id, since publish_date 
@@ -928,7 +908,7 @@ class AccountHandler(tornado.web.RequestHandler):
                                 t_urls, ctime, 0, 0,
                                 "brightcove", 0, 0)
                         thumbs.append(tm.to_dict_for_video_response())
-                        vr = VideoResponse(item["id"],
+                        vr = neondata.VideoResponse(item["id"],
                               "processing",
                               "brightcove",
                               i_id,
@@ -1112,7 +1092,7 @@ class AccountHandler(tornado.web.RequestHandler):
                                                                   item["embed_code"]),
                                 t_urls, ctime, 0, 0, "ooyala", 0, 0)
                         thumbs.append(tm.to_dict_for_video_response())
-                        vr = VideoResponse(item["embed_code"],
+                        vr = neondata.VideoResponse(item["embed_code"],
                               "processing",
                               "ooyala",
                               i_id,

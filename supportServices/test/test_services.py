@@ -284,7 +284,7 @@ class TestServices(AsyncHTTPTestCase):
         
         items = self._get_video_status_brightcove()
         for item in items['items']:
-            vr = services.VideoResponse(None, None, None, None, None, 
+            vr = neondata.VideoResponse(None, None, None, None, None, 
                                     None, None, None, None)
             vr.__dict__ = item
             status = vr.status
@@ -674,7 +674,7 @@ class TestServices(AsyncHTTPTestCase):
             thumbs = []
             items = self._get_video_status_brightcove()
             for item, tid in zip(items['items'], new_tids):
-                vr = services.VideoResponse(None, None, None, None,
+                vr = neondata.VideoResponse(None, None, None, None,
                                         None, None, None, None, None)
                 vr.__dict__ = item
                 thumbs.append(vr.current_thumbnail)

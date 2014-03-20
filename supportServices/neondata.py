@@ -2100,3 +2100,24 @@ class InMemoryCache(object):
         Dummy callback
         '''
         print "callback done"
+
+class VideoResponse(object):
+    ''' VideoResponse object that contains list of thumbs for a video '''
+    def __init__(self, vid, status, i_type, i_id, title, duration,
+            pub_date, cur_tid, thumbs):
+        self.video_id = vid
+        self.status = status
+        self.integration_type = i_type
+        self.integration_id = i_id
+        self.title = title
+        self.duration = duration
+        self.publish_date = pub_date
+        self.current_thumbnail = cur_tid
+        #list of ThumbnailMetdata dicts 
+        self.thumbnails = thumbs if thumbs else []  
+    
+    def to_dict(self):
+        return self.__dict__
+
+    def to_json(self):
+        return json.dumps(self, default=lambda o: o.__dict__)

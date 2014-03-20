@@ -221,9 +221,10 @@ class TestVideoClient(unittest.TestCase):
         #mock tornado http
         request = HTTPRequest('http://google.com')
         response = HTTPResponse(request, 200, buffer=self._create_random_image())
+        notification_response = HTTPResponse(request, 200, buffer=StringIO(""))
         clientp = patch('api.client.tornado.httpclient.HTTPClient')
         http_patcher = clientp.start()
-        http_patcher().fetch.side_effect = [response, response]
+        http_patcher().fetch.side_effect = [response, response, notification_response]
         
         self.dl.send_client_response()
         bcove_thumb = False
