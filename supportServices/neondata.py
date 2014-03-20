@@ -1743,6 +1743,14 @@ class ThumbnailMetadata(object):
         ''' to dict '''
         return self.__dict__
     
+    def to_dict_for_video_response(self):
+        ''' to dict for video response object
+            replace key to thumbnail_id 
+        '''
+        new_dict = self.__dict__
+        new_dict["thumbnail_id"] = new_dict.pop("key")
+        return new_dict 
+    
     def to_json(self):
         ''' to json '''
         return json.dumps(self, default=lambda o: o.__dict__) 

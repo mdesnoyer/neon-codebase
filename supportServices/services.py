@@ -498,7 +498,7 @@ class AccountHandler(tornado.web.RequestHandler):
         tm = neondata.ThumbnailMetadata(0, video_id, t_urls, ctime, 0, 0,
                                         neondata.ThumbnailType.CENTERFRAME,
                                         0, 0)
-        thumbs.append(tm.to_dict())
+        thumbs.append(tm.to_dict_for_video_response())
         vr = VideoResponse(video_id,
                             neondata.RequestState.PROCESSING,
                             "neon",
@@ -627,7 +627,7 @@ class AccountHandler(tornado.web.RequestHandler):
                     0, #Create TID 0 as a temp id for previous thumbnail
                     neondata.InternalVideoID.generate(self.api_key, vid),
                     t_urls, ctime, 0, 0, t_type, 0, 0)
-                thumbs.append(tm.to_dict())
+                thumbs.append(tm.to_dict_for_video_response())
                 p_videos.append(vid)
             elif request.state in failed_states:
                 status = "failed" 
@@ -701,7 +701,7 @@ class AccountHandler(tornado.web.RequestHandler):
             for thumb in thumbnails:
                 if thumb:
                     vid = neondata.InternalVideoID.to_external(thumb.video_id)
-                    tdata = thumb.to_dict()
+                    tdata = thumb.to_dict_for_video_response()
                     if not result.has_key(vid):
                         _log.debug("key=get_video_status_%s"
                                 " msg=video deleted %s"%(i_type, vid))
@@ -709,17 +709,18 @@ class AccountHandler(tornado.web.RequestHandler):
                         result[vid].thumbnails.append(tdata)
 
         #4. Set the default thumbnail for each of the video
+        tid_key = "thumbnail_id"
         for res in result:
             vres = result[res]
             platform_thumb_id = None
             for thumb in vres.thumbnails:
                 if thumb['chosen'] == True:
-                    vres.current_thumbnail = thumb['key']
+                    vres.current_thumbnail = thumb[tid_key]
                     if "neon" in thumb['type']:
                         vres.status = "active"
 
                 if thumb['type'] == i_type:
-                    platform_thumb_id = thumb['key']
+                    platform_thumb_id = thumb[tid_key]
 
             if vres.status == "finished" and vres.current_thumbnail == 0:
                 vres.current_thumbnail = platform_thumb_id
@@ -926,7 +927,7 @@ class AccountHandler(tornado.web.RequestHandler):
                                                                   item["id"]),
                                 t_urls, ctime, 0, 0,
                                 "brightcove", 0, 0)
-                        thumbs.append(tm.to_dict())
+                        thumbs.append(tm.to_dict_for_video_response())
                         vr = VideoResponse(item["id"],
                               "processing",
                               "brightcove",
@@ -1004,7 +1005,7 @@ class AccountHandler(tornado.web.RequestHandler):
                         if thumb:
                             vid = thumb.video_id
                             #neondata.InternalVideoID.to_external(thumb.video_id)
-                            tdata = thumb.to_dict()
+                            tdata = thumb.to_dict_for_video_response()
                             video_thumb_mappings[vid].append(tdata)
                 
                 # Check if Neon thumbnail is set as the top rank neon thumbnail
@@ -1015,7 +1016,7 @@ class AccountHandler(tornado.web.RequestHandler):
                         if thumb["chosen"] == True and thumb["type"] == 'neon':
                             update = False
                         if thumb["type"] == 'neon' and thumb["rank"] == 1:
-                            neon_tid = thumb["key"]
+                            neon_tid = thumb["thumbnail_id"]
                     
                     if update and neon_tid is not None:
                         update_videos[vid] = neon_tid
@@ -1110,7 +1111,7 @@ class AccountHandler(tornado.web.RequestHandler):
                                 neondata.InternalVideoID.generate(self.api_key,
                                                                   item["embed_code"]),
                                 t_urls, ctime, 0, 0, "ooyala", 0, 0)
-                        thumbs.append(tm.to_dict())
+                        thumbs.append(tm.to_dict_for_video_response())
                         vr = VideoResponse(item["embed_code"],
                               "processing",
                               "ooyala",
