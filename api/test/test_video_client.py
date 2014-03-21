@@ -477,18 +477,18 @@ class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
         res = vc.dequeue_job()
         self.assertEqual(res,"{}") #empty queue result
 
-        params = {"api_key": self.api_key, 
-                   "video_url": "http://bunny.mp4","video_id": "testid124",
-                   "topn": 3, "callback_url": "http://localhost:8081/testcallback", 
-                   "video_title": "testtitle"}
+        #params = {"api_key": self.api_key, 
+        #           "video_url": "http://bunny.mp4","video_id": "testid124",
+        #           "topn": 3, "callback_url": "http://localhost:8081/testcallback", 
+        #           "video_title": "testtitle"}
     
-        server_url = ('http://localhost:%i/api/v1/submitvideo/topn' 
-                      % self.server_port)
-        hc = tornado.httpclient.HTTPClient()
+        #server_url = ('http://localhost:%i/api/v1/submitvideo/topn' 
+        #              % self.server_port)
+        #hc = tornado.httpclient.HTTPClient()
         #submit a job
-        resp = hc.fetch(server_url,method="POST",body=json.dumps(params))
-        res = vc.dequeue_job()
-        self.assertFalse(res == "{}") 
+        #resp = hc.fetch(server_url,method="POST",body=json.dumps(params))
+        #res = vc.dequeue_job()
+        #self.assertFalse(res == "{}") 
 
 if __name__ == '__main__':
     unittest.main()
