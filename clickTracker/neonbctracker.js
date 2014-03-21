@@ -272,7 +272,7 @@ if(typeof NeonImageTracker == "undefined"){
 					var imageUrls = new Array();
 					for (var i = 0; i<imgTags.length; i++) {
 						//imageUrls.push(imgTags[i].src.split('?')[0]);
-						imageUrls.push(imgTags[i]);
+						imageUrls.push(imgTags[i].src);
 					}
 					NeonDataSender.createRequest(action, imageUrls, 
 							TrackerAccountId, null, NeonTrackerType);

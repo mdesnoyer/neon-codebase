@@ -47,3 +47,6 @@ S3_SECRET_KEY = 'd9Q9abhaUh625uXpSrKElvQ/DrbKsCUAYAPaeVLU'
 S3_BUCKET_NAME = 'neon-beta-test' 
 S3_IMAGE_HOST_BUCKET_NAME = 'host-thumbnails' 
 S3_CUSTOMER_ACCOUNT_BUCKET_NAME = 'neon-customer-accounts'
+
+#Frontend config
+NOTIFICATION_API_KEY = 'kR0ks7NpdSD0w6xXAAvWfw' 
