@@ -33,19 +33,53 @@ class URL2ThumbnailIndex:
     '''
     def __init__(self):
         '''Create the index. It is loaded from the neondata db.'''
-        self.hash_index = ImHashIndex()
+        self.hash_index = ImHashIndex(hashtype='dhash', hash_size=64)
         self.phash_map = {} # pHash -> [thumbnail_mapper_obj]
-        
-        self._build_index()
 
-    def _build_index(self):
+    def build_index_from_neondata(self):
         '''Builds the index from the neondata database.'''
         _log.info('Collecting all the images in the database.')
         hashes = set()
         for thumb_info in neondata.ThumbnailMetadata.iterate_all_thumbnails():
-            # Go grab the thumbnail and compute its perceptual hash
-            for url in thumb_info.urls:
-                response = utils.http.send_request(
+            cur_hash = self._add_new_thumbnail_to_index(
+                thumb_info,
+                update_hash_index=False)
+            if cur_hash is not None:
+                hashes.add(cur_hash)
+
+        _log.info('Building perceptual image index.')
+        self.hash_index.build_index(hashes)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def add_thumbnail_to_index(self, thumbnail):
+        '''Add an image to the index if it's not in there already.
+
+        Inputs:
+        thumbnail - A thumbnail metadata object.
+        '''
+        try:
+            if thumbnail.key in [x.key for x in 
+                                 self.phash_map[thumbnail.phash]]:
+                # This thumb is already in the index so we're done
+                return
+        except KeyError:
+            pass
+
+        yield tornado.gen.Task(self._add_new_thumbnail_to_index, thumbnail)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _add_new_thumbnail_to_index(self, thumb, update_hash_index=True):
+        '''Adds the new thumbnail to the index.
+
+        Returns its hash value
+        '''
+        # Go grab the thumbnail and compute its perceptual hash if
+        # necessary
+        if thumb.phash is None:
+            for url in thumb.urls:
+                response = yield tornado.gen.Task(utils.http.send_request,
                     tornado.httpclient.HTTPRequest(url))
                 if response.error:
                     _log.error('Error retrieving image from: %s. %s' % 
@@ -53,20 +87,26 @@ class URL2ThumbnailIndex:
                     continue
 
                 image = PIL.Image.open(response.buffer)
-                cur_hash = self.hash_index.hash_pil_image(image)
-
-                # Record the hash value
-                hashes.add(cur_hash)
-                try:
-                    self.phash_map[cur_hash].append(thumb_info)
-                except KeyError:
-                    self.phash_map[cur_hash] = [thumb_info]
-
+                thumb.update_phash(image)
+                    
                 # Only need the hash from one url
                 break
 
-        _log.info('Building perceptual image index.')
-        self.hash_index.build_index(hashes)
+        if thumb.phash is not None:
+            # Record the hash value in the index
+            # TODO(mdesnoyer): Make sure this is thread safe
+            try:
+                self.phash_map[thumb.phash].append(thumb)
+            except KeyError:
+                self.phash_map[thumb.phash] = [thumb]
+                if update_hash_index:
+                    self.hash_index.add_hash(thumb.phash)
+
+        
+        yield tornado.gen.Task(thumb.save)
+
+        raise tornado.gen.Return(thumb.phash)
+        
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -110,10 +150,11 @@ class URL2ThumbnailIndex:
                        (url, response.error))
             raise tornado.gen.Return(None)
         image = PIL.Image.open(response.buffer)
+        phash = self.hash_index.hash_pil_image(image)
         
         # Lookup similar images in the hash index
         possible_thumbs = []
-        for cur_hash, dist in self.hash_index.pil_image_radius_search(image):
+        for cur_hash, dist in self.hash_index.radius_search(phash):
             try:
                 for thumb_info in self.phash_map[cur_hash]:
                     if internal_video_id is not None:
@@ -134,6 +175,10 @@ class URL2ThumbnailIndex:
             # We found a unique enough match for the url, so record it
             found_thumb = possible_thumbs[0][1]
             found_thumb.urls.append(url)
+
+            # Record the phash so it's not calculated later
+            if possible_thumbs[0][0] == 0:
+                found_thumb.phash = phash
 
             # We don't need to wait for the save to happen here, but
             # it simplifies testing, so do it.

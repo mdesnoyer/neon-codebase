@@ -14,6 +14,7 @@ if sys.path[0] != __base_path__:
 import logging
 from mock import patch, MagicMock
 from supportServices import neondata
+import PIL.Image
 import random
 from StringIO import StringIO
 from supportServices.url2thumbnail import URL2ThumbnailIndex
@@ -54,6 +55,7 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
         t2 = neondata.ThumbnailMetadata(
             't2', v1.key,  ['two.jpg'],
             None, None, None, None, None, None)
+        t2.phash = self._get_phash_of_jpegimage(self.images[1])
         t2.save()
         neondata.ThumbnailURLMapper('two.jpg', 't2').save()
         v2 = neondata.VideoMetadata(
@@ -106,6 +108,15 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
         response.buffer.seek(0)
         return response
 
+    def _get_phash_of_jpegimage(self, image):
+        # needed because random images don't JPEG compress well
+        buf = StringIO()
+        image.save(buf, format='JPEG')
+        buf.seek(0)
+
+        cimage = PIL.Image.open(buf)
+        return URL2ThumbnailIndex().hash_index.hash_pil_image(cimage)
+
     def setURLImageMapping(self, mapping):
         '''Define the mapping that will be mocked out from url to images.
 
@@ -136,6 +147,7 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
                                  'four.jpg' : self.images[3],
                                  'unknown.jpg' : self.images[1]})
         index = URL2ThumbnailIndex()
+        index.build_index_from_neondata()
 
         index.get_thumbnail_info('three.jpg', callback=self.stop)
         self.assertEqual(self.wait().key, 't3')
@@ -158,6 +170,7 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
                                  'four.jpg' : self.images[3],
                                  'unknown.jpg' : self.images[1]})
         index = URL2ThumbnailIndex()
+        index.build_index_from_neondata()
 
 
         thumb_info = index.get_thumbnail_info('unknown.jpg')
@@ -175,8 +188,59 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
                                  'four.jpg' : self.images[3],
                                  'unknown.jpg' : self.images[4]})
         index = URL2ThumbnailIndex()
+        index.build_index_from_neondata()
 
         self.assertIsNone(index.get_thumbnail_info('unknown.jpg'))
+
+    def test_add_known_thumbnail(self):
+        self.setURLImageMapping({'one.jpg' : self.images[0],
+                                 'one_cmp.jpg' : self.images[0],
+                                 'two.jpg' : self.images[1],
+                                 'three.jpg' : self.images[2],
+                                 'four.jpg' : self.images[3]})
+        index = URL2ThumbnailIndex()
+        index.build_index_from_neondata()
+
+        db_thumb = neondata.ThumbnailMetadata.get('t2')
+        self.assertIsNotNone(db_thumb.phash)
+        index.add_thumbnail_to_index(db_thumb)
+
+        thumb_info = index.get_thumbnail_info('two.jpg')
+        self.assertEqual(thumb_info.key, 't2')
+        self.assertEqual(thumb_info.phash, db_thumb.phash)
+
+    def test_add_new_thumbnail(self):
+        self.setURLImageMapping({'one.jpg' : self.images[0],
+                                 'one_cmp.jpg' : self.images[0],
+                                 'two.jpg' : self.images[1],
+                                 'three.jpg' : self.images[2],
+                                 'four.jpg' : self.images[3],
+                                 'five.jpg' : self.images[4],
+                                 'five_cmp.jpg' : self.images[4]})
+        index = URL2ThumbnailIndex()
+        index.build_index_from_neondata()
+
+        v3 = neondata.ThumbnailMetadata.get(
+            neondata.InternalVideoID.generate('api2', 'v3'))
+        t5 = neondata.ThumbnailMetadata(
+             't5', v3.key, ['five.jpg'],
+             None, None, None, None, None, None)
+        index.add_thumbnail_to_index(t5)
+        v2 = neondata.ThumbnailMetadata.get(
+            neondata.InternalVideoID.generate('api1', 'v2'))
+        t6 = neondata.ThumbnailMetadata(
+             't6', v2.key, ['five_cmp.jpg'],
+             None, None, None, None, None, None)
+        t6.phash = self._get_phash_of_jpegimage(self.images[4])
+        index.add_thumbnail_to_index(t6)
+
+        self.assertIsNone(index.get_thumbnail_info('five.jpg'))
+        self.assertEqual('t5', 
+                         index.get_thumbnail_info('five.jpg',
+                                                  internal_video_id=v3.key).key)
+        self.assertEqual('t6', 
+                         index.get_thumbnail_info('five_cmp.jpg',
+                                                  internal_video_id=v2.key).key)
 
     def test_same_image_in_different_account(self):
         v3 = neondata.ThumbnailMetadata.get(
@@ -196,6 +260,7 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
                                  'five.jpg' : self.images[0]})
 
         index = URL2ThumbnailIndex()
+        index.build_index_from_neondata()
 
         self.assertIsNone(index.get_thumbnail_info('five.jpg'))
         self.assertEqual(index.get_thumbnail_info('five.jpg',
@@ -235,6 +300,7 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
                                  'five.jpg' : self.images[0]})
 
         index = URL2ThumbnailIndex()
+        index.build_index_from_neondata()
 
         self.assertIsNone(index.get_thumbnail_info('five.jpg'))
         self.assertIsNone(index.get_thumbnail_info('five.jpg',
@@ -258,6 +324,7 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
                                  'four.jpg' : self.images[3]})
         
         index = URL2ThumbnailIndex()
+        index.build_index_from_neondata()
 
         with self.assertLogExists(
                 logging.ERROR,
@@ -271,6 +338,7 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
                                  'three.jpg' : self.images[2],
                                  'four.jpg' : self.images[3]})
         index = URL2ThumbnailIndex()
+        index.build_index_from_neondata()
 
         def return_error(x, callback=None):
             callback(tornado.httpclient.HTTPResponse(

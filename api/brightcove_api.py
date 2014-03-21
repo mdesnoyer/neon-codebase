@@ -17,6 +17,7 @@ from PIL import Image
 from StringIO import StringIO
 import supportServices.neondata 
 import time
+import tornado.gen
 import tornado.httpclient
 import tornado.httputil
 import tornado.ioloop
@@ -221,19 +222,6 @@ class BrightcoveApi(object):
                     bcove_still = PILImageUtils.resize(image,
                                                        im_w=self.STILL_SIZE[0])
 
-            t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
-                                                            bcove_thumb,
-                                                            ref_id)
-            s_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
-                                                            bcove_still,
-                                                            ref_id)
-            md5_objs = []
-            md5_objs.append(t_md5)
-            md5_objs.append(s_md5)
-            res = supportServices.neondata.ImageMD5Mapper.save_all(md5_objs)
-            if not res:
-                _log.error('key=update_thumbnail msg=failed to' 
-                            'save ImageMD5Mapper for %s' %video_id)
             
             rt = self.add_image(video_id,
                                 bcove_thumb,
@@ -357,17 +345,6 @@ class BrightcoveApi(object):
             bcove_thumb = PILImageUtils.resize(image, im_w=self.THUMB_SIZE[0])
             bcove_still = PILImageUtils.resize(image, im_w=self.STILL_SIZE[0])
 
-        t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
-                                                        bcove_thumb,
-                                                        thumbnail_id)
-        s_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
-                                                        bcove_still,
-                                                        thumbnail_id)
-        md5_objs = []
-        md5_objs.append(t_md5); md5_objs.append(s_md5)
-        res = supportServices.neondata.ImageMD5Mapper.save_all(md5_objs)
-        if not res:
-            _log.error('key=update_thumbnail msg=failed to save ImageMD5Mapper for %s' %video_id)
 
         rt = self.add_image(video_id,image, atype='thumbnail',
                             reference_id=reference_id)
@@ -440,21 +417,6 @@ class BrightcoveApi(object):
                     bcove_still = PILImageUtils.resize(image,
                                                        im_w=self.STILL_SIZE[0])
 
-                t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
-                                                                bcove_thumb,
-                                                                thumbnail_id)
-                s_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
-                                                                bcove_still,
-                                                                thumbnail_id)
-                md5_objs = []
-                md5_objs.append(t_md5)
-                md5_objs.append(s_md5)
-                res = yield tornado.gen.Task(
-                            supportServices.neondata.ImageMD5Mapper.save_all,
-                            md5_objs)
-                if not res:
-                    _log.error('key=async_update_thumbnail' 
-                        'msg=failed to save ImageMD5Mapper for %s' %thumbnail_id)
                 
                 #TODO : use generator task. Don't you dare. This code
                 #is complicated enough as is
@@ -1081,13 +1043,15 @@ class BrightcoveApi(object):
             BrightcoveApi.read_connection.send_request(req))
 
 
-    def async_check_thumbnail(self, video_id, callback):
-        '''Method to check the current thumbnail for a video on brightcove
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_current_thumbnail_url(self, video_id):
+        '''Method to retrieve the current thumbnail url on Brightcove
         
         Used by AB Test to keep track of any uploaded image to
-        brightcove, its MD5 & URL
+        brightcove, its URL
 
-        Returns True if the current thumbnail is on brighcove.
+        Returns thumb_url, still_url
         
         '''
         thumb_url = None

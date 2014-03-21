@@ -29,6 +29,7 @@ import random
 import redis as blockingRedis
 import string
 from StringIO import StringIO
+from supportServices.url2thumbnail import URL2ThumbnailIndex
 import tornado.ioloop
 import tornado.gen
 import tornado.httpclient
@@ -1653,7 +1654,7 @@ class ThumbnailMetadata(object):
     '''
     def __init__(self, tid, internal_vid, urls, created, width, height, ttype,
                  model_score, model_version, enabled=True, chosen=False,
-                 rank=None, refid=None):
+                 rank=None, refid=None, phash=None):
         super(ThumbnailMetadata,self).__init__()
         self.key = tid # Thumbnail id
         self.video_id = internal_vid #api_key + platform video id
@@ -1668,12 +1669,11 @@ class ThumbnailMetadata(object):
         self.model_score = model_score #float
         self.model_version = model_version #string
         self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
-        
+        self.phash = phash # Perceptual hash of the image. None if unknown
 
-    #@classmethod
-        #def generate_key(cls, video_id, tid):
-        #''' generate thumbnail key '''
-        #return video_id + '_' + tid 
+    def update_phash(self, image):
+        '''Update the phash from a PIL image.'''
+        self.phash = URL2ThumbnailIndex().hash_index.hash_pil_image(image)
 
     def get_account_id(self):
         ''' get the internal account id. aka api key '''

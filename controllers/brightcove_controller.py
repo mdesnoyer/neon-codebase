@@ -28,6 +28,7 @@ import urllib
 import utils.neon
 from heapq import heappush, heappop
 from supportServices.neondata import VideoMetadata, ThumbnailMetadata, InMemoryCache
+from supportServices.url2thumbnail import URL2ThumbnailIndex
 from utils.options import define, options
 define("port", default=8888, help="run on the given port", type=int)
 define("delay", default=10, help="initial delay", type=int)
@@ -167,24 +168,20 @@ class ThumbnailCheckTask(AbstractTask):
     If thumbnail is new, save the corresponding THUMB URL => TID mapping
     '''
     def __init__(self, account_id, video_id):
-
-        self.video_id = video_id
-        self.service_url = options.service_url + \
-                "/api/v1/brightcovecontroller/%s/checkthumbnail/%s"\
-                %(account_id, video_id)
+        super(ThumbnailCheckTask, self).__init__(video_id)
+        self.account_id = account_id
     
-    @tornado.gen.engine
     def execute(self):
-        http_client = tornado.httpclient.AsyncHTTPClient()
-        req = tornado.httpclient.HTTPRequest(method='POST', url=self.service_url,
-                        request_timeout=10.0, body="")
-        result = yield tornado.gen.Task(http_client.fetch, req)
-        if result.error:
-            _log.error("key=ThumbnailCheckTask msg=service error for video %s"
-                        %self.video_id)
+        # Get the current thumbnail url showing on brightcove for this video
+
+        # Record the new thumbnail if its new
+        thumb_id = url2thumb.get_thumbnail_info(thumb_url, 
+                                                internal_video_id=video_id)
+
+        if thumb_id is None:
+            _log.warn("key=ThumbnailCheckTask "
+                      "msg=Could not get the thumbnail id for %s" % thumb_url)
             statemon.state.increment('thumbchecktask_fail')
-        else:
-            _log.info("key=ThumbnailCheckTask msg=run thumbnail check")
 
 
 class VideoTaskInfo(object):
@@ -251,7 +248,7 @@ class TaskManager(object):
 
     def add_video_info(self, vid, tdist):
         ''' Add video info '''
-        vminfo = VideoTaskInfo(vid,tdist) 
+        vminfo = VideoTaskInfo(vid, tdist) 
         if self.video_map.has_key(vid):
             self.clear_taskinfo_for_video(vid)
 
@@ -291,7 +288,7 @@ class BrightcoveABController(object):
         self.max_update_delay = delay
         
         self.timeslice = timeslice 
-        self.cushion_time = cushion_time 
+        self.cushion_time = cushion_time
 
     def thumbnail_change_scheduler(self, video_id, distribution):
         ''' Change thumbnail scheduler '''
@@ -409,7 +406,10 @@ class BrightcoveABController(object):
             pass
 
     def convert_from_percentages(self, pd):
-        ''' Convert from fraction(%) to time '''
+        ''' Convert from fraction(%) to time 
+
+        Returns: [(thumb_id, # of seconds to run)] sorted by the number of seconds
+        '''
         
         total_pcnt = sum([float(tup[1]) for tup in pd])
         time_dist = []
@@ -417,7 +417,7 @@ class BrightcoveABController(object):
         for tup in pd:
             pcnt = float(tup[1])
             if total_pcnt > 1:
-               tslice = (pcnt/total_pcnt) * self.timeslice  
+                tslice = (pcnt/total_pcnt) * self.timeslice  
             else:
                 tslice = pcnt * self.timeslice
 
@@ -496,9 +496,13 @@ application = tornado.web.Application([
 
 def main():
     SCHED_CHECK_INTERVAL = 1000 #1s
+    
     taskQ = PriorityQ()
     global taskmgr
     taskmgr = TaskManager(taskQ)
+    global url2thumb = URL2ThumbnailIndex()
+    
+    _log.info('Initializing the BrightCove controller')
     initialize_brightcove_controller()
     server = tornado.httpserver.HTTPServer(application)
     server.listen(options.port)

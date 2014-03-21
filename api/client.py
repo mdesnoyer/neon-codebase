@@ -154,8 +154,8 @@ class ProcessVideo(object):
         #AB Test Data
         self.abtest_thumbnails = {}
 
-        #thumbnail list of maps
-        self.thumbnails = [] # ThumbnailMetaData
+        #thumbnail list
+        self.thumbnails = [] # ThumbnailMetadata
         
         self.debug = debug
         self.pid = cur_pid
@@ -430,6 +430,7 @@ class ProcessVideo(object):
             tdata = ThumbnailMetadata(tid, video_id, urls, created, width,
                                       height, ttype, score,
                                       self.model_version, rank=rank)
+            tdata.update_phash(image)
             self.thumbnails.append(tdata)
         return s3_urls
 
@@ -464,6 +465,7 @@ class ProcessVideo(object):
         #populate thumbnails
         tdata = ThumbnailMetadata(tid, video_id, urls, created, width, height,
                                   ttype, score, self.model_version, rank=rank)
+        tdata.update_phash(image)
         self.thumbnails.append(tdata)
 
     ############# Request Finalizers ##############
