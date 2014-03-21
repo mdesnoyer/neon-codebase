@@ -49,4 +49,5 @@ S3_IMAGE_HOST_BUCKET_NAME = 'host-thumbnails'
 S3_CUSTOMER_ACCOUNT_BUCKET_NAME = 'neon-customer-accounts'
 
 #Frontend config
-NOTIFICATION_API_KEY = 'kR0ks7NpdSD0w6xXAAvWfw' 
+NOTIFICATION_API_KEY = 'icAxBCbwo--owZaFED8hWA'
+NOTIFICATION_API_KEY_STAGING = 'kR0ks7NpdSD0w6xXAAvWfw' 
