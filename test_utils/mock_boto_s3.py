@@ -301,6 +301,8 @@ class MockBucket(object):
 
     def list(self, prefix='', delimiter='', marker=NOT_IMPL,
              headers=NOT_IMPL):
+        return self.keys.itervalues()
+        '''
         prefix = prefix or '' # Turn None into '' for prefix match.
         # Return list instead of using a generator so we don't get
         # 'dictionary changed size during iteration' error when performing
@@ -323,6 +325,7 @@ class MockBucket(object):
                     key_name_set.add(key_or_prefix.name)
                     result.append(key_or_prefix)
         return result
+        '''
 
     def set_acl(self, acl_or_str, key_name='', headers=NOT_IMPL,
                 version_id=NOT_IMPL):

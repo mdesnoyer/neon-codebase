@@ -46,10 +46,11 @@ def main(options):
             for line in f.readlines():
                 d = line.split(' ')
                 d[-1] = d[-1].rstrip('\n')
-                for i in range(len(d)):
+                for i in range(len(d) -1):
+                    i = i+1
                     d[i] = float(d[i])
                 data.append(d)
-
+    
     ctr_base = np.array([float(x[2])/float(x[1]) for x in data])
     n_base = np.array([x[1] for x in data])
     ctr_neon = np.array([float(x[4])/float(x[3]) for x in data])
