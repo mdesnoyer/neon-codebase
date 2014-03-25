@@ -1249,12 +1249,11 @@ class SendNotification(object):
     def send(self, a_id):
         ''' send respone to notification url '''
        
-        notification_url = 'http://neon-lab.com/api/accounts/%s/events'%a_id
+        notification_url = 'http://www.neon-lab.com/api/accounts/%s/events'%a_id
         #notification_url = 'http://staging.neon-lab.com/api/accounts/%s/events'%a_id 
         body = urllib.urlencode(self.__dict__)
-        h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
         req = tornado.httpclient.HTTPRequest(url=notification_url, method = "POST",
-                headers = h, body=body, request_timeout=60.0, connect_timeout=10.0)
+                body=body, request_timeout=60.0, connect_timeout=10.0)
         http_client = tornado.httpclient.HTTPClient()
         try:
             response = http_client.fetch(req)
