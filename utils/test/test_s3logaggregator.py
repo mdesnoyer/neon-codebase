@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 '''
+Test S3 Log aggregator
 '''
 import os.path
 import sys
@@ -7,7 +8,6 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
                                          '..'))
 if sys.path[0] <> base_path:
         sys.path.insert(0, base_path)
-
 
 import boto
 from boto.s3.connection import S3Connection
@@ -17,7 +17,7 @@ from mock import MagicMock, patch
 import StringIO
 import unittest
 import test_utils.mock_boto_s3 as boto_mock
-from utils import s3logaggregator
+import utils.s3logaggregator
 
 class TestLogAggregator(unittest.TestCase):
 
@@ -39,7 +39,7 @@ class TestLogAggregator(unittest.TestCase):
             k = s3bucket.new_key("tkey-%s"%i)  
             k.set_contents_from_string(self.test_string)
 
-        s3logaggregator.main(input_bucket, output_bucket, 5)
+        utils.s3logaggregator.main(input_bucket, output_bucket, 5)
         for key in conn.buckets[output_bucket].get_all_keys():
             gzip_output = key.get_contents_as_string()
             gz = gzip.GzipFile(fileobj=StringIO.StringIO(gzip_output), mode='rb')
