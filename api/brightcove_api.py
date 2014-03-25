@@ -25,7 +25,7 @@ import urllib
 
 from utils.http import RequestPool
 import utils.http
-from utils.imageutils import ImageUtils
+from utils.imageutils import PILImageUtils
 import utils.logs
 import utils.neon
 _log = utils.logs.FileLogger("brighcove_api")
@@ -210,14 +210,17 @@ class BrightcoveApi(object):
             bcove_thumb = bcove_still = image
 
             #Always save the Image with the aspect ratio of the video
+
             if resize:
                 if frame_size is None:
                     #resize to brightcove default size
                     bcove_thumb = image.resize(self.THUMB_SIZE)
                     bcove_still = image.resize(self.STILL_SIZE)
                 else:
-                    bcove_thumb = ImageUtils.resize(image, im_w=self.THUMB_SIZE[0])
-                    bcove_still = ImageUtils.resize(image, im_w=self.STILL_SIZE[0])
+                    bcove_thumb = PILImageUtils.resize(image,
+                                                       im_w=self.THUMB_SIZE[0])
+                    bcove_still = PILImageUtils.resize(image,
+                                                       im_w=self.STILL_SIZE[0])
 
             t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
                                                             bcove_thumb,
@@ -352,8 +355,8 @@ class BrightcoveApi(object):
             bcove_thumb = image.resize(self.THUMB_SIZE)
             bcove_still = image.resize(self.STILL_SIZE)
         else:
-            bcove_thumb = ImageUtils.resize(image, im_w=self.THUMB_SIZE[0])
-            bcove_still = ImageUtils.resize(image, im_w=self.STILL_SIZE[0])
+            bcove_thumb = PILImageUtils.resize(image, im_w=self.THUMB_SIZE[0])
+            bcove_still = PILImageUtils.resize(image, im_w=self.STILL_SIZE[0])
 
         t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
                                                         bcove_thumb,
@@ -433,8 +436,10 @@ class BrightcoveApi(object):
                     bcove_thumb = image.resize(self.THUMB_SIZE)
                     bcove_still = image.resize(self.STILL_SIZE)
                 else:
-                    bcove_thumb = ImageUtils.resize(image, im_w=self.THUMB_SIZE[0])
-                    bcove_still = ImageUtils.resize(image, im_w=self.STILL_SIZE[0])
+                    bcove_thumb = PILImageUtils.resize(image,
+                                                       im_w=self.THUMB_SIZE[0])
+                    bcove_still = PILImageUtils.resize(image,
+                                                       im_w=self.STILL_SIZE[0])
 
                 t_md5 = supportServices.neondata.ImageMD5Mapper(video_id,
                                                                 bcove_thumb,

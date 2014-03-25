@@ -1466,81 +1466,6 @@ class AccountHandler(tornado.web.RequestHandler):
         '''
         pass
 
-###########################################################
-## Util Handler 
-###########################################################
-
-class UtilHandler(tornado.web.RequestHandler):
-    def prepare(self):
-        ''' image random seed'''
-        random.seed(340)
-
-    @tornado.web.asynchronous
-    def get(self, *args, **kwargs):
-        ''' get request '''
-
-        #call to utils/videoinfo
-        #call to utils/image
-        if "videoinfo" in self.request.uri:
-            image_url = self.get_argument("image_url", None)
-            self.image_to_video_info(image_url)
-            return
-
-        width = 480
-        height = 360
-        try:
-            width = int(self.get_argument("width"))
-            height = (self.get_argument("height"))
-        except Exception, e:
-            pass
-        
-        seed = int(hashlib.md5(self.request.uri).hexdigest(), 16)
-        random.seed(seed)
-        im = self._create_random_image(height, width)
-        imgstream = StringIO() 
-        im.save(imgstream, "jpeg", quality=100)
-        imgstream.seek(0)
-        data = imgstream.read()
-        self.finish(data)
-
-    def _create_random_image(self, h, w):
-        ''' image data'''
-
-        pixels = [(0,0,0) for _w in range(h*w)] 
-        r = random.randrange(0, 255)
-        g = random.randrange(0, 255)
-        b = random.randrange(0, 255)
-        pixels[0] = (r, g, b)
-        im = Image.new("RGB",(h, w))
-        im.putdata(pixels)
-        return im
-
-    def image_to_video_info(self, im_url):
-        ''' Given a image url, return video info '''
-
-        cb = self.get_argument("callback", "response")
-        info = {}
-        #video_url, video_title, video_process_time, video_id
-        data = '{"vinfo":{}}'
-
-        if im_url:
-            tid = neondata.ThumbnailURLMapper.get_id(im_url)
-            if tid:
-                vid = neondata.ThumbnailMetadata.get_video_id(tid)
-                if vid:
-                    req = neondata.VideoMetadata.get_video_request(vid)
-                if req:
-                    info["video_url"] = req.video_url
-                    info["video_title"] = req.video_title
-                    info["video_process_time"] = float(req.response["timestamp"]) - float(req.submit_time)
-                    info["video_id"] = req.video_id
-                    data = '{"vinfo":%s}' %json.dumps(info)
-
-        self.set_header("Content-Type", "application/json")
-        self.set_status(200)
-        self.write(cb + "("+ data + ")") #wrap json data in callback
-        self.finish()
-
 ######################################################################
 ## Brightcove support handler -- Mainly used by brigthcovecontroller 
 ######################################################################
@@ -1649,8 +1574,8 @@ class BcoveHandler(tornado.web.RequestHandler):
 
 application = tornado.web.Application([
         (r'/api/v1/accounts(.*)', AccountHandler),
-        (r'/api/v1/brightcovecontroller(.*)', BcoveHandler),
-        (r'/api/v1/utils(.*)', UtilHandler)], debug=True, gzip=True)
+        (r'/api/v1/brightcovecontroller(.*)', BcoveHandler)],
+        debug=True, gzip=True)
 
 def main():
     

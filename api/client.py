@@ -41,6 +41,7 @@ import tornado.httpclient
 import tornado.httputil
 import tornado.ioloop
 import time
+import urllib
 import numpy as np
 from PIL import Image
 import ffvideo 
@@ -687,7 +688,7 @@ class ProcessVideo(object):
                             0, #current_tid
                             thumbs)
 
-            sn = SendNotification(api_key, i_id, vr.to_dict())
+            sn = SendNotification(i_id, vr.to_json())
             sn.send(ba.account_id)
 
         else:
@@ -1235,8 +1236,8 @@ class SendNotification(object):
     Send notifications to heroku app api 
     '''
 
-    def __init__(self, api_key, i_id, video_json, event="processing_complete"):
-        self.api_key = api_key
+    def __init__(self, i_id, video_json, event="processing_complete"):
+        self.api_key = properties.NOTIFICATION_API_KEY
         self.integration_id = i_id
         self.video = video_json
         self.event = event
@@ -1248,12 +1249,11 @@ class SendNotification(object):
     def send(self, a_id):
         ''' send respone to notification url '''
        
-        notification_url = 'http://neon-lab.com/api/accounts/%s/events'%a_id
-        notification_url = 'http://staging.neon-lab.com/api/accounts/%s/events'%a_id 
-        body = self.to_json()
-        h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
+        notification_url = 'http://www.neon-lab.com/api/accounts/%s/events'%a_id
+        #notification_url = 'http://staging.neon-lab.com/api/accounts/%s/events'%a_id 
+        body = urllib.urlencode(self.__dict__)
         req = tornado.httpclient.HTTPRequest(url=notification_url, method = "POST",
-                headers = h, body=body, request_timeout=60.0, connect_timeout=10.0)
+                body=body, request_timeout=60.0, connect_timeout=10.0)
         http_client = tornado.httpclient.HTTPClient()
         try:
             response = http_client.fetch(req)

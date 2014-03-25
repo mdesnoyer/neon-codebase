@@ -32,6 +32,7 @@ from api import brightcove_api
 #from api import ooyala_api 
 from tornado.testing import AsyncHTTPTestCase, AsyncTestCase, AsyncHTTPClient
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
+from utils.imageutils import PILImageUtils
 from utils.options import define, options
 import logging
 _log = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ def create_random_image_response():
     '''http image response''' 
         
     request = HTTPRequest("http://someimageurl/image.jpg")
-    im = utils.imageutils.ImageUtils.create_random_image(360, 480)
+    im = utils.imageutils.PILImageUtils.create_random_image(360, 480)
     imgstream = StringIO()
     im.save(imgstream, "jpeg", quality=100)
     imgstream.seek(0)
@@ -74,7 +75,8 @@ def process_neon_api_requests(api_requests, api_key, i_id, t_type):
         job_id = api_request.job_id
         thumbnails = []
         for t in range(N_THUMBS):
-            image =  utils.imageutils.ImageUtils.create_random_image(360, 480)
+            image =  utils.imageutils.PILImageUtils.create_random_image(
+                360, 480)
             filestream = StringIO()
             image.save(filestream, "JPEG", quality=100) 
             filestream.seek(0)
@@ -488,6 +490,7 @@ class TestServices(AsyncHTTPTestCase):
         
         reqs = self._create_neon_api_requests()
         self._process_neon_api_requests(reqs)
+
 
     ################################################################
     # Unit Tests
@@ -1122,13 +1125,6 @@ class TestServices(AsyncHTTPTestCase):
         resp = self.get_request(url, self.api_key)
         self.assertEqual(resp.code, 400)
     
-    def test_utils_handler(self):
-        ''' random image utils handler test '''
-        url = self.get_url('/api/v1/utils/get_random_image')
-        resp = self.get_request(url, '')
-        self.assertEqual(resp.code, 200)
-        image = Image.open(StringIO(resp.body))
-        self.assertIsNotNone(image)
 
 
     ##### OOYALA PLATFORM TEST ######
