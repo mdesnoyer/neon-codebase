@@ -21,6 +21,7 @@ if sys.path[0] <> base_path:
 
 import base64
 import binascii
+import contextlib
 import copy
 import hashlib
 import json
@@ -156,59 +157,47 @@ class RedisAsyncWrapper(object):
     def __init__(self, host='127.0.0.1', port=6379):
         self.client = blockingRedis.StrictRedis(host, port, socket_timeout=10)
 
-    def get(self, key, callback):
-        ''' get key '''
-        io_loop = tornado.ioloop.IOLoop.current()
-        def _callback(result):
-            ''' result callback'''
-            io_loop.add_callback(
-                    lambda: callback(result))
-        RedisAsyncWrapper._thread_pool.apply_async(
-                self.client.get, args=(key,), callback=_callback)
-   
-    def set(self, key, value, callback):
-        ''' set key '''
-        io_loop = tornado.ioloop.IOLoop.current()
-        def _callback(result):
-            ''' result callback'''
-            io_loop.add_callback(
-                    lambda: callback(result))
-        RedisAsyncWrapper._thread_pool.apply_async(
-            self.client.set, args=(key, value,), callback=_callback)
+    @staticmethod
+    def _get_wrapped_async_func(func):
+        '''Returns an asynchronous function wrapped around the given func.
+
+        The asynchronous call has a callback keyword added to it
+        '''
+        def AsyncWrapper(*args, **kwargs):
+            # Find the callback argument
+            try:
+                callback = kwargs['callback']
+                del kwargs['callback']
+            except KeyError:
+                if len(args) > 0 and hasattr(args[-1], '__call__'):
+                    callback = args[-1]
+                    args = args[:-1]
+                else:
+                    raise AttributeError('A callback is necessary')
+                    
+            io_loop = tornado.ioloop.IOLoop.current()
+            def _cb(result):
+                io_loop.add_callback(lambda: callback(result))
+
+            RedisAsyncWrapper._thread_pool.apply_async(
+                func, args=args,
+                kwds=kwargs, callback=_cb)
+        return AsyncWrapper
+        
+
+    def __getattr__(self, attr):
+        '''Allows us to wrap all of the redis-py functions.'''
+        if hasattr(self.client, attr):
+            if hasattr(getattr(self.client, attr), '__call__'):
+                return RedisAsyncWrapper._get_wrapped_async_func(
+                    getattr(self.client, attr))
+                
+        raise AttributeError(attr)
     
     def pipeline(self):
         ''' pipeline '''
+        #TODO(Sunil) make this asynchronous
         return self.client.pipeline()
-
-    def mget(self, keys, callback):
-        ''' multi get '''
-        io_loop = tornado.ioloop.IOLoop.current()
-        def _callback(result):
-            ''' result callback'''
-            io_loop.add_callback(
-                    lambda: callback(result))
-        RedisAsyncWrapper._thread_pool.apply_async(
-            self.client.mget, args=(keys,), callback=_callback)
-    
-    def mset(self, keys, callback):
-        ''' multi set '''
-        io_loop = tornado.ioloop.IOLoop.current()
-        def _callback(result):
-            ''' result callback'''
-            io_loop.add_callback(
-                    lambda: callback(result))
-        RedisAsyncWrapper._thread_pool.apply_async(
-            self.client.mset, args=(keys,), callback=_callback)
-    
-    def keys(self, prefix, callback):
-        ''' key regex match'''
-        io_loop = tornado.ioloop.IOLoop.current()
-        def _callback(result):
-            ''' result callback'''
-            io_loop.add_callback(
-                    lambda: callback(result))
-        RedisAsyncWrapper._thread_pool.apply_async(
-            self.client.keys, args=(prefix,), callback=_callback)
     
 class DBConnectionCheck(threading.Thread):
 
@@ -298,6 +287,151 @@ def id_generator(size=32,
 
 ##############################################################################
 
+class StoredObject(object):
+    '''Abstract class to represent an object that is stored in the database.
+
+    This contains common routines for interacting with the data.
+    TODO: Convert all the objects to use this consistent interface.
+    '''
+    def __init__(self, key):
+        self.key = key
+
+    def to_json(self):
+        '''Returns a json version of the object'''
+        return json.dumps(self, default=lambda o: o.__dict__)
+
+    def save(self, callback=None):
+        '''Save the object to the database.'''
+        db_connection = DBConnection(self)
+        value = self.to_json()
+        if self.key is None:
+            raise Exception("key not set")
+        if callback:
+            db_connection.conn.set(self.key, value, callback)
+        else:
+            return db_connection.blocking_conn.set(self.key, value)
+
+    @classmethod
+    def get(cls, key, callback=None):
+        '''Retrieve this object from the database.
+
+        Returns the object or None if it couldn't be found
+        '''
+        db_connection = DBConnection(cls)
+
+        def cb(result):
+            if result:
+                obj = cls._create(key, result)
+                callback(obj)
+            else:
+                callback(None)
+
+        if callback:
+            db_connection.conn.get(key, cb)
+        else:
+            jdata = db_connection.blocking_conn.get(key)
+            if jdata is None:
+                return None
+            return cls._create(key, jdata)
+
+    @classmethod
+    def get_many(cls, keys, callback=None):
+        ''' Get many objects of the same type simultaneously
+
+        This is more efficient than one at a time.
+
+        Inputs:
+        keys - List of keys to get
+        callback - Optional callback function to call
+
+        Returns:
+        A list of cls objects or None if it wasn't there, one for each key
+        '''
+        db_connection = DBConnection(cls)
+
+        def process(results):
+            mappings = [] 
+            for key, item in zip(keys, results):
+                obj = cls._create(key, item)
+                mappings.append(obj)
+            callback(mappings)
+
+        if callback:
+            db_connection.conn.mget(keys, process)
+        else:
+            mappings = [] 
+            items = db_connection.blocking_conn.mget(keys)
+            for key, item in zip(keys, items):
+                obj = cls._create(key, item)
+                mappings.append(obj)
+            return mappings
+
+    
+    @classmethod
+    def modify(cls, key, func, callback=None):
+        '''Allows you to modify the object in the database atomically.
+
+        While in func, you have a lock on the object so you are
+        guaranteed for it not to change. It is automatically saved at
+        the end of func.
+        
+        Inputs:
+        func - Function that takes a single parameter (the object being edited)
+        key - The key of the object to modify
+
+        Example usage:
+        SoredObject.modify('thumb_a', lambda thumb: thumb.update_phash())
+        '''
+        def _getandset(pipe):
+            json_data = pipe.get(key)
+            pipe.multi()
+            obj = cls._create(key, json_data)
+            try:
+                func(obj)
+            finally:
+                pipe.set(key, obj.to_json())
+
+        db_connection = DBConnection(cls)
+        if callback:
+            db_connection.conn.transaction(_getandset, key, callback)
+        else:
+            db_connection.blocking_conn.transaction(_getandset, key)
+            
+    @classmethod
+    def save_all(cls, objects, callback=None):
+        '''Save many objects simultaneously'''
+        db_connection = DBConnection(cls)
+        data = {}
+        for obj in objects:
+            data[obj.key] = obj.to_json()
+
+        if callback:
+            db_connection.conn.mset(data, callback)
+        else:
+            return db_connection.blocking_conn.mset(data)
+
+    @classmethod
+    def _create(cls, key, json_data):
+        '''Create an object from the json_data.
+
+        Returns None if the object could not be created.
+        '''
+        if json_data:
+            data_dict = json.loads(json_data)
+            #create basic object
+            obj = cls(key)
+
+            #populate the object dictionary
+            for key, value in data_dict.iteritems():
+                obj.__dict__[key] = value
+        
+            return obj
+
+    @classmethod
+    def _erase_all_data(cls):
+        '''Clear the database that contains objects of this type '''
+        db_connection = DBConnection(cls)
+        db_connection.clear_db()
 
 class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
@@ -1646,7 +1780,7 @@ class ThumbnailURLMapper(object):
         db_connection.clear_db()
 
 
-class ThumbnailMetadata(object):
+class ThumbnailMetadata(StoredObject):
     '''
     Class schema for Thumbnail information.
 
@@ -1655,8 +1789,7 @@ class ThumbnailMetadata(object):
     def __init__(self, tid, internal_vid, urls, created, width, height, ttype,
                  model_score, model_version, enabled=True, chosen=False,
                  rank=None, refid=None, phash=None):
-        super(ThumbnailMetadata,self).__init__()
-        self.key = tid # Thumbnail id
+        super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
         self.urls = urls  # List of all urls associated with single image
         self.created_time = created # Timestamp when thumbnail was created 
@@ -1696,20 +1829,16 @@ class ThumbnailMetadata(object):
         '''
         new_dict = self.__dict__
         new_dict["thumbnail_id"] = new_dict.pop("key")
-        return new_dict 
-    
-    def to_json(self):
-        ''' to json '''
-        return json.dumps(self, default=lambda o: o.__dict__) 
+        return new_dict  
 
-    @staticmethod
-    def create(json_data):
+    @classmethod
+    def _create(cls, key, json_data):
         ''' create object '''
 
         if json_data:
             data_dict = json.loads(json_data)
             #create basic object
-            obj = ThumbnailMetadata(None, None, None, None, None, None, None,
+            obj = ThumbnailMetadata(key, None, None, None, None, None, None,
                                     None, None)
 
             # For backwards compatibility, check to see if there is a
@@ -1733,90 +1862,19 @@ class ThumbnailMetadata(object):
             asscociated with thumbnail
         '''
 
-        def get_metadata(result):
-            ''' extract thumbnail metadata from obj '''
-            vid = None
-            if result:
-                obj = ThumbnailMetadata.create(result)
-                callback(obj.video_id)
-                return
-            callback(vid)
-
-        db_connection = DBConnection(cls)
         if callback:
-            db_connection.conn.get(tid, get_metadata)
+            def handle_obj(obj):
+                if obj:
+                    callback(obj.video_id)
+                else:
+                    callback(None)
+            cls.get(tid, callback=handle_obj)
         else:
-            result = db_connection.blocking_conn.get(tid)
-            if result:
-                obj = ThumbnailMetadata.create(result)
+            obj = cls.get(tid)
+            if obj:
                 return obj.video_id
-
-    @classmethod
-    def get(cls, thumbnail_id, callback=None):
-        db_connection = DBConnection(cls)
-
-        def cb(result):
-            if result:
-                obj = cls.create(result)
-                callback(obj)
             else:
-                callback(None)
-
-        if callback:
-            db_connection.conn.get(thumbnail_id, cb)
-        else:
-            jdata = db_connection.blocking_conn.get(thumbnail_id)
-            if jdata is None:
                 return None
-            return cls.create(jdata)
-
-
-    @classmethod
-    def get_many(cls, keys, callback=None):
-        ''' Returns list of thumbnail metadata for give thumb ids(keys)
-        '''
-        db_connection = DBConnection(cls)
-
-        def process(results):
-            mappings = [] 
-            for item in results:
-                obj = ThumbnailMetadata.create(item)
-                mappings.append(obj)
-            callback(mappings)
-
-        if callback:
-            db_connection.conn.mget(keys, process)
-        else:
-            mappings = [] 
-            items = db_connection.blocking_conn.mget(keys)
-            for item in items:
-                obj = ThumbnailMetadata.create(item)
-                mappings.append(obj)
-            return mappings
-
-    @classmethod
-    def save_all(cls, thumbnails, callback=None):
-        ''' multi save '''
-        db_connection = DBConnection(cls)
-        data = {}
-        for t in thumbnails:
-            data[t.key] = t.to_json()
-
-        if callback:
-            db_connection.conn.mset(data, callback)
-        else:
-            return db_connection.blocking_conn.mset(data)
-
-    def save(self, callback=None):
-        ''' save instance '''
-        db_connection = DBConnection(self)
-        value = self.to_json()
-        if self.key is None:
-            raise Exception("key not set")
-        if callback:
-            db_connection.conn.set(self.key, value, callback)
-        else:
-            return db_connection.blocking_conn.set(self.key, value)
 
     @staticmethod
     def enable_thumbnail(thumbnails, new_tid):
@@ -1881,12 +1939,6 @@ class ThumbnailMetadata(object):
                 for thumb in ThumbnailMetadata.get_many(
                         video_metadata.thumbnail_ids):
                     yield thumb
-
-    @classmethod
-    def _erase_all_data(cls):
-        ''' clear db '''
-        db_connection = DBConnection(cls)
-        db_connection.clear_db()
 
 class VideoMetadata(object):
     '''

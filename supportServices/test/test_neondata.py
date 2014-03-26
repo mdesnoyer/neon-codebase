@@ -26,7 +26,7 @@ from StringIO import StringIO
 from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         YoutubePlatform, NeonUserAccount, DBConnection, NeonApiKey, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
-        ImageMD5Mapper, ThumbnailMetadata, InternalVideoID, OoyalaPlatform
+        ThumbnailMetadata, InternalVideoID, OoyalaPlatform
 
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
@@ -291,6 +291,7 @@ class TestBrightcovePlatform(unittest.TestCase):
     Brightcove platform specific tests
     '''
     def setUp(self):
+        super(TestBrightcovePlatform, self).setUp()
         self.cp_sync_patcher = \
           patch('utils.http.tornado.httpclient.HTTPClient')
         self.cp_async_patcher = \
@@ -351,11 +352,12 @@ class TestBrightcovePlatform(unittest.TestCase):
         u_bp = BrightcovePlatform.create(bp.get())
         self.assertEqual(len(u_bp.get_videos()), nvideos)
 
-class TestThumbnailHelperClass(unittest.TestCase):
+class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
     '''
     Thumbnail ID Mapper and other thumbnail helper class tests 
     '''
     def setUp(self):
+        super(TestThumbnailHelperClass, self).setUp()
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
 
@@ -363,6 +365,7 @@ class TestThumbnailHelperClass(unittest.TestCase):
 
     def tearDown(self):
         self.redis.stop()
+        super(TestThumbnailHelperClass, self).tearDown()
 
     def test_thumbnail_mapper(self):
         ''' Thumbnail mappings '''
@@ -370,12 +373,7 @@ class TestThumbnailHelperClass(unittest.TestCase):
         url = "http://thumbnail.jpg"
         vid = "v123"
         image = PILImageUtils.create_random_image(360, 480)
-        tid = ThumbnailID.generate(image, vid)
-        im_md5 = ImageMD5Mapper(vid, image, tid) 
-        im_md5.save()
-
-        res_tid = ImageMD5Mapper.get_tid(vid, im_md5)
-        #self.assertEqual(tid, res_tid)   
+        tid = ThumbnailID.generate(image, vid)  
     
         tdata = ThumbnailMetadata(tid, vid, [], 0, 480, 360,
                         "ttype", 0, 1, 0)
@@ -399,9 +397,35 @@ class TestThumbnailHelperClass(unittest.TestCase):
         self.assertEqual(tdata.rank, 0)
         self.assertEqual(tdata.urls, ['one.jpg', 'two.jpg'])
 
+    def test_atomic_modify(self):
+        vid = InternalVideoID.generate('api1', 'vid1')
+        tid = ThumbnailID.generate(self.image, vid)
+        tdata = ThumbnailMetadata(tid, vid, ['one.jpg', 'two.jpg'],
+                                  None, self.image.size[1], self.image.size[0],
+                                  'brightcove', 1.0, '1.2')
+        tdata.save()
+
+        ThumbnailMetadata.modify(tid, lambda x: x.urls.append('url3.jpg'))
+        self.assertItemsEqual(ThumbnailMetadata.get(tid).urls,
+                              ['one.jpg', 'two.jpg', 'url3.jpg'])
+
+        # Now try asynchronously
+        def setphash(thumb): thumb.phash = 'hash'
+        def setrank(thumb): thumb.rank = 6
+        ThumbnailMetadata.modify(tid, setphash, callback=self.stop)
+        ThumbnailMetadata.modify(tid, setrank, callback=self.stop)
+        self.wait()
+        self.wait()
+        thumb = ThumbnailMetadata.get(tid)
+        self.assertEqual(thumb.phash, 'hash')
+        self.assertEqual(thumb.rank, 6)
+        self.assertItemsEqual(thumb.urls,
+                              ['one.jpg', 'two.jpg', 'url3.jpg'])
+        
+
     def test_read_thumbnail_old_format(self):
         # Make sure that we're backwards compatible
-        thumb = ThumbnailMetadata.create("{\"video_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001\", \"thumbnail_metadata\": {\"chosen\": false, \"thumbnail_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\", \"model_score\": 4.1698684091322846, \"enabled\": true, \"rank\": 5, \"height\": 232, \"width\": 416, \"model_version\": \"20130924\", \"urls\": [\"https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg\"], \"created_time\": \"2013-12-02 09:55:19\", \"type\": \"neon\", \"refid\": null}, \"key\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\"}")
+        thumb = ThumbnailMetadata._create('2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15', "{\"video_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001\", \"thumbnail_metadata\": {\"chosen\": false, \"thumbnail_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\", \"model_score\": 4.1698684091322846, \"enabled\": true, \"rank\": 5, \"height\": 232, \"width\": 416, \"model_version\": \"20130924\", \"urls\": [\"https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg\"], \"created_time\": \"2013-12-02 09:55:19\", \"type\": \"neon\", \"refid\": null}, \"key\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\"}")
 
         self.assertEqual(thumb.key, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15')
         self.assertEqual(thumb.video_id, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001')

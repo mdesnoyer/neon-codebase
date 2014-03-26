@@ -14,6 +14,7 @@ from cv.imhash_index import ImHashIndex
 import logging
 import neondata
 import PIL.Image
+import threading
 import tornado.httpclient
 import tornado.gen
 import utils.http
@@ -35,6 +36,8 @@ class URL2ThumbnailIndex:
         '''Create the index. It is loaded from the neondata db.'''
         self.hash_index = ImHashIndex(hashtype='dhash', hash_size=64)
         self.phash_map = {} # pHash -> [thumbnail_mapper_obj]
+
+        self.thread_lock = threading.RLock()
 
     def build_index_from_neondata(self):
         '''Builds the index from the neondata database.'''
@@ -59,10 +62,11 @@ class URL2ThumbnailIndex:
         thumbnail - A thumbnail metadata object.
         '''
         try:
-            if thumbnail.key in [x.key for x in 
-                                 self.phash_map[thumbnail.phash]]:
-                # This thumb is already in the index so we're done
-                return
+            with self.thread_lock:
+                if thumbnail.key in [x.key for x in 
+                                     self.phash_map[thumbnail.phash]]:
+                    # This thumb is already in the index so we're done
+                    return
         except KeyError:
             pass
 
@@ -94,13 +98,13 @@ class URL2ThumbnailIndex:
 
         if thumb.phash is not None:
             # Record the hash value in the index
-            # TODO(mdesnoyer): Make sure this is thread safe
-            try:
-                self.phash_map[thumb.phash].append(thumb)
-            except KeyError:
-                self.phash_map[thumb.phash] = [thumb]
-                if update_hash_index:
-                    self.hash_index.add_hash(thumb.phash)
+            with self.thread_lock:
+                try:
+                    self.phash_map[thumb.phash].append(thumb)
+                except KeyError:
+                    self.phash_map[thumb.phash] = [thumb]
+                    if update_hash_index:
+                        self.hash_index.add_hash(thumb.phash)
 
         
         yield tornado.gen.Task(thumb.save)
