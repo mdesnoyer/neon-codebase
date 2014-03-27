@@ -242,76 +242,6 @@ class BrightcoveApi(object):
             vref_id = add_image_val["result"]["referenceId"]
 
         return ((rt is not None and rv is not None), tref_id, vref_id)
-
-    def update_thumbnail_and_still_refid(self, video_id, refid, callback):
-        '''
-        update both thumbnail and video still  
-        async only
-        '''
-        self.img_result = []
-        def updated_image(result):
-            if not result.error and len(result.body) > 0:
-                self.img_result.append(tornado.escape.json_decode(result.body))
-            else:
-                self.img_result.append(None)
-
-            if len(self.img_result) == 2:
-                thumb = False
-                still = False
-                try:
-                    for res in self.img_result:
-                        if res and not res["error"]:
-                            if res["result"]["type"] == 'THUMBNAIL':
-                                thumb = res["result"]["referenceId"]
-                            elif res["result"]["type"] == 'VIDEO_STILL':
-                                still = res["result"]["referenceId"]
-                except:
-                    pass
-                callback_value = (thumb, still)
-                callback(callback_value)
-
-            self.update_image_with_refid(video_id,
-                                         refid,
-                                         callback=updated_image)
-            self.update_image_with_refid(video_id,
-                                         'still-'+refid,
-                                         callback=updated_image)
-
-
-    def update_image_with_refid(self, video_id, refid, videostill=False,
-                                callback=None):
-        '''
-        Update the thumbnail for a given video given the ReferenceID 
-        of an existing image asset 
-        '''
-
-        outer = {}
-        params = {}
-        params["token"] = self.write_token 
-        params["video_id"] = video_id 
-        image = {} 
-        image["referenceId"] = refid
-        if videostill:
-            image["type"] = "VIDEO_STILL"
-        params["image"] = image
-        outer["params"] = params
-        outer["method"] = "add_image"
-        body = tornado.escape.json_encode(outer)
-        
-        post_param = []
-        args = poster.encode.MultipartParam("JSONRPC", value=body)
-        post_param.append(args)
-        datagen, headers = multipart_encode(post_param)
-        body = "".join([data for data in datagen])
-
-        req = tornado.httpclient.HTTPRequest(url=self.write_url,
-                                             method="POST",
-                                             headers=headers,
-                                             body=body,
-                                             request_timeout=60.0,
-                                             connect_timeout=10.0)
-
-        return BrightcoveApi.write_connection.send_request(req, callback)
         
 
     def enable_thumbnail_from_url(self, video_id, url, frame_size=None,
@@ -1017,31 +947,6 @@ class BrightcoveApi(object):
                 callback(None)
         self.async_get_n_videos(5, verify_brightcove_tokens)
     
-    #################################################################
-    # Brightcove Thumbnail check methods 
-    #################################################################
-    
-    def get_image(self, image_url, callback=None):
-        '''Returns the raw image stream from a given URL.'''
-        def process_response(response):
-
-            if response.error:
-                _log.error('key=get_image msg=Error getting %s' % image_url)
-                raise response.error
-            return response.body
-            
-        req = tornado.httpclient.HTTPRequest(url=image_url,
-                                             method="GET",
-                                             request_timeout=60.0,
-                                             connect_timeout=10.0)
-
-        #TODO: Not a brightcove api call, switch to normal http fetch
-        if callback:
-            #callback = lambda x: callback(process_response(x))#investigate recursion
-            return BrightcoveApi.read_connection.send_request(req, callback)
-        return process_response(
-            BrightcoveApi.read_connection.send_request(req))
-
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -1051,99 +956,14 @@ class BrightcoveApi(object):
         Used by AB Test to keep track of any uploaded image to
         brightcove, its URL
 
+        Inputs:
+        video_id - The brightcove video id to get the urls for
+
         Returns thumb_url, still_url
         
         '''
         thumb_url = None
         still_url = None
-
-        @tornado.gen.engine
-        def check_image_md5_db(thumb_url, thumbnail, callback):
-            ''' check if imagemd5 already is in the DB'''
-            if thumbnail:
-                #valid image
-                t_md5 = supportServices.neondata.ThumbnailMD5.generate(
-                    thumbnail)
-                tid = yield tornado.gen.Task(
-                    supportServices.neondata.ImageMD5Mapper.get_tid,
-                    video_id,
-                    t_md5)
-                if tid:
-                    url_mapper = yield tornado.gen.Task(
-                        supportServices.neondata.ThumbnailURLMapper.get_id,
-                        thumb_url)
-                    if not url_mapper:
-                        #entry for the given thumbnail url doesn't exist, Save it !
-                        mapper = supportServices.neondata.ThumbnailURLMapper(
-                            thumb_url, tid)
-                        res = yield tornado.gen.Task(mapper.save)
-                        if res:
-                            callback(True)
-                            return
-                        else:
-                            _log.error("key=async_check_thumbnail" 
-                                    " msg=failed to save ThumbnailURLMapper url " 
-                                    " %s tid %s" %(thumb_url, tid))
-                    else:
-                        _log.info("key=async_check_thumbnail"
-                                " msg=entry for url %s exists already"%thumb_url)
-                        callback(False) #indicate thumb not saved
-                        return
-                else:
-                    #Should this entry be saved, perhaps its a new image 
-                    #that the customer may have overriden ? 
-                    #-- should this be saved in db as chosen=true?
-                    i_vid = supportServices.neondata.InternalVideoID.generate(
-                                self.neon_api_key, video_id) 
-                    tid = supportServices.neondata.ThumbnailID.generate(
-                                thumbnail, i_vid)
-                    created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    urls = [thumb_url]
-                    td = supportServices.neondata.ThumbnailMetadata(
-                                tid, i_vid, urls, created, 480, 360,
-                                "brightcove", 0, 0, rank=0)
-                    ret = td.save()
-                    
-                    if ret:
-                        tmap = supportServices.neondata.ThumbnailURLMapper(
-                            thumb_url, tid)
-                        ret = supportServices.neondata.ThumbnailURLMapper.save_all([tmap])
-                    _log.info("key=async_check_thumbnail"
-                            " msg=saved mapping for image url" 
-                            " %s md5 %s"%(thumb_url, t_md5)) 
-                    callback(False)
-                    return
-            else:
-                _log.error("key=async_check_thumbnail" 
-                        " msg=thumbnail not downloaded %s" %thumb_url)
-            
-            callback(None)
-
-        @tornado.gen.engine
-        def result_callback(response):
-            '''
-            Make a call to Brightcove, Download the image and process the result
-            '''
-            if not response.error:
-                resp = tornado.escape.json_decode(response.body)
-                try:
-                    thumb_url = resp['thumbnailURL'].split('?')[0]
-                    still_url = resp['videoStillURL'].split('?')[0]
-                except:
-                    _log.error("key=async_check_thumbnail "
-                            " msg=thumbnail url not found for %s"%video_id)
-                    callback(None)
-                    return
-                thumbnail = yield tornado.gen.Task(self.get_image, thumb_url)
-                videostill = yield tornado.gen.Task(self.get_image, still_url)
-                
-                tret = yield tornado.gen.Task(
-                        check_image_md5_db,thumb_url, thumbnail.body)
-                stret = yield tornado.gen.Task(
-                        check_image_md5_db,still_url, videostill.body)
-                callback(tret and stret)
-            else:
-                callback(None)
 
         url = 'http://api.brightcove.com/services/library?' \
                 'command=find_video_by_id&token=%s&media_delivery=http'\
@@ -1153,9 +973,24 @@ class BrightcoveApi(object):
                                              method="GET", 
                                              request_timeout=60.0,
                                              connect_timeout=10.0)
-        response = BrightcoveApi.read_connection.send_request(req,
-                                                              result_callback)
+        response = yield tornado.gen.Task(
+            BrightcoveApi.read_connection.send_request, req)
 
+        if response.error:
+            _log.error('key=get_current_thumbnail_url '
+                       'msg=Error getting thumbnail for video id %s'%video_id)
+            raise tornado.gen.Return((None, None))
+
+        result = tornado.escape.json_decode(response.body)
+        try:
+            thumb_url = resp['thumbnailURL'].split('?')[0]
+            still_url = resp['videoStillURL'].split('?')[0]
+        except KeyError:
+            _log.error('key=get_current_thumbnail_url '
+                       'msg=No valid url set for video id %s' % video_id)
+            raise tornado.gen.Return((None, None))
+
+        raise tornado.gen.Return((thumb_url, still_url))
     
 
 if __name__ == "__main__" :

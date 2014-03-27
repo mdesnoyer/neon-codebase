@@ -48,7 +48,7 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
         v1.save()
         t1 = neondata.ThumbnailMetadata(
             't1', v1.key, ['one.jpg', 'one_cmp.jpg'],
-            None, None, None, None, None, None)
+            None, None, None, None, None, None, enabled=True)
         t1.save()
         neondata.ThumbnailURLMapper('one.jpg', 't1').save()
         neondata.ThumbnailURLMapper('one_cmp.jpg', 't1').save()
@@ -139,6 +139,27 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
         self.assertEqual(index.get_thumbnail_info('three.jpg').key, 't3')
         self.assertEqual(index.get_thumbnail_info('four.jpg').key, 't4')
 
+    def test_external_process_changes_thumb_info(self):
+        self.setURLImageMapping({'one.jpg' : self.images[0],
+                                 'one_cmp.jpg' : self.images[0],
+                                 'two.jpg' : self.images[1],
+                                 'three.jpg' : self.images[2],
+                                 'four.jpg' : self.images[3]})
+        index = URL2ThumbnailIndex()
+
+        orig_thumb = index.get_thumbnail_info('one.jpg')
+        self.assertTrue(orig_thumb.enabled)
+        self.assertEqual(orig_thumb.key, 't1')
+
+        to_mod = neondata.ThumbnailMetadata.get('t1')
+        to_mod.enabled = False
+        to_mod.save()
+
+        mod_thumb = index.get_thumbnail_info('one.jpg')
+        self.assertFalse(mod_thumb.enabled)
+        self.assertEqual(mod_thumb.key, 't1')
+        
+
     def test_async_ability(self):
         self.setURLImageMapping({'one.jpg' : self.images[0],
                                  'one_cmp.jpg' : self.images[0],
@@ -226,21 +247,36 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
              't5', v3.key, ['five.jpg'],
              None, None, None, None, None, None)
         index.add_thumbnail_to_index(t5)
+        index.add_thumbnail_to_index(t5)
         v2 = neondata.ThumbnailMetadata.get(
             neondata.InternalVideoID.generate('api1', 'v2'))
         t6 = neondata.ThumbnailMetadata(
              't6', v2.key, ['five_cmp.jpg'],
              None, None, None, None, None, None)
         t6.phash = self._get_phash_of_jpegimage(self.images[4])
+        t6.save()
         index.add_thumbnail_to_index(t6)
 
+        # The same image is used in different videos, so we don't know
+        # which one to choose.
         self.assertIsNone(index.get_thumbnail_info('five.jpg'))
+        self.assertIsNone(neondata.ThumbnailURLMapper.get_id('five.jpg'))
+        self.assertIsNone(neondata.ThumbnailURLMapper.get_id('five_cmp.jpg'))
+
+        # Now we limit to the specific video so that we can find it
         self.assertEqual('t5', 
                          index.get_thumbnail_info('five.jpg',
                                                   internal_video_id=v3.key).key)
+        self.assertEqual(neondata.ThumbnailURLMapper.get_id('five.jpg'), 't5')
+        self.assertIsNone(neondata.ThumbnailURLMapper.get_id('five_cmp.jpg'))
+        
         self.assertEqual('t6', 
                          index.get_thumbnail_info('five_cmp.jpg',
                                                   internal_video_id=v2.key).key)
+        self.assertIsNotNone(neondata.ThumbnailMetadata.get('t6').phash)
+        self.assertEqual(neondata.ThumbnailURLMapper.get_id('five.jpg'), 't5')
+        self.assertEqual(neondata.ThumbnailURLMapper.get_id('five_cmp.jpg'),
+                         't6')
 
     def test_same_image_in_different_account(self):
         v3 = neondata.ThumbnailMetadata.get(
@@ -268,13 +304,19 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
                                                   't5')
         index.get_thumbnail_info('five.jpg', callback=self.stop,
                                  account_api_key='api1')
+        self.assertIsNone(self.wait())
         self.assertEqual(
-            index.get_thumbnail_info('five.jpg', account_api_key='api1').key,
+            index.get_thumbnail_info('one.jpg', account_api_key='api1').key,
             't1')
+        self.assertIsNone(
+            index.get_thumbnail_info(
+            'five.jpg',
+            internal_video_id=neondata.InternalVideoID.generate('api1',
+                                                                'v1')))
         self.assertEqual(
             't1',
             index.get_thumbnail_info(
-            'five.jpg',
+            'one.jpg',
             internal_video_id=neondata.InternalVideoID.generate('api1',
                                                                 'v1')).key)
         self.assertEqual(
@@ -308,13 +350,17 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
         self.assertEqual(
             't5',
             index.get_thumbnail_info('five.jpg', internal_video_id=v2.key).key)
-        self.assertEqual(
-            't1',
+        self.assertIsNone(
             index.get_thumbnail_info(
                 'five.jpg',
                 internal_video_id=neondata.InternalVideoID.generate(
+                    'api1', 'v1')))
+        self.assertEqual(
+            't1',
+            index.get_thumbnail_info(
+                'one.jpg',
+                internal_video_id=neondata.InternalVideoID.generate(
                     'api1', 'v1')).key)
-
     def test_thumbnail_metadata_missing(self):
         neondata.ThumbnailURLMapper('unknown.jpg', 'no_tid').save()
         self.setURLImageMapping({'one.jpg' : self.images[0],

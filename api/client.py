@@ -455,6 +455,7 @@ class ProcessVideo(object):
 
         #If tid already exists, then skip saving metadata
         if ThumbnailMetadata.get(tid) is not None:
+            _log.warn('Already have thumbnail id: %s' % tid)
             return
 
         urls.append(s3fname)

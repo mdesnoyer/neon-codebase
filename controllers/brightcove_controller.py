@@ -14,8 +14,13 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0, base_path)
 
+from api.brightcove_api import BrightcoveApi
+from heapq import heappush, heappop
 import itertools
 import random
+from supportServices.neondata import VideoMetadata, ThumbnailMetadata, \
+     InMemoryCache, InternalVideoID, ThumbnailID
+from supportServices.url2thumbnail import URL2ThumbnailIndex
 import time
 import threading
 import tornado
@@ -25,10 +30,8 @@ import tornado.httpserver
 import tornado.gen
 import tornado.httpclient
 import urllib
+from utils.imageutils import PILImageUtils
 import utils.neon
-from heapq import heappush, heappop
-from supportServices.neondata import VideoMetadata, ThumbnailMetadata, InMemoryCache
-from supportServices.url2thumbnail import URL2ThumbnailIndex
 from utils.options import define, options
 define("port", default=8888, help="run on the given port", type=int)
 define("delay", default=10, help="initial delay", type=int)
@@ -36,6 +39,9 @@ define("service_url", default="http://localhost:8083",
         help="service url", type=str)
 define("mastermind_url", default="http://localhost:8086/get_directives", 
         help="mastermind url", type=str)
+define("max_thumb_check_threads", default=10,
+       help=("Maximum number of threads used to check the brightcove "
+             "thumbnail state"))
 
 import logging
 _log = logging.getLogger(__name__)
@@ -47,6 +53,10 @@ statemon.define('pqsize', int)
 statemon.define('thumbchangetask', int)
 statemon.define('thumbchangetask_fail', int)
 statemon.define('thumbchecktask_fail', int)
+# The number of videos being ab tested
+statemon.define('nvideos_abtesting', int)
+# The number of videos being monitored by this controller
+statemon.define('nvideos', int)
 
 ###################################################################################
 ## Priority Q Impl
@@ -102,6 +112,7 @@ class PriorityQ(object):
 
 class AbstractTask(object):
     def __init__(self, vid):
+        '''Initialize the task with the internal video id'''
         self.video_id = vid
 
     def execute(self):
@@ -118,8 +129,8 @@ class ThumbnailChangeTask(AbstractTask):
         #will have only a single thumbnail with fraction=1.0
     '''
     
-    def __init__(self,account_id, video_id, new_tid, nosave=True):
-        self.video_id = video_id
+    def __init__(self, account_id, video_id, new_tid, nosave=True):
+        super(ThumbnailChangeTask, self).__init__(video_id)
         self.tid = new_tid
         self.service_url = options.service_url + \
                 "/api/v1/brightcovecontroller/%s/updatethumbnail/%s" \
@@ -148,10 +159,6 @@ class ThumbnailChangeTask(AbstractTask):
 class TimesliceEndTask(AbstractTask):
 
     ''' Task that executes at the end of time slice'''
-
-    def __init__(self, vid):
-        self.video_id = vid 
-
     def execute(self):
         '''
         based on current state of video take a decision
@@ -165,23 +172,72 @@ class ThumbnailCheckTask(AbstractTask):
     '''
     Check the current thumbnail in brightcove and verify if the thumbnail has 
     been saved in the DB.
-    If thumbnail is new, save the corresponding THUMB URL => TID mapping
-    '''
-    def __init__(self, account_id, video_id):
-        super(ThumbnailCheckTask, self).__init__(video_id)
-        self.account_id = account_id
     
+    If thumbnail is new, save the corresponding THUMB URL => TID
+    mapping and create a new entry for the thumbnail if it doesn't
+    exist already.
+    
+    '''    
     def execute(self):
+        # Get the BrightcovePlatform associated with this video id
+        video = VideoMetadata.get(self.video_id)
+        if video is None:
+            _log.error("key=ThumbnailCheckTask "
+                       "msg=Could not find video id: %s" % self.video_id)
+            statemon.state.increment('thumbchecktask_fail')
+            return
+        platform = BrightcovePlatform.get_account(video.get_account_id(),
+                                                  video.integration_id)
+        if platform is None:
+            _log.error("key=ThumbnailCheckTask "
+                       "msg=Could not find brightcove platform for video: %s" 
+                       % self.video_id)
+            statemon.state.increment('thumbchecktask_fail')
+            return
+        
         # Get the current thumbnail url showing on brightcove for this video
+        thumb_url, still_url = platform.get_api().get_current_thumbnail_url(
+            neondata.InternalVideoID.to_external(self.video_id))
 
-        # Record the new thumbnail if its new
-        thumb_id = url2thumb.get_thumbnail_info(thumb_url, 
-                                                internal_video_id=video_id)
+        if thumb_url is None:
+            _log.error("key=ThumbnailCheckTask "
+                       "msg=Could not find thumbnail url for video: %s" %
+                       self.video_id)
+            statemon.state.increment('thumbchecktask_fail')
+            return
+
+        # Record the new thumbnail if it's new
+        thumb_id = url2thumb.get_thumbnail_info(
+            thumb_url, 
+            internal_video_id=self.video_id)
 
         if thumb_id is None:
-            _log.warn("key=ThumbnailCheckTask "
-                      "msg=Could not get the thumbnail id for %s" % thumb_url)
-            statemon.state.increment('thumbchecktask_fail')
+            # Somebody uploaded a new thumbnail to Brightcove so we
+            # are going to record it.
+            image = PILImageUtils.download_image(thumb_url)
+            tid = ThumbnailID.generate(image, self.video_id)
+            created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            thumb = ThumbnailMetadata(tid, self.video_id, [thumb_url],
+                                      created, image.width, image.height,
+                                      'brightcove', rank=0)
+            thumb.update_phash(image)
+            thumb.save()
+
+            #TODO(mdesnoyer): We have a potential race condition here
+            #when updating the ranks in the brightcove thumbnails for
+            #this video. It's not very risky because this task is only
+            #ever running once (unless it takes longer than the
+            #period), but it should be locked proplery.
+            thumb_ids = []
+            def update_video(video):
+                thumb_ids = video.thumbnail_ids
+                video.append(tid)
+            VideoMetadata.modify(self.video_id, update_video)
+            for thumb_id in thumb_ids:
+                def inc_rank(t): t.rank += 1
+                ThumbnailMetadata.modify(thumb_id, inc_rank)
+
+            url2thumb.add_thumbnail_to_index(thumb)
 
 
 class VideoTaskInfo(object):
@@ -214,6 +270,7 @@ class TaskManager(object):
     def __init__(self, taskQ):
         self.taskQ = taskQ
         self.video_map = {} #vid => VideoTaskInfo
+        self.thumb_check_pool = ThreadPool(options.max_thumb_check_threads)
 
     def add_task(self, task, priority):
         ''' Add task to the taskQ '''
@@ -269,6 +326,7 @@ class TaskManager(object):
     @tornado.gen.engine
     def check_scheduler(self):
         ''' Check scheduler thread '''
+        statemon.state.nvideos = len(self.video_map)
         priority, count, task = self.taskQ.peek_task()
         cur_time = time.time()
         if priority and priority <= cur_time:
@@ -276,6 +334,12 @@ class TaskManager(object):
             t = threading.Thread(target=self.task_worker, args=(task,))
             t.setDaemon(True)
             t.start()
+
+    def check_thumbnails(self):
+        '''Launch jobs to check all of the urls on Brightcove.'''
+        for video_id in self.video_map.keys():
+            task = ThumbnailCheckTask(video_id)
+            self.thumb_check_pool.apply_async(task.execute)
 
 ###################################################################################
 # Brightcove AB Controller Logic 
@@ -352,9 +416,8 @@ class BrightcoveABController(object):
         #| check |  sched A  | sched B | sched A |  end task |
         #--------0-------------------------------------------E-
 
-        #Thumbnail Check Task -- May need to run more than once? 
-        ctask = ThumbnailCheckTask(account_id, video_id)
-        taskmgr.add_task(ctask, cur_time)
+        #Thumbnail Check Task -- May need to run more than once?
+        taskmgr.add_task(ThumbnailCheckTask(video_id), cur_time)
 
         #NOTE: Check what happens when you push same refID thumb to bcove
         #ans: It keeps the same thumb, discards the image being uploaded
@@ -377,6 +440,10 @@ class BrightcoveABController(object):
                 if tup[1] <= 0.0:
                     continue
 
+                # Schedule a check of the brightcove url before we change it
+                taskmgr.add_task(ThumbnailCheckTask(video_id),
+                                 time_to_exec_task - 10)
+
                 task = ThumbnailChangeTask(account_id, video_id, tup[0]) 
                 taskmgr.add_task(task, time_to_exec_task)
                 #print "---" , cur_time,delay,abtest_start_time
@@ -398,6 +465,8 @@ class BrightcoveABController(object):
         
             #schedule End of Timeslice for a particular video
             taskmgr.add_task(task_time_slice, time_to_exec_task)
+            
+            statemon.state.nvideos_abtesting.increment()
         else:
             #Dont need to end the timeslice since the majority thumbnail is 
             #designated to run until mastermind sends a changed directive
@@ -441,6 +510,7 @@ class GetData(tornado.web.RequestHandler):
         Handler that recieves data from mastermind
         '''
         data = self.request.body
+        statemon.state.nvideos_abtesting.decrement()
         setup_controller_for_video(data)
         self.set_status(201)
         self.finish()
@@ -462,6 +532,12 @@ def setup_controller_for_video(jsondata, delay=0):
     vid = vid_tuple[0]
     tid_dists = vid_tuple[1]
     taskmgr.add_video_info(vid, tid_dists) #store vid,tdist info 
+
+    # New data from mastermind, so add any new thumbnails to the
+    # url2thumb index.
+    for thumb in ThumbnailMetadata.get_many([x[0] for x in tid_dists]):
+        url2thumb.add_thumbnail_to_index(thumb)
+    
     controller.thumbnail_change_scheduler(vid, tid_dists)
     return True
 
@@ -501,6 +577,7 @@ def main():
     global taskmgr
     taskmgr = TaskManager(taskQ)
     global url2thumb = URL2ThumbnailIndex()
+    url2thumb.build_index_from_neondata()
     
     _log.info('Initializing the BrightCove controller')
     initialize_brightcove_controller()
@@ -508,6 +585,9 @@ def main():
     server.listen(options.port)
     tornado.ioloop.PeriodicCallback(taskmgr.check_scheduler,
             SCHED_CHECK_INTERVAL).start()
+    # Check brightcove for the thumbnail state at least every 5 minutes
+    tornado.ioloop.PeriodicCallback(taskmgr.check_thumbnails,
+                                    304086).start()
     tornado.ioloop.IOLoop.instance().start()
     
 # ============= MAIN ======================== #

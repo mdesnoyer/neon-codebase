@@ -782,36 +782,6 @@ class TestServices(AsyncHTTPTestCase):
         tids = neondata.ThumbnailMetadata.get_many([tid,tid2])
         self.assertTrue(tids[0].chosen)
         self.assertFalse(tids[1].chosen)
-
-    def test_bh_check_thumbnail(self):
-        ''' Brightcove support handler tests (check thumb/update thumb) '''
-        
-        self._setup_initial_brightcove_state()
-        
-        vids = self._get_videos()
-        vid  = vids[0]
-        tids = self._get_thumbnails(vid)
-        i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
-        tid  = tids[0]
-        url = self.get_url('/api/v1/brightcovecontroller/%s/checkthumbnail/%s' 
-                        %(self.api_key, i_vid))
-        vals = {}
-        
-        # thumbnail md5 shouldnt be found since random image was returned
-        # while creating the response for get_image()
-        resp = self.post_request(url, vals, self.api_key)
-        self.assertEqual(resp.code, 200) 
-
-        #NOTE: ImageMD5 gets saved as part of image upload to brightcove
-        #hence simulate that so as to create DB entry for check thumbnail run
-
-        #TODO: Return image that was saved so that thumbnail check succeceds
-        #HACK: all potential tids here are associated with single video 
-        md5_objs = []
-        for tid,image in self.images.iteritems():
-            t_md5 = neondata.ImageMD5Mapper(vid, image, tid)
-            md5_objs.append(t_md5) 
-        res = neondata.ImageMD5Mapper.save_all(md5_objs)
         
 
     def test_pagination_videos_brighcove(self):

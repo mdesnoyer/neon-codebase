@@ -405,7 +405,9 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
                                   'brightcove', 1.0, '1.2')
         tdata.save()
 
-        ThumbnailMetadata.modify(tid, lambda x: x.urls.append('url3.jpg'))
+        thumb = ThumbnailMetadata.modify(tid,
+                                         lambda x: x.urls.append('url3.jpg'))
+        self.assertItemsEqual(thumb.urls, ['one.jpg', 'two.jpg', 'url3.jpg'])
         self.assertItemsEqual(ThumbnailMetadata.get(tid).urls,
                               ['one.jpg', 'two.jpg', 'url3.jpg'])
 

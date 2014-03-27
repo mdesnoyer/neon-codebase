@@ -688,8 +688,9 @@ class AccountHandler(tornado.web.RequestHandler):
             self.api_key, vid) for vid in completed_videos] #get internal vids
 
         if len(keys) > 0:
-            video_results = yield tornado.gen.Task(neondata.VideoMetadata.multi_get,
-                                                   keys)
+            video_results = yield tornado.gen.Task(
+                neondata.VideoMetadata.get_many,
+                keys)
             tids = []
             for vresult in video_results:
                 if vresult:
@@ -988,7 +989,7 @@ class AccountHandler(tornado.web.RequestHandler):
                 keys = [neondata.InternalVideoID.generate(
                             self.api_key, vid) for vid in vids]
                 video_results = yield tornado.gen.Task(
-                        neondata.VideoMetadata.multi_get, keys)
+                        neondata.VideoMetadata.get_many, keys)
                 tids = []
                 video_thumb_mappings = {} #vid => [thumbnail metadata ...]
                 update_videos = {} #vid => neon_tid
@@ -1553,39 +1554,6 @@ class BcoveHandler(tornado.web.RequestHandler):
                     " msg=failed to fetch video metadata or video not present for "
                     "%s %s"%(self.internal_video_id, new_tid))
             self.set_status(502)
-        self.finish()
-    
-    @tornado.gen.engine   
-    def check_thumbnail(self):
-        ''' #/api/v1/brightcovecontroller/%s/checkthumbnail/%s'
-            %(self.api_key,i_vid)) '''
-
-        vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get,
-                                        self.internal_video_id)
-        if vmdata:
-            i_id = vmdata.integration_id
-            ba = yield tornado.gen.Task(
-                    neondata.BrightcovePlatform.get_account,
-                    self.a_id,
-                    i_id)
-            if ba:
-                result = yield tornado.gen.Task(
-                        ba.check_current_thumbnail_in_db, 
-                        self.internal_video_id)
-                if result is not None:
-                    self.set_status(200)
-                else:
-                    _log.error("key=bcove_handler msg=failed to check thumbnail " 
-                                " for %s"%self.internal_video_id)
-                    self.set_status(502)
-            else:
-                _log.error("key=bcove_handler msg=failed to fetch" 
-                        " BrightcovePlatform %s i_id %s"%(self.a_id, i_id))
-        else:
-            _log.error("key=bcove_handler msg=failed to fetch video metadata " 
-                        "for %s"%self.internal_video_id)
-            self.set_status(500)
-
         self.finish()
 
 ################################################################
