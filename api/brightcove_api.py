@@ -497,7 +497,7 @@ class BrightcoveApi(object):
         d_url  = b_json_item['FLVURL']
 
         #If we get a broken response from brightcove api
-        if not b_json_item.has_key['renditions']:
+        if not b_json_item.has_key('renditions'):
             return d_url
 
         renditions = b_json_item['renditions']
