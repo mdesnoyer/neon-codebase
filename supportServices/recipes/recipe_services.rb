@@ -5,8 +5,8 @@ bash "Setup Services App" do
   echo "start services setup" 
   cd /opt/neon/
   git stash
-  git pull
+  git checkout git@github.com:neon-lab/neon-codebase.git
   source enable_env
-  make test
+  make test >> /tmp/make.output
   EOH
 end
