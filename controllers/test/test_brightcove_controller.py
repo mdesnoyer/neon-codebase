@@ -10,6 +10,7 @@ from controllers import brightcove_controller
 import json
 from mock import patch, MagicMock
 from StringIO import StringIO
+import random
 import time
 import test_utils.neontest
 import tornado
@@ -42,7 +43,7 @@ class TestScheduler(unittest.TestCase):
         #setup video distribution
         brightcove_controller.setup_controller_for_video(
                                 json.dumps(self.test_video_distribution), delay=10)
-                                
+                               
         self.test_video_distribution2 =\
                 {'d': ("int_vid2", [('B', 0.30), ('A', 0.70)]) }
         brightcove_controller.setup_controller_for_video(
@@ -267,6 +268,23 @@ class TestScheduler(unittest.TestCase):
         
         #TODO: Test logic
         pass
+
+    def test_random_directives(self):
+        '''
+        Test directives with random fractions
+        
+        Since test code expects A to have higher fraction, the max fraction
+        in the code below is assigned to A. 
+        '''
+        random.seed(2003)
+        for i in range(50):
+            rand = random.random()
+            a = max(rand, 1 - rand)
+            b = 1 - a
+            new_video_distribution = {'d': ("int_vid1", [('B', b), ('A', a)])}
+            brightcove_controller.setup_controller_for_video(
+                                json.dumps(new_video_distribution)) 
+            self._test_add_tasks()
 
 class TestDryRunBrighcoveController(AsyncHTTPTestCase):
 

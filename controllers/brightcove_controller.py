@@ -324,6 +324,7 @@ class BrightcoveABController(object):
             if not chosen:
                 return
 
+        #import pdb; pdb.set_trace()
         #Make a decision based on the current state of the video data
         delay = random.randint(0, self.max_update_delay)
         cur_time = time.time()
@@ -341,14 +342,8 @@ class BrightcoveABController(object):
         #Time when the thumbnail to be A/B tested starts (the lower % thumbnail)
         abtest_start_time = random.randint(self.cushion_time,
                                 self.timeslice -
-                                    self.cushion_time) 
-
-        #abtest start time correction, i.e if 
-        if (abtest_start_time + minority_thumb_timeslice) > minority_thumb_boundary:
-                abtest_start_time =\
-                        (self.timeslice  
-                            - self.cushion_time 
-                            - majority_thumb_timeslice) 
+                                    int(minority_thumb_timeslice +1) #could be fraction, hence +1s 
+                                    - self.cushion_time)
 
         # Task sched visualization
         #-----------------------------------------------------
@@ -458,6 +453,7 @@ def setup_controller_for_video(jsondata, delay=0):
     '''
     controller = BrightcoveABController(delay=delay)
     directive = tornado.escape.json_decode(jsondata)
+    print "directive " , directive 
     vid_tuple = directive["d"]
     vid = vid_tuple[0]
     tid_dists = vid_tuple[1]
