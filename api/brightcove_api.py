@@ -960,14 +960,18 @@ class BrightcoveApi(object):
         video_id - The brightcove video id to get the urls for
 
         Returns thumb_url, still_url
+
+        If there is an error, (None, None) is returned
         
         '''
         thumb_url = None
         still_url = None
 
-        url = 'http://api.brightcove.com/services/library?' \
-                'command=find_video_by_id&token=%s&media_delivery=http'\
-                '&output=json&video_id=%s' %(self.read_token, video_id)
+        url = ('http://api.brightcove.com/services/library?' 
+                'command=find_video_by_id&token=%s&media_delivery=http'
+                '&output=json&video_id=%s'
+                '&video_fields=videoStillURL%%2CthumbnailURL' %
+                (self.read_token, video_id))
 
         req = tornado.httpclient.HTTPRequest(url=url,
                                              method="GET", 
@@ -981,10 +985,14 @@ class BrightcoveApi(object):
                        'msg=Error getting thumbnail for video id %s'%video_id)
             raise tornado.gen.Return((None, None))
 
-        result = tornado.escape.json_decode(response.body)
         try:
-            thumb_url = resp['thumbnailURL'].split('?')[0]
-            still_url = resp['videoStillURL'].split('?')[0]
+            result = tornado.escape.json_decode(response.body)
+            thumb_url = result['thumbnailURL'].split('?')[0]
+            still_url = result['videoStillURL'].split('?')[0]
+        except ValueError as e:
+            _log.error('key=get_current_thumbnail_url '
+                       'msg=Invalid JSON response from %s' % url)
+            raise tornado.gen.Return((None, None))
         except KeyError:
             _log.error('key=get_current_thumbnail_url '
                        'msg=No valid url set for video id %s' % video_id)

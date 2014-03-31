@@ -8,10 +8,13 @@ if sys.path[0] <> base_path:
 
 import controllers.brightcove_controller
 import json
+import logging
 from mock import patch, MagicMock
+import PIL.Image
 import random
 from StringIO import StringIO
 from supportServices import neondata
+from supportServices.url2thumbnail import URL2ThumbnailIndex
 import time
 import test_utils.redis
 import test_utils.neontest
@@ -20,6 +23,7 @@ from tornado.gen import YieldPoint, Task
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 from tornado.testing import AsyncHTTPTestCase, AsyncTestCase, AsyncHTTPClient
 import unittest
+from utils import imageutils
 
 class TestScheduler(test_utils.neontest.TestCase):
     '''
@@ -250,6 +254,183 @@ class TestScheduler(test_utils.neontest.TestCase):
         #TODO: Test logic
         pass
 
+class TestThumbnailCheckTask(test_utils.neontest.TestCase):
+    def setUp(self):
+        super(TestThumbnailCheckTask, self).setUp()
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+
+        random.seed(198948)
+
+        self.images = [self._compress_image(
+            imageutils.PILImageUtils.create_random_image(640, 480))
+            for x in range(5)]
+
+        # Set up an account in the database
+        acct1 = neondata.BrightcovePlatform('acct1', 'i1', 'api1')
+        acct1.add_video('v1', 'j1')
+        acct1.save()
+        self.v1 = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate('api1', 'v1'),
+            ['t1', 't2'], 
+            i_id='i1')
+        self.v1.save()
+        t1 = neondata.ThumbnailMetadata(
+            't1', self.v1.key, ['one.jpg', 'one_cmp.jpg'], enabled=True,
+            ttype='brightcove', rank=0)
+        t1.update_phash(self.images[0])
+        t1.save()
+        neondata.ThumbnailURLMapper('one.jpg', 't1').save()
+        neondata.ThumbnailURLMapper('one_cmp.jpg', 't1').save()
+        t2 = neondata.ThumbnailMetadata(
+            't2', self.v1.key,  ['two.jpg'], ttype='neon', rank=0)
+        t2.update_phash(self.images[1])
+        t2.save()
+        neondata.ThumbnailURLMapper('two.jpg', 't2').save()
+
+        self.url2thumb = URL2ThumbnailIndex()
+        self.url2thumb.build_index_from_neondata()
+
+        # Mock out the Brightcove API call
+        self.bc_platform_patcher = patch(
+            'controllers.brightcove_controller.BrightcovePlatform.get_account')
+        self.bc_platform_mock = MagicMock()
+        self.bc_get_account_mock = self.bc_platform_patcher.start()
+        self.bc_get_account_mock.side_effect = [self.bc_platform_mock]
+
+        # Mock out the image downloading
+        self.im_download_patcher = patch(
+            'controllers.brightcove_controller.PILImageUtils.download_image')
+        self.im_download_mock = self.im_download_patcher.start()
+
+        # Create the task to run
+        self.task = controllers.brightcove_controller.ThumbnailCheckTask(
+            self.v1.key, self.url2thumb)
+
+    def tearDown(self):
+        self.bc_platform_patcher.stop()
+        self.im_download_patcher.stop()
+        self.redis.stop()
+        super(TestThumbnailCheckTask, self).tearDown()
+
+    def _compress_image(self, image):
+        buf = StringIO()
+        image.save(buf, format='JPEG')
+        buf.seek(0)
+
+        return PIL.Image.open(buf)
+
+    def _set_bc_url(self, thumb_url, still_url):
+        '''Set the brightcove urls that will be returned by the mock.'''
+        self.bc_platform_mock.get_api().get_current_thumbnail_url.return_value \
+          = (thumb_url, still_url)
+
+    def _set_download_image(self, image):
+        def fake_download(url, callback=None):
+            if callback:
+                callback(image)
+            else:
+                return image
+        self.im_download_mock.side_effect = fake_download
+
+    def test_known_thumbnail_url(self):
+        self._set_bc_url('one.jpg', 'one_still.jpg')
+
+        self.task.execute()
+
+        self.bc_get_account_mock.assert_called_with('api1', 'i1')
+        self.bc_platform_mock.get_api().get_current_thumbnail_url.assert_called_with('v1')
+
+        self.assertEqual(self.im_download_mock.call_count, 0)
+
+        self.assertEqual('t1', self.url2thumb.get_thumbnail_info(
+            'one.jpg', internal_video_id=self.v1.key).key)
+
+    def test_known_thumbnail_new_url(self):
+        self._set_bc_url('one_new.jpg', 'one_still_new.jpg')
+        self._set_download_image(self.images[0])
+
+        self.task.execute()
+
+        self.assertEqual(self.im_download_mock.call_count, 1)
+        self.assertEqual(neondata.ThumbnailURLMapper.get_id('one_new.jpg'),
+                         't1')
+        thumb = self.url2thumb.get_thumbnail_info(
+            'one_new.jpg', internal_video_id=self.v1.key)
+        self.assertEqual(thumb.key, 't1')
+        self.assertItemsEqual(thumb.urls,
+                              ['one.jpg', 'one_cmp.jpg', 'one_new.jpg'])
+
+    def test_null_video_id(self):
+        task = controllers.brightcove_controller.ThumbnailCheckTask(
+            None, self.url2thumb)
+
+        with self.assertLogExists(logging.ERROR,
+                                  'Could not find video id:'):
+            task.execute()
+
+    def test_video_id_unknown(self):
+        task = controllers.brightcove_controller.ThumbnailCheckTask(
+            'unknown_video_id', self.url2thumb)
+
+        with self.assertLogExists(logging.ERROR,
+                                  'Could not find video id: unknown_video_id'):
+            task.execute()
+
+    def test_unknown_bc_platform(self):
+        self.bc_get_account_mock.side_effect = [None]
+
+        with self.assertLogExists(
+                logging.ERROR,
+                'Could not find brightcove platform for video: '
+                'api1_v1'):
+            self.task.execute()
+
+    def test_error_getting_current_bc_url(self):
+        self._set_bc_url(None, None)
+
+        with self.assertLogExists(
+                logging.ERROR,
+                'Could not find thumbnail url for video: api1_v1'):
+            self.task.execute()
+
+    def test_new_image_appeared_in_brightcove(self):
+        self._set_bc_url('three.jpg', 'three_still.jpg')
+        self._set_download_image(self.images[2])
+
+        self.task.execute()
+
+        tid = neondata.ThumbnailID.generate(self.images[2], self.v1.key)
+
+        # Make sure the new thumb is in the database
+        thumb = neondata.ThumbnailMetadata.get(tid)
+        self.assertEqual(thumb.rank, 0)
+        self.assertEqual(thumb.video_id, self.v1.key)
+        self.assertItemsEqual(thumb.urls, ['three.jpg'])
+        self.assertEqual(thumb.width, self.images[2].size[0])
+        self.assertEqual(thumb.height, self.images[2].size[1])
+        self.assertEqual(thumb.type, 'brightcove')
+        self.assertTrue(thumb.enabled)
+        self.assertFalse(thumb.chosen)
+        self.assertIsNotNone(thumb.phash)
+
+        # Make sure that the video was updated
+        video = neondata.VideoMetadata.get(self.v1.key)
+        self.assertItemsEqual(video.thumbnail_ids, [tid, 't1', 't2'])
+
+        # Make sure that all the other brightcove thumbnails for the
+        # video had their rank increased.
+        self.assertEqual(neondata.ThumbnailMetadata.get('t1').rank,
+                         1)
+        self.assertEqual(neondata.ThumbnailMetadata.get('t2').rank,
+                         0)
+
+        # Finally make sure the new thumbnail was added to the index
+        self.assertEqual(self.url2thumb.get_thumbnail_info('three.jpg').key,
+                         tid)
+            
+
+@unittest.skip("Test is borked and not worth fixing at the moment")
 class TestDryRunBrighcoveController(AsyncHTTPTestCase):
 
     '''

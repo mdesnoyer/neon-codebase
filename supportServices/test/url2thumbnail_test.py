@@ -35,7 +35,8 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
         
         random.seed(198948)
 
-        self.images = [imageutils.PILImageUtils.create_random_image(640, 480) for x in range(5)]
+        self.images = [imageutils.PILImageUtils.create_random_image(640, 480) 
+                       for x in range(5)]
 
         # Create some simple entries in the account database
         acct1 = neondata.BrightcovePlatform('acct1', 'i1', 'api1')
