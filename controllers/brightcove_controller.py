@@ -187,7 +187,11 @@ class ThumbnailCheckTask(AbstractTask):
     mapping and create a new entry for the thumbnail if it doesn't
     exist already.
     
-    '''    
+    '''   
+     def __init__(self, video_id, url2thumb):
+        super(TimesliceEndTask, self).__init__(video_id)
+        self.url2thumb = url2thumb
+        
     def execute(self):
         # Get the BrightcovePlatform associated with this video id
         video = VideoMetadata.get(self.video_id)
@@ -217,7 +221,7 @@ class ThumbnailCheckTask(AbstractTask):
             return
 
         # Record the new thumbnail if it's new
-        thumb_id = url2thumb.get_thumbnail_info(
+        thumb_id = self.url2thumb.get_thumbnail_info(
             thumb_url, 
             internal_video_id=self.video_id)
 
@@ -247,7 +251,7 @@ class ThumbnailCheckTask(AbstractTask):
                 def inc_rank(t): t.rank += 1
                 ThumbnailMetadata.modify(thumb_id, inc_rank)
 
-            url2thumb.add_thumbnail_to_index(thumb)
+            self.url2thumb.add_thumbnail_to_index(thumb)
 
 
 class VideoTaskInfo(object):
