@@ -36,7 +36,7 @@ import tornado.gen
 import tornado.httpclient
 import threading
 import time
-from api import brightcove_api #coz of cyclic import 
+import api.brightcove_api #coz of cyclic import 
 import api.youtube_api
 from api import ooyala_api
 
@@ -886,7 +886,7 @@ class BrightcovePlatform(AbstractPlatform):
         return "brightcove"
 
     def get(self, callback=None):
-        ''' get instance'''
+        ''' get json'''
         db_connection = DBConnection(self)
         if callback:
             db_connection.conn.get(self.key, callback)
@@ -897,7 +897,8 @@ class BrightcovePlatform(AbstractPlatform):
         '''Return the Brightcove API object for this platform integration.'''
         return api.brightcove_api.BrightcoveApi(
             self.neon_api_key, self.publisher_id,
-            self.read_token, self.write_token, self.auto_update)
+            self.read_token, self.write_token, self.auto_update,
+            self.last_process_date, account_created=self.account_created)
 
     @tornado.gen.engine
     def update_thumbnail(self, i_vid, new_tid, nosave=False, callback=None):
@@ -1773,7 +1774,8 @@ class ThumbnailMetadata(StoredObject):
 
     Keyed by thumbnail id
     '''
-    def __init__(self, tid, internal_vid, urls, created, width, height, ttype,
+    def __init__(self, tid, internal_vid, urls=None, created=None,
+                 width=None, height=None, ttype=None,
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None):
         super(ThumbnailMetadata,self).__init__(tid)

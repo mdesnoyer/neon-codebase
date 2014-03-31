@@ -599,7 +599,7 @@ class BrightcoveApi(object):
                 psize = json['page_size']
                 pno   = json['page_number']
 
-            except Exception,e:
+            except Exception, e:
                 _log.exception('key=create_neon_api_requests msg=%s' % e)
                 return
             

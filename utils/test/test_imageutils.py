@@ -126,5 +126,6 @@ class TestDownloadImage(test_utils.neontest.AsyncTestCase):
         with self.assertRaises(TypeError):
             with self.assertLogExists(logging.ERROR, 'Invalid image at url'):
                 imageutils.PILImageUtils.download_image('url')
+                
 if __name__ == '__main__':
     unittest.main()
