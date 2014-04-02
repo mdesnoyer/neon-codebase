@@ -156,15 +156,17 @@ class TestVideoClient(unittest.TestCase):
         '''
         
         #verify metadata has been populated
-        for key,value in self.pv.video_metadata.iteritems():
-            self.assertNotEqual(value, None, "Video metadata test")
+        self.assertEqual(self.pv.video_metadata['codec_name'], 'avc1')
+        self.assertEqual(self.pv.video_metadata['duration'], 1980)
+        self.assertEqual(self.pv.video_metadata['framerate'], 15)
+        self.assertEqual(self.pv.video_metadata['frame_size'], (400, 264))
+        self.assertIsNone(self.pv.video_metadata['bitrate'])
        
         #verify that following maps get populated
         self.assertGreater(len(self.pv.data_map), 0)
         self.assertGreater(len(self.pv.attr_map), 0)
         self.assertGreater(len(self.pv.timecodes), 0)
-        self.assertFalse(float('-inf') in self.pv.valence_scores[1],
-                "discarded frames havent been filtered")
+        self.assertNotIn(float('-inf'), self.pv.valence_scores[1])
         
     @patch('api.client.S3Connection')
     def test_save_data_to_s3(self, mock_conntype):
@@ -235,7 +237,7 @@ class TestVideoClient(unittest.TestCase):
         
         #verify thumbnail metadata and video metadata 
         vm = neondata.VideoMetadata.get(api_key + "_" + vid)
-        self.assertNotEqual(vm, None, "assert videometadata")
+        self.assertIsNotNone(vm)
         
         #TODO: Brightcove request with autosync
     
@@ -373,10 +375,10 @@ class TestVideoClient(unittest.TestCase):
         
         self.dl.send_client_response()
         s3_keys = [x.name for x in conn.buckets['host-thumbnails'].get_all_keys()]
-        self.assertTrue( "%s/%s/centerframe.jpeg"%(api_key,job_id) in s3_keys)
+        self.assertIn( "%s/%s/centerframe.jpeg"%(api_key,job_id), s3_keys)
         for i in range(len(s3_keys) -1):
             key = "%s/%s/neon%s.jpeg"%(api_key, job_id, i)
-            self.assertTrue(key in s3_keys)
+            self.assertIn(key, s3_keys)
 
         #check api request state
         japi_request = neondata.NeonApiRequest.get_request(api_key, job_id)
@@ -387,7 +389,7 @@ class TestVideoClient(unittest.TestCase):
         vm = neondata.VideoMetadata.get(neondata.InternalVideoID.generate(api_key, vid))
         tids = vm.thumbnail_ids
         thumb_mappings = neondata.ThumbnailMetadata.get_many(tids)
-        self.assertFalse( None in thumb_mappings)
+        self.assertNotIn(None, thumb_mappings)
        
         s3prefix = "https://host-thumbnails.s3.amazonaws.com/"
         for k in s3_keys:
@@ -437,7 +439,7 @@ class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
         vc.dequeue_url = self.get_url('/dequeue')
         vc.dequeue_job(callback=self.stop)
         res = self.wait()
-        self.assertEqual(res,"{}") #empty queue result
+        self.assertEqual(res, "{}") #empty queue result
 
         params = {"api_key": self.api_key, 
                    "video_url": "http://bunny.mp4",

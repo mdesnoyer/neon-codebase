@@ -23,6 +23,7 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
+import cv2
 import datetime
 import json
 import gzip
@@ -33,6 +34,7 @@ import Queue
 import random
 import shutil
 import signal
+import struct
 import tempfile
 import tornado.web
 import tornado.gen
@@ -45,7 +47,6 @@ import utils.sync
 import urllib
 import numpy as np
 from PIL import Image
-import ffvideo 
 
 from boto.exception import S3ResponseError
 from boto.s3.connection import S3Connection
@@ -163,20 +164,31 @@ class ProcessVideo(object):
         ''' process all the frames from the partial video downloaded '''
         start_process = time.time()
         try:
-            mov = ffvideo.VideoStream(video_file)
+            mov = cv2.VideoCapture(video_file)
             if self.video_metadata['codec_name'] is None:
-                self.video_metadata['codec_name'] = mov.codec_name
-                self.video_metadata['duration'] = mov.duration
-                self.video_metadata['framerate'] = mov.framerate
-                self.video_metadata['bitrate'] = mov.bitrate
-                self.video_metadata['frame_size'] = mov.frame_size
-                self.video_size = mov.duration * mov.bitrate / 8 # in bytes
+                fps = mov.get(cv2.cv.CV_CAP_PROP_FPS) or 30.0
+                self.video_metadata['codec_name'] = \
+                  struct.pack('I', mov.get(cv2.cv.CV_CAP_PROP_FOURCC))
+                self.video_metadata['duration'] = \
+                  fps * mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
+                self.video_metadata['framerate'] = fps
+                self.video_metadata['bitrate'] = None # Can't get this in OpenCV
+                width = mov.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH)
+                height = mov.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT)
+                self.video_metadata['frame_size'] = (width, height)
+                self.video_size = None # Can't get this in OpenCV
         except Exception, e:
             _log.error("key=process_video worker[%s] " 
                         " msg=%s "  %(self.pid, e.message))
             return
 
-        duration = mov.duration
+        duration = self.video_metadata['duration']
+
+        if duration <= 1e-3:
+            _log.error("key=process_video worker[%s] "
+                       "msg=video %s has no length. skipping." %
+                       (self.pid, video_file))
+            return
 
         #If a really long video, then increase the sampling rate
         if duration > 1800:
@@ -223,10 +235,16 @@ class ProcessVideo(object):
          the images are close but this is not the exact frame
         '''
         try:
-            mov = ffvideo.VideoStream(video_file)
-            mid = int(mov.duration / 2)
-            mid_frame = mov.get_frame_at_sec(mid)
-            return mid_frame.image()
+            mov = cv2.VideoCapture(video_file)
+            duration = mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
+            mov.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, int(duration / 2))
+            read_sucess, image = mov.read()
+            if read_sucess:
+                return image[:,:,::-1]
+            else:
+                _log.error('key=get_center_frame '
+                           'msg=Error reading middle frame of video %s'
+                           % video_file)
         except Exception,e:
             _log.debug("key=get_center_frame msg=%s"%e)
 
