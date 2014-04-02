@@ -143,11 +143,11 @@ if (typeof NeonPlayerTracker == "undefined"){
 			},
 
 			hookNeonTrackerToFlashPlayer: function(expID) { 
-				try { player = brightcove.api.getExperience(expID);} catch(err) {console.log(err);}
+				try { player = brightcove.api.getExperience(expID);} catch(err) {}
 				if (player){
 					NeonTrackerType = "html5";
 				}else{
-					player = bcPlayer.getPlayer(expID);                                     
+					player = bcPlayer.getPlayer(expID);
 					videoPlayer = player.getModule(APIModules.VIDEO_PLAYER);                 
 					content = player.getModule(APIModules.CONTENT);                         
 					exp     = player.getModule(APIModules.EXPERIENCE); 

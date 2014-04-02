@@ -39,6 +39,7 @@ DIRNAME = os.path.dirname(__file__)
 #Monitoring variables
 statemon.define('server_queue', int)
 statemon.define('duplicate_requests', int)
+statemon.state.enable_reset()
 
 #=============== Global Handlers ======================================#
 

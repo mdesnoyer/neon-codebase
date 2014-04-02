@@ -207,7 +207,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             api_key + '_4': neondata.VideoMetadata(
                             0,['t41', 't42'],'','','','','','')
             }
-        datamock.VideoMetadata.get.side_effect = lambda vid: vid_meta[vid]
+        datamock.VideoMetadata.multi_get.side_effect = \
+                        lambda vids: [vid_meta[vid] for vid in vids]
 
         # Define the thumbnail meta data
         TMD = neondata.ThumbnailMetadata
@@ -221,8 +222,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             't41': TMD('t41','vid',0,0,0,0,'neon',0,0,True,False,0),
             't42': TMD('t42','vid',0,0,0,0,'neon',1,0,True,False,0),
             }
-        datamock.ThumbnailMetadata.get.side_effect = \
-          lambda tid: tid_meta[tid]
+        datamock.ThumbnailMetadata.get_many.side_effect = \
+                lambda tids: [tid_meta[tid] for tid in tids]
 
         # Process the data
         self.watcher._process_db_data()
@@ -257,13 +258,13 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         
         datamock.AbstractPlatform.get_all_instances.return_value = \
           [bcPlatform]
-        datamock.VideoMetadata.get.return_value = None
+        datamock.VideoMetadata.multi_get.return_value = [None, None] 
 
         with self.assertLogExists(logging.ERROR,
-                             'Could not find information about video api_key_10'):
+                             'Could not find information about video api_key_0'):
             with self.assertLogExists(logging.ERROR,
                                       'Could not find information about '
-                                      'video api_key_0'):
+                                      'video api_key_10'):
                 self.watcher._process_db_data()
         
         self.assertTrue(self.watcher.is_loaded.is_set())
@@ -282,7 +283,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                             0,['t01','t02','t03'],'','','','','',''),
             'api_key_10': neondata.VideoMetadata(0,[],'','','','','','')
             }
-        datamock.VideoMetadata.get.side_effect = lambda vid: vid_meta[vid]
+        datamock.VideoMetadata.multi_get.side_effect = \
+                        lambda vids: [vid_meta[vid] for vid in vids]
 
         TMD = neondata.ThumbnailMetadata
         tid_meta = {
@@ -290,9 +292,9 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             't02': TMD('t02','vid',0,0,0,0,'neon',0,0,True,False,0),
             't03': None,
             }
-        datamock.ThumbnailMetadata.get.side_effect = \
-          lambda tid: tid_meta[tid]
 
+        datamock.ThumbnailMetadata.get_many.side_effect = \
+                lambda tids: [tid_meta[tid] for tid in tids]
         with self.assertLogExists(logging.ERROR,
                                   'Could not find metadata for thumb t03'):
             self.watcher._process_db_data()

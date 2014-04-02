@@ -118,9 +118,9 @@ class VideoDBWatcher(threading.Thread):
 
     def _process_db_data(self):
         for platform in neondata.AbstractPlatform.get_all_instances():
-            for video_id in platform.get_internal_video_ids():
-                video_metadata = neondata.VideoMetadata.get(
-                                            video_id)
+            video_ids = platform.get_internal_video_ids()
+            all_video_metadata = neondata.VideoMetadata.multi_get(video_ids)
+            for video_id, video_metadata in zip(video_ids, all_video_metadata):
                 if video_metadata is None:
                     _log.error('Could not find information about video %s' %
                                video_id)
@@ -128,8 +128,9 @@ class VideoDBWatcher(threading.Thread):
 
                 thumbnails = []
                 data_missing = False
-                for thumb_id in video_metadata.thumbnail_ids:
-                    meta = neondata.ThumbnailMetadata.get(thumb_id)
+                thumbs = neondata.ThumbnailMetadata.get_many(
+                                        video_metadata.thumbnail_ids)
+                for thumb_id, meta in zip(video_metadata.thumbnail_ids, thumbs):
                     if meta is None:
                         _log.error('Could not find metadata for thumb %s' %
                                    thumb_id)
