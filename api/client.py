@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 '''
 Video Processing client, no longer a multiprocessing client
 
@@ -23,6 +23,7 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
+import cv2
 import datetime
 import json
 import gzip
@@ -33,6 +34,7 @@ import Queue
 import random
 import shutil
 import signal
+import struct
 import tempfile
 import tornado.web
 import tornado.gen
@@ -41,10 +43,10 @@ import tornado.httpclient
 import tornado.httputil
 import tornado.ioloop
 import time
+import utils.sync
 import urllib
 import numpy as np
 from PIL import Image
-import ffvideo 
 
 from boto.exception import S3ResponseError
 from boto.s3.connection import S3Connection
@@ -57,12 +59,7 @@ import tarfile
 import brightcove_api
 import youtube_api
 
-from supportServices.neondata import NeonApiRequest, BrightcoveApiRequest
-from supportServices.neondata import NeonPlatform, YoutubePlatform, \
-        BrightcovePlatform, VideoMetadata, RequestState, \
-        InternalVideoID, VideoResponse
-from supportServices.neondata import ThumbnailID, ThumbnailType, \
-        ThumbnailURLMapper, ThumbnailMetadata, OoyalaApiRequest
+from supportServices import neondata
 
 import gc
 import pprint
@@ -157,8 +154,8 @@ class ProcessVideo(object):
         #AB Test Data
         self.abtest_thumbnails = {}
 
-        #thumbnail list of maps
-        self.thumbnails = [] # ThumbnailMetaData
+        #thumbnail list
+        self.thumbnails = [] # neondata.ThumbnailMetadata
         
         self.debug = debug
         self.pid = cur_pid
@@ -167,20 +164,31 @@ class ProcessVideo(object):
         ''' process all the frames from the partial video downloaded '''
         start_process = time.time()
         try:
-            mov = ffvideo.VideoStream(video_file)
+            mov = cv2.VideoCapture(video_file)
             if self.video_metadata['codec_name'] is None:
-                self.video_metadata['codec_name'] = mov.codec_name
-                self.video_metadata['duration'] = mov.duration
-                self.video_metadata['framerate'] = mov.framerate
-                self.video_metadata['bitrate'] = mov.bitrate
-                self.video_metadata['frame_size'] = mov.frame_size
-                self.video_size = mov.duration * mov.bitrate / 8 # in bytes
+                fps = mov.get(cv2.cv.CV_CAP_PROP_FPS) or 30.0
+                self.video_metadata['codec_name'] = \
+                  struct.pack('I', mov.get(cv2.cv.CV_CAP_PROP_FOURCC))
+                self.video_metadata['duration'] = \
+                  fps * mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
+                self.video_metadata['framerate'] = fps
+                self.video_metadata['bitrate'] = None # Can't get this in OpenCV
+                width = mov.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH)
+                height = mov.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT)
+                self.video_metadata['frame_size'] = (width, height)
+                self.video_size = None # Can't get this in OpenCV
         except Exception, e:
             _log.error("key=process_video worker[%s] " 
                         " msg=%s "  %(self.pid, e.message))
             return
 
-        duration = mov.duration
+        duration = self.video_metadata['duration']
+
+        if duration <= 1e-3:
+            _log.error("key=process_video worker[%s] "
+                       "msg=video %s has no length. skipping." %
+                       (self.pid, video_file))
+            return
 
         #If a really long video, then increase the sampling rate
         if duration > 1800:
@@ -227,10 +235,16 @@ class ProcessVideo(object):
          the images are close but this is not the exact frame
         '''
         try:
-            mov = ffvideo.VideoStream(video_file)
-            mid = int(mov.duration / 2)
-            mid_frame = mov.get_frame_at_sec(mid)
-            return mid_frame.image()
+            mov = cv2.VideoCapture(video_file)
+            duration = mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
+            mov.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, int(duration / 2))
+            read_sucess, image = mov.read()
+            if read_sucess:
+                return image[:,:,::-1]
+            else:
+                _log.error('key=get_center_frame '
+                           'msg=Error reading middle frame of video %s'
+                           % video_file)
         except Exception,e:
             _log.debug("key=get_center_frame msg=%s"%e)
 
@@ -402,7 +416,7 @@ class ProcessVideo(object):
         
         api_key = self.request_map[properties.API_KEY] 
         video_id = self.request_map[properties.VIDEO_ID]
-        i_vid = InternalVideoID.generate(api_key, video_id)
+        i_vid = neondata.InternalVideoID.generate(api_key, video_id)
 
         #upload the images to s3
         for i in range(len(frames)):
@@ -420,19 +434,20 @@ class ProcessVideo(object):
             s3_urls.append(s3fname)
             
             urls = []
-            tid = ThumbnailID.generate(imgdata, i_vid)
+            tid = neondata.ThumbnailID.generate(imgdata, i_vid)
             urls.append(s3fname)
             created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             enabled = None 
             width   = image.size[0]
             height  = image.size[1] 
-            ttype   = ThumbnailType.NEON 
+            ttype   = neondata.ThumbnailType.NEON 
             rank    = i +1 
 
             #populate thumbnails
-            tdata = ThumbnailMetadata(tid, i_vid, urls, created, width,
+            tdata = neondata.ThumbnailMetadata(tid, i_vid, urls, created, width,
                                       height, ttype, score,
                                       self.model_version, rank=rank)
+            tdata.update_phash(image)
             self.thumbnails.append(tdata)
         return s3_urls
 
@@ -451,11 +466,12 @@ class ProcessVideo(object):
         urls = []
         api_key = self.request_map[properties.API_KEY] 
         video_id = self.request_map[properties.VIDEO_ID]
-        i_vid = InternalVideoID.generate(api_key, video_id)
-        tid = ThumbnailID.generate(imgdata, i_vid)
+        i_vid = neondata.InternalVideoID.generate(api_key, video_id)
+        tid = neondata.ThumbnailID.generate(imgdata, i_vid)
 
         #If tid already exists, then skip saving metadata
-        if ThumbnailMetadata.get(tid) is not None:
+        if neondata.ThumbnailMetadata.get(tid) is not None:
+            _log.warn('Already have thumbnail id: %s' % tid)
             return
 
         urls.append(s3fname)
@@ -464,8 +480,9 @@ class ProcessVideo(object):
         height  = image.size[1] 
 
         #populate thumbnails
-        tdata = ThumbnailMetadata(tid, i_vid, urls, created, width, height,
+        tdata = neondata.ThumbnailMetadata(tid, i_vid, urls, created, width, height,
                                   ttype, score, self.model_version, rank=rank)
+        tdata.update_phash(image)
         self.thumbnails.append(tdata)
 
     ############# Request Finalizers ##############
@@ -485,7 +502,7 @@ class ProcessVideo(object):
         
         api_key = self.request_map[properties.API_KEY] 
         vid = self.request_map[properties.VIDEO_ID]
-        i_vid = InternalVideoID.generate(api_key,vid)
+        i_vid = neondata.InternalVideoID.generate(api_key,vid)
         i_id = self.request_map[properties.INTEGRATION_ID] if self.request_map.has_key(properties.INTEGRATION_ID) else 0 
         job_id = self.request_map[properties.REQUEST_UUID_KEY]
         duration = self.video_metadata["duration"]
@@ -496,7 +513,7 @@ class ProcessVideo(object):
 
         tids = [x.key for x in self.thumbnails]
 
-        vmdata = VideoMetadata(i_vid, tids, job_id, url, duration,
+        vmdata = neondata.VideoMetadata(i_vid, tids, job_id, url, duration,
                     video_valence, model_version, i_id, frame_size)
         ret = vmdata.save()
         if not ret:
@@ -509,18 +526,18 @@ class ProcessVideo(object):
         api_key = self.request_map[properties.API_KEY] 
         vid = self.request_map[properties.VIDEO_ID]
         job_id = self.request_map[properties.REQUEST_UUID_KEY]
-        i_vid = InternalVideoID.generate(api_key, vid)
+        i_vid = neondata.InternalVideoID.generate(api_key, vid)
 
         thumbnail_url_mapper_list = []
         if len(self.thumbnails) > 0:
             for thumb in self.thumbnails:
                 tid = thumb.key
                 for t_url in thumb.urls:
-                    uitem = ThumbnailURLMapper(t_url, tid)
+                    uitem = neondata.ThumbnailURLMapper(t_url, tid)
                     thumbnail_url_mapper_list.append(uitem)
 
-            retid = ThumbnailMetadata.save_all(self.thumbnails)
-            returl = ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
+            retid = neondata.ThumbnailMetadata.save_all(self.thumbnails)
+            returl = neondata.ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
             
             return (retid and returl)
 
@@ -529,7 +546,7 @@ class ProcessVideo(object):
         api_key = self.request_map[properties.API_KEY] 
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
         video_id = self.request_map[properties.VIDEO_ID]
-        api_request = NeonApiRequest.get(api_key,job_id)
+        api_request = neondata.NeonApiRequest.get(api_key,job_id)
         if not api_request:
             #TODO: more stuff ? 
             _log.error("key=finalize_neon_request msg=api request is null")
@@ -537,15 +554,15 @@ class ProcessVideo(object):
       
         #change the status to requeued, and don't store a response 
         if result is None:
-            api_request.state = RequestState.REQUEUED 
+            api_request.state = neondata.RequestState.REQUEUED 
         elif len(self.thumbnails) == 0:
-            api_request.state = RequestState.INT_ERROR
+            api_request.state = neondata.RequestState.INT_ERROR
         else:
             
             try:
                 #try decoding result, if error then video failed
                 api_request.response = tornado.escape.json_decode(result)
-                api_request.state = RequestState.FINISHED 
+                api_request.state = neondata.RequestState.FINISHED 
                 api_request.publish_date = time.time() *1000.0 #ms
                 
                 #Save the mid frame (Random) thumbnail
@@ -558,7 +575,7 @@ class ProcessVideo(object):
                     s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
                     keyname = self.base_filename + "/centerframe.jpeg" 
                     s3fname = s3_url_prefix + "/" + keyname
-                    ttype = ThumbnailType.CENTERFRAME
+                    ttype = neondata.ThumbnailType.CENTERFRAME
                     self.save_thumbnail_to_s3_and_metadata(image, score, s3bucket,
                               keyname, s3fname, ttype, rank=0)
                 else:
@@ -566,7 +583,7 @@ class ProcessVideo(object):
       
             except:
                 api_request.response = result 
-                api_request.state = RequestState.FAILED
+                api_request.state = neondata.RequestState.FAILED
             
         ret = api_request.save()
         if ret:
@@ -589,7 +606,7 @@ class ProcessVideo(object):
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
         video_id = self.request_map[properties.VIDEO_ID]
         title = self.request_map[properties.VIDEO_TITLE]
-        bc_request = BrightcoveApiRequest.get(api_key, job_id)
+        bc_request = neondata.BrightcoveApiRequest.get(api_key, job_id)
         bc_request.response = tornado.escape.json_decode(result)
         bc_request.publish_date = time.time() *1000.0 #ms
 
@@ -598,7 +615,7 @@ class ProcessVideo(object):
             return
         
         if len(self.thumbnails) == 0 :
-            bc_request.state = RequestState.INT_ERROR
+            bc_request.state = neondata.RequestState.INT_ERROR
             bc_request.save()
         
         #Save previous thumbnail to s3
@@ -621,7 +638,7 @@ class ProcessVideo(object):
             s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
             keyname =  self.base_filename + "/brightcove.jpeg" 
             s3fname = s3_url_prefix + "/" + keyname
-            ttype = ThumbnailType.BRIGHTCOVE
+            ttype = neondata.ThumbnailType.BRIGHTCOVE
             self.save_thumbnail_to_s3_and_metadata(image, score, s3bucket,
                     keyname, s3fname, ttype, rank=1)
             bc_request.previous_thumbnail = s3fname
@@ -632,7 +649,7 @@ class ProcessVideo(object):
         
         #2 Push thumbnail in to brightcove account
         autosync = bc_request.autosync
-        ba = BrightcovePlatform.get_account(api_key, i_id)
+        ba = neondata.BrightcovePlatform.get_account(api_key, i_id)
         if not ba:
             _log.error("key=finalize_brightcove_request msg=Brightcove " 
                     " account doesnt exists a_id=%s i_id=%s"%(api_key, i_id))
@@ -664,7 +681,7 @@ class ProcessVideo(object):
                 self.thumbnails[0].refid = tid
 
         #3 Update Request State
-        bc_request.state = RequestState.FINISHED 
+        bc_request.state = neondata.RequestState.FINISHED 
         ret = bc_request.save()
 
         #NOTE: The newly uploaded thumbnail's url isn't available immidiately, 
@@ -678,15 +695,15 @@ class ProcessVideo(object):
            
             #Send notification that the video completed processing
             thumbs = [t.to_dict_for_video_response() for t in self.thumbnails]
-            vr = VideoResponse(video_id,
-                            "processed",
-                            "brightcove",
-                            i_id,
-                            title,
-                            None, 
-                            None,
-                            0, #current_tid
-                            thumbs)
+            vr = neondata.VideoResponse(video_id,
+                                        "processed",
+                                        "brightcove",
+                                        i_id,
+                                        title,
+                                        None, 
+                                        None,
+                                        0, #current_tid
+                                        thumbs)
 
             sn = SendNotification(i_id, vr.to_json())
             sn.send(ba.account_id)
@@ -705,7 +722,7 @@ class ProcessVideo(object):
         i_id = self.request_map[properties.INTEGRATION_ID]
         job_id  = self.request_map[properties.REQUEST_UUID_KEY]
         video_id = self.request_map[properties.VIDEO_ID]
-        oo_request = OoyalaApiRequest.get(api_key, job_id)
+        oo_request = neondata.OoyalaApiRequest.get(api_key, job_id)
         oo_request.response = tornado.escape.json_decode(result)
         oo_request.publish_date = time.time() *1000.0 #ms
 
@@ -714,7 +731,7 @@ class ProcessVideo(object):
             return
         
         if len(self.thumbnails) == 0 :
-            oo_request.state = RequestState.INT_ERROR
+            oo_request.state = neondata.RequestState.INT_ERROR
             oo_request.save()
         
         #Save previous thumbnail to s3
@@ -736,7 +753,7 @@ class ProcessVideo(object):
             s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
             keyname =  self.base_filename + "/oooyala.jpeg" 
             s3fname = s3_url_prefix + "/" + keyname
-            ttype = ThumbnailType.OOYALA
+            ttype = neondata.ThumbnailType.OOYALA
             self.save_thumbnail_to_s3_and_metadata(image, score, s3bucket,
                     keyname, s3fname, ttype, rank=1)
             oo_request.previous_thumbnail = s3fname
@@ -772,7 +789,7 @@ class ProcessVideo(object):
             pass
 
         #3 Update Request State
-        oo_request.state = RequestState.FINISHED 
+        oo_request.state = neondata.RequestState.FINISHED 
         ret = oo_request.save()
 
         #4 Save the Thumbnail URL and ID to Mapper DB
@@ -801,7 +818,7 @@ class ProcessVideo(object):
             return
         
         if len(self.thumbnails) == 0 :
-            yt_request.state = RequestState.INT_ERROR
+            yt_request.state = neondata.RequestState.INT_ERROR
             yt_request.save()
         
         #Save previous thumbnail to s3
@@ -828,8 +845,8 @@ class ProcessVideo(object):
         
         #populate thumbnail
         urls = []
-        tid = ThumbnailID.generate(imgdata,
-                                   InternalVideoID.generate(api_key, video_id))
+        tid = neondata.ThumbnailID.generate(imgdata,
+                                   neondata.InternalVideoID.generate(api_key, video_id))
         urls.append(p_url)
         urls.append(s3fname)
         created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -860,7 +877,7 @@ class ProcessVideo(object):
         
         #3 Add thumbnails to the request object and save
         yt_request.thumbnails = self.thumbnails
-        yt_request.state = RequestState.FINISHED
+        yt_request.state = neondata.RequestState.FINISHED
         ret = yt_request.save()
 
         if ret:
@@ -883,7 +900,7 @@ class HttpDownload(object):
     retry_codes = [403,500,502,503,504]
 
     def __init__(self, json_params, ioloop, model, model_version, 
-            debug=False, cur_pid=None, sync=False):
+                 debug=False, cur_pid=None, sync=False):
 
         params = tornado.escape.json_decode(json_params)
 
@@ -1281,18 +1298,21 @@ class VideoClient(object):
         self.sync = sync
         self.pid = os.getpid()
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def dequeue_job(self):
         ''' Blocking http call to global queue to dequeue work
             Change state to PROCESSING after dequeue
         '''
         retries = 2
         
-        http_client = tornado.httpclient.HTTPClient()
+        http_client = tornado.httpclient.AsyncHTTPClient()
         headers = {'X-Neon-Auth' : properties.NEON_AUTH} 
         result = None
         for i in range(retries):
             try:
-                response = http_client.fetch(self.dequeue_url,headers=headers)
+                response = yield http_client.fetch(self.dequeue_url,
+                                                   headers=headers)
                 result = response.body
                 break
             except tornado.httpclient.HTTPError, e:
@@ -1306,16 +1326,17 @@ class VideoClient(object):
                 #Change Job State
                 api_key = job_params[properties.API_KEY]
                 job_id  = job_params[properties.REQUEST_UUID_KEY]
-                api_request = NeonApiRequest.get(api_key,job_id)
-                if api_request.state == RequestState.SUBMIT:
-                    api_request.state = RequestState.PROCESSING
+                api_request = yield tornado.gen.Task(
+                    neondata.NeonApiRequest.get(api_key,job_id))
+                if api_request.state == neondata.RequestState.SUBMIT:
+                    api_request.state = neondata.RequestState.PROCESSING
                     api_request.model_version = self.model_version
                     api_request.save()
                 _log.info("key=worker [%s] msg=processing request %s "
                           %(self.pid,job_params[properties.REQUEST_UUID_KEY]))
             except Exception,e:
                 _log.error("key=worker [%s] msg=db error %s" %(self.pid,e.message))
-        return result
+        raise tornado.gen.Return(result)
     
     def load_model(self):
         ''' load model '''
@@ -1344,7 +1365,7 @@ class VideoClient(object):
                 raise Queue.Empty
             
             ## ===== ASYNC Code Starts ===== ##
-            ioloop = tornado.ioloop.IOLoop.instance()
+            ioloop = tornado.ioloop.IOLoop.current()
             dl = HttpDownload(job, ioloop, self.model,self.model_version,
                               self.debug, self.pid, self.sync)
         

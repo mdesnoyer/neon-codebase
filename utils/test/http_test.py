@@ -17,6 +17,7 @@ import random
 from StringIO import StringIO
 import test_utils.neontest
 from tornado.concurrent import Future
+import tornado.gen
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 import unittest
 import utils.http
@@ -132,6 +133,15 @@ class TestAsyncSendRequest(test_utils.neontest.AsyncTestCase):
         utils.http.send_request(request, callback=self.stop)
         
         found_response = self.wait()
+
+        self.assertEqual(found_response, response)
+
+    def test_yielding(self):
+        request, response = create_valid_ack()
+        self.mock_responses.side_effect = [response]
+
+        found_response = yield tornado.gen.Task(utils.http.send_request,
+                                                request)
 
         self.assertEqual(found_response, response)
 
@@ -309,6 +319,35 @@ class TestRequestPool(test_utils.neontest.TestCase):
             n_responses += 1
 
         self.assertEqual(n_responses, n_queries)
+
+class TestTornadoAsyncRequestPool(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        super(TestTornadoAsyncRequestPool, self).setUp()
+        self.pool = utils.http.RequestPool(5, 3)
+        self.patcher = \
+          patch('utils.http.tornado.httpclient.AsyncHTTPClient')
+        self.mock_client = self.patcher.start()
+
+        self.mock_responses = MagicMock()
+
+        self.mock_client().fetch.side_effect = \
+          lambda x, callback: self.io_loop.add_callback(callback,
+                                                        self.mock_responses(x))
+        
+    def tearDown(self):
+        self.pool.stop()
+        self.patcher.stop()
+        super(TestTornadoAsyncRequestPool, self).tearDown()
+
+    def test_yielding(self):
+        request, response = create_valid_ack()
+        self.mock_responses.side_effect = [response]
+
+        found_response = yield tornado.gen.Task(self.pool.send_request,
+                                                request)
+
+        self.assertEqual(found_response, response)
+        
 
         
    

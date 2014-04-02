@@ -6,13 +6,19 @@ sys.path.insert(0,  os.path.abspath(
     os.path.join(os.path.dirname(__file__),  '..',  '..')))
 
 import Image
+import logging
+from mock import patch, MagicMock
 import random
+from StringIO import StringIO
+import test_utils.neontest
+import tornado.ioloop
+import tornado.httpclient
 import unittest
 from utils import imageutils
 
-random.seed(214)
 class TestPILImageUtils(unittest.TestCase):
     def setUp(self):
+        random.seed(214)
         self.im = imageutils.PILImageUtils.create_random_image(360, 480)
 
     def _generate_aspect_ratio_tuples(self, ar):
@@ -55,5 +61,72 @@ class TestPILImageUtils(unittest.TestCase):
         self.assertEqual(im2.size, (480, 360))
         self.assertEqual(self.im, im2)
 
+class TestDownloadImage(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        random.seed(1654984)
+        super(TestDownloadImage, self).setUp()
+        self.image = imageutils.PILImageUtils.create_random_image(360, 480)
+
+        self.get_img_patcher = \
+          patch('utils.http.send_request')
+        self.get_img_mock = self.get_img_patcher.start()
+        self.get_img_mock.side_effect = self._returnValidImage
+
+    def tearDown(self):
+        self.get_img_patcher.stop()
+        
+        super(TestDownloadImage, self).tearDown()
+
+    def _returnValidImage(self, request, callback):
+        response = tornado.httpclient.HTTPResponse(request, 200,
+                                                   buffer=StringIO())
+        self.image.save(response.buffer, 'JPEG')
+        response.buffer.seek(0)
+        tornado.ioloop.IOLoop.current().add_callback(callback, response)
+
+    def test_get_valid_image(self):
+
+        image = imageutils.PILImageUtils.download_image('url')
+
+        self.assertEqual(self.image.size, image.size)
+
+    def test_connection_error(self):
+        self.get_img_mock.side_effect = (
+            lambda x, callback: tornado.ioloop.IOLoop.current().add_callback(
+                callback,
+                tornado.httpclient.HTTPResponse(
+                    x,
+                    200,
+                    error = tornado.httpclient.HTTPError(404))))
+
+        with self.assertRaises(tornado.httpclient.HTTPError):
+            with self.assertLogExists(logging.ERROR, 'Error retrieving image'):
+                imageutils.PILImageUtils.download_image('url')
+
+    @patch('utils.imageutils.Image')
+    def test_image_ioerror(self, pil_mock):
+        pil_mock.open.side_effect = [IOError()]
+
+        with self.assertRaises(IOError):
+            with self.assertLogExists(logging.ERROR, 'Invalid image at url'):
+                imageutils.PILImageUtils.download_image('url')
+
+    
+    @patch('utils.imageutils.Image')
+    def test_image_valueerror(self, pil_mock):
+        pil_mock.open.side_effect = [ValueError()]
+
+        with self.assertRaises(ValueError):
+            with self.assertLogExists(logging.ERROR, 'Invalid image at url'):
+                imageutils.PILImageUtils.download_image('url')
+
+    @patch('utils.imageutils.Image')
+    def test_image_typeerror(self, pil_mock):
+        pil_mock.open.side_effect = [TypeError()]
+
+        with self.assertRaises(TypeError):
+            with self.assertLogExists(logging.ERROR, 'Invalid image at url'):
+                imageutils.PILImageUtils.download_image('url')
+                
 if __name__ == '__main__':
     unittest.main()

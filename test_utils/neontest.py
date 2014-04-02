@@ -21,7 +21,7 @@ class TestCase(unittest.TestCase):
         '''Asserts that a log message was written at a given level.
 
         This can be used either in a with statement e.g:
-        with self.assertLogs(logging.INFO, 'Hi'):
+        with self.assertLogExists(logging.INFO, 'Hi'):
           do_stuff()
           _log.info('Hi')
 

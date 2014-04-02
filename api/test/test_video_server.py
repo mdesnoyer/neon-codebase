@@ -9,51 +9,42 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] <> base_path:
         sys.path.insert(0,base_path)
 
+from api import properties
+import api.server
+import logging
+import json
+from mock import patch
 import os
-import subprocess
 import re
-import unittest
-import urllib
 import random
+import subprocess
+from supportServices import neondata
 import test_utils.redis
 import tornado.gen
 import tornado.ioloop
 import tornado.web
 import tornado.httpclient
-import json
-from mock import patch
 from tornado.testing import AsyncHTTPTestCase, AsyncTestCase
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
+import unittest
+import urllib
 
-from api import server,properties
-from supportServices import neondata
 from utils.options import define, options
-import logging
+
 _log = logging.getLogger(__name__)
 
-random.seed(1324)
 class TestVideoServer(AsyncHTTPTestCase):
     ''' Video Server test'''
 
     def setUp(self):
         super(TestVideoServer, self).setUp()
-        #create un-mocked httpclients for use of testcases later
-        self.real_httpclient = tornado.httpclient.HTTPClient()
-        self.real_asynchttpclient = tornado.httpclient.AsyncHTTPClient(self.io_loop)
-        self.sync_patcher = patch('tornado.httpclient.HTTPClient')
-        self.async_patcher = patch('tornado.httpclient.AsyncHTTPClient')
-        self.mock_client = self.sync_patcher.start()
-        self.mock_async_client = self.async_patcher.start()
-
-        #self.nplatform_patcher = patch('api.server.NeonPlatform')
-        #self.mock_nplatform_patcher = self.nplatform_patcher.start()
-        #self.mock_nplatform_patcher.get_account.side_effect = self._db_side_effect
 
         self.base_uri = '/api/v1/submitvideo/topn'
         self.neon_api_url = self.get_url(self.base_uri)
   
         self.redis = test_utils.redis.RedisServer()
         self.redis.start() 
+        random.seed(1324)
 
         #create test account
         a_id = "testaccountneonapi"
@@ -62,33 +53,26 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.api_key = self.nuser.neon_api_key
         self.na = neondata.NeonPlatform(a_id, self.api_key)
         self.na.save()
-    
-    #def _db_side_effect(*args, **kwargs):
-    #
-    #    key = args[0]
-    #    cb  = args[1]
-    #    print key,cb
-    #    return "something"
 
     def get_app(self):
-        return server.application
+        return api.server.application
     
     def get_new_ioloop(self):
         return tornado.ioloop.IOLoop.instance()
     
     def tearDown(self):
-        self.sync_patcher.stop()
-        self.async_patcher.stop()
-        #self.mock_nplatform_patcher.stop()
         self.redis.stop()
+        super(TestVideoServer, self).tearDown()
 
-    def make_api_request(self,vals,url=None):
+    def make_api_request(self, vals, url=None):
         if not url:
             url = self.neon_api_url
 
         body = json.dumps(vals)
-        self.real_asynchttpclient.fetch(url, 
-                callback=self.stop, method="POST", body=body)
+        self.http_client.fetch(url, 
+                               callback=self.stop,
+                               method="POST",
+                               body=body)
         response = self.wait()
         return response
     
@@ -143,7 +127,7 @@ class TestVideoServer(AsyncHTTPTestCase):
 
     def test_empty_request(self):
         ''' test empty request '''
-        self.real_asynchttpclient.fetch(self.neon_api_url, 
+        self.http_client.fetch(self.neon_api_url, 
                 callback=self.stop, method="POST", body='')
         resp = self.wait()
         self.assertEqual(resp.code, 400)
@@ -155,7 +139,7 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.assertEqual(resp.code, 201)
         h = {'X-Neon-Auth' : properties.NEON_AUTH} 
         for i in range(10): #dequeue a bunch 
-            self.real_asynchttpclient.fetch(self.get_url('/dequeue'), 
+            self.http_client.fetch(self.get_url('/dequeue'), 
                 callback=self.stop, method="GET", headers=h)
             resp = self.wait()
             self.assertEqual(resp.code, 200)
@@ -171,7 +155,7 @@ class TestVideoServer(AsyncHTTPTestCase):
                     "callback_url": "http://callback_push_url", 
                     "video_title": "test_title"}
         jdata = json.dumps(vals)
-        self.real_asynchttpclient.fetch(self.get_url('/requeue'),
+        self.http_client.fetch(self.get_url('/requeue'),
                 callback=self.stop, method="POST", body=jdata)
         resp = self.wait()
         self.assertEqual(resp.code, 200)
@@ -179,7 +163,7 @@ class TestVideoServer(AsyncHTTPTestCase):
     def test_job_status_handler(self):
         resp = self.add_request()
         job_id = json.loads(resp.body)['job_id']
-        self.real_asynchttpclient.fetch(
+        self.http_client.fetch(
                 self.get_url('/api/v1/jobstatus?api_key=%s&job_id=%s'
                     %(self.api_key, job_id)),
                 callback=self.stop, method="GET")
@@ -188,7 +172,7 @@ class TestVideoServer(AsyncHTTPTestCase):
         
         #wrong job_id
         job_id = 'dummyjobid'
-        self.real_asynchttpclient.fetch(
+        self.http_client.fetch(
                 self.get_url('/api/v1/jobstatus?api_key=%s&job_id=%s'
                     %(self.api_key, job_id)),
                 callback=self.stop, method="GET")
@@ -199,7 +183,7 @@ class TestVideoServer(AsyncHTTPTestCase):
         pass
         #TODO: Get results from DB
         #resp = self.add_request()
-        #self.real_asynchttpclient.fetch(
+        #self.http_client.fetch(
         #        self.get_url('/api/v1/jobstatus?api_key=%s&job_id=%s'
         #            %(self.api_key,job_id)),
         #        callback=self.stop, method="GET")

@@ -82,6 +82,8 @@ def tar_src_tree():
         archive.add(os.path.join(source_root, 'api'), 'api')
         archive.add(os.path.join(source_root, 'supportServices'),
                     'supportServices')
+        archive.add(os.path.join(source_root, 'cv'),
+                    'cv')
         archive.add(os.path.join(source_root, 'NEON_ROOT'), 'NEON_ROOT')
         
     return tarstream.name
