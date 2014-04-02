@@ -98,7 +98,7 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
     def _returnImageCallback(self, request, callback=None):
         image = self._returnValidImage(request)
         if callback:
-            self.io_loop.add_callback(callback, image)
+            tornado.ioloop.IOLoop.current().add_callback(callback, image)
         else:
             return image
 

@@ -20,10 +20,10 @@ Inject failures
 
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
                                          '..'))
-if sys.path[0] <> base_path:
-        sys.path.insert(0,base_path)
+if sys.path[0] != __base_path__:
+        sys.path.insert(0, __base_path__)
 
 from api import server,client
 import json
@@ -182,8 +182,11 @@ class TestVideoClient(unittest.TestCase):
         s3_keys = [x for x in conn.buckets['neon-beta-test'].get_all_keys()]
         self.assertEqual(len(s3_keys), 1)
 
+    @patch('api.client.neondata.BrightcoveApiRequest')
+    @patch('api.client.tornado.httpclient.HTTPClient')
     @patch('api.client.S3Connection')
-    def test_brightcove_request_process(self, mock_conntype):
+    def test_brightcove_request_process(self, mock_bplatform_patcher, 
+                                        http_patcher, mock_conntype):
         
         conn = boto_mock.MockConnection()
         mock_conntype.return_value = conn
@@ -211,8 +214,6 @@ class TestVideoClient(unittest.TestCase):
         self.dl.job_params = params
         
         #brightcove platform patcher
-        bplatform_patcher = patch('api.client.BrightcoveApiRequest')
-        mock_bplatform_patcher = bplatform_patcher.start()
         breq = neondata.BrightcoveApiRequest("d", "d", None, None, None,
                                         None, None, None)
         breq.previous_thumbnail = "http://prevthumb"
@@ -221,8 +222,6 @@ class TestVideoClient(unittest.TestCase):
         #mock tornado http
         request = HTTPRequest('http://google.com')
         response = HTTPResponse(request, 200, buffer=self._create_random_image())
-        clientp = patch('api.client.tornado.httpclient.HTTPClient')
-        http_patcher = clientp.start()
         http_patcher().fetch.side_effect = [response, response]
         
         self.dl.send_client_response()
@@ -231,34 +230,26 @@ class TestVideoClient(unittest.TestCase):
             if "brightcove" in key.name:
                 bcove_thumb = True  
         
-        self.assertTrue(bcove_thumb, "finalize brightcove request")        
+        self.assertTrue(bcove_thumb)        
         
         #verify thumbnail metadata and video metadata 
-        vm = neondata.VideoMetadata.get(api_key+"_"+vid)
+        vm = neondata.VideoMetadata.get(api_key + "_" + vid)
         self.assertNotEqual(vm, None, "assert videometadata")
         
         #TODO: Brightcove request with autosync
     
-        #cleanup
-        http_patcher.stop()
-        clientp.stop()
-        mock_bplatform_patcher.stop()
-    
-
-    def test_processing_error(self):
+    @patch('api.client.tornado.httpclient.HTTPClient')
+    def test_processing_error(self, http_patcher):
 
         ''' error while processing video '''
 
         #mock requeue job failure
         request = HTTPRequest('http://neon-lab.com')
         response = HTTPResponse(request, 500, buffer=StringIO(""))
-        clientp = patch('api.client.tornado.httpclient.HTTPClient')
-        http_patcher = clientp.start()
         http_patcher().fetch.side_effect = [response, response]
 
         #requeue job mock
         self.dl.send_client_response(error=True)
-        clientp.stop()
 
         #self.nplatform_patcher = patch('api.client.NeonApiRequest')
         #self.mock_nplatform_patcher = self.nplatform_patcher.start()
@@ -295,7 +286,8 @@ class TestVideoClient(unittest.TestCase):
         self.assertEqual(api_request.state, neondata.RequestState.INT_ERROR)
 
 
-    def test_httpdownload_async_callback_error_cases(self):
+    @patch('api.client.tornado.httpclient.HTTPClient')
+    def test_httpdownload_async_callback_error_cases(self, http_patcher):
         ''' Failed on async callback '''
 
         j_id = "j123"
@@ -312,8 +304,6 @@ class TestVideoClient(unittest.TestCase):
         response = HTTPResponse(request, 500, buffer=StringIO(data))
         
         #mock requeue job, set requeue job to fail so that error propogates up
-        clientp = patch('api.client.tornado.httpclient.HTTPClient')
-        http_patcher = clientp.start()
         http_patcher().fetch.side_effect = [response] *10
         
         self.dl.async_callback(response)
@@ -327,8 +317,6 @@ class TestVideoClient(unittest.TestCase):
         api_request = neondata.NeonApiRequest.get(api_key, j_id)
         
         self.assertEqual(api_request.state, neondata.RequestState.INT_ERROR)
-        
-        clientp.stop()
 
     def test_streaming_callback(self):
     
@@ -410,7 +398,7 @@ class TestVideoClient(unittest.TestCase):
     #TODO: autosync enabled video processing
    
     #TODO: test client response formatting
-
+    
 class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
     '''
     #NOTE: Need to start server using subprocess and can't use tornado 
@@ -418,22 +406,13 @@ class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
     port 
     '''
     def setUp(self):
-        random.seed(2000)
         super(TestVideoClientAndServerIntegration,self).setUp()
         self.model_patcher = patch('api.client.model')
         self.model = self.model_patcher.start()
         self.model().load_model = [None]
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-        self.server_port = test_utils.net.find_free_port()
-        self.tmp_conf_file = tempfile.NamedTemporaryFile(delete=False)
-        self.create_temp_config_file(self.tmp_conf_file, self.redis.port,
-                                     self.server_port)
-        server_path = os.path.join(base_path, "api/server.py")
-        self.proc = subprocess.Popen([server_path, '-c', 
-                                      self.tmp_conf_file.name],
-                                     stdout=subprocess.PIPE)
-        time.sleep(1) #wait for proc to start
+        random.seed(2000)
         
         #create test neon account
         a_id = "testaccountneonapi"
@@ -445,49 +424,33 @@ class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
 
     def tearDown(self):
         self.model_patcher.stop()
-        utils.ps.send_signal_and_wait(signal.SIGTERM, [self.proc.pid])
-        utils.ps.send_signal_and_wait(signal.SIGKILL, [self.proc.pid])
         self.redis.stop()
-        if os.path.exists(self.tmp_conf_file.name):
-            os.unlink(self.tmp_conf_file.name)
+        super(TestVideoClientAndServerIntegration, self).tearDown()
 
     def get_app(self):
         return server.application
-    
-    def get_new_ioloop(self):
-        return tornado.ioloop.IOLoop.instance()
-   
-    def create_temp_config_file(self, conf_file, db_port, server_port):
-        conf_file.write(
-            "supportServices:\n"
-            "  neondata:\n"
-            "    accountDB: \"127.0.0.1\"\n"
-            "    videoDB: \"127.0.0.1\"\n"
-            "    dbPort: %i \n" 
-            "api:\n"
-            "  server:\n"
-            "    port: %i\n" % (db_port, server_port))
-        conf_file.flush() 
 
     def test_dequeue_video_client(self):
         model_file = "modelfile.model" 
         vc = client.VideoClient(model_file)
-        vc.dequeue_url = "http://localhost:%i/dequeue" % self.server_port
-        res = vc.dequeue_job()
+        vc.dequeue_url = self.get_url('/dequeue')
+        vc.dequeue_job(callback=self.stop)
+        res = self.wait()
         self.assertEqual(res,"{}") #empty queue result
 
         params = {"api_key": self.api_key, 
-                   "video_url": "http://bunny.mp4","video_id": "testid124",
-                   "topn": 3, "callback_url": "http://localhost:8081/testcallback", 
+                   "video_url": "http://bunny.mp4",
+                   "video_id": "testid124",
+                   "topn": 3,
+                   "callback_url": "http://localhost:8081/testcallback", 
                    "video_title": "testtitle"}
     
-        server_url = ('http://localhost:%i/api/v1/submitvideo/topn' 
-                      % self.server_port)
-        hc = tornado.httpclient.HTTPClient()
         #submit a job
-        resp = hc.fetch(server_url,method="POST",body=json.dumps(params))
-        res = vc.dequeue_job()
-        self.assertFalse(res == "{}") 
+        resp = self.fetch('/api/v1/submitvideo/topn', method="POST", body=json.dumps(params))
+        self.assertEqual(resp.code, 201)
+        vc.dequeue_job(callback=self.stop)
+        res = self.wait()
+        self.assertNotEqual(res, "{}") 
 
 if __name__ == '__main__':
     unittest.main()

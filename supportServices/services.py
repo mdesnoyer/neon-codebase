@@ -26,12 +26,14 @@ import tornado.web
 import tornado.escape
 import tornado.gen
 import tornado.httpclient
+import traceback
 import utils.neon
 
 from StringIO import StringIO
 from supportServices import neondata
 from utils.inputsanitizer import InputSanitizer
 from utils import statemon
+import utils.sync
 from utils.options import define, options
 define("port", default=8083, help="run on the given port", type=int)
 define("local", default=0, help="call local service", type=int)
@@ -1137,7 +1139,8 @@ class AccountHandler(tornado.web.RequestHandler):
 
 
 
-    @tornado.gen.engine
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def update_video_ooyala(self, i_id, i_vid, new_tid):
         ''' update thumbnail for a Ooyala video '''
         
@@ -1145,19 +1148,19 @@ class AccountHandler(tornado.web.RequestHandler):
         
         #Get account/integration
         oo = yield tornado.gen.Task(neondata.OoyalaPlatform.get_account,
-                self.api_key,i_id)
+                self.api_key, i_id)
         if not oo:
             _log.error("key=update_video_ooyala" 
                     " msg=account doesnt exist api key=%s " 
                     "i_id=%s"%(self.api_key,i_id))
             data = '{"error": "no such account"}'
             self.send_json_response(data, 400)
-            return
+            raise tornado.gen.Return()
 
         result = yield tornado.gen.Task(oo.update_thumbnail, i_vid, new_tid)
         
         if result:
-            _log.info("key=update_video_brightcove" 
+            _log.info("key=update_video_ooyala" 
                         " msg=thumbnail updated for video=%s tid=%s"\
                         %(p_vid, new_tid))
             data = ''

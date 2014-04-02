@@ -11,6 +11,7 @@ from mock import patch, MagicMock
 import random
 from StringIO import StringIO
 import test_utils.neontest
+import tornado.ioloop
 import tornado.httpclient
 import unittest
 from utils import imageutils
@@ -81,7 +82,7 @@ class TestDownloadImage(test_utils.neontest.AsyncTestCase):
                                                    buffer=StringIO())
         self.image.save(response.buffer, 'JPEG')
         response.buffer.seek(0)
-        self.io_loop.add_callback(callback, response)        
+        tornado.ioloop.IOLoop.current().add_callback(callback, response)
 
     def test_get_valid_image(self):
 
@@ -91,7 +92,7 @@ class TestDownloadImage(test_utils.neontest.AsyncTestCase):
 
     def test_connection_error(self):
         self.get_img_mock.side_effect = (
-            lambda x, callback: self.io_loop.add_callback(
+            lambda x, callback: tornado.ioloop.IOLoop.current().add_callback(
                 callback,
                 tornado.httpclient.HTTPResponse(
                     x,

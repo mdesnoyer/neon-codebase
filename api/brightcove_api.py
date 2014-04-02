@@ -659,6 +659,11 @@ class BrightcoveApi(object):
                                              request_timeout = 60.0
                                              )
         response = BrightcoveApi.read_connection.send_request(req)
+        if response.error:
+            _log.error("key=create_requests_unscheduled_videos" 
+                        " msg=Error getting unscheduled videos from "
+                        "Brightcove: %s" % response.error)
+            raise response.error
         items = tornado.escape.json_decode(response.body)
 
         #Logic to determine videos that may be not scheduled to run yet
@@ -841,7 +846,7 @@ class BrightcoveApi(object):
         #Sync version
         '''
         result = self.get_publisher_feed(command='find_all_videos',
-                                       page_size = n) #get n videos
+                                         page_size = n) #get n videos
 
         if result and not result.error:
             bc = supportServices.neondata.BrightcovePlatform.get_account(

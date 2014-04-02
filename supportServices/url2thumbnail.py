@@ -176,7 +176,7 @@ class URL2ThumbnailIndex:
         try:
             image = yield tornado.gen.Task(
                 PILImageUtils.download_image, url)
-        except Exception:
+        except Exception as e:
             # Error logging happens in the download_image function
             raise tornado.gen.Return(None)
         phash = self.hash_index.hash_pil_image(image)

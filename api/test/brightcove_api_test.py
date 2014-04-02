@@ -17,13 +17,13 @@ from mock import patch, MagicMock
 from StringIO import StringIO
 import test_utils.neontest
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
+import tornado.ioloop
 import urlparse
 import unittest
 
 _log = logging.getLogger(__name__)
 
 # TODO(sunil) Add more tests
-
 class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestBrightcoveApi, self).setUp()
@@ -48,7 +48,8 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
                                     buffer=StringIO(body),
                                     error=error)
             if callback:
-                self.io_loop.add_callback(callback, response)
+                tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                             response)
             else:
                 return response
 

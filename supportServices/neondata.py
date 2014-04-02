@@ -1338,8 +1338,9 @@ class OoyalaPlatform(AbstractPlatform):
         oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret)
         oo._create_video_requests_on_signup(copy.deepcopy(self), n, callback) 
 
-    @tornado.gen.engine
-    def update_thumbnail(self, i_vid, new_tid, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def update_thumbnail(self, i_vid, new_tid):
         '''
         Update the Preview image on Ooyala video 
         
@@ -1354,8 +1355,7 @@ class OoyalaPlatform(AbstractPlatform):
         vmdata = yield tornado.gen.Task(VideoMetadata.get, i_vid)
         if not vmdata:
             _log.error("key=ooyala update_thumbnail msg=vid %s not found" %i_vid)
-            callback(None)
-            return
+            raise tornado.gen.Return(None)
         
         #Thumbnail ids for the video
         tids = vmdata.thumbnail_ids
@@ -1375,20 +1375,20 @@ class OoyalaPlatform(AbstractPlatform):
         
         if not t_url:
             _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
-            callback(None)
-            return
+            raise tornado.gen.Return(None)
+            
         
         # Update the new_tid as the thumbnail for the video
         oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret)
         update_result = yield tornado.gen.Task(oo.update_thumbnail_from_url,
-                                           platform_vid,
-                                           t_url,
-                                           new_tid,
-                                           fsize)
+                                               platform_vid,
+                                               t_url,
+                                               new_tid,
+                                               fsize)
         #check if thumbnail was updated 
         if not update_result:
-            callback(None)
-            return
+            raise tornado.gen.Return(None)
+            
       
         #Update the database with video
         #Get previous thumbnail and new thumb
@@ -1410,12 +1410,12 @@ class OoyalaPlatform(AbstractPlatform):
             if not res:
                 _log.error("key=update_thumbnail msg=ThumbnailMetadata save_all"
                                 " failed for %s" %new_tid)
-                callback(False)
-                return
+                raise tornado.gen.Return(False)
+                
         else:
             _log.error("key=oo_update_thumbnail msg=new_thumb is None %s"%new_tid)
-            callback(False)
-            return
+            raise tornado.gen.Return(False)
+            
 
         req_data = NeonApiRequest.get_request(self.neon_api_key, vmdata.job_id) 
         vid_request = NeonApiRequest.create(req_data)
@@ -1424,7 +1424,7 @@ class OoyalaPlatform(AbstractPlatform):
         if not ret:
             _log.error("key=update_thumbnail msg=%s state not updated to active"
                         %vid_request.key)
-        callback(True)
+        raise tornado.gen.Return(True)
     
     @classmethod
     def create(cls, json_data):
