@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 from mrjob.protocol import *
 from StringIO import StringIO
@@ -55,7 +55,7 @@ class TestSetTrackerID(unittest.TestCase):
         input_data = (
             '{"sts":19800, "a":"click", "page":"post-gazette.com", "tai":null,'
             '"ttype":"flashonly", "img":"http://monkey.com"}\n'
-            '{"sts":19795, "a":"load", "page":"http://www.post-gazette.com",'
+            '{"sts":19795, "a":"load", "page":"http://www.post-gazette.com/",'
             '"ttype":"flashonly","tai":"246890",'
             '"imgs":["http://monkey.com","http://panda.com","pumpkin.wow"]}\n'
             '{"sts":19805, "a":"click", "page":"post-gazette.com/video", '

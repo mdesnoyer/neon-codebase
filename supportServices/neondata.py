@@ -21,6 +21,7 @@ if sys.path[0] <> base_path:
 
 import base64
 import binascii
+import contextlib
 import copy
 import hashlib
 import json
@@ -29,12 +30,13 @@ import random
 import redis as blockingRedis
 import string
 from StringIO import StringIO
+from supportServices.url2thumbnail import URL2ThumbnailIndex
 import tornado.ioloop
 import tornado.gen
 import tornado.httpclient
 import threading
 import time
-from api import brightcove_api #coz of cyclic import 
+import api.brightcove_api #coz of cyclic import 
 import api.youtube_api
 from api import ooyala_api
 
@@ -155,54 +157,47 @@ class RedisAsyncWrapper(object):
     def __init__(self, host='127.0.0.1', port=6379):
         self.client = blockingRedis.StrictRedis(host, port, socket_timeout=10)
 
-    def get(self, key, callback):
-        ''' get key '''
-        def _callback(result):
-            ''' result callback'''
-            tornado.ioloop.IOLoop.instance().add_callback(
-                    lambda: callback(result))
-        RedisAsyncWrapper._thread_pool.apply_async(
-                self.client.get, args=(key,), callback=_callback)
-   
-    def set(self, key, value, callback):
-        ''' set key '''
-        def _callback(result):
-            ''' result callback'''
-            tornado.ioloop.IOLoop.instance().add_callback(
-                    lambda: callback(result))
-        RedisAsyncWrapper._thread_pool.apply_async(
-            self.client.set, args=(key, value,), callback=_callback)
+    @staticmethod
+    def _get_wrapped_async_func(func):
+        '''Returns an asynchronous function wrapped around the given func.
+
+        The asynchronous call has a callback keyword added to it
+        '''
+        def AsyncWrapper(*args, **kwargs):
+            # Find the callback argument
+            try:
+                callback = kwargs['callback']
+                del kwargs['callback']
+            except KeyError:
+                if len(args) > 0 and hasattr(args[-1], '__call__'):
+                    callback = args[-1]
+                    args = args[:-1]
+                else:
+                    raise AttributeError('A callback is necessary')
+                    
+            io_loop = tornado.ioloop.IOLoop.current()
+            def _cb(result):
+                io_loop.add_callback(lambda: callback(result))
+
+            RedisAsyncWrapper._thread_pool.apply_async(
+                func, args=args,
+                kwds=kwargs, callback=_cb)
+        return AsyncWrapper
+        
+
+    def __getattr__(self, attr):
+        '''Allows us to wrap all of the redis-py functions.'''
+        if hasattr(self.client, attr):
+            if hasattr(getattr(self.client, attr), '__call__'):
+                return RedisAsyncWrapper._get_wrapped_async_func(
+                    getattr(self.client, attr))
+                
+        raise AttributeError(attr)
     
     def pipeline(self):
         ''' pipeline '''
+        #TODO(Sunil) make this asynchronous
         return self.client.pipeline()
-
-    def mget(self, keys, callback):
-        ''' multi get '''
-        def _callback(result):
-            ''' result callback'''
-            tornado.ioloop.IOLoop.instance().add_callback(
-                    lambda: callback(result))
-        RedisAsyncWrapper._thread_pool.apply_async(
-            self.client.mget, args=(keys,), callback=_callback)
-    
-    def mset(self, keys, callback):
-        ''' multi set '''
-        def _callback(result):
-            ''' result callback'''
-            tornado.ioloop.IOLoop.instance().add_callback(
-                    lambda: callback(result))
-        RedisAsyncWrapper._thread_pool.apply_async(
-            self.client.mset, args=(keys,), callback=_callback)
-    
-    def keys(self, prefix, callback):
-        ''' key regex match'''
-        def _callback(result):
-            ''' result callback'''
-            tornado.ioloop.IOLoop.instance().add_callback(
-                    lambda: callback(result))
-        RedisAsyncWrapper._thread_pool.apply_async(
-            self.client.keys, args=(prefix,), callback=_callback)
     
 class DBConnectionCheck(threading.Thread):
 
@@ -292,6 +287,163 @@ def id_generator(size=32,
 
 ##############################################################################
 
+class StoredObject(object):
+    '''Abstract class to represent an object that is stored in the database.
+
+    This contains common routines for interacting with the data.
+    TODO: Convert all the objects to use this consistent interface.
+    '''
+    def __init__(self, key):
+        self.key = key
+
+    def to_json(self):
+        '''Returns a json version of the object'''
+        return json.dumps(self, default=lambda o: o.__dict__)
+
+    def save(self, callback=None):
+        '''Save the object to the database.'''
+        db_connection = DBConnection(self)
+        value = self.to_json()
+        if self.key is None:
+            raise Exception("key not set")
+        if callback:
+            db_connection.conn.set(self.key, value, callback)
+        else:
+            return db_connection.blocking_conn.set(self.key, value)
+
+    @classmethod
+    def get(cls, key, callback=None):
+        '''Retrieve this object from the database.
+
+        Returns the object or None if it couldn't be found
+        '''
+        db_connection = DBConnection(cls)
+
+        def cb(result):
+            if result:
+                obj = cls._create(key, result)
+                callback(obj)
+            else:
+                callback(None)
+
+        if callback:
+            db_connection.conn.get(key, cb)
+        else:
+            jdata = db_connection.blocking_conn.get(key)
+            if jdata is None:
+                return None
+            return cls._create(key, jdata)
+
+    @classmethod
+    def get_many(cls, keys, callback=None):
+        ''' Get many objects of the same type simultaneously
+
+        This is more efficient than one at a time.
+
+        Inputs:
+        keys - List of keys to get
+        callback - Optional callback function to call
+
+        Returns:
+        A list of cls objects or None if it wasn't there, one for each key
+        '''
+        db_connection = DBConnection(cls)
+
+        def process(results):
+            mappings = [] 
+            for key, item in zip(keys, results):
+                obj = cls._create(key, item)
+                mappings.append(obj)
+            callback(mappings)
+
+        if callback:
+            db_connection.conn.mget(keys, process)
+        else:
+            mappings = [] 
+            items = db_connection.blocking_conn.mget(keys)
+            for key, item in zip(keys, items):
+                obj = cls._create(key, item)
+                mappings.append(obj)
+            return mappings
+
+    
+    @classmethod
+    def modify(cls, key, func, callback=None):
+        '''Allows you to modify the object in the database atomically.
+
+        While in func, you have a lock on the object so you are
+        guaranteed for it not to change. It is automatically saved at
+        the end of func.
+        
+        Inputs:
+        func - Function that takes a single parameter (the object being edited)
+        key - The key of the object to modify
+
+        Returns: A copy of the updated object or None, if the object wasn't
+                 in the database and thus couldn't be updated.
+
+        Example usage:
+        SoredObject.modify('thumb_a', lambda thumb: thumb.update_phash())
+        '''
+        def _getandset(pipe):
+            json_data = pipe.get(key)
+            pipe.multi()
+
+            if json_data is None:
+                _log.error('Could not get redis object: %s' % key)
+                return None
+            
+            obj = cls._create(key, json_data)
+            try:
+                func(obj)
+            finally:
+                pipe.set(key, obj.to_json())
+            return obj
+
+        db_connection = DBConnection(cls)
+        if callback:
+            return db_connection.conn.transaction(_getandset, key,
+                                                  callback=callback,
+                                                  value_from_callable=True)
+        else:
+            return db_connection.blocking_conn.transaction(
+                _getandset, key, value_from_callable=True)
+            
+    @classmethod
+    def save_all(cls, objects, callback=None):
+        '''Save many objects simultaneously'''
+        db_connection = DBConnection(cls)
+        data = {}
+        for obj in objects:
+            data[obj.key] = obj.to_json()
+
+        if callback:
+            db_connection.conn.mset(data, callback)
+        else:
+            return db_connection.blocking_conn.mset(data)
+
+    @classmethod
+    def _create(cls, key, json_data):
+        '''Create an object from the json_data.
+
+        Returns None if the object could not be created.
+        '''
+        if json_data:
+            data_dict = json.loads(json_data)
+            #create basic object
+            obj = cls(key)
+
+            #populate the object dictionary
+            for key, value in data_dict.iteritems():
+                obj.__dict__[key] = value
+        
+            return obj
+
+    @classmethod
+    def _erase_all_data(cls):
+        '''Clear the database that contains objects of this type '''
+        db_connection = DBConnection(cls)
+        db_connection.clear_db()
 
 class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
@@ -559,7 +711,7 @@ class AbstractPlatform(object):
         self.abtest = abtest # Boolean on wether AB tests can run
         self.integration_id = None # Unique platform ID to 
     
-    def generate_key(self,i_id):
+    def generate_key(self, i_id):
         ''' generate db key '''
         return '_'.join([self.__class__.__name__.lower(),
                          self.neon_api_key, i_id])
@@ -627,6 +779,18 @@ class AbstractPlatform(object):
         return instances
 
     @classmethod
+    def _get_all_instances_impl(cls, callback=None):
+        '''Implements get_all_instances for a single platform type.'''
+        platforms = cls.get_all_platform_data()
+        instances = [] 
+        for pdata in platforms:
+            platform = cls.create(pdata)
+            if platform:
+                instances.append(platform)
+
+        return instances
+
+    @classmethod
     def get_all_platform_data(cls):
         ''' get all platform data '''
         db_connection = DBConnection(cls)
@@ -690,16 +854,11 @@ class NeonPlatform(AbstractPlatform):
         
         return obj
 
+    
     @classmethod
     def get_all_instances(cls, callback=None):
-        ''' get all instances [NeonPlatform..]''' 
-        platforms = NeonPlatform.get_all_platform_data()
-        instances = [] 
-        for pdata in platforms:
-            platform = NeonPlatform.create(pdata)
-            instances.append(platform)
-
-        return instances
+        ''' get all brightcove instances'''
+        return cls._get_all_instances_impl()
 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
@@ -730,12 +889,19 @@ class BrightcovePlatform(AbstractPlatform):
         return "brightcove"
 
     def get(self, callback=None):
-        ''' get instance'''
+        ''' get json'''
         db_connection = DBConnection(self)
         if callback:
             db_connection.conn.get(self.key, callback)
         else:
             return db_connection.blocking_conn.get(self.key)
+
+    def get_api(self):
+        '''Return the Brightcove API object for this platform integration.'''
+        return api.brightcove_api.BrightcoveApi(
+            self.neon_api_key, self.publisher_id,
+            self.read_token, self.write_token, self.auto_update,
+            self.last_process_date, account_created=self.account_created)
 
     @tornado.gen.engine
     def update_thumbnail(self, i_vid, new_tid, nosave=False, callback=None):
@@ -744,9 +910,7 @@ class BrightcovePlatform(AbstractPlatform):
         callback(False): internal error
         callback(True): success
         '''
-        bc = api.brightcove_api.BrightcoveApi(
-            self.neon_api_key, self.publisher_id,
-            self.read_token, self.write_token, self.auto_update)
+        bc = self.get_api()
       
         #update the default still size, if set
         if self.video_still_width != BCOVE_STILL_WIDTH:
@@ -896,46 +1060,21 @@ class BrightcovePlatform(AbstractPlatform):
                     callback(False)
             else:
                 callback(False)
-
-        bc = api.brightcove_api.BrightcoveApi(
-            self.neon_api_key, self.publisher_id, self.read_token,
-            self.write_token, self.auto_update)
-        bc.create_video_request(vid, self.integration_id, created_job)
+                
+        self.get_api().create_video_request(vid, self.integration_id,
+                                            created_job)
 
     def check_feed_and_create_api_requests(self):
         ''' Use this only after you retreive the object from DB '''
 
-        bc = api.brightcove_api.BrightcoveApi(
-            self.neon_api_key, self.publisher_id,
-            self.read_token, self.write_token, self.auto_update,
-            self.last_process_date,account_created=self.account_created)
+        bc = self.get_api()
         bc.create_neon_api_requests(self.integration_id)    
         bc.create_requests_unscheduled_videos(self.integration_id)
 
     def check_feed_and_create_request_by_tag(self):
         ''' Temp method to support backward compatibility '''
+        self.get_api().create_brightcove_request_by_tag(self.integration_id)
 
-        bc = api.brightcove_api.BrightcoveApi(
-            self.neon_api_key, self.publisher_id, self.read_token,
-            self.write_token, self.auto_update, self.last_process_date)
-        bc.create_brightcove_request_by_tag(self.integration_id)
-
-    def check_current_thumbnail_in_db(self, i_vid, callback=None):
-        '''
-        Check if the current thumbnail for the given video on brightcove
-        has been recorded in Neon DB. Returns True if it has
-        '''
-        p_vid = InternalVideoID.to_external(i_vid)
-        bc = api.brightcove_api.BrightcoveApi(self.neon_api_key,
-                                              self.publisher_id,
-                                              self.read_token,
-                                              self.write_token,
-                                              self.auto_update,
-                                              self.last_process_date)
-        if callback:
-            bc.async_check_thumbnail(p_vid, callback)
-        else:
-            return bc.check_thumbnail(p_vid) #TODO: Impl
 
     def verify_token_and_create_requests_for_video(self, n, callback=None):
         ''' Method to verify brightcove token on account creation 
@@ -943,9 +1082,7 @@ class BrightcovePlatform(AbstractPlatform):
             @return: Callback returns job id, along with brightcove vid metadata
         '''
 
-        bc = api.brightcove_api.BrightcoveApi(
-            self.neon_api_key, self.publisher_id, self.read_token,
-            self.write_token, False, self.last_process_date)
+        bc = self.get_api()
         if callback:
             bc.async_verify_token_and_create_requests(self.integration_id,
                                                       n,
@@ -956,10 +1093,8 @@ class BrightcovePlatform(AbstractPlatform):
     def sync_individual_video_metadata(self):
         ''' sync video metadata from bcove individually using 
         find_video_id api '''
-        bcove_api = api.brightcove_api.BrightcoveApi(
-            self.neon_api_key, self.publisher_id, self.read_token,
-            self.write_token, self.auto_update, self.last_process_date)
-        bcove_api.sync_individual_video_metadata(self.integration_id)
+        self.get_api().bcove_api.sync_individual_video_metadata(
+            self.integration_id)
 
     def set_rendition_frame_width(self, f_width):
         ''' Set framewidth of the video resolution to process '''
@@ -1019,14 +1154,7 @@ class BrightcovePlatform(AbstractPlatform):
     @classmethod
     def get_all_instances(cls, callback=None):
         ''' get all brightcove instances'''
-
-        platforms = BrightcovePlatform.get_all_platform_data()
-        instances = [] 
-        for pdata in platforms:
-            platform = BrightcovePlatform.create(pdata)
-            if platform:
-                instances.append(platform)
-        return instances
+        return cls._get_all_instances_impl()
 
 class YoutubePlatform(AbstractPlatform):
     ''' Youtube platform integration '''
@@ -1152,23 +1280,18 @@ class YoutubePlatform(AbstractPlatform):
             yt.__dict__[key] = params[key]
 
         return yt
-    
+
     @classmethod
     def get_all_instances(cls, callback=None):
-        platforms = YoutubePlatform.get_all_platform_data()
-        instances = [] 
-        for pdata in platforms:
-            platform = YoutubePlatform.create(pdata)
-            instances.append(platform)
-
-        return instances
+        ''' get all brightcove instances'''
+        return cls._get_all_instances_impl()
 
 class OoyalaPlatform(AbstractPlatform):
     '''
     OOYALA Platform
     '''
     def __init__(self, a_id, i_id, api_key, p_code, 
-                            o_api_key, api_secret, auto_update=False): 
+                 o_api_key, api_secret, auto_update=False): 
         '''
         Init ooyala platform 
         
@@ -1218,8 +1341,9 @@ class OoyalaPlatform(AbstractPlatform):
         oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret)
         oo._create_video_requests_on_signup(copy.deepcopy(self), n, callback) 
 
-    @tornado.gen.engine
-    def update_thumbnail(self, i_vid, new_tid, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def update_thumbnail(self, i_vid, new_tid):
         '''
         Update the Preview image on Ooyala video 
         
@@ -1234,8 +1358,7 @@ class OoyalaPlatform(AbstractPlatform):
         vmdata = yield tornado.gen.Task(VideoMetadata.get, i_vid)
         if not vmdata:
             _log.error("key=ooyala update_thumbnail msg=vid %s not found" %i_vid)
-            callback(None)
-            return
+            raise tornado.gen.Return(None)
         
         #Thumbnail ids for the video
         tids = vmdata.thumbnail_ids
@@ -1255,20 +1378,20 @@ class OoyalaPlatform(AbstractPlatform):
         
         if not t_url:
             _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
-            callback(None)
-            return
+            raise tornado.gen.Return(None)
+            
         
         # Update the new_tid as the thumbnail for the video
         oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret)
         update_result = yield tornado.gen.Task(oo.update_thumbnail_from_url,
-                                           platform_vid,
-                                           t_url,
-                                           new_tid,
-                                           fsize)
+                                               platform_vid,
+                                               t_url,
+                                               new_tid,
+                                               fsize)
         #check if thumbnail was updated 
         if not update_result:
-            callback(None)
-            return
+            raise tornado.gen.Return(None)
+            
       
         #Update the database with video
         #Get previous thumbnail and new thumb
@@ -1290,12 +1413,12 @@ class OoyalaPlatform(AbstractPlatform):
             if not res:
                 _log.error("key=update_thumbnail msg=ThumbnailMetadata save_all"
                                 " failed for %s" %new_tid)
-                callback(False)
-                return
+                raise tornado.gen.Return(False)
+                
         else:
             _log.error("key=oo_update_thumbnail msg=new_thumb is None %s"%new_tid)
-            callback(False)
-            return
+            raise tornado.gen.Return(False)
+            
 
         req_data = NeonApiRequest.get_request(self.neon_api_key, vmdata.job_id) 
         vid_request = NeonApiRequest.create(req_data)
@@ -1304,7 +1427,7 @@ class OoyalaPlatform(AbstractPlatform):
         if not ret:
             _log.error("key=update_thumbnail msg=%s state not updated to active"
                         %vid_request.key)
-        callback(True)
+        raise tornado.gen.Return(True)
     
     @classmethod
     def create(cls, json_data):
@@ -1331,6 +1454,11 @@ class OoyalaPlatform(AbstractPlatform):
             if platform:
                 instances.append(platform)
         return instances
+
+    @classmethod
+    def get_all_instances(cls, callback=None):
+        ''' get all brightcove instances'''
+        return cls._get_all_instances_impl()
 
 #######################
 # Request Blobs 
@@ -1642,76 +1770,18 @@ class ThumbnailURLMapper(object):
         db_connection = DBConnection(cls)
         db_connection.clear_db()
 
-class ImageMD5Mapper(object):
-    '''
-    Maps a given Image MD5 to Thumbnail ID
 
-    This is needed to keep the mapping of individual image md5's to tid
-    A single image can exist is different sizes, for example brightcove has 
-    videostills and thumbnails for any given video
-
-    '''
-    def __init__(self, ext_video_id, imgdata, tid):
-        self.key = self.format_key(ext_video_id, imgdata)
-        self.value = tid
-
-    def get_md5(self):
-        ''' return md5 '''
-        return self.key.split('_')[-1]
-
-    def format_key(self, video_id, imdata):
-        ''' format key for ImageMD5Mapper '''
-        if imdata:
-            md5 = ThumbnailID.generate(imdata, video_id)
-            return self.__class__.__name__.lower() + '_' + md5
-        else:
-            raise
-
-    def save(self, callback=None):
-        ''' save ''' 
-        db_connection = DBConnection(self)
-        
-        if callback:
-            db_connection.conn.set(self.key, self.value, callback)
-        else:
-            db_connection.blocking_conn.set(self.key, self.value)
-
-    @classmethod   
-    def get_tid(cls, ext_video_id, image_md5, callback=None):
-        ''' get tid for the image md5 '''
-        db_connection = DBConnection(cls)
-        
-        key = "ImageMD5Mapper".lower() + '_%s_%s' %(ext_video_id, image_md5)
-        if callback:
-            db_connection.conn.get(key, callback)
-        else:
-            return db_connection.blocking_conn.get(key)
-    
-    @classmethod
-    def save_all(cls, objs, callback=None):
-        ''' multi save ''' 
-        db_connection = DBConnection(cls)
-        data = {}
-        for obj in objs:
-            data[obj.key] = obj.value
-
-        if callback:
-            db_connection.conn.mset(data,callback)
-        else:
-            return db_connection.blocking_conn.mset(data)
-
-
-class ThumbnailMetadata(object):
+class ThumbnailMetadata(StoredObject):
     '''
     Class schema for Thumbnail information.
 
     Keyed by thumbnail id
     '''
-    def __init__(self, tid, internal_vid, urls, created, width, height, ttype,
-                 model_score, model_version, enabled=True, chosen=False,
-                 rank=None, refid=None):
-        super(ThumbnailMetadata,self).__init__()
-        self.key = tid # Thumbnail id
+    def __init__(self, tid, internal_vid, urls=None, created=None,
+                 width=None, height=None, ttype=None,
+                 model_score=None, model_version=None, enabled=True,
+                 chosen=False, rank=None, refid=None, phash=None):
+        super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
         self.urls = urls  # List of all urls associated with single image
         self.created_time = created # Timestamp when thumbnail was created 
@@ -1723,13 +1793,13 @@ class ThumbnailMetadata(object):
         self.rank = 0 if not rank else rank  #int 
         self.model_score = model_score #float
         self.model_version = model_version #string
+        #TODO: remove refid. It's not necessary
         self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
-        
+        self.phash = phash # Perceptual hash of the image. None if unknown
 
-    #@classmethod
-        #def generate_key(cls, video_id, tid):
-        #''' generate thumbnail key '''
-        #return video_id + '_' + tid 
+    def update_phash(self, image):
+        '''Update the phash from a PIL image.'''
+        self.phash = URL2ThumbnailIndex().hash_index.hash_pil_image(image)
 
     def get_account_id(self):
         ''' get the internal account id. aka api key '''
@@ -1752,20 +1822,16 @@ class ThumbnailMetadata(object):
         '''
         new_dict = self.__dict__
         new_dict["thumbnail_id"] = new_dict.pop("key")
-        return new_dict 
-    
-    def to_json(self):
-        ''' to json '''
-        return json.dumps(self, default=lambda o: o.__dict__) 
+        return new_dict  
 
-    @staticmethod
-    def create(json_data):
+    @classmethod
+    def _create(cls, key, json_data):
         ''' create object '''
 
         if json_data:
             data_dict = json.loads(json_data)
             #create basic object
-            obj = ThumbnailMetadata(None, None, None, None, None, None, None,
+            obj = ThumbnailMetadata(key, None, None, None, None, None, None,
                                     None, None)
 
             # For backwards compatibility, check to see if there is a
@@ -1789,88 +1855,19 @@ class ThumbnailMetadata(object):
             asscociated with thumbnail
         '''
 
-        def get_metadata(result):
-            ''' extract thumbnail metadata from obj '''
-            vid = None
-            if result:
-                obj = ThumbnailMetadata.create(result)
-                callback(obj.video_id)
-                return
-            callback(vid)
-
-        db_connection = DBConnection(cls)
         if callback:
-            db_connection.conn.get(tid, get_metadata)
+            def handle_obj(obj):
+                if obj:
+                    callback(obj.video_id)
+                else:
+                    callback(None)
+            cls.get(tid, callback=handle_obj)
         else:
-            result = db_connection.blocking_conn.get(tid)
-            if result:
-                obj = ThumbnailMetadata.create(result)
+            obj = cls.get(tid)
+            if obj:
                 return obj.video_id
-
-    @classmethod
-    def get(cls, thumbnail_id, callback=None):
-        db_connection = DBConnection(cls)
-
-        def cb(result):
-            if result:
-                obj = create(result)
-                callback(obj)
             else:
-                callback(None)
-
-        if callback:
-            db_connection.conn.get(thumbnail_id, cb)
-        else:
-            jdata = db_connection.blocking_conn.get(thumbnail_id)
-            if jdata is None:
                 return None
-            return cls.create(jdata)
-
-
-    @classmethod
-    def get_many(cls, keys, callback=None):
-        ''' Returns list of thumbnail metadata for give thumb ids(keys)
-        '''
-        db_connection = DBConnection(cls)
-
-        def process(results):
-            mappings = [] 
-            for item in results:
-                obj = ThumbnailMetadata.create(item)
-                mappings.append(obj)
-            callback(mappings)
-
-        if callback:
-            db_connection.conn.mget(keys, process)
-        else:
-            mappings = [] 
-            items = db_connection.blocking_conn.mget(keys)
-            for item in items:
-                obj = ThumbnailMetadata.create(item)
-                mappings.append(obj)
-            return mappings
-
-    @classmethod
-    def save_all(cls, thumbnails, callback=None):
-        ''' multi save '''
-        db_connection = DBConnection(cls)
-        data = {}
-        for t in thumbnails:
-            data[t.key] = t.to_json()
-
-        if callback:
-            db_connection.conn.mset(data, callback)
-        else:
-            return db_connection.blocking_conn.mset(data)
-
-    def save(self, callback=None):
-        ''' save  '''
-        db_connection = DBConnection(self)
-        value = self.to_json()
-        if callback:
-            db_connection.conn.set(self.key, value, callback)
-        else:
-            return db_connection.blocking_conn.set(self.key, value)
 
     @staticmethod
     def enable_thumbnail(thumbnails, new_tid):
@@ -1911,12 +1908,32 @@ class ThumbnailMetadata(object):
             return pipe.execute()
 
     @classmethod
-    def _erase_all_data(cls):
-        ''' clear db '''
-        db_connection = DBConnection(cls)
-        db_connection.clear_db()
+    def iterate_all_thumbnails(cls):
+        '''Iterates through all of the thumbnails in the system.
 
-class VideoMetadata(object):
+        ***WARNING*** This function is a best effort iteration. There
+           is a good chance that the database changes while the
+           iteration occurs. Given that we only ever add thumbnails to
+           the system, this means that it is likely that some
+           thumbnails will be missing.
+
+        Returns - A generator that does the iteration and produces 
+                  ThumbnailMetadata objects.
+        '''
+
+        for platform in AbstractPlatform.get_all_instances():
+            for video_id in platform.get_internal_video_ids():
+                video_metadata = VideoMetadata.get(video_id)
+                if video_metadata is None:
+                    _log.error('Could not find information about video %s' %
+                               video_id)
+                    continue
+
+                for thumb in ThumbnailMetadata.get_many(
+                        video_metadata.thumbnail_ids):
+                    yield thumb
+
+class VideoMetadata(StoredObject):
     '''
     Schema for metadata associated with video which gets stored
     when the video is processed
@@ -1924,12 +1941,12 @@ class VideoMetadata(object):
     Contains list of Thumbnail IDs associated with the video
     '''
 
-    '''  Keyed by API_KEY + VID '''
+    '''  Keyed by API_KEY + VID (internal video id) '''
     
-    def __init__(self, video_id, tids, request_id, video_url, duration,
-                 vid_valence, model_version, i_id, frame_size=None):
-
-        self.key = video_id #internal video id 
+    def __init__(self, video_id, tids=None, request_id=None, video_url=None,
+                 duration=None, vid_valence=None, model_version=None,
+                 i_id=None, frame_size=None):
+        super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids 
         self.url = video_url 
         self.duration = duration
@@ -1943,90 +1960,14 @@ class VideoMetadata(object):
         ''' get internal video id '''
         return self.key
 
+    def get_account_id(self):
+        ''' get the internal account id. aka api key '''
+        return self.key.split('_')[0]
+
     def get_frame_size(self):
         ''' framesize of the video '''
-        #if self.frame_size:
-        #    return float(self.frame_size[0])/self.frame_size[1]
         if self.__dict__.has_key('frame_size'):
             return self.frame_size
-
-    def to_json(self):
-        ''' to json'''
-        return json.dumps(self, default=lambda o: o.__dict__) 
-
-    def save(self, callback=None):
-        ''' save  '''
-        db_connection = DBConnection(self)
-        value = self.to_json()
-        if callback:
-            db_connection.conn.set(self.key, value, callback)
-        else:
-            return db_connection.blocking_conn.set(self.key, value)
-
-    @classmethod
-    def get(cls, internal_video_id, callback=None):
-        ''' get video metadata '''
-        db_connection = DBConnection(cls)
-
-        def create(jdata):
-            ''' create obj'''
-            data_dict = json.loads(jdata) 
-            obj = VideoMetadata(None, None, None, None, None, None, None, None)
-            for key in data_dict.keys():
-                obj.__dict__[key] = data_dict[key]
-            return obj
-        
-        def cb(result):
-            if result:
-                obj = create(result)
-                callback(obj)
-            else:
-                callback(None)
-
-        if callback:
-            db_connection.conn.get(internal_video_id, cb)
-        else:
-            jdata = db_connection.blocking_conn.get(internal_video_id)
-            if jdata is None:
-                return None
-            return create(jdata)
-
-    @classmethod
-    def multi_get(cls, internal_video_ids, callback=None):
-        ''' multi get '''
-        db_connection = DBConnection(cls) 
-        def create(jdata):
-            data_dict = json.loads(jdata)
-            obj = VideoMetadata(None, None, None, None, None, None, None, None)
-            for key in data_dict.keys():
-                obj.__dict__[key] = data_dict[key]
-            return obj
-
-        def cb(results):
-            ''' result callback '''
-            if len(results) > 0:
-                vmdata = []
-                for result in results:
-                    if result:
-                        vm = create(result)
-                    else:
-                        vm = None
-                    vmdata.append(vm)
-                callback(vmdata)
-            else:
-                callback(None)
-
-        if callback:
-            db_connection.conn.mget(internal_video_ids, cb) 
-        else:
-            results = db_connection.blocking_conn.mget(internal_video_ids) 
-            vmdata  = []
-            for result in results:
-                vm = None
-                if result:
-                    vm = create(result)
-                vmdata.append(vm)
-            return vmdata
 
     @classmethod
     def get_video_request(cls, internal_video_id, callback=None):
@@ -2037,12 +1978,8 @@ class VideoMetadata(object):
             jdata = NeonApiRequest.get_request(api_key, vm.job_id)
             nreq = NeonApiRequest.create(jdata)
             return nreq
-
-    @classmethod
-    def _erase_all_data(cls):
-        ''' clear db '''
-        db_connection = DBConnection(cls)
-        db_connection.clear_db()
+        else:
+            raise AttributeError("Callbacks not allowed")
 
 class InMemoryCache(object):
 

@@ -25,7 +25,9 @@ _log = logging.getLogger(__name__)
 def send_request(request, ntries=5, callback=None, cur_try=0):
     '''Sends an HTTP request with retries
 
-    If there was an error, either in the connection, or if the response is json and has a non-nill "error" field, the response.error will be a tornado.httpclient.HTTPError
+    If there was an error, either in the connection, or if the
+    response is json and has a non-nill "error" field, the
+    response.error will be a tornado.httpclient.HTTPError
 
     The retries occur with exponential backoff
 

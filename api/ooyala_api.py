@@ -23,6 +23,7 @@ import tornado.gen
 import tornado.httpclient
 import utils.logs
 import utils.neon
+import utils.sync
 _log = utils.logs.FileLogger(__name__)
 
 HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']    
@@ -547,9 +548,10 @@ class OoyalaAPI(object):
             _log.error("Neon api request failed")
         return response
 
-    @tornado.gen.engine 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine 
     def update_thumbnail_from_url(self, video_id, image_url, 
-                                        tid, fsize, callback):
+                                        tid, fsize):
         '''
         Async method, no sync version currently
 
@@ -580,8 +582,7 @@ class OoyalaAPI(object):
             if resp is None:
                 msg = "failed to %s for video %s" %(current_state, video_id)        
                 _log.error("update_thumbnail_from_url msg=%s"%msg)
-                callback(None)
-                return
+                raise tornado.gen.Return(None)
             else:
                 if isinstance(resp, tornado.httpclient.HTTPResponse):
                     return resp.body
@@ -622,8 +623,7 @@ class OoyalaAPI(object):
         #    callback(True)
         #    return
         if set_resp:
-            callback(True)
-            return
+            raise tornado.gen.Return(True)
 
         #something went wrong ?
-        callback(False) 
+        raise tornado.gen.Return(False)

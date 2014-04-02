@@ -26,7 +26,7 @@ from StringIO import StringIO
 from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         YoutubePlatform, NeonUserAccount, DBConnection, NeonApiKey, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
-        ImageMD5Mapper, ThumbnailMetadata, InternalVideoID
+        ThumbnailMetadata, InternalVideoID, OoyalaPlatform
 
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
@@ -231,7 +231,59 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         #Make sure that each of the thread retrieved a key
         #and did not have an exception
-        self.assertTrue(None not in results) 
+        self.assertTrue(None not in results)
+
+    def test_iterate_all_thumbnails(self):
+
+        # Build up a database structure
+        na = NeonUserAccount('acct1')
+        bp = BrightcovePlatform('acct1', 'bp1', na.neon_api_key)
+        op = OoyalaPlatform('acct1', 'op1', na.neon_api_key, 'p_code', 'o_key',
+                            'o_secret')
+        na.add_platform(bp)
+        na.add_platform(op)
+        na.save()
+
+        vids = [
+            InternalVideoID.generate(na.neon_api_key, 'v0'),
+            InternalVideoID.generate(na.neon_api_key, 'v1'),
+            InternalVideoID.generate(na.neon_api_key, 'v2')
+            ]
+            
+        thumbs = [
+            ThumbnailMetadata('t1', vids[0], ['t1.jpg'], None, None, None,
+                              None, None, None),
+            ThumbnailMetadata('t2', vids[0], ['t2.jpg'], None, None, None,
+                              None, None, None),
+            ThumbnailMetadata('t3', vids[1], ['t3.jpg'], None, None, None,
+                              None, None, None),
+            ThumbnailMetadata('t4', vids[2], ['t4.jpg'], None, None, None,
+                              None, None, None),
+            ThumbnailMetadata('t5', vids[2], ['t5.jpg'], None, None, None,
+                              None, None, None)]
+        ThumbnailMetadata.save_all(thumbs)
+
+        v0 = VideoMetadata(vids[0], [thumbs[0].key, thumbs[1].key],
+                           'r0', 'v0.mp4', 0, 0, None, bp.integration_id)
+        v0.save()
+        v1 = VideoMetadata(vids[1], [thumbs[2].key],
+                           'r1', 'v1.mp4', 0, 0, None, bp.integration_id)
+        v1.save()
+        v2 = VideoMetadata(vids[2], [thumbs[3].key, thumbs[4].key],
+                           'r2', 'v2.mp4', 0, 0, None, op.integration_id)
+        v2.save()
+
+
+        bp.add_video('v0', 'r0')
+        bp.add_video('v1', 'r1')
+        bp.save()
+        op.add_video('v2', 'r2')
+        op.save()
+
+        # Now make sure that the iteration goes through all the thumbnails
+        found_thumb_ids = [x.key for x in  
+                           ThumbnailMetadata.iterate_all_thumbnails()]
+        self.assertItemsEqual(found_thumb_ids, [x.key for x in thumbs])
 
 
 class TestBrightcovePlatform(unittest.TestCase):
@@ -239,6 +291,7 @@ class TestBrightcovePlatform(unittest.TestCase):
     Brightcove platform specific tests
     '''
     def setUp(self):
+        super(TestBrightcovePlatform, self).setUp()
         self.cp_sync_patcher = \
           patch('utils.http.tornado.httpclient.HTTPClient')
         self.cp_async_patcher = \
@@ -299,11 +352,12 @@ class TestBrightcovePlatform(unittest.TestCase):
         u_bp = BrightcovePlatform.create(bp.get())
         self.assertEqual(len(u_bp.get_videos()), nvideos)
 
-class TestThumbnailHelperClass(unittest.TestCase):
+class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
     '''
     Thumbnail ID Mapper and other thumbnail helper class tests 
     '''
     def setUp(self):
+        super(TestThumbnailHelperClass, self).setUp()
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
 
@@ -311,6 +365,7 @@ class TestThumbnailHelperClass(unittest.TestCase):
 
     def tearDown(self):
         self.redis.stop()
+        super(TestThumbnailHelperClass, self).tearDown()
 
     def test_thumbnail_mapper(self):
         ''' Thumbnail mappings '''
@@ -318,12 +373,8 @@ class TestThumbnailHelperClass(unittest.TestCase):
         url = "http://thumbnail.jpg"
         vid = "v123"
         image = PILImageUtils.create_random_image(360, 480)
-        tid = ThumbnailID.generate(image, vid)
+        tid = ThumbnailID.generate(image, vid)  
         im_md5 = ImageMD5Mapper(vid, image, tid) 
-        im_md5.save()
-
-        res_tid = ImageMD5Mapper.get_tid(vid, im_md5)
-        #self.assertEqual(tid, res_tid)   
     
         tdata = ThumbnailMetadata(tid, vid, [], 0, 480, 360,
                         "ttype", 0, 1, 0)
@@ -347,9 +398,37 @@ class TestThumbnailHelperClass(unittest.TestCase):
         self.assertEqual(tdata.rank, 0)
         self.assertEqual(tdata.urls, ['one.jpg', 'two.jpg'])
 
+    def test_atomic_modify(self):
+        vid = InternalVideoID.generate('api1', 'vid1')
+        tid = ThumbnailID.generate(self.image, vid)
+        tdata = ThumbnailMetadata(tid, vid, ['one.jpg', 'two.jpg'],
+                                  None, self.image.size[1], self.image.size[0],
+                                  'brightcove', 1.0, '1.2')
+        tdata.save()
+
+        thumb = ThumbnailMetadata.modify(tid,
+                                         lambda x: x.urls.append('url3.jpg'))
+        self.assertItemsEqual(thumb.urls, ['one.jpg', 'two.jpg', 'url3.jpg'])
+        self.assertItemsEqual(ThumbnailMetadata.get(tid).urls,
+                              ['one.jpg', 'two.jpg', 'url3.jpg'])
+
+        # Now try asynchronously
+        def setphash(thumb): thumb.phash = 'hash'
+        def setrank(thumb): thumb.rank = 6
+        ThumbnailMetadata.modify(tid, setphash, callback=self.stop)
+        ThumbnailMetadata.modify(tid, setrank, callback=self.stop)
+        self.wait()
+        self.wait()
+        thumb = ThumbnailMetadata.get(tid)
+        self.assertEqual(thumb.phash, 'hash')
+        self.assertEqual(thumb.rank, 6)
+        self.assertItemsEqual(thumb.urls,
+                              ['one.jpg', 'two.jpg', 'url3.jpg'])
+        
+
     def test_read_thumbnail_old_format(self):
         # Make sure that we're backwards compatible
-        thumb = ThumbnailMetadata.create("{\"video_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001\", \"thumbnail_metadata\": {\"chosen\": false, \"thumbnail_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\", \"model_score\": 4.1698684091322846, \"enabled\": true, \"rank\": 5, \"height\": 232, \"width\": 416, \"model_version\": \"20130924\", \"urls\": [\"https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg\"], \"created_time\": \"2013-12-02 09:55:19\", \"type\": \"neon\", \"refid\": null}, \"key\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\"}")
+        thumb = ThumbnailMetadata._create('2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15', "{\"video_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001\", \"thumbnail_metadata\": {\"chosen\": false, \"thumbnail_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\", \"model_score\": 4.1698684091322846, \"enabled\": true, \"rank\": 5, \"height\": 232, \"width\": 416, \"model_version\": \"20130924\", \"urls\": [\"https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg\"], \"created_time\": \"2013-12-02 09:55:19\", \"type\": \"neon\", \"refid\": null}, \"key\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\"}")
 
         self.assertEqual(thumb.key, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15')
         self.assertEqual(thumb.video_id, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001')

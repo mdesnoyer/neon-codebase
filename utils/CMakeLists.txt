@@ -3,7 +3,7 @@ PROJECT(utils)
 
 include(${CMAKE_SOURCE_DIR}/Common.cmake)
 
-add_library(cvutils STATIC
+add_library(cvutils
   cvutils.cc
 )
 target_link_libraries(cvutils

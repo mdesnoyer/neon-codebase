@@ -1,29 +1,26 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 import os.path
 import sys
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0, base_path)
 
+
+import hashlib
+import logging
+import multiprocessing
+import os
+import properties
+import Queue
+import re
+from supportServices import neondata
+import time
 import tornado.httpserver
 import tornado.ioloop
 import tornado.web
 import tornado.escape
-import tornado.httpclient
-import multiprocessing
-import Queue
-import time
-import hashlib
-import re
-import properties
-import os
-import utils.ps
-
-from supportServices.neondata import NeonApiRequest, BrightcoveApiRequest
-from supportServices.neondata import NeonPlatform, YoutubePlatform, \
-        BrightcovePlatform, VideoMetadata, RequestState, \
-        InternalVideoID, OoyalaApiRequest 
 import utils.neon
+import utils.ps
 from utils import statemon
 
 #Tornado options
@@ -31,7 +28,6 @@ from utils.options import define, options
 define("port", default=8081, help="run on the given port", type=int)
 MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
 
-import logging
 _log = logging.getLogger(__name__)
 
 DIRNAME = os.path.dirname(__file__)
@@ -166,7 +162,7 @@ class JobStatusHandler(tornado.web.RequestHandler):
         try:
             api_key = self.get_argument(properties.API_KEY)
             job_id  = self.get_argument(properties.REQUEST_UUID_KEY)
-            NeonApiRequest.get_request(api_key,job_id, db_callback)
+            neondata.NeonApiRequest.get_request(api_key,job_id, db_callback)
 
         except Exception,e:
             _log.error("key=jobstatus_handler msg=exception " + e.__str__())
@@ -234,9 +230,11 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 self.finish()
             else:
                 if request_type == 'youtube':
-                    YoutubePlatform.get_account(api_key,get_yt_account) #i_id ?  
+                    neondata.YoutubePlatform.get_account(api_key,
+                                                         get_yt_account) #i_id ?  
                 elif request_type == 'neon':
-                    NeonPlatform.get_account(api_key,get_platform) 
+                    neondata.NeonPlatform.get_account(api_key,
+                                                      get_platform) 
                 else:
                     self.set_status(201)
                     self.write(response_data)
@@ -286,8 +284,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 autosync = params["autosync"]
                 request_type = "brightcove"
                 i_id = params[properties.INTEGRATION_ID]
-                api_request = BrightcoveApiRequest(job_id, api_key, vid, title, url,
-                                        rtoken, wtoken, pub_id, http_callback, i_id)
+                api_request = neondata.BrightcoveApiRequest(
+                    job_id, api_key, vid, title, url,
+                    rtoken, wtoken, pub_id, http_callback, i_id)
                 api_request.previous_thumbnail = p_thumb 
                 api_request.autosync = autosync
 
@@ -297,10 +296,11 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 refresh_token = params["refresh_token"]
                 expiry = params["token_expiry"]
                 autosync = params["autosync"]
-                api_request = YoutubeApiRequest(job_id, api_key, vid, 
-                                                title, url,
-                                                access_token, refresh_token, 
-                                                expiry, http_callback)
+                api_request = neondata.YoutubeApiRequest(job_id, api_key, vid, 
+                                                         title, url,
+                                                         access_token,
+                                                         refresh_token, 
+                                                         expiry, http_callback)
                 api_request.previous_thumbnail = "http://img.youtube.com/vi/" + vid + "maxresdefault.jpg"
             
             elif "ooyala" in self.request.uri:
@@ -310,27 +310,31 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 autosync = params["autosync"]
                 i_id = params[properties.INTEGRATION_ID]
                 p_thumb = params[properties.PREV_THUMBNAIL]
-                api_request = OoyalaApiRequest(job_id, api_key, 
-                                            i_id, vid, title, url,
-                                            oo_api_key, oo_secret_key, 
-                                            p_thumb, http_callback)
+                api_request = neondata.OoyalaApiRequest(job_id, api_key, 
+                                                        i_id, vid, title, url,
+                                                        oo_api_key,
+                                                        oo_secret_key, 
+                                                        p_thumb, http_callback)
                 api_request.autosync = autosync
 
             else:
                 request_type = "neon"
-                api_request = NeonApiRequest(job_id, api_key, vid, title, url,
-                        request_type, http_callback)
+                api_request = neondata.NeonApiRequest(job_id, api_key, vid,
+                                                      title, url,
+                                                      request_type,
+                                                      http_callback)
             
             #API Method
             api_request.set_api_method(api_method, api_param)
             api_request.submit_time = str(time.time())
-            api_request.state = RequestState.SUBMIT
+            api_request.state = neondata.RequestState.SUBMIT
 
             #Validate Request & Insert in to Queue (serialized/json)
             #job_result = None #NeonApiRequest.blocking_conn.get(api_request.key)
-            job_result = yield tornado.gen.Task(BrightcoveApiRequest.get,
-                                                api_request.api_key,
-                                                api_request.job_id)
+            job_result = yield tornado.gen.Task(
+                neondata.BrightcoveApiRequest.get,
+                api_request.api_key,
+                api_request.job_id)
             if job_result is not None:
                 response_data = '{"error":"duplicate job %r" }'%job_result 
                 self.write(response_data)
@@ -354,9 +358,10 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 self.set_status(502)
             else:
                 if request_type == 'youtube':
-                    YoutubePlatform.get_account(api_key, get_yt_account) #i_id ?  
+                    neondata.YoutubePlatform.get_account(
+                        api_key, get_yt_account) #i_id ?  
                 elif request_type == 'neon':
-                    NeonPlatform.get_account(api_key, get_platform) 
+                    neondata.NeonPlatform.get_account(api_key, get_platform) 
                 else:
                     self.set_status(201)
                     self.write(response_data)
@@ -406,7 +411,7 @@ def main():
     server = tornado.httpserver.HTTPServer(application)
     utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)
-    tornado.ioloop.IOLoop.instance().start()
+    tornado.ioloop.IOLoop.current().start()
 
 # ============= MAIN ======================== #
 if __name__ == "__main__":

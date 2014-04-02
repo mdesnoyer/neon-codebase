@@ -11,6 +11,10 @@ import logging
 import numpy as np
 from PIL import Image
 import random
+import tornado.httpclient
+import tornado.gen
+import utils.http
+import utils.sync
 
 _log = logging.getLogger(__name__)
 
@@ -49,7 +53,9 @@ class PILImageUtils(object):
     @classmethod
     def create_random_image(cls, h, w):
         ''' return a random image '''
-        return Image.new("RGB", (w, h), None)
+        return Image.fromarray(np.array(
+            np.random.random_integers(0, 255, (h, w, 3)),
+            np.uint8))
 
     @classmethod
     def to_cv(cls, im):
@@ -69,4 +75,41 @@ class PILImageUtils(object):
             return Image.fromarray(im[:,:,::-1])
         else:
             return Image.fromarray(im)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def download_image(cls, url):
+        '''Downloads an image from a given url.
+
+        Returns the image in PIL format.
+        '''
+        response = yield tornado.gen.Task(
+            utils.http.send_request,
+            tornado.httpclient.HTTPRequest(url,
+                                           request_timeout=60.0,
+                                           connect_timeout=10.0))
+        if response.error:
+            _log.error('Error retrieving image from: %s. %s' % 
+                       (url, response.error))
+            raise response.error
+
+        try:
+            image = Image.open(response.buffer)
+        except IOError as e:
+            _log.error('Invalid image at %s: %s' % (url, e))
+            raise
+        except ValueError as e:
+            _log.error('Invalid image at %s: %s' % (url, e))
+            raise
+        except TypeError as e:
+            _log.error('Invalid image at %s: %s' % (url, e))
+            raise
+        except Exception as e:
+            _log.exception('Uncaught exception %s' % e)
+            raise
+
+        raise tornado.gen.Return(image)
+
+    
             
