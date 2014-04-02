@@ -677,15 +677,15 @@ class ProcessVideo(object):
            
             #Send notification that the video completed processing
             thumbs = [t.to_dict_for_video_response() for t in self.thumbnails]
-            vr = VideoResponse(video_id,
-                            "processed",
-                            "brightcove",
-                            i_id,
-                            title,
-                            None, 
-                            None,
-                            0, #current_tid
-                            thumbs)
+            vr = neondata.VideoResponse(video_id,
+                                        "processed",
+                                        "brightcove",
+                                        i_id,
+                                        title,
+                                        None, 
+                                        None,
+                                        0, #current_tid
+                                        thumbs)
 
             sn = SendNotification(i_id, vr.to_json())
             sn.send(ba.account_id)
@@ -882,7 +882,7 @@ class HttpDownload(object):
     retry_codes = [403,500,502,503,504]
 
     def __init__(self, json_params, ioloop, model, model_version, 
-            debug=False, cur_pid=None, sync=False):
+                 debug=False, cur_pid=None, sync=False):
 
         params = tornado.escape.json_decode(json_params)
 

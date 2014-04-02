@@ -373,8 +373,7 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         url = "http://thumbnail.jpg"
         vid = "v123"
         image = PILImageUtils.create_random_image(360, 480)
-        tid = ThumbnailID.generate(image, vid)  
-        im_md5 = ImageMD5Mapper(vid, image, tid) 
+        tid = ThumbnailID.generate(image, vid)
     
         tdata = ThumbnailMetadata(tid, vid, [], 0, 480, 360,
                         "ttype", 0, 1, 0)

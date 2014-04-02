@@ -267,8 +267,8 @@ class TestScheduler(test_utils.neontest.TestCase):
             a = max(rand, 1 - rand)
             b = 1 - a
             new_video_distribution = {'d': ("int_vid1", [('B', b), ('A', a)])}
-            brightcove_controller.setup_controller_for_video(
-                                json.dumps(new_video_distribution)) 
+            self.controller.apply_directive(
+                json.dumps(new_video_distribution))
             self._test_add_tasks()
 
 class TestThumbnailCheckTask(test_utils.neontest.TestCase):

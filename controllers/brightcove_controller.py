@@ -611,8 +611,6 @@ class GetData(tornado.web.RequestHandler):
         self.set_status(201)
         statemon.state.decrement('nvideos_abtesting')
         self.finish()
-
-    print "directive " , directive 
    
 ###################################################################################
 # MAIN
