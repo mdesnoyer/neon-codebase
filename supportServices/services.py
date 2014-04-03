@@ -384,7 +384,70 @@ class AccountHandler(tornado.web.RequestHandler):
     def get_neon_videos(self):
         ''' Get Videos which were called from the Neon API '''
         self.send_json_response('{"msg":"not yet implemented"}', 200)
+   
+    ## Submit a video request to Neon Video Server
+    def submit_neon_video_request(self, api_key, video_id, video_url, 
+                    video_title, topn, callback_url, default_thumbnail):
+
+        request_body = {}
+        request_body["topn"] = topn 
+        request_body["api_key"] = api_key 
+        request_body["video_id"] = video_id 
+        request_body["video_title"] = \
+                video_url.split('//')[-1] if video_title is None else video_title 
+        request_body["video_url"] = video_url
+        client_url = 'http://thumbnails.neon-lab.com/api/v1/submitvideo/topn'
+        if options.local == 1:
+            client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
+            request_body["callback_url"] = callback_url 
+        body = tornado.escape.json_encode(request_body)
+        hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
+        req = tornado.httpclient.HTTPRequest(url=client_url,
+                                             method="POST",
+                                             headers=hdr,
+                                             body=body,
+                                             request_timeout=30.0,
+                                             connect_timeout=10.0)
+        
+        result = yield tornado.gen.Task(http_client.fetch, req)
+        
+        if result.code == 409:
+            data = '{"error":"url already processed","video_id":"%s"}'%video_id
+            self.send_json_response(data, 409)
+            return
+        if result.error:
+            _log.error("key=create_neon_video_request_via_api "
+                    "msg=thumbnail api error %s" %result.error)
+            data = '{"error":"neon thumbnail api error"}'
+            self.send_json_response(data, 502)
+            return
+
+        #Success
+        self.send_json_response(result.body, 200)
     
+    @tornado.gen.engine
+    def create_neon_video_request_via_api(self):
+        '''
+        Endpoint for API calls to submit a video request
+        '''
+        video_url = self.get_argument('video_url', "")
+        video_url = video_url.replace("www.dropbox.com", 
+                                "dl.dropboxusercontent.com")
+        title = self.get_argument('video_title', None)
+        neon_api_key = self.get_argument('api_key', None)
+        topn = self.get_argument('topn', 1)
+        callback_url = self.get_argument('callback_url', None)
+        default_thumbnail = self.get_argument('default_thumbnail', None)
+        
+        if video_url == "" or neon_api_key is None:
+            _log.error("key=create_neon_video_request_via_api "
+                    "msg=malformed request or missing arguments")
+            self.send_json_response('{"error":"missing video_url"}', 400)
+            return
+        
+        #TODO: Create Neon API Request
+
+
     @tornado.gen.engine
     def create_neon_video_request(self, i_id):
         ''' neon platform request '''

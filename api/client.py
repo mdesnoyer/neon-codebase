@@ -188,7 +188,7 @@ class ProcessVideo(object):
             _log.error("key=process_video worker[%s] "
                        "msg=video %s has no length. skipping." %
                        (self.pid, video_file))
-            return
+            #return #NOTE: cv2 doesn't return this reliably, investigate why? 
 
         #If a really long video, then increase the sampling rate
         if duration > 1800:
@@ -986,7 +986,6 @@ class HttpDownload(object):
         try:
             #TODO Check for content type (html,json,xml) which may be
             #error messages
-
             #False link or transfer encoding is chunked
             if not response.headers.has_key('Content-Length'):
                 self.ioloop.stop()
@@ -1019,7 +1018,6 @@ class HttpDownload(object):
             if not self.tempfile.closed:
                 self.tempfile.flush()
                 self.tempfile.close()
-
 
         if response.error:
             if "HTTP 599: Operation timed out after" not in response.error.message:
@@ -1327,7 +1325,7 @@ class VideoClient(object):
                 api_key = job_params[properties.API_KEY]
                 job_id  = job_params[properties.REQUEST_UUID_KEY]
                 api_request = yield tornado.gen.Task(
-                    neondata.NeonApiRequest.get(api_key,job_id))
+                        neondata.NeonApiRequest.get, api_key, job_id)
                 if api_request.state == neondata.RequestState.SUBMIT:
                     api_request.state = neondata.RequestState.PROCESSING
                     api_request.model_version = self.model_version

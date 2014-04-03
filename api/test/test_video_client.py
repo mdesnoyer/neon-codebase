@@ -184,17 +184,18 @@ class TestVideoClient(unittest.TestCase):
         s3_keys = [x for x in conn.buckets['neon-beta-test'].get_all_keys()]
         self.assertEqual(len(s3_keys), 1)
 
-    @patch('api.client.neondata.BrightcoveApiRequest')
-    @patch('api.client.tornado.httpclient.HTTPClient')
     @patch('api.client.S3Connection')
+    @patch('api.client.tornado.httpclient.HTTPClient')
+    @patch('api.client.neondata.BrightcoveApiRequest')
     def test_brightcove_request_process(self, mock_bplatform_patcher, 
                                         http_patcher, mock_conntype):
         
         conn = boto_mock.MockConnection()
-        mock_conntype.return_value = conn
         conn.create_bucket('host-thumbnails')
         conn.create_bucket('neon-beta-test')
-
+        #print mock_conntype, http_patcher, mock_bplatform_patcher
+        mock_conntype.return_value = conn
+        
         # TEST Brightcove request flow and finalize_brightcove_request() 
         # Replace the request parameters of the dl & pv objects to save time on
         # video processing and reuse the setup
@@ -229,6 +230,7 @@ class TestVideoClient(unittest.TestCase):
         
         self.dl.send_client_response()
         bcove_thumb = False
+        
         for key in conn.buckets['host-thumbnails'].get_all_keys():
             if "brightcove" in key.name:
                 bcove_thumb = True  
@@ -261,7 +263,10 @@ class TestVideoClient(unittest.TestCase):
 
     
     @patch('api.client.S3Connection')
-    def test_httpdownload_async_callback(self, mock_conntype):
+    @patch('api.client.tornado.httpclient.HTTPClient')
+    @patch('api.client.tornado.httpclient.AsyncHTTPClient')
+    def test_httpdownload_async_callback_no_data(self, async_patcher, 
+                                    http_patcher, mock_conntype):
         ''' test streaming callback and async callback '''
 
         j_id = "j123"
@@ -272,16 +277,19 @@ class TestVideoClient(unittest.TestCase):
         self.dl = client.HttpDownload(jparams, self.ioloop, 
                 self.model, self.model_version)
         request = HTTPRequest('http://neon-lab.com/video.mp4')
-        data = "somefakevideodata"
-        response = HTTPResponse(request, 200, buffer=StringIO(data),
-                    headers={'Content-Length':len(data)})
+        data = ""
+        #return no data
+        response = HTTPResponse(request, 200, buffer=StringIO(data))
+        rq_response = HTTPResponse(request, 500, buffer=StringIO(data))
         
         #s3mocks to mock host_thumbnails_to_s3
         conn = boto_mock.MockConnection()
         mock_conntype.return_value = conn
         conn.create_bucket('host-thumbnails')
         conn.create_bucket('neon-beta-test')
-       
+        
+        http_patcher().fetch.side_effect = [rq_response]
+        async_patcher().fetch.side_effect = [response]
         self.dl.async_callback(response)
 
         #Assert error response

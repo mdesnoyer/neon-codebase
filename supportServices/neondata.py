@@ -1550,9 +1550,9 @@ class NeonApiRequest(object):
             else:
                 callback(None)
 
-        key = generate_request_key(api_key,job_id)
+        key = generate_request_key(api_key, job_id)
         if callback:
-            db_connection.conn.get(key,callback)
+            db_connection.conn.get(key, lambda x: callback(package(x)))
         else:
             result = db_connection.blocking_conn.get(key)
             if result:
@@ -1596,16 +1596,17 @@ class NeonApiRequest(object):
     @staticmethod
     def create(json_data):
         ''' create object '''
-        data_dict = json.loads(json_data)
+        if json_data:
+            data_dict = json.loads(json_data)
 
-        #create basic object
-        obj = NeonApiRequest("dummy", "dummy", None, None, None, None, None) 
+            #create basic object
+            obj = NeonApiRequest("dummy", "dummy", None, None, None, None, None) 
 
-        #populate the object dictionary
-        for key in data_dict.keys():
-            obj.__dict__[key] = data_dict[key]
+            #populate the object dictionary
+            for key in data_dict.keys():
+                obj.__dict__[key] = data_dict[key]
 
-        return obj
+            return obj
 
 class BrightcoveApiRequest(NeonApiRequest):
     '''
