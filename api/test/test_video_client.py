@@ -25,7 +25,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
         sys.path.insert(0, __base_path__)
 
-from api import server,client
+from api import client
 import json
 import logging
 import mock
@@ -242,25 +242,6 @@ class TestVideoClient(unittest.TestCase):
         self.assertIsNotNone(vm)
         
         #TODO: Brightcove request with autosync
-    
-    @patch('api.client.tornado.httpclient.HTTPClient')
-    def test_processing_error(self, http_patcher):
-
-        ''' error while processing video '''
-
-        #mock requeue job failure
-        request = HTTPRequest('http://neon-lab.com')
-        response = HTTPResponse(request, 500, buffer=StringIO(""))
-        http_patcher().fetch.side_effect = [response, response]
-
-        #requeue job mock
-        self.dl.send_client_response(error=True)
-
-        #self.nplatform_patcher = patch('api.client.NeonApiRequest')
-        #self.mock_nplatform_patcher = self.nplatform_patcher.start()
-        #self.mock_nplatform_patcher.get.side_effect = [
-        #        neondata.NeonApiRequest("d","d",None,None,None,None,None)]
-
     
     @patch('api.client.S3Connection')
     @patch('api.client.tornado.httpclient.HTTPClient')
