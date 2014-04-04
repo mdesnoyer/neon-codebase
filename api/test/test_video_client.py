@@ -114,7 +114,7 @@ class TestVideoClient(unittest.TestCase):
         jparams = request_template.neon_api_request %(
                 j_id, vid, api_key, "neon", api_key, j_id)
         params = json.loads(jparams)
-        self.dl = client.HttpDownload(jparams, None, 
+        self.dl = client.HttpDownload(jparams, self.ioloop, 
                 self.model, self.model_version)
         self.pv = client.ProcessVideo(params, jparams, 
                 self.model, self.model_version, False, 123)
