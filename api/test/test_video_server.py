@@ -21,7 +21,6 @@ import subprocess
 from supportServices import neondata
 import test_utils.redis
 import tornado.gen
-import tornado.ioloop
 import tornado.web
 import tornado.httpclient
 from tornado.testing import AsyncHTTPTestCase, AsyncTestCase
@@ -36,6 +35,10 @@ _log = logging.getLogger(__name__)
 class TestVideoServer(AsyncHTTPTestCase):
     ''' Video Server test'''
 
+    @classmethod
+    def setUpClass(cls):
+        super(TestVideoServer, cls).setUpClass()
+    
     def setUp(self):
         super(TestVideoServer, self).setUp()
 

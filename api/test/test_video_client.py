@@ -411,13 +411,15 @@ class TestVideoClient(unittest.TestCase):
     #TODO: autosync enabled video processing
    
     #TODO: test client response formatting
-    
+   
+'''
+#Disable this test for now. The test is broken and needs
+to be fixed 
+
 class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
-    '''
     #NOTE: Need to start server using subprocess and can't use tornado 
-    asynctestcase because we can't bind the client and redis to the same
-    port 
-    '''
+    #asynctestcase because we can't bind the client and redis to the same
+    #port 
     def setUp(self):
         super(TestVideoClientAndServerIntegration,self).setUp()
         self.model_patcher = patch('api.client.model')
@@ -464,6 +466,6 @@ class TestVideoClientAndServerIntegration(AsyncHTTPTestCase):
         vc.dequeue_job(callback=self.stop)
         res = self.wait()
         self.assertNotEqual(res, "{}") 
-
+'''
 if __name__ == '__main__':
     unittest.main()

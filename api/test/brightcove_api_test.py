@@ -20,6 +20,7 @@ from supportServices import neondata
 import test_utils.neontest
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
 import tornado.ioloop
+import test_utils.redis
 import urlparse
 import unittest
 
@@ -39,11 +40,14 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         self.http_call_patcher = \
           patch('api.brightcove_api.BrightcoveApi.read_connection.send_request')
         self.http_mock = self.http_call_patcher.start()
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start() 
 
     def tearDown(self):
         self.http_mock.stop()
+        self.redis.stop()
         super(TestBrightcoveApi, self).tearDown()
-
+    
 
     def _set_http_response(self, code=200, body='', error=None):
         def do_response(request, callback=None, *args, **kwargs):
