@@ -157,6 +157,8 @@ class TestVideoClient(unittest.TestCase):
         
         #verify metadata has been populated
         self.assertEqual(self.pv.video_metadata['codec_name'], 'avc1')
+        #on linux returns --> '\x00\x00\x00\x00'
+
         self.assertEqual(self.pv.video_metadata['duration'], 1980)
         self.assertEqual(self.pv.video_metadata['framerate'], 15)
         self.assertEqual(self.pv.video_metadata['frame_size'], (400, 264))

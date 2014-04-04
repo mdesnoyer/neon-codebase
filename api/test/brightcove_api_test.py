@@ -12,9 +12,11 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import api.brightcove_api
+import bcove_responses
 import logging
 from mock import patch, MagicMock
 from StringIO import StringIO
+from supportServices import neondata
 import test_utils.neontest
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
 import tornado.ioloop
@@ -41,6 +43,7 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
     def tearDown(self):
         self.http_mock.stop()
         super(TestBrightcoveApi, self).tearDown()
+
 
     def _set_http_response(self, code=200, body='', error=None):
         def do_response(request, callback=None, *args, **kwargs):
@@ -152,7 +155,54 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
             thumb_url, still_url = self.api.get_current_thumbnail_url('vid_1')
             self.assertIsNone(thumb_url)
             self.assertIsNone(still_url)
+      
+    @patch('api.brightcove_api.utils.http.send_request')
+    def test_cehck_feed(self, utils_http_patch):
+    
+        def _side_effect(request, callback=None, *args, **kwargs):
+            if "submitvideo" in request.url:
+                response = HTTPResponse(request, 200,
+                    buffer=StringIO('{"job_id":"j123"}'))
+            if "find_modified_videos" in request.url:
+                response = bcove_find_modified_videos_response 
+            if "find_all_videos" in request.url:
+                response = bcove_response
+            
+            if callback:
+                tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                    response)
+            else:
+                return response
         
+        bcove_request = HTTPRequest(
+            'http://api.brightcove.com/services/library?'
+            'get_item_count=true&command=find_all_videos&page_size=5&sort_by='
+            'publish_date&token=rtoken&page_number=0&\
+             output=json&media_delivery=http')
+
+        bcove_response = HTTPResponse(bcove_request, 200,
+                buffer=StringIO(bcove_responses.find_all_videos_response))
+    
+        bcove_find_modified_videos_response = \
+                HTTPResponse(bcove_request, 200,
+                buffer=StringIO(bcove_responses.find_modified_videos_response))
+
+        self.http_mock.side_effect = _side_effect
+        utils_http_patch.side_effect = _side_effect
+        
+        a_id = 'test' 
+        i_id = 'i123'
+        nvideos = 6
+        na = neondata.NeonUserAccount('acct1')
+        na.save()
+        bp = neondata.BrightcovePlatform(a_id, i_id, na.neon_api_key, 'p1', 'rt', 'wt', 
+                last_process_date=21492000000)
+        bp.account_created = 21492000
+        bp.save()
+        bp.check_feed_and_create_api_requests()
+        u_bp = neondata.BrightcovePlatform.create(bp.get())
+        self.assertEqual(len(u_bp.get_videos()), nvideos)
+
 
 if __name__ == "__main__" :
     unittest.main()

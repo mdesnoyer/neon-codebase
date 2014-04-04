@@ -179,16 +179,5 @@ class TestVideoServer(AsyncHTTPTestCase):
         resp = self.wait()
         self.assertEqual(resp.code, 400)
 
-    def test_get_results_handler(self):
-        pass
-        #TODO: Get results from DB
-        #resp = self.add_request()
-        #self.http_client.fetch(
-        #        self.get_url('/api/v1/jobstatus?api_key=%s&job_id=%s'
-        #            %(self.api_key,job_id)),
-        #        callback=self.stop, method="GET")
-        #resp = self.wait()
-        #self.assertEqual(resp.code,200)
-
 if __name__ == '__main__':
     unittest.main()

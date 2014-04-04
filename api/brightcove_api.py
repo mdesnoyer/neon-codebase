@@ -574,7 +574,7 @@ class BrightcoveApi(object):
                                              request_timeout = 30.0,
                                              connect_timeout = 10.0)
 
-        response = utils.http.send_request(req, ntries=3, callback=callback)
+        response = utils.http.send_request(req, callback=callback)
         if response and response.error:
             _log.error(('key=format_neon_api_request '
                         'msg=Error sending Neon API request: %s')
