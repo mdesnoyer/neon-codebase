@@ -348,9 +348,9 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         def setphash(thumb): thumb.phash = 'hash'
         def setrank(thumb): thumb.rank = 6
         ThumbnailMetadata.modify(tid, setphash, callback=self.stop)
+        self.wait()
         ThumbnailMetadata.modify(tid, setrank, callback=self.stop)
-        self.wait()
-        self.wait()
+        self.wait() #wait() runs the IOLoop until self.stop() is called
         thumb = ThumbnailMetadata.get(tid)
         self.assertEqual(thumb.phash, 'hash')
         self.assertEqual(thumb.rank, 6)
@@ -382,7 +382,7 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
 
 if __name__ == '__main__':
     
-    test_classes_to_run = [TestNeondata, TestBrightcovePlatform, TestThumbnailHelperClass]
+    test_classes_to_run = [TestNeondata, TestThumbnailHelperClass]
     loader = unittest.TestLoader()
 
     suites_list = []
