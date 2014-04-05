@@ -186,9 +186,10 @@ class TestVideoClient(unittest.TestCase):
 
     @patch('api.client.S3Connection')
     @patch('api.client.tornado.httpclient.HTTPClient')
+    @patch('api.client.tornado.httpclient.AsyncHTTPClient')
     @patch('api.client.neondata.BrightcoveApiRequest')
     def test_brightcove_request_process(self, mock_bplatform_patcher, 
-                                        http_patcher, mock_conntype):
+                                async_patcher, http_patcher, mock_conntype):
         
         conn = boto_mock.MockConnection()
         conn.create_bucket('host-thumbnails')
@@ -227,6 +228,7 @@ class TestVideoClient(unittest.TestCase):
         response = HTTPResponse(request, 200, buffer=self._create_random_image())
         notification_response = HTTPResponse(request, 200, buffer=StringIO(""))
         http_patcher().fetch.side_effect = [response, response, notification_response]
+        async_patcher().fetch.side_effect = [response, response, notification_response]
         
         self.dl.send_client_response()
         bcove_thumb = False

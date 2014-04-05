@@ -1056,11 +1056,15 @@ class HttpDownload(object):
         self.pv.center_frame = self.pv.get_center_frame(self.tempfile.name)
 
         end_time = time.time()
-        total_request_time =  end_time - float(self.pv.video_metadata[properties.VIDEO_PROCESS_TIME])
-        self.pv.video_metadata[properties.VIDEO_PROCESS_TIME] = str(total_request_time)
-        self.pv.video_metadata[properties.JOB_SUBMIT_TIME] = self.job_params[properties.JOB_SUBMIT_TIME]
-        self.pv.video_metadata[properties.JOB_END_TIME] = str(end_time)
-
+        try:
+            #best effort stats
+            total_request_time =  end_time - float(self.pv.video_metadata[properties.VIDEO_PROCESS_TIME])
+            self.pv.video_metadata[properties.VIDEO_PROCESS_TIME] = str(total_request_time)
+            self.pv.video_metadata[properties.JOB_SUBMIT_TIME] = self.job_params[properties.JOB_SUBMIT_TIME]
+            self.pv.video_metadata[properties.JOB_END_TIME] = str(end_time)
+        except:
+            pass
+        
         #Delete the temp video file which was downloaded
         if os.path.exists(self.tempfile.name):
             os.unlink(self.tempfile.name)
