@@ -103,7 +103,6 @@ class TestVideoServer(AsyncHTTPTestCase):
         resp = self.make_api_request(vals)
         self.assertEqual(resp.code,409)
 
-    @unittest.skip("temp skip")
     def test_brightcove_request(self):
         ''' create brightcove platform account '''
 
