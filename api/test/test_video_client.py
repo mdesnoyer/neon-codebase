@@ -281,39 +281,6 @@ class TestVideoClient(unittest.TestCase):
         api_request = neondata.NeonApiRequest.get(api_key, j_id)
         self.assertEqual(api_request.state, neondata.RequestState.INT_ERROR)
 
-
-    @patch('api.client.tornado.httpclient.HTTPClient')
-    def test_httpdownload_async_callback_error_cases(self, http_patcher):
-        ''' Failed on async callback '''
-
-        j_id = "j123"
-        api_key = "apikey123"
-        jparams = request_template.neon_api_request %(
-                j_id, "v", api_key, "neon", api_key, j_id)
-        params = json.loads(jparams)
-        self.dl = client.HttpDownload(jparams, self.ioloop, 
-                self.model, self.model_version)
-        request = HTTPRequest('http://neon-lab.com/video.mp4')
-        data = "somefakevideodata"
-        
-        #E1. No content length header in response
-        response = HTTPResponse(request, 500, buffer=StringIO(data))
-        
-        #mock requeue job, set requeue job to fail so that error propogates up
-        http_patcher().fetch.side_effect = [response] *10
-        
-        self.dl.async_callback(response)
-        api_request = neondata.NeonApiRequest.get(api_key, j_id)
-        self.assertEqual(api_request.state, neondata.RequestState.INT_ERROR)
-
-        #E2. Http Response error
-        response = HTTPResponse(request, 500, buffer=StringIO(data),
-                    headers={'Content-Length':len(data)})
-        self.dl.async_callback(response)
-        api_request = neondata.NeonApiRequest.get(api_key, j_id)
-        
-        self.assertEqual(api_request.state, neondata.RequestState.INT_ERROR)
-
     @unittest.skip("temp skip")
     @patch('api.client.tornado.httpclient.AsyncHTTPClient')
     def test_streaming_callback(self, async_patcher):

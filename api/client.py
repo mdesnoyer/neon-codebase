@@ -934,7 +934,8 @@ class HttpDownload(object):
         
         self.http_client_pool = RequestPool() #may be use for all outbound requests
         if not sync:
-            tornado.httpclient.AsyncHTTPClient.configure("tornado.curl_httpclient.CurlAsyncHTTPClient")
+            tornado.httpclient.AsyncHTTPClient.configure(
+                        "tornado.curl_httpclient.CurlAsyncHTTPClient")
             req = tornado.httpclient.HTTPRequest(url=url, headers=headers,
                         streaming_callback=self.streaming_callback, 
                         use_gzip=False, request_timeout=self.timeout)
