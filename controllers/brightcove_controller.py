@@ -500,11 +500,6 @@ class BrightcoveABController(object):
                                 self.timeslice -
                                     int(minority_thumb_timeslice +1) #could be fraction, hence +1s 
                                     - self.cushion_time)
-        # TODO(sunil): Fix
-        # this. It is broken. You get negative numbers
-        # sometimes. e.g. if A=0.9, B=0.1, cushion is 600, timeslice
-        # is 4260, abtest_start_time is 3093
-
         # Task sched visualization
         #-----------------------------------------------------
         #| check |  sched A  | sched B | sched A |  end task |

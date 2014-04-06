@@ -337,7 +337,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 api_request.api_key,
                 api_request.job_id)
             if job_result is not None:
-                response_data = '{"error":"duplicate job %r" }'%job_result 
+                response_data = '{"error":"duplicate job", "job_id": "%s" }'%job_result.job_id 
                 self.write(response_data)
                 self.set_status(409)
                 self.finish()
