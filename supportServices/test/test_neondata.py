@@ -348,7 +348,6 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         def setphash(thumb): thumb.phash = 'hash'
         def setrank(thumb): thumb.rank = 6
         ThumbnailMetadata.modify(tid, setphash, callback=self.stop)
-        self.wait()
         ThumbnailMetadata.modify(tid, setrank, callback=self.stop)
         self.wait() #wait() runs the IOLoop until self.stop() is called
         thumb = ThumbnailMetadata.get(tid)
