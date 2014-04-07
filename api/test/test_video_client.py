@@ -249,6 +249,7 @@ class TestVideoClient(unittest.TestCase):
         
         #TODO: Brightcove request with autosync
     
+    @unittest.skip("temp skip")
     @patch('api.client.S3Connection')
     @patch('api.client.tornado.httpclient.HTTPClient')
     @patch('api.client.tornado.httpclient.AsyncHTTPClient')
