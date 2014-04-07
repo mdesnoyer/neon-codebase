@@ -25,7 +25,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
         sys.path.insert(0, __base_path__)
 
-from api import client
+import api.client
 import json
 import logging
 import mock
@@ -95,7 +95,6 @@ class TestVideoClient(unittest.TestCase):
        
         #setup process video object
         self.napi_request = None
-        self.processvideo_setup()
 
     #ProcessVideo setup
     def processvideo_setup(self):
@@ -114,9 +113,9 @@ class TestVideoClient(unittest.TestCase):
         jparams = request_template.neon_api_request %(
                 j_id, vid, api_key, "neon", api_key, j_id)
         params = json.loads(jparams)
-        self.dl = client.HttpDownload(jparams, self.ioloop, 
+        self.dl = api.client.HttpDownload(jparams, self.ioloop, 
                 self.model, self.model_version)
-        self.pv = client.ProcessVideo(params, jparams, 
+        self.pv = api.client.ProcessVideo(params, jparams, 
                 self.model, self.model_version, False, 123)
         self.dl.pv = self.pv
         nthumbs = params['api_param']
@@ -155,6 +154,7 @@ class TestVideoClient(unittest.TestCase):
         Verify execution of the process_all call in ProcessVideo
         '''
         
+        self.processvideo_setup()
         #verify metadata has been populated
         self.assertEqual(self.pv.video_metadata['codec_name'], 'avc1')
         self.assertEqual(self.pv.video_metadata['duration'], 1980)
@@ -171,6 +171,7 @@ class TestVideoClient(unittest.TestCase):
     @patch('api.client.S3Connection')
     def test_save_data_to_s3(self, mock_conntype):
 
+        self.processvideo_setup()
         #s3mocks to mock host_thumbnails_to_s3
         conn = boto_mock.MockConnection()
         conn.create_bucket('neon-beta-test')
@@ -191,6 +192,7 @@ class TestVideoClient(unittest.TestCase):
     def test_brightcove_request_process(self, mock_bplatform_patcher, 
                                 async_patcher, http_patcher, mock_conntype):
         
+        self.processvideo_setup()
         conn = boto_mock.MockConnection()
         conn.create_bucket('host-thumbnails')
         conn.create_bucket('neon-beta-test')
@@ -254,12 +256,13 @@ class TestVideoClient(unittest.TestCase):
                                     http_patcher, mock_conntype):
         ''' test streaming callback and async callback '''
 
+        self.processvideo_setup()
         j_id = "j123"
         api_key = "apikey123"
         jparams = request_template.neon_api_request %(
                 j_id, "v", api_key, "neon", api_key, j_id)
         params = json.loads(jparams)
-        self.dl = client.HttpDownload(jparams, self.ioloop, 
+        self.dl = api.client.HttpDownload(jparams, self.ioloop, 
                 self.model, self.model_version)
         request = HTTPRequest('http://neon-lab.com/video.mp4')
         data = ""
@@ -289,12 +292,13 @@ class TestVideoClient(unittest.TestCase):
         Tornado streaming callback
         '''
 
+        self.processvideo_setup()
         j_id = "j123"
         api_key = "apikey123"
         jparams = request_template.neon_api_request %(j_id, "v",
                 api_key, "neon", api_key, j_id)
         params = json.loads(jparams)
-        self.dl = client.HttpDownload(jparams, self.ioloop, 
+        self.dl = api.client.HttpDownload(jparams, self.ioloop, 
                 self.model, self.model_version)
         data = "somefakevideodata"
         self.dl.callback_data_size = len(data) -1 #change callback datasize
@@ -318,6 +322,9 @@ class TestVideoClient(unittest.TestCase):
     @patch('api.client.tornado.httpclient.AsyncHTTPClient')
     def test_neon_request_process(self, async_patcher, http_patcher, mock_conntype):
         ''' test processing a neon api request''' 
+
+        self.processvideo_setup()
+        
         conn = boto_mock.MockConnection()
         mock_conntype.return_value = conn
         conn.create_bucket('host-thumbnails')
