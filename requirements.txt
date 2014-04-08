@@ -1,7 +1,7 @@
 #git+https://github.com/nvie/pip-tools.git@future#egg=pip-tools
 
 FFVideo==0.0.13
-MySQL-python==1.2.4
+MySQL-python==1.2.5
 PIL==1.1.7
 PyYAML==3.10
 boto==2.6.0
