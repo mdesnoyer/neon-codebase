@@ -386,6 +386,7 @@ class AccountHandler(tornado.web.RequestHandler):
         self.send_json_response('{"msg":"not yet implemented"}', 200)
    
     ## Submit a video request to Neon Video Server
+    @tornado.gen.engine
     def submit_neon_video_request(self, api_key, video_id, video_url, 
                     video_title, topn, callback_url, default_thumbnail):
 
@@ -430,6 +431,7 @@ class AccountHandler(tornado.web.RequestHandler):
         '''
         Endpoint for API calls to submit a video request
         '''
+        video_id = self.get_argument('video_id', None)
         video_url = self.get_argument('video_url', "")
         video_url = video_url.replace("www.dropbox.com", 
                                 "dl.dropboxusercontent.com")
@@ -439,14 +441,15 @@ class AccountHandler(tornado.web.RequestHandler):
         callback_url = self.get_argument('callback_url', None)
         default_thumbnail = self.get_argument('default_thumbnail', None)
         
-        if video_url == "" or neon_api_key is None:
+        if video_id is None or video_url == "" or neon_api_key is None:
             _log.error("key=create_neon_video_request_via_api "
                     "msg=malformed request or missing arguments")
             self.send_json_response('{"error":"missing video_url"}', 400)
             return
         
-        #TODO: Create Neon API Request
-
+        #Create Neon API Request
+        self.submit_neon_video_request(neon_api_key, video_id, video_url,
+                            video_title, topn, callback_url, default_thumbnail)
 
     @tornado.gen.engine
     def create_neon_video_request(self, i_id):
