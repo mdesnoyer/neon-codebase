@@ -20,6 +20,7 @@ RelWithDebInfo:
 
 clean:
 	-cd build/${BUILD_TYPE} && make clean
+	rm externalLibs/flann/lib/libflann*
 	rm -rf build bin lib
 
 test: all
