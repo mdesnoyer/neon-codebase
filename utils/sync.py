@@ -73,6 +73,8 @@ def bounded_io_loop():
     temp_ioloop = tornado.ioloop.IOLoop()
     temp_ioloop.make_current()
 
-    yield temp_ioloop
+    try:
+        yield temp_ioloop
 
-    old_ioloop.make_current()
+    finally:
+        old_ioloop.make_current()

@@ -88,7 +88,7 @@ define('model_file', default=None, help='File that contains the model')
 define('debug', default=0, type=int, help='If true, runs in debug mode')
 define('profile', default=0, type=int, help='If true, runs in debug mode')
 define('sync', default=0, type=int,
-       help='If true, runs http client in async mode')
+       help='If true, runs http client in synchronous mode')
 
 # ======== API String constants  =======================#
 
