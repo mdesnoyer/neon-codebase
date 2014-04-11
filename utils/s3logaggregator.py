@@ -9,6 +9,7 @@ USAGE='%prog input_bucket n_chunks'
 
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
+import dateutil.parser
 import gzip
 from optparse import OptionParser
 import sys
@@ -47,6 +48,8 @@ def aggregate_and_save_data(keyset, output_bucket):
 
     aggr_data = ''
     for key in keyset:
+        #Remove timezone awareness, Assume UTC timestamp   
+        #key_modified_date = dateutil.parser.parse(key.last_modified).replace(tzinfo=None)
         data = get_data(key)
         if len(data) == 0:
             print key

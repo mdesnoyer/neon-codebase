@@ -1304,20 +1304,18 @@ class VideoClient(object):
         self.sync = sync
         self.pid = os.getpid()
 
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
     def dequeue_job(self):
         ''' Blocking http call to global queue to dequeue work
             Change state to PROCESSING after dequeue
         '''
         retries = 2
         
-        http_client = tornado.httpclient.AsyncHTTPClient()
+        http_client = tornado.httpclient.HTTPClient()
         headers = {'X-Neon-Auth' : properties.NEON_AUTH} 
         result = None
         for i in range(retries):
             try:
-                response = yield http_client.fetch(self.dequeue_url,
+                response = http_client.fetch(self.dequeue_url,
                                                    headers=headers)
                 result = response.body
                 break
@@ -1332,8 +1330,7 @@ class VideoClient(object):
                 #Change Job State
                 api_key = job_params[properties.API_KEY]
                 job_id  = job_params[properties.REQUEST_UUID_KEY]
-                api_request = yield tornado.gen.Task(
-                        neondata.NeonApiRequest.get, api_key, job_id)
+                api_request = neondata.NeonApiRequest.get(api_key, job_id)
                 if api_request.state == neondata.RequestState.SUBMIT:
                     api_request.state = neondata.RequestState.PROCESSING
                     api_request.model_version = self.model_version
@@ -1342,7 +1339,7 @@ class VideoClient(object):
                           %(self.pid,job_params[properties.REQUEST_UUID_KEY]))
             except Exception,e:
                 _log.error("key=worker [%s] msg=db error %s" %(self.pid,e.message))
-        raise tornado.gen.Return(result)
+        return result
     
     def load_model(self):
         ''' load model '''
