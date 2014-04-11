@@ -86,5 +86,16 @@ class TestOptionalSyncDecorator(test_utils.neontest.AsyncTestCase):
         self.assertEqual(self.fast_callback_count, 1)
         self.assertEqual(self.slow_callback_count, 2)
 
+    def test_exception_in_function_call(self):
+        cur_io_loop = tornado.ioloop.IOLoop.current()
+
+        def exception_raise():
+            raise Exception()
+
+        with self.assertRaises(Exception):
+            self._some_tornado_async_function(exception_raise)
+
+        self.assertEqual(tornado.ioloop.IOLoop.current(), cur_io_loop)
+
 if __name__ == '__main__':
     unittest.main()
