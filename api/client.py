@@ -906,9 +906,10 @@ class HttpDownload(object):
 
         self.timeout = 300000.0 #long running tasks ## -- is this necessary ???
         self.ioloop = ioloop
-        self.tempfile = tempfile.NamedTemporaryFile(delete=False)
-        self.job_params = params
         url = params[properties.VIDEO_DOWNLOAD_URL]
+        vsuffix = url.split('/')[-1]  #get the file extension for the file
+        self.tempfile = tempfile.NamedTemporaryFile(suffix='_%s'%vsuffix, delete=False)
+        self.job_params = params
         headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
             Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
@@ -1356,7 +1357,6 @@ class VideoClient(object):
     def run(self):
         ''' run/start method '''
         _log.info("starting worker [%s] " %(self.pid))
-        self.load_model()
         while not self.kill_received:
             self.do_work()
 
@@ -1366,6 +1366,11 @@ class VideoClient(object):
             job = self.dequeue_job()
             if not job or job == "{}": #string match
                 raise Queue.Empty
+            
+            #NOTE: There is an issue with opencv which causes subsequent
+            #videos to get decoded incorrectly, hence load model before 
+            #every call
+            self.load_model()
             
             ## ===== ASYNC Code Starts ===== ##
             ioloop = tornado.ioloop.IOLoop.current()
