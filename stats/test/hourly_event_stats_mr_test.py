@@ -242,6 +242,55 @@ class TestIDMapping(unittest.TestCase):
         self.assertEqual(
             counters['HourlyEventStatsErrors']['UnknownThumbnailURL'], 1)
 
+    def test_tid_end_of_bc_url(self):
+        self.mock_mapper.side_effect = [None, None]
+        self.account_mapper.return_value = (
+            "acct1", neondata.TrackerAccountIDMapper.PRODUCTION)
+
+        results, counters = test_utils.mr.run_single_step(self.mr,
+            encode([(('click', 'http://brightcove.vo.llnwd.net/d21/unsecured/media/1079349493/201404/3085/1079349493_3457310978001_sdf434g-3442191308001-fhaf4DFG4345.jpg', 'tai1', 94), 3),
+                    (('load', 'https://brightcove.vo.llnwd.net/d21/unsecured/media/1079349493/201404/3085/1079349493_3457310978001_sdf434g-3442191308001-fhaf4DFG4345.jpg', 'tai1', 87), 1)]),
+            step=2)
+
+        self.assertItemsEqual(
+            results, 
+            [(('click', 'sdf434g_3442191308001_fhaf4DFG4345', 94), 3),
+             (('load', 'sdf434g_3442191308001_fhaf4DFG4345', 87), 1)])
+
+    @patch('stats.hourly_event_stats_mr.neondata.ThumbnailMetadata.get_many')
+    @patch('stats.hourly_event_stats_mr.neondata.VideoMetadata.get')
+    def test_old_bcove_url_format(self, video_mock, thumb_mock):
+        self.mock_mapper.side_effect = [None, None]
+        self.account_mapper.return_value = (
+            "acct1", neondata.TrackerAccountIDMapper.PRODUCTION)
+        video_mock.return_value = \
+            neondata.VideoMetadata('acct1_3449463059001',
+                                   ['3449463059001_t1', '3449463059001_t2'])
+        thumb_mock.return_value = [
+            neondata.ThumbnailMetadata('3449463059001_t1',
+                                       'acct1_3449463059001',
+                                       ttype='brightcove'),
+            neondata.ThumbnailMetadata('3449463059001_t2',
+                                       'acct1_3449463059001',
+                                       ttype='neon', chosen=True)]
+
+        results, counters = test_utils.mr.run_single_step(self.mr,
+            encode([(('click', 'http://brightcove.vo.llnwd.net/d21/unsecured/media/1079349493/201404/2085/1079349493_3457310977001_neonthumbnail-3449463059001.jpg', 'tai1', 94), 3),
+                    (('load', 'http://brightcove.vo.llnwd.net/d21/unsecured/media/1105443290001/201404/3122/1105443290001_3449709878001_neonthumbnailbc-3449463059001.jpg', 'tai1', 87), 1)]),
+            step=2)
+
+        video_mock.assert_any_call('acct1_3449463059001')
+        self.assertEqual(video_mock.call_count, 2)
+        thumb_mock.assert_any_call(['3449463059001_t1', '3449463059001_t2'])
+        self.assertEqual(thumb_mock.call_count, 2)
+
+        self.assertItemsEqual(
+            results, 
+            [(('click', '3449463059001_t2', 94), 3),
+             (('load', '3449463059001_t1', 87), 1)])
+        
+        
+
     def test_thumb_url_redis_error(self):
         self.mock_mapper.side_effect = redis.exceptions.RedisError
         self.account_mapper.return_value = (

@@ -20,6 +20,7 @@ from mrjob.job import MRJob
 import mrjob.protocol
 import mrjob.util
 import MySQLdb as sqldb
+import re
 import redis.exceptions
 import stats.db
 from supportServices import neondata
@@ -205,10 +206,12 @@ class HourlyEventStats(MRJob):
             return
 
         try:
+            img_url = event[1]
+            tracker_id = event[2]
             account_info = neondata.TrackerAccountIDMapper.get_neon_account_id(
-                event[2])
+                tracker_id)
             if account_info is None:
-                _log.warn('Tracker ID %s unknown', event[2])
+                _log.warn('Tracker ID %s unknown', tracker_id)
                 self.increment_counter('HourlyEventStatsErrors',
                                        'UnknownTrackerId', 1)
                 return
@@ -217,24 +220,82 @@ class HourlyEventStats(MRJob):
                 # this entry
                 return
             
-            thumb_id = neondata.ThumbnailURLMapper.get_id(event[1])
+            thumb_id = neondata.ThumbnailURLMapper.get_id(img_url)
 
             if thumb_id is None:
-                _log.warn('URL %s not in database' % event[1])
-                self.increment_counter('HourlyEventStatsErrors',
-                                       'UnknownThumbnailURL', 1)
-            elif len(thumb_id) < 5:
-                _log.warn('ID for URL %s is too short: %s' % (event[1],
+                # Look for the thumbnail id in the url
+                thumb_id = self._extract_thumbnail_id_from_url(img_url,
+                                                               account_info[0])
+                if thumb_id is None:
+                    _log.warn('Unknown Thumbnail URL %s' % img_url)
+                    self.increment_counter('HourlyEventStatsErrors',
+                                           'UnknownThumbnailURL', 1)
+                    return
+            if len(thumb_id) < 5:
+                _log.warn('ID for URL %s is too short: %s' % (img_url,
                                                               thumb_id))
                 self.increment_counter('HourlyEventStatsErrors',
                                        'ThumbIDTooShort', 1)
+                return
                 
-            else:
-                yield (event[0], thumb_id, event[3]), count
+            yield (event[0], thumb_id, event[3]), count
         except redis.exceptions.RedisError as e:
             _log.exception('Error getting data from Redis server: %s' % e)
             self.increment_counter('HourlyEventStatsErrors',
                                    'RedisErrors', 1)
+
+    def _extract_thumbnail_id_from_url(self, img_url, account_id):
+        '''Tries to extract the thumbnail id from the url itself.
+
+        Returns None if it can't be found
+        '''
+        # This is used to extract the data we put in the brightcove url
+        bc_url_tag_extractor = \
+          re.compile(r'https*:\/\/brightcove.*/[0-9]+_[0-9]+_([\w\-]+)\.jpg')
+        # This is used to parse the thumbnail id
+        tidRe = re.compile(r'(\w+)_(\w+)_(\w+)')
+        # These are used to identify old format brightcove or
+        # neonthumbnail urls. TODO(mdesnoyer) remove this hack
+        oldBcRe = re.compile(r'neonthumbnailbc_([0-9]+)')
+        oldNeonRe = re.compile(r'neonthumbnail_([0-9]+)')
+
+        bc_tag_found = bc_url_tag_extractor.search(img_url)
+        if bc_tag_found:
+            bc_tag = bc_tag_found.group(1).replace('-', '_')
+            
+            tid_found = tidRe.match(bc_tag)
+            if tid_found:
+                # The thumbnail is just the tag we threw into brightcove
+                return bc_tag
+            else:
+                # TODO(mdesnoyer): Remove this hack
+                oldBcMatch = oldBcRe.match(bc_tag)
+                oldNeonMatch = oldNeonRe.match(bc_tag)
+                if oldBcMatch:
+                    # It's the default brightcove thumbnail
+                    # for this video
+                    ext_video_id = oldBcMatch.group(1)
+                    video_data = neondata.VideoMetadata.get(
+                        neondata.InternalVideoID.generate(
+                            account_id, ext_video_id))
+                    thumbs = neondata.ThumbnailMetadata.get_many(
+                        video_data.thumbnail_ids)
+                    for thumb in thumbs:
+                        if thumb.type == 'brightcove':
+                            return thumb.key
+                elif oldNeonMatch:
+                    # It's a Neon thumbnail, so take the chosen one
+                    # Hopefully it hasn't changed
+                    ext_video_id = oldNeonMatch.group(1)
+                    video_data = neondata.VideoMetadata.get(
+                        neondata.InternalVideoID.generate(
+                            account_id, ext_video_id))
+                    thumbs = neondata.ThumbnailMetadata.get_many(
+                        video_data.thumbnail_ids)
+                    for thumb in thumbs:
+                        if thumb.type == 'neon' and thumb.chosen:
+                            return thumb.key
+        return None
 
     def merge_events(self, event, count):
         if event == 'latest':

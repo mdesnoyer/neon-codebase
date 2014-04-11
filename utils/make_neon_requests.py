@@ -9,7 +9,7 @@ from optparse import OptionParser
 API_KEY = '2630b61d2db8c85e9491efa7a1dd48d0'
 parser = OptionParser()
 parser.add_option('--input', default="video.links", type=str) 
-parser.add_option('--apikey', default="2630b61d2db8c85e9491efa7a1dd48d0", type=str) 
+parser.add_option('--api_key', default="2630b61d2db8c85e9491efa7a1dd48d0", type=str) 
 
 def request(api_key, id, url):
     #CREATE POST REQUEST
@@ -39,5 +39,5 @@ if __name__ == "__main__":
     for url in urls:
         url = url.rstrip('\n')
         vid = shortuuid.uuid() 
-        request(options.api_ke, vid, url)
+        request(options.api_key, vid, url)
 
