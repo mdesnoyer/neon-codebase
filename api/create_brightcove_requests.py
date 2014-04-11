@@ -17,6 +17,9 @@ import redis as blockingRedis
 import os
 from supportServices.neondata import *
 import json
+import utils.neon
+from utils.options import define, options
+
 import logging
 logging.basicConfig(level=logging.DEBUG,
         format='%(asctime)s %(levelname)s %(message)s',
@@ -29,6 +32,7 @@ skip_accounts = ["brightcoveplatform_4b33788e970266fefb74153dcac00f94_31", "brig
         ]
 
 if __name__ == "__main__":
+    utils.neon.InitNeon()
     pid = str(os.getpid())
     pidfile = "/tmp/brightcovecron.pid"
     if os.path.isfile(pidfile):
@@ -39,7 +43,7 @@ if __name__ == "__main__":
 
         try:
             # Get all Brightcove accounts
-            host = '127.0.0.1'
+            host = "127.0.0.1" 
             port = 6379
             rclient = blockingRedis.StrictRedis(host, port)
             accounts = rclient.keys('brightcoveplatform*')

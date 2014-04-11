@@ -491,7 +491,9 @@ class ProcessVideo(object):
         ''' valence of pil.image '''
         im_array = np.array(image)
         im = im_array[:, :, ::-1]
-        score, attr = self.model.score(im)
+        #score, attr = self.model.score(im)
+        #TODO: enable after new client is ready
+        score = 0
         return str(score)
 
     def save_video_metadata(self):

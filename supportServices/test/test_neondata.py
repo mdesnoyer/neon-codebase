@@ -12,6 +12,8 @@ import logging
 _log = logging.getLogger(__name__)
 import multiprocessing
 from mock import patch
+import random
+import string
 import test_utils.neontest
 import test_utils.redis
 import time
@@ -377,6 +379,31 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         
         with self.assertRaises(AttributeError):
             thumb.thumbnail_id
+    
+
+    def test_internal_video_id(self):
+        '''
+        Generate bunch of random video ids, covert them to internal VID
+        and try to get external VID out of them.
+        '''
+        random.seed(time.time())
+        def id_generator(size=32, 
+                chars=string.ascii_lowercase + string.digits + "_"):
+            
+            return ''.join(random.choice(chars) for x in range(size))
+        
+        external_vids = ['5ieGdqMjoiVJJjw7YIZk5fMBvIE86Z1c', 
+                'xhdG5nMjoiKNbeAz0UrQo2_YVPcZRng8', '12451561361', 
+                'R4YjBnMjrzRQRcDLf34bXbRH4qR6CEF1' ]
+
+        for i in range(100):
+            external_vids.append(id_generator())
+
+        i_vids = [InternalVideoID.generate("apikey", vid) for vid in external_vids]
+
+        result = [InternalVideoID.to_external(i_vid) for i_vid in i_vids]
+
+        self.assertEqual(result, external_vids)
 
 
 if __name__ == '__main__':

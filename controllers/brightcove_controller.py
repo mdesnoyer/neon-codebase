@@ -480,7 +480,6 @@ class BrightcoveABController(object):
             if not chosen:
                 return
 
-        #import pdb; pdb.set_trace()
         #Make a decision based on the current state of the video data
         delay = random.randint(0, max_update_delay)
         cur_time = time.time()
