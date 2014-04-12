@@ -43,32 +43,37 @@ def get_data(key):
             continue
         return ''    
 
-def aggregate_and_save_data(keyset, output_bucket):
+def aggregate_and_save_data(keyset, output_bucket, s_date=None, e_date=None):
     ''' Aggregate data from keys and save the data in a new key'''
 
     aggr_data = ''
     for key in keyset:
         #Remove timezone awareness, Assume UTC timestamp   
-        #key_modified_date = dateutil.parser.parse(key.last_modified).replace(tzinfo=None)
+        key_modified_date = dateutil.parser.parse(key.last_modified).replace(tzinfo=None)
+        if s_date and e_date:
+            if key_modified_date <= s_date or key_modified_date >= e_date:
+                continue
+
         data = get_data(key)
         if len(data) == 0:
             print key
         aggr_data += data
         aggr_data += "\n" #add newline to end of log
-        
-    #save to s3
-    conn = S3Connection(s3key, s3secret)
-    bucket = conn.get_bucket(output_bucket)
-    keyname = _generate_log_filename()
-    k = bucket.new_key(keyname)
-    gz_stream = StringIO.StringIO()
-    gz = gzip.GzipFile(fileobj=gz_stream, mode='w')
-    gz.write(aggr_data)
-    gz.close()
-    k.set_contents_from_string(gz_stream.getvalue())
-    gz_stream.close()
+    
+    if len(aggr_data) > 0:
+        #save to s3
+        conn = S3Connection(s3key, s3secret)
+        bucket = conn.get_bucket(output_bucket)
+        keyname = _generate_log_filename()
+        k = bucket.new_key(keyname)
+        gz_stream = StringIO.StringIO()
+        gz = gzip.GzipFile(fileobj=gz_stream, mode='w')
+        gz.write(aggr_data)
+        gz.close()
+        k.set_contents_from_string(gz_stream.getvalue())
+        gz_stream.close()
 
-def main(input_bucket, output_bucket, n_chunks):
+def main(input_bucket, output_bucket, n_chunks, s_date, e_date):
     ''' Get keys from a bucket and do work '''
 
     conn = S3Connection(s3key, s3secret)
@@ -81,12 +86,12 @@ def main(input_bucket, output_bucket, n_chunks):
     all_keys.sort(key=lambda x: x.last_modified)
     for i in range(len(all_keys)/ n_chunks):
         keyset = all_keys[i*n_chunks: (i+1)*n_chunks]
-        aggregate_and_save_data(keyset, output_bucket)
+        aggregate_and_save_data(keyset, output_bucket, s_date, e_date)
 
     remainder = len(all_keys) % n_chunks 
     if remainder != 0:
         keyset = all_keys[ -1 * remainder : ]
-        aggregate_and_save_data(keyset)
+        aggregate_and_save_data(keyset, output_bucket, s_date, e_date)
 
 if __name__ == "__main__":
     parser = OptionParser(usage=USAGE)
@@ -97,9 +102,12 @@ if __name__ == "__main__":
     parser.add_option('--nchunks', default=100,
                       help='Number of chunks to stitch')
     parser.add_option('--start_date', default=None,
-                      help='Start date of the logs')
+                      help='Start date of the logs in UTC')
     parser.add_option('--end_date', default=None,
-                      help='End date of the logs')
+                      help='End date of the logs in UTC')
     options, args = parser.parse_args()
     #TODO: Checks
-    main(options.input, options.output, options.nchunks)
+    s_date = dateutil.parser.parse(options.start_date).replace(tzinfo=None)
+    e_date = dateutil.parser.parse(options.end_date).replace(tzinfo=None)
+
+    main(options.input, options.output, options.nchunks, s_date, e_date) 
