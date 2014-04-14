@@ -10,16 +10,27 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-from cv.imhash_index import ImHashIndex
+import cv.imhash_index
 import logging
 import neondata
 import threading
 import tornado.gen
 import tornado.httpclient
 from utils.imageutils import PILImageUtils
+from utils.options import define, options
 import utils.sync
 
 _log = logging.getLogger(__name__)
+
+define("hash_type", default="dhash", type=str,
+       help="Type of perceptual hash function to use. ahash, phash or dhash")
+define("hash_size", default=64, type=int,
+       help="Size of the perceptual hash in bits")
+
+def hash_pil_image(image):
+    return cv.imhash_index.hash_pil_image(image,
+                                          hash_type=options.hash_type,
+                                          hash_size=options.hash_size)
 
 class URL2ThumbnailIndex:
     '''An index that converts from url to thumbnail metadata.
@@ -33,7 +44,9 @@ class URL2ThumbnailIndex:
     '''
     def __init__(self):
         '''Create the index. It is loaded from the neondata db.'''
-        self.hash_index = ImHashIndex(hashtype='dhash', hash_size=64)
+        self.hash_index = cv.imhash_index.ImHashIndex(
+            hash_type=options.hash_type,
+            hash_size=options.hash_size)
         self.phash_map = {} # pHash -> [thumbnail_id]
 
         self.thread_lock = threading.RLock()
