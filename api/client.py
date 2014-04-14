@@ -128,7 +128,7 @@ def notification_response_builder(a_id, i_id, video_json,
         '''
         r = {}
 
-        r["notification_url"] = 'http://www.neon-lab.com/api/accounts/%s/events'%a_id
+        notification_url = 'http://www.neon-lab.com/api/accounts/%s/events'%a_id
         r["api_key"] = properties.NOTIFICATION_API_KEY
         r["video"] = video_json
         r["event"] = event
@@ -555,7 +555,7 @@ class VideoProcessor(object):
                 self.finalize_api_request(cr_request.body, "brightcove")
                 self.send_notifiction_response()
 
-            # Ooyala section
+            ## Ooyala section
             elif request_type == "ooyala":
                 self.finalize_api_request(cr_request.body, "ooyala")
 
@@ -610,6 +610,10 @@ class VideoProcessor(object):
             _log.error("key=finalize_api_request msg=failed to save request")
     
     def save_previous_thumbnail(self, api_request):
+        '''
+        Save the previous thumbnail / default thumbnail in the request
+        '''
+
         if not api_request.previous_thumbnail:
             return 
 
