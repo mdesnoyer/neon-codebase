@@ -14,14 +14,30 @@ if sys.path[0] != __base_path__:
 
 import imagehash
 import logging
+_log = logging.getLogger(__name__)
 import math
 import numpy as np
-import pyflann
+try:
+    import pyflann
+except ImportError as e:
+    _log.warn('Pyflann could not be imported. That may be ok. %s' % e)
 
-_log = logging.getLogger(__name__)
+__hashfuncs = {
+    'ahash' : imagehash.average_hash,
+    'phash' : imagehash.phash,
+    'dhash' : imagehash.dhash
+    }
+
+def hash_pil_image(image, hash_type='dhash', hash_size=64):
+    '''Returns the hash integer of a PIL image.'''
+    hashfunc = __hashfuncs[hash_type]
+    hash_size = 64 if hash_type == 'phash' else hash_size
+    return ImHashIndex.binary_array_to_int(
+        hashfunc(image,
+                 hash_size=int(math.sqrt(hash_size))).hash)
 
 class ImHashIndex:
-    def __init__(self, hashtype='dhash', hash_size=64, rebuild_threshold=1.5,
+    def __init__(self, hash_type='dhash', hash_size=64, rebuild_threshold=1.5,
                  min_flann_size=256):
         '''
         Inputs:
@@ -39,14 +55,8 @@ class ImHashIndex:
             multi_probe_level_=2)
         self.flann.set_distance_type("hamming")
         self.params = None
-        hashfuncs = {
-            'ahash' : imagehash.average_hash,
-            'phash' : imagehash.phash,
-            'dhash' : imagehash.dhash
-            }
-
-        self.hashfunc = hashfuncs[hashtype]
-        self.hash_size = 64 if hashtype == 'phash' else hash_size
+        self.hash_type = hash_type
+        self.hash_size = 64 if hash_type == 'phash' else hash_size
         self.rebuild_threshold = rebuild_threshold
         self.min_flann_size = min_flann_size
 
@@ -156,9 +166,7 @@ class ImHashIndex:
 
     def hash_pil_image(self, image):
         '''Returns the hash integer of a PIL image.'''
-        return self.binary_array_to_int(
-            self.hashfunc(image,
-                          hash_size=int(math.sqrt(self.hash_size))).hash)
+        return hash_pil_image(image, self.hash_type, self.hash_size)
 
     def int_to_binary_array(self, val):
         '''Converts an integer to a binary numpy array.

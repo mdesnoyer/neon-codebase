@@ -278,6 +278,8 @@ class HourlyEventStats(MRJob):
                     video_data = neondata.VideoMetadata.get(
                         neondata.InternalVideoID.generate(
                             account_id, ext_video_id))
+                    if video_data is None:
+                        return None
                     thumbs = neondata.ThumbnailMetadata.get_many(
                         video_data.thumbnail_ids)
                     for thumb in thumbs:
@@ -290,6 +292,8 @@ class HourlyEventStats(MRJob):
                     video_data = neondata.VideoMetadata.get(
                         neondata.InternalVideoID.generate(
                             account_id, ext_video_id))
+                    if video_data is None:
+                        return None
                     thumbs = neondata.ThumbnailMetadata.get_many(
                         video_data.thumbnail_ids)
                     for thumb in thumbs:

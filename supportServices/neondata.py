@@ -30,7 +30,7 @@ import random
 import redis as blockingRedis
 import string
 from StringIO import StringIO
-from supportServices.url2thumbnail import URL2ThumbnailIndex
+import supportServices.url2thumbnail
 import tornado.ioloop
 import tornado.gen
 import tornado.httpclient
@@ -1800,7 +1800,7 @@ class ThumbnailMetadata(StoredObject):
 
     def update_phash(self, image):
         '''Update the phash from a PIL image.'''
-        self.phash = URL2ThumbnailIndex().hash_index.hash_pil_image(image)
+        self.phash = supportServices.url2thumbnail.hash_pil_image(image)
 
     def get_account_id(self):
         ''' get the internal account id. aka api key '''

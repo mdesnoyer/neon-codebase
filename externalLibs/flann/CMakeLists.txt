@@ -9,10 +9,6 @@ string(TOLOWER ${PROJECT_NAME} PROJECT_NAME_LOWER)
 
 include(${CMAKE_SOURCE_DIR}/Common.cmake)
 
-# Force the libraries to be built in /lib
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY})
-
 include(${PROJECT_SOURCE_DIR}/cmake/flann_utils.cmake)
 set(FLANN_VERSION 1.8.4.2)
 DISSECT_VERSION()

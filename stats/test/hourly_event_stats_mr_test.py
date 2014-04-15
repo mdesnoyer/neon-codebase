@@ -288,7 +288,24 @@ class TestIDMapping(unittest.TestCase):
             results, 
             [(('click', '3449463059001_t2', 94), 3),
              (('load', '3449463059001_t1', 87), 1)])
-        
+
+    @patch('stats.hourly_event_stats_mr.neondata.VideoMetadata.get')
+    def test_old_bcove_url_format_unknown_vid(self, video_mock):
+        self.mock_mapper.side_effect = [None, None]
+        self.account_mapper.return_value = (
+            "acct1", neondata.TrackerAccountIDMapper.PRODUCTION)
+        video_mock.side_effect = [None, None]
+
+        results, counters = test_utils.mr.run_single_step(self.mr,
+            encode([(('click', 'http://brightcove.vo.llnwd.net/d21/unsecured/media/1079349493/201404/2085/1079349493_3457310977001_neonthumbnail-3449463059001.jpg', 'tai1', 94), 3),
+                    (('load', 'http://brightcove.vo.llnwd.net/d21/unsecured/media/1105443290001/201404/3122/1105443290001_3449709878001_neonthumbnailbc-3449463059001.jpg', 'tai1', 87), 1)]),
+            step=2)
+
+        self.assertEqual(results, [])
+        self.assertEqual(self.mock_mapper.call_count, 2)
+        self.assertEqual(video_mock.call_count, 2)
+        self.assertEqual(
+            counters['HourlyEventStatsErrors']['UnknownThumbnailURL'], 2)
         
 
     def test_thumb_url_redis_error(self):
