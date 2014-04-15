@@ -119,7 +119,7 @@ class VideoDBWatcher(threading.Thread):
     def _process_db_data(self):
         for platform in neondata.AbstractPlatform.get_all_instances():
             video_ids = platform.get_internal_video_ids()
-            all_video_metadata = neondata.VideoMetadata.multi_get(video_ids)
+            all_video_metadata = neondata.VideoMetadata.get_many(video_ids)
             for video_id, video_metadata in zip(video_ids, all_video_metadata):
                 if video_metadata is None:
                     _log.error('Could not find information about video %s' %

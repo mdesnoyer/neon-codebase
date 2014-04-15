@@ -207,7 +207,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             api_key + '_4': neondata.VideoMetadata(
                             0,['t41', 't42'],'','','','','','')
             }
-        datamock.VideoMetadata.multi_get.side_effect = \
+        datamock.VideoMetadata.get_many.side_effect = \
                         lambda vids: [vid_meta[vid] for vid in vids]
 
         # Define the thumbnail meta data
@@ -258,7 +258,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         
         datamock.AbstractPlatform.get_all_instances.return_value = \
           [bcPlatform]
-        datamock.VideoMetadata.multi_get.return_value = [None, None] 
+        datamock.VideoMetadata.get_many.return_value = [None, None] 
 
         with self.assertLogExists(logging.ERROR,
                              'Could not find information about video api_key_0'):
@@ -283,7 +283,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                             0,['t01','t02','t03'],'','','','','',''),
             'api_key_10': neondata.VideoMetadata(0,[],'','','','','','')
             }
-        datamock.VideoMetadata.multi_get.side_effect = \
+        datamock.VideoMetadata.get_many.side_effect = \
                         lambda vids: [vid_meta[vid] for vid in vids]
 
         TMD = neondata.ThumbnailMetadata
