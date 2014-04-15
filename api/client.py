@@ -52,6 +52,7 @@ from boto.s3.bucket import Bucket
 from StringIO import StringIO
 
 import brightcove_api
+import ooyala_api 
 from supportServices import neondata
 
 import logging
@@ -573,7 +574,7 @@ class VideoProcessor(object):
         '''
         
         api_key = self.job_params[properties.API_KEY]  
-        job_id  = self.job_params[properties.REQUEST_UUID_KEY]
+        job_id = self.job_params[properties.REQUEST_UUID_KEY]
         video_id = self.job_params[properties.VIDEO_ID]
         title = self.job_params[properties.VIDEO_TITLE]
         i_id = 0
@@ -594,7 +595,9 @@ class VideoProcessor(object):
         #autosync    
         if hasattr(api_request, "autosync"):
             if api_request.autosync:
-                self.request_autosync()
+                fno = api_request.response["data"][0]
+                img = Image.fromarray(self.data_map[fno][1])
+                self.autosync(api_request, img)
 
         api_request.state = neondata.RequestState.FINISHED 
         if api_request.save():
@@ -652,39 +655,48 @@ class VideoProcessor(object):
         else:
             _log.error("key=save_previous_thumbnail msg=failed to download image")
 
-    def autosync(self, api_request):
+    def autosync(self, api_request, image):
+        '''
+        Autosync Thumbnail
+        '''
         api_key = self.job_params[properties.API_KEY]  
+        video_id = self.job_params[properties.VIDEO_ID]  
         i_id = self.job_params[properties.INTEGRATION_ID] 
-        ba = neondata.BrightcovePlatform.get_account(api_key, i_id)
-        if not ba:
-            _log.error("key=finalize_brightcove_request msg=Brightcove " 
-                    " account doesnt exists a_id=%s i_id=%s"%(api_key, i_id))
-        else: 
-            autosync = ba.auto_update 
+        frame_size = self.video_metadata['frame_size']
+        tid = self.thumbnails[0].key #TOP Neon thumbnail TID
+        if api_request.request_type == "brightcove":
         
-        if autosync:
-            rtoken  = self.job_params[properties.BCOVE_READ_TOKEN]
-            wtoken  = self.job_params[properties.BCOVE_WRITE_TOKEN]
+            rtoken = self.job_params[properties.BCOVE_READ_TOKEN]
+            wtoken = self.job_params[properties.BCOVE_WRITE_TOKEN]
             pid = self.job_params[properties.PUBLISHER_ID]
-            fno = api_request.response["data"][0]
-            img = Image.fromarray(self.data_map[fno][1])
-            tid = self.thumbnails[0].key
-            bcove   = brightcove_api.BrightcoveApi(
-                neon_api_key=api_key,
-                publisher_id=pid,
-                read_token=rtoken,
-                write_token=wtoken)
+            bcove = brightcove_api.BrightcoveApi(
+                        neon_api_key=api_key,
+                        publisher_id=pid,
+                        read_token=rtoken,
+                        write_token=wtoken)
             
-            frame_size = self.video_metadata['frame_size']
             ret = bcove.update_thumbnail_and_videostill(
-                                video_id, img, tid, frame_size)
+                                video_id, image, tid, frame_size)
 
             if ret[0]:
-                #update enabled time & reference ID
                 #NOTE: By default Neon rank 1 is always uploaded
                 self.thumbnails[0].chosen = True 
-                self.thumbnails[0].refid = tid
-    
+            else:
+                _log.error("autosync failed for video %s" % video_id)
+   
+        elif api_request.request_type == "ooyala":
+            oo_api_key = self.job_params["oo_api_key"]
+            oo_secret_key = self.job_params["oo_secret_key"]
+            oo = ooyala_api.OoyalaAPI(oo_api_key, oo_secret_key)
+            update_result = oo.update_thumbnail(video_id,
+                                               image,
+                                               tid,
+                                               frame_size)
+            if update_result:
+                self.thumbnails[0].chosen = True 
+            else:
+                _log.error("autosync failed for ooyala video %s" % video_id)
+
     def save_thumbnail_metadata(self, platform, i_id):
         '''Save the Thumbnail URL and ID to Mapper DB '''
 
@@ -765,7 +777,6 @@ class VideoProcessor(object):
         if response.error:
             return False
         return True
- 
 
     def send_notifiction_response(self):
         '''
@@ -865,7 +876,6 @@ class VideoClient(object):
     def run(self):
         ''' run/start method '''
         _log.info("starting worker [%s] " %(self.pid))
-        self.load_model()
         while not self.kill_received:
             self.do_work()
 
@@ -876,6 +886,7 @@ class VideoClient(object):
             if not job or job == "{}": #string match
                 raise Queue.Empty
            
+            self.load_model()
             jparams = json.loads(job)
             vprocessor = VideoProcessor(jparams, self.model, self.model_version)
             vprocessor.start()

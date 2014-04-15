@@ -6,6 +6,8 @@ Video processing client unit test
 NOTE: Model call has been mocked out, the results are embedded in the 
 pickle file for the calls made from model object
 
+#TODO:
+    Identify all the errors cases and inject them to be tested
 '''
 
 import os.path
@@ -77,21 +79,22 @@ class TestVideoClient(unittest.TestCase):
         #setup process video object
         self.api_request = None
         
+    def setup_video_processor(self, request_type):
+        '''
+        Setup the api request for the video processor
+        '''
 
-    def setup_video_processor(self, rtype):
-        #video processor object
-        
         j_id = "j123"
         api_key = "apikey123"
         vid = "video1"
         i_id = 0
 
-        if rtype == "neon":
+        if request_type == "neon":
             jparams = request_template.neon_api_request %(
                     j_id, vid, api_key, "neon", api_key, j_id)
             self.api_request = neondata.NeonApiRequest(j_id, api_key, vid, "title",
                             None, None, None)
-        elif rtype == "brightcove":
+        elif request_type == "brightcove":
             i_id = "b_id"
             jparams = request_template.brightcove_api_request %(j_id, vid, api_key,
                             "brightcove", api_key, j_id, i_id)
@@ -99,6 +102,13 @@ class TestVideoClient(unittest.TestCase):
                                         j_id, api_key, vid, 'title', None,
                                         None, None, None)
             self.api_request.previous_thumbnail = "http://prevthumb"
+        elif request_type == "ooyala":
+            i_id = "b_id"
+            jparams = request_template.ooyala_api_request %(j_id, vid, api_key,
+                            "ooyala", api_key, j_id, i_id)
+            self.api_request = neondata.OoyalaApiRequest(
+                                       j_id, api_key, i_id, vid, 'title', 'url',
+                                       'oo_key', 'oo_secret', 'http://p_thumb', 'cb')
 
         job = json.loads(jparams)
         self.api_request.save()
@@ -174,7 +184,6 @@ class TestVideoClient(unittest.TestCase):
             
             elif "video" in part:
                 self.assertEqual(e[1], '{"video":"data"}')
-
 
     ##### Process video tests ####
     @patch('api.client.tornado.httpclient.HTTPClient')
@@ -332,10 +341,37 @@ class TestVideoClient(unittest.TestCase):
         self.assertEqual(tdata.video_id, self.api_request.video_id)
         self.assertIn("brightcove.jpeg", tdata.urls[0])
 
+    @patch("api.ooyala_api.OoyalaAPI.update_thumbnail")
+    @patch("api.brightcove_api.BrightcoveApi.update_thumbnail_and_videostill")
+    def test_autosync(self, update_bc_mock, update_oo_mock):
+        ''' Test Autosync thumbnails '''
 
-    def test_autosync(self):
-        #TODO: Test Autosync thumbnails
-        pass
+        update_bc_mock.return_value = ('refid1', 'still-refid1') 
+        update_oo_mock.return_value = True 
+        vprocessor = self.setup_video_processor("brightcove")
+        vprocessor.process_video(self.test_video_file)
+        #Setup  vprocessor.thumbnails
+        TMD = neondata.ThumbnailMetadata
+        tid_meta = {
+            't01': TMD('t01','vid',[0],0,0,0,'neon',0,0,True,False,0),
+            't02': TMD('t02','vid',[0],0,0,0,'neon',0,0,True,True,0),
+            't03': TMD('t03','vid',[0],0,0,0,'neon',1,0,True,False,0)
+            }
+        vprocessor.thumbnails = tid_meta.values()
+        ret = vprocessor.save_video_metadata()
+        im = PILImageUtils.create_random_image(360, 480)
+        vprocessor.autosync(self.api_request, im)
+        self.assertEqual(update_bc_mock.call_args[0][0], self.api_request.video_id)
+        self.assertEqual(update_bc_mock.call_args[0][2], vprocessor.thumbnails[0].key)
+        self.assertTrue(vprocessor.thumbnails[0].chosen)
+
+        ## Ooyala Autosync
+        vprocessor = self.setup_video_processor("ooyala")
+        vprocessor.process_video(self.test_video_file)
+        vprocessor.thumbnails = tid_meta.values()
+        vprocessor.autosync(self.api_request, im)
+        self.assertEqual(update_oo_mock.call_args[0][0], self.api_request.video_id)
+        self.assertTrue(vprocessor.thumbnails[0].chosen)
 
     def test_save_thumbnail_metadata(self):
         '''
@@ -391,7 +427,6 @@ class TestVideoClient(unittest.TestCase):
         #Exceed requeue count
         vprocessor.job_params["requeue_count"] = 4
         self.assertFalse(vprocessor.requeue_job())
-
 
 if __name__ == '__main__':
     unittest.main()
