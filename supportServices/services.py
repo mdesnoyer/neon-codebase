@@ -322,8 +322,8 @@ class AccountHandler(tornado.web.RequestHandler):
                 self.update_brightcove_integration(i_id)
             elif "youtube_integrations" == itype:
                 self.update_youtube_account(i_id)
-            #elif "ooyala_integrations" == itype:
-            #    self.update_ooyala_account(i_id)
+            elif "ooyala_integrations" == itype:
+                self.update_ooyala_integration(i_id)
             elif itype is None:
                 #Update basic neon account
                 self.method_not_supported()
@@ -617,7 +617,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
         if not platform_account:
             _log.error("key=get_video_status_%s msg=account not found" %i_type)
-            self.send_json_response("%i_type account not found"%i_type, 400)
+            self.send_json_response("%s account not found"%i_type, 400)
             return
        
         #return all videos in the account
@@ -1005,7 +1005,6 @@ class AccountHandler(tornado.web.RequestHandler):
     @tornado.gen.engine
     def update_brightcove_integration(self, i_id):
         ''' Update Brightcove account details '''
-        
         try:
             rtoken = InputSanitizer.to_string(self.get_argument("read_token"))
             wtoken = InputSanitizer.to_string(self.get_argument("write_token"))
@@ -1017,7 +1016,6 @@ class AccountHandler(tornado.web.RequestHandler):
             return
 
         uri_parts = self.request.uri.split('/')
-
         bc = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,
                                     self.api_key, i_id)
         if bc:
@@ -1182,8 +1180,44 @@ class AccountHandler(tornado.web.RequestHandler):
                     self.send_json_response(data, 500)
 
     #2. Update  the Account
+    @tornado.gen.engine
+    def update_ooyala_integration(self, i_id):
+        ''' Update Ooyala account details '''
+        
+        try:
+            partner_code = InputSanitizer.to_string(
+                                self.get_argument("partner_code"))
+            oo_api_key = InputSanitizer.to_string(self.get_argument("oo_api_key"))
+            oo_secret_key = InputSanitizer.to_string(
+                                self.get_argument("oo_secret_key"))
+            autosync = InputSanitizer.to_bool(self.get_argument("auto_update"))
+        except Exception,e:
+            _log.error("key=update ooyala account msg= %s" %e)
+            data = '{"error": "API Params missing"}'
+            self.send_json_response(data, 400)
+            return
 
+        uri_parts = self.request.uri.split('/')
 
+        oo = yield tornado.gen.Task(neondata.OoyalaPlatform.get_account,
+                                    self.api_key, i_id)
+        if oo:
+            oo.partner_code = partner_code
+            oo.ooyala_api_key = oo_api_key
+            oo.api_secret = oo_secret_key 
+            oo.autosync = autosync
+            #TODO: Test autosync
+            res = yield tornado.gen.Task(oo.save)
+            if res:
+                data = ''
+                self.send_json_response(data, 200)
+            else:
+                data = '{"error": "account not updated"}'
+                self.send_json_response(data, 500)
+        else:
+            _log.error("key=update_ooyala_integration msg=no such account ") 
+            data = '{"error": "Account doesnt exists"}'
+            self.send_json_response(data, 400)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine

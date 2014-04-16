@@ -3,6 +3,7 @@ Input sanitizer module to clean up _inputs and convert to particular datatype
 '''
 
 import logging
+import re
 import tornado.escape
 import tornado.httpclient
 
@@ -80,3 +81,22 @@ class InputSanitizer(object):
     @classmethod
     def to_no_unicode(cls, _input):
         return _input.encode('punycode')
+
+    @classmethod
+    def validate_http_url(cls, _input):
+        #TO BE FIXED, Dont' use
+ 
+        '''
+        Check if _input is a valid http url 
+        Copied from DJANGO url validator
+        '''
+        regex = re.compile(
+            r'^(?:http|ftp)s?://' # http:// or https://
+            r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|' #domain...
+            r'localhost|' #localhost...
+            r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})' # ...or ip
+            r'(?::\d+)?' # optional port
+            r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+        return regex.match(_input)
+
+

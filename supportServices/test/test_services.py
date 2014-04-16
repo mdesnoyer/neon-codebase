@@ -29,7 +29,6 @@ from StringIO import StringIO
 from mock import patch 
 from supportServices import services, neondata
 from api import brightcove_api
-#from api import ooyala_api 
 import tornado.testing
 import tornado.httpclient
 from utils.imageutils import PILImageUtils
@@ -131,14 +130,6 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         super(TestServices, self).setUp()
         #NOTE: Make sure that you don't repatch objects
 
-        #Brightcove api http mock
-        #self.bapi_sync_patcher = \
-        #  patch('api.brightcove_api.tornado.httpclient.HTTPClient')
-        #self.bapi_async_patcher = \
-        #  patch('api.brightcove_api.tornado.httpclient.AsyncHTTPClient')
-        #self.bapi_mock_client = self.bapi_sync_patcher.start()
-        #self.bapi_mock_async_client = self.bapi_async_patcher.start()
-
         #Http Connection pool Mock
         self.cp_sync_patcher = \
           patch('utils.http.tornado.httpclient.HTTPClient')
@@ -201,7 +192,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         body = urllib.urlencode(vals)
         self.http_client.fetch(url, self.stop,method="PUT", body=body,
                                headers=headers)
-        response = self.wait()
+        response = self.wait(timeout=10)
         return response
 
     def get_request(self, url, apikey):
@@ -399,12 +390,12 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
                     buffer=StringIO(bcove_responses.find_video_by_id_response))
             if kwargs.has_key("callback"):
                 callback = kwargs["callback"]
-                return tornado.io_loop.IOLoop.current().add_callback(callback,
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
                                                                      response)
             else:
                 if len(args) > 1:
                     callback = args[1]
-                    return tornado.io_loop.IOLoop.current().add_callback(
+                    return tornado.ioloop.IOLoop.current().add_callback(
                         callback, response)
                 else:
                     return response
@@ -431,14 +422,14 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
                 callback  = kwargs["callback"]
             else:
                 callback = args[1] 
-            return tornado.io_loop.IOLoop.current().callllback(callback,
+            return tornado.ioloop.IOLoop.current().add_callback(callback,
                                                                response)
 
         #neon api request
         elif "api/v1/submitvideo" in http_request.url:
             response = _neon_submit_job_response()
             if callback:    
-                return tornado.io_loop.IOLoop.current().add_callback(callback,
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
                                                                      response)
             return response
 
@@ -446,7 +437,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
             #downloading any image (create a random image response)
             response = create_random_image_response()
             if callback:
-                return tornado.io_loop.IOLoop.current().add_callback(callback,
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
                                                                      response)
             else:
                 return response
@@ -457,14 +448,14 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
                                                        headers=headers,
                                                        buffer=StringIO('videodata'))
             if callback:
-                return tornado.io_loop.IOLoop.current().add_callback(callback,
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
                                                                      response)
         else:
             headers = {"Content-Type": "text/plain"}
             response = tornado.httpclient.HTTPResponse(request, 200, headers=headers,
                 buffer=StringIO('someplaindata'))
             if callback:
-                return tornado.io_loop.IOLoop.current().add_callback(callback,
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
                                                                      response)
             return response
 
@@ -499,7 +490,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
     # Unit Tests
     ################################################################
 
-    def _test_invalid_get_rest_uri(self):
+    def test_invalid_get_rest_uri(self):
         ''' test uri parsing, invalid requests '''
         api_key = self.create_neon_account()
 
@@ -525,7 +516,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         resp = self.get_request(url, api_key)
         self.assertEqual(resp.code, 400)
 
-    def _test_invalid_put_rest_uri(self):
+    def test_invalid_put_rest_uri(self):
         ''' put requests'''
         
         api_key = self.create_neon_account()
@@ -541,7 +532,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(resp.code, 400)
 
 
-    def _test_create_update_brightcove_account(self):
+    def test_create_update_brightcove_account(self):
         ''' updation of brightcove account '''
 
         #create neon account
@@ -592,12 +583,8 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
                                   self.redis.port):
 
             #Setup Side effect for the http clients
-            #self.bapi_mock_client().fetch.side_effect = \
-            #  self._success_http_side_effect
             self.cp_mock_client().fetch.side_effect = \
               self._success_http_side_effect 
-            #self.bapi_mock_async_client().fetch.side_effect = \
-            #  self._success_http_side_effect
             self.cp_mock_async_client().fetch.side_effect = \
               self._success_http_side_effect
 
@@ -627,7 +614,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
                 videos.append(str(item['id']))                              
             self._check_neon_default_chosen(videos)
 
-    def _test_brightcove_web_account_flow(self):
+    def test_brightcove_web_account_flow(self):
         #Create Neon Account --> Bcove Integration --> update Integration --> 
         #query videos --> autopublish --> verify autopublish
         with options._set_bounded('supportServices.neondata.dbPort',
@@ -690,7 +677,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
     #Database failure on account creation, updation
     #Brightcove API failures
 
-    def _test_update_thumbnail_fails(self):
+    def test_update_thumbnail_fails(self):
         with options._set_bounded('supportServices.neondata.dbPort',
                                   self.redis.port):
             self._setup_initial_brightcove_state()
@@ -707,7 +694,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
                     callback = kwargs["callback"]
                 else:
                     callback = args[1]
-                return tornado.io_loop.IOLoop.current().add_callback(callback,
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
                                                                      response)
 
             if "http://api.brightcove.com/services/post" in http_request.url:
@@ -757,7 +744,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
 
     ######### BCOVE HANDLER Test cases ##########################
 
-    def _test_bh_update_thumbnail(self):
+    def test_bh_update_thumbnail(self):
         ''' Brightcove support handler tests (check thumb/update thumb) '''
         
         self._setup_initial_brightcove_state()
@@ -791,7 +778,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertFalse(tids[1].chosen)
         
 
-    def _test_pagination_videos_brighcove(self):
+    def test_pagination_videos_brighcove(self):
         ''' test pagination of brightcove integration '''
 
         self._setup_initial_brightcove_state()
@@ -857,7 +844,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(len(ordered_videos) - (page_no*page_size),
                         len(result_vids))
 
-    def _test_request_by_video_ids_brightcove(self):
+    def test_request_by_video_ids_brightcove(self):
         ''' test video ids of brightcove integration '''
 
         self._setup_initial_brightcove_state()
@@ -874,7 +861,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         result_vids = [x['video_id'] for x in items]
         self.assertItemsEqual(result_vids, test_video_ids)
     
-    def _test_invalid_model_scores(self):
+    def test_invalid_model_scores(self):
         ''' test filtering of invalid model scores like -inf, nan '''
 
         self._setup_initial_brightcove_state()
@@ -902,7 +889,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertFalse(float('nan') in model_scores)    
         self.assertFalse(None in model_scores)    
    
-    def _test_get_brightcove_video_requests_by_state(self):
+    def test_get_brightcove_video_requests_by_state(self):
         '''
         Test you can query brightcove videos by their video state
         including requesting them in pages
@@ -939,7 +926,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertItemsEqual(vids,
                 result_vids)
 
-    def _test_tracker_account_id_mapper(self):
+    def test_tracker_account_id_mapper(self):
         '''
         Test mapping between tracker account id => neon account id
         '''
@@ -985,13 +972,13 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         #        headers={"Accept-Encoding": "gzip"})
         #self.assertEqual(response.headers["Content-Encoding"], "gzip")
     
-    def _test_create_neon_integration(self):
+    def test_create_neon_integration(self):
         api_key = self.create_neon_account()
         nuser = neondata.NeonUserAccount.get_account(api_key)
         neon_integration_id = "0"
         self.assertTrue(neon_integration_id in nuser.integrations.keys()) 
 
-    def _test_create_neon_video_request(self):
+    def test_create_neon_video_request(self):
         ''' verify that video request creation via services  ''' 
         
         api_key = self.create_neon_account()
@@ -1008,7 +995,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertIsNotNone(response["video_id"])  
         self.assertEqual(response["status"], neondata.RequestState.PROCESSING)
 
-    def _test_create_neon_video_request_invalid_url(self):
+    def test_create_neon_video_request_invalid_url(self):
         ''' invalid url test '''
         api_key = self.create_neon_account()
         vals = { 'video_url' : "http://not_a_video_link", "title": "test_title" }
@@ -1023,7 +1010,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(response['error'], 
                 'link given is invalid or not a video file')
 
-    def _test_empty_get_video_status_neonplatform(self):
+    def test_empty_get_video_status_neonplatform(self):
         ''' empty videos '''
         api_key = self.create_neon_account()
         page_no = 0
@@ -1035,7 +1022,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         items = json.loads(resp.body)['items']
         self.assertEqual(items,[])
 
-    def _test_get_video_status_neonplatform(self):
+    def test_get_video_status_neonplatform(self):
         '''
         Test retreiving video responses for neonplatform
         '''
@@ -1250,7 +1237,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
             response = tornado.httpclient.HTTPResponse(request, 200,
                     buffer=StringIO(ooyala_responses.streams))
             if callback:
-                return tornado.io_loop.IOLoop.current().add_callback(callback,
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
                                                                      response)
             else:
                 return response
@@ -1262,7 +1249,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
                     buffer=StringIO(''))
         
             if callback:
-                return tornado.io_loop.IOLoop.current().add_callback(callback,
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
                                                                      response)
             else:
                 return response
@@ -1270,7 +1257,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         #generic asset call
         elif "/v2/assets" in http_request.url:
             if callback:
-                return tornado.io_loop.IOLoop.current().add_callback(
+                return tornado.ioloop.IOLoop.current().add_callback(
                     callback,
                     ooyala_response)
             else:
@@ -1281,7 +1268,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
             #downloading any image (create a random image response)
             response = create_random_image_response()
             if callback:
-                return tornado.io_loop.IOLoop.current().add_callback(callback,
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
                                                                      response)
             else:
                 return response
@@ -1294,7 +1281,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         elif "api/v1/submitvideo" in http_request.url:
             response = _neon_submit_job_response()
             if callback:    
-                return tornado.io_loop.IOLoop.current().add_callback(callback,
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
                                                                      response)
             return response
 
@@ -1303,7 +1290,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
             response = tornado.httpclient.HTTPResponse(request, 200, headers=headers,
                 buffer=StringIO('someplaindata'))
             if callback:
-                return tornado.io_loop.IOLoop.current().add_callback(callback,
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
                                                                      response)
             return response
 
@@ -1316,7 +1303,6 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         #Get ooyala account 
         oo_account = neondata.OoyalaPlatform.get_account(self.api_key,
                                                          self.i_id)
-        
         
         #create feed request
         oo_account.check_feed_and_create_requests()
@@ -1410,6 +1396,30 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
             #set neon rank 2 
         resp = self._update_ooyala_thumbnail(vid, tids[1])
         self.assertEqual(resp.code, 200)
+
+    def test_ooyala_account_update(self):
+        '''
+        Update the ooyala account 
+        '''
+            
+        self._create_request_from_feed()
+        self._process_neon_api_requests()
+        url = self.get_url('/api/v1/accounts/%s/ooyala_integrations/%s' \
+                            %(self.a_id, self.i_id))
+        vals = {'oo_secret_key' : 'sec', 'oo_api_key': 'okey', 
+                'auto_update': False, 'partner_code': 'part'}
+        response = self.put_request(url, vals, self.api_key)
+        self.assertEqual(response.code, 200)
+
+        oo_account = neondata.OoyalaPlatform.get_account(self.api_key,
+                                                         self.i_id)
+        self.assertEqual(oo_account.ooyala_api_key, 'okey') 
+       
+        #Test Missing an argument
+        vals = {'oo_secret_key' : 'sec', 'oo_api_key': 'okey', 
+                'auto_update': False}
+        response = self.put_request(url, vals, self.api_key)
+        self.assertEqual(response.code, 400)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

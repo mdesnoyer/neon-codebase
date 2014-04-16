@@ -14,6 +14,7 @@ import json
 import hashlib
 import logging
 import properties
+from StringIO import StringIO
 import urllib
 from utils.http import RequestPool
 import utils.http
@@ -550,9 +551,10 @@ class OoyalaAPI(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine 
-    def update_thumbnail_from_url(self, video_id, image_url, 
+    def update_thumbnail(self, video_id, image, 
                                         tid, fsize):
         '''
+        @image: image could be a url or a Image object
         Async method, no sync version currently
 
         DOC: http://support.ooyala.com/developers/documentation/api/asset_video.html
@@ -589,15 +591,24 @@ class OoyalaAPI(object):
                 return resp
  
         states = ["download_image", "upload_thumbnail", "set_primary"] 
- 
-        state = states[0] 
-        req = tornado.httpclient.HTTPRequest(url=image_url,
-                                             method="GET",
-                                             request_timeout=60.0,
-                                             connect_timeout=10.0)
-        image_response = yield tornado.gen.Task(
-                            self.http_request_pool.send_request, req) 
-        image_body = handle_response(image_response)
+
+        #Check if image is a URL or a Image object
+        if isinstance(image, basestring):
+            state = states[0]
+            image_url = image
+            req = tornado.httpclient.HTTPRequest(url=image_url,
+                                                 method="GET",
+                                                 request_timeout=60.0,
+                                                 connect_timeout=10.0)
+            image_response = yield tornado.gen.Task(
+                                self.http_request_pool.send_request, req) 
+            image_body = handle_response(image_response)
+            
+        else:
+            imstream = StringIO()
+            image.save(imstream, 'jpeg')
+            imstream.seek(0)
+            image_body = imstream.getvalue()
         
         #Upload the image
         state = states[1] 
@@ -627,3 +638,4 @@ class OoyalaAPI(object):
 
         #something went wrong ?
         raise tornado.gen.Return(False)
+    

@@ -72,14 +72,15 @@ class TestVideoServer(AsyncHTTPTestCase):
             url = self.neon_api_url
 
         body = json.dumps(vals)
-        self.http_client.fetch(url, 
-                               callback=self.stop,
-                               method="POST",
-                               body=body)
+        request = tornado.httpclient.HTTPRequest(
+                                url=url, 
+                                method="POST",
+                                body=body)
+        self.http_client.fetch(request, self.stop)
         response = self.wait()
         return response
     
-    def add_request(self,video_id="vid123"):
+    def add_request(self, video_id="vid123"):
 
         vals = {"api_key": self.api_key, 
                     "video_url": "http://testurl/video.mp4", 
@@ -91,7 +92,7 @@ class TestVideoServer(AsyncHTTPTestCase):
 
     def test_neon_api_request(self):
         resp = self.add_request("neonapi_vid123") 
-        self.assertEqual(resp.code,201)
+        self.assertEqual(resp.code, 201)
 
     def test_duplicate_request(self):
         vals = {"api_key": self.api_key, 
@@ -101,7 +102,7 @@ class TestVideoServer(AsyncHTTPTestCase):
                     "video_title": "test_title" }
         resp = self.make_api_request(vals)
         resp = self.make_api_request(vals)
-        self.assertEqual(resp.code,409)
+        self.assertEqual(resp.code, 409)
 
     def test_brightcove_request(self):
         ''' create brightcove platform account '''
