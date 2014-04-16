@@ -407,12 +407,16 @@ class OoyalaAPI(object):
         #http://ak.c.ooyala.com/l2djJvazrgOdtAiOtaWrZejpYgsdH8zc/DOcJ-FxaFrRg4gtDEwOmY1OjBrO_V8SW
 
         video_data = self.get('assets/%s/streams'%video_id)
-        #profiles = {} 
-        for p in video_data:
-            #prof = p['profile']
-            #profiels[prof] = p['url']
-            if p['muxing_format'] != "NA":
-                return p['url']
+        #some videos may not have streams (default videos)
+        if isinstance(video_data, list):
+            #profiles = {} 
+            for p in video_data:
+                #prof = p['profile']
+                #profiles[prof] = p['url']
+                if p['muxing_format'] != "NA":
+                    return p['url']
+        else:
+            _log.error("error downloading video data from ooyala");
 
     @tornado.gen.engine
     def _create_video_requests_on_signup(self, oo_account, limit=10, callback=None):

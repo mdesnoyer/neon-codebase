@@ -143,6 +143,7 @@ class MockKey(object):
         self.set_etag()
         self.size = len(self.data)
         self._handle_headers(headers)
+        return self.size
 
     def set_contents_from_stream(self, fp, headers=None, replace=NOT_IMPL,
                                cb=NOT_IMPL, num_cb=NOT_IMPL, policy=NOT_IMPL,
@@ -164,6 +165,7 @@ class MockKey(object):
         self.set_etag()
         self.size = len(s)
         self._handle_headers(headers)
+        return self.size
 
     def set_contents_from_filename(self, filename, headers=None,
                                    replace=NOT_IMPL, cb=NOT_IMPL,

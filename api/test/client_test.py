@@ -157,13 +157,18 @@ class TestVideoClient(unittest.TestCase):
             images.append((
                 PILImageUtils.create_random_image(360, 480), random.random()))
 
-        thumbnails, s3_urls = api.client.host_images_s3(
-                                    api_key, vid, 
-                                    images, bfname)
+        thumbnails, s3_urls = api.client.host_images_s3(api_key, vid, images, bfname)
 
         s3_keys = [x for x in conn.buckets['host-thumbnails'].get_all_keys()]
         self.assertEqual(len(thumbnails), N)
         self.assertEqual(len(s3_keys), N)
+        for i, s3key in zip(range(N), sorted(s3_keys, key=lambda k: k.name)):
+            self.assertEqual(s3key.content_type, 'image/jpeg')
+            filestream = StringIO()
+            images[i][0].save(filestream, "jpeg", quality=90) 
+            filestream.seek(0)
+            imgdata = filestream.read()
+            self.assertEqual(s3key.data, imgdata) 
 
         #verify s3 urls
         s3prefix = 'https://host-thumbnails.s3.amazonaws.com/%s/neon%s.jpeg'
@@ -225,7 +230,7 @@ class TestVideoClient(unittest.TestCase):
         self.assertNotIn(float('-inf'), vprocessor.valence_scores[1])
     
     @patch('api.client.VideoProcessor.finalize_api_request')
-    @patch('api.client.VideoProcessor.http_request_pool')
+    @patch('utils.http')
     @patch('api.client.S3Connection')
     def test_finalize_request(self, mock_conntype, mock_client, mock_finalize_api):
         request = tornado.httpclient.HTTPRequest("http://xyz")
@@ -253,7 +258,7 @@ class TestVideoClient(unittest.TestCase):
         self.assertEqual(callback_result["data"], result_data)
         self.assertEqual(len(callback_result["thumbnails"]), len(result_data))
     
-    @patch('api.client.VideoProcessor.http_request_pool')
+    @patch('utils.http')
     def test_finalize_request_error(self, mock_client):
         '''
         Test finalize request flow when there has been 
@@ -415,7 +420,7 @@ class TestVideoClient(unittest.TestCase):
         vmdata = neondata.VideoMetadata.get(i_vid)
         self.assertIsNotNone(vmdata)
 
-    @patch('api.client.VideoProcessor.http_request_pool')
+    @patch('utils.http')
     def test_requeue_job(self, mock_client):
         request = tornado.httpclient.HTTPRequest("http://neon-lab.com")
         response = tornado.httpclient.HTTPResponse(request, 200,
