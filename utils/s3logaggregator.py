@@ -27,7 +27,7 @@ def _generate_log_filename():
     ''' Generate log file name'''
 
     folder = time.strftime("%d%m%Y")
-    return '%s/%s_%s_aggregate.log' % (folder, 
+    return '%s/%s_%s_aggregate.log.gz' % (folder, 
             time.strftime('%S%M%H%d%m%Y', time.gmtime()),
             shortuuid.uuid())
 
@@ -70,7 +70,8 @@ def aggregate_and_save_data(keyset, output_bucket, s_date=None, e_date=None):
         gz = gzip.GzipFile(fileobj=gz_stream, mode='w')
         gz.write(aggr_data)
         gz.close()
-        k.set_contents_from_string(gz_stream.getvalue())
+        k.set_contents_from_string(gz_stream.getvalue(),
+	  headers={'Content-Type' : 'application/x-gzip'})
         gz_stream.close()
 
 def main(input_bucket, output_bucket, n_chunks, s_date, e_date):
@@ -99,7 +100,7 @@ if __name__ == "__main__":
                       help='Input s3 bucket')
     parser.add_option('--output', default=None,
                       help='Output bucket')
-    parser.add_option('--nchunks', default=100,
+    parser.add_option('--nchunks', default=100, type='int',
                       help='Number of chunks to stitch')
     parser.add_option('--start_date', default=None,
                       help='Start date of the logs in UTC')
