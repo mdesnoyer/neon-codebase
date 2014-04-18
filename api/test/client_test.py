@@ -343,7 +343,8 @@ class TestVideoClient(unittest.TestCase):
         vprocessor = self.setup_video_processor("brightcove")
         tdata = vprocessor.save_previous_thumbnail(self.api_request)
         self.assertGreater(vprocessor.thumbnails, 0)
-        self.assertEqual(tdata.video_id, self.api_request.video_id)
+        i_vid = neondata.InternalVideoID.generate(self.api_request.api_key, self.api_request.video_id)
+        self.assertEqual(tdata.video_id, i_vid)
         self.assertIn("brightcove.jpeg", tdata.urls[0])
 
     @patch("api.ooyala_api.OoyalaAPI.update_thumbnail")
