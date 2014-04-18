@@ -937,11 +937,11 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         api_key = json.loads(response.body)["neon_api_key"]
         tai = json.loads(response.body)["tracker_account_id"]
         s_tai = json.loads(response.body)["staging_tracker_account_id"]
-        a_id,itype = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)   
-        self.assertEqual(self.a_id, a_id)
+        a_id, itype = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)   
+        self.assertEqual(api_key, a_id)
         self.assertEqual(itype,neondata.TrackerAccountIDMapper.PRODUCTION)
         a_id,itype = neondata.TrackerAccountIDMapper.get_neon_account_id(s_tai)   
-        self.assertEqual(self.a_id, a_id)
+        self.assertEqual(api_key, a_id)
         self.assertEqual(itype, neondata.TrackerAccountIDMapper.STAGING)
 
         #query tai
@@ -950,12 +950,12 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         response = self.get_request(url, api_key)
         tai = json.loads(response.body)["tracker_account_id"]
         s_tai = json.loads(response.body)["staging_tracker_account_id"]
-        a_id,itype = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)   
-        self.assertEqual(self.a_id, a_id)
+        a_id, itype = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)   
+        self.assertEqual(api_key, a_id)
         self.assertEqual(itype,neondata.TrackerAccountIDMapper.PRODUCTION)
         
-        a_id,itype = neondata.TrackerAccountIDMapper.get_neon_account_id(s_tai)   
-        self.assertEqual(self.a_id, a_id)
+        a_id, itype = neondata.TrackerAccountIDMapper.get_neon_account_id(s_tai)   
+        self.assertEqual(api_key, a_id)
         self.assertEqual(itype, neondata.TrackerAccountIDMapper.STAGING)
 
         r_a_id,r_itype = neondata.TrackerAccountIDMapper.get_neon_account_id(tai)

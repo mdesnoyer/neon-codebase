@@ -880,10 +880,10 @@ class AccountHandler(tornado.web.RequestHandler):
             res = yield tornado.gen.Task(user.save_platform, nplatform) 
             if res:
                 tai_mapper = neondata.TrackerAccountIDMapper(
-                                    user.tracker_account_id, a_id, 
+                                    user.tracker_account_id, api_key, 
                                     neondata.TrackerAccountIDMapper.PRODUCTION)
                 tai_staging_mapper = neondata.TrackerAccountIDMapper(
-                                    user.staging_tracker_account_id, a_id,
+                                    user.staging_tracker_account_id, api_key,
                                     neondata.TrackerAccountIDMapper.STAGING)
                 staging_resp = yield tornado.gen.Task(tai_staging_mapper.save)
                 resp = yield tornado.gen.Task(tai_mapper.save)

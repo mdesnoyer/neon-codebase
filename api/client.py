@@ -571,7 +571,7 @@ class VideoProcessor(object):
 
         #previous thumbnail
         if hasattr(api_request, "previous_thumbnail"):
-            self.save_previous_thumbnail()
+            self.save_previous_thumbnail(api_request)
         else:
             _log.info("key=finalize_api_request "
                        " msg=no previous thumbnail for %s %s" %(api_key, video_id))
@@ -605,7 +605,9 @@ class VideoProcessor(object):
             return 
 
         p_url = api_request.previous_thumbnail.split('?')[0]
+        api_key = self.job_params[properties.API_KEY]  
         video_id = self.job_params[properties.VIDEO_ID]
+        i_vid = neondata.InternalVideoID.generate(api_key, video_id)
 
         http_client = tornado.httpclient.HTTPClient()
         req = tornado.httpclient.HTTPRequest(url=p_url,
@@ -622,18 +624,24 @@ class VideoProcessor(object):
             s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
             s3bucket = s3conn.get_bucket(s3bucket_name)
             s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
-            keyname =  self.base_filename + "/brightcove.jpeg" 
-            s3fname = s3_url_prefix + "/" + keyname
             if api_request.request_type == "brightcove":
+                keyname =  self.base_filename + "/brightcove.jpeg" 
                 ttype = neondata.ThumbnailType.BRIGHTCOVE
-            if api_request.request_type == "ooyala":
+            elif api_request.request_type == "ooyala":
+                keyname =  self.base_filename + "/ooyala.jpeg" 
                 ttype = neondata.ThumbnailType.OOYALA
+            else:
+                ttype = neondata.ThumbnailType.DEFAULT
+                keyname =  self.base_filename + "/default.jpeg" 
+
+            s3fname = s3_url_prefix + "/" + keyname
             tdata = save_thumbnail_to_s3_and_metadata(
-                                            video_id, image, 
+                                            i_vid, image, 
                                             score, s3bucket,
                                             keyname, s3fname, 
                                             ttype, rank=1)
-            self.thumbnails.append(tdata)
+            if tdata:
+                self.thumbnails.append(tdata)
             api_request.previous_thumbnail = s3fname
             return tdata
         else:
