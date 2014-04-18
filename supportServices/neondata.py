@@ -526,9 +526,9 @@ class TrackerAccountIDMapper(object):
     STAGING = "staging"
     PRODUCTION = "production"
 
-    def __init__(self, tai, account_id, itype):
+    def __init__(self, tai, api_key, itype):
         self.key = self.__class__.format_key(tai)
-        self.value = account_id 
+        self.value = api_key 
         self.itype = itype
 
     @classmethod
@@ -552,7 +552,7 @@ class TrackerAccountIDMapper(object):
     @classmethod
     def get_neon_account_id(cls, tai, callback=None):
         '''
-        returns tuple of account_id, type(staging/production)
+        returns tuple of api_key, type(staging/production)
         '''
         def format_tuple(result):
             ''' format result tuple '''
@@ -1667,6 +1667,7 @@ class ThumbnailType(object):
     OOYALA      = "ooyala"
     RANDOM      = "random"
     FILTERED    = "filtered"
+    DEFAULT     = "default" #sent via api request
 
 class ThumbnailID(AbstractHashGenerator):
     '''
