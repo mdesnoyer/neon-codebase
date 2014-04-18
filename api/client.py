@@ -23,12 +23,16 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
+import brightcove_api
 import cv2
 import datetime
 import json
 import hashlib
 import model
+import numpy as np
+import ooyala_api 
 import properties
+from PIL import Image
 import Queue
 import random
 import signal
@@ -42,24 +46,21 @@ import tornado.httputil
 import tornado.ioloop
 import time
 import urllib
-import numpy as np
-from PIL import Image
+import utils.neon
+import utils.http
+from utils import statemon
 
 from boto.exception import S3ResponseError
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
 from boto.s3.bucket import Bucket
 from StringIO import StringIO
-
-import brightcove_api
 from supportServices import neondata
+import utils.s3
 
 import logging
 _log = logging.getLogger(__name__)
 
-import utils.neon
-from utils.http import RequestPool
-from utils import statemon
 
 #Monitoring
 statemon.define('processed_video', int)
@@ -79,19 +80,7 @@ define('sync', default=0, type=int,
        help='If true, runs http client in async mode')
 
 # ======== API String constants  =======================#
-
-MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 2
 INTERNAL_PROCESSING_ERROR = "internal error"
-
-#=============== Global Handlers =======================#
-def sig_handler(sig, frame):
-    ''' signal handler '''
-    _log.debug('Caught signal: ' + str(sig) )
-    try:
-        vc.kill_received = True
-    except Exception, e:
-        sys.exit(0)
-
 
 ###########################################################################
 # Global Helper functions
@@ -100,7 +89,13 @@ def sig_handler(sig, frame):
 def callback_response_builder(job_id, vid, data, 
                             thumbnails, client_url, error=None):
         '''
-        build callback response
+        build callback response that will be sent to the callback url
+        which was specified when the request was created
+
+        @data: frame numbers in rank order
+        @thumbnails: s3 urls of the recommended images
+        @client_url: the callback url to send the data to
+
         '''
         response_body = {}
         response_body["job_id"] = job_id 
@@ -116,13 +111,14 @@ def callback_response_builder(job_id, vid, data,
         cb_response_request = tornado.httpclient.HTTPRequest(
                                 url=client_url, 
                                 method="POST",
-                                headers=h,body=body, 
+                                headers=h, 
+                                body=body, 
                                 request_timeout=60.0, 
                                 connect_timeout=10.0)
         return cb_response_request 
 
 def notification_response_builder(a_id, i_id, video_json, 
-                                event="processing_complete"):
+                                  event="processing_complete"):
         '''
         Notification to rails end point
         '''
@@ -135,14 +131,14 @@ def notification_response_builder(a_id, i_id, video_json,
         body = urllib.urlencode(r)
         nt_response_request = tornado.httpclient.HTTPRequest(
                                 url=notification_url, 
-                                method = "POST",
+                                method="POST",
                                 body=body, 
                                 request_timeout=60.0, 
                                 connect_timeout=10.0)
         return nt_response_request
     
 def host_images_s3(api_key, video_id, img_and_scores, base_filename, 
-            model_version=0, ttype=neondata.ThumbnailType.NEON):
+                   model_version=0, ttype=neondata.ThumbnailType.NEON):
     ''' 
     Host images on s3 which is available publicly 
     @input
@@ -167,7 +163,6 @@ def host_images_s3(api_key, video_id, img_and_scores, base_filename,
     #upload the images to s3
     rank = 0 
     for image, score in img_and_scores:
-        #image = Image.fromarray(imdata)
         keyname = base_filename + "/" + fname_prefix + str(rank) + "." + fmt
         s3fname = s3_url_prefix + "/%s/%s%s.jpeg" %(base_filename, fname_prefix, rank)
         tdata = save_thumbnail_to_s3_and_metadata(
@@ -194,7 +189,7 @@ def save_thumbnail_to_s3_and_metadata(i_vid, image, score, s3bucket,
     filestream.seek(0)
     imgdata = filestream.read()
     k = s3bucket.new_key(keyname)
-    k.set_contents_from_string(imgdata,{"Content-Type":"image/jpeg"})
+    utils.s3.set_contents_from_string(k, imgdata, {"Content-Type":"image/jpeg"})
     s3bucket.set_acl('public-read', keyname)
     
     urls = []
@@ -218,7 +213,7 @@ def save_thumbnail_to_s3_and_metadata(i_vid, image, score, s3bucket,
 
 ###########################################################################
 # Process Video File
-####################################################################################
+###########################################################################
 
 class VideoProcessor(object):
     ''' 
@@ -228,7 +223,6 @@ class VideoProcessor(object):
     '''
 
     retry_codes = [403, 500, 502, 503, 504]
-    http_request_pool = RequestPool(3, 3) 
 
     def __init__(self, params, model, model_version):
         '''
@@ -242,7 +236,7 @@ class VideoProcessor(object):
         self.video_url = self.job_params[properties.VIDEO_DOWNLOAD_URL]
         vsuffix = self.video_url.split('/')[-1]  #get the video file extension
         self.tempfile = tempfile.NamedTemporaryFile(
-                                    suffix='_%s'%vsuffix, delete=False)
+                                    suffix='_%s'%vsuffix, delete=True)
         self.headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
             Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
@@ -327,8 +321,8 @@ class VideoProcessor(object):
         #Delete the temp video file which was downloaded
         self.tempfile.flush()
         self.tempfile.close()
-        if os.path.exists(self.tempfile.name):
-            os.unlink(self.tempfile.name)
+        #if os.path.exists(self.tempfile.name):
+        #    os.unlink(self.tempfile.name)
        
         #finalize request, if success send client and notification response
         #error cases are handled in finalize_request
@@ -414,7 +408,7 @@ class VideoProcessor(object):
 
         im_array = np.array(image)
         im = im_array[:, :, ::-1]
-        #TODO: Test flann global data corruption
+        #TODO(Sunil): Test flann global data corruption
         #score, attr = self.model.score(im)
         score = 0
         return str(score)
@@ -540,25 +534,16 @@ class VideoProcessor(object):
                                             ttype=neondata.ThumbnailType.NEON)
             self.thumbnails.extend(thumbnails)
             cr_request = callback_response_builder(job_id, video_id, data, 
-                            s3_urls[:topn], callback_url, error=self.error)
+                                                   s3_urls[:topn], callback_url, 
+                                                   error=self.error)
             self.send_client_callback_response(cr_request)
-            VideoProcessor.http_request_pool.send_request(cr_request)
-
-            ## Neon section
-            if request_type == "neon":
-                #Save response that was created for the callback to client 
-                self.finalize_api_request(cr_request.body, "neon")
-                return
-
-            ## Brightcove secion 
-            elif request_type == "brightcove":
-                self.finalize_api_request(cr_request.body, "brightcove")
-                self.send_notifiction_response()
-
-            ## Ooyala section
-            elif request_type == "ooyala":
-                self.finalize_api_request(cr_request.body, "ooyala")
-
+            utils.http.send_request(cr_request)
+            
+            if request_type in ["neon", "brightcove", "ooyala"]:
+                self.finalize_api_request(cr_request.body, request_type)
+                ## Notification enabled for brightcove only 
+                if request_type == "brightcove":
+                    self.send_notifiction_response()
             else:
                 _log.error("request type not supported")
         else:
@@ -573,7 +558,7 @@ class VideoProcessor(object):
         '''
         
         api_key = self.job_params[properties.API_KEY]  
-        job_id  = self.job_params[properties.REQUEST_UUID_KEY]
+        job_id = self.job_params[properties.REQUEST_UUID_KEY]
         video_id = self.job_params[properties.VIDEO_ID]
         title = self.job_params[properties.VIDEO_TITLE]
         i_id = 0
@@ -594,7 +579,9 @@ class VideoProcessor(object):
         #autosync    
         if hasattr(api_request, "autosync"):
             if api_request.autosync:
-                self.request_autosync()
+                fno = api_request.response["data"][0]
+                img = Image.fromarray(self.data_map[fno][1])
+                self.autosync(api_request, img)
 
         api_request.state = neondata.RequestState.FINISHED 
         if api_request.save():
@@ -604,7 +591,7 @@ class VideoProcessor(object):
                 statemon.state.increment('save_tmdata_error')
 
             if not self.save_video_metadata():
-                _log.error("save_video_metadata")
+                _log.error("save_video_metadata failed to save")
                 statemon.state.increment('save_vmdata_error')
         else:
             _log.error("key=finalize_api_request msg=failed to save request")
@@ -622,9 +609,9 @@ class VideoProcessor(object):
 
         http_client = tornado.httpclient.HTTPClient()
         req = tornado.httpclient.HTTPRequest(url=p_url,
-                                            method="GET",
-                                            request_timeout=60.0,
-                                            connect_timeout=10.0)
+                                             method="GET",
+                                             request_timeout=60.0,
+                                             connect_timeout=10.0)
 
         response = http_client.fetch(req)
         if not response.error:
@@ -652,39 +639,48 @@ class VideoProcessor(object):
         else:
             _log.error("key=save_previous_thumbnail msg=failed to download image")
 
-    def autosync(self, api_request):
+    def autosync(self, api_request, image):
+        '''
+        Autosync Thumbnail
+        '''
         api_key = self.job_params[properties.API_KEY]  
+        video_id = self.job_params[properties.VIDEO_ID]  
         i_id = self.job_params[properties.INTEGRATION_ID] 
-        ba = neondata.BrightcovePlatform.get_account(api_key, i_id)
-        if not ba:
-            _log.error("key=finalize_brightcove_request msg=Brightcove " 
-                    " account doesnt exists a_id=%s i_id=%s"%(api_key, i_id))
-        else: 
-            autosync = ba.auto_update 
+        frame_size = self.video_metadata['frame_size']
+        tid = self.thumbnails[0].key #TOP Neon thumbnail TID
+        if api_request.request_type == "brightcove":
         
-        if autosync:
-            rtoken  = self.job_params[properties.BCOVE_READ_TOKEN]
-            wtoken  = self.job_params[properties.BCOVE_WRITE_TOKEN]
+            rtoken = self.job_params[properties.BCOVE_READ_TOKEN]
+            wtoken = self.job_params[properties.BCOVE_WRITE_TOKEN]
             pid = self.job_params[properties.PUBLISHER_ID]
-            fno = api_request.response["data"][0]
-            img = Image.fromarray(self.data_map[fno][1])
-            tid = self.thumbnails[0].key
-            bcove   = brightcove_api.BrightcoveApi(
-                neon_api_key=api_key,
-                publisher_id=pid,
-                read_token=rtoken,
-                write_token=wtoken)
+            bcove = brightcove_api.BrightcoveApi(
+                        neon_api_key=api_key,
+                        publisher_id=pid,
+                        read_token=rtoken,
+                        write_token=wtoken)
             
-            frame_size = self.video_metadata['frame_size']
             ret = bcove.update_thumbnail_and_videostill(
-                                video_id, img, tid, frame_size)
+                                video_id, image, tid, frame_size)
 
             if ret[0]:
-                #update enabled time & reference ID
                 #NOTE: By default Neon rank 1 is always uploaded
                 self.thumbnails[0].chosen = True 
-                self.thumbnails[0].refid = tid
-    
+            else:
+                _log.error("autosync failed for video %s" % video_id)
+   
+        elif api_request.request_type == "ooyala":
+            oo_api_key = self.job_params["oo_api_key"]
+            oo_secret_key = self.job_params["oo_secret_key"]
+            oo = ooyala_api.OoyalaAPI(oo_api_key, oo_secret_key)
+            update_result = oo.update_thumbnail(video_id,
+                                               image,
+                                               tid,
+                                               frame_size)
+            if update_result:
+                self.thumbnails[0].chosen = True 
+            else:
+                _log.error("autosync failed for ooyala video %s" % video_id)
+
     def save_thumbnail_metadata(self, platform, i_id):
         '''Save the Thumbnail URL and ID to Mapper DB '''
 
@@ -752,7 +748,7 @@ class VideoProcessor(object):
                             body=body, 
                             request_timeout=60.0, 
                             connect_timeout=10.0)
-        response = VideoProcessor.http_request_pool.send_request(requeue_request)
+        response = utils.http.send_request(requeue_request)
         if response.error:
             return False
         return True
@@ -761,11 +757,10 @@ class VideoProcessor(object):
         '''
         Send client response
         '''
-        response = VideoProcessor.http_request_pool.send_request(request)
+        response = utils.http.send_request(request)
         if response.error:
             return False
         return True
- 
 
     def send_notifiction_response(self):
         '''
@@ -787,7 +782,7 @@ class VideoProcessor(object):
                                     0, #current_tid
                                     thumbs)
         request = notification_response_builder(ba.account_id, i_id, vr.to_json()) 
-        response = VideoProcessor.http_request_pool.send_request(request)
+        response = utils.http.send_request(request)
 
 class VideoClient(object):
    
@@ -806,47 +801,44 @@ class VideoClient(object):
         self.debug = debug
         self.sync = sync
         self.pid = os.getpid()
-        self.http_pool = RequestPool(2, 3)
 
     def dequeue_job(self):
         ''' Blocking http call to global queue to dequeue work
             Change state to PROCESSING after dequeue
         '''
         
-        http_client = tornado.httpclient.AsyncHTTPClient()
         headers = {'X-Neon-Auth' : properties.NEON_AUTH} 
         result = None
-        try:
-            req = tornado.httpclient.HTTPRequest(
+        req = tornado.httpclient.HTTPRequest(
                                             url=self.dequeue_url,
                                             method="GET",
                                             headers=headers,
                                             request_timeout=60.0,
                                             connect_timeout=10.0)
 
-            response = self.http_pool.send_request(req)
+        response = utils.http.send_request(req)
+        if not response.error:
             result = response.body
-        except tornado.httpclient.HTTPError, e:
+             
+            if result is not None and result != "{}":
+                try:
+                    job_params = tornado.escape.json_decode(result)
+                    #Change Job State
+                    api_key = job_params[properties.API_KEY]
+                    job_id  = job_params[properties.REQUEST_UUID_KEY]
+                    api_request = neondata.NeonApiRequest.get(api_key, job_id)
+                    if api_request.state == neondata.RequestState.SUBMIT:
+                        api_request.state = neondata.RequestState.PROCESSING
+                        api_request.model_version = self.model_version
+                        api_request.save()
+                    _log.info("key=worker [%s] msg=processing request %s "
+                              %(self.pid, job_params[properties.REQUEST_UUID_KEY]))
+                except Exception,e:
+                    _log.error("key=worker [%s] msg=db error %s" %(self.pid, e.message))
+            return result
+        else:
             _log.error("Dequeue Error %s" %e)
             statemon.state.increment('dequeue_error')
-             
-        if result is not None and result != "{}":
-            try:
-                job_params = tornado.escape.json_decode(result)
-                #Change Job State
-                api_key = job_params[properties.API_KEY]
-                job_id  = job_params[properties.REQUEST_UUID_KEY]
-                api_request = neondata.NeonApiRequest.get(api_key, job_id)
-                if api_request.state == neondata.RequestState.SUBMIT:
-                    api_request.state = neondata.RequestState.PROCESSING
-                    api_request.model_version = self.model_version
-                    api_request.save()
-                _log.info("key=worker [%s] msg=processing request %s "
-                          %(self.pid,job_params[properties.REQUEST_UUID_KEY]))
-            except Exception,e:
-                _log.error("key=worker [%s] msg=db error %s" %(self.pid,e.message))
-        return result
-    
 
     ##### Model Methods #####
 
@@ -856,7 +848,7 @@ class VideoClient(object):
         version = parts.split('.model')[0]
         self.model_version = version
         _log.info('Loading model from %s version %s'
-                  % (self.model_file,self.model_version))
+                  % (self.model_file, self.model_version))
         self.model = model.load_model(self.model_file)
         if not self.model:
             _log.error('Error loading the Model')
@@ -865,7 +857,6 @@ class VideoClient(object):
     def run(self):
         ''' run/start method '''
         _log.info("starting worker [%s] " %(self.pid))
-        self.load_model()
         while not self.kill_received:
             self.do_work()
 
@@ -876,6 +867,7 @@ class VideoClient(object):
             if not job or job == "{}": #string match
                 raise Queue.Empty
            
+            self.load_model()
             jparams = json.loads(job)
             vprocessor = VideoProcessor(jparams, self.model, self.model_version)
             vprocessor.start()
@@ -892,14 +884,10 @@ class VideoClient(object):
 def main():
     utils.neon.InitNeon()
     
-    signal.signal(signal.SIGTERM, sig_handler)
-    signal.signal(signal.SIGINT, sig_handler)
-    
     if options.local:
         _log.info("Running locally")
         properties.BASE_SERVER_URL = properties.LOCALHOST_URL
 
-    global vc
     vc = VideoClient(options.model_file,
                      options.debug, options.sync)
     vc.run()

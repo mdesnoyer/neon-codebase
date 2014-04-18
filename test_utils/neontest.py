@@ -55,7 +55,11 @@ class TestCase(unittest.TestCase):
 
 class AsyncTestCase(tornado.testing.AsyncTestCase, TestCase):
     '''A test case that has access to Neon functions and can do tornado async calls.'''
-    pass
+    def setUp(self):
+       tornado.testing.AsyncTestCase.setUp(self)
+
+    def tearDown(self):
+        tornado.testing.AsyncTestCase.tearDown(self)
 
 def main():
     unittest.main()

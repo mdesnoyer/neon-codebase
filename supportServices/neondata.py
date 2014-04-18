@@ -1383,7 +1383,7 @@ class OoyalaPlatform(AbstractPlatform):
         
         # Update the new_tid as the thumbnail for the video
         oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret)
-        update_result = yield tornado.gen.Task(oo.update_thumbnail_from_url,
+        update_result = yield tornado.gen.Task(oo.update_thumbnail,
                                                platform_vid,
                                                t_url,
                                                new_tid,

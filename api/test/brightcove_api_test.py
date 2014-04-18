@@ -2,6 +2,11 @@
 '''
 Copyright: 2014 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
+
+#TODO @MARK: figure out why test_utils.neontest.AsyncTestCase affects
+other test cases. Seems like the mock persists across test cases.
+disabling this file ensures other tests succeed.
+
 '''
 
 import os.path
@@ -44,10 +49,9 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         self.redis.start() 
 
     def tearDown(self):
-        self.http_mock.stop()
+        self.http_call_patcher.stop()
         self.redis.stop()
         super(TestBrightcoveApi, self).tearDown()
-    
 
     def _set_http_response(self, code=200, body='', error=None):
         def do_response(request, callback=None, *args, **kwargs):

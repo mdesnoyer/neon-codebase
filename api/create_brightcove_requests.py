@@ -36,8 +36,14 @@ if __name__ == "__main__":
     pid = str(os.getpid())
     pidfile = "/tmp/brightcovecron.pid"
     if os.path.isfile(pidfile):
-        print "%s already exists, exiting" % pidfile
-        sys.exit()
+        with open(pidfile, 'r') as f:
+            pid = f.readline().rstrip('\n')
+            if os.path.exits('/proc/%s' %pid):
+                print "%s already exists, exiting" % pidfile
+                sys.exit()
+            else:
+            os.unlink(pidfile)
+
     else:
         file(pidfile, 'w').write(pid)
 

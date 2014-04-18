@@ -36,5 +36,15 @@ class TestInputSantizer(unittest.TestCase):
         l = [ "s","t","r" ]
         self.assertEqual(InputSanitizer.to_string(l),"str")
 
+    def test_valid_http_url(self):
+        #TO BE FIXED 
+        links = ["http://image.jpg"] 
+        for link in links:
+            self.assertIsNotNone(InputSanitizer.validate_http_url(link))
+        
+        invs = ["htt://agag.jpg", "htttp://images.jpg", "soemrangomstring"]
+        for inv in invs:
+            self.assertIsNone(InputSanitizer.validate_http_url(inv))
+
 if __name__ == '__main__':
     unittest.main()
