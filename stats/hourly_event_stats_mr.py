@@ -253,7 +253,7 @@ class HourlyEventStats(MRJob):
         bc_url_tag_extractor = \
           re.compile(r'https*:\/\/brightcove.*/[0-9]+_[0-9]+_([\w\-]+)\.jpg')
         # This is used to parse the thumbnail id
-        tidRe = re.compile(r'(\w+)_(\w+)_(\w+)')
+        tidRe = re.compile(r'([0-9a-z]+)_(\d+)_([a-f0-9]+)')
         # These are used to identify old format brightcove or
         # neonthumbnail urls. TODO(mdesnoyer) remove this hack
         oldBcRe = re.compile(r'neonthumbnailbc_([0-9]+)')
