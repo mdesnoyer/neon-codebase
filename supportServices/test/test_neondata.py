@@ -394,7 +394,7 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         
         external_vids = ['5ieGdqMjoiVJJjw7YIZk5fMBvIE86Z1c', 
                 'xhdG5nMjoiKNbeAz0UrQo2_YVPcZRng8', '12451561361', 
-                'R4YjBnMjrzRQRcDLf34bXbRH4qR6CEF1' ]
+                'R4YjBnMjrzRQRcDLf34bXbRH4qR6CEF1', 'vid_3' ]
 
         for i in range(100):
             external_vids.append(id_generator())
