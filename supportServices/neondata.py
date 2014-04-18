@@ -534,7 +534,7 @@ class TrackerAccountIDMapper(object):
     @classmethod
     def format_key(cls, tai):
         ''' format db key '''
-        return cls.__name__.lower() + '_%s'%tai
+        return cls.__name__.lower() + '_%s' % tai
     
     def to_json(self):
         ''' to json '''
