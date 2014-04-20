@@ -10,10 +10,14 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
   sys.path.insert(0, __base_path__)
 
+import multiprocessing
+import os
+import time
 import tornado.concurrent
 import tornado.gen
 import tornado.ioloop
 import test_utils.neontest
+import utils.http
 import utils.sync
 import unittest
 
@@ -96,6 +100,48 @@ class TestOptionalSyncDecorator(test_utils.neontest.AsyncTestCase):
             self._some_tornado_async_function(exception_raise)
 
         self.assertEqual(tornado.ioloop.IOLoop.current(), cur_io_loop)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _call_google(self):
+        response = yield tornado.gen.Task(
+            utils.http.send_request,
+            tornado.httpclient.HTTPRequest('http://localhost'),
+            1)
+        raise tornado.gen.Return(response)
+
+    def _call_google_alot(self, start_gate, wait_gate, end_gate):
+        wait_gate.set()
+        start_gate.wait()
+        for i in range(10):
+            self._call_google()
+        wait_gate.set()
+        end_gate.wait()
+
+    def test_file_descriptors_leaking(self):
+        start_gate = multiprocessing.Event()
+        wait_gate = multiprocessing.Event()
+        end_gate = multiprocessing.Event()
+        proc = multiprocessing.Process(target=self._call_google_alot,
+                                       args=(start_gate, wait_gate, end_gate))
+        proc.daemon = True
+        proc.start()
+        try:
+            wait_gate.wait()
+            wait_gate.clear()
+            start_fd_count = len(os.listdir("/proc/%s/fd" % proc.pid))
+
+            start_gate.set()
+            wait_gate.wait()
+            self.assertEqual(start_fd_count,
+                             len(os.listdir("/proc/%s/fd" % proc.pid)))
+            end_gate.set()
+
+        except Exception:
+            # Release the process so that it can finish
+            start_gate.set()
+            end_gate.set()
+            raise
 
 if __name__ == '__main__':
     unittest.main()

@@ -78,3 +78,4 @@ def bounded_io_loop():
 
     finally:
         old_ioloop.make_current()
+        temp_ioloop.close()
