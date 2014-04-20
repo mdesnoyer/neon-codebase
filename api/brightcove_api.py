@@ -159,13 +159,6 @@ class BrightcoveApi(object):
 
         if reference_id is not None:
             image_fname = 'neontn%s.jpg' % (reference_id)
-        
-        #If reference_id is given, use that to name the file
-        #Example image url 
-        #http://brightcove.../2294876105001_3454491787001_still-d927f1b798758dcd1d012263608f4ae8-3117793385001-4ce090d327f195c2648ac0ccc42697ef.jpg
-
-        if reference_id is not None:
-            image_fname = '%s.jpg' % (reference_id)
 
         if remote_url:
             post_param = []
