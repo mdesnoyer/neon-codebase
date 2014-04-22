@@ -27,8 +27,8 @@ import brightcove_api
 import cv2
 import datetime
 import ffvideo
-import json
 import hashlib
+import json
 import model
 import numpy as np
 import ooyala_api 
@@ -334,6 +334,8 @@ class VideoProcessor(object):
         start_process = time.time()
 
         try:
+            # OpenCV doesn't return metadata reliably, so use ffvideo
+            # to get that information.
             fmov = ffvideo.VideoStream(video_file)
             self.video_metadata['codec_name'] = fmov.codec_name
             self.video_metadata['duration'] = fmov.duration
@@ -357,8 +359,7 @@ class VideoProcessor(object):
         if duration <= 1e-3:
             _log.error("key=process_video worker "
                        "msg=video %s has no length. skipping." %
-                       (video_file))
-            #return #NOTE: cv2 doesn't return this reliably, investigate why? 
+                       (video_file)) 
 
         #If a really long video, then increase the sampling rate
         if duration > 1800:
@@ -367,11 +368,22 @@ class VideoProcessor(object):
         # >1 hr
         if duration > 3600:
             self.sec_to_extract_offset = 4
-        results, self.sec_to_extract = \
-                self.model.choose_thumbnails(mov,
-                                       n=n_thumbs,
-                                       sample_step=self.sec_to_extract_offset,
-                                       start_time=self.sec_to_extract)
+
+        try:
+            results, self.sec_to_extract = \
+              self.model.choose_thumbnails(
+                  mov,
+                  n=n_thumbs,
+                  sample_step=self.sec_to_extract_offset,
+                  start_time=self.sec_to_extract)
+        except model.VideoReadError:
+            _log.error("Error using OpenCV to read video. Trying ffvideo")
+            results, self.sec_to_extract = \
+              self.model.ffvideo_choose_thumbnails(
+                  fmov,
+                  n=n_thumbs,
+                  sample_step=self.sec_to_extract_offset,
+                  start_time=self.sec_to_extract)
 
         for image, score, frame_no, timecode, attribute in results:
             if attribute is not None and attribute == '':

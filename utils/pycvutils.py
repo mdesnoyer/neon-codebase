@@ -89,14 +89,10 @@ def seek_video(video, frame_no, do_log=True, cur_frame=None):
             grab_sucess = video.grab()
             cur_frame = video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES)
             if cur_frame == 0:
-                if do_log:
-                    _log.error('Cannot read the current frame location. '
-                               'You need to set a cur_frame, but we are '
-                               'resorting to manual assuming that we started '
-                               'at 0.')
-                cur_frame = 1
-                while grab_sucess and cur_frame < frame_no:
-                    grab_sucess = video.grab()
-                    cur_frame += 1
+                _log.error('Cannot read the current frame location. '
+                           'This probably means that we cannot walk '
+                           'through the video properly, so we are '
+                           'stopping.')
+                return False, None
 
     return grab_sucess, cur_frame
