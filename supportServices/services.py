@@ -397,7 +397,8 @@ class AccountHandler(tornado.web.RequestHandler):
         request_body["video_title"] = \
                 video_url.split('//')[-1] if video_title is None else video_title 
         request_body["video_url"] = video_url
-        client_url = 'http://thumbnails.neon-lab.com/api/v1/submitvideo/topn'
+        #client_url = 'http://thumbnails.neon-lab.com/api/v1/submitvideo/topn'
+        client_url = 'http://50.19.216.114:8081/api/v1/submitvideo/topn' #use EIP
         if options.local == 1:
             client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
             request_body["callback_url"] = callback_url 
@@ -504,7 +505,8 @@ class AccountHandler(tornado.web.RequestHandler):
         request_body["video_title"] = \
                 video_url.split('//')[-1] if title is None else title 
         request_body["video_url"]   = video_url
-        client_url = 'http://thumbnails.neon-lab.com/api/v1/submitvideo/topn'
+        #client_url = 'http://thumbnails.neon-lab.com/api/v1/submitvideo/topn'
+        client_url = 'http://50.19.216.114:8081/api/v1/submitvideo/topn' #use EIP
         if options.local == 1:
             client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
             request_body["callback_url"] = "http://localhost:8081/testcallback"

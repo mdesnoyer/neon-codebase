@@ -42,7 +42,7 @@ if __name__ == "__main__":
                 print "%s already exists, exiting" % pidfile
                 sys.exit()
             else:
-            os.unlink(pidfile)
+                os.unlink(pidfile)
 
     else:
         file(pidfile, 'w').write(pid)

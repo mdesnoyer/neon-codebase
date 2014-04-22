@@ -26,6 +26,7 @@ if sys.path[0] <> base_path:
 import brightcove_api
 import cv2
 import datetime
+import ffvideo
 import json
 import hashlib
 import model
@@ -331,20 +332,21 @@ class VideoProcessor(object):
     def process_video(self, video_file, n_thumbs=1):
         ''' process all the frames from the partial video downloaded '''
         start_process = time.time()
+
+        try:
+            fmov = ffvideo.VideoStream(video_file)
+            self.video_metadata['codec_name'] = fmov.codec_name
+            self.video_metadata['duration'] = fmov.duration
+            self.video_metadata['framerate'] = fmov.framerate
+            self.video_metadata['bitrate'] = fmov.bitrate
+            self.video_metadata['frame_size'] = fmov.frame_size
+            self.video_size = fmov.duration * fmov.bitrate / 8 # in bytes
+        except Exception, e:
+            _log.error("key=process_video msg=FFVIDEO error")
+            return False
+
         try:
             mov = cv2.VideoCapture(video_file)
-            if self.video_metadata['codec_name'] is None:
-                fps = mov.get(cv2.cv.CV_CAP_PROP_FPS) or 30.0
-                self.video_metadata['codec_name'] = \
-                  struct.pack('I', mov.get(cv2.cv.CV_CAP_PROP_FOURCC))
-                self.video_metadata['duration'] = \
-                  fps * mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
-                self.video_metadata['framerate'] = fps
-                self.video_metadata['bitrate'] = None # Can't get this in OpenCV
-                width = mov.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH)
-                height = mov.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT)
-                self.video_metadata['frame_size'] = (width, height)
-                self.video_size = None # Can't get this in OpenCV
         except Exception, e:
             _log.error("key=process_video worker " 
                         " msg=%s "  % (e.message))
@@ -353,9 +355,9 @@ class VideoProcessor(object):
         duration = self.video_metadata['duration']
 
         if duration <= 1e-3:
-            _log.error("key=process_video worker[%s] "
+            _log.error("key=process_video worker "
                        "msg=video %s has no length. skipping." %
-                       (self.pid, video_file))
+                       (video_file))
             #return #NOTE: cv2 doesn't return this reliably, investigate why? 
 
         #If a really long video, then increase the sampling rate
@@ -778,6 +780,7 @@ class VideoProcessor(object):
         api_key = self.job_params[properties.API_KEY] 
         video_id = self.job_params[properties.VIDEO_ID]
         title = self.job_params[properties.VIDEO_TITLE]
+        i_id = self.job_params[properties.INTEGRATION_ID]
         ba = neondata.BrightcovePlatform.get_account(api_key, i_id) 
         thumbs = [t.to_dict_for_video_response() for t in self.thumbnails]
         vr = neondata.VideoResponse(video_id,

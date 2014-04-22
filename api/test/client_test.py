@@ -217,11 +217,11 @@ class TestVideoClient(unittest.TestCase):
         self.assertTrue(ret)
 
         #verify metadata has been populated
-        self.assertEqual(vprocessor.video_metadata['codec_name'], 'avc1')
-        self.assertEqual(vprocessor.video_metadata['duration'], 1980)
+        self.assertEqual(vprocessor.video_metadata['codec_name'], 'h264')
+        self.assertEqual(vprocessor.video_metadata['duration'], 8.8)
         self.assertEqual(vprocessor.video_metadata['framerate'], 15)
         self.assertEqual(vprocessor.video_metadata['frame_size'], (400, 264))
-        self.assertIsNone(vprocessor.video_metadata['bitrate'])
+        self.assertIsNotNone(vprocessor.video_metadata['bitrate'])
        
         #verify that following maps get populated
         self.assertGreater(len(vprocessor.data_map), 0)
