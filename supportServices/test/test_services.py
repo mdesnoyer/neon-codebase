@@ -47,7 +47,6 @@ mock_image_url_prefix = "http://servicesunittest.mock.com/"
 
 def create_random_image_response():
     '''http image response''' 
-        
     request = tornado.httpclient.HTTPRequest("http://someimageurl/image.jpg")
     im = utils.imageutils.PILImageUtils.create_random_image(360, 480)
     imgstream = StringIO()
