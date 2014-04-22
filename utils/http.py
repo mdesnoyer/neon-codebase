@@ -148,9 +148,9 @@ class RequestThread(threading.Thread):
                     if (ntries + 1) >= self.max_tries:
                         _log.error(('key=http_too_many_errors '
                                     'msg=Abort. Too many errors for %s '
-                                    'request to %s with body: %s')
+                                    'request to %s with body starting: %s')
                                     % (request.method, request.url,
-                                       request.body))
+                                       request.body[0:100]))
                         callback(response)
                         self.q.task_done()
                     else:
