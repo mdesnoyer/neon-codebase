@@ -28,6 +28,7 @@ import tornado.ioloop
 import test_utils.redis
 import urlparse
 import unittest
+from utils.imageutils import PILImageUtils
 
 _log = logging.getLogger(__name__)
 
@@ -165,7 +166,7 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
             self.assertIsNone(still_url)
       
     @patch('api.brightcove_api.utils.http.send_request')
-    def test_cehck_feed(self, utils_http_patch):
+    def test_check_feed(self, utils_http_patch):
     
         def _side_effect(request, callback=None, *args, **kwargs):
             if "submitvideo" in request.url:
@@ -211,7 +212,27 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         u_bp = neondata.BrightcovePlatform.create(bp.get())
         self.assertEqual(len(u_bp.get_videos()), nvideos)
 
+    @patch('api.brightcove_api.BrightcoveApi.write_connection.send_request') 
+    def test_add_image(self, write_conn_mock):
+        response = HTTPResponse(HTTPRequest("http://bcove"), 200,
+                buffer=StringIO('done'))
+        write_conn_mock.side_effect = [response]
+        image = PILImageUtils.create_random_image(360, 480) 
+        tid = "TID"
+        self.api.add_image("video_id1", image, reference_id=tid)
+        headers = write_conn_mock.call_args[0][0].headers
+        self.assertTrue('multipart/form-data' in headers['Content-Type'])
+        body = write_conn_mock.call_args[0][0].body
 
+        ##parse multipart request body; #TODO(Sunil) Find python lib to parse this
+        separator = body.split('\r\n')[0]
+        parts = body.split(separator)
+        img_metadata = parts[1]
+        img_data = parts[2]
+        c_disposition = img_data.split('\r\n')[1]
+        #ex: 'Content-Disposition: form-data; name="filePath"; filename="neontnTID.jpg"'
+        img_filename = c_disposition.split(';')[-1].split("=")[-1]
+        self.assertEqual(img_filename, '"neontn%s.jpg"' %tid)
+    
 if __name__ == "__main__" :
     unittest.main()
-        

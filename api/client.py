@@ -26,8 +26,9 @@ if sys.path[0] <> base_path:
 import brightcove_api
 import cv2
 import datetime
-import json
+import ffvideo
 import hashlib
+import json
 import model
 import numpy as np
 import ooyala_api 
@@ -278,7 +279,20 @@ class VideoProcessor(object):
                                             headers=self.headers,
                                             request_timeout=self.timeout)
         http_client = tornado.httpclient.HTTPClient()
-        response = http_client.fetch(req)
+        
+        try:
+            response = http_client.fetch(req)
+            #TODO(Sunil): Investiage if fallback is needed for tornado errors?
+            #import urllib2
+            #req = urllib2.Request(self.video_url, headers=self.headers)
+            #res = urllib2.urlopen(req)
+            #data = res.read()
+            #self.tempfile.write(data)
+            #return
+        except Exception, e:
+            self.error = "http error conencting to url"
+            return
+
         if response.error:
             #Do we need to handle timeout for long running http calls ? 
             self.error = "http error downloading file"
@@ -321,8 +335,6 @@ class VideoProcessor(object):
         #Delete the temp video file which was downloaded
         self.tempfile.flush()
         self.tempfile.close()
-        #if os.path.exists(self.tempfile.name):
-        #    os.unlink(self.tempfile.name)
        
         #finalize request, if success send client and notification response
         #error cases are handled in finalize_request
@@ -331,20 +343,24 @@ class VideoProcessor(object):
     def process_video(self, video_file, n_thumbs=1):
         ''' process all the frames from the partial video downloaded '''
         start_process = time.time()
+
+        try:
+            # OpenCV doesn't return metadata reliably, so use ffvideo
+            # to get that information.
+            fmov = ffvideo.VideoStream(video_file)
+            self.video_metadata['codec_name'] = fmov.codec_name
+            self.video_metadata['duration'] = fmov.duration
+            self.video_metadata['framerate'] = fmov.framerate
+            self.video_metadata['bitrate'] = fmov.bitrate
+            self.video_metadata['frame_size'] = fmov.frame_size
+            self.video_size = fmov.duration * fmov.bitrate / 8 # in bytes
+        except Exception, e:
+            _log.error("key=process_video msg=FFVIDEO error")
+            return False
+
+        #Try to open the video file using openCV
         try:
             mov = cv2.VideoCapture(video_file)
-            if self.video_metadata['codec_name'] is None:
-                fps = mov.get(cv2.cv.CV_CAP_PROP_FPS) or 30.0
-                self.video_metadata['codec_name'] = \
-                  struct.pack('I', mov.get(cv2.cv.CV_CAP_PROP_FOURCC))
-                self.video_metadata['duration'] = \
-                  fps * mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
-                self.video_metadata['framerate'] = fps
-                self.video_metadata['bitrate'] = None # Can't get this in OpenCV
-                width = mov.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH)
-                height = mov.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT)
-                self.video_metadata['frame_size'] = (width, height)
-                self.video_size = None # Can't get this in OpenCV
         except Exception, e:
             _log.error("key=process_video worker " 
                         " msg=%s "  % (e.message))
@@ -353,10 +369,9 @@ class VideoProcessor(object):
         duration = self.video_metadata['duration']
 
         if duration <= 1e-3:
-            _log.error("key=process_video worker[%s] "
+            _log.error("key=process_video worker "
                        "msg=video %s has no length. skipping." %
-                       (self.pid, video_file))
-            #return #NOTE: cv2 doesn't return this reliably, investigate why? 
+                       (video_file)) 
 
         #If a really long video, then increase the sampling rate
         if duration > 1800:
@@ -365,11 +380,22 @@ class VideoProcessor(object):
         # >1 hr
         if duration > 3600:
             self.sec_to_extract_offset = 4
-        results, self.sec_to_extract = \
-                self.model.choose_thumbnails(mov,
-                                       n=n_thumbs,
-                                       sample_step=self.sec_to_extract_offset,
-                                       start_time=self.sec_to_extract)
+
+        try:
+            results, self.sec_to_extract = \
+              self.model.choose_thumbnails(
+                  mov,
+                  n=n_thumbs,
+                  sample_step=self.sec_to_extract_offset,
+                  start_time=self.sec_to_extract)
+        except model.VideoReadError:
+            _log.error("Error using OpenCV to read video. Trying ffvideo")
+            results, self.sec_to_extract = \
+              self.model.ffvideo_choose_thumbnails(
+                  fmov,
+                  n=n_thumbs,
+                  sample_step=self.sec_to_extract_offset,
+                  start_time=self.sec_to_extract)
 
         for image, score, frame_no, timecode, attribute in results:
             if attribute is not None and attribute == '':
@@ -778,6 +804,7 @@ class VideoProcessor(object):
         api_key = self.job_params[properties.API_KEY] 
         video_id = self.job_params[properties.VIDEO_ID]
         title = self.job_params[properties.VIDEO_TITLE]
+        i_id = self.job_params[properties.INTEGRATION_ID]
         ba = neondata.BrightcovePlatform.get_account(api_key, i_id) 
         thumbs = [t.to_dict_for_video_response() for t in self.thumbnails]
         vr = neondata.VideoResponse(video_id,
@@ -845,7 +872,7 @@ class VideoClient(object):
                     _log.error("key=worker [%s] msg=db error %s" %(self.pid, e.message))
             return result
         else:
-            _log.error("Dequeue Error %s" %e)
+            _log.error("Dequeue Error")
             statemon.state.increment('dequeue_error')
 
     ##### Model Methods #####
