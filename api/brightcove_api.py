@@ -65,7 +65,8 @@ class BrightcoveApi(object):
         if self.local:
             self.neon_uri = "http://localhost:8081/api/v1/submitvideo/"
         else:
-            self.neon_uri = "http://thumbnails.neon-lab.com/api/v1/submitvideo/" 
+            #self.neon_uri = "http://thumbnails.neon-lab.com/api/v1/submitvideo/" 
+            self.neon_uri = "http://50.19.216.114:8081/api/v1/submitvideo/" 
         
         self.THUMB_SIZE = 120, 90
         self.STILL_SIZE = 480, 360
@@ -159,13 +160,7 @@ class BrightcoveApi(object):
 
         if reference_id is not None:
             image_fname = 'neontn%s.jpg' % (reference_id)
-        
-        #If reference_id is given, use that to name the file
-        #Example image url 
-        #http://brightcove.../2294876105001_3454491787001_still-d927f1b798758dcd1d012263608f4ae8-3117793385001-4ce090d327f195c2648ac0ccc42697ef.jpg
-
-        if reference_id is not None:
-            image_fname = '%s.jpg' % (reference_id)
+            #reference_id = "v2_%s" %reference_id #V2 ref ID
 
         if remote_url:
             post_param = []
@@ -441,6 +436,7 @@ class BrightcoveApi(object):
         data['page_size'] = page_size
         data['sort_by'] = 'publish_date'
         data['get_item_count'] = "true"
+        data['cache_buster'] = time.time() 
 
         url = self.format_get(self.read_url, data)
         req = tornado.httpclient.HTTPRequest(url=url,
@@ -563,7 +559,8 @@ class BrightcoveApi(object):
         if self.local:
             request_body["callback_url"] = "http://localhost:8081/testcallback"
         else:
-            request_body["callback_url"] = "http://thumbnails.neon-lab.com/testcallback"
+            #request_body["callback_url"] = "http://thumbnails.neon-lab.com/testcallback"
+            request_body["callback_url"] = "http://50.19.216.114:8081/testcallback"
         request_body["autosync"] = self.autosync
         request_body["topn"] = 1
         request_body["integration_id"] = i_id 
@@ -672,9 +669,10 @@ class BrightcoveApi(object):
         data['video_fields'] = "id,name,length,endDate,startDate,creationDate,publishedDate,lastModifiedDate,thumbnailURL,videoStillURL,FLVURL"
         data["from_date"] = 21492000
         data["filter"] = "UNSCHEDULED,INACTIVE"
+        data['cache_buster'] = time.time() 
 
         url = self.format_get(self.read_url, data)
-        req = tornado.httpclient.HTTPRequest(url = url,
+        req = tornado.httpclient.HTTPRequest(url=url,
                                              method = "GET",
                                              request_timeout = 60.0
                                              )

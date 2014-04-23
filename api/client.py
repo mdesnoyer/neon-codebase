@@ -279,7 +279,20 @@ class VideoProcessor(object):
                                             headers=self.headers,
                                             request_timeout=self.timeout)
         http_client = tornado.httpclient.HTTPClient()
-        response = http_client.fetch(req)
+        
+        try:
+            response = http_client.fetch(req)
+            #TODO(Sunil): Investiage if fallback is needed for tornado errors?
+            #import urllib2
+            #req = urllib2.Request(self.video_url, headers=self.headers)
+            #res = urllib2.urlopen(req)
+            #data = res.read()
+            #self.tempfile.write(data)
+            #return
+        except Exception, e:
+            self.error = "http error conencting to url"
+            return
+
         if response.error:
             #Do we need to handle timeout for long running http calls ? 
             self.error = "http error downloading file"
@@ -322,8 +335,6 @@ class VideoProcessor(object):
         #Delete the temp video file which was downloaded
         self.tempfile.flush()
         self.tempfile.close()
-        #if os.path.exists(self.tempfile.name):
-        #    os.unlink(self.tempfile.name)
        
         #finalize request, if success send client and notification response
         #error cases are handled in finalize_request
@@ -347,6 +358,7 @@ class VideoProcessor(object):
             _log.error("key=process_video msg=FFVIDEO error")
             return False
 
+        #Try to open the video file using openCV
         try:
             mov = cv2.VideoCapture(video_file)
         except Exception, e:
@@ -860,7 +872,7 @@ class VideoClient(object):
                     _log.error("key=worker [%s] msg=db error %s" %(self.pid, e.message))
             return result
         else:
-            _log.error("Dequeue Error %s" %e)
+            _log.error("Dequeue Error")
             statemon.state.increment('dequeue_error')
 
     ##### Model Methods #####
