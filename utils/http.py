@@ -150,7 +150,7 @@ class RequestThread(threading.Thread):
                                     'msg=Abort. Too many errors for %s '
                                     'request to %s with body starting: %s')
                                     % (request.method, request.url,
-                                       (request.body[0:100] or '')))
+                                       ('' if request.body is None else request.body[0:100])))
                         callback(response)
                         self.q.task_done()
                     else:
