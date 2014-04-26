@@ -228,7 +228,6 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
             img_metadata = parts[1]
             img_data = parts[2]
             c_disposition = img_data.split('\r\n')[1]
-            import pdb; pdb.set_trace()
             #ex: 'Content-Disposition: form-data; name="filePath"; filename="neontnTID.jpg"'
             img_filename = c_disposition.split(';')[-1].split("=")[-1]
             self.assertEqual(img_filename, '"neontn%s.jpg"' %tid)
