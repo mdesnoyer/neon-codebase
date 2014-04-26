@@ -347,6 +347,13 @@ class StoredObject(object):
         Returns:
         A list of cls objects or None if it wasn't there, one for each key
         '''
+        #MGET raises an exception for wrong number of args if keys = []
+        if len(keys) == 0:
+            if callback:
+                callback([])
+            else:
+                return []
+
         db_connection = DBConnection(cls)
 
         def process(results):
