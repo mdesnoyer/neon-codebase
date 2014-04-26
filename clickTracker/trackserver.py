@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 ''''
-Server that logs data from the tracker in to S3
+Server that logs data from the tracker and sends it to a local flume agent
 
-Tornado server listens for http requests and puts in to the Q a
-TrackerData json object. A thread dequeues data and sends the data to s3
+Tornado server listens for http requests and sends them to flume. If
+flume can't handle the load, the events are logged to disk and then
+replayed when flume comes back.
+
 '''
 
 import os.path
@@ -37,27 +39,20 @@ _log = logging.getLogger(__name__)
 
 from utils.options import define, options
 define("port", default=9080, help="run on the given port", type=int)
-define("test", default=0, help="populate queue for test", type=int)
-define("batch_count", default=100, type=int, 
-       help="Number of lines to bacth to s3")
-define("s3disk", default="/mnt/neon/s3diskbacklog", type=str,
-        help="Location to store backup lines which failed to upload s3")
-define("output", default='s3://neon-tracker-logs',
-       help=('Location to store the output. Can be a local directory, '
-             'or an S3 bucket of the form s3://<bucket_name>'))
-define("flush_interval", default=120, type=float,
-       help='Interval in seconds to force a flush to S3')
-define("max_concurrent_uploads", default=100, type=int,
-       help='Maximum number of concurrent uploads')
-define("s3accesskey", default='AKIAJ5G2RZ6BDNBZ2VBA', help="s3 access key",
-       type=str)
-define("s3secretkey", default='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',
-       help="s3 secret key", type=str)
+define("flume_port", default=6367, type=int,
+       help='Port to talk to the flume agent running locally')
+define("backup_disk", default="/mnt/neon/backlog", type=str,
+        help="Location to store backup lines which failed to send to the flume agent")
+define("backup_max_events_per_file", default=100000, type=int,
+       help='Maximum events to allow backups on per file')
+define("backup_flush_interval", default=100, type=int,
+       help='Flush to disk after how many events?')
 
 from utils import statemon
-statemon.define('qsize', int)
-statemon.define('buffer_size', int)
-statemon.define('s3_connection_errors', int)
+statemon.define('backup_qsize', int)
+statemon.define('flume_errors', int)
+statemon.define('messages_handled', int)
+statemon.define('invalid_messages', int)
 
 #############################################
 #### DATA FORMAT ###
@@ -133,26 +128,44 @@ class LogLines(TrackerDataHandler):
 
     def initialize(self, q, watcher):
         '''Initialize the logger.'''
-        self.q = q
         self.watcher = watcher
+        self.backup_q = q
     
     @tornado.web.asynchronous
+    @tornado.gen.coroutine
     def get(self, *args, **kwargs):
         '''Handle a tracking request.'''
         with self.watcher.activate():
+            statemon.state.messages_handled.increment()
+            
             try:
                 tracker_data = self.parse_tracker_data()
+            except tornado.web.HTTPError as e:
+                _log.error('Invalid request: %s' % self.request.uri)
+                statemon.state.invalid_messages.increment()
+                raise
             except Exception, err:
-                _log.exception("key=get_track msg=%s", err) 
+                _log.exception("key=get_track msg=%s", err)
                 self.set_status(500)
                 self.finish()
                 return
 
             data = tracker_data.to_json()
             try:
-                self.q.put(data)
-                statemon.state.qsize = self.q.qsize()
-                self.set_status(200)
+                request = tornado.httpclient.HTTPRequest(
+                    'http://localhost:%i' % options.flume_port,
+                    method='POST'
+                    headers={'Content-Type': 'application/json'},
+                    body=data)
+                response = yield torndado.gen.Task(utils.http.send_request,
+                                                   request)
+                if response.error:
+                    _log.error('Could not send message to flume')
+                    statemon.state.flume_errors.increment()
+                    self.backup_q.put(data)
+                    self.set_status(response.error.code)
+                else:
+                    self.set_status(response.code)
             except Exception, err:
                 _log.exception("key=loglines msg=Q error %s", err)
                 self.set_status(500)
@@ -182,62 +195,32 @@ class TestTracker(TrackerDataHandler):
         self.finish()
 
 ###########################################
-# S3 Handler thread 
+# File Backup Handler thread 
 ###########################################
-class S3Handler(threading.Thread):
+class FileBackupHandler(threading.Thread):
     '''Thread that uploads data to S3.'''
     
     def __init__(self, dataQ, watcher=utils.ps.ActivityWatcher()):
         super(S3Handler, self).__init__()
         self.dataQ = dataQ
-        self.last_upload_time = time.time()
         self.daemon = True
         self.watcher = watcher
-
-        self.bucket_name = None
-        self.use_s3 = False
-        self.s3conn = None
+        self.backup_stream = None
+        self.events_in_file = 0
+        
         self._mutex = threading.RLock()
         self._upload_limiter = \
           threading.Semaphore(options.max_concurrent_uploads)
 
-        statemon.state.s3_connection_errors = 0
         statemon.state.qsize = self.dataQ.qsize()
-        statemon.state.buffer_size = 0
 
-        self._check_output_location()
+        # Make sure the backup directory exists
+        if not os.path.exists(options.backup_disk):
+            os.makedirs(options.backup_disk)
 
-    def _check_output_location(self):
-        '''Determine where to output the log file.
-
-        Directories are created as necessary.
-        '''
-        # Make sure the s3 backup exists
-        if not os.path.exists(options.s3disk):
-            os.makedirs(options.s3disk)
-        
-        # Determine where the output will be and create the
-        # directories if necessary
-        s3path_re = re.compile(r's3://([0-9a-zA-Z_-]+)')
-        s3match = s3path_re.match(options.output)
-        self.use_s3 = False
-        if s3match:
-            self.bucket_name = s3match.groups()[0]
-            self.use_s3 = True
-
-            if self.s3conn is None:
-                self.s3conn = S3Connection(options.s3accesskey,
-                        options.s3secretkey)
-                
-            bucket = self.s3conn.lookup(self.bucket_name)
-            if bucket is None:
-                self.s3conn.create_bucket(self.bucket_name)
-        else:
-            if not os.path.exists(options.output):
-                os.makedirs(options.output)
-            if not os.path.isdir(options.output):
-                raise IOError('The output directory: %s is not a directory' %
-                              options.output)
+    def __del__(self):
+        if self.backup_stream is not None:
+            self.backup_stream.close()
 
     def _generate_log_filename(self):
         '''Create a new log filename.'''
@@ -245,129 +228,53 @@ class S3Handler(threading.Thread):
             time.strftime('%S%M%H%d%m%Y', time.gmtime()),
             shortuuid.uuid())
 
-    def _send_to_output(self, data):
-        '''Sends the data to the appropriate output location.'''
-        filename = self._generate_log_filename()
-        self._check_output_location()
-        if self.use_s3:
-            thread = threading.Thread(target=self._save_to_s3,
-                                      args=('\n'.join(data), self.bucket_name,
-                                            filename, len(data)))
-        else:
-            thread = threading.Thread(
-                target=self._save_to_disk,
-                args=('\n'.join(data) + "\n",
-                      os.path.join(options.output, filename),
-                      len(data)))
-
-        self._upload_limiter.acquire()
-        thread.start()
-
-    def _save_to_s3(self, data, bucket_name, key_name, nlines):
-        '''Saves some data to S3
-
-        Inputs:
-        data - data to save
-        bucket_name - Name of the S3 bucket to send to
-        key_name - S3 key to write the data in
-        nlines - Number of lines in the data
-        '''
-        try:
-            bucket = self.s3conn.get_bucket(bucket_name)
-            key = bucket.new_key(key_name)
-            key.set_contents_from_string(data)
-
-            self._upload_temp_logs_to_s3(bucket_name)
-
-            self._upload_limiter.release()
+    def _open_new_backup_file(self):
+        '''Opens a new backup file and puts it on self.backup_stream.'''
+        if not os.path.exists(options.backup_disk):
+            os.makedirs(options.backup_disk)
             
-            for i in range(nlines):
-                self.dataQ.task_done()
-                
-        except boto.exception.BotoServerError as err:
-            _log.error("key=upload_to_s3 msg=S3 Error %s", err)
-            statemon.state.increment('s3_connection_errors')
-            self._save_to_disk(data, os.path.join(options.s3disk, key_name),
-                               nlines)
-            return
-        except IOError as err:
-            _log.error("key=upload_to_s3 msg=S3 I/O Error %s", err)
-            statemon.state.increment('s3_connection_errors')
-            self._save_to_disk(data, os.path.join(options.s3disk, key_name),
-                               nlines)
-            return
+        self.backup_stream = \
+          open(os.path.join(options.backup_disk,
+                            self._generate_log_filename()),
+                            'a')
 
-    def _save_to_disk(self, data, path, nlines):
-        '''Saves some data to a file on disk.
+    def _prepare_backup_stream(self):
+        '''Prepares the backup stream for writing to.
 
-        data - Data to save
-        path - path to the file. It is created if not there
-        nlines - Number of lines that are in the data.
+        This could mean flushing it to disk or closing this file and
+        opening a new one.
         '''
-        try:
-            if not os.path.exists(os.path.dirname(path)):
-                os.makedirs(os.path.dirname(path))
+        if self.backup_stream is None:
+            self._open_new_backup_file()
 
-            if self.use_s3:
-                with self._mutex:
-                    with open(path, 'a') as stream:
-                        stream.write(data)
-            else:
-                with open(path, 'a') as stream:
-                    stream.write(data)
+        # See if the file should be flushed
+        if self.events_in_file % options.backup_flush_interval == 0:
+            self.backup_stream.flush()
 
-            for i in range(nlines):
-                self.dataQ.task_done()
-        finally:
-            self._upload_limiter.release()
-
-    def _upload_temp_logs_to_s3(self, bucket_name):
-        '''Uploads temporary files to S3
-
-        The temporary files were put there because the connection to
-        S3 had a hiccup.
-        
-        '''
-        with self._mutex:
-            for filename in os.listdir(options.s3disk):
-                full_path = os.path.join(options.s3disk, filename)
-                if filename.endswith('clicklog.log'):
-                    bucket = self.s3conn.get_bucket(bucket_name)
-                    key = bucket.new_key(filename)
-                    key.set_contents_from_filename(full_path)
-                    os.remove(full_path)
+        # Check to see if the file should be rolled over
+        if self.events_in_file >= options.backup_max_events_per_file:
+            self.backup_stream.close()
+            self._open_new_backup_file()
+            self.events_in_file = 0
 
     def run(self):
         '''Main runner for the handler.'''
-        data = []
         while True:
             try:
                 try:
-                    data.append(self.dataQ.get(True, options.flush_interval))
+                    event = self.dataQ.get(True, 30)
                 except Queue.Empty:
-                    pass
+                    if self.backup_stream is not None:
+                        self.backup_stream.flush()
+                    continue
 
-                nlines = len(data)
                 statemon.state.qsize = self.dataQ.qsize()
-                statemon.state.buffer_size = nlines
+                self._prepare_backup_stream()
 
-                # If we have enough data or it's been too long, upload
-                if (nlines >= options.batch_count or 
-                    (self.last_upload_time + options.flush_interval <= 
-                     time.time())):
-                    if nlines > 0:
-                        _log.info('Sending %i lines to output %s', 
-                                  nlines, options.output)
-                        with self.watcher.activate():
-                            self._send_to_output(data)
-                            data = []
-                            self.last_upload_time = time.time()
+                self.backup_stream.write('%s\n' % event)
+                self.events_in_file += 1
             except Exception as err:
-                _log.exception("key=s3_uploader msg=%s", err)
-            
-
-            statemon.state.qsize = self.dataQ.qsize()
-            statemon.state.buffer_size = nlines
+                _log.exception("key=file_backup_handler msg=%s", err)
 
 class HealthCheckHandler(TrackerDataHandler):
     '''Handler for health check ''' 
@@ -398,21 +305,25 @@ class Server(threading.Thread):
         
         '''
         super(Server, self).__init__()
-        self.event_queue = Queue.Queue()
-        self.s3handler = S3Handler(self.event_queue, watcher)
+        self.backup_queue = Queue.Queue()
+        self.backup_handler = FileBackupHandler(self.backup_queue, watcher)
         self.io_loop = tornado.ioloop.IOLoop()
         self._is_running = threading.Event()
         self._watcher = watcher
 
     def run(self):
+        statemon.state.flume_errors = 0
+        statemon.state.messages_handled = 0
+        statemon.state.invalid_messages = 0
+        
         with self._watcher.activate():
-            self.s3handler.start()
+            self.backup_handler.start()
             self.io_loop.make_current()
 
             application = tornado.web.Application([
-                (r"/", LogLines, dict(q=self.event_queue, 
+                (r"/", LogLines, dict(q=self.backup_queue,
                                       watcher=self._watcher)),
-                (r"/track", LogLines, dict(q=self.event_queue,
+                (r"/track", LogLines, dict(q=self.backup_queue,
                                            watcher=self._watcher)),
                 (r"/test", TestTracker),
                 (r"/healthcheck", HealthCheckHandler),
