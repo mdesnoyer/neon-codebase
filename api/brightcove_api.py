@@ -117,11 +117,23 @@ class BrightcoveApi(object):
         #NOTE: When uploading an image with a reference ID that already
         #exists, the image is not
         updated. Although other metadata like displayName is updated.
+        
+        ReferenceID for thumbnails are of the form v2_TID
+        ReferenceID for stills are of the form v2_still-TID
 
         '''
         #help.brightcove.com/developer/docs/mediaapi/add_image.cfm
         
         reference_id = kwargs.get('reference_id', None)
+        if reference_id:
+            reference_id = "v2_%s" %reference_id #V2 ref ID
+        
+        #use this keyword to identify if it is a neon image or not
+        image_suffix = kwargs.get('image_suffix', '')
+        image_fname = 'neonthumbnail%s-%s.jpg' % (image_suffix, video_id) 
+        
+        #TID of the Image being uploaded, to be used to construct the image fname 
+        tid = kwargs.get('tid', None)
         remote_url = kwargs.get('remote_url', None)
 
         outer = {}
@@ -150,14 +162,9 @@ class BrightcoveApi(object):
 
         body = tornado.escape.json_encode(outer)
         
-        #use this keyword to identify if it is a neon image or not
-        image_suffix = kwargs.get('image_suffix', '')
-        image_fname = 'neonthumbnail%s-%s.jpg' % (image_suffix, video_id) 
-        
-        #If reference_id is given, use that to name the file
-        if reference_id is not None:
-            image_fname = 'neontn%s.jpg' % (reference_id)
-            #reference_id = "v2_%s" %reference_id #V2 ref ID
+        #Use TID to name the file
+        if tid is not None:
+            image_fname = 'neontn%s.jpg' % (tid)
 
         if remote_url:
             post_param = []
@@ -195,14 +202,15 @@ class BrightcoveApi(object):
             
         return BrightcoveApi.write_connection.send_request(req, callback)
     
-    def update_thumbnail_and_videostill(self, video_id, image, ref_id, 
+    def update_thumbnail_and_videostill(self, video_id, image, tid, 
             frame_size=None, resize=True): 
     
         ''' add thumbnail and videostill in to brightcove account.  used
             by neon client to update thumbnail, Image gets sent to the
             method call
 
-            ref_id = tid
+            tid is used as the reference id of the thumbnail
+            for videoStill still- is prepended to the tid to generate refid
         '''
         
         #If url is passed, then set thumbnail using the remote url 
@@ -233,11 +241,13 @@ class BrightcoveApi(object):
             rt = self.add_image(video_id,
                                 bcove_thumb,
                                 atype='thumbnail',
-                                reference_id=ref_id)
+                                reference_id=tid,
+                                tid=tid)
             rv = self.add_image(video_id,
                                 bcove_still,
                                 atype='videostill',
-                                reference_id='still-' + ref_id)
+                                reference_id='still-%s'%tid,
+                                tid=tid)
         
         tref_id = None ; vref_id = None
         #Get thumbnail name, referenceId params
@@ -252,7 +262,7 @@ class BrightcoveApi(object):
         
 
     def enable_thumbnail_from_url(self, video_id, url, frame_size=None,
-                                  reference_id=None):
+                                  tid=None):
         '''
         Enable a particular thumbnail in the brightcove account
         '''
@@ -273,7 +283,7 @@ class BrightcoveApi(object):
             _log.exception("Image format error %s" %e )
 
         #TODO: Resize to the aspect ratio of video; key by width
-        thumbnail_id = reference_id
+        thumbnail_id = tid
         if frame_size is None:
             #resize to brightcove default size
             bcove_thumb = image.resize(self.THUMB_SIZE)
@@ -284,9 +294,11 @@ class BrightcoveApi(object):
 
 
         rt = self.add_image(video_id,image, atype='thumbnail',
-                            reference_id=reference_id)
+                            reference_id=tid,
+                            tid=tid)
         rv = self.add_image(video_id,image, atype='videostill',
-                            reference_id=reference_id if not reference_id else "still-" + reference_id)
+                            reference_id=tid if not tid else "still-" + tid,
+                            tid=tid)
        
         tref_id = None ; vref_id = None
         #Get thumbnail name, referenceId params
@@ -297,7 +309,7 @@ class BrightcoveApi(object):
             add_image_val = tornado.escape.json_decode(rv.body)
             vref_id = add_image_val["result"]["referenceId"]
 
-        return ((rt is not None and rv is not None),tref_id,vref_id)
+        return ((rt is not None and rv is not None), tref_id, vref_id)
     
 
     def async_enable_thumbnail_from_url(self, video_id, img_url, 
@@ -362,11 +374,13 @@ class BrightcoveApi(object):
                                atype='thumbnail', 
                                reference_id=reference_id,
                                image_suffix=image_suffix,
+                               tid=thumbnail_id,
                                callback=add_image_callback)
                 self.add_image(video_id,
                                bcove_still,
                                atype='videostill',
                                reference_id=srefid,
+                               tid=thumbnail_id,
                                image_suffix=image_suffix,
                                callback=add_image_callback)
             else:
