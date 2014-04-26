@@ -345,7 +345,7 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
     utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)
     
-    tornado.ioloop.IOLoop.instance().start()
+    tornado.ioloop.IOLoop.current().start()
     
 if __name__ == "__main__":
     utils.neon.InitNeon()

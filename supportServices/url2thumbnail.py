@@ -90,6 +90,11 @@ class URL2ThumbnailIndex:
 
         Returns its hash value
         '''
+
+        # thumb could be none, due to retreival error from DB
+        if thumb is None:
+            raise tornado.gen.Return(None)
+
         # Go grab the thumbnail and compute its perceptual hash if
         # necessary
         image = None

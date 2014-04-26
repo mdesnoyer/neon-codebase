@@ -379,7 +379,6 @@ class BrightcoveABController(object):
         self.tornado_app = tornado.web.Application([
             (r"/(.*)", GetData, dict(controller=self)),
             ])
-
         # Check brightcove for the thumbnail state at least every 5 minutes
         tornado.ioloop.PeriodicCallback(
             self.check_thumbnails,
