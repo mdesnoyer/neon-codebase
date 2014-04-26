@@ -214,25 +214,38 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
 
     @patch('api.brightcove_api.BrightcoveApi.write_connection.send_request') 
     def test_add_image(self, write_conn_mock):
+        def verify():
+            '''
+            Verify the image name when uploaded to Bcove
+            '''
+            headers = write_conn_mock.call_args[0][0].headers
+            self.assertTrue('multipart/form-data' in headers['Content-Type'])
+            body = write_conn_mock.call_args[0][0].body
+
+            ##parse multipart request body; #TODO(Sunil) Find python lib to parse this
+            separator = body.split('\r\n')[0]
+            parts = body.split(separator)
+            img_metadata = parts[1]
+            img_data = parts[2]
+            c_disposition = img_data.split('\r\n')[1]
+            import pdb; pdb.set_trace()
+            #ex: 'Content-Disposition: form-data; name="filePath"; filename="neontnTID.jpg"'
+            img_filename = c_disposition.split(';')[-1].split("=")[-1]
+            self.assertEqual(img_filename, '"neontn%s.jpg"' %tid)
+    
         response = HTTPResponse(HTTPRequest("http://bcove"), 200,
                 buffer=StringIO('done'))
-        write_conn_mock.side_effect = [response]
+        write_conn_mock.return_value = response
         image = PILImageUtils.create_random_image(360, 480) 
         tid = "TID"
-        self.api.add_image("video_id1", image, reference_id=tid)
-        headers = write_conn_mock.call_args[0][0].headers
-        self.assertTrue('multipart/form-data' in headers['Content-Type'])
-        body = write_conn_mock.call_args[0][0].body
-
-        ##parse multipart request body; #TODO(Sunil) Find python lib to parse this
-        separator = body.split('\r\n')[0]
-        parts = body.split(separator)
-        img_metadata = parts[1]
-        img_data = parts[2]
-        c_disposition = img_data.split('\r\n')[1]
-        #ex: 'Content-Disposition: form-data; name="filePath"; filename="neontnTID.jpg"'
-        img_filename = c_disposition.split(';')[-1].split("=")[-1]
-        self.assertEqual(img_filename, '"neontn%s.jpg"' %tid)
-    
+        
+        #verify image name
+        self.api.add_image("video_id1", image, reference_id=tid, tid=tid)
+        verify()
+        
+        #verify image name
+        self.api.add_image("video_id1", image, reference_id="still-%s" %tid, tid=tid)
+        verify()
+        
 if __name__ == "__main__" :
     unittest.main()

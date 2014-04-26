@@ -78,4 +78,6 @@ def bounded_io_loop():
 
     finally:
         old_ioloop.make_current()
+        #TODO(Mark/Sunil): May result in close() called during concurrent operation 
+        #on the same file object, hence check if ioloop is closing
         temp_ioloop.close()
