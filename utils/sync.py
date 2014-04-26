@@ -21,6 +21,11 @@ def optional_sync(func):
     optional. If callback is None, then the function will be
     synchronous. If it is not None, the function will be asyncronous.
 
+    Also, if your function returns a Future, then if you add the
+    special "async=True" keywork argument, an asynchronous call will
+    be made and the Future will be returned. This is useful to avoid a
+    tornado.gen.Task wrapping.
+
     To use it, make sure this decorator is on the outside. For example
     @optional_sync
     @tornado.gen.coroutine
@@ -39,6 +44,10 @@ def optional_sync(func):
     weird_response = yield tornado.gen.Task(do_something_async,
     'http://hi.com')
 
+    or if your async function returns a Future (like tornado.gen.coroutine):
+
+    weird_response = yield do_something_async('http://hi.com', async=True)
+
     Note that inside the function, you must use
     tornado.ioloop.IOLoop.current() to get the current io
     loop. Otherwise it will hang.
@@ -50,6 +59,11 @@ def optional_sync(func):
             if kwargs['callback'] is not None:
                 return func(*args, **kwargs)
             kwargs.pop('callback')
+        if 'async' in kwargs:
+            async = kwargs['async']
+            kwargs.pop('async')
+            if async:
+                return func(*args, **kwargs)
 
         with bounded_io_loop() as io_loop:
             return io_loop.run_sync(lambda : func(*args, **kwargs))
@@ -78,4 +92,6 @@ def bounded_io_loop():
 
     finally:
         old_ioloop.make_current()
+        #TODO(Mark/Sunil): May result in close() called during concurrent operation 
+        #on the same file object, hence check if ioloop is closing
         temp_ioloop.close()

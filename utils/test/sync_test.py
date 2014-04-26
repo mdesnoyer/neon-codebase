@@ -79,6 +79,23 @@ class TestOptionalSyncDecorator(test_utils.neontest.AsyncTestCase):
         self.assertEqual(self.fast_callback_count, 1)
         self.assertEqual(self.slow_callback_count, 2)
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def test_tornado_async_function_keyword(self):
+        val = yield self._some_tornado_async_function(
+            self._slow_callback_function, async=True)
+        self.assertEqual(val, 1)
+        val = yield self._some_tornado_async_function(
+            self._fast_callback_function, async=True)
+        self.assertEqual(val, 1)
+        val = yield self._some_tornado_async_function(
+            self._slow_callback_function, async=True)
+        self.assertEqual(val, 2)
+        
+
+        self.assertEqual(self.fast_callback_count, 1)
+        self.assertEqual(self.slow_callback_count, 2)
+
     def test_sync_function_call(self):
         self.assertEqual(
             self._some_tornado_async_function(self._slow_callback_function), 1)
