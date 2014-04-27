@@ -224,7 +224,7 @@ class TestRequestPool(test_utils.neontest.TestCase):
         self.assertEqual(self.response_q.get_nowait(), valid_response)
 
     def test_too_many_retries(self):
-        request = HTTPRequest('http://www.neon.com')
+        request = HTTPRequest('http://www.neon.com', body='Lalalalal')
         invalid_response = HTTPResponse(request, 200,
                                         buffer=StringIO('{"error":600}'))
         self.mock_client().fetch.side_effect = [

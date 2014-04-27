@@ -2,7 +2,7 @@
 '''
 Test functionality of the click log server.
 
-#TODO: Nagios like script to monitor the following issues
+#TODO(sunil): Nagios like script to monitor the following issues
 
 - Server not at capacity, 1 or more process died
 - S3 uploader has issues with s3 connection
@@ -18,9 +18,6 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import __builtin__
-import boto
-import boto.exception
-import test_utils.mock_boto_s3 as boto_mock
 import clickTracker.trackserver 
 import fake_filesystem
 import json
@@ -30,395 +27,411 @@ from mock import MagicMock
 import os
 import Queue
 import random
-import socket
-import test_utils.net
 import time
+import tornado.testing
+from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
+import urllib
 import unittest
-import urllib2
 import utils.neon
 from utils.options import options
 
-class TestS3Handler(unittest.TestCase):
+class TestFileBackupHandler(unittest.TestCase):
     def setUp(self):
         self.filesystem = fake_filesystem.FakeFilesystem()
         self.fake_os = fake_filesystem.FakeOsModule(self.filesystem)
         self.fake_open = fake_filesystem.FakeFileOpen(self.filesystem)
         clickTracker.trackserver.os = self.fake_os
         clickTracker.trackserver.open = self.fake_open
-        boto_mock.open = self.fake_open
 
     def tearDown(self):
         clickTracker.trackserver.os = os
         clickTracker.trackserver.open = __builtin__.open
-        boto_mock.open = __builtin__.open
 
     def processData(self):
         '''Sends 1000 requests to a handler and waits until they are done.'''
+
+        mock_click_request = MagicMock()
+        click_fields = {'pageid' : 'pageid234',
+                        'tai' : 'tai234',
+                        'ttype' : 'brightcove',
+                        'page' : 'http://go.com',
+                        'ref' : 'http://ref.com',
+                        'cts' : '23945827',
+                        'a' : 'ic',
+                        'tid' : 'tid345',
+                        'x' : '3467',
+                        'y' : '123',
+                        'wx' : '567',
+                        'wy' : '9678'}
+        mock_click_request.get_argument.side_effect = lambda x: click_fields[x]
+        mock_click_request.request.remote_ip = '12.43.151.12'
+        mock_click_request.get_cookie.return_value = 'cookie1'
+
+        mock_view_request = MagicMock()
+        view_fields = {'pageid' : 'pageid67',
+                       'tai' : 'tai20',
+                       'ttype' : 'brightcove',
+                       'page' : 'http://go1.com',
+                       'ref' : 'http://ref1.com',
+                       'cts' : '23945898',
+                       'a' : 'iv',
+                       'tids' : 'tid345,34,89+tid346,67,98'
+                       }
+        mock_view_request.get_argument.side_effect = lambda x: view_fields[x]
+        mock_view_request.request.remote_ip = '12.43.151.120'
+        mock_view_request.get_cookie.return_value = 'cookie2'
         
         # Start a thread to handle the data
         dataQ = Queue.Queue()
-        handle_thread = clickTracker.trackserver.S3Handler(dataQ)
+        handle_thread = clickTracker.trackserver.FileBackupHandler(dataQ)
         handle_thread.start()
 
         # Send data
-        nlines = 1000
+        nlines = 400
         for i in range(nlines/2):
-            cd = clickTracker.trackserver.TrackerData(
-                "load", 1, "flashonlytracker", time.time(),
-                time.time(), "http://localhost",
-                "127.0.0.1", ['i1.jpg','i2.jpg'],"trackerid",'v1')
-            dataQ.put(cd.to_json())
+            click = clickTracker.trackserver.BaseTrackerDataV2.generate(
+                mock_click_request)
+            
+            dataQ.put(click.to_flume_event())
 
-            click = clickTracker.trackserver.TrackerData(
-                "click", 1, "flashonlytracker", time.time(),
-                time.time(), "http://localhost",
-                "127.0.0.1", 'i1.jpg',"trackerid")
-            dataQ.put(click.to_json())
+            view = clickTracker.trackserver.BaseTrackerDataV2.generate(
+                mock_view_request)
+            dataQ.put(view.to_flume_event())
             
         # Wait until the data is processeed 
         dataQ.join()
 
-    @patch('clickTracker.trackserver.S3Connection')
-    def test_log_to_s3(self, mock_conntype):
-        conn = boto_mock.MockConnection()
-        mock_conntype.return_value = conn
-        
-        # Create the S3 bucket for the logs
-        bucket = conn.create_bucket('neon-tracker-logs')
-
-        self.processData()
-        
-        # Check that there are 10 files in the bucket because each
-        # file by default is 100 lines
-        s3_keys = [x for x in bucket.get_all_keys()]
-        self.assertEqual(len(s3_keys), 10)
-
-        # Make sure that the files have the same number of lines
-        file_lines = None
-        for key in s3_keys:
-            nlines = 0
-            for line in key.get_contents_as_string().split('\n'):
-                nlines += 1
-            if file_lines is None:
-                file_lines = nlines
-            else:
-                self.assertEqual(file_lines, nlines)
-
-        # Open one of the files and check that it contains what we expect
-        for line in s3_keys[0].get_contents_as_string().split('\n'):
-            line = line.strip()
-            if line == '':
-                continue
-            parsed = json.loads(line)
-            self.assertEqual(parsed['id'], 1)
-            self.assertEqual(parsed['ttype'], 'flashonlytracker')
-            self.assertEqual(parsed['page'], 'http://localhost')
-            self.assertEqual(parsed['cip'], '127.0.0.1')
-            self.assertTrue(parsed['ts'])
-            self.assertTrue(parsed['sts'])
-
-            if parsed['a'] == 'load':
-                self.assertEqual(parsed['cvid'], 'v1')
-                self.assertEqual(parsed['imgs'], ['i1.jpg','i2.jpg'])
-            elif parsed['a'] == 'click':
-                self.assertEqual(parsed['img'], 'i1.jpg')
-            else:
-                self.fail('Bad action field %s' % parsed['a'])
-
-    @patch('clickTracker.trackserver.S3Connection')
-    def test_log_to_s3_with_timeout(self, mock_conntype):
-        '''Make sure that a package is sent to S3 after a timeout.'''
-        conn = boto_mock.MockConnection()
-        mock_conntype.return_value = conn
-
-        # Create the S3 bucket for the logs
-        bucket = conn.create_bucket('neon-tracker-logs')
-
-        with options._set_bounded('clickTracker.trackserver.flush_interval',
-                                  0.5):
-            
-            # Start a thread to handle the data
-            dataQ = Queue.Queue()
-            handle_thread = clickTracker.trackserver.S3Handler(dataQ)
-            handle_thread.start()
-
-            # Send the data
-            nlines = 56
-            for i in range(nlines):
-                cd = clickTracker.trackserver.TrackerData(
-                    "load", 1, "flashonlytracker", time.time(),
-                    time.time(), "http://localhost",
-                    "127.0.0.1", ['i1.jpg','i2.jpg'],'v1')
-                dataQ.put(cd.to_json())
-            
-            # Wait for the timeout
-            time.sleep(0.6)
-
-        # Check that the file is in the bucket
-        s3_keys = [x for x in bucket.get_all_keys()]
-        self.assertEqual(len(s3_keys), 1)
-
-        # Make sure that all the data is in the file
-        nlines = 0
-        for line in s3_keys[0].get_contents_as_string().split('\n'):
-            nlines += 1
-        self.assertEqual(nlines, 56)
+        # Force a flush to disk
+        handle_thread.backup_stream.flush()
 
     def test_log_to_disk_normally(self):
         '''Check the mechanism to log to disk.'''
         log_dir = '/tmp/fake_log_dir'
-        with options._set_bounded('clickTracker.trackserver.output',
+        with options._set_bounded('clickTracker.trackserver.backup_disk',
                                   log_dir):
-            self.processData()
+            with options._set_bounded(
+                    'clickTracker.trackserver.backup_max_events_per_file',
+                    100):
+                self.processData()
 
-            files = self.fake_os.listdir(log_dir)
-            self.assertEqual(len(files), 10)
+                files = self.fake_os.listdir(log_dir)
+                self.assertEqual(len(files), 4)
 
-            # Make sure the files have the same number of lines
-            file_lines = None
-            for fname in files:
-                with self.fake_open(os.path.join(log_dir, fname)) as f:
-                    nlines = 0
-                    for line in f:
-                        nlines += 1
-                    if file_lines is None:
-                        file_lines = nlines
-                    else:
-                        self.assertEqual(file_lines, nlines)
-
-            # Open one of the files and check that it contains what we expect
-            with self.fake_open(os.path.join(log_dir, files[0])) as f:
-                for line in f:
-                    line = line.strip()
-                    if line == '':
-                        continue
-                    parsed = json.loads(line)
-                    self.assertEqual(parsed['id'], 1)
-                    self.assertEqual(parsed['ttype'], 'flashonlytracker')
-                    self.assertEqual(parsed['page'], 'http://localhost')
-                    self.assertEqual(parsed['cip'], '127.0.0.1')
-                    self.assertTrue(parsed['ts'])
-                    self.assertTrue(parsed['sts'])
-
-                    if parsed['a'] == 'load':
-                        self.assertEqual(parsed['cvid'], 'v1')
-                        self.assertEqual(parsed['imgs'], ['i1.jpg','i2.jpg'])
-                    elif parsed['a'] == 'click':
-                        self.assertEqual(parsed['img'], 'i1.jpg')
-                    else:
-                        self.fail('Bad action field %s' % parsed['a'])
-        
-    @patch('clickTracker.trackserver.S3Connection')
-    def test_log_to_disk_on_connection_error(self, mock_conntype):
-        conn = boto_mock.MockConnection()
-        mock_conntype.return_value = conn
-
-        # Mock out the exception to throw
-        mock_bucket = MagicMock()
-        conn.buckets['neon-tracker-logs'] = mock_bucket
-        mock_bucket.new_key.side_effect = socket.gaierror()
-
-        self.processData()
-
-        # Make sure there are 10 files on the disk
-        log_dir = '/mnt/neon/s3diskbacklog'
-        files = self.fake_os.listdir(log_dir)
-        self.assertEqual(len(files), 10)
-
-        # Make sure the files have the same number of lines
-        file_lines = None
-        for fname in files:
-            with self.fake_open(os.path.join(log_dir, fname)) as f:
+                # Make sure the number of lines in the files is what we expect
                 nlines = 0
-                for line in f:
-                    nlines += 1
-                if file_lines is None:
-                    file_lines = nlines
-                else:
-                    self.assertEqual(file_lines, nlines)
+                for fname in files:
+                    with self.fake_open(os.path.join(log_dir, fname)) as f:
+                        for line in f:
+                            nlines += 1
+                self.assertEqual(400, nlines)
 
-        # Open one of the files and check that it contains what we expect
-        with self.fake_open(os.path.join(log_dir, files[0])) as f:
-            for line in f:
-                line = line.strip()
-                if line == '':
-                    continue
-                parsed = json.loads(line)
-                self.assertEqual(parsed['id'], 1)
-                self.assertEqual(parsed['ttype'], 'flashonlytracker')
-                self.assertEqual(parsed['page'], 'http://localhost')
-                self.assertEqual(parsed['cip'], '127.0.0.1')
-                self.assertTrue(parsed['ts'])
-                self.assertTrue(parsed['sts'])
-
-                if parsed['a'] == 'load':
-                    self.assertEqual(parsed['cvid'], 'v1')
-                    self.assertEqual(parsed['imgs'], ['i1.jpg', 'i2.jpg'])
-                elif parsed['a'] == 'click':
-                    self.assertEqual(parsed['img'], 'i1.jpg')
-                else:
-                    self.fail('Bad action field %s' % parsed['a'])
-
-    @patch('clickTracker.trackserver.S3Connection')
-    def test_log_to_disk_on_key_creation_error(self, mock_conntype):
-        conn = boto_mock.MockConnection()
-        mock_conntype.return_value = conn
-
-        # Mock out the exception to throw
-        mock_bucket = MagicMock()
-        conn.buckets['neon-tracker-logs'] = mock_bucket
-        mock_bucket.new_key.side_effect = boto.exception.S3CreateError(
-            500, 'Error')
-
-        self.processData()
-
-        # Make sure there are 10 files on the disk
-        files = self.fake_os.listdir('/mnt/neon/s3diskbacklog')
-        self.assertEqual(len(files), 10)
-
-    @patch('clickTracker.trackserver.S3Connection')
-    def test_log_to_disk_on_s3_response_error(self, mock_conntype):
-        conn = boto_mock.MockConnection()
-        mock_conntype.return_value = conn
-
-        # Mock out the exception to throw
-        mock_bucket = MagicMock()
-        conn.buckets['neon-tracker-logs'] = mock_bucket
-        mock_bucket.new_key.side_effect = boto.exception.S3ResponseError(
-            500, 'An error')
-
-        self.processData()
-
-        # Make sure there are 10 files on the disk
-        files = self.fake_os.listdir('/mnt/neon/s3diskbacklog')
-        self.assertEqual(len(files), 10)
-
-    @patch('clickTracker.trackserver.S3Connection')
-    def test_log_to_disk_on_upload_connection_error(self, mock_conntype):
-        conn = boto_mock.MockConnection()
-        mock_conntype.return_value = conn
-
-        # Mock out the exception to throw
-        mock_bucket = MagicMock()
-        mock_key = MagicMock()
-        conn.buckets['neon-tracker-logs'] = mock_bucket
-        mock_bucket.new_key.return_value = mock_key
-        mock_key.set_contents_from_string.side_effect = socket.error()
-
-        self.processData()
-
-        # Make sure there are 10 files on the disk
-        files = self.fake_os.listdir('/mnt/neon/s3diskbacklog')
-        self.assertEqual(len(files), 10)
-
-    @patch('clickTracker.trackserver.S3Connection')
-    def test_log_to_disk_on_upload_response_error(self, mock_conntype):
-        conn = boto_mock.MockConnection()
-        mock_conntype.return_value = conn
-
-        # Mock out the exception to throw
-        mock_bucket = MagicMock()
-        mock_key = MagicMock()
-        conn.buckets['neon-tracker-logs'] = mock_bucket
-        mock_bucket.new_key.return_value = mock_key
-        mock_key.set_contents_from_string.side_effect = \
-          boto.exception.S3ResponseError(500, 'An error')
-
-        self.processData()
-
-        # Make sure there are 10 files on the disk
-        files = self.fake_os.listdir('/mnt/neon/s3diskbacklog')
-        self.assertEqual(len(files), 10)
-
-    @patch('clickTracker.trackserver.S3Connection')
-    def test_upload_to_s3_once_connection_back(self, mock_conntype):
-        conn = boto_mock.MockConnection()
-        mock_conntype.return_value = conn
-
-        # Create the bucket
-        bucket = conn.create_bucket('neon-tracker-logs')
-
-        # Mock out the exception to throw for the first chunk of data
-        mock_bucket = MagicMock()
-        conn.buckets['neon-tracker-logs'] = mock_bucket
-        mock_bucket.new_key.side_effect = socket.gaierror()
-
-        self.processData()
-
-        # Now, mock out a valid connection
-        conn.buckets['neon-tracker-logs'] = bucket
-
-        self.processData()
-
-        # Make sure there are 20 files on S3
-        s3_keys = [x for x in bucket.get_all_keys()]
-        self.assertEqual(len(s3_keys), 20)
-
-        # Make sure that there are no files on disk
-        files = self.fake_os.listdir('/mnt/neon/s3diskbacklog')
-        self.assertEqual(len(files), 0)
+                # Open one of the files and check that it contains
+                # what we expect
+                with self.fake_open(os.path.join(log_dir, files[0])) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line == '':
+                            continue
+                        parsed = json.loads(line)
+                        body = parsed[0]['body']
+                        if body['event'] == 'ic':
+                            self.assertEqual(body['pageid'], 'pageid234')
+                            self.assertEqual(body['tai'], 'tai234')
+                            self.assertEqual(body['ttype'], 'brightcove')
+                            self.assertEqual(body['page'], 'http://go.com')
+                            self.assertEqual(body['ref'], 'http://ref.com')
+                            self.assertEqual(body['cip'], '12.43.151.12')
+                            self.assertEqual(body['cts'], 23945827)
+                            self.assertTrue(body['sts'])
+                            self.assertEqual(body['tid'], 'tid345')
+                            self.assertEqual(body['px'], 3467)
+                            self.assertEqual(body['py'], 123)
+                            self.assertEqual(body['wx'], 567)
+                            self.assertEqual(body['wy'], 9678)
+                        elif body['event'] == 'iv':
+                            self.assertEqual(body['pageid'], 'pageid67')
+                            self.assertEqual(body['tai'], 'tai20')
+                            self.assertEqual(body['ttype'], 'brightcove')
+                            self.assertEqual(body['page'], 'http://go1.com')
+                            self.assertEqual(body['ref'], 'http://ref1.com')
+                            self.assertEqual(body['cip'], '12.43.151.120')
+                            self.assertEqual(body['cts'], 23945898)
+                            self.assertTrue(body['sts'])
+                            self.assertItemsEqual(body['tids'], 
+                                                  [['tid345', 34, 89],
+                                                   ['tid346', 67, 98]])
+                        else:
+                            self.fail('Bad event field %s' % body['event'])
         
 
-class TestFullServer(unittest.TestCase):
+class TestFullServer(tornado.testing.AsyncHTTPTestCase):
     '''A set of tests that fire up the whole server and throws http requests at it.'''
 
     def setUp(self):
-        self.port = test_utils.net.find_free_port()
-
-        self.load_url = 'http://localhost:'+str(self.port)+'/track?a=load&id=288edb2d31c34507&imgs=%5B%22http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fd21%2Funsecured%2Fmedia%2F2294876105001%2F201310%2F34%2F2294876105001_2727914703001_thumbnail-2296855887001.jpg%22%2C%22http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fd21%2Funsecured%2Fmedia%2F2294876105001%2F201310%2F354%2F2294876105001_2727881607001_thumbnail-2369368872001.jpg%22%2C%22http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fd21%2Funsecured%2Fmedia%2F2294876105001%2F2294876105001_2660525568001_thumbnail-2296855886001.jpg%22%2C%22http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fe1%2Fpd%2F2294876105001%2F2294876105001_2617231423001_thumbnail-2323153341001.jpg%22%5D&cvid=2296855887001&ts=1381257030328&page=http%3A%2F%2Flocalhost%2Fbcove%2Ffplayerabtest.html&ttype=flashonlyplayer&tai=test&noCacheIE=1381257030328'
-
-        self.click_url = 'http://localhost:'+str(self.port)+'/track?a=click&id=14b150ad6a59e93c&img=http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fd21%2Funsecured%2Fmedia%2F2294876105001%2F201310%2F34%2F2294876105001_2727914703001_thumbnail-2296855887001.jpg&ts=1381264478544&page=http%3A%2F%2Flocalhost%2Fbcove%2Ffplayerabtest.html&ttype=flashonlyplayer&tai=test'
-
-        self.image_click_url = 'http://localhost:'+str(self.port)+'/track?a=click&id=14b150ad6a59e93c&img=http%3A%2F%2Fbrightcove.vo.llnwd.net%2Fd21%2Funsecured%2Fmedia%2F2294876105001%2F201310%2F34%2F2294876105001_2727914703001_thumbnail-2296855887001.jpg&ts=1381264478544&page=http%3A%2F%2Flocalhost%2Fbcove%2Ffplayerabtest.html&ttype=imagetracker&tai=test&xy=100,100'
-
-        random.seed(168984)
-
         self.filesystem = fake_filesystem.FakeFilesystem()
         self.fake_os = fake_filesystem.FakeOsModule(self.filesystem)
         self.fake_open = fake_filesystem.FakeFileOpen(self.filesystem)
         clickTracker.trackserver.os = self.fake_os
         clickTracker.trackserver.open = self.fake_open
-        boto_mock.open = self.fake_open
+        
+        self.server_obj = clickTracker.trackserver.Server()
+        super(TestFullServer, self).setUp()
 
-        self.patcher = patch('clickTracker.trackserver.S3Connection')
-        mock_conn = self.patcher.start()
-        self.s3conn = boto_mock.MockConnection()
-        mock_conn.return_value = self.s3conn
+        random.seed(168984)
 
-        # Start the server in its own thread
-        with options._set_bounded('clickTracker.trackserver.port', self.port):
-            self.server = clickTracker.trackserver.Server()
-            self.server.daemon = True
-            self.server.start()
-            self.server.wait_until_running()
+        self.http_patcher = patch(
+            'clickTracker.trackserver.utils.http.send_request')
+        self.http_mock = self.http_patcher.start()
+        self.http_mock.side_effect = \
+          lambda x, callback: self.io_loop.add_callback(callback,
+                                                        HTTPResponse(x, 200))
+        self.backup_q = self.server_obj.backup_queue
 
     def tearDown(self):
-        self.server.stop()
-        self.patcher.stop()
-
+        self.http_patcher.stop()
+        
+        super(TestFullServer, self).tearDown()
         clickTracker.trackserver.os = os
         clickTracker.trackserver.open = __builtin__.open
-        boto_mock.open = __builtin__.open
 
-    def test_send_data_to_server(self):        
-        # Fire requests to the server      
-        nlines = 1000
-        for i in range(nlines):
-            rd = random.randint(1, 100)
-            if rd < 2:
-                response = urllib2.urlopen(self.click_url) 
-            elif rd >=2 and rd <10:
-                response = urllib2.urlopen(self.image_click_url) 
-            else:
-                response = urllib2.urlopen(self.load_url)
-            self.assertEqual(response.getcode(), 200)
+    def get_app(self):
+        return self.server_obj.application
 
-        self.server.wait_for_processing()
+    def check_message_sent(self, url_params, ebody, neon_id=None,
+                           path='/v2'):
+        '''Sends a message and checks the body to be what's expected.
 
-        # Now check that all the data got sent to S3
-        bucket = self.s3conn.get_bucket('neon-tracker-logs')
-        s3_keys = [x for x in bucket.get_all_keys()]
-        self.assertEqual(len(s3_keys), 10)
+        Inputs:
+        url_params - Dictionary of url params
+        ebody - json dictionary of expected body in the logged message
+        neon_id - Neon id to store in a cookie
+        path - Endpoint for the server
+        '''
+        self.http_mock.reset_mock()
+        
+        headers = {}
+        if neon_id is not None:
+            headers['Cookie'] = 'neonglobaluserid=%s' % neon_id
+        response = self.fetch(
+            '%s?%s' % (path, urllib.urlencode(url_params)),
+            headers=headers)
+
+        self.assertEqual(response.code, 200)
+
+        # Check that a response was found
+        self.assertEqual(self.http_mock.call_count, 1)
+        request_saw = self.http_mock.call_args[0][0]
+        self.assertEqual(request_saw.headers,
+                         {'Content-Type': 'application/json'})
+        self.assertEqual(request_saw.method, 'POST')
+
+        json_msg = json.loads(request_saw.body)
+        self.assertEqual(len(json_msg), 1)
+        json_msg = json_msg[0]
+        self.assertEqual(json_msg['headers']['tai'], ebody['tai'])
+        self.assertTrue(json_msg['headers']['timestamp'])
+        self.assertEqual(json_msg['headers']['timestamp'],
+                         json_msg['body']['sts'])
+        if 'v2' in path:
+            self.assertEqual(json_msg['headers']['track_vers'], '2')
+        else:
+            self.assertEqual(json_msg['headers']['track_vers'], '1')
+
+        self.assertDictContainsSubset(ebody, json_msg['body'])
+        self.assertEqual(json_msg['body']['cip'], '127.0.0.1')
+        if neon_id is not None:
+            self.assertEqual(json_msg['body']['uid'], neon_id)
+
+    def test_v2_valid_messages(self):
+        # Image Visible Message
+        self.check_message_sent(
+            { 'a' : 'iv',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'tids' : 'tid1,56,67+tid2,89,123'},
+            { 'event' : 'iv',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : 2345623,
+              'tids' : [['tid1',56,67],['tid2',89,123]],
+              'uid' : 'neon_id1'},
+              'neon_id1'
+            )
+
+        # Image loaded message
+        self.check_message_sent(
+            { 'a' : 'il',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'tids' : 'tid1,56,67+tid2,89,123'},
+            { 'event' : 'il',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : 2345623,
+              'tids' : [['tid1',56,67],['tid2',89,123]],
+              'uid' : 'neon_id1'},
+              'neon_id1'
+            )
+
+        # Image clicked message
+        self.check_message_sent(
+            { 'a' : 'ic',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'tid' : 'tid1',
+              'x' : '56',
+              'y' : '23',
+              'wx' : '78',
+              'wy' : '34'},
+            { 'event' : 'ic',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : 2345623,
+              'tid' : 'tid1',
+              'px' : 56,
+              'py' : 23,
+              'wx' : 78,
+              'wy' : 34,
+              'uid' : 'neon_id1'},
+              'neon_id1'
+            )
+
+        # Video play message
+        self.check_message_sent(
+            { 'a' : 'vp',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'tid' : 'tid1',
+              'vid' : 'vid1',
+              'pltype' : 'brightcove'},
+            { 'event' : 'vp',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : 2345623,
+              'tid' : 'tid1',
+              'vid' : 'vid1',
+              'pltype' : 'brightcove',
+              'uid' : 'neon_id1'},
+              'neon_id1'
+            )
+
+        # Ad play message
+        # TODO(Sunil): Change this message when the ad plays are better defined
+        self.check_message_sent(
+            { 'a' : 'ap',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'tid' : 'tid1',},
+            { 'event' : 'ap',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : 2345623,
+              'tid' : 'tid1',
+              'uid' : 'neon_id1'},
+              'neon_id1'
+            )
+    def test_v2_secondary_endpoint(self):
+        self.check_message_sent(
+            { 'a' : 'iv',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'tids' : 'tid1,56,67+tid2,89,123'},
+            { 'event' : 'iv',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : 2345623,
+              'tids' : [['tid1',56,67],['tid2',89,123]],
+              'uid' : 'neon_id1'},
+              'neon_id1',
+              '/v2/track'
+            )
+
+    def test_v1_valid_messages(self):
+        # A load message
+        self.check_message_sent(
+            { 'a' : 'load',
+              'id' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'html5',
+              'page' : 'http://go.com',
+              'ts' : '2345623',
+              'cvid' : 'vid1',
+              'imgs' : '["http://img1.jpg", "img2.jpg"]'},
+            { 'a' : 'load',
+              'id' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'html5',
+              'page' : 'http://go.com',
+              'ts' : '2345623',
+              'cvid' : 'vid1',
+              'imgs' : ["http://img1.jpg", "img2.jpg"],
+              'cip': '127.0.0.1'},
+              path='/track'
+            )
+
+        # An image click message
+        self.check_message_sent(
+            { 'a' : 'click',
+              'id' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'html5',
+              'page' : 'http://go.com',
+              'ts' : '2345623',
+              'img' : 'http://img1.jpg',
+              'xy' : '23,45'},
+            { 'a' : 'click',
+              'id' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'html5',
+              'page' : 'http://go.com',
+              'ts' : '2345623',
+              'img' : "http://img1.jpg",
+              'xy' : '23,45',
+              'cip': '127.0.0.1'},
+              path='/track'
+            )
             
 
 if __name__ == '__main__':
