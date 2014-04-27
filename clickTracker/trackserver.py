@@ -27,6 +27,7 @@ import tornado.ioloop
 import tornado.web
 import tornado.httpserver
 import tornado.escape
+import utils.http
 import utils.neon
 import utils.ps
 
@@ -49,10 +50,12 @@ define("backup_flush_interval", default=100, type=int,
        help='Flush to disk after how many events?')
 
 from utils import statemon
-statemon.define('backup_qsize', int)
+statemon.define('qsize', int)
 statemon.define('flume_errors', int)
 statemon.define('messages_handled', int)
 statemon.define('invalid_messages', int)
+
+# TODO(mdesnoyer): Remove version 1 code once it is phased out
 
 #############################################
 #### DATA FORMAT ###
@@ -81,10 +84,114 @@ class TrackerData(object):
             self.img = imgs  #clicked image
             if xy:
                 self.xy = xy 
-    
-    def to_json(self):
-        '''Converts the object to a json string.'''
-        return json.dumps(self, default=lambda o: o.__dict__)
+
+    def to_flume_event(self):
+        '''Coverts the data to a flume event.'''
+        return json.dumps([
+            {'headers': {
+                'timestamp' : self.sts,
+                'tai' : self.tai,
+                'track_vers' : '1',
+                },
+            'body': self.__dict__
+            }])
+
+class BaseTrackerDataV2(object):
+    '''
+    Schema for V2 tracking data
+    '''
+    def __init__(self, request):
+        self.pageid = request.get_argument('pageid') # page_id
+        self.tai = request.get_argument('tai') # tracker_account_id
+        # tracker_type (brightcove, ooyala, bcgallery, ign as of April 2014)
+        self.ttype = request.get_argument('ttype') 
+        self.page = request.get_argument('page') # page_url
+        self.ref = request.get_argument('ref') # referral_url
+        self.sts = int(time.time()) # Server time stamp
+        self.cts = int(request.get_argument('cts')) # client_time
+        self.cip = request.request.remote_ip # client_ip
+        # Neon's user id
+        self.uid = request.get_cookie('neonglobaluserid', default=None) 
+
+    def to_flume_event(self):
+        '''Coverts the data to a flume event.'''
+        return json.dumps([
+            {'headers': {
+                'timestamp' : self.sts,
+                'tai' : self.tai,
+                'track_vers' : '2',
+                },
+            'body': self.__dict__
+            }])
+
+    @staticmethod
+    def generate(request_handler):
+        '''A Factory generator to make the event.
+
+        Inputs:
+        request_handler - The http request handler
+        '''
+        event_map = {
+            'iv' : ImagesVisible,
+            'il' : ImagesLoaded,
+            'ic' : ImageClicked,
+            'vp' : VideoPlay,
+            'ap' : AdPlay}
+
+        action = request_handler.get_argument('a')
+        try:
+            return event_map[action](request_handler)
+        except KeyError as e:
+            _log.error('Invalid event: %s' % action)
+            raise tornado.web.HTTPError(400)
+
+class ImagesVisible(BaseTrackerDataV2):
+    '''An event specifying that the image became visible.'''
+    def __init__(self, request):
+        super(ImagesVisible, self).__init__(request)
+        self.event = 'iv'
+        self.tids = [] # [(Thumbnail id, width, height)]
+        for tup in request.get_argument('tids').split('+'):
+            elems = tup.split(',')
+            self.tids.append((elems[0], int(elems[1]), int(elems[2])))
+
+class ImagesLoaded(BaseTrackerDataV2):
+    '''An event specifying that the image were loaded.'''
+    def __init__(self, request):
+        super(ImagesLoaded, self).__init__(request)
+        self.event = 'il'
+        self.tids = [] # [(Thumbnail id, width, height)]
+        for tup in request.get_argument('tids').split('+'):
+            elems = tup.split(',')
+            self.tids.append((elems[0], int(elems[1]), int(elems[2])))
+
+class ImageClicked(BaseTrackerDataV2):
+    '''An event specifying that the image were loaded.'''
+    def __init__(self, request):
+        super(ImageClicked, self).__init__(request)
+        self.event = 'ic'
+        self.tid = request.get_argument('tid') # Thumbnail id
+        self.px = int(request.get_argument('x')) # Page X coordinate
+        self.py = int(request.get_argument('y')) # Page Y coordinate
+        self.wx = int(request.get_argument('wx')) # Window X
+        self.wy = int(request.get_argument('wy')) # Window Y
+
+class VideoPlay(BaseTrackerDataV2):
+    '''An event specifying that the image were loaded.'''
+    def __init__(self, request):
+        super(VideoPlay, self).__init__(request)
+        self.event = 'vp'
+        self.tid = request.get_argument('tid') # Thumbnail id
+        self.vid = request.get_argument('vid') # Video id
+        self.pltype = request.get_argument('pltype') # Player id
+
+class AdPlay(BaseTrackerDataV2):
+    '''An event specifying that the image were loaded.'''
+    def __init__(self, request):
+        super(AdPlay, self).__init__(request)
+        self.event = 'ap'
+        self.tid = request.get_argument('tid') # Thumbnail id
+        # TODO(sunil): Define the rest of this message
 
 #############################################
 #### WEB INTERFACE #####
@@ -93,12 +200,22 @@ class TrackerData(object):
 class TrackerDataHandler(tornado.web.RequestHandler):
     '''Common class to handle http requests to the tracker.'''
     
-    def parse_tracker_data(self):
+    def parse_tracker_data(self, version):
         '''Parses the tracker data from a GET request.
 
         returns:
         TrackerData object
         '''
+        if version == 1:
+            return self._parse_v1_tracker_data()
+        elif version == 2:
+            return BaseTrackerDataV2.generate(self)
+        else:
+            _log.fatal('Invalid api version %s' % version)
+            raise ValueError('Bad version %s' % version)
+        
+
+    def _parse_v1_tracker_data(self):
         ttype = self.get_argument('ttype')
         action = self.get_argument('a')
         _id = self.get_argument('id')
@@ -126,23 +243,24 @@ class TrackerDataHandler(tornado.web.RequestHandler):
 class LogLines(TrackerDataHandler):
     '''Handler for real tracking data that should be logged.'''
 
-    def initialize(self, q, watcher):
+    def initialize(self, q, watcher, version):
         '''Initialize the logger.'''
         self.watcher = watcher
         self.backup_q = q
+        self.version = version
     
     @tornado.web.asynchronous
     @tornado.gen.coroutine
     def get(self, *args, **kwargs):
         '''Handle a tracking request.'''
         with self.watcher.activate():
-            statemon.state.messages_handled.increment()
+            statemon.state.increment('messages_handled')
             
             try:
-                tracker_data = self.parse_tracker_data()
+                tracker_data = self.parse_tracker_data(self.version)
             except tornado.web.HTTPError as e:
                 _log.error('Invalid request: %s' % self.request.uri)
-                statemon.state.invalid_messages.increment()
+                statemon.state.increment('invalid_messages')
                 raise
             except Exception, err:
                 _log.exception("key=get_track msg=%s", err)
@@ -150,18 +268,18 @@ class LogLines(TrackerDataHandler):
                 self.finish()
                 return
 
-            data = tracker_data.to_json()
+            data = tracker_data.to_flume_event()
             try:
                 request = tornado.httpclient.HTTPRequest(
                     'http://localhost:%i' % options.flume_port,
-                    method='POST'
+                    method='POST',
                     headers={'Content-Type': 'application/json'},
                     body=data)
-                response = yield torndado.gen.Task(utils.http.send_request,
-                                                   request)
+                response = yield tornado.gen.Task(utils.http.send_request,
+                                                  request)
                 if response.error:
                     _log.error('Could not send message to flume')
-                    statemon.state.flume_errors.increment()
+                    statemon.state.increment('flume_errors')
                     self.backup_q.put(data)
                     self.set_status(response.error.code)
                 else:
@@ -177,19 +295,23 @@ class LogLines(TrackerDataHandler):
 
 class TestTracker(TrackerDataHandler):
     '''Handler for test requests.'''
+
+    def initialize(self, version):
+        '''Initialize the logger.'''
+        self.version = version
     
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
         '''Handle a test tracking request.'''
         try:
-            tracker_data = self.parse_tracker_data()
+            tracker_data = self.parse_tracker_data(self.version)
             cb = self.get_argument("callback")
         except Exception as err:
             _log.exception("key=test_track msg=%s", err) 
             self.finish()
             return
         
-        data = tracker_data.to_json()
+        data = tracker_data.to_flume_event()
         self.set_header("Content-Type", "application/json")
         self.write(cb + "("+ data + ")") #wrap json data in callback
         self.finish()
@@ -201,16 +323,12 @@ class FileBackupHandler(threading.Thread):
     '''Thread that uploads data to S3.'''
     
     def __init__(self, dataQ, watcher=utils.ps.ActivityWatcher()):
-        super(S3Handler, self).__init__()
+        super(FileBackupHandler, self).__init__()
         self.dataQ = dataQ
         self.daemon = True
         self.watcher = watcher
         self.backup_stream = None
         self.events_in_file = 0
-        
-        self._mutex = threading.RLock()
-        self._upload_limiter = \
-          threading.Semaphore(options.max_concurrent_uploads)
 
         statemon.state.qsize = self.dataQ.qsize()
 
@@ -268,13 +386,16 @@ class FileBackupHandler(threading.Thread):
                         self.backup_stream.flush()
                     continue
 
-                statemon.state.qsize = self.dataQ.qsize()
-                self._prepare_backup_stream()
+                with self.watcher.activate():
+                    statemon.state.qsize = self.dataQ.qsize()
+                    self._prepare_backup_stream()
 
-                self.backup_stream.write('%s\n' % event)
-                self.events_in_file += 1
+                    self.backup_stream.write('%s\n' % event)
+                    self.events_in_file += 1
             except Exception as err:
                 _log.exception("key=file_backup_handler msg=%s", err)
+
+            self.dataQ.task_done()
 
 class HealthCheckHandler(TrackerDataHandler):
     '''Handler for health check ''' 
@@ -311,6 +432,24 @@ class Server(threading.Thread):
         self._is_running = threading.Event()
         self._watcher = watcher
 
+        self.application = tornado.web.Application([
+            (r"/", LogLines, dict(q=self.backup_queue,
+                                  watcher=self._watcher,
+                                  version=1)),
+            (r"/v2", LogLines, dict(q=self.backup_queue,
+                                    watcher=self._watcher,
+                                    version=2)),
+            (r"/track", LogLines, dict(q=self.backup_queue,
+                                       watcher=self._watcher,
+                                       version=1)),
+            (r"/v2/track", LogLines, dict(q=self.backup_queue,
+                                          watcher=self._watcher,
+                                          version=2)),
+            (r"/test", TestTracker, dict(version=1)),
+            (r"/v2/test", TestTracker, dict(version=2)),
+            (r"/healthcheck", HealthCheckHandler),
+            ])
+
     def run(self):
         statemon.state.flume_errors = 0
         statemon.state.messages_handled = 0
@@ -319,16 +458,8 @@ class Server(threading.Thread):
         with self._watcher.activate():
             self.backup_handler.start()
             self.io_loop.make_current()
-
-            application = tornado.web.Application([
-                (r"/", LogLines, dict(q=self.backup_queue,
-                                      watcher=self._watcher)),
-                (r"/track", LogLines, dict(q=self.backup_queue,
-                                           watcher=self._watcher)),
-                (r"/test", TestTracker),
-                (r"/healthcheck", HealthCheckHandler),
-                ])
-            server = tornado.httpserver.HTTPServer(application,
+            
+            server = tornado.httpserver.HTTPServer(self.application,
                                                    io_loop=self.io_loop)
             utils.ps.register_tornado_shutdown(server)
             server.listen(options.port)
