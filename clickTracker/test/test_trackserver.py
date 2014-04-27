@@ -432,6 +432,34 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'cip': '127.0.0.1'},
               path='/track'
             )
+
+    def test_error_connecting_to_flume(self):
+        # Simulate a connection error
+        self.http_mock.side_effect = \
+          lambda x, callback: self.io_loop.add_callback(
+              callback,
+              HTTPResponse(x, 404, error=HTTPError(404)))
+
+        self.assertEqual(self.backup_q.qsize(), 0)
+
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'iv',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'tids' : 'tid1,56,67+tid2,89,123'}))
+
+        self.assertEqual(response.code, 404)
+
+        # Now check the quere for writing to disk to make sure that
+        # the data is there.
+        self.assertEqual(self.backup_q.qsize(), 1)
+        msg = json.loads(self.backup_q.get())
+        self.assertEqual(len(msg), 1)
+        self.assertEqual(msg[0]['body']['event'], 'iv')
             
 
 if __name__ == '__main__':
