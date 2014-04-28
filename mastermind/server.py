@@ -82,7 +82,8 @@ def initialize():
                   options.youtube_controller_url)
         ab_manager.register_destination(DistributionType.YOUTUBE,
                                         options.youtube_controller_url)
-    
+  
+    #TODO(Mark): Need to disable the AB managers once Image platform is live 
     mastermind = Mastermind()
 
     return mastermind, ab_manager

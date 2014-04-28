@@ -24,12 +24,14 @@ class DistributionType:
     NEON = 0
     BRIGHTCOVE = 1
     YOUTUBE = 2
+    OOYALA = 3
 
     @classmethod
     def fromString(cls, string):
         d = {'neon' : cls.NEON,
              'brightcove' : cls.BRIGHTCOVE,
-             'youtube' : cls.YOUTUBE
+             'youtube' : cls.YOUTUBE,
+             'ooyala' : cls.OOYALA
              }
         return d[string.lower()]
 
