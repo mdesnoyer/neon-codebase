@@ -308,7 +308,7 @@ class Mastermind(object):
                 thumb_id, fraction = max(new_directive, key=lambda tup:tup[1])
                 if fraction == 1.0:
                     _log.info("Only showing thumbnail %s for video id %s"
-                        %(video_id, thumb_id))
+                        %(thumb_id, video_id))
         except KeyError:
             pass
             

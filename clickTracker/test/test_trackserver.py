@@ -75,7 +75,7 @@ class TestFileBackupHandler(unittest.TestCase):
                        'ref' : 'http://ref1.com',
                        'cts' : '23945898',
                        'a' : 'iv',
-                       'tids' : 'tid345,34,89+tid346,67,98'
+                       'tids' : 'tid345,tid346'
                        }
         mock_view_request.get_argument.side_effect = lambda x: view_fields[x]
         mock_view_request.request.remote_ip = '12.43.151.120'
@@ -158,8 +158,7 @@ class TestFileBackupHandler(unittest.TestCase):
                             self.assertEqual(body['cts'], 23945898)
                             self.assertTrue(body['sts'])
                             self.assertItemsEqual(body['tids'], 
-                                                  [['tid345', 34, 89],
-                                                   ['tid346', 67, 98]])
+                                                  ['tid345', 'tid346'])
                         else:
                             self.fail('Bad event field %s' % body['event'])
         
@@ -216,6 +215,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
             '%s?%s' % (path, urllib.urlencode(url_params)),
             headers=headers)
 
+        print url_params
         self.assertEqual(response.code, 200)
 
         # Check that a response was found
@@ -237,6 +237,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         else:
             self.assertEqual(json_msg['headers']['track_vers'], '1')
 
+        print "E", json_msg['body'];
         self.assertDictContainsSubset(ebody, json_msg['body'])
         self.assertEqual(json_msg['body']['cip'], '127.0.0.1')
         if neon_id is not None:
@@ -252,7 +253,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'tids' : 'tid1,56,67+tid2,89,123'},
+              'tids' : 'tid1,tid2'},
             { 'event' : 'iv',
               'pageid' : 'pageid123',
               'tai' : 'tai123',
@@ -260,7 +261,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : 2345623,
-              'tids' : [['tid1',56,67],['tid2',89,123]],
+              'tids' : ['tid1','tid2'],
               'uid' : 'neon_id1'},
               'neon_id1'
             )
@@ -274,7 +275,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'tids' : 'tid1,56,67+tid2,89,123'},
+              'tids' : 'tid1 56 67,tid2 89 123'}, #tornado converts + to " "
             { 'event' : 'il',
               'pageid' : 'pageid123',
               'tai' : 'tai123',
@@ -328,7 +329,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'cts' : '2345623',
               'tid' : 'tid1',
               'vid' : 'vid1',
-              'pltype' : 'brightcove'},
+              'playerid' : 'brightcoveP123'},
             { 'event' : 'vp',
               'pageid' : 'pageid123',
               'tai' : 'tai123',
@@ -338,7 +339,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'cts' : 2345623,
               'tid' : 'tid1',
               'vid' : 'vid1',
-              'pltype' : 'brightcove',
+              'playerid' : 'brightcoveP123',
               'uid' : 'neon_id1'},
               'neon_id1'
             )
@@ -353,7 +354,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'tid' : 'tid1',},
+              },
             { 'event' : 'ap',
               'pageid' : 'pageid123',
               'tai' : 'tai123',
@@ -361,8 +362,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : 2345623,
-              'tid' : 'tid1',
-              'uid' : 'neon_id1'},
+              'euid' : 'neon_id1'},
               'neon_id1'
             )
     def test_v2_secondary_endpoint(self):
@@ -374,7 +374,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'tids' : 'tid1,56,67+tid2,89,123'},
+              'tids' : 'tid1,tid2'},
             { 'event' : 'iv',
               'pageid' : 'pageid123',
               'tai' : 'tai123',
@@ -382,7 +382,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : 2345623,
-              'tids' : [['tid1',56,67],['tid2',89,123]],
+              'tids' : ['tid1', 'tid2'],
               'uid' : 'neon_id1'},
               'neon_id1',
               '/v2/track'
@@ -438,7 +438,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         self.http_mock.side_effect = \
           lambda x, callback: self.io_loop.add_callback(
               callback,
-              HTTPResponse(x, 404, error=HTTPError(404)))
+              HTTPResponse(x, 599, error=HTTPError(599)))
 
         self.assertEqual(self.backup_q.qsize(), 0)
 
@@ -450,9 +450,10 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'tids' : 'tid1,56,67+tid2,89,123'}))
+             'tids' : 'tid1,tid2'}))
 
-        self.assertEqual(response.code, 404)
+        #TODO(Sunil) : return 500 if flume is down 
+        self.assertEqual(response.code, 599)
 
         # Now check the quere for writing to disk to make sure that
         # the data is there.

@@ -54,6 +54,7 @@ statemon.define('qsize', int)
 statemon.define('flume_errors', int)
 statemon.define('messages_handled', int)
 statemon.define('invalid_messages', int)
+statemon.define('internal_server_error', int)
 
 # TODO(mdesnoyer): Remove version 1 code once it is phased out
 
@@ -104,9 +105,14 @@ class BaseTrackerDataV2(object):
         self.pageid = request.get_argument('pageid') # page_id
         self.tai = request.get_argument('tai') # tracker_account_id
         # tracker_type (brightcove, ooyala, bcgallery, ign as of April 2014)
-        self.ttype = request.get_argument('ttype') 
+        self.ttype = request.get_argument('ttype')
+        #TODO(Sunil): Mock this correctly and use default value
         self.page = request.get_argument('page') # page_url
-        self.ref = request.get_argument('ref') # referral_url
+        try:
+            self.ref = request.get_argument('ref') # referral_url
+        except:
+            self.ref = None
+
         self.sts = int(time.time()) # Server time stamp
         self.cts = int(request.get_argument('cts')) # client_time
         self.cip = request.request.remote_ip # client_ip
@@ -136,6 +142,7 @@ class BaseTrackerDataV2(object):
             'il' : ImagesLoaded,
             'ic' : ImageClicked,
             'vp' : VideoPlay,
+            'vc' : VideoClick,
             'ap' : AdPlay}
 
         action = request_handler.get_argument('a')
@@ -150,10 +157,11 @@ class ImagesVisible(BaseTrackerDataV2):
     def __init__(self, request):
         super(ImagesVisible, self).__init__(request)
         self.event = 'iv'
-        self.tids = [] # [(Thumbnail id, width, height)]
-        for tup in request.get_argument('tids').split('+'):
-            elems = tup.split(',')
-            self.tids.append((elems[0], int(elems[1]), int(elems[2])))
+        self.tids = [] #[Thumbnail_id1, Thumbnail_id2]
+        self.tids = request.get_argument('tids').split(',')
+        #for tup in request.get_argument('tids').split(','):
+        #    elems = tup.split(' ')
+        #    self.tids.append(elems[0])
 
 class ImagesLoaded(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
@@ -161,12 +169,12 @@ class ImagesLoaded(BaseTrackerDataV2):
         super(ImagesLoaded, self).__init__(request)
         self.event = 'il'
         self.tids = [] # [(Thumbnail id, width, height)]
-        for tup in request.get_argument('tids').split('+'):
-            elems = tup.split(',')
+        for tup in request.get_argument('tids').split(','):
+            elems = tup.split(' ')
             self.tids.append((elems[0], int(elems[1]), int(elems[2])))
 
 class ImageClicked(BaseTrackerDataV2):
-    '''An event specifying that the image were loaded.'''
+    '''An event specifying that the image was clicked.'''
     def __init__(self, request):
         super(ImageClicked, self).__init__(request)
         self.event = 'ic'
@@ -176,6 +184,15 @@ class ImageClicked(BaseTrackerDataV2):
         self.wx = int(request.get_argument('wx')) # Window X
         self.wy = int(request.get_argument('wy')) # Window Y
 
+class VideoClick(BaseTrackerDataV2):
+    '''An event specifying that the image was clicked within the player'''
+    def __init__(self, request):
+        super(ImageClicked, self).__init__(request)
+        self.event = 'vc'
+        self.tid = request.get_argument('tid') # Thumbnail id
+        self.adplay = request.get_argument('adplay') # ts when ad started to play
+        self.mplay = request.get_argument('mplay') # ts when play buttion was pressed
+
 class VideoPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
@@ -183,14 +200,13 @@ class VideoPlay(BaseTrackerDataV2):
         self.event = 'vp'
         self.tid = request.get_argument('tid') # Thumbnail id
         self.vid = request.get_argument('vid') # Video id
-        self.pltype = request.get_argument('pltype') # Player id
+        self.playerid = request.get_argument('playerid') # Player id
 
 class AdPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
         super(AdPlay, self).__init__(request)
         self.event = 'ap'
-        self.tid = request.get_argument('tid') # Thumbnail id
         # TODO(sunil): Define the rest of this message
 
 #############################################
@@ -261,9 +277,11 @@ class LogLines(TrackerDataHandler):
             except tornado.web.HTTPError as e:
                 _log.error('Invalid request: %s' % self.request.uri)
                 statemon.state.increment('invalid_messages')
+                self.set_status(400)
                 raise
             except Exception, err:
                 _log.exception("key=get_track msg=%s", err)
+                statemon.state.increment('internal_server_error')
                 self.set_status(500)
                 self.finish()
                 return
@@ -281,7 +299,8 @@ class LogLines(TrackerDataHandler):
                     _log.error('Could not send message to flume')
                     statemon.state.increment('flume_errors')
                     self.backup_q.put(data)
-                    self.set_status(response.error.code)
+                    #Don't throw exception to client if it fails to write to flume
+                    #self.set_status(response.error.code)
                 else:
                     self.set_status(response.code)
             except Exception, err:

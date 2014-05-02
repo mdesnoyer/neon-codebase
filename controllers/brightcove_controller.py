@@ -244,8 +244,9 @@ class ThumbnailCheckTask(AbstractTask):
             #ever running once (unless it takes longer than the
             #period), but it should be locked properly.
             video = VideoMetadata.get(self.video_id)
-            video.thumbnail_ids.append(tid)
-            video.save()
+            if tid not in video.thumbnail_ids:
+                video.thumbnail_ids.append(tid)
+                video.save()
             for thumb_id in video.thumbnail_ids:
                 if thumb_id == tid:
                     continue
