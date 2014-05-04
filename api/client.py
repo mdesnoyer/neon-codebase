@@ -47,6 +47,7 @@ import tornado.httputil
 import tornado.ioloop
 import time
 import urllib
+import urllib2
 import utils.neon
 import utils.http
 from utils import statemon
@@ -270,6 +271,13 @@ class VideoProcessor(object):
         self.sec_to_extract = 1 
         self.sec_to_extract_offset = 1
 
+    def download_video_file_urllib2(self):
+        req = urllib2.Request(self.video_url, headers=self.headers)
+        res = urllib2.urlopen(req)
+        data = res.read()
+        self.tempfile.write(data)
+        return
+
     def download_video_file(self):
         '''
         Download the video file 
@@ -282,16 +290,14 @@ class VideoProcessor(object):
         
         try:
             response = http_client.fetch(req)
-            #TODO(Sunil): Investiage if fallback is needed for tornado errors?
-            #import urllib2
-            #req = urllib2.Request(self.video_url, headers=self.headers)
-            #res = urllib2.urlopen(req)
-            #data = res.read()
-            #self.tempfile.write(data)
-            #return
         except Exception, e:
-            self.error = "http error conencting to url"
-            return
+            #Enable fallback is needed for tornado errors, explore a single solution
+            try:
+                self.download_video_file_urllib2()
+                return
+            except urllib2.HTTPError, e:
+                self.error = "http error conencting to url"
+                return
 
         if response.error:
             #Do we need to handle timeout for long running http calls ? 

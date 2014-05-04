@@ -190,6 +190,7 @@ class VideoClick(BaseTrackerDataV2):
         super(ImageClicked, self).__init__(request)
         self.event = 'vc'
         self.tid = request.get_argument('tid') # Thumbnail id
+        self.pclick = request.get_argument('pclick') # ts when the player was clicked
         self.adplay = request.get_argument('adplay') # ts when ad started to play
         self.mplay = request.get_argument('mplay') # ts when play buttion was pressed
 

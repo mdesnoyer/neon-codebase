@@ -362,7 +362,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : 2345623,
-              'euid' : 'neon_id1'},
+              'uid' : 'neon_id1'},
               'neon_id1'
             )
     def test_v2_secondary_endpoint(self):
@@ -452,8 +452,8 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'cts' : '2345623',
              'tids' : 'tid1,tid2'}))
 
-        #TODO(Sunil) : return 500 if flume is down 
-        self.assertEqual(response.code, 599)
+        #Returns 200, even if flume is down
+        self.assertEqual(response.code, 200)
 
         # Now check the quere for writing to disk to make sure that
         # the data is there.
