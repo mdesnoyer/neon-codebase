@@ -108,10 +108,7 @@ class BaseTrackerDataV2(object):
         self.ttype = request.get_argument('ttype')
         #TODO(Sunil): Mock this correctly and use default value
         self.page = request.get_argument('page') # page_url
-        try:
-            self.ref = request.get_argument('ref') # referral_url
-        except:
-            self.ref = None
+        self.ref = request.get_argument('ref', None) # referral_url
 
         self.sts = int(time.time()) # Server time stamp
         self.cts = int(request.get_argument('cts')) # client_time

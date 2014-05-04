@@ -63,7 +63,9 @@ class TestFileBackupHandler(unittest.TestCase):
                         'y' : '123',
                         'wx' : '567',
                         'wy' : '9678'}
-        mock_click_request.get_argument.side_effect = lambda x: click_fields[x]
+        def mock_click_get_argument(field, default=[]):
+            return click_fields[field]
+        mock_click_request.get_argument.side_effect = mock_click_get_argument
         mock_click_request.request.remote_ip = '12.43.151.12'
         mock_click_request.get_cookie.return_value = 'cookie1'
 
@@ -77,7 +79,9 @@ class TestFileBackupHandler(unittest.TestCase):
                        'a' : 'iv',
                        'tids' : 'tid345,tid346'
                        }
-        mock_view_request.get_argument.side_effect = lambda x: view_fields[x]
+        def mock_view_get_request(field, default=[]):
+            return view_fields[field]
+        mock_view_request.get_argument.side_effect = mock_view_get_request
         mock_view_request.request.remote_ip = '12.43.151.120'
         mock_view_request.get_cookie.return_value = 'cookie2'
         
@@ -362,7 +366,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : 2345623,
-              'euid' : 'neon_id1'},
+              'uid' : 'neon_id1'},
               'neon_id1'
             )
     def test_v2_secondary_endpoint(self):
@@ -386,6 +390,36 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'uid' : 'neon_id1'},
               'neon_id1',
               '/v2/track'
+            )
+
+    def test_v2_no_referral_url(self):
+         # Image clicked message
+        self.check_message_sent(
+            { 'a' : 'ic',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'cts' : '2345623',
+              'tid' : 'tid1',
+              'x' : '56',
+              'y' : '23',
+              'wx' : '78',
+              'wy' : '34'},
+            { 'event' : 'ic',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : None,
+              'cts' : 2345623,
+              'tid' : 'tid1',
+              'px' : 56,
+              'py' : 23,
+              'wx' : 78,
+              'wy' : 34,
+              'uid' : 'neon_id1'},
+              'neon_id1'
             )
 
     def test_v1_valid_messages(self):
@@ -452,8 +486,9 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'cts' : '2345623',
              'tids' : 'tid1,tid2'}))
 
-        #TODO(Sunil) : return 500 if flume is down 
-        self.assertEqual(response.code, 599)
+        # If flume is down, we still want to respond with a 200 if it
+        # is stored on disk
+        self.assertEqual(response.code, 200)
 
         # Now check the quere for writing to disk to make sure that
         # the data is there.
