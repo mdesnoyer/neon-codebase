@@ -106,18 +106,14 @@ class BaseTrackerDataV2(object):
         self.tai = request.get_argument('tai') # tracker_account_id
         # tracker_type (brightcove, ooyala, bcgallery, ign as of April 2014)
         self.ttype = request.get_argument('ttype')
-        #TODO(Sunil): Mock this correctly and use default value
         self.page = request.get_argument('page') # page_url
-        try:
-            self.ref = request.get_argument('ref') # referral_url
-        except:
-            self.ref = None
+        self.ref = request.get_argument('ref', None) # referral_url
 
         self.sts = int(time.time()) # Server time stamp
         self.cts = int(request.get_argument('cts')) # client_time
         self.cip = request.request.remote_ip # client_ip
         # Neon's user id
-        self.uid = request.get_cookie('neonglobaluserid', default=None) 
+        self.uid = request.get_cookie('neonglobaluserid', default="") 
 
     def to_flume_event(self):
         '''Coverts the data to a flume event.'''
@@ -151,6 +147,14 @@ class BaseTrackerDataV2(object):
         except KeyError as e:
             _log.error('Invalid event: %s' % action)
             raise tornado.web.HTTPError(400)
+    
+    def sanitize_null(self, ip):
+        '''
+        Sanitize null or undefined strings from tracker to python None
+        '''
+        if ip == "null" or ip == "undefined":
+            return
+        return ip
 
 class ImagesVisible(BaseTrackerDataV2):
     '''An event specifying that the image became visible.'''
@@ -159,9 +163,6 @@ class ImagesVisible(BaseTrackerDataV2):
         self.event = 'iv'
         self.tids = [] #[Thumbnail_id1, Thumbnail_id2]
         self.tids = request.get_argument('tids').split(',')
-        #for tup in request.get_argument('tids').split(','):
-        #    elems = tup.split(' ')
-        #    self.tids.append(elems[0])
 
 class ImagesLoaded(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
@@ -170,7 +171,7 @@ class ImagesLoaded(BaseTrackerDataV2):
         self.event = 'il'
         self.tids = [] # [(Thumbnail id, width, height)]
         for tup in request.get_argument('tids').split(','):
-            elems = tup.split(' ')
+            elems = tup.split(' ') # '+' delimiter converts to ' '
             self.tids.append((elems[0], int(elems[1]), int(elems[2])))
 
 class ImageClicked(BaseTrackerDataV2):
@@ -179,36 +180,38 @@ class ImageClicked(BaseTrackerDataV2):
         super(ImageClicked, self).__init__(request)
         self.event = 'ic'
         self.tid = request.get_argument('tid') # Thumbnail id
-        self.px = int(request.get_argument('x')) # Page X coordinate
-        self.py = int(request.get_argument('y')) # Page Y coordinate
-        self.wx = int(request.get_argument('wx')) # Window X
-        self.wy = int(request.get_argument('wy')) # Window Y
+        self.px = float(request.get_argument('x', 0)) # Page X coordinate
+        self.py = float(request.get_argument('y', 0)) # Page Y coordinate
+        self.wx = float(request.get_argument('wx', 0)) # Window X
+        self.wy = float(request.get_argument('wy', 0)) # Window Y
 
 class VideoClick(BaseTrackerDataV2):
     '''An event specifying that the image was clicked within the player'''
     def __init__(self, request):
-        super(ImageClicked, self).__init__(request)
+        super(VideoClick, self).__init__(request)
         self.event = 'vc'
-        self.tid = request.get_argument('tid') # Thumbnail id
-        self.pclick = request.get_argument('pclick') # ts when the player was clicked
-        self.adplay = request.get_argument('adplay') # ts when ad started to play
-        self.mplay = request.get_argument('mplay') # ts when play buttion was pressed
+        self.tid = self.sanitize_null(request.get_argument('tid')) # Thumbnail id
+        self.pclick = int(request.get_argument('pclick')) # ts when the player was clicked
+        self.adplay = int(request.get_argument('adplay')) # ts when ad started to play
+        self.mplay = int(request.get_argument('mplay')) # ts when play buttion was pressed
 
 class VideoPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
         super(VideoPlay, self).__init__(request)
         self.event = 'vp'
-        self.tid = request.get_argument('tid') # Thumbnail id
-        self.vid = request.get_argument('vid') # Video id
-        self.playerid = request.get_argument('playerid') # Player id
+        self.tid = self.sanitize_null(request.get_argument('tid')) # Thumbnail id
+        self.vid = self.sanitize_null(request.get_argument('vid')) # Video id
+        self.playerid = request.get_argument('playerid', None) # Player id
 
 class AdPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
         super(AdPlay, self).__init__(request)
         self.event = 'ap'
-        # TODO(sunil): Define the rest of this message
+        self.tid = self.sanitize_null(request.get_argument('tid')) # Thumbnail id
+        self.vid = self.sanitize_null(request.get_argument('vid')) # Video id
+        self.playerid = request.get_argument('playerid', None) # Player id
 
 #############################################
 #### WEB INTERFACE #####

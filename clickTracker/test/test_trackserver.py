@@ -1,13 +1,6 @@
 #!/usr/bin/env python
 '''
 Test functionality of the click log server.
-
-#TODO(sunil): Nagios like script to monitor the following issues
-
-- Server not at capacity, 1 or more process died
-- S3 uploader has issues with s3 connection
-- Memory on the box is running out, Q drain issue 
-
 '''
 
 import os.path
@@ -63,7 +56,9 @@ class TestFileBackupHandler(unittest.TestCase):
                         'y' : '123',
                         'wx' : '567',
                         'wy' : '9678'}
-        mock_click_request.get_argument.side_effect = lambda x: click_fields[x]
+        def mock_click_get_argument(field, default=[]):
+            return click_fields[field]
+        mock_click_request.get_argument.side_effect = mock_click_get_argument
         mock_click_request.request.remote_ip = '12.43.151.12'
         mock_click_request.get_cookie.return_value = 'cookie1'
 
@@ -77,7 +72,9 @@ class TestFileBackupHandler(unittest.TestCase):
                        'a' : 'iv',
                        'tids' : 'tid345,tid346'
                        }
-        mock_view_request.get_argument.side_effect = lambda x: view_fields[x]
+        def mock_view_get_request(field, default=[]):
+            return view_fields[field]
+        mock_view_request.get_argument.side_effect = mock_view_get_request
         mock_view_request.request.remote_ip = '12.43.151.120'
         mock_view_request.get_cookie.return_value = 'cookie2'
         
@@ -317,6 +314,35 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'uid' : 'neon_id1'},
               'neon_id1'
             )
+        
+        #Video clicked message
+        self.check_message_sent(
+            { 'a' : 'vc',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'tid' : 'tid1',
+              'pclick' : 125326,
+              'adplay' : 0,
+              'mplay' : 1251515,
+              },
+            { 'event' : 'vc',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : 2345623,
+              'tid' : 'tid1',
+              'pclick' : 125326,
+              'adplay' : 0,
+              'mplay' : 1251515,
+              'uid' : 'neon_id1'},
+              'neon_id1'
+            )
 
         # Video play message
         self.check_message_sent(
@@ -345,7 +371,6 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
             )
 
         # Ad play message
-        # TODO(Sunil): Change this message when the ad plays are better defined
         self.check_message_sent(
             { 'a' : 'ap',
               'pageid' : 'pageid123',
@@ -354,6 +379,9 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
+              'tid' : 'tid1',
+              'vid' : 'vid1',
+              'playerid' : 'brightcoveP123',
               },
             { 'event' : 'ap',
               'pageid' : 'pageid123',
@@ -362,6 +390,9 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : 2345623,
+              'tid' : 'tid1',
+              'vid' : 'vid1',
+              'playerid' : 'brightcoveP123',
               'uid' : 'neon_id1'},
               'neon_id1'
             )
@@ -386,6 +417,36 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'uid' : 'neon_id1'},
               'neon_id1',
               '/v2/track'
+            )
+
+    def test_v2_no_referral_url(self):
+         # Image clicked message
+        self.check_message_sent(
+            { 'a' : 'ic',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'cts' : '2345623',
+              'tid' : 'tid1',
+              'x' : '56',
+              'y' : '23',
+              'wx' : '78',
+              'wy' : '34'},
+            { 'event' : 'ic',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : None,
+              'cts' : 2345623,
+              'tid' : 'tid1',
+              'px' : 56,
+              'py' : 23,
+              'wx' : 78,
+              'wy' : 34,
+              'uid' : 'neon_id1'},
+              'neon_id1'
             )
 
     def test_v1_valid_messages(self):
@@ -452,7 +513,8 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'cts' : '2345623',
              'tids' : 'tid1,tid2'}))
 
-        #Returns 200, even if flume is down
+        # If flume is down, we still want to respond with a 200 if it
+        # is stored on disk
         self.assertEqual(response.code, 200)
 
         # Now check the quere for writing to disk to make sure that
