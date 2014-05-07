@@ -16,6 +16,7 @@ if sys.path[0] != __base_path__:
 
 
 import json
+import httpagentparser
 import os
 import Queue
 import re
@@ -28,6 +29,7 @@ import tornado.web
 import tornado.httpserver
 import tornado.escape
 import utils.http
+import utils.inputsanitizer
 import utils.neon
 import utils.ps
 
@@ -114,6 +116,22 @@ class BaseTrackerDataV2(object):
         self.cip = request.request.remote_ip # client_ip
         # Neon's user id
         self.uid = request.get_cookie('neonglobaluserid', default="") 
+        # User agent of the client
+        self.uagent = None
+        self.uinfo = None
+        http_request = request.request
+        if hasattr(http_request, "headers"):
+            if http_request.headers.has_key("User-Agent"):
+                self.uagent = http_request.headers["User-Agent"]
+                self.uinfo = BaseTrackerDataV2.format_user_agent(self.uagent)
+
+    @classmethod
+    def format_user_agent(cls, uagent):
+        try:
+            return httpagentparser.detect(uagent)
+        except Exception, e:
+            _log.exception("httpagentparser failed %s" %e)
+            return
 
     def to_flume_event(self):
         '''Coverts the data to a flume event.'''
@@ -148,14 +166,6 @@ class BaseTrackerDataV2(object):
             _log.error('Invalid event: %s' % action)
             raise tornado.web.HTTPError(400)
     
-    def sanitize_null(self, ip):
-        '''
-        Sanitize null or undefined strings from tracker to python None
-        '''
-        if ip == "null" or ip == "undefined":
-            return
-        return ip
-
 class ImagesVisible(BaseTrackerDataV2):
     '''An event specifying that the image became visible.'''
     def __init__(self, request):
@@ -170,9 +180,11 @@ class ImagesLoaded(BaseTrackerDataV2):
         super(ImagesLoaded, self).__init__(request)
         self.event = 'il'
         self.tids = [] # [(Thumbnail id, width, height)]
-        for tup in request.get_argument('tids').split(','):
-            elems = tup.split(' ') # '+' delimiter converts to ' '
-            self.tids.append((elems[0], int(elems[1]), int(elems[2])))
+        tid_list = request.get_argument('tids')
+        if len(tid_list) >0:
+            for tup in tid_list.split(','):
+                elems = tup.split(' ') # '+' delimiter converts to ' '
+                self.tids.append((elems[0], int(elems[1]), int(elems[2])))
 
 class ImageClicked(BaseTrackerDataV2):
     '''An event specifying that the image was clicked.'''
@@ -190,28 +202,46 @@ class VideoClick(BaseTrackerDataV2):
     def __init__(self, request):
         super(VideoClick, self).__init__(request)
         self.event = 'vc'
-        self.tid = self.sanitize_null(request.get_argument('tid')) # Thumbnail id
-        self.pclick = int(request.get_argument('pclick')) # ts when the player was clicked
-        self.adplay = int(request.get_argument('adplay')) # ts when ad started to play
-        self.mplay = int(request.get_argument('mplay')) # ts when play buttion was pressed
+        # Thumbnail id that was in the player
+        self.vid = request.get_argument('vid') # Video id
+        self.tid = utils.inputsanitizer.InputSanitizer.sanitize_null(
+                            request.get_argument('tid')) # Thumbnail id
+        self.playerid = request.get_argument('playerid', None) # Player id
 
 class VideoPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
         super(VideoPlay, self).__init__(request)
         self.event = 'vp'
-        self.tid = self.sanitize_null(request.get_argument('tid')) # Thumbnail id
-        self.vid = self.sanitize_null(request.get_argument('vid')) # Video id
+        self.tid = utils.inputsanitizer.InputSanitizer.sanitize_null(
+                            request.get_argument('tid')) # Thumbnail id
+        self.vid = request.get_argument('vid') # Video id
         self.playerid = request.get_argument('playerid', None) # Player id
+        self.adplay = utils.inputsanitizer.InputSanitizer.to_bool(
+                request.get_argument('adplay', False)) # If an adplay preceeded video play 
+        # (time when player initiates request to play video - 
+        #             Last time an image or the player was clicked) 
+        self.adelta = utils.inputsanitizer.InputSanitizer.sanitize_int(
+                        request.get_argument('adelta')) # autoplay delta 
+        self.pcount = utils.inputsanitizer.InputSanitizer.sanitize_int(
+                        request.get_argument('pcount')) #the current count of the video playing on the page 
 
 class AdPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
         super(AdPlay, self).__init__(request)
         self.event = 'ap'
-        self.tid = self.sanitize_null(request.get_argument('tid')) # Thumbnail id
-        self.vid = self.sanitize_null(request.get_argument('vid')) # Video id
+        self.tid = utils.inputsanitizer.InputSanitizer.sanitize_null(
+                            request.get_argument('tid')) # Thumbnail id
+        #VID can be null, if VideoClick event doesn't fire before adPlay
+        self.vid = utils.inputsanitizer.InputSanitizer.sanitize_null(
+                            request.get_argument('vid')) # Video id
         self.playerid = request.get_argument('playerid', None) # Player id
+        # (time when player initiates request to play video - Last time an image or the player was clicked) 
+        self.adelta = utils.inputsanitizer.InputSanitizer.sanitize_int(
+                            request.get_argument('adelta')) # autoplay delta 
+        self.pcount = utils.inputsanitizer.InputSanitizer.sanitize_int(
+                            request.get_argument('pcount')) #the current count of the video playing on the page 
 
 #############################################
 #### WEB INTERFACE #####

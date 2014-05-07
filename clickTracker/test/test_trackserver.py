@@ -42,7 +42,9 @@ class TestFileBackupHandler(unittest.TestCase):
 
     def processData(self):
         '''Sends 1000 requests to a handler and waits until they are done.'''
-
+        
+        user_agent = "Mozilla/5.0 (Linux; U; Android 2.3.5; en-in; "\
+                "HTC_DesireS_S510e Build/GRJ90) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1"
         mock_click_request = MagicMock()
         click_fields = {'pageid' : 'pageid234',
                         'tai' : 'tai234',
@@ -61,6 +63,8 @@ class TestFileBackupHandler(unittest.TestCase):
         mock_click_request.get_argument.side_effect = mock_click_get_argument
         mock_click_request.request.remote_ip = '12.43.151.12'
         mock_click_request.get_cookie.return_value = 'cookie1'
+        mock_click_request.request.headers = {} 
+        mock_click_request.request.headers['User-Agent'] = user_agent 
 
         mock_view_request = MagicMock()
         view_fields = {'pageid' : 'pageid67',
@@ -77,6 +81,8 @@ class TestFileBackupHandler(unittest.TestCase):
         mock_view_request.get_argument.side_effect = mock_view_get_request
         mock_view_request.request.remote_ip = '12.43.151.120'
         mock_view_request.get_cookie.return_value = 'cookie2'
+        mock_view_request.request.headers = {}
+        mock_view_request.request.headers['User-Agent'] = user_agent 
         
         # Start a thread to handle the data
         dataQ = Queue.Queue()
@@ -206,13 +212,15 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         self.http_mock.reset_mock()
         
         headers = {}
+        headers['User-Agent'] = "Mozilla/5.0 (Linux; U; Android 2.3.5; en-in; HTC_DesireS_S510e Build/GRJ90) \
+                        AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1"
         if neon_id is not None:
             headers['Cookie'] = 'neonglobaluserid=%s' % neon_id
         response = self.fetch(
             '%s?%s' % (path, urllib.urlencode(url_params)),
             headers=headers)
 
-        print url_params
+        #print url_params
         self.assertEqual(response.code, 200)
 
         # Check that a response was found
@@ -234,7 +242,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         else:
             self.assertEqual(json_msg['headers']['track_vers'], '1')
 
-        print "E", json_msg['body'];
+        #print ebody, json_msg['body']
         self.assertDictContainsSubset(ebody, json_msg['body'])
         self.assertEqual(json_msg['body']['cip'], '127.0.0.1')
         if neon_id is not None:
@@ -324,10 +332,9 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
+              'vid' : 'vid1',
               'tid' : 'tid1',
-              'pclick' : 125326,
-              'adplay' : 0,
-              'mplay' : 1251515,
+              'playerid' : 'brightcoveP123',
               },
             { 'event' : 'vc',
               'pageid' : 'pageid123',
@@ -336,10 +343,9 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : 2345623,
+              'vid' : 'vid1',
               'tid' : 'tid1',
-              'pclick' : 125326,
-              'adplay' : 0,
-              'mplay' : 1251515,
+              'playerid' : 'brightcoveP123',
               'uid' : 'neon_id1'},
               'neon_id1'
             )
@@ -355,6 +361,9 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'cts' : '2345623',
               'tid' : 'tid1',
               'vid' : 'vid1',
+              'adplay': False,
+              'adelta': 'null',
+              'pcount': 1,
               'playerid' : 'brightcoveP123'},
             { 'event' : 'vp',
               'pageid' : 'pageid123',
@@ -365,6 +374,9 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'cts' : 2345623,
               'tid' : 'tid1',
               'vid' : 'vid1',
+              'adplay': False,
+              'adelta': None,
+              'pcount': 1,
               'playerid' : 'brightcoveP123',
               'uid' : 'neon_id1'},
               'neon_id1'
@@ -381,6 +393,8 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'cts' : '2345623',
               'tid' : 'tid1',
               'vid' : 'vid1',
+              'adelta': '214',
+              'pcount' : 1,
               'playerid' : 'brightcoveP123',
               },
             { 'event' : 'ap',
@@ -392,6 +406,8 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'cts' : 2345623,
               'tid' : 'tid1',
               'vid' : 'vid1',
+              'adelta': 214,
+              'pcount' : 1,
               'playerid' : 'brightcoveP123',
               'uid' : 'neon_id1'},
               'neon_id1'
@@ -528,5 +544,5 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
 if __name__ == '__main__':
     utils.neon.InitNeonTest()
     # Turn off the annoying logs
-    logging.getLogger('tornado.access').propagate = False
+    #logging.getLogger('tornado.access').propagate = False
     unittest.main()

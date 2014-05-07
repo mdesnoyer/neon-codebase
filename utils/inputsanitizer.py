@@ -99,4 +99,22 @@ class InputSanitizer(object):
             r'(?:/?|[/?]\S+)$', re.IGNORECASE)
         return regex.match(_input)
 
+    @classmethod
+    def sanitize_null(cls, ip):
+
+        '''
+        Sanitize null or undefined strings from tracker to python None
+        '''
+        if ip == "null" or ip == "undefined":
+            return
+        return ip
+
+    @classmethod
+    def sanitize_int(cls, ip):
+        '''
+        Sanitize null or undefined strings from tracker data to INT or None
+        '''
+        if ip == "null" or ip == "undefined":
+            return
+        return int(ip)
 
