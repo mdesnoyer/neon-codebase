@@ -96,7 +96,7 @@ class TrackerData(object):
                 'tai' : self.tai,
                 'track_vers' : '1',
                 },
-            'body': self.__dict__
+            'body': json.dumps(self.__dict__)
             }])
 
 class BaseTrackerDataV2(object):
@@ -141,7 +141,7 @@ class BaseTrackerDataV2(object):
                 'tai' : self.tai,
                 'track_vers' : '2',
                 },
-            'body': self.__dict__
+            'body': json.dumps(self.__dict__)
             }])
 
     @staticmethod

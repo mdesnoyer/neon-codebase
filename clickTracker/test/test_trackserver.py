@@ -136,7 +136,7 @@ class TestFileBackupHandler(unittest.TestCase):
                         if line == '':
                             continue
                         parsed = json.loads(line)
-                        body = parsed[0]['body']
+                        body = json.loads(parsed[0]['body'])
                         if body['event'] == 'ic':
                             self.assertEqual(body['pageid'], 'pageid234')
                             self.assertEqual(body['tai'], 'tai234')
@@ -233,20 +233,20 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         json_msg = json.loads(request_saw.body)
         self.assertEqual(len(json_msg), 1)
         json_msg = json_msg[0]
+        body = json.loads(json_msg['body'])
         self.assertEqual(json_msg['headers']['tai'], ebody['tai'])
         self.assertTrue(json_msg['headers']['timestamp'])
         self.assertEqual(json_msg['headers']['timestamp'],
-                         json_msg['body']['sts'])
+                         body['sts'])
         if 'v2' in path:
             self.assertEqual(json_msg['headers']['track_vers'], '2')
         else:
             self.assertEqual(json_msg['headers']['track_vers'], '1')
 
-        #print ebody, json_msg['body']
-        self.assertDictContainsSubset(ebody, json_msg['body'])
-        self.assertEqual(json_msg['body']['cip'], '127.0.0.1')
+        self.assertDictContainsSubset(ebody, json.loads(json_msg['body']))
+        self.assertEqual(json.loads(json_msg['body'])['cip'], '127.0.0.1')
         if neon_id is not None:
-            self.assertEqual(json_msg['body']['uid'], neon_id)
+            self.assertEqual(body['uid'], neon_id)
 
     def test_v2_valid_messages(self):
         # Image Visible Message
@@ -538,7 +538,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(self.backup_q.qsize(), 1)
         msg = json.loads(self.backup_q.get())
         self.assertEqual(len(msg), 1)
-        self.assertEqual(msg[0]['body']['event'], 'iv')
+        self.assertEqual(json.loads(msg[0]['body'])['event'], 'iv')
             
 
 if __name__ == '__main__':
