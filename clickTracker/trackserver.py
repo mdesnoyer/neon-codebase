@@ -111,8 +111,8 @@ class BaseTrackerDataV2(object):
         self.page = request.get_argument('page') # page_url
         self.ref = request.get_argument('ref', None) # referral_url
 
-        self.sts = int(time.time()) # Server time stamp
-        self.cts = int(request.get_argument('cts')) # client_time
+        self.sts = int(time.time() * 1000) # Server time stamp in ms
+        self.cts = int(request.get_argument('cts')) # client_time in ms
         self.cip = request.request.remote_ip # client_ip
         # Neon's user id
         self.uid = request.get_cookie('neonglobaluserid', default="") 
@@ -314,7 +314,8 @@ class LogLines(TrackerDataHandler):
                 self.set_status(400)
                 raise
             except Exception, err:
-                _log.exception("key=get_track msg=%s", err)
+                _log.exception("key=get_track request=%s msg=%s",
+                               (self.request.uri, err))
                 statemon.state.increment('internal_server_error')
                 self.set_status(500)
                 self.finish()
@@ -513,7 +514,8 @@ class Server(threading.Thread):
             self.io_loop.make_current()
             
             server = tornado.httpserver.HTTPServer(self.application,
-                                                   io_loop=self.io_loop)
+                                                   io_loop=self.io_loop,
+                                                   xheaders=True)
             utils.ps.register_tornado_shutdown(server)
             server.listen(options.port)
         
