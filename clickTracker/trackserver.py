@@ -119,11 +119,14 @@ class BaseTrackerDataV2(object):
         # User agent of the client
         self.uagent = None
         self.uinfo = None
+        self.geoinfo = None
         http_request = request.request
         if hasattr(http_request, "headers"):
-            if http_request.headers.has_key("User-Agent"):
-                self.uagent = http_request.headers["User-Agent"]
+            headers = http_request.headers 
+            if headers.has_key("User-Agent"):
+                self.uagent = headers["User-Agent"]
                 self.uinfo = BaseTrackerDataV2.format_user_agent(self.uagent)
+            self.geoinfo = self.get_geoip_data(headers)
 
     @classmethod
     def format_user_agent(cls, uagent):
@@ -132,6 +135,24 @@ class BaseTrackerDataV2(object):
         except Exception, e:
             _log.exception("httpagentparser failed %s" %e)
             return
+    
+    def get_geoip_data(self, headers):
+        '''
+        Return a dict of geoip data
+        country, city, region, zip, lat, long
+        '''
+        def _get_value(d, key):
+            if d.has_key(key):
+                return d[key]
+        geoinfo = {}
+        geoinfo["country"] = _get_value(headers, "Geoip_country_code3")
+        geoinfo["city"] = _get_value(headers, "Geoip_city")
+        geoinfo["region"] = _get_value(headers, "Geoip_region")
+        geoinfo["zip"] = _get_value(headers, "Geoip_postal_code")
+        geoinfo["lat"] = _get_value(headers, "Geoip_latitude")
+        geoinfo["long"] = _get_value(headers, "Geoip_longitude")
+        
+        return geoinfo
 
     def to_flume_event(self):
         '''Coverts the data to a flume event.'''

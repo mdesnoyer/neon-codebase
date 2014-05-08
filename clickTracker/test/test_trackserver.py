@@ -81,8 +81,15 @@ class TestFileBackupHandler(unittest.TestCase):
         mock_view_request.get_argument.side_effect = mock_view_get_request
         mock_view_request.request.remote_ip = '12.43.151.120'
         mock_view_request.get_cookie.return_value = 'cookie2'
-        mock_view_request.request.headers = {}
-        mock_view_request.request.headers['User-Agent'] = user_agent 
+        mock_view_request.request.headers = { 
+                'User-Agent': user_agent,
+                'Geoip_city_country_name': 'United States',
+                'Geoip_country_code3': 'USA',
+                'Geoip_latitude': '37.7794',
+                'Geoip_city': 'San Francisco',
+                'Geoip_longitude': '-122.4170',
+                'Geoip_postal_code': '94102'
+                }
         
         # Start a thread to handle the data
         dataQ = Queue.Queue()
@@ -162,6 +169,8 @@ class TestFileBackupHandler(unittest.TestCase):
                             self.assertTrue(body['sts'])
                             self.assertItemsEqual(body['tids'], 
                                                   ['tid345', 'tid346'])
+                            self.assertEqual(body['geoinfo']["city"], "San Francisco")
+                            self.assertEqual(body['geoinfo']["zip"], "94102")
                         else:
                             self.fail('Bad event field %s' % body['event'])
         

@@ -10,6 +10,7 @@ Copyright Neon Labs 2013
 
 import logging
 from optparse import OptionParser
+import math
 import numpy as np
 import scipy.stats
 
@@ -38,6 +39,21 @@ data = [
     ['Pose2',6697,132,6756,119],
     ['Pose3',3608,13,3480,7]]
 
+def significance_calculator(lb, cb, la, ca):
+    '''
+    AB Test significance calculator
+    '''
+
+    ctr_a = ca/la
+    ctr_b = cb/lb
+    se_a = math.sqrt(ctr_a *(1-ctr_a)/la)
+    se_b = math.sqrt(ctr_b *(1-ctr_b)/lb)
+    x = (ctr_b - ctr_a)/ (math.sqrt( se_a**2 + se_b**2 ))
+    p_value = scipy.stats.norm(0,1).cdf(x)
+    if p_value >= 0.95 or p_value <= 0.05:
+        return True
+    return False
+
 def main(options):
     if options.filename:
         global data
@@ -49,6 +65,10 @@ def main(options):
                 for i in range(len(d) -1):
                     i = i+1
                     d[i] = float(d[i])
+                
+                if options.significant:
+                    if not significance_calculator(d[1], d[2], d[3], d[4]):
+                        continue
                 data.append(d)
     
     ctr_base = np.array([float(x[2])/float(x[1]) for x in data])
@@ -96,7 +116,9 @@ def main(options):
 if __name__ == '__main__':
     parser = OptionParser()
     parser.add_option("-f", "--file", dest="filename",
-                              help="write report to FILE", metavar="FILE")
+                        help="write report to FILE", metavar="FILE")
+    parser.add_option("-s", "--significant", dest="significant",
+                        help="AB test significance", default=None)
 
     options, args = parser.parse_args()
 
