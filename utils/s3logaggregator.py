@@ -14,7 +14,7 @@ import gzip
 from optparse import OptionParser
 import sys
 import shortuuid
-import StringIO
+from StringIO import StringIO
 import time
 
 #n_chunks = 100 # no of keys to be merged. 
@@ -47,6 +47,8 @@ def aggregate_and_save_data(keyset, output_bucket, s_date=None, e_date=None):
     ''' Aggregate data from keys and save the data in a new key'''
 
     aggr_data = ''
+    gz_data = ''
+
     for key in keyset:
         #Remove timezone awareness, Assume UTC timestamp   
         key_modified_date = dateutil.parser.parse(key.last_modified).replace(tzinfo=None)
@@ -57,22 +59,54 @@ def aggregate_and_save_data(keyset, output_bucket, s_date=None, e_date=None):
         data = get_data(key)
         if len(data) == 0:
             print key
-        aggr_data += data
-        aggr_data += "\n" #add newline to end of log
-    
-    if len(aggr_data) > 0:
+        else: 
+            data += "\n" #add newline to end of log
+            gz_data += GzipStream().read(StringIO(data))
+
+    if len(gz_data) > 0:
         #save to s3
         conn = S3Connection(s3key, s3secret)
         bucket = conn.get_bucket(output_bucket)
         keyname = _generate_log_filename()
         k = bucket.new_key(keyname)
-        gz_stream = StringIO.StringIO()
-        gz = gzip.GzipFile(fileobj=gz_stream, mode='w')
-        gz.write(aggr_data)
-        gz.close()
-        k.set_contents_from_string(gz_stream.getvalue(),
-	  headers={'Content-Type' : 'application/x-gzip'})
-        gz_stream.close()
+        k.set_contents_from_string(gz_data,
+                            headers={'Content-Type' : 'application/x-gzip'})
+
+class GzipStream(StringIO):
+    CHUNCK_SIZE = 65536
+
+    def __init__(self, name="data"):
+        StringIO.__init__(self)
+
+        self.source_eof = False
+        self.gz_buffer = ""
+        self.zipfile = gzip.GzipFile(name, 'wb', 9, self)
+
+    def write(self, data):
+        self.gz_buffer += data
+
+    def read(self, source, size = -1):
+        while ((len(self.gz_buffer) < size) or (size == -1)) and not self.source_eof:
+            if source == None: 
+                break
+            chunk = source.read(GzipStream.CHUNCK_SIZE)
+            self.zipfile.write(chunk)
+            if (len(chunk) < GzipStream.CHUNCK_SIZE):
+                self.source_eof = True
+                self.zipfile.flush()
+                self.zipfile.close()
+                break
+
+        if size == 0:
+            result = ""
+        if size >= 1:
+            result = self.gz_buffer[0:size]
+            self.gz_buffer = self.gz_buffer[size:]
+        else:
+            result = self.gz_buffer
+            self.gz_buffer = ""
+
+        return result
 
 def main(input_bucket, output_bucket, n_chunks, s_date, e_date):
     ''' Get keys from a bucket and do work '''

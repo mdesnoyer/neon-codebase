@@ -188,7 +188,10 @@ if (typeof NeonPlayerTracker == "undefined"){
 				var mediaCollection = content.getAllMediaCollections();
 				if (mediaCollection.length >0 && mediaCollection[0].mediaCount > 0){
 					for(var i = 0; i < mediaCollection[0].mediaCount; i++) {
-							imageUrls[i] = content.getMedia(mediaCollection[0].mediaIds[i]) ["thumbnailURL"].split('?')[0]; 
+							iurl = content.getMedia(mediaCollection[0].mediaIds[i]) ["thumbnailURL"];
+							if(iurl){
+								imageUrls[i] = iurl.split('?')[0];
+							}	
 					}
 				}
 				action = "load";

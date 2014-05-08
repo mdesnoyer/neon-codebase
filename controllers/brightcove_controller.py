@@ -205,7 +205,7 @@ class ThumbnailCheckTask(AbstractTask):
                                                   video.integration_id)
         if platform is None:
             _log.error("key=ThumbnailCheckTask "
-                       "msg=Could not find brightcove platform for video: %s" 
+                       "msg=Could not find brightcove platform account for video: %s" 
                        % self.video_id)
             statemon.state.increment('thumbchecktask_fail')
             return
@@ -244,8 +244,9 @@ class ThumbnailCheckTask(AbstractTask):
             #ever running once (unless it takes longer than the
             #period), but it should be locked properly.
             video = VideoMetadata.get(self.video_id)
-            video.thumbnail_ids.append(tid)
-            video.save()
+            if tid not in video.thumbnail_ids:
+                video.thumbnail_ids.append(tid)
+                video.save()
             for thumb_id in video.thumbnail_ids:
                 if thumb_id == tid:
                     continue
@@ -398,7 +399,7 @@ class BrightcoveABController(object):
             _log.error('key=load_initial_state '
                        'msg=Failed to load data from mastermind')
             raise response.error
-        directives = result.body.split('\n')
+        directives = response.body.split('\n')
         for directive in directives:
             self.apply_directive(directive, options.delay)
 

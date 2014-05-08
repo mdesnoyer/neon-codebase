@@ -31,3 +31,4 @@ pycurl==7.19
 pylint==1.1.0
 psutil==1.2.1
 imagehash==0.3
+httpagentparser==1.6.0
