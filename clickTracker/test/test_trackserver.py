@@ -145,7 +145,7 @@ class TestFileBackupHandler(unittest.TestCase):
                             self.assertEqual(body['ref'], 'http://ref.com')
                             self.assertEqual(body['cip'], '12.43.151.12')
                             self.assertEqual(body['cts'], 23945827)
-                            self.assertTrue(body['sts'])
+                            self.assertGreater(body['sts'], 1300000000000)
                             self.assertEqual(body['tid'], 'tid345')
                             self.assertEqual(body['px'], 3467)
                             self.assertEqual(body['py'], 123)
@@ -159,7 +159,7 @@ class TestFileBackupHandler(unittest.TestCase):
                             self.assertEqual(body['ref'], 'http://ref1.com')
                             self.assertEqual(body['cip'], '12.43.151.120')
                             self.assertEqual(body['cts'], 23945898)
-                            self.assertTrue(body['sts'])
+                            self.assertGreater(body['sts'], 1300000000000)
                             self.assertItemsEqual(body['tids'], 
                                                   ['tid345', 'tid346'])
                         else:
