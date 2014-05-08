@@ -248,14 +248,14 @@ class TestIDMapping(unittest.TestCase):
             "acct1", neondata.TrackerAccountIDMapper.PRODUCTION)
 
         results, counters = test_utils.mr.run_single_step(self.mr,
-            encode([(('click', 'http://brightcove.vo.llnwd.net/d21/unsecured/media/1079349493/201404/3085/1079349493_3457310978001_sdf434g-3442191308001-fhaf4DFG4345.jpg', 'tai1', 94), 3),
-                    (('load', 'https://brightcove.vo.llnwd.net/d21/unsecured/media/1079349493/201404/3085/1079349493_3457310978001_sdf434g-3442191308001-fhaf4DFG4345.jpg', 'tai1', 87), 1)]),
+            encode([(('click', 'http://brightcove.vo.llnwd.net/d21/unsecured/media/1079349493/201404/3085/1079349493_3457310978001_neontnsdf434g-3442191308001-51c85b5b15c087c75a1406df90a9a752.jpg', 'tai1', 94), 3),
+                    (('load', 'https://brightcove.vo.llnwd.net/d21/unsecured/media/1079349493/201404/3085/1079349493_3457310978001_neontnsdf434g-3442191308001-51c85b5b15c087c75a1406df90a9a752.jpg', 'tai1', 87), 1)]),
             step=2)
 
         self.assertItemsEqual(
             results, 
-            [(('click', 'sdf434g_3442191308001_fhaf4DFG4345', 94), 3),
-             (('load', 'sdf434g_3442191308001_fhaf4DFG4345', 87), 1)])
+            [(('click', 'sdf434g_3442191308001_51c85b5b15c087c75a1406df90a9a752', 94), 3),
+             (('load', 'sdf434g_3442191308001_51c85b5b15c087c75a1406df90a9a752', 87), 1)])
 
     @patch('stats.hourly_event_stats_mr.neondata.ThumbnailMetadata.get_many')
     @patch('stats.hourly_event_stats_mr.neondata.VideoMetadata.get')

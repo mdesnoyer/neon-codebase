@@ -304,7 +304,7 @@ class LogLines(TrackerDataHandler):
     def get(self, *args, **kwargs):
         '''Handle a tracking request.'''
         with self.watcher.activate():
-            statemon.state.increment('messages_handled')
+            #statemon.state.increment('messages_handled')
             
             try:
                 tracker_data = self.parse_tracker_data(self.version)
