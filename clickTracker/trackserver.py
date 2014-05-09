@@ -95,6 +95,7 @@ class TrackerData(object):
                 'timestamp' : self.sts,
                 'tai' : self.tai,
                 'track_vers' : '1',
+                'event', self.a
                 },
             'body': json.dumps(self.__dict__)
             }])
@@ -159,6 +160,7 @@ class BaseTrackerDataV2(object):
                 'timestamp' : self.sts,
                 'tai' : self.tai,
                 'track_vers' : '2',
+                'event' : self.event
                 },
             'body': json.dumps(self.__dict__)
             }])
