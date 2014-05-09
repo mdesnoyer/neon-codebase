@@ -105,8 +105,8 @@ class InputSanitizer(object):
         '''
         Sanitize null or undefined strings from tracker to python None
         '''
-        if ip == "null" or ip == "undefined":
-            return
+        if ip == "null" or ip == "undefined" or ip == "":
+            return None
         return ip
 
     @classmethod
