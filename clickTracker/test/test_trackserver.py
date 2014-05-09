@@ -81,8 +81,15 @@ class TestFileBackupHandler(unittest.TestCase):
         mock_view_request.get_argument.side_effect = mock_view_get_request
         mock_view_request.request.remote_ip = '12.43.151.120'
         mock_view_request.get_cookie.return_value = 'cookie2'
-        mock_view_request.request.headers = {}
-        mock_view_request.request.headers['User-Agent'] = user_agent 
+        mock_view_request.request.headers = { 
+                'User-Agent': user_agent,
+                'Geoip_city_country_name': 'United States',
+                'Geoip_country_code3': 'USA',
+                'Geoip_latitude': '37.7794',
+                'Geoip_city': 'San Francisco',
+                'Geoip_longitude': '-122.4170',
+                'Geoip_postal_code': ''
+                }
         
         # Start a thread to handle the data
         dataQ = Queue.Queue()
@@ -162,6 +169,12 @@ class TestFileBackupHandler(unittest.TestCase):
                             self.assertGreater(body['sts'], 1300000000000)
                             self.assertItemsEqual(body['tids'], 
                                                   ['tid345', 'tid346'])
+                            self.assertEqual(body["city"], "San Francisco")
+                            self.assertEqual(body["country"], "USA")
+                            self.assertEqual(body["lat"], "37.7794")
+                            self.assertEqual(body["lon"], "-122.4170")
+                            self.assertIsNone(body["zip"])
+                            self.assertIsNone(body["region"])
                         else:
                             self.fail('Bad event field %s' % body['event'])
         
@@ -240,8 +253,10 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
                          body['sts'])
         if 'v2' in path:
             self.assertEqual(json_msg['headers']['track_vers'], '2')
+            self.assertEqual(json_msg['headers']['event'], ebody['event'])
         else:
             self.assertEqual(json_msg['headers']['track_vers'], '1')
+            self.assertEqual(json_msg['headers']['event'], ebody['a'])
 
         self.assertDictContainsSubset(ebody, json.loads(json_msg['body']))
         self.assertEqual(json.loads(json_msg['body'])['cip'], '127.0.0.1')

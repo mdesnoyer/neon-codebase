@@ -29,7 +29,7 @@ import tornado.web
 import tornado.httpserver
 import tornado.escape
 import utils.http
-import utils.inputsanitizer
+from utils.inputsanitizer import InputSanitizer
 import utils.neon
 import utils.ps
 
@@ -95,6 +95,7 @@ class TrackerData(object):
                 'timestamp' : self.sts,
                 'tai' : self.tai,
                 'track_vers' : '1',
+                'event': self.a
                 },
             'body': json.dumps(self.__dict__)
             }])
@@ -103,6 +104,18 @@ class BaseTrackerDataV2(object):
     '''
     Schema for V2 tracking data
     '''
+    # A map from schema entries to the http headers where the value is found
+    header_map = {
+        'uagent' : 'User-Agent',
+        'country': 'Geoip_country_code3',
+        'city' : 'Geoip_city',
+        'region' : "Geoip_region",
+        'zip' : "Geoip_postal_code",
+        'lat' : "Geoip_latitude",
+        'lon' : "Geoip_longitude"
+        }      
+        
+    
     def __init__(self, request):
         self.pageid = request.get_argument('pageid') # page_id
         self.tai = request.get_argument('tai') # tracker_account_id
@@ -116,14 +129,21 @@ class BaseTrackerDataV2(object):
         self.cip = request.request.remote_ip # client_ip
         # Neon's user id
         self.uid = request.get_cookie('neonglobaluserid', default="") 
-        # User agent of the client
-        self.uagent = None
+        
+        # Data from the HTTP headers
+        for key, header_name in BaseTrackerDataV2.header_map.iteritems():
+            try:
+                self.__dict__[key] = InputSanitizer.sanitize_null(
+                    request.request.headers[header_name])
+            except KeyError:
+                self.__dict__[key] = None
+            except AttributeError:
+                self.__dict__[key] = None
+
+        # Get better information about the user agent if it is available
         self.uinfo = None
-        http_request = request.request
-        if hasattr(http_request, "headers"):
-            if http_request.headers.has_key("User-Agent"):
-                self.uagent = http_request.headers["User-Agent"]
-                self.uinfo = BaseTrackerDataV2.format_user_agent(self.uagent)
+        if self.uagent is not None:
+            self.uinfo = BaseTrackerDataV2.format_user_agent(self.uagent)
 
     @classmethod
     def format_user_agent(cls, uagent):
@@ -140,6 +160,7 @@ class BaseTrackerDataV2(object):
                 'timestamp' : self.sts,
                 'tai' : self.tai,
                 'track_vers' : '2',
+                'event' : self.event
                 },
             'body': json.dumps(self.__dict__)
             }])
@@ -204,8 +225,8 @@ class VideoClick(BaseTrackerDataV2):
         self.event = 'vc'
         # Thumbnail id that was in the player
         self.vid = request.get_argument('vid') # Video id
-        self.tid = utils.inputsanitizer.InputSanitizer.sanitize_null(
-                            request.get_argument('tid')) # Thumbnail id
+         # Thumbnail id
+        self.tid = InputSanitizer.sanitize_null(request.get_argument('tid'))
         self.playerid = request.get_argument('playerid', None) # Player id
 
 class VideoPlay(BaseTrackerDataV2):
@@ -213,35 +234,36 @@ class VideoPlay(BaseTrackerDataV2):
     def __init__(self, request):
         super(VideoPlay, self).__init__(request)
         self.event = 'vp'
-        self.tid = utils.inputsanitizer.InputSanitizer.sanitize_null(
-                            request.get_argument('tid')) # Thumbnail id
+        # Thumbnail id
+        self.tid = InputSanitizer.sanitize_null(request.get_argument('tid')) 
         self.vid = request.get_argument('vid') # Video id
         self.playerid = request.get_argument('playerid', None) # Player id
-        self.adplay = utils.inputsanitizer.InputSanitizer.to_bool(
-                request.get_argument('adplay', False)) # If an adplay preceeded video play 
+         # If an adplay preceeded video play 
+        self.adplay = InputSanitizer.to_bool(
+            request.get_argument('adplay', False))
         # (time when player initiates request to play video - 
         #             Last time an image or the player was clicked) 
-        self.adelta = utils.inputsanitizer.InputSanitizer.sanitize_int(
-                        request.get_argument('adelta')) # autoplay delta 
-        self.pcount = utils.inputsanitizer.InputSanitizer.sanitize_int(
-                        request.get_argument('pcount')) #the current count of the video playing on the page 
+        self.adelta = InputSanitizer.sanitize_int(
+            request.get_argument('adelta')) # autoplay delta in milliseconds
+        self.pcount = InputSanitizer.sanitize_int(
+            request.get_argument('pcount')) #the current count of the video playing on the page 
 
 class AdPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
         super(AdPlay, self).__init__(request)
         self.event = 'ap'
-        self.tid = utils.inputsanitizer.InputSanitizer.sanitize_null(
-                            request.get_argument('tid')) # Thumbnail id
+        # Thumbnail id
+        self.tid = InputSanitizer.sanitize_null(request.get_argument('tid')) 
         #VID can be null, if VideoClick event doesn't fire before adPlay
-        self.vid = utils.inputsanitizer.InputSanitizer.sanitize_null(
-                            request.get_argument('vid')) # Video id
+        # Video id
+        self.vid = InputSanitizer.sanitize_null(request.get_argument('vid')) 
         self.playerid = request.get_argument('playerid', None) # Player id
         # (time when player initiates request to play video - Last time an image or the player was clicked) 
-        self.adelta = utils.inputsanitizer.InputSanitizer.sanitize_int(
-                            request.get_argument('adelta')) # autoplay delta 
-        self.pcount = utils.inputsanitizer.InputSanitizer.sanitize_int(
-                            request.get_argument('pcount')) #the current count of the video playing on the page 
+        self.adelta = InputSanitizer.sanitize_int(
+            request.get_argument('adelta')) # autoplay delta in millisecond
+         #the current count of the video playing on the page
+        self.pcount = InputSanitizer.sanitize_int(request.get_argument('pcount')) 
 
 #############################################
 #### WEB INTERFACE #####

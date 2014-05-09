@@ -3,6 +3,8 @@
 Aggregate smaller s3 logs in to bigger chunks
 
 Supports a date range in UTC 
+./s3logaggregator.py --input neon-tracker-logs --output neon-test --start_date 'Fri, 01 May 2014 00:00:00 GMT' --end_date 'Fri, 07 May 2014 12:00:00 GMT'
+
 '''
 
 USAGE='%prog input_bucket n_chunks'
