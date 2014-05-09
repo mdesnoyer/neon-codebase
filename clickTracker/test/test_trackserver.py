@@ -253,8 +253,10 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
                          body['sts'])
         if 'v2' in path:
             self.assertEqual(json_msg['headers']['track_vers'], '2')
+            self.assertEqual(json_msg['headers']['event'], ebody['event'])
         else:
             self.assertEqual(json_msg['headers']['track_vers'], '1')
+            self.assertEqual(json_msg['headers']['event'], ebody['a'])
 
         self.assertDictContainsSubset(ebody, json.loads(json_msg['body']))
         self.assertEqual(json.loads(json_msg['body'])['cip'], '127.0.0.1')
