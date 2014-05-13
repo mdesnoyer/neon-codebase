@@ -14,13 +14,15 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-
-import json
+import avro.io
+import avro.schema
 import httpagentparser
+import json
 import os
 import Queue
 import re
 import shortuuid
+from cStringIO import StringIO
 import threading
 import time
 import tornado.gen
@@ -50,6 +52,10 @@ define("backup_max_events_per_file", default=100000, type=int,
        help='Maximum events to allow backups on per file')
 define("backup_flush_interval", default=100, type=int,
        help='Flush to disk after how many events?')
+define("message_schema",
+       default=os.path.join(os.path.dirname(__file__), '..', 'schema',
+                            'TrackerEvent.avsc'),
+        help='Path to the output avro message schema (avsc) file')
 
 from utils import statemon
 statemon.define('qsize', int)
@@ -88,14 +94,15 @@ class TrackerData(object):
             if xy:
                 self.xy = xy 
 
-    def to_flume_event(self):
+    def to_flume_event(self, writer=None, schema_hash=None):
         '''Coverts the data to a flume event.'''
         return json.dumps([
             {'headers': {
                 'timestamp' : self.sts,
                 'tai' : self.tai,
                 'track_vers' : '1',
-                'event': self.a
+                'event': self.a,
+                'schema': schema_hash
                 },
             'body': json.dumps(self.__dict__)
             }])
@@ -177,26 +184,32 @@ class BaseTrackerDataV2(object):
             if 'browser' not in raw_data:
                 return None
             retval['browser'] = raw_data['browser']
-            if 'platform' in raw_data:
-                retval['os'] = raw_data['platform']
+            if 'dist' in raw_data:
+                retval['os'] = raw_data['dist']
+            elif 'flavor' in raw_data:
+                retval['os'] = raw_data['flavor']
             elif 'platform' in raw_data:
                 retval['os'] = raw_data['platform']
-            elif 'platform' in raw_data:
-                retval['os'] = raw_data['platform']
+            else:
+                retval['os'] = raw_data['os']
         except Exception, e:
             _log.exception("httpagentparser failed %s" %e)
             return None
 
-    def to_flume_event(self):
+    def to_flume_event(self, writer, schema_hash):
         '''Coverts the data to a flume event.'''
+        encoded_str = StringIO()
+        encoder = avro.io.BinaryEncoder(encoded_str)
+        writer.write(self.__dict__, encoder)
         return json.dumps([
             {'headers': {
-                'timestamp' : self.sts,
-                'tai' : self.tai,
-                'track_vers' : '2',
-                'event' : self.event
+                'timestamp' : self.serverTime,
+                'tai' : self.trackerAccountId,
+                'track_vers' : '3',
+                'event' : self.eventType,
+                'schema' : schema_hash
                 },
-            'body': json.dumps(self.__dict__)
+            'body': encoded_str.getvalue()
             }])
 
     @staticmethod
@@ -225,79 +238,86 @@ class ImagesVisible(BaseTrackerDataV2):
     '''An event specifying that the image became visible.'''
     def __init__(self, request):
         super(ImagesVisible, self).__init__(request)
-        self.event = 'iv'
-        self.tids = [] #[Thumbnail_id1, Thumbnail_id2]
-        self.tids = request.get_argument('tids').split(',')
+        self.eventType = 'IMAGES_VISIBLE'
+        self.thumbnailIds = request.get_argument('tids').split(',')
 
 class ImagesLoaded(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
         super(ImagesLoaded, self).__init__(request)
-        self.event = 'il'
-        self.tids = [] # [(Thumbnail id, width, height)]
+        self.event = 'IMAGES_LOADED'
+        self.images = []
         tid_list = request.get_argument('tids')
         if len(tid_list) >0:
             for tup in tid_list.split(','):
                 elems = tup.split(' ') # '+' delimiter converts to ' '
-                self.tids.append((elems[0], int(elems[1]), int(elems[2])))
+                self.images.append({
+                    'thumbnailId' : elems[0],
+                    'width' : int(elems[1]),
+                    'height' : int(elems[2])})
 
 class ImageClicked(BaseTrackerDataV2):
     '''An event specifying that the image was clicked.'''
     def __init__(self, request):
         super(ImageClicked, self).__init__(request)
-        self.event = 'ic'
-        self.tid = request.get_argument('tid') # Thumbnail id
-        self.px = float(request.get_argument('x', 0)) # Page X coordinate
-        self.py = float(request.get_argument('y', 0)) # Page Y coordinate
-        self.wx = float(request.get_argument('wx', 0)) # Window X
-        self.wy = float(request.get_argument('wy', 0)) # Window Y
+        self.event = 'IMAGE_CLICK'
+        self.thumbnailId = request.get_argument('tid') # Thumbnail id
+        self.pageCoords = {
+            'x' : float(request.get_argument('x', 0)),
+            'y' : float(request.get_argument('y', 0))
+            }
+        self.windowCoords = {
+            'x' : float(request.get_argument('wx', 0)),
+            'y' : float(request.get_argument('wy', 0))
+            }
 
 class VideoClick(BaseTrackerDataV2):
     '''An event specifying that the image was clicked within the player'''
     def __init__(self, request):
         super(VideoClick, self).__init__(request)
-        self.event = 'vc'
+        self.event = 'VIDEO_CLICK'
         # Thumbnail id that was in the player
-        self.vid = request.get_argument('vid') # Video id
+        self.videoId = request.get_argument('vid') # Video id
          # Thumbnail id
-        self.tid = InputSanitizer.sanitize_null(request.get_argument('tid'))
-        self.playerid = request.get_argument('playerid', None) # Player id
+        self.thumbnailId = \
+          InputSanitizer.sanitize_null(request.get_argument('tid'))
+        self.playerId = request.get_argument('playerid', None) # Player id
 
 class VideoPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
         super(VideoPlay, self).__init__(request)
-        self.event = 'vp'
+        self.event = 'VIDEO_PLAY'
         # Thumbnail id
-        self.tid = InputSanitizer.sanitize_null(request.get_argument('tid')) 
-        self.vid = request.get_argument('vid') # Video id
-        self.playerid = request.get_argument('playerid', None) # Player id
+        self.thumbnailId = InputSanitizer.sanitize_null(request.get_argument('tid')) 
+        self.videoId = request.get_argument('vid') # Video id
+        self.playerId = request.get_argument('playerid', None) # Player id
          # If an adplay preceeded video play 
-        self.adplay = InputSanitizer.to_bool(
+        self.didAdPlay = InputSanitizer.to_bool(
             request.get_argument('adplay', False))
         # (time when player initiates request to play video - 
         #             Last time an image or the player was clicked) 
-        self.adelta = InputSanitizer.sanitize_int(
+        self.autoplayDelta = InputSanitizer.sanitize_int(
             request.get_argument('adelta')) # autoplay delta in milliseconds
-        self.pcount = InputSanitizer.sanitize_int(
+        self.playCount = InputSanitizer.sanitize_int(
             request.get_argument('pcount')) #the current count of the video playing on the page 
 
 class AdPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
         super(AdPlay, self).__init__(request)
-        self.event = 'ap'
+        self.event = 'AD_PLAY'
         # Thumbnail id
-        self.tid = InputSanitizer.sanitize_null(request.get_argument('tid')) 
+        self.thumbnailId = InputSanitizer.sanitize_null(request.get_argument('tid')) 
         #VID can be null, if VideoClick event doesn't fire before adPlay
         # Video id
-        self.vid = InputSanitizer.sanitize_null(request.get_argument('vid')) 
-        self.playerid = request.get_argument('playerid', None) # Player id
+        self.videoId = InputSanitizer.sanitize_null(request.get_argument('vid')) 
+        self.playerId = request.get_argument('playerid', None) # Player id
         # (time when player initiates request to play video - Last time an image or the player was clicked) 
-        self.adelta = InputSanitizer.sanitize_int(
+        self.autoplayDelta = InputSanitizer.sanitize_int(
             request.get_argument('adelta')) # autoplay delta in millisecond
          #the current count of the video playing on the page
-        self.pcount = InputSanitizer.sanitize_int(request.get_argument('pcount')) 
+        self.playCount = InputSanitizer.sanitize_int(request.get_argument('pcount')) 
 
 #############################################
 #### WEB INTERFACE #####
@@ -354,6 +374,9 @@ class LogLines(TrackerDataHandler):
         self.watcher = watcher
         self.backup_q = q
         self.version = version
+        schema = avro.schema.parse(options.message_schema)
+        self.schema_hash = hashlib.md5(schema.to_json()).hexdigest()
+        self.avro_writer = avro.io.DatumWriter(schema)
     
     @tornado.web.asynchronous
     @tornado.gen.coroutine
@@ -377,7 +400,8 @@ class LogLines(TrackerDataHandler):
                 self.finish()
                 return
 
-            data = tracker_data.to_flume_event()
+            data = tracker_data.to_flume_event(self.avro_writer,
+                                               self.schema_hash)
             try:
                 request = tornado.httpclient.HTTPRequest(
                     'http://localhost:%i' % options.flume_port,

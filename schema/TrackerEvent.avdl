@@ -42,15 +42,18 @@ record Coords {
 }
 
 enum EventType {
-  IMAGE_VISIBLE, IMAGE_LOAD, IMAGE_CLICK, VIDEO_CLICK, VIDEO_PLAY,
-  AD_PLAY
+  IMAGE_VISIBLE, IMAGES_VISIBLE, IMAGE_LOAD, IMAGES_LOADED, IMAGE_CLICK,
+  VIDEO_CLICK, VIDEO_PLAY, AD_PLAY
 }
 
+
+record ImagesVisible {
+  array<string> thumbnailIds;
+}
 
 record ImageVisible {
   string thumbnailId;
 }
-
 
 record ImageLoad {
   string thumbnailId;
@@ -58,6 +61,9 @@ record ImageLoad {
   int width;   // Displayed width of the image
 }
 
+record ImagesLoaded {
+  array<ImageLoad> images;
+}
 
 record ImageClick {
   string thumbnailId;
@@ -138,7 +144,9 @@ record TrackerEvent {
 
   // Data specific to each event
   union {ImageVisible,
+         ImagesVisible,
          ImageLoad,
+         ImagesLoaded,
          ImageClick,
          VideoClick,
          VideoPlay,
