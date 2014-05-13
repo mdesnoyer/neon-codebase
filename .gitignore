@@ -58,6 +58,9 @@ pylint.out
 .mtj.tmp/
 hs_err_pid*
 
+#### Schema Compiled Files ####
+*.avsc
+
 #### cmake stuff ###
 CMakeCache.txt
 CMakeFiles

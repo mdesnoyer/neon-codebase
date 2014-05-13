@@ -102,7 +102,8 @@ class TrackerData(object):
 
 class BaseTrackerDataV2(object):
     '''
-    Schema for V2 tracking data
+    Object that mirrors the the Avro TrackerEvent schema and is used to 
+    write the Avro data
     '''
     # A map from schema entries to the http headers where the value is found
     header_map = {
@@ -113,45 +114,78 @@ class BaseTrackerDataV2(object):
         'zip' : "Geoip_postal_code",
         'lat' : "Geoip_latitude",
         'lon' : "Geoip_longitude"
-        }      
+        }
+
+    tracker_type_map = {
+        'brightcove' : 'BRIGHTCOVE',
+        'ooyala' : 'OOYALA',
+        'bcgallery' : 'BCGALLERY',
+        'ign' : 'IGN'
+        }
         
     
     def __init__(self, request):
-        self.pageid = request.get_argument('pageid') # page_id
-        self.tai = request.get_argument('tai') # tracker_account_id
+        self.pageId = request.get_argument('pageid') # page_id
+        self.trackerAccountId = request.get_argument('tai') # tracker_account_id
         # tracker_type (brightcove, ooyala, bcgallery, ign as of April 2014)
-        self.ttype = request.get_argument('ttype')
-        self.page = request.get_argument('page') # page_url
-        self.ref = request.get_argument('ref', None) # referral_url
-
-        self.sts = int(time.time() * 1000) # Server time stamp in ms
-        self.cts = int(request.get_argument('cts')) # client_time in ms
-        self.cip = request.request.remote_ip # client_ip
-        # Neon's user id
-        self.uid = request.get_cookie('neonglobaluserid', default="") 
-        
-        # Data from the HTTP headers
-        for key, header_name in BaseTrackerDataV2.header_map.iteritems():
-            try:
-                self.__dict__[key] = InputSanitizer.sanitize_null(
-                    request.request.headers[header_name])
-            except KeyError:
-                self.__dict__[key] = None
-            except AttributeError:
-                self.__dict__[key] = None
-
-        # Get better information about the user agent if it is available
-        self.uinfo = None
-        if self.uagent is not None:
-            self.uinfo = BaseTrackerDataV2.format_user_agent(self.uagent)
-
-    @classmethod
-    def format_user_agent(cls, uagent):
         try:
-            return httpagentparser.detect(uagent)
+            self.trackerType = \
+              BaseTrackerDataV2.tracker_type_map[request.get_argument('ttype')]
+        except KeyError:
+            raise tornado.web.HTTPError(
+                400, "Invalid ttype %s" % request.get_argument('ttype'))
+        
+        self.pageURL = request.get_argument('page') # page_url
+        self.refURL = request.get_argument('ref', None) # referral_url
+
+        self.serverTime = int(time.time() * 1000) # Server time stamp in ms
+        self.clientTime = int(request.get_argument('cts')) # client_time in ms
+        self.clientIP = request.request.remote_ip # client_ip
+        # Neon's user id
+        self.neonUserId = request.get_cookie('neonglobaluserid', default="") 
+
+        self.userAgent = self.get_header_safe(request, 'uagent')
+        if self.userAgent:
+            self.agentInfo = BaseTrackerDataV2.extract_agent_info(
+                self.userAgent)
+
+        self.ipGeoData = {
+            'country': self.get_header_safe(request, 'Geoip_country_code3'),
+            'city': self.get_header_safe(request, 'Geoip_city'),
+            'region': self.get_header_safe(request, 'Geoip_region'),
+            'zip': self.get_header_safe(request, 'Geoip_postal_code'),
+            'lat': self.get_header_safe(request, 'Geoip_latitude', float),
+            'lon': self.get_header_safe(request, 'Geoip_longitude', float)
+            }
+
+    def get_header_safe(self, request, header_name, typ=str):
+        '''Returns the header value, or None if it's not there.'''
+        try:
+            return typ(request.request.headers[header_name])
+        except KeyError:
+            return None
+        except ValueError as e:
+            raise tornado.web.HTTPError(
+                400, "Invalid header info %s" % e)
+            
+
+    @staticmethod
+    def extract_agent_info(uagent):
+        retval = {}
+        try:
+            raw_data = httpagentparser.detect(uagent)
+            if 'browser' not in raw_data:
+                return None
+            retval['browser'] = raw_data['browser']
+            if 'platform' in raw_data:
+                retval['os'] = raw_data['platform']
+            elif 'platform' in raw_data:
+                retval['os'] = raw_data['platform']
+            elif 'platform' in raw_data:
+                retval['os'] = raw_data['platform']
         except Exception, e:
             _log.exception("httpagentparser failed %s" %e)
-            return
+            return None
 
     def to_flume_event(self):
         '''Coverts the data to a flume event.'''

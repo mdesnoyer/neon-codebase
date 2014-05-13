@@ -1,3 +1,15 @@
+//
+// Schema that defines a TrackerEvent.
+//
+// It is wrapped in a protocol so that we can do the definition using
+// the idl format, which takes comments and is easier to read than the
+// json. To generate the json schema needed by avro use:
+//
+// java -jar /usr/lib/avro/avro-tools.jar idl2schemata TrackerEvent.avdl outdir
+//
+// Author: Mark Desnoyer (desnoyer@neon-lab.com)
+// Copyright 2014 Neon Labs Inc.
+//
 @namespace("com.neon.Tracker")
 protocol DummyTrackerProtocol {
 
@@ -6,14 +18,23 @@ enum TrackerType {
 }
 
 record GeoData {
-  union { null, string} country; // 3 character country code
-  union { null, string} city; // City name
-  union { null, string} region; // Region
-  union { null, string} zip; // Postal Code
-  union { null, float} lat; // Latitude
-  union { null, float} lon; // Longitude
+  union { null, string } country; // 3 character country code
+  union { null, string } city; // City name
+  union { null, string } region; // Region
+  union { null, string } zip; // Postal Code
+  union { null, float } lat; // Latitude
+  union { null, float } lon; // Longitude
 }
 
+record NmVers {
+  union { null, string } name;
+  union { null, string } version;
+}
+
+record AgentInfo {
+  union { null, NmVers } os;
+  union { null, NmVers } browser;
+}
 
 record Coords {
   float x;
@@ -109,7 +130,7 @@ record TrackerEvent {
 
   union { null, string } userAgent;   // The user's agent string
 
-  union { null, string } agentInfo; // Translated agent info if available
+  union { null, AgentInfo } agentInfo; // Translated agent info if available
   
   GeoData ipGeoData; // The user's location based on IP data
   
