@@ -218,7 +218,7 @@ class BaseTrackerDataV2(object):
                 'tai' : self.trackerAccountId,
                 'track_vers' : '2.1',
                 'event' : self.eventType,
-                'schemaUrl' : schema_url
+                'flume.avro.schema.url' : schema_url
                 },
             'body': base64.b64encode(encoded_str.getvalue())
             }])
