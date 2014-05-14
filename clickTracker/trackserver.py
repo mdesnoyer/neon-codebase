@@ -154,7 +154,7 @@ class BaseTrackerDataV2(object):
         # Neon's user id
         self.neonUserId = request.get_cookie('neonglobaluserid', default="") 
 
-        self.userAgent = self.get_header_safe(request, 'uagent')
+        self.userAgent = self.get_header_safe(request, 'User-Agent')
         if self.userAgent:
             self.agentInfo = BaseTrackerDataV2.extract_agent_info(
                 self.userAgent)
@@ -173,7 +173,10 @@ class BaseTrackerDataV2(object):
     def get_header_safe(self, request, header_name, typ=str):
         '''Returns the header value, or None if it's not there.'''
         try:
-            return typ(request.request.headers[header_name])
+            strval = request.request.headers[header_name]
+            if strval == '':
+                return None
+            return typ(strval)
         except KeyError:
             return None
         except ValueError as e:
@@ -200,6 +203,7 @@ class BaseTrackerDataV2(object):
         except Exception, e:
             _log.exception("httpagentparser failed %s" % e)
             return None
+        return retval
 
     def to_flume_event(self, writer, schema_hash):
         '''Coverts the data to a flume event.'''

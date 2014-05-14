@@ -182,22 +182,28 @@ class TestFileBackupHandler(unittest.TestCase):
                                 body['eventData']['windowCoords']['y'], 9678)
                             self.assertTrue(body['eventData']['isImageClick'])
                         elif body['eventType'] == 'IMAGES_VISIBLE':
-                            self.assertEqual(body['pageid'], 'pageid67')
-                            self.assertEqual(body['tai'], 'tai20')
-                            self.assertEqual(body['ttype'], 'brightcove')
-                            self.assertEqual(body['page'], 'http://go1.com')
-                            self.assertEqual(body['ref'], 'http://ref1.com')
-                            self.assertEqual(body['cip'], '12.43.151.120')
-                            self.assertEqual(body['cts'], 23945898)
-                            self.assertGreater(body['sts'], 1300000000000)
-                            self.assertItemsEqual(body['tids'], 
-                                                  ['tid345', 'tid346'])
-                            self.assertEqual(body["city"], "San Francisco")
-                            self.assertEqual(body["country"], "USA")
-                            self.assertEqual(body["lat"], "37.7794")
-                            self.assertEqual(body["lon"], "-122.4170")
-                            self.assertIsNone(body["zip"])
-                            self.assertIsNone(body["region"])
+                            self.assertEqual(body['pageId'], 'pageid67')
+                            self.assertEqual(body['trackerAccountId'], 'tai20')
+                            self.assertEqual(body['trackerType'], 'BRIGHTCOVE')
+                            self.assertEqual(body['pageURL'], 'http://go1.com')
+                            self.assertEqual(body['refURL'], 'http://ref1.com')
+                            self.assertEqual(body['clientIP'], '12.43.151.120')
+                            self.assertEqual(body['clientTime'], 23945898)
+                            self.assertGreater(body['serverTime'],
+                                               1300000000000)
+                            self.assertItemsEqual(
+                                body['eventData']['thumbnailIds'], 
+                                ['tid345', 'tid346'])
+                            self.assertEqual(
+                                body["ipGeoData"]["city"], "San Francisco")
+                            self.assertEqual(
+                                body["ipGeoData"]["country"], "USA"),
+                            self.assertIsNone(body["ipGeoData"]["region"])
+                            self.assertIsNone(body["ipGeoData"]["zip"])
+                            self.assertAlmostEqual(body["ipGeoData"]["lat"],
+                                                   37.7794, 4)
+                            self.assertAlmostEqual(body["ipGeoData"]["lon"],
+                                                   -122.4170, 4)
                         else:
                             self.fail('Bad event field %s' % body['eventType'])
         
@@ -259,8 +265,10 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         self.http_mock.reset_mock()
         
         headers = {}
-        headers['User-Agent'] = "Mozilla/5.0 (Linux; U; Android 2.3.5; en-in; HTC_DesireS_S510e Build/GRJ90) \
-                        AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1"
+        headers['User-Agent'] = (
+            "Mozilla/5.0 (Linux; U; Android 2.3.5; en-in; HTC_DesireS_S510e "
+            "Build/GRJ90) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 "
+            "Mobile Safari/533.1")
         if neon_id is not None:
             headers['Cookie'] = 'neonglobaluserid=%s' % neon_id
         response = self.fetch(
@@ -296,6 +304,12 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
             self.assertEqual(body['clientIP'], '127.0.0.1')
             if neon_id is not None:
                 self.assertEqual(body['neonUserId'], neon_id)
+
+            self.assertEqual(body['userAgent'], headers['User-Agent'])
+            self.assertEqual(
+                body['agentInfo'],
+                {'os': {'name': 'Android', 'version': '2.3.5'},
+                 'browser' : {'name' : 'Safari', 'version' : '4.0' }})
         else:
             self.assertEqual(json_msg['headers']['track_vers'], '1')
             self.assertEqual(json_msg['headers']['event'], ebody['a'])
