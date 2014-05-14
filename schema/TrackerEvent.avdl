@@ -48,6 +48,7 @@ enum EventType {
 
 
 record ImagesVisible {
+  boolean isImagesVisible = true;
   array<string> thumbnailIds;
 }
 
@@ -62,10 +63,13 @@ record ImageLoad {
 }
 
 record ImagesLoaded {
+  boolean isImagesLoaded = true;
   array<ImageLoad> images;
 }
 
 record ImageClick {
+  boolean isImageClick = true;
+
   string thumbnailId;
   Coords pageCoords; // Coordinates of the click relative to the page
   Coords windowCoords; // Coordinates of the click relative to the visible window
@@ -73,6 +77,8 @@ record ImageClick {
 
 
 record VideoClick {
+  boolean isVideoClick = true; // Used so that the event isn't confused in the union.
+
   string videoId;
   string playerId;
   union{null, string} thumbnailId;
@@ -80,6 +86,8 @@ record VideoClick {
 
 
 record VideoPlay {
+  boolean isVideoPlay = true; // Used so that the event isn't confused in the union.
+
   string videoId;
   union{null, string} playerId;
   union{null, string} thumbnailId;
@@ -97,6 +105,8 @@ record VideoPlay {
 
 
 record AdPlay {
+  boolean isAdPlay = true; // Used so that the event isn't confused in the union.
+
   // Video id. Can be null if the video click event doesn't fire in time
   // so we can't figure out which video is playing after the ad.
   union{null, string} videoId;

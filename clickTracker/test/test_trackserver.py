@@ -10,10 +10,15 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import avro.io
+import avro.schema
+import base64
 import __builtin__
 import clickTracker.trackserver 
+from cStringIO import StringIO
 import fake_filesystem
 import json
+import hashlib
 import logging
 from mock import patch
 from mock import MagicMock
@@ -30,6 +35,14 @@ from utils.options import options
 
 class TestFileBackupHandler(unittest.TestCase):
     def setUp(self):
+        schema_path = options.get('clickTracker.trackserver.message_schema')
+        with open(schema_path) as f:
+            schema_str = f.read()
+        schema = avro.schema.parse(schema_str)
+        self.schema_hash = hashlib.md5(json.dumps(schema.to_json())).hexdigest()
+        self.avro_writer = avro.io.DatumWriter(schema)
+        self.avro_reader = avro.io.DatumReader(schema, schema)
+        
         self.filesystem = fake_filesystem.FakeFilesystem()
         self.fake_os = fake_filesystem.FakeOsModule(self.filesystem)
         self.fake_open = fake_filesystem.FakeFileOpen(self.filesystem)
@@ -102,11 +115,11 @@ class TestFileBackupHandler(unittest.TestCase):
             click = clickTracker.trackserver.BaseTrackerDataV2.generate(
                 mock_click_request)
             
-            dataQ.put(click.to_flume_event())
+            dataQ.put(click.to_flume_event(self.avro_writer, self.schema_hash))
 
             view = clickTracker.trackserver.BaseTrackerDataV2.generate(
                 mock_view_request)
-            dataQ.put(view.to_flume_event())
+            dataQ.put(view.to_flume_event(self.avro_writer, self.schema_hash))
             
         # Wait until the data is processeed 
         dataQ.join()
@@ -143,22 +156,32 @@ class TestFileBackupHandler(unittest.TestCase):
                         if line == '':
                             continue
                         parsed = json.loads(line)
-                        body = json.loads(parsed[0]['body'])
-                        if body['event'] == 'ic':
-                            self.assertEqual(body['pageid'], 'pageid234')
-                            self.assertEqual(body['tai'], 'tai234')
-                            self.assertEqual(body['ttype'], 'brightcove')
-                            self.assertEqual(body['page'], 'http://go.com')
-                            self.assertEqual(body['ref'], 'http://ref.com')
-                            self.assertEqual(body['cip'], '12.43.151.12')
-                            self.assertEqual(body['cts'], 23945827)
-                            self.assertGreater(body['sts'], 1300000000000)
-                            self.assertEqual(body['tid'], 'tid345')
-                            self.assertEqual(body['px'], 3467)
-                            self.assertEqual(body['py'], 123)
-                            self.assertEqual(body['wx'], 567)
-                            self.assertEqual(body['wy'], 9678)
-                        elif body['event'] == 'iv':
+                        msgbuf = StringIO(base64.b64decode(parsed[0]['body']))
+                        body = self.avro_reader.read(
+                            avro.io.BinaryDecoder(msgbuf))
+                        if body['eventType'] == 'IMAGE_CLICK':
+                            self.assertEqual(body['pageId'], 'pageid234')
+                            self.assertEqual(body['trackerAccountId'],
+                                             'tai234')
+                            self.assertEqual(body['trackerType'], 'BRIGHTCOVE')
+                            self.assertEqual(body['pageURL'], 'http://go.com')
+                            self.assertEqual(body['refURL'], 'http://ref.com')
+                            self.assertEqual(body['clientIP'], '12.43.151.12')
+                            self.assertEqual(body['clientTime'], 23945827)
+                            self.assertGreater(body['serverTime'],
+                                               1300000000000)
+                            self.assertEqual(body['eventData']['thumbnailId'],
+                                             'tid345')
+                            self.assertEqual(
+                                body['eventData']['pageCoords']['x'], 3467)
+                            self.assertEqual(
+                                body['eventData']['pageCoords']['y'], 123)
+                            self.assertEqual(
+                                body['eventData']['windowCoords']['x'], 567)
+                            self.assertEqual(
+                                body['eventData']['windowCoords']['y'], 9678)
+                            self.assertTrue(body['eventData']['isImageClick'])
+                        elif body['eventType'] == 'IMAGES_VISIBLE':
                             self.assertEqual(body['pageid'], 'pageid67')
                             self.assertEqual(body['tai'], 'tai20')
                             self.assertEqual(body['ttype'], 'brightcove')
@@ -176,18 +199,29 @@ class TestFileBackupHandler(unittest.TestCase):
                             self.assertIsNone(body["zip"])
                             self.assertIsNone(body["region"])
                         else:
-                            self.fail('Bad event field %s' % body['event'])
+                            self.fail('Bad event field %s' % body['eventType'])
         
 
 class TestFullServer(tornado.testing.AsyncHTTPTestCase):
     '''A set of tests that fire up the whole server and throws http requests at it.'''
 
     def setUp(self):
+        schema_path = options.get('clickTracker.trackserver.message_schema')
+        with open(schema_path) as f:
+            schema_str = f.read()
+        schema = avro.schema.parse(schema_str)
+        self.avro_reader = avro.io.DatumReader(schema, schema)
+        
         self.filesystem = fake_filesystem.FakeFilesystem()
         self.fake_os = fake_filesystem.FakeOsModule(self.filesystem)
         self.fake_open = fake_filesystem.FakeFileOpen(self.filesystem)
         clickTracker.trackserver.os = self.fake_os
         clickTracker.trackserver.open = self.fake_open
+
+        # Put the schema in the fake filesystem
+        self.fake_os.makedirs(os.path.dirname(schema_path))
+        with self.fake_open(schema_path, 'w') as f:
+            f.write(schema_str)
         
         self.server_obj = clickTracker.trackserver.Server()
         super(TestFullServer, self).setUp()
@@ -246,22 +280,28 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         json_msg = json.loads(request_saw.body)
         self.assertEqual(len(json_msg), 1)
         json_msg = json_msg[0]
-        body = json.loads(json_msg['body'])
-        self.assertEqual(json_msg['headers']['tai'], ebody['tai'])
         self.assertTrue(json_msg['headers']['timestamp'])
-        self.assertEqual(json_msg['headers']['timestamp'],
-                         body['sts'])
+        
         if 'v2' in path:
-            self.assertEqual(json_msg['headers']['track_vers'], '2')
-            self.assertEqual(json_msg['headers']['event'], ebody['event'])
+            msgbuf = StringIO(base64.b64decode(json_msg['body']))
+            body = self.avro_reader.read(avro.io.BinaryDecoder(msgbuf))
+        
+            self.assertEqual(json_msg['headers']['track_vers'], '2.1')
+            self.assertEqual(json_msg['headers']['event'], ebody['eventType'])
+            self.assertEqual(json_msg['headers']['timestamp'],
+                         body['serverTime'])
+            self.assertEqual(json_msg['headers']['tai'],
+                             ebody['trackerAccountId'])
+            
+            self.assertEqual(body['clientIP'], '127.0.0.1')
+            if neon_id is not None:
+                self.assertEqual(body['neonUserId'], neon_id)
         else:
             self.assertEqual(json_msg['headers']['track_vers'], '1')
             self.assertEqual(json_msg['headers']['event'], ebody['a'])
+            body = json.loads(json_msg['body'])
 
-        self.assertDictContainsSubset(ebody, json.loads(json_msg['body']))
-        self.assertEqual(json.loads(json_msg['body'])['cip'], '127.0.0.1')
-        if neon_id is not None:
-            self.assertEqual(body['uid'], neon_id)
+        self.assertDictContainsSubset(ebody, body)
 
     def test_v2_valid_messages(self):
         # Image Visible Message
@@ -274,15 +314,18 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'ref' : 'http://ref.com',
               'cts' : '2345623',
               'tids' : 'tid1,tid2'},
-            { 'event' : 'iv',
-              'pageid' : 'pageid123',
-              'tai' : 'tai123',
-              'ttype' : 'brightcove',
-              'page' : 'http://go.com',
-              'ref' : 'http://ref.com',
-              'cts' : 2345623,
-              'tids' : ['tid1','tid2'],
-              'uid' : 'neon_id1'},
+            { 'eventType' : 'IMAGES_VISIBLE',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData': { 
+                  'isImagesVisible' : True,
+                  'thumbnailIds' : ['tid1', 'tid2']
+                  },
+              'neonUserId' : 'neon_id1'},
               'neon_id1'
             )
 
@@ -296,15 +339,23 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'ref' : 'http://ref.com',
               'cts' : '2345623',
               'tids' : 'tid1 56 67,tid2 89 123'}, #tornado converts + to " "
-            { 'event' : 'il',
-              'pageid' : 'pageid123',
-              'tai' : 'tai123',
-              'ttype' : 'brightcove',
-              'page' : 'http://go.com',
-              'ref' : 'http://ref.com',
-              'cts' : 2345623,
-              'tids' : [['tid1',56,67],['tid2',89,123]],
-              'uid' : 'neon_id1'},
+            { 'eventType' : 'IMAGES_LOADED',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData': {
+                  'isImagesLoaded' : True,
+                  'images' : [
+                  {'thumbnailId': 'tid1',
+                   'height' : 67,
+                   'width' :56 },
+                  {'thumbnailId': 'tid2',
+                   'height' : 123,
+                   'width' : 89}]},
+              'neonUserId' : 'neon_id1'},
               'neon_id1'
             )
 
@@ -322,19 +373,26 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'y' : '23',
               'wx' : '78',
               'wy' : '34'},
-            { 'event' : 'ic',
-              'pageid' : 'pageid123',
-              'tai' : 'tai123',
-              'ttype' : 'brightcove',
-              'page' : 'http://go.com',
-              'ref' : 'http://ref.com',
-              'cts' : 2345623,
-              'tid' : 'tid1',
-              'px' : 56,
-              'py' : 23,
-              'wx' : 78,
-              'wy' : 34,
-              'uid' : 'neon_id1'},
+            { 'eventType' : 'IMAGE_CLICK',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'isImageClick' : True,
+                  'thumbnailId' : 'tid1',
+                  'pageCoords' : {
+                      'x' : 56,
+                      'y' : 23,
+                      },
+                  'windowCoords' : {
+                      'x' : 78,
+                      'y' : 34
+                      }
+                  },
+              'neonUserId' : 'neon_id1'},
               'neon_id1'
             )
         
@@ -351,17 +409,20 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'tid' : 'tid1',
               'playerid' : 'brightcoveP123',
               },
-            { 'event' : 'vc',
-              'pageid' : 'pageid123',
-              'tai' : 'tai123',
-              'ttype' : 'brightcove',
-              'page' : 'http://go.com',
-              'ref' : 'http://ref.com',
-              'cts' : 2345623,
-              'vid' : 'vid1',
-              'tid' : 'tid1',
-              'playerid' : 'brightcoveP123',
-              'uid' : 'neon_id1'},
+            { 'eventType' : 'VIDEO_CLICK',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'videoId' : 'vid1',
+                  'thumbnailId' : 'tid1',
+                  'playerId' : 'brightcoveP123',
+                  'isVideoClick' : True
+                  },
+              'neonUserId' : 'neon_id1'},
               'neon_id1'
             )
 
@@ -376,24 +437,27 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'cts' : '2345623',
               'tid' : 'tid1',
               'vid' : 'vid1',
-              'adplay': False,
+              'adplay': 'False',
               'adelta': 'null',
-              'pcount': 1,
+              'pcount': '1',
               'playerid' : 'brightcoveP123'},
-            { 'event' : 'vp',
-              'pageid' : 'pageid123',
-              'tai' : 'tai123',
-              'ttype' : 'brightcove',
-              'page' : 'http://go.com',
-              'ref' : 'http://ref.com',
-              'cts' : 2345623,
-              'tid' : 'tid1',
-              'vid' : 'vid1',
-              'adplay': False,
-              'adelta': None,
-              'pcount': 1,
-              'playerid' : 'brightcoveP123',
-              'uid' : 'neon_id1'},
+            { 'eventType' : 'VIDEO_PLAY',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'thumbnailId' : 'tid1',
+                  'videoId' : 'vid1',
+                  'didAdPlay': False,
+                  'autoplayDelta': None,
+                  'playCount': 1,
+                  'playerId' : 'brightcoveP123',
+                  'isVideoPlay' : True
+                  },
+              'neonUserId' : 'neon_id1'},
               'neon_id1'
             )
 
@@ -409,22 +473,25 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'tid' : 'tid1',
               'vid' : 'vid1',
               'adelta': '214',
-              'pcount' : 1,
+              'pcount' : '1',
               'playerid' : 'brightcoveP123',
               },
-            { 'event' : 'ap',
-              'pageid' : 'pageid123',
-              'tai' : 'tai123',
-              'ttype' : 'brightcove',
-              'page' : 'http://go.com',
-              'ref' : 'http://ref.com',
-              'cts' : 2345623,
-              'tid' : 'tid1',
-              'vid' : 'vid1',
-              'adelta': 214,
-              'pcount' : 1,
-              'playerid' : 'brightcoveP123',
-              'uid' : 'neon_id1'},
+            { 'eventType' : 'AD_PLAY',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'thumbnailId' : 'tid1',
+                  'videoId' : 'vid1',
+                  'autoplayDelta': 214,
+                  'playCount': 1,
+                  'playerId' : 'brightcoveP123',
+                  'isAdPlay' : True
+                  },
+              'neonUserId' : 'neon_id1'},
               'neon_id1'
             )
     def test_v2_secondary_endpoint(self):
@@ -437,49 +504,51 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'ref' : 'http://ref.com',
               'cts' : '2345623',
               'tids' : 'tid1,tid2'},
-            { 'event' : 'iv',
-              'pageid' : 'pageid123',
-              'tai' : 'tai123',
-              'ttype' : 'brightcove',
-              'page' : 'http://go.com',
-              'ref' : 'http://ref.com',
-              'cts' : 2345623,
-              'tids' : ['tid1', 'tid2'],
-              'uid' : 'neon_id1'},
+            { 'eventType' : 'IMAGES_VISIBLE',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData': { 
+                  'isImagesVisible' : True,
+                  'thumbnailIds' : ['tid1', 'tid2']
+                  },
+              'neonUserId' : 'neon_id1'},
               'neon_id1',
               '/v2/track'
             )
 
     def test_v2_no_referral_url(self):
-         # Image clicked message
+        #Video clicked message
         self.check_message_sent(
-            { 'a' : 'ic',
+            { 'a' : 'vc',
               'pageid' : 'pageid123',
               'tai' : 'tai123',
               'ttype' : 'brightcove',
               'page' : 'http://go.com',
               'cts' : '2345623',
+              'vid' : 'vid1',
               'tid' : 'tid1',
-              'x' : '56',
-              'y' : '23',
-              'wx' : '78',
-              'wy' : '34'},
-            { 'event' : 'ic',
-              'pageid' : 'pageid123',
-              'tai' : 'tai123',
-              'ttype' : 'brightcove',
-              'page' : 'http://go.com',
-              'ref' : None,
-              'cts' : 2345623,
-              'tid' : 'tid1',
-              'px' : 56,
-              'py' : 23,
-              'wx' : 78,
-              'wy' : 34,
-              'uid' : 'neon_id1'},
+              'playerid' : 'brightcoveP123',
+              },
+            { 'eventType' : 'VIDEO_CLICK',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : None,
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'videoId' : 'vid1',
+                  'thumbnailId' : 'tid1',
+                  'playerId' : 'brightcoveP123',
+                  'isVideoClick' : True
+                  },
+              'neonUserId' : 'neon_id1'},
               'neon_id1'
             )
-
     def test_v1_valid_messages(self):
         # A load message
         self.check_message_sent(
@@ -553,7 +622,6 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(self.backup_q.qsize(), 1)
         msg = json.loads(self.backup_q.get())
         self.assertEqual(len(msg), 1)
-        self.assertEqual(json.loads(msg[0]['body'])['event'], 'iv')
             
 
 if __name__ == '__main__':

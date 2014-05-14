@@ -16,6 +16,8 @@ if sys.path[0] != __base_path__:
 
 import avro.io
 import avro.schema
+import base64
+import hashlib
 import httpagentparser
 import json
 import os
@@ -53,8 +55,9 @@ define("backup_max_events_per_file", default=100000, type=int,
 define("backup_flush_interval", default=100, type=int,
        help='Flush to disk after how many events?')
 define("message_schema",
-       default=os.path.join(os.path.dirname(__file__), '..', 'schema',
-                            'TrackerEvent.avsc'),
+       default=os.path.abspath(
+           os.path.join(os.path.dirname(__file__), '..', 'schema',
+                        'compiled', 'TrackerEvent.avsc')),
         help='Path to the output avro message schema (avsc) file')
 
 from utils import statemon
@@ -165,6 +168,8 @@ class BaseTrackerDataV2(object):
             'lon': self.get_header_safe(request, 'Geoip_longitude', float)
             }
 
+        self.eventData = {}
+
     def get_header_safe(self, request, header_name, typ=str):
         '''Returns the header value, or None if it's not there.'''
         try:
@@ -193,7 +198,7 @@ class BaseTrackerDataV2(object):
             else:
                 retval['os'] = raw_data['os']
         except Exception, e:
-            _log.exception("httpagentparser failed %s" %e)
+            _log.exception("httpagentparser failed %s" % e)
             return None
 
     def to_flume_event(self, writer, schema_hash):
@@ -205,11 +210,11 @@ class BaseTrackerDataV2(object):
             {'headers': {
                 'timestamp' : self.serverTime,
                 'tai' : self.trackerAccountId,
-                'track_vers' : '3',
+                'track_vers' : '2.1',
                 'event' : self.eventType,
                 'schema' : schema_hash
                 },
-            'body': encoded_str.getvalue()
+            'body': base64.b64encode(encoded_str.getvalue())
             }])
 
     @staticmethod
@@ -238,35 +243,41 @@ class ImagesVisible(BaseTrackerDataV2):
     '''An event specifying that the image became visible.'''
     def __init__(self, request):
         super(ImagesVisible, self).__init__(request)
+        self.eventData['isImagesVisible'] = True
         self.eventType = 'IMAGES_VISIBLE'
-        self.thumbnailIds = request.get_argument('tids').split(',')
+        self.eventData['thumbnailIds'] = \
+          request.get_argument('tids').split(',')
 
 class ImagesLoaded(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
         super(ImagesLoaded, self).__init__(request)
-        self.event = 'IMAGES_LOADED'
-        self.images = []
+        self.eventData['isImagesLoaded'] = True
+        self.eventType = 'IMAGES_LOADED'
+        images = []
         tid_list = request.get_argument('tids')
         if len(tid_list) >0:
             for tup in tid_list.split(','):
                 elems = tup.split(' ') # '+' delimiter converts to ' '
-                self.images.append({
+                images.append({
                     'thumbnailId' : elems[0],
                     'width' : int(elems[1]),
                     'height' : int(elems[2])})
+
+        self.eventData['images'] = images
 
 class ImageClicked(BaseTrackerDataV2):
     '''An event specifying that the image was clicked.'''
     def __init__(self, request):
         super(ImageClicked, self).__init__(request)
-        self.event = 'IMAGE_CLICK'
-        self.thumbnailId = request.get_argument('tid') # Thumbnail id
-        self.pageCoords = {
+        self.eventData['isImageClick'] = True
+        self.eventType = 'IMAGE_CLICK'
+        self.eventData['thumbnailId'] = request.get_argument('tid') 
+        self.eventData['pageCoords'] = {
             'x' : float(request.get_argument('x', 0)),
             'y' : float(request.get_argument('y', 0))
             }
-        self.windowCoords = {
+        self.eventData['windowCoords'] = {
             'x' : float(request.get_argument('wx', 0)),
             'y' : float(request.get_argument('wy', 0))
             }
@@ -275,49 +286,55 @@ class VideoClick(BaseTrackerDataV2):
     '''An event specifying that the image was clicked within the player'''
     def __init__(self, request):
         super(VideoClick, self).__init__(request)
-        self.event = 'VIDEO_CLICK'
+        self.eventData['isVideoClick'] = True
+        
+        self.eventType = 'VIDEO_CLICK'
         # Thumbnail id that was in the player
-        self.videoId = request.get_argument('vid') # Video id
+        self.eventData['videoId'] = request.get_argument('vid') # Video id
          # Thumbnail id
-        self.thumbnailId = \
+        self.eventData['thumbnailId'] = \
           InputSanitizer.sanitize_null(request.get_argument('tid'))
-        self.playerId = request.get_argument('playerid', None) # Player id
+        self.eventData['playerId'] = request.get_argument('playerid', None) # Player id
 
 class VideoPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
         super(VideoPlay, self).__init__(request)
-        self.event = 'VIDEO_PLAY'
+        self.eventData['isVideoPlay'] = True
+        
+        self.eventType = 'VIDEO_PLAY'
         # Thumbnail id
-        self.thumbnailId = InputSanitizer.sanitize_null(request.get_argument('tid')) 
-        self.videoId = request.get_argument('vid') # Video id
-        self.playerId = request.get_argument('playerid', None) # Player id
+        self.eventData['thumbnailId'] = InputSanitizer.sanitize_null(request.get_argument('tid')) 
+        self.eventData['videoId'] = request.get_argument('vid') # Video id
+        self.eventData['playerId'] = request.get_argument('playerid', None) # Player id
          # If an adplay preceeded video play 
-        self.didAdPlay = InputSanitizer.to_bool(
+        self.eventData['didAdPlay'] = InputSanitizer.to_bool(
             request.get_argument('adplay', False))
         # (time when player initiates request to play video - 
         #             Last time an image or the player was clicked) 
-        self.autoplayDelta = InputSanitizer.sanitize_int(
+        self.eventData['autoplayDelta'] = InputSanitizer.sanitize_int(
             request.get_argument('adelta')) # autoplay delta in milliseconds
-        self.playCount = InputSanitizer.sanitize_int(
+        self.eventData['playCount'] = InputSanitizer.sanitize_int(
             request.get_argument('pcount')) #the current count of the video playing on the page 
 
 class AdPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
         super(AdPlay, self).__init__(request)
-        self.event = 'AD_PLAY'
+        self.eventData['isAdPlay'] = True
+        
+        self.eventType = 'AD_PLAY'
         # Thumbnail id
-        self.thumbnailId = InputSanitizer.sanitize_null(request.get_argument('tid')) 
+        self.eventData['thumbnailId'] = InputSanitizer.sanitize_null(request.get_argument('tid')) 
         #VID can be null, if VideoClick event doesn't fire before adPlay
         # Video id
-        self.videoId = InputSanitizer.sanitize_null(request.get_argument('vid')) 
-        self.playerId = request.get_argument('playerid', None) # Player id
+        self.eventData['videoId'] = InputSanitizer.sanitize_null(request.get_argument('vid')) 
+        self.eventData['playerId'] = request.get_argument('playerid', None) # Player id
         # (time when player initiates request to play video - Last time an image or the player was clicked) 
-        self.autoplayDelta = InputSanitizer.sanitize_int(
+        self.eventData['autoplayDelta'] = InputSanitizer.sanitize_int(
             request.get_argument('adelta')) # autoplay delta in millisecond
          #the current count of the video playing on the page
-        self.playCount = InputSanitizer.sanitize_int(request.get_argument('pcount')) 
+        self.eventData['playCount'] = InputSanitizer.sanitize_int(request.get_argument('pcount')) 
 
 #############################################
 #### WEB INTERFACE #####
@@ -374,8 +391,10 @@ class LogLines(TrackerDataHandler):
         self.watcher = watcher
         self.backup_q = q
         self.version = version
-        schema = avro.schema.parse(options.message_schema)
-        self.schema_hash = hashlib.md5(schema.to_json()).hexdigest()
+        with open(options.message_schema) as f:
+            schema_str = f.read()
+        schema = avro.schema.parse(schema_str)
+        self.schema_hash = hashlib.md5(json.dumps(schema.to_json())).hexdigest()
         self.avro_writer = avro.io.DatumWriter(schema)
     
     @tornado.web.asynchronous
