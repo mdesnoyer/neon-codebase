@@ -1648,7 +1648,7 @@ class BcoveHandler(tornado.web.RequestHandler):
 application = tornado.web.Application([
         (r'/api/v1/accounts(.*)', AccountHandler),
         (r'/api/v1/brightcovecontroller(.*)', BcoveHandler)],
-        debug=True, gzip=True)
+        gzip=True)
 
 def main():
     

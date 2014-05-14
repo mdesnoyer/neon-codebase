@@ -119,6 +119,22 @@ def check_services_bad_request():
     m_var = 'bad_request'
     check_module(module, program, m_var)
 
+def check_last_request_from_client():
+    '''
+    check the last request to the video server to deque
+    from the video clients
+    
+    If no requests in the last 2 mins, then the clients are down
+
+    '''
+    pass
+
+def check_controller_pqsize():
+    '''
+    Check the PQ Size of the controller
+    '''
+    pass
+
 def main():
     ''' main '''
 

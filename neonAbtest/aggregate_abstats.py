@@ -60,6 +60,7 @@ def main(options):
         data = []
         with open(options.filename, 'r') as f:
             for line in f.readlines():
+                print line
                 d = line.split(' ')
                 d[-1] = d[-1].rstrip('\n')
                 for i in range(len(d) -1):

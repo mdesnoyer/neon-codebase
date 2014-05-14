@@ -212,6 +212,7 @@ class ImageClicked(BaseTrackerDataV2):
     def __init__(self, request):
         super(ImageClicked, self).__init__(request)
         self.event = 'ic'
+        self.vid = request.get_argument('vid') # video id 
         self.tid = request.get_argument('tid') # Thumbnail id
         self.px = float(request.get_argument('x', 0)) # Page X coordinate
         self.py = float(request.get_argument('y', 0)) # Page Y coordinate
@@ -223,8 +224,8 @@ class VideoClick(BaseTrackerDataV2):
     def __init__(self, request):
         super(VideoClick, self).__init__(request)
         self.event = 'vc'
-        # Thumbnail id that was in the player
         self.vid = request.get_argument('vid') # Video id
+        # Thumbnail id that was in the player
         self.tid = utils.inputsanitizer.InputSanitizer.sanitize_null(
                             request.get_argument('tid')) # Thumbnail id
         self.playerid = request.get_argument('playerid', None) # Player id
@@ -246,6 +247,8 @@ class VideoPlay(BaseTrackerDataV2):
                         request.get_argument('adelta')) # autoplay delta 
         self.pcount = utils.inputsanitizer.InputSanitizer.sanitize_int(
                         request.get_argument('pcount')) #the current count of the video playing on the page 
+        self.infocus = utils.inputsanitizer.InputSanitizer.to_bool(
+                request.get_argument('infocus', True)) # Was the player in foucs when video started playing (optional) 
 
 class AdPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''

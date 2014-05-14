@@ -394,6 +394,9 @@ class Mastermind(object):
         '''
         if chosen.loads < 500 or default.loads < 500:
             return False
+
+        if chosen.clicks < 1 or defaulcks < 1:
+            return False
         
         p_chosen = float(chosen.clicks) / chosen.loads
         p_default = float(default.clicks) / default.loads

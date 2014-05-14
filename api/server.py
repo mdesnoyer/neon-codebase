@@ -35,6 +35,7 @@ DIRNAME = os.path.dirname(__file__)
 #Monitoring variables
 statemon.define('server_queue', int)
 statemon.define('duplicate_requests', int)
+statemon.define('dequeue_requests', int)
 statemon.state.enable_reset()
 
 #=============== Global Handlers ======================================#
@@ -83,6 +84,7 @@ class DequeueHandler(tornado.web.RequestHandler):
             raise tornado.web.HTTPError(400)
         
         try:
+            statemon.state.increment('dequeue_requests')
             element = global_api_work_queue.get_nowait()
             #send http response
             h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
