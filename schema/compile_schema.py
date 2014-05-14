@@ -69,7 +69,8 @@ def main(options):
               (options.s3_bucket, '%s.avsc' % schema_hash))
     key = Key(bucket=bucket, name='%s.avsc' % schema_hash)
     key.content_type = 'application/json'
-    key.set_contents_from_string(schema_str, replace=False)
+    key.set_contents_from_string(schema_str, replace=False,
+                                 policy='public-read')
 
 if __name__ == "__main__":
 

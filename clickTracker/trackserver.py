@@ -59,6 +59,8 @@ define("message_schema",
            os.path.join(os.path.dirname(__file__), '..', 'schema',
                         'compiled', 'TrackerEvent.avsc')),
         help='Path to the output avro message schema (avsc) file')
+define("schema_bucket", default="neon-avro-schema",
+       help='S3 Bucket that contains schemas')
 
 from utils import statemon
 statemon.define('qsize', int)
@@ -205,7 +207,7 @@ class BaseTrackerDataV2(object):
             return None
         return retval
 
-    def to_flume_event(self, writer, schema_hash):
+    def to_flume_event(self, writer, schema_url):
         '''Coverts the data to a flume event.'''
         encoded_str = StringIO()
         encoder = avro.io.BinaryEncoder(encoded_str)
@@ -216,7 +218,7 @@ class BaseTrackerDataV2(object):
                 'tai' : self.trackerAccountId,
                 'track_vers' : '2.1',
                 'event' : self.eventType,
-                'schema' : schema_hash
+                'schemaUrl' : schema_url
                 },
             'body': base64.b64encode(encoded_str.getvalue())
             }])
@@ -390,16 +392,13 @@ class TrackerDataHandler(tornado.web.RequestHandler):
 class LogLines(TrackerDataHandler):
     '''Handler for real tracking data that should be logged.'''
 
-    def initialize(self, q, watcher, version):
+    def initialize(self, q, watcher, version, avro_writer, schema_url):
         '''Initialize the logger.'''
         self.watcher = watcher
         self.backup_q = q
         self.version = version
-        with open(options.message_schema) as f:
-            schema_str = f.read()
-        schema = avro.schema.parse(schema_str)
-        self.schema_hash = hashlib.md5(json.dumps(schema.to_json())).hexdigest()
-        self.avro_writer = avro.io.DatumWriter(schema)
+        self.avro_writer = avro_writer
+        self.schema_url = schema_url
     
     @tornado.web.asynchronous
     @tornado.gen.coroutine
@@ -424,7 +423,7 @@ class LogLines(TrackerDataHandler):
                 return
 
             data = tracker_data.to_flume_event(self.avro_writer,
-                                               self.schema_hash)
+                                               self.schema_url)
             try:
                 request = tornado.httpclient.HTTPRequest(
                     'http://localhost:%i' % options.flume_port,
@@ -589,19 +588,45 @@ class Server(threading.Thread):
         self._is_running = threading.Event()
         self._watcher = watcher
 
+        # Figure out the message schema
+        with open(options.message_schema) as f:
+            schema_str = f.read()
+        schema = avro.schema.parse(schema_str)
+        schema_hash = hashlib.md5(schema_str).hexdigest()
+        schema_url = ('http://%s.s3.amazonaws.com/%s.avsc' % 
+                      (options.schema_bucket, schema_hash))
+        avro_writer = avro.io.DatumWriter(schema)
+
+        # Make sure that the schema exists at a URL that can be reached
+        response = utils.http.send_request(
+            tornado.httpclient.HTTPRequest(schema_url), 2)
+        if response.error:
+            _log.fatal('Could not find schema at %s. '
+                       'Did you run schema/compile_schema.py?' % 
+                       schema_url)
+            raise response.error
+
         self.application = tornado.web.Application([
             (r"/", LogLines, dict(q=self.backup_queue,
                                   watcher=self._watcher,
-                                  version=1)),
+                                  version=1,
+                                  avro_writer=avro_writer,
+                                  schema_url=schema_url)),
             (r"/v2", LogLines, dict(q=self.backup_queue,
                                     watcher=self._watcher,
-                                    version=2)),
+                                    version=2,
+                                    avro_writer=avro_writer,
+                                    schema_url=schema_url)),
             (r"/track", LogLines, dict(q=self.backup_queue,
                                        watcher=self._watcher,
-                                       version=1)),
+                                       version=1,
+                                       avro_writer=avro_writer,
+                                       schema_url=schema_url)),
             (r"/v2/track", LogLines, dict(q=self.backup_queue,
                                           watcher=self._watcher,
-                                          version=2)),
+                                          version=2,
+                                          avro_writer=avro_writer,
+                                          schema_url=schema_url)),
             (r"/test", TestTracker, dict(version=1)),
             (r"/v2/test", TestTracker, dict(version=2)),
             (r"/healthcheck", HealthCheckHandler),

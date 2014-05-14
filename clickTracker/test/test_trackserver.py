@@ -39,7 +39,9 @@ class TestFileBackupHandler(unittest.TestCase):
         with open(schema_path) as f:
             schema_str = f.read()
         schema = avro.schema.parse(schema_str)
-        self.schema_hash = hashlib.md5(json.dumps(schema.to_json())).hexdigest()
+        schema_hash = hashlib.md5(json.dumps(schema.to_json())).hexdigest()
+        self.schema_url = ('http://bucket.s3.amazonaws.com/%s.avsc' % 
+                           schema_hash)
         self.avro_writer = avro.io.DatumWriter(schema)
         self.avro_reader = avro.io.DatumReader(schema, schema)
         
@@ -115,11 +117,11 @@ class TestFileBackupHandler(unittest.TestCase):
             click = clickTracker.trackserver.BaseTrackerDataV2.generate(
                 mock_click_request)
             
-            dataQ.put(click.to_flume_event(self.avro_writer, self.schema_hash))
+            dataQ.put(click.to_flume_event(self.avro_writer, self.schema_url))
 
             view = clickTracker.trackserver.BaseTrackerDataV2.generate(
                 mock_view_request)
-            dataQ.put(view.to_flume_event(self.avro_writer, self.schema_hash))
+            dataQ.put(view.to_flume_event(self.avro_writer, self.schema_url))
             
         # Wait until the data is processeed 
         dataQ.join()
@@ -229,18 +231,25 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         with self.fake_open(schema_path, 'w') as f:
             f.write(schema_str)
         
-        self.server_obj = clickTracker.trackserver.Server()
-        super(TestFullServer, self).setUp()
 
-        random.seed(168984)
 
         self.http_patcher = patch(
             'clickTracker.trackserver.utils.http.send_request')
         self.http_mock = self.http_patcher.start()
-        self.http_mock.side_effect = \
-          lambda x, callback: self.io_loop.add_callback(callback,
-                                                        HTTPResponse(x, 200))
+        def patch_func(url, ntries=5, callback=None):
+            if callback:
+                return self.io_loop.add_callback(callback,
+                                                 HTTPResponse(url, 200))
+            else:
+                return HTTPResponse(url, 200)
+        self.http_mock.side_effect = patch_func
+
+        self.server_obj = clickTracker.trackserver.Server()
         self.backup_q = self.server_obj.backup_queue
+        super(TestFullServer, self).setUp()
+
+        random.seed(168984)
+        
 
     def tearDown(self):
         self.http_patcher.stop()
@@ -636,6 +645,9 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(self.backup_q.qsize(), 1)
         msg = json.loads(self.backup_q.get())
         self.assertEqual(len(msg), 1)
+
+    # TODO(mdesnoyer) add tests for when the schema isn't on S3 and
+    # for when arguments are missing
             
 
 if __name__ == '__main__':
