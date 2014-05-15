@@ -35,7 +35,7 @@ pylint.out
 
 # Mr Developer
 .mr.developer.cfg
-.project
+#.project
 .pydevproject
 
 
@@ -49,6 +49,17 @@ pylint.out
 #### Emacs stuff ###
 *~
 
+#### Java stuff ###
+*.class
+*.jar
+*.war
+*.ear
+.metadata
+.mtj.tmp/
+hs_err_pid*
+
+#### Schema Compiled Files ####
+*.avsc
 
 #### cmake stuff ###
 CMakeCache.txt
@@ -58,3 +69,6 @@ CMakeFiles
 cmake_install.cmake
 install_manifest.txt
 CTestResults.xml
+
+#### git stuff ###
+*.orig

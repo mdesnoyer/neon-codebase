@@ -14,13 +14,17 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-
-import json
+import avro.io
+import avro.schema
+import base64
+import hashlib
 import httpagentparser
+import json
 import os
 import Queue
 import re
 import shortuuid
+from cStringIO import StringIO
 import threading
 import time
 import tornado.gen
@@ -50,6 +54,13 @@ define("backup_max_events_per_file", default=100000, type=int,
        help='Maximum events to allow backups on per file')
 define("backup_flush_interval", default=100, type=int,
        help='Flush to disk after how many events?')
+define("message_schema",
+       default=os.path.abspath(
+           os.path.join(os.path.dirname(__file__), '..', 'schema',
+                        'compiled', 'TrackerEvent.avsc')),
+        help='Path to the output avro message schema (avsc) file')
+define("schema_bucket", default="neon-avro-schema",
+       help='S3 Bucket that contains schemas')
 
 from utils import statemon
 statemon.define('qsize', int)
@@ -88,21 +99,23 @@ class TrackerData(object):
             if xy:
                 self.xy = xy 
 
-    def to_flume_event(self):
+    def to_flume_event(self, writer=None, schema_hash=None):
         '''Coverts the data to a flume event.'''
         return json.dumps([
             {'headers': {
                 'timestamp' : self.sts,
                 'tai' : self.tai,
                 'track_vers' : '1',
-                'event': self.a
+                'event': self.a,
+                'schema': schema_hash
                 },
             'body': json.dumps(self.__dict__)
             }])
 
 class BaseTrackerDataV2(object):
     '''
-    Schema for V2 tracking data
+    Object that mirrors the the Avro TrackerEvent schema and is used to 
+    write the Avro data
     '''
     # A map from schema entries to the http headers where the value is found
     header_map = {
@@ -113,56 +126,101 @@ class BaseTrackerDataV2(object):
         'zip' : "Geoip_postal_code",
         'lat' : "Geoip_latitude",
         'lon' : "Geoip_longitude"
-        }      
+        }
+
+    tracker_type_map = {
+        'brightcove' : 'BRIGHTCOVE',
+        'ooyala' : 'OOYALA',
+        'bcgallery' : 'BCGALLERY',
+        'ign' : 'IGN'
+        }
         
     
     def __init__(self, request):
-        self.pageid = request.get_argument('pageid') # page_id
-        self.tai = request.get_argument('tai') # tracker_account_id
+        self.pageId = request.get_argument('pageid') # page_id
+        self.trackerAccountId = request.get_argument('tai') # tracker_account_id
         # tracker_type (brightcove, ooyala, bcgallery, ign as of April 2014)
-        self.ttype = request.get_argument('ttype')
-        self.page = request.get_argument('page') # page_url
-        self.ref = request.get_argument('ref', None) # referral_url
-
-        self.sts = int(time.time() * 1000) # Server time stamp in ms
-        self.cts = int(request.get_argument('cts')) # client_time in ms
-        self.cip = request.request.remote_ip # client_ip
-        # Neon's user id
-        self.uid = request.get_cookie('neonglobaluserid', default="") 
-        
-        # Data from the HTTP headers
-        for key, header_name in BaseTrackerDataV2.header_map.iteritems():
-            try:
-                self.__dict__[key] = InputSanitizer.sanitize_null(
-                    request.request.headers[header_name])
-            except KeyError:
-                self.__dict__[key] = None
-            except AttributeError:
-                self.__dict__[key] = None
-
-        # Get better information about the user agent if it is available
-        self.uinfo = None
-        if self.uagent is not None:
-            self.uinfo = BaseTrackerDataV2.format_user_agent(self.uagent)
-
-    @classmethod
-    def format_user_agent(cls, uagent):
         try:
-            return httpagentparser.detect(uagent)
-        except Exception, e:
-            _log.exception("httpagentparser failed %s" %e)
-            return
+            self.trackerType = \
+              BaseTrackerDataV2.tracker_type_map[request.get_argument('ttype')]
+        except KeyError:
+            raise tornado.web.HTTPError(
+                400, "Invalid ttype %s" % request.get_argument('ttype'))
+        
+        self.pageURL = request.get_argument('page') # page_url
+        self.refURL = request.get_argument('ref', None) # referral_url
 
-    def to_flume_event(self):
+        self.serverTime = int(time.time() * 1000) # Server time stamp in ms
+        self.clientTime = int(request.get_argument('cts')) # client_time in ms
+        self.clientIP = request.request.remote_ip # client_ip
+        # Neon's user id
+        self.neonUserId = request.get_cookie('neonglobaluserid', default="") 
+
+        self.userAgent = self.get_header_safe(request, 'User-Agent')
+        if self.userAgent:
+            self.agentInfo = BaseTrackerDataV2.extract_agent_info(
+                self.userAgent)
+
+        self.ipGeoData = {
+            'country': self.get_header_safe(request, 'Geoip_country_code3'),
+            'city': self.get_header_safe(request, 'Geoip_city'),
+            'region': self.get_header_safe(request, 'Geoip_region'),
+            'zip': self.get_header_safe(request, 'Geoip_postal_code'),
+            'lat': self.get_header_safe(request, 'Geoip_latitude', float),
+            'lon': self.get_header_safe(request, 'Geoip_longitude', float)
+            }
+
+        self.eventData = {}
+
+    def get_header_safe(self, request, header_name, typ=str):
+        '''Returns the header value, or None if it's not there.'''
+        try:
+            strval = request.request.headers[header_name]
+            if strval == '':
+                return None
+            return typ(strval)
+        except KeyError:
+            return None
+        except ValueError as e:
+            raise tornado.web.HTTPError(
+                400, "Invalid header info %s" % e)
+            
+
+    @staticmethod
+    def extract_agent_info(uagent):
+        retval = {}
+        try:
+            raw_data = httpagentparser.detect(uagent)
+            if 'browser' not in raw_data:
+                return None
+            retval['browser'] = raw_data['browser']
+            if 'dist' in raw_data:
+                retval['os'] = raw_data['dist']
+            elif 'flavor' in raw_data:
+                retval['os'] = raw_data['flavor']
+            elif 'platform' in raw_data:
+                retval['os'] = raw_data['platform']
+            else:
+                retval['os'] = raw_data['os']
+        except Exception, e:
+            _log.exception("httpagentparser failed %s" % e)
+            return None
+        return retval
+
+    def to_flume_event(self, writer, schema_url):
         '''Coverts the data to a flume event.'''
+        encoded_str = StringIO()
+        encoder = avro.io.BinaryEncoder(encoded_str)
+        writer.write(self.__dict__, encoder)
         return json.dumps([
             {'headers': {
-                'timestamp' : self.sts,
-                'tai' : self.tai,
-                'track_vers' : '2',
-                'event' : self.event
+                'timestamp' : self.serverTime,
+                'tai' : self.trackerAccountId,
+                'track_vers' : '2.1',
+                'event' : self.eventType,
+                'flume.avro.schema.url' : schema_url
                 },
-            'body': json.dumps(self.__dict__)
+            'body': base64.b64encode(encoded_str.getvalue())
             }])
 
     @staticmethod
@@ -191,62 +249,78 @@ class ImagesVisible(BaseTrackerDataV2):
     '''An event specifying that the image became visible.'''
     def __init__(self, request):
         super(ImagesVisible, self).__init__(request)
-        self.event = 'iv'
-        self.tids = [] #[Thumbnail_id1, Thumbnail_id2]
-        self.tids = request.get_argument('tids').split(',')
+        self.eventData['isImagesVisible'] = True
+        self.eventType = 'IMAGES_VISIBLE'
+        self.eventData['thumbnailIds'] = \
+          request.get_argument('tids').split(',')
 
 class ImagesLoaded(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
         super(ImagesLoaded, self).__init__(request)
-        self.event = 'il'
-        self.tids = [] # [(Thumbnail id, width, height)]
+        self.eventData['isImagesLoaded'] = True
+        self.eventType = 'IMAGES_LOADED'
+        images = []
         tid_list = request.get_argument('tids')
         if len(tid_list) >0:
             for tup in tid_list.split(','):
                 elems = tup.split(' ') # '+' delimiter converts to ' '
-                self.tids.append((elems[0], int(elems[1]), int(elems[2])))
+                images.append({
+                    'thumbnailId' : elems[0],
+                    'width' : int(elems[1]),
+                    'height' : int(elems[2])})
+
+        self.eventData['images'] = images
 
 class ImageClicked(BaseTrackerDataV2):
     '''An event specifying that the image was clicked.'''
     def __init__(self, request):
         super(ImageClicked, self).__init__(request)
-        self.event = 'ic'
-        self.vid = request.get_argument('vid') # video id 
-        self.tid = request.get_argument('tid') # Thumbnail id
-        self.px = float(request.get_argument('x', 0)) # Page X coordinate
-        self.py = float(request.get_argument('y', 0)) # Page Y coordinate
-        self.wx = float(request.get_argument('wx', 0)) # Window X
-        self.wy = float(request.get_argument('wy', 0)) # Window Y
+        self.eventData['isImageClick'] = True
+        self.eventType = 'IMAGE_CLICK'
+        self.eventData['thumbnailId'] = request.get_argument('tid') 
+        self.eventData['pageCoords'] = {
+            'x' : float(request.get_argument('x', 0)),
+            'y' : float(request.get_argument('y', 0))
+            }
+        self.eventData['windowCoords'] = {
+            'x' : float(request.get_argument('wx', 0)),
+            'y' : float(request.get_argument('wy', 0))
+            }
 
 class VideoClick(BaseTrackerDataV2):
     '''An event specifying that the image was clicked within the player'''
     def __init__(self, request):
         super(VideoClick, self).__init__(request)
-        self.event = 'vc'
-        self.vid = request.get_argument('vid') # Video id
+        self.eventData['isVideoClick'] = True
+        
+        self.eventType = 'VIDEO_CLICK'
         # Thumbnail id that was in the player
-        self.tid = utils.inputsanitizer.InputSanitizer.sanitize_null(
-                            request.get_argument('tid')) # Thumbnail id
-        self.playerid = request.get_argument('playerid', None) # Player id
+        self.eventData['videoId'] = request.get_argument('vid') # Video id
+         # Thumbnail id
+        self.eventData['thumbnailId'] = \
+          InputSanitizer.sanitize_null(request.get_argument('tid'))
+        self.eventData['playerId'] = request.get_argument('playerid', None) # Player id
 
 class VideoPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
         super(VideoPlay, self).__init__(request)
-        self.event = 'vp'
+        self.eventData['isVideoPlay'] = True
+        
+        self.eventType = 'VIDEO_PLAY'
         # Thumbnail id
-        self.tid = InputSanitizer.sanitize_null(request.get_argument('tid')) 
-        self.vid = request.get_argument('vid') # Video id
-        self.playerid = request.get_argument('playerid', None) # Player id
+        self.eventData['thumbnailId'] = InputSanitizer.sanitize_null(request.get_argument('tid')) 
+        self.eventData['videoId'] = request.get_argument('vid') # Video id
+        self.eventData['playerId'] = request.get_argument('playerid', None) # Player id
          # If an adplay preceeded video play 
-        self.adplay = InputSanitizer.to_bool(
+        self.eventData['didAdPlay'] = InputSanitizer.to_bool(
             request.get_argument('adplay', False))
         # (time when player initiates request to play video - 
         #             Last time an image or the player was clicked) 
-        self.adelta = InputSanitizer.sanitize_int(
+        self.eventData['autoplayDelta'] = InputSanitizer.sanitize_int(
             request.get_argument('adelta')) # autoplay delta in milliseconds
-        self.pcount = InputSanitizer.sanitize_int(
+        self.eventData['playCount'] = InputSanitizer.sanitize_int(
             request.get_argument('pcount')) #the current count of the video playing on the page 
         self.infocus = utils.inputsanitizer.InputSanitizer.to_bool(
                 request.get_argument('infocus', True)) # Was the player in foucs when video started playing (optional) 
@@ -255,18 +329,20 @@ class AdPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
     def __init__(self, request):
         super(AdPlay, self).__init__(request)
-        self.event = 'ap'
+        self.eventData['isAdPlay'] = True
+        
+        self.eventType = 'AD_PLAY'
         # Thumbnail id
-        self.tid = InputSanitizer.sanitize_null(request.get_argument('tid')) 
+        self.eventData['thumbnailId'] = InputSanitizer.sanitize_null(request.get_argument('tid')) 
         #VID can be null, if VideoClick event doesn't fire before adPlay
         # Video id
-        self.vid = InputSanitizer.sanitize_null(request.get_argument('vid')) 
-        self.playerid = request.get_argument('playerid', None) # Player id
+        self.eventData['videoId'] = InputSanitizer.sanitize_null(request.get_argument('vid')) 
+        self.eventData['playerId'] = request.get_argument('playerid', None) # Player id
         # (time when player initiates request to play video - Last time an image or the player was clicked) 
-        self.adelta = InputSanitizer.sanitize_int(
+        self.eventData['autoplayDelta'] = InputSanitizer.sanitize_int(
             request.get_argument('adelta')) # autoplay delta in millisecond
          #the current count of the video playing on the page
-        self.pcount = InputSanitizer.sanitize_int(request.get_argument('pcount')) 
+        self.eventData['playCount'] = InputSanitizer.sanitize_int(request.get_argument('pcount')) 
 
 #############################################
 #### WEB INTERFACE #####
@@ -318,11 +394,13 @@ class TrackerDataHandler(tornado.web.RequestHandler):
 class LogLines(TrackerDataHandler):
     '''Handler for real tracking data that should be logged.'''
 
-    def initialize(self, q, watcher, version):
+    def initialize(self, q, watcher, version, avro_writer, schema_url):
         '''Initialize the logger.'''
         self.watcher = watcher
         self.backup_q = q
         self.version = version
+        self.avro_writer = avro_writer
+        self.schema_url = schema_url
     
     @tornado.web.asynchronous
     @tornado.gen.coroutine
@@ -346,7 +424,8 @@ class LogLines(TrackerDataHandler):
                 self.finish()
                 return
 
-            data = tracker_data.to_flume_event()
+            data = tracker_data.to_flume_event(self.avro_writer,
+                                               self.schema_url)
             try:
                 request = tornado.httpclient.HTTPRequest(
                     'http://localhost:%i' % options.flume_port,
@@ -511,19 +590,45 @@ class Server(threading.Thread):
         self._is_running = threading.Event()
         self._watcher = watcher
 
+        # Figure out the message schema
+        with open(options.message_schema) as f:
+            schema_str = f.read()
+        schema = avro.schema.parse(schema_str)
+        schema_hash = hashlib.md5(schema_str).hexdigest()
+        schema_url = ('http://%s.s3.amazonaws.com/%s.avsc' % 
+                      (options.schema_bucket, schema_hash))
+        avro_writer = avro.io.DatumWriter(schema)
+
+        # Make sure that the schema exists at a URL that can be reached
+        response = utils.http.send_request(
+            tornado.httpclient.HTTPRequest(schema_url), 2)
+        if response.error:
+            _log.fatal('Could not find schema at %s. '
+                       'Did you run schema/compile_schema.py?' % 
+                       schema_url)
+            raise response.error
+
         self.application = tornado.web.Application([
             (r"/", LogLines, dict(q=self.backup_queue,
                                   watcher=self._watcher,
-                                  version=1)),
+                                  version=1,
+                                  avro_writer=avro_writer,
+                                  schema_url=schema_url)),
             (r"/v2", LogLines, dict(q=self.backup_queue,
                                     watcher=self._watcher,
-                                    version=2)),
+                                    version=2,
+                                    avro_writer=avro_writer,
+                                    schema_url=schema_url)),
             (r"/track", LogLines, dict(q=self.backup_queue,
                                        watcher=self._watcher,
-                                       version=1)),
+                                       version=1,
+                                       avro_writer=avro_writer,
+                                       schema_url=schema_url)),
             (r"/v2/track", LogLines, dict(q=self.backup_queue,
                                           watcher=self._watcher,
-                                          version=2)),
+                                          version=2,
+                                          avro_writer=avro_writer,
+                                          schema_url=schema_url)),
             (r"/test", TestTracker, dict(version=1)),
             (r"/v2/test", TestTracker, dict(version=2)),
             (r"/healthcheck", HealthCheckHandler),
