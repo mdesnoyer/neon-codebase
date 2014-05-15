@@ -92,6 +92,12 @@ def check_module(module, program, m_var):
                     " current value: %s"%(service, value, threshold)
     sys.exit(ret_val)
 
+def get_threshold(module, program, m_var):
+    with open(base_path + "/" +  options.monitoring_conf, "r") as stream:
+        params = options._parse_config_file(stream)
+        threshold = params['system'][module][program][m_var]
+        return threshold
+
 def check_services_internal_error():
     '''
     Check for internal errors on services servers
@@ -127,17 +133,42 @@ def check_last_request_from_client():
     If no requests in the last 2 mins, then the clients are down
 
     '''
-    pass
+    module = 'api'
+    program = 'server'
+    m_var = 'dequeue_requests'
+    threshold = get_threshold(module, program, m_var)
+    server = 'ip-10-237-152-105'
+    service = "system.%s.%s.%s.%s" %(server, module, program, m_var) 
+    json = get_graphite_stats('%s,"5min","avg",true)'%service)
+    value = json[0]['datapoints'][-1][0]
+    if float(value) < float(threshold):
+        print >> sys.stderr, \
+                    "service %s exceeds threshold: %s"\
+                    " current value: %s"%(service, value, threshold)
+        sys.exit(1)
+
 
 def check_controller_pqsize():
     '''
     Check the PQ Size of the controller
     '''
-    pass
+    module = 'controllers'
+    program = 'brightcove_controller'
+    m_var = 'pqsize'
+    server = 'ip-10-184-23-43'
+    threshold = get_threshold(module, program, m_var)
+    service = "system.%s.%s.%s.%s" %(server, module, program, m_var) 
+    json = get_graphite_stats('%s,"5min","avg",true)'%service)
+    value = json[0]['datapoints'][-1][0]
+    if float(value) < float(threshold):
+        print >> sys.stderr, \
+                    "service %s exceeds threshold: %s"\
+                    " current value: %s"%(service, value, threshold)
+        sys.exit(1)
 
 def main():
     ''' main '''
-
+    check_controller_pqsize()
     local_functions = inspect.getmembers(sys.modules[__name__])
     checks = [func[0].replace('check_', '') for func in local_functions if func[0].startswith('check_')]
     doc = __doc__.replace('<check>', "(%s)" % " | ".join(checks))
