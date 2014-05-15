@@ -88,7 +88,7 @@ class TestFileBackupHandler(unittest.TestCase):
                 'Geoip_latitude': '37.7794',
                 'Geoip_city': 'San Francisco',
                 'Geoip_longitude': '-122.4170',
-                'Geoip_postal_code': '94102'
+                'Geoip_postal_code': ''
                 }
         
         # Start a thread to handle the data
@@ -169,8 +169,12 @@ class TestFileBackupHandler(unittest.TestCase):
                             self.assertGreater(body['sts'], 1300000000000)
                             self.assertItemsEqual(body['tids'], 
                                                   ['tid345', 'tid346'])
-                            self.assertEqual(body['geoinfo']["city"], "San Francisco")
-                            self.assertEqual(body['geoinfo']["zip"], "94102")
+                            self.assertEqual(body["city"], "San Francisco")
+                            self.assertEqual(body["country"], "USA")
+                            self.assertEqual(body["lat"], "37.7794")
+                            self.assertEqual(body["lon"], "-122.4170")
+                            self.assertIsNone(body["zip"])
+                            self.assertIsNone(body["region"])
                         else:
                             self.fail('Bad event field %s' % body['event'])
         
@@ -249,8 +253,10 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
                          body['sts'])
         if 'v2' in path:
             self.assertEqual(json_msg['headers']['track_vers'], '2')
+            self.assertEqual(json_msg['headers']['event'], ebody['event'])
         else:
             self.assertEqual(json_msg['headers']['track_vers'], '1')
+            self.assertEqual(json_msg['headers']['event'], ebody['a'])
 
         self.assertDictContainsSubset(ebody, json.loads(json_msg['body']))
         self.assertEqual(json.loads(json_msg['body'])['cip'], '127.0.0.1')

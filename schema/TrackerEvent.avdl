@@ -1,0 +1,126 @@
+@namespace("com.neon.Tracker")
+protocol DummyTrackerProtocol {
+
+enum TrackerType {
+  BRIGHTCOVE, OOYALA, BCGALLERY, IGN
+}
+
+record GeoData {
+  union { null, string} country; // 3 character country code
+  union { null, string} city; // City name
+  union { null, string} region; // Region
+  union { null, string} zip; // Postal Code
+  union { null, float} lat; // Latitude
+  union { null, float} lon; // Longitude
+}
+
+
+record Coords {
+  float x;
+  float y;
+}
+
+enum EventType {
+  IMAGE_VISIBLE, IMAGE_LOAD, IMAGE_CLICK, VIDEO_CLICK, VIDEO_PLAY,
+  AD_PLAY
+}
+
+
+record ImageVisible {
+  string thumbnailId;
+}
+
+
+record ImageLoad {
+  string thumbnailId;
+  int height;  // Displayed height of the image
+  int width;   // Displayed width of the image
+}
+
+
+record ImageClick {
+  string thumbnailId;
+  Coords pageCoords; // Coordinates of the click relative to the page
+  Coords windowCoords; // Coordinates of the click relative to the visible window
+}
+
+
+record VideoClick {
+  string videoId;
+  string playerId;
+  union{null, string} thumbnailId;
+}
+
+
+record VideoPlay {
+  string videoId;
+  union{null, string} playerId;
+  union{null, string} thumbnailId;
+  boolean didAdPlay = false;  // Was an ad play detected before the video
+
+  // Time when the player initiates a request to play the video - the
+  // last time an image or the player was clicked by the user. Used to
+  // identify autoplay. Given in milliseconds, or null if there was no
+  // click
+  union{null, int} autoplayDelta;
+
+  // This video is the nth one playing on this page load
+  int playCount; 
+}
+
+
+record AdPlay {
+  // Video id. Can be null if the video click event doesn't fire in time
+  // so we can't figure out which video is playing after the ad.
+  union{null, string} videoId;
+  union{null, string} playerId;
+  union{null, string} thumbnailId;
+  
+  // Time when the player initiates a request to play the video - the
+  // last time an image or the player was clicked by the user. Used to
+  // identify autoplay. Given in milliseconds, or null if there was no
+  // click
+  union{null, int} autoplayDelta;
+
+  // This ad is attached to the nth video playing on this page load.
+  int playCount; 
+}
+
+// A generic tracker event
+record TrackerEvent {
+  string pageId; // Unique page load id
+
+  string trackerAccountId;  // The publisher's tracker account id
+
+  TrackerType trackerType;
+
+  string pageURL;     // Page URL where the event took place
+
+  union { null, string } refURL;  // The referral URL
+
+  long serverTime;    // The server's time in ms since epoch
+
+  long clientTime;    // The client's time in ms since epoch
+
+  string clientIP;    // The client's ip address
+
+  // The user id from the cookie. Can be an empty string
+  string neonUserId = "";  
+
+  union { null, string } userAgent;   // The user's agent string
+
+  union { null, string } agentInfo; // Translated agent info if available
+  
+  GeoData ipGeoData; // The user's location based on IP data
+  
+  EventType eventType;
+
+  // Data specific to each event
+  union {ImageVisible,
+         ImageLoad,
+         ImageClick,
+         VideoClick,
+         VideoPlay,
+         AdPlay} eventData;
+}
+}

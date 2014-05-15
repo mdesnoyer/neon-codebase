@@ -95,6 +95,6 @@ def _send_directive(directive, destination):
         urllib2.urlopen(destination, json.dumps({'d': directive}))
     except IOError as e:
         #_log.exception('Error sending directive to %s: %s' % (destination, e))
-        _log.exception('Error sending directive to %s' % (destination)) #minimize o/p
+        _log.error('Error sending directive to %s' % (destination)) #minimize o/p, no trace
 
 
