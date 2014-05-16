@@ -1,0 +1,98 @@
+{
+  "type" : "record",
+  "name" : "VideoClickEvent",
+  "namespace" : "com.neon.Tracker",
+  "fields" : [ {
+    "name" : "pageId",
+    "type" : "string"
+  }, {
+    "name" : "trackerAccountId",
+    "type" : "string"
+  }, {
+    "name" : "trackerType",
+    "type" : {
+      "type" : "enum",
+      "name" : "TrackerType",
+      "symbols" : [ "BRIGHTCOVE", "OOYALA", "BCGALLERY", "IGN" ]
+    }
+  }, {
+    "name" : "pageURL",
+    "type" : "string"
+  }, {
+    "name" : "refURL",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "serverTime",
+    "type" : "long"
+  }, {
+    "name" : "clientTime",
+    "type" : "long"
+  }, {
+    "name" : "clientIP",
+    "type" : "string"
+  }, {
+    "name" : "neonUserId",
+    "type" : "string",
+    "default" : ""
+  }, {
+    "name" : "userAgent",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "agentInfo",
+    "type" : [ "null", {
+      "type" : "record",
+      "name" : "AgentInfo",
+      "fields" : [ {
+        "name" : "os",
+        "type" : [ "null", {
+          "type" : "record",
+          "name" : "NmVers",
+          "fields" : [ {
+            "name" : "name",
+            "type" : [ "null", "string" ]
+          }, {
+            "name" : "version",
+            "type" : [ "null", "string" ]
+          } ]
+        } ]
+      }, {
+        "name" : "browser",
+        "type" : [ "null", "NmVers" ]
+      } ]
+    } ]
+  }, {
+    "name" : "ipGeoData",
+    "type" : {
+      "type" : "record",
+      "name" : "GeoData",
+      "fields" : [ {
+        "name" : "country",
+        "type" : [ "null", "string" ]
+      }, {
+        "name" : "city",
+        "type" : [ "null", "string" ]
+      }, {
+        "name" : "region",
+        "type" : [ "null", "string" ]
+      }, {
+        "name" : "zip",
+        "type" : [ "null", "string" ]
+      }, {
+        "name" : "lat",
+        "type" : [ "null", "float" ]
+      }, {
+        "name" : "lon",
+        "type" : [ "null", "float" ]
+      } ]
+    }
+  }, {
+    "name" : "videoId",
+    "type" : "string"
+  }, {
+    "name" : "playerId",
+    "type" : "string"
+  }, {
+    "name" : "thumbnailId",
+    "type" : [ "null", "string" ]
+  } ]
+}
