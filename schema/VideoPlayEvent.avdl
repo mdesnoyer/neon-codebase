@@ -26,9 +26,9 @@ record VideoPlayEvent {
 
   union { null, string } refURL;  // The referral URL
 
-  long serverTime;    // The server's time in ms since epoch
+  float serverTime;    // The server's time in s since epoch
 
-  long clientTime;    // The client's time in ms since epoch
+  float clientTime;    // The client's time in s since epoch
 
   string clientIP;    // The client's ip address
 

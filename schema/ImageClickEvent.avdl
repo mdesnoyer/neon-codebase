@@ -26,9 +26,9 @@ record ImageClickEvent {
 
   union { null, string } refURL;  // The referral URL
 
-  long serverTime;    // The server's time in ms since epoch
+  float serverTime;    // The server's time in s since epoch
 
-  long clientTime;    // The client's time in ms since epoch
+  float clientTime;    // The client's time in s since epoch
 
   string clientIP;    // The client's ip address
 
@@ -43,9 +43,14 @@ record ImageClickEvent {
   
   string thumbnail_id; // The thumbnail id for the image that became visible
 
-  Coords pageCoords; // Coordinates of the click relative to the page
+  union { null, string } video_id; // The video id of the video play that the click resulted in
 
-  Coords windowCoords; // Coordinates of the click relative to the visible window
+  union {null, Coords} pageCoords; // Coordinates of the click relative to the page
+
+  union {null, Coords}  windowCoords; // Coordinates of the click relative to the visible window
+
+  boolean isClickInPlayer; // Is the click in a video player
+
 }
 
 }

@@ -23,10 +23,10 @@
     "type" : [ "null", "string" ]
   }, {
     "name" : "serverTime",
-    "type" : "long"
+    "type" : "float"
   }, {
     "name" : "clientTime",
-    "type" : "long"
+    "type" : "float"
   }, {
     "name" : "clientIP",
     "type" : "string"
