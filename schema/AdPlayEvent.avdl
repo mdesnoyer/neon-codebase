@@ -53,6 +53,10 @@ record AdPlayEvent {
 
   // This video is the nth one playing on this page load
   int playCount;
+
+  // An id used to link a sequence of events together. The sequence is 
+  // ideally an image_load -> image_visible -> image_click -> video_play
+  long sequenceId;
 }
 
 }

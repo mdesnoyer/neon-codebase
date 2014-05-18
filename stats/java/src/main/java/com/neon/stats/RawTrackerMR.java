@@ -6,6 +6,7 @@ package com.neon.stats;
 import java.io.IOException;
 import java.util.*;
 
+import org.apache.avro.generic.GenericData;
 import org.apache.avro.mapred.AvroKey;
 import org.apache.avro.mapred.AvroValue;
 import org.apache.avro.mapreduce.AvroJob;
@@ -41,7 +42,9 @@ public class RawTrackerMR extends Configured implements Tool {
   /**
    * @author mdesnoyer
    * 
-   *         Map all the events for a given user on a given site together.
+   *         Map all the events for a given user viewing a video on a given site
+   *         together. We also expand the Image Load and Image Visible events to
+   *         one for each image.
    * 
    */
   public static class MapToUserEventStream
@@ -51,11 +54,84 @@ public class RawTrackerMR extends Configured implements Tool {
     @Override
     public void map(AvroKey<TrackerEvent> key, NullWritable value,
         Context context) throws IOException, InterruptedException {
+      String mapKey =
+          key.datum().getTrackerAccountId().toString()
+              + key.datum().getClientIP();
+      String videoId;
 
-      String mapKey = key.datum().getTrackerAccountId().toString()
-          + key.datum().getClientIP();
+      switch (key.datum().getEventType()) {
 
-      context.write(new Text(mapKey), new AvroValue<TrackerEvent>(key.datum()));
+      case IMAGES_VISIBLE:
+        List<CharSequence> thumbnailids =
+            ((ImagesVisible) key.datum().getEventData()).getThumbnailIds();
+        for (CharSequence thumbnailId : thumbnailids) {
+          // We don't copy the original event because it doesn't need to be. The
+          // new events are copied when they are written.
+          ImageVisible newEventData = new ImageVisible(thumbnailId);
+          TrackerEvent newEvent = key.datum();
+          newEvent.setEventData(newEventData);
+          newEvent.setEventType(EventType.IMAGE_VISIBLE);
+          context.write(new Text(mapKey
+              + ExtractVideoId(thumbnailId.toString())),
+              new AvroValue<TrackerEvent>(newEvent));
+        }
+        break;
+
+      case IMAGES_LOADED:
+        List<ImageLoad> imageLoads =
+            ((ImagesLoaded) key.datum().getEventData()).getImages();
+        for (ImageLoad imageLoad : imageLoads) {
+          // We don't copy the original event because it doesn't need to be. The
+          // new events are copied when they are written.
+          TrackerEvent newEvent = key.datum();
+          newEvent.setEventData(imageLoad);
+          newEvent.setEventType(EventType.IMAGE_LOAD);
+          context.write(new Text(mapKey
+              + ExtractVideoId(imageLoad.getThumbnailId().toString())),
+              new AvroValue<TrackerEvent>(newEvent));
+        }
+        break;
+
+      case IMAGE_CLICK:
+        String thumbnailId =
+            ((ImageClick) key.datum().getEventData()).getThumbnailId()
+                .toString();
+        context.write(new Text(mapKey + ExtractVideoId(thumbnailId)),
+            new AvroValue<TrackerEvent>(key.datum()));
+        break;
+
+      case VIDEO_CLICK:
+        videoId =
+            ((VideoClick) key.datum().getEventData()).getVideoId().toString();
+        context.write(new Text(mapKey + videoId), new AvroValue<TrackerEvent>(
+            key.datum()));
+        break;
+
+      case VIDEO_PLAY:
+        videoId =
+            ((VideoPlay) key.datum().getEventData()).getVideoId().toString();
+        context.write(new Text(mapKey + videoId), new AvroValue<TrackerEvent>(
+            key.datum()));
+        break;
+
+      case AD_PLAY:
+        // The video id could be null in an ad play. For now don't try to figure
+        // out the associated video id
+        // TODO(mdesnoyer): Figure out the video idea in this case.
+        if (((AdPlay) key.datum().getEventData()).getVideoId() == null) {
+          context.write(new Text(mapKey),
+              new AvroValue<TrackerEvent>(key.datum()));
+        } else {
+          videoId =
+              ((AdPlay) key.datum().getEventData()).getVideoId().toString();
+          context.write(new Text(mapKey + videoId),
+              new AvroValue<TrackerEvent>(key.datum()));
+        }
+        break;
+        
+      default:
+        context.getCounter("MappingError", "InvalidEvent").increment(1);
+      }
     }
   }
 
@@ -80,7 +156,8 @@ public class RawTrackerMR extends Configured implements Tool {
     @Override
     public void reduce(Text key, Iterable<AvroValue<TrackerEvent>> values,
         Context context) throws IOException, InterruptedException {
-      // Grab all the events and sort them by client time so that we can analyze
+      // Grab all the events and sort them by client time so that we can
+      // analyze
       // the stream.
       Vector<TrackerEvent> events = new Vector<TrackerEvent>();
       for (AvroValue<TrackerEvent> value : values) {
@@ -88,16 +165,23 @@ public class RawTrackerMR extends Configured implements Tool {
       }
       Collections.sort(events, new Comparator<TrackerEvent>() {
         public int compare(TrackerEvent a, TrackerEvent b) {
-          return (int)(a.getClientTime() - b.getClientTime());
+          return (int) (a.getClientTime() - b.getClientTime());
         }
       });
-      
+
     }
 
     protected void cleanup(Context context) throws IOException,
         InterruptedException {
       out.close();
     }
+  }
+
+  private static String ExtractVideoId(String thumbnailId) {
+    if (thumbnailId == null) {
+      return null;
+    }
+    return thumbnailId.split("_")[1];
   }
 
   /*
@@ -148,7 +232,6 @@ public class RawTrackerMR extends Configured implements Tool {
    * @throws Exception
    */
   public static void main(String[] args) throws Exception {
-    // TODO Auto-generated method stub
     int res = ToolRunner.run(new RawTrackerMR(), args);
     System.exit(res);
   }
