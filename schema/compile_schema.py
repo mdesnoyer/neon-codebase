@@ -13,6 +13,8 @@
  Author: Mark Desnoyer (desnoyer@neon-labs.com)
  Copyright 2014 Neon Labs Inc.
 '''
+import avro.io
+import avro.schema
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
 import hashlib
@@ -25,6 +27,22 @@ import subprocess
 import tempfile
 
 _log = logging.getLogger(__name__)
+
+def check_schemas(old_schema_path, new_schema_path):
+    '''Makes sure that the new schema is compatible with one already there.'''
+    if not os.path.exists(old_schema_path):
+        # It's a new schema so we're done
+        return
+
+    with open(old_schema_path) as f:
+        old_schema = avro.schema.parse(f.read())
+
+    with open(new_schema_path) as f:
+        new_schema = avro.schema.parse(f.read())
+
+    if not avro.io.DatumReader.match_schemas(old_schema, new_schema):
+        raise avro.io.SchemaResolutionException(
+            'New schema is not compatible.', old_schema, new_schema)
 
 def main(options):
     if options.input is None:
@@ -46,6 +64,9 @@ def main(options):
 
         if retcode != 0:
             raise Exception('Error running %s' % ' '.join(exec_params))
+
+        check_schemas(os.path.join(tempdir, avsc_file),
+                      os.path.join(output_dir, avsc_file))
 
         # Move the avsc file to the output directory
         if not os.path.exists(output_dir):
