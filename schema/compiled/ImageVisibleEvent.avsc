@@ -88,5 +88,8 @@
   }, {
     "name" : "thumbnail_id",
     "type" : "string"
+  }, {
+    "name" : "sequenceId",
+    "type" : "long"
   } ]
 }

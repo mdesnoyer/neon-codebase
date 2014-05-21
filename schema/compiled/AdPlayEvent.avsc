@@ -100,5 +100,8 @@
   }, {
     "name" : "playCount",
     "type" : "int"
+  }, {
+    "name" : "sequenceId",
+    "type" : "long"
   } ]
 }

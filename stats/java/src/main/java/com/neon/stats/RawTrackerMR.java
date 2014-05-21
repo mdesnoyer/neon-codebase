@@ -6,13 +6,13 @@ package com.neon.stats;
 import java.io.IOException;
 import java.util.*;
 
-import org.apache.avro.generic.GenericData;
 import org.apache.avro.mapred.AvroKey;
 import org.apache.avro.mapred.AvroValue;
 import org.apache.avro.mapreduce.AvroJob;
 import org.apache.avro.mapreduce.AvroKeyInputFormat;
 import org.apache.avro.mapreduce.AvroKeyOutputFormat;
 import org.apache.avro.mapreduce.AvroMultipleOutputs;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.NullWritable;
@@ -38,6 +38,8 @@ import com.neon.Tracker.*;
  * 
  */
 public class RawTrackerMR extends Configured implements Tool {
+  // The maximum time that a sequence can occur over (6 hours)
+  private static final long MAX_SEQUENCE_TIME = 21600000;
 
   /**
    * @author mdesnoyer
@@ -128,7 +130,7 @@ public class RawTrackerMR extends Configured implements Tool {
               new AvroValue<TrackerEvent>(key.datum()));
         }
         break;
-        
+
       default:
         context.getCounter("MappingError", "InvalidEvent").increment(1);
       }
@@ -157,26 +159,303 @@ public class RawTrackerMR extends Configured implements Tool {
     public void reduce(Text key, Iterable<AvroValue<TrackerEvent>> values,
         Context context) throws IOException, InterruptedException {
       // Grab all the events and sort them by client time so that we can
-      // analyze
-      // the stream.
-      Vector<TrackerEvent> events = new Vector<TrackerEvent>();
+      // analyze the stream.
+      ArrayList<TrackerEvent> events = new ArrayList<TrackerEvent>();
       for (AvroValue<TrackerEvent> value : values) {
         events.add(value.datum());
       }
       Collections.sort(events, new Comparator<TrackerEvent>() {
         public int compare(TrackerEvent a, TrackerEvent b) {
-          return (int) (a.getClientTime() - b.getClientTime());
+          int timeDiff = (int) (a.getClientTime() - b.getClientTime());
+          if (timeDiff == 0) {
+            // Force the event types to be clustered
+            return a.getEventType().compareTo(b.getEventType());
+          }
+          return timeDiff;
         }
       });
 
+      // Build up the list of events as they will be in their Hive tables
+      LinkedList<Pair<TrackerEvent, Long>> seqEvents =
+          new LinkedList<Pair<TrackerEvent, Long>>();
+      for (ListIterator<TrackerEvent> baseI = events.listIterator(); baseI
+          .hasNext();) {
+        TrackerEvent curEvent = baseI.next();
+        long curSequenceId = InitializeSequenceId(curEvent, context);
+
+        // Skip this event if it is a duplicate
+        ListIterator<Pair<TrackerEvent, Long>> revIter =
+            seqEvents.listIterator(seqEvents.size());
+        TrackerEvent oldEvent;
+        boolean foundDup = false;
+        while (revIter.hasPrevious()) {
+          oldEvent = revIter.previous().getLeft();
+          if (IsDuplicateTrackerEvent(oldEvent, curEvent)) {
+            foundDup = true;
+            break;
+          } else if ((curEvent.getClientTime() - oldEvent.getClientTime()) > MAX_SEQUENCE_TIME) {
+            // Stop looking for duplicates that are too old
+            break;
+          }
+        }
+        if (foundDup) {
+          context.getCounter("EventStats", "DuplicatesFound").increment(1);
+          break;
+        }
+
+        BackfillSequenceId(curEvent, seqEvents, curSequenceId, context);
+
+        // If it is a video click, see if there is an associated image click. If
+        // so, ignore the video click.
+        if (curEvent.getEventType() == EventType.VIDEO_CLICK) {
+          if (IsAutoplay(curEvent)) {
+            // Ignore the event because it can never be a real click
+            break;
+          }
+
+          // See if we can find an associated image click
+          revIter = seqEvents.listIterator(seqEvents.size());
+          boolean foundRealClick = false;
+          while (revIter.hasPrevious() && !foundRealClick) {
+            oldEvent = revIter.previous().getLeft();
+            if (oldEvent.getPageId() == curEvent.getPageId()) {
+              if (oldEvent.getEventType() == EventType.IMAGE_CLICK) {
+                foundRealClick = true;
+                break;
+              }
+            } else if (oldEvent.getEventType() == EventType.VIDEO_PLAY
+                || oldEvent.getEventType() == EventType.VIDEO_CLICK) {
+              break;
+            } else if ((curEvent.getClientTime() - oldEvent.getClientTime()) > MAX_SEQUENCE_TIME) {
+              // Stop looking because it's too old
+              break;
+            }
+          }
+          if (foundRealClick) {
+            // There is a real click so we can ignore this video click
+            context.getCounter("EventStats", "ExtraVideoClicks").increment(1);
+            break;
+          }
+        }
+
+        // Add the current event to the ones to write out
+        seqEvents.add(Pair.of(curEvent, curSequenceId));
+
+      }
+
+      // Now output the resulting event.
+      // TODO(mdesnoyer): Do the output part
     }
 
     protected void cleanup(Context context) throws IOException,
         InterruptedException {
       out.close();
     }
+
+    private static long
+        InitializeSequenceId(TrackerEvent event, Context context) {
+      long videoPlayHash = 0;
+      CharSequence videoId;
+
+      switch (event.getEventType()) {
+      case IMAGE_VISIBLE:
+        videoPlayHash =
+            ((ImageVisible) event.getEventData()).getThumbnailId().hashCode();
+        break;
+      case IMAGE_LOAD:
+        videoPlayHash =
+            ((ImageLoad) event.getEventData()).getThumbnailId().hashCode();
+        break;
+      case IMAGE_CLICK:
+        videoPlayHash =
+            ((ImageClick) event.getEventData()).getThumbnailId().hashCode();
+        break;
+      case VIDEO_CLICK:
+        videoPlayHash =
+            ((VideoClick) event.getEventData()).getVideoId().hashCode();
+        break;
+      case AD_PLAY:
+        videoPlayHash = ((AdPlay) event.getEventData()).getPlayCount();
+        videoId = ((AdPlay) event.getEventData()).getVideoId();
+        if (videoId != null) {
+          videoPlayHash ^= videoId.hashCode();
+        }
+        break;
+      case VIDEO_PLAY:
+        videoPlayHash =
+            ((VideoPlay) event.getEventData()).getPlayCount()
+                ^ ((VideoPlay) event.getEventData()).getVideoId().hashCode();
+        break;
+      default:
+        context.getCounter("ReduceError", "InvalidEventType").increment(1);
+      }
+
+      return ((long) event.getPageId().hashCode()) << 32 | videoPlayHash;
+    }
+
+    private static void BackfillSequenceId(TrackerEvent curEvent,
+        LinkedList<Pair<TrackerEvent, Long>> seqEvents, long curSequenceId,
+        Context context) {
+      Pair<TrackerEvent, Long> eventPair;
+      if (curEvent.getEventType() == EventType.AD_PLAY
+          || curEvent.getEventType() == EventType.VIDEO_PLAY) {
+        boolean fromOtherPage =
+            curEvent.getRefURL() != null && IsFirstAutoplay(curEvent);
+        boolean isAutoplay = IsAutoplay(curEvent);
+
+        boolean foundClick = false;
+        CharSequence foundThumbnailId = null;
+        CharSequence clickPageId = null;
+        boolean doneBackfill = false;
+        ListIterator<Pair<TrackerEvent, Long>> revIter =
+            seqEvents.listIterator(seqEvents.size());
+        while (revIter.hasPrevious() && !doneBackfill) {
+          eventPair = revIter.previous();
+          TrackerEvent oldEvent = eventPair.getLeft();
+
+          if (oldEvent.getPageId() == curEvent.getPageId() && !isAutoplay) {
+            // Events occured on the same page load so if it's not an
+            // autoclick, then transfer the sequence id
+            switch (oldEvent.getEventType()) {
+            case VIDEO_CLICK:
+              if (foundClick) {
+                // Remove the video click because there was an image click
+                revIter.remove();
+                context.getCounter("EventStats", "ExtraVideoClicks").increment(
+                    1);
+                break;
+              }
+              foundClick = true;
+              foundThumbnailId =
+                  ((VideoClick) oldEvent.getEventData()).getThumbnailId();
+              eventPair.setValue(curSequenceId);
+              clickPageId = oldEvent.getPageId();
+              break;
+            case IMAGE_CLICK:
+              foundClick = true;
+              foundThumbnailId =
+                  ((ImageClick) oldEvent.getEventData()).getThumbnailId();
+              eventPair.setValue(curSequenceId);
+              clickPageId = oldEvent.getPageId();
+              break;
+            case IMAGE_LOAD:
+            case IMAGE_VISIBLE:
+              eventPair.setValue(curSequenceId);
+              break;
+            case VIDEO_PLAY:
+              // We've seen another video play so we can stop looking
+              doneBackfill = true;
+            default:
+              // Nothing to do
+
+            }
+          } else if (fromOtherPage
+              && oldEvent.getPageURL() == curEvent.getRefURL()) {
+            // We have an event from the page that referred us to backfill the
+            // sequence id.
+            switch (oldEvent.getEventType()) {
+            case IMAGE_CLICK:
+              if (foundClick) {
+                doneBackfill = true;
+                break;
+              }
+              foundClick = true;
+              foundThumbnailId =
+                  ((ImageClick) oldEvent.getEventData()).getThumbnailId();
+              clickPageId = oldEvent.getPageId();
+            case IMAGE_LOAD:
+            case IMAGE_VISIBLE:
+              // Only backfill for the most recent page load of the referral
+              if (clickPageId != null && clickPageId == oldEvent.getPageId()) {
+                eventPair.setValue(curSequenceId);
+              }
+            default:
+            }
+          }
+
+          // Stop the backfill if the data is too old
+          doneBackfill =
+              (curEvent.getClientTime() - oldEvent.getClientTime()) > MAX_SEQUENCE_TIME;
+        }
+
+        // Fill in the thumbnail id from the one we found in the previous event
+        if (foundThumbnailId != null) {
+          if (curEvent.getEventType() == EventType.AD_PLAY) {
+            ((AdPlay) curEvent.getEventData()).setThumbnailId(foundThumbnailId);
+          } else if (curEvent.getEventType() == EventType.VIDEO_PLAY) {
+            ((VideoPlay) curEvent.getEventData())
+                .setThumbnailId(foundThumbnailId);
+          }
+        }
+      }
+    }
+
+    /**
+     * Returns true if two events are functionally duplicates.
+     */
+    private static boolean IsDuplicateTrackerEvent(TrackerEvent a,
+        TrackerEvent b) {
+      if (a.getEventType() != b.getEventType()) {
+        return false;
+      }
+
+      switch (a.getEventType()) {
+      case IMAGE_LOAD:
+      case IMAGE_VISIBLE:
+        return a.getPageId() == b.getPageId();
+
+      case IMAGE_CLICK:
+      case VIDEO_CLICK:
+      case VIDEO_PLAY:
+      case AD_PLAY:
+        // TODO(mdesnoyer): Maybe flag play & click events as duplicates if they
+        // are too close in time
+        return a == b;
+
+      }
+
+      return true;
+    }
+
+    /**
+     * Returns true if the play event was the result of an autoplay
+     */
+    private static boolean IsAutoplay(TrackerEvent event) {
+      if (event.getEventType() == EventType.VIDEO_PLAY) {
+        VideoPlay data = (VideoPlay) event.getEventData();
+        return data.getAutoplayDelta() == null
+            || data.getAutoplayDelta() > 2000;
+      } else if (event.getEventType() == EventType.AD_PLAY) {
+        AdPlay adData = (AdPlay) event.getEventData();
+        return adData.getAutoplayDelta() == null
+            || adData.getAutoplayDelta() > 2000;
+      }
+
+      return false;
+    }
+
+    /**
+     * Returns true if the play event was the result of an autoplay and it's the
+     * first on a page
+     */
+    private static boolean IsFirstAutoplay(TrackerEvent event) {
+      int playCount = -1;
+      if (event.getEventType() == EventType.VIDEO_PLAY) {
+        playCount = ((VideoPlay) event.getEventData()).getPlayCount();
+      } else if (event.getEventType() == EventType.AD_PLAY) {
+        playCount = ((AdPlay) event.getEventData()).getPlayCount();
+      }
+
+      return playCount == 1 && IsAutoplay(event);
+    }
   }
 
+  /**
+   * Extracts the external video id from a thumbnail id string
+   * 
+   * @param thumbnailId
+   * @return The external video id
+   */
   private static String ExtractVideoId(String thumbnailId) {
     if (thumbnailId == null) {
       return null;

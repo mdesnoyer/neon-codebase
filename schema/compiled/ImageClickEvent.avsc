@@ -110,5 +110,11 @@
   }, {
     "name" : "isClickInPlayer",
     "type" : "boolean"
+  }, {
+    "name" : "isRightClick",
+    "type" : "boolean"
+  }, {
+    "name" : "sequenceId",
+    "type" : "long"
   } ]
 }

@@ -94,5 +94,8 @@
   }, {
     "name" : "width",
     "type" : "int"
+  }, {
+    "name" : "sequenceId",
+    "type" : "long"
   } ]
 }

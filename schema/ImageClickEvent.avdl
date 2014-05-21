@@ -51,6 +51,8 @@ record ImageClickEvent {
 
   boolean isClickInPlayer; // Is the click in a video player
 
+  boolean isRightClick; // Is the click a right click
+
   // An id used to link a sequence of events together. The sequence is 
   // ideally an image_load -> image_visible -> image_click -> video_play
   long sequenceId;
