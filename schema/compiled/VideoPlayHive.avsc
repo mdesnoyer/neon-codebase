@@ -1,6 +1,6 @@
 {
   "type" : "record",
-  "name" : "VideoPlayEvent",
+  "name" : "VideoPlayHive",
   "namespace" : "com.neon.Tracker",
   "fields" : [ {
     "name" : "pageId",

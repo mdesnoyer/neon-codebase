@@ -1,6 +1,6 @@
 {
   "type" : "record",
-  "name" : "ImageVisibleEvent",
+  "name" : "ImageVisibleHive",
   "namespace" : "com.neon.Tracker",
   "fields" : [ {
     "name" : "pageId",

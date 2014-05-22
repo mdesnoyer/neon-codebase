@@ -1,5 +1,5 @@
 //
-// Schema that defines an AdPlayEvent.
+// Schema that defines an VideoPlayEvent.
 //
 // It is wrapped in a protocol so that we can do the definition using
 // the idl format, which takes comments and is easier to read than the
@@ -15,7 +15,7 @@ protocol DummyTrackerProtocol {
 
 import idl "CommonTrackerInfo.avdl";
 
-record AdPlayEvent {
+record VideoPlayHive {
   string pageId; // Unique page load id
 
   string trackerAccountId;  // The publisher's tracker account id
@@ -44,6 +44,7 @@ record AdPlayEvent {
   string videoId;
   union{null, string} playerId;
   union{null, string} thumbnailId;
+  boolean didAdPlay = false;  // Was an ad play detected before the video
 
   // Time when the player initiates a request to play the video - the
   // last time an image or the player was clicked by the user. Used to

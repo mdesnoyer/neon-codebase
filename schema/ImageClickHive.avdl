@@ -15,7 +15,7 @@ protocol DummyTrackerProtocol {
 
 import idl "CommonTrackerInfo.avdl";
 
-record ImageClickEvent {
+record ImageClickHive {
   string pageId; // Unique page load id
 
   string trackerAccountId;  // The publisher's tracker account id
@@ -41,7 +41,7 @@ record ImageClickEvent {
   
   GeoData ipGeoData; // The user's location based on IP data
   
-  string thumbnail_id; // The thumbnail id for the image that became visible
+  union { null, string} thumbnail_id; // The thumbnail id for the image that became visible
 
   union { null, string } video_id; // The video id of the video play that the click resulted in
 

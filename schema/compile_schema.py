@@ -65,8 +65,8 @@ def main(options):
         if retcode != 0:
             raise Exception('Error running %s' % ' '.join(exec_params))
 
-        check_schemas(os.path.join(tempdir, avsc_file),
-                      os.path.join(output_dir, avsc_file))
+        check_schemas(os.path.join(output_dir, avsc_file),
+                      os.path.join(tempdir, avsc_file),)
 
         # Move the avsc file to the output directory
         if not os.path.exists(output_dir):

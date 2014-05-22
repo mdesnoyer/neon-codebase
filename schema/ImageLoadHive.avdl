@@ -1,5 +1,5 @@
 //
-// Schema that defines an VideoPlayEvent.
+// Schema that defines an ImageLoadEvent.
 //
 // It is wrapped in a protocol so that we can do the definition using
 // the idl format, which takes comments and is easier to read than the
@@ -15,7 +15,7 @@ protocol DummyTrackerProtocol {
 
 import idl "CommonTrackerInfo.avdl";
 
-record VideoPlayEvent {
+record ImageLoadHive {
   string pageId; // Unique page load id
 
   string trackerAccountId;  // The publisher's tracker account id
@@ -40,20 +40,12 @@ record VideoPlayEvent {
   union { null, AgentInfo } agentInfo; // Translated agent info if available
   
   GeoData ipGeoData; // The user's location based on IP data
+  
+  string thumbnail_id; // The thumbnail id for the image that became visible
 
-  string videoId;
-  union{null, string} playerId;
-  union{null, string} thumbnailId;
-  boolean didAdPlay = false;  // Was an ad play detected before the video
+  int height;  // Displayed height of the image
 
-  // Time when the player initiates a request to play the video - the
-  // last time an image or the player was clicked by the user. Used to
-  // identify autoplay. Given in milliseconds, or null if there was no
-  // click
-  union{null, int} autoplayDelta;
-
-  // This video is the nth one playing on this page load
-  int playCount;
+  int width;   // Displayed width of the image
 
   // An id used to link a sequence of events together. The sequence is 
   // ideally an image_load -> image_visible -> image_click -> video_play

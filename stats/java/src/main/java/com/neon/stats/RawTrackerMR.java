@@ -4,6 +4,7 @@
 package com.neon.stats;
 
 import java.io.IOException;
+import java.text.SimpleDateFormat;
 import java.util.*;
 
 import org.apache.avro.mapred.AvroKey;
@@ -12,12 +13,13 @@ import org.apache.avro.mapreduce.AvroJob;
 import org.apache.avro.mapreduce.AvroKeyInputFormat;
 import org.apache.avro.mapreduce.AvroKeyOutputFormat;
 import org.apache.avro.mapreduce.AvroMultipleOutputs;
+import org.apache.avro.specific.SpecificRecordBase;
+import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.io.Text;
-import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.io.WritableComparable;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
@@ -26,7 +28,6 @@ import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
-import org.apache.hadoop.mapreduce.lib.output.MultipleOutputs;
 
 import com.neon.Tracker.*;
 
@@ -119,7 +120,7 @@ public class RawTrackerMR extends Configured implements Tool {
       case AD_PLAY:
         // The video id could be null in an ad play. For now don't try to figure
         // out the associated video id
-        // TODO(mdesnoyer): Figure out the video idea in this case.
+        // TODO(mdesnoyer): Figure out the video id in this case.
         if (((AdPlay) key.datum().getEventData()).getVideoId() == null) {
           context.write(new Text(mapKey),
               new AvroValue<TrackerEvent>(key.datum()));
@@ -147,12 +148,27 @@ public class RawTrackerMR extends Configured implements Tool {
    */
   public static class CleanUserStreamReducer
       extends
-      Reducer<Text, AvroValue<TrackerEvent>, WritableComparable<Object>, Writable> {
+      Reducer<Text, AvroValue<TrackerEvent>, WritableComparable<Object>, NullWritable> {
 
-    private MultipleOutputs<WritableComparable<Object>, Writable> out;
+    private AvroMultipleOutputs out;
+
+    /**
+     * Constructor primarily for unittesting
+     * 
+     * @param _out
+     */
+    public CleanUserStreamReducer(AvroMultipleOutputs _out) {
+      this.out = _out;
+    }
+
+    public CleanUserStreamReducer() {
+      this.out = null;
+    }
 
     public void setup(Context context) {
-      out = new MultipleOutputs<WritableComparable<Object>, Writable>(context);
+      if (this.out == null) {
+        out = new AvroMultipleOutputs(context);
+      }
     }
 
     @Override
@@ -162,7 +178,7 @@ public class RawTrackerMR extends Configured implements Tool {
       // analyze the stream.
       ArrayList<TrackerEvent> events = new ArrayList<TrackerEvent>();
       for (AvroValue<TrackerEvent> value : values) {
-        events.add(value.datum());
+        events.add(TrackerEvent.newBuilder(value.datum()).build());
       }
       Collections.sort(events, new Comparator<TrackerEvent>() {
         public int compare(TrackerEvent a, TrackerEvent b) {
@@ -208,17 +224,12 @@ public class RawTrackerMR extends Configured implements Tool {
         // If it is a video click, see if there is an associated image click. If
         // so, ignore the video click.
         if (curEvent.getEventType() == EventType.VIDEO_CLICK) {
-          if (IsAutoplay(curEvent)) {
-            // Ignore the event because it can never be a real click
-            break;
-          }
-
-          // See if we can find an associated image click
+          // See if we can find an associated image click on the same page
           revIter = seqEvents.listIterator(seqEvents.size());
           boolean foundRealClick = false;
           while (revIter.hasPrevious() && !foundRealClick) {
             oldEvent = revIter.previous().getLeft();
-            if (oldEvent.getPageId() == curEvent.getPageId()) {
+            if (oldEvent.getPageId().equals(curEvent.getPageId())) {
               if (oldEvent.getEventType() == EventType.IMAGE_CLICK) {
                 foundRealClick = true;
                 break;
@@ -236,15 +247,18 @@ public class RawTrackerMR extends Configured implements Tool {
             context.getCounter("EventStats", "ExtraVideoClicks").increment(1);
             break;
           }
+
         }
 
         // Add the current event to the ones to write out
-        seqEvents.add(Pair.of(curEvent, curSequenceId));
+        seqEvents.add(MutablePair.of(curEvent, curSequenceId));
 
       }
 
-      // Now output the resulting event.
-      // TODO(mdesnoyer): Do the output part
+      // Now output the resulting events.
+      for (Pair<TrackerEvent, Long> pair : seqEvents) {
+        OutputEventToHive(pair.getLeft(), pair.getRight(), context);
+      }
     }
 
     protected void cleanup(Context context) throws IOException,
@@ -313,44 +327,54 @@ public class RawTrackerMR extends Configured implements Tool {
           eventPair = revIter.previous();
           TrackerEvent oldEvent = eventPair.getLeft();
 
-          if (oldEvent.getPageId() == curEvent.getPageId() && !isAutoplay) {
-            // Events occured on the same page load so if it's not an
-            // autoclick, then transfer the sequence id
-            switch (oldEvent.getEventType()) {
-            case VIDEO_CLICK:
-              if (foundClick) {
-                // Remove the video click because there was an image click
+          if (oldEvent.getPageId().equals(curEvent.getPageId())) {
+            if (isAutoplay) {
+              // If this is a video click, we can remove it because we never
+              // care about video clicks when an autoplay happens
+              if (oldEvent.getEventType() == EventType.VIDEO_CLICK) {
                 revIter.remove();
                 context.getCounter("EventStats", "ExtraVideoClicks").increment(
                     1);
-                break;
               }
-              foundClick = true;
-              foundThumbnailId =
-                  ((VideoClick) oldEvent.getEventData()).getThumbnailId();
-              eventPair.setValue(curSequenceId);
-              clickPageId = oldEvent.getPageId();
-              break;
-            case IMAGE_CLICK:
-              foundClick = true;
-              foundThumbnailId =
-                  ((ImageClick) oldEvent.getEventData()).getThumbnailId();
-              eventPair.setValue(curSequenceId);
-              clickPageId = oldEvent.getPageId();
-              break;
-            case IMAGE_LOAD:
-            case IMAGE_VISIBLE:
-              eventPair.setValue(curSequenceId);
-              break;
-            case VIDEO_PLAY:
-              // We've seen another video play so we can stop looking
-              doneBackfill = true;
-            default:
-              // Nothing to do
+            } else {
+              // Events occured on the same page load so if it's not an
+              // autoclick, then transfer the sequence id
+              switch (oldEvent.getEventType()) {
+              case VIDEO_CLICK:
+                if (foundClick) {
+                  // Remove the video click because there was an image click
+                  revIter.remove();
+                  context.getCounter("EventStats", "ExtraVideoClicks")
+                      .increment(1);
+                  break;
+                }
+                foundClick = true;
+                foundThumbnailId =
+                    ((VideoClick) oldEvent.getEventData()).getThumbnailId();
+                eventPair.setValue(curSequenceId);
+                clickPageId = oldEvent.getPageId();
+                break;
+              case IMAGE_CLICK:
+                foundClick = true;
+                foundThumbnailId =
+                    ((ImageClick) oldEvent.getEventData()).getThumbnailId();
+                eventPair.setValue(curSequenceId);
+                clickPageId = oldEvent.getPageId();
+                break;
+              case IMAGE_LOAD:
+              case IMAGE_VISIBLE:
+                eventPair.setValue(curSequenceId);
+                break;
+              case VIDEO_PLAY:
+                // We've seen another video play so we can stop looking
+                doneBackfill = true;
+              default:
+                // Nothing to do
 
+              }
             }
           } else if (fromOtherPage
-              && oldEvent.getPageURL() == curEvent.getRefURL()) {
+              && oldEvent.getPageURL().equals(curEvent.getRefURL())) {
             // We have an event from the page that referred us to backfill the
             // sequence id.
             switch (oldEvent.getEventType()) {
@@ -366,10 +390,12 @@ public class RawTrackerMR extends Configured implements Tool {
             case IMAGE_LOAD:
             case IMAGE_VISIBLE:
               // Only backfill for the most recent page load of the referral
-              if (clickPageId != null && clickPageId == oldEvent.getPageId()) {
+              if (clickPageId != null
+                  && clickPageId.equals(oldEvent.getPageId())) {
                 eventPair.setValue(curSequenceId);
               }
             default:
+              // We don't care about other events
             }
           }
 
@@ -402,7 +428,7 @@ public class RawTrackerMR extends Configured implements Tool {
       switch (a.getEventType()) {
       case IMAGE_LOAD:
       case IMAGE_VISIBLE:
-        return a.getPageId() == b.getPageId();
+        return a.getPageId().equals(b.getPageId());
 
       case IMAGE_CLICK:
       case VIDEO_CLICK:
@@ -410,7 +436,7 @@ public class RawTrackerMR extends Configured implements Tool {
       case AD_PLAY:
         // TODO(mdesnoyer): Maybe flag play & click events as duplicates if they
         // are too close in time
-        return a == b;
+        return a.equals(b);
 
       }
 
@@ -447,6 +473,194 @@ public class RawTrackerMR extends Configured implements Tool {
       }
 
       return playCount == 1 && IsAutoplay(event);
+    }
+
+    private void OutputEventToHive(TrackerEvent orig, long sequenceId,
+        Context context) throws IOException, InterruptedException {
+      SpecificRecordBase hiveEvent;
+      Coords clickCoords;
+
+      // Create the output path that partitions based on time and the account id
+      SimpleDateFormat timestampFormat = new SimpleDateFormat("YYYY-MM-dd");
+      String timestamp = timestampFormat.format(new Date(orig.getServerTime()));
+      String partitionPath =
+          "/tai=" + orig.getTrackerAccountId() + "/ts=" + timestamp;
+
+      switch (orig.getEventType()) {
+      case IMAGE_LOAD:
+        hiveEvent =
+            ImageLoadHive
+                .newBuilder()
+                .setAgentInfo(orig.getAgentInfo())
+                .setClientIP(orig.getClientIP())
+                .setClientTime((float) (orig.getClientTime() / 1000.))
+                .setIpGeoData(orig.getIpGeoData())
+                .setNeonUserId(orig.getNeonUserId())
+                .setPageId(orig.getPageId())
+                .setPageURL(orig.getPageURL())
+                .setRefURL(orig.getRefURL())
+                .setServerTime((float) (orig.getServerTime() / 1000.))
+                .setTrackerAccountId(orig.getTrackerAccountId())
+                .setTrackerType(orig.getTrackerType())
+                .setUserAgent(orig.getUserAgent())
+                .setSequenceId(sequenceId)
+                .setThumbnailId(
+                    ((ImageLoad) orig.getEventData()).getThumbnailId())
+                .setHeight(((ImageLoad) orig.getEventData()).getHeight())
+                .setWidth(((ImageLoad) orig.getEventData()).getWidth())
+                .build();
+        out.write("ImageLoadHive", hiveEvent, NullWritable.get(),
+            "ImageLoadHive" + partitionPath);
+        break;
+
+      case IMAGE_VISIBLE:
+        hiveEvent =
+            ImageVisibleHive
+                .newBuilder()
+                .setAgentInfo(orig.getAgentInfo())
+                .setClientIP(orig.getClientIP())
+                .setClientTime((float) (orig.getClientTime() / 1000.))
+                .setIpGeoData(orig.getIpGeoData())
+                .setNeonUserId(orig.getNeonUserId())
+                .setPageId(orig.getPageId())
+                .setPageURL(orig.getPageURL())
+                .setRefURL(orig.getRefURL())
+                .setServerTime((float) (orig.getServerTime() / 1000.))
+                .setTrackerAccountId(orig.getTrackerAccountId())
+                .setTrackerType(orig.getTrackerType())
+                .setUserAgent(orig.getUserAgent())
+                .setSequenceId(sequenceId)
+                .setThumbnailId(
+                    ((ImageVisible) orig.getEventData()).getThumbnailId())
+                .build();
+        out.write("ImageVisibleHive", hiveEvent, NullWritable.get(),
+            "ImageVisibleHive" + partitionPath);
+        break;
+
+      case IMAGE_CLICK:
+        // We know if it is a right click only if the click coordinates are 0.
+        clickCoords = ((ImageClick) orig.getEventData()).getPageCoords();
+        CharSequence thumbnailId =
+            ((ImageClick) orig.getEventData()).getThumbnailId();
+        hiveEvent =
+            ImageClickHive
+                .newBuilder()
+                .setAgentInfo(orig.getAgentInfo())
+                .setClientIP(orig.getClientIP())
+                .setClientTime((float) (orig.getClientTime() / 1000.))
+                .setIpGeoData(orig.getIpGeoData())
+                .setNeonUserId(orig.getNeonUserId())
+                .setPageId(orig.getPageId())
+                .setPageURL(orig.getPageURL())
+                .setRefURL(orig.getRefURL())
+                .setServerTime((float) (orig.getServerTime() / 1000.))
+                .setTrackerAccountId(orig.getTrackerAccountId())
+                .setTrackerType(orig.getTrackerType())
+                .setUserAgent(orig.getUserAgent())
+                .setSequenceId(sequenceId)
+                .setThumbnailId(thumbnailId)
+                .setVideoId(ExtractVideoId(thumbnailId.toString()))
+                .setPageCoords(clickCoords)
+                .setWindowCoords(
+                    ((ImageClick) orig.getEventData()).getWindowCoords())
+                .setIsClickInPlayer(false)
+                .setIsRightClick(
+                    clickCoords.getX() <= 0 && clickCoords.getY() <= 0).build();
+        out.write("ImageClickHive", hiveEvent, NullWritable.get(),
+            "ImageClickHive" + partitionPath);
+        break;
+
+      case VIDEO_CLICK:
+        // We know if it is a right click only if the click coordinates are 0.
+        hiveEvent =
+            ImageClickHive
+                .newBuilder()
+                .setAgentInfo(orig.getAgentInfo())
+                .setClientIP(orig.getClientIP())
+                .setClientTime((float) (orig.getClientTime() / 1000.))
+                .setIpGeoData(orig.getIpGeoData())
+                .setNeonUserId(orig.getNeonUserId())
+                .setPageId(orig.getPageId())
+                .setPageURL(orig.getPageURL())
+                .setRefURL(orig.getRefURL())
+                .setServerTime((float) (orig.getServerTime() / 1000.))
+                .setTrackerAccountId(orig.getTrackerAccountId())
+                .setTrackerType(orig.getTrackerType())
+                .setUserAgent(orig.getUserAgent())
+                .setSequenceId(sequenceId)
+                .setThumbnailId(
+                    ((VideoClick) orig.getEventData()).getThumbnailId())
+                .setVideoId(((VideoClick) orig.getEventData()).getVideoId())
+                .setPageCoords(new Coords(-1f, -1f))
+                .setWindowCoords(new Coords(-1f, -1f)).setIsClickInPlayer(true)
+                .setIsRightClick(false).build();
+        out.write("ImageClickHive", hiveEvent, NullWritable.get(),
+            "ImageClickHive" + partitionPath);
+        break;
+
+      case AD_PLAY:
+        // We know if it is a right click only if the click coordinates are 0.
+        hiveEvent =
+            AdPlayHive
+                .newBuilder()
+                .setAgentInfo(orig.getAgentInfo())
+                .setClientIP(orig.getClientIP())
+                .setClientTime((float) (orig.getClientTime() / 1000.))
+                .setIpGeoData(orig.getIpGeoData())
+                .setNeonUserId(orig.getNeonUserId())
+                .setPageId(orig.getPageId())
+                .setPageURL(orig.getPageURL())
+                .setRefURL(orig.getRefURL())
+                .setServerTime((float) (orig.getServerTime() / 1000.))
+                .setTrackerAccountId(orig.getTrackerAccountId())
+                .setTrackerType(orig.getTrackerType())
+                .setUserAgent(orig.getUserAgent())
+                .setSequenceId(sequenceId)
+                .setVideoId(((AdPlay) orig.getEventData()).getVideoId())
+                .setThumbnailId(((AdPlay) orig.getEventData()).getThumbnailId())
+                .setPlayerId(((AdPlay) orig.getEventData()).getPlayerId())
+                .setAutoplayDelta(
+                    ((AdPlay) orig.getEventData()).getAutoplayDelta())
+                .setPlayCount(((AdPlay) orig.getEventData()).getPlayCount())
+                .build();
+        out.write("AdPlayHive", hiveEvent, NullWritable.get(), "AdPlayHive"
+            + partitionPath);
+        break;
+
+      case VIDEO_PLAY:
+        // We know if it is a right click only if the click coordinates are 0.
+        hiveEvent =
+            VideoPlayHive
+                .newBuilder()
+                .setAgentInfo(orig.getAgentInfo())
+                .setClientIP(orig.getClientIP())
+                .setClientTime((float) (orig.getClientTime() / 1000.))
+                .setIpGeoData(orig.getIpGeoData())
+                .setNeonUserId(orig.getNeonUserId())
+                .setPageId(orig.getPageId())
+                .setPageURL(orig.getPageURL())
+                .setRefURL(orig.getRefURL())
+                .setServerTime((float) (orig.getServerTime() / 1000.))
+                .setTrackerAccountId(orig.getTrackerAccountId())
+                .setTrackerType(orig.getTrackerType())
+                .setUserAgent(orig.getUserAgent())
+                .setSequenceId(sequenceId)
+                .setVideoId(((VideoPlay) orig.getEventData()).getVideoId())
+                .setThumbnailId(
+                    ((VideoPlay) orig.getEventData()).getThumbnailId())
+                .setPlayerId(((VideoPlay) orig.getEventData()).getPlayerId())
+                .setAutoplayDelta(
+                    ((VideoPlay) orig.getEventData()).getAutoplayDelta())
+                .setPlayCount(((VideoPlay) orig.getEventData()).getPlayCount())
+                .setDidAdPlay(((VideoPlay) orig.getEventData()).getDidAdPlay())
+                .build();
+        out.write("VideoPlayHive", hiveEvent, NullWritable.get(),
+            "VideoPlayHive" + partitionPath);
+        break;
+
+      default:
+        context.getCounter("ReduceError", "InvalidEventType").increment(1);
+      }
     }
   }
 
@@ -492,16 +706,16 @@ public class RawTrackerMR extends Configured implements Tool {
     job.setReducerClass(CleanUserStreamReducer.class);
 
     // Define the output streams, one per table
-    AvroMultipleOutputs.addNamedOutput(job, "imageLoad",
-        AvroKeyOutputFormat.class, ImageLoadEvent.getClassSchema());
-    AvroMultipleOutputs.addNamedOutput(job, "imageVisible",
-        AvroKeyOutputFormat.class, ImageVisibleEvent.getClassSchema());
-    AvroMultipleOutputs.addNamedOutput(job, "imageClick",
-        AvroKeyOutputFormat.class, ImageClickEvent.getClassSchema());
-    AvroMultipleOutputs.addNamedOutput(job, "adPlay",
-        AvroKeyOutputFormat.class, AdPlayEvent.getClassSchema());
-    AvroMultipleOutputs.addNamedOutput(job, "videoPlay",
-        AvroKeyOutputFormat.class, VideoPlayEvent.getClassSchema());
+    AvroMultipleOutputs.addNamedOutput(job, "ImageLoadHive",
+        AvroKeyOutputFormat.class, ImageLoadHive.getClassSchema());
+    AvroMultipleOutputs.addNamedOutput(job, "ImageVisibleHive",
+        AvroKeyOutputFormat.class, ImageVisibleHive.getClassSchema());
+    AvroMultipleOutputs.addNamedOutput(job, "ImageClickHive",
+        AvroKeyOutputFormat.class, ImageClickHive.getClassSchema());
+    AvroMultipleOutputs.addNamedOutput(job, "AdPlayHive",
+        AvroKeyOutputFormat.class, AdPlayHive.getClassSchema());
+    AvroMultipleOutputs.addNamedOutput(job, "VideoPlayHive",
+        AvroKeyOutputFormat.class, VideoPlayHive.getClassSchema());
 
     return (job.waitForCompletion(true) ? 0 : 1);
   }

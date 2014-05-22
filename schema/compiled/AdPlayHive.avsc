@@ -1,6 +1,6 @@
 {
   "type" : "record",
-  "name" : "AdPlayEvent",
+  "name" : "AdPlayHive",
   "namespace" : "com.neon.Tracker",
   "fields" : [ {
     "name" : "pageId",

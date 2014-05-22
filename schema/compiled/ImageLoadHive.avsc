@@ -1,6 +1,6 @@
 {
   "type" : "record",
-  "name" : "ImageClickEvent",
+  "name" : "ImageLoadHive",
   "namespace" : "com.neon.Tracker",
   "fields" : [ {
     "name" : "pageId",
@@ -89,30 +89,11 @@
     "name" : "thumbnail_id",
     "type" : "string"
   }, {
-    "name" : "video_id",
-    "type" : [ "null", "string" ]
+    "name" : "height",
+    "type" : "int"
   }, {
-    "name" : "pageCoords",
-    "type" : [ "null", {
-      "type" : "record",
-      "name" : "Coords",
-      "fields" : [ {
-        "name" : "x",
-        "type" : "float"
-      }, {
-        "name" : "y",
-        "type" : "float"
-      } ]
-    } ]
-  }, {
-    "name" : "windowCoords",
-    "type" : [ "null", "Coords" ]
-  }, {
-    "name" : "isClickInPlayer",
-    "type" : "boolean"
-  }, {
-    "name" : "isRightClick",
-    "type" : "boolean"
+    "name" : "width",
+    "type" : "int"
   }, {
     "name" : "sequenceId",
     "type" : "long"
