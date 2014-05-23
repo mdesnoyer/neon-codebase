@@ -699,6 +699,7 @@ public class RawTrackerMR extends Configured implements Tool {
     job.setMapperClass(MapToUserEventStream.class);
     job.setInputFormatClass(AvroKeyInputFormat.class);
     AvroJob.setInputKeySchema(job, TrackerEvent.getClassSchema());
+    AvroJob.setMapOutputValueSchema(job, TrackerEvent.getClassSchema());
     job.setMapOutputKeyClass(Text.class);
     job.setMapOutputValueClass(AvroValue.class);
 
