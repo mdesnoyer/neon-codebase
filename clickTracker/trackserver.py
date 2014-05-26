@@ -16,7 +16,9 @@ if sys.path[0] != __base_path__:
 
 import avro.io
 import avro.schema
-import base64
+from clickTracker.flume import ThriftSourceProtocol
+from clickTracker.flume.ttypes import *
+from clickTracker import TTornado
 import hashlib
 import httpagentparser
 import json
@@ -26,6 +28,9 @@ import re
 import shortuuid
 from cStringIO import StringIO
 import threading
+from thrift import Thrift
+from thrift.transport import TTransport
+from thrift.protocol import TCompactProtocol
 import time
 import tornado.gen
 import tornado.ioloop
@@ -52,8 +57,8 @@ define("backup_disk", default="/mnt/neon/backlog", type=str,
         help="Location to store backup lines which failed to send to the flume agent")
 define("backup_max_events_per_file", default=100000, type=int,
        help='Maximum events to allow backups on per file')
-define("backup_flush_interval", default=100, type=int,
-       help='Flush to disk after how many events?')
+define("flume_flush_interval", default=100, type=int,
+       help='Flush flume events after how many events?')
 define("message_schema",
        default=os.path.abspath(
            os.path.join(os.path.dirname(__file__), '..', 'schema',
@@ -101,16 +106,13 @@ class TrackerData(object):
 
     def to_flume_event(self, writer=None, schema_hash=None):
         '''Coverts the data to a flume event.'''
-        return json.dumps([
-            {'headers': {
-                'timestamp' : self.sts,
+        return ThriftFlumeEvent(headers = {
+                'timestamp' : str(self.sts),
                 'tai' : self.tai,
                 'track_vers' : '1',
                 'event': self.a,
                 'schema': schema_hash
-                },
-            'body': json.dumps(self.__dict__)
-            }])
+                }, body = json.dumps(self.__dict__))
 
 class BaseTrackerDataV2(object):
     '''
@@ -212,16 +214,13 @@ class BaseTrackerDataV2(object):
         encoded_str = StringIO()
         encoder = avro.io.BinaryEncoder(encoded_str)
         writer.write(self.__dict__, encoder)
-        return json.dumps([
-            {'headers': {
-                'timestamp' : self.serverTime,
+        return ThriftFlumeEvent(headers = {
+                'timestamp' : str(self.serverTime),
                 'tai' : self.trackerAccountId,
-                'track_vers' : '2.1',
+                'track_vers' : '2.2',
                 'event' : self.eventType,
                 'flume.avro.schema.url' : schema_url
-                },
-            'body': base64.b64encode(encoded_str.getvalue())
-            }])
+                }, body=encoded_str.getvalue())
 
     @staticmethod
     def generate(request_handler):
@@ -390,17 +389,79 @@ class TrackerDataHandler(tornado.web.RequestHandler):
         return TrackerData(action, _id, ttype, cts, sts, page, cip, imgs, tai,
                            cvid, xy)
 
+class FlumeBuffer:
+    '''Class that handles buffering messages to flume.'''
+    def __init__(self, port, backup_q):
+        self.port = port
+        self.backup_q = backup_q
+        self.client = None
+        self.buffer = []
+        self.flush_interval = options.flume_flush_interval
+
+    @tornado.gen.coroutine
+    def _open(self):
+        '''Opens a connection to flume.'''
+
+        try:
+            transport = TTornado.TTornadoStreamTransport('localhost',
+                                                         self.port)
+            pfactory = TCompactProtocol.TCompactProtocolFactory()
+            self.client = ThriftSourceProtocol.Client(transport, pfactory)
+            yield tornado.gen.Task(transport.open)
+            self.is_open = True
+        except TTransport.TTransportException as e:
+            _log.error('Error opening connection to Flume: %s' % e)
+            raise
+        
+    @tornado.gen.coroutine
+    def send(self, event):
+        '''Send an events to flume.
+
+        event - A ThriftFlumeEvent object
+        '''
+        self.buffer.append(event)
+
+        if len(self.buffer) >= self.flush_interval:
+            yield self._send_buffer()
+
+    @tornado.gen.coroutine
+    def _send_buffer(self):
+        '''Sends all the events in the buffer to flume.'''
+        # First copy the buffer and put a new empty one in so that
+        # another call can add to it without losing messages.
+        local_buf = self.buffer
+        self.buffer = []
+
+        try:
+            yield self._open()
+            
+            status = yield tornado.gen.Task(self.client.appendBatch, local_buf)
+            if status != Status.OK:
+                raise Thrift.TException('Flume returned error: %s' % status)
+        except Thrift.TException as e:
+            _log.error('Error writing to Flume: %s' % e)
+            statemon.state.increment('flume_errors')
+            for event in local_buf:
+                self.backup_q.put(event)
+            
+        except IOError as e:
+            _log.error('Error writing to Flume stream: %s' % e)
+            statemon.state.increment('flume_errors')
+            for event in local_buf:
+                self.backup_q.put(event)
+        
 
 class LogLines(TrackerDataHandler):
     '''Handler for real tracking data that should be logged.'''
 
-    def initialize(self, q, watcher, version, avro_writer, schema_url):
+    def initialize(self, watcher, version, avro_writer, schema_url,
+                   flume_buffer):
         '''Initialize the logger.'''
         self.watcher = watcher
-        self.backup_q = q
         self.version = version
         self.avro_writer = avro_writer
         self.schema_url = schema_url
+        self.flume_buffer = flume_buffer
     
     @tornado.web.asynchronous
     @tornado.gen.coroutine
@@ -427,21 +488,9 @@ class LogLines(TrackerDataHandler):
             data = tracker_data.to_flume_event(self.avro_writer,
                                                self.schema_url)
             try:
-                request = tornado.httpclient.HTTPRequest(
-                    'http://localhost:%i' % options.flume_port,
-                    method='POST',
-                    headers={'Content-Type': 'application/json'},
-                    body=data)
-                response = yield tornado.gen.Task(utils.http.send_request,
-                                                  request)
-                if response.error:
-                    _log.error('Could not send message to flume')
-                    statemon.state.increment('flume_errors')
-                    self.backup_q.put(data)
-                    #Don't throw exception to client if it fails to write to flume
-                    #self.set_status(response.error.code)
-                else:
-                    self.set_status(response.code)
+                yield self.flume_buffer.send(data)
+                self.set_status(200)
+                
             except Exception, err:
                 _log.exception("key=loglines msg=Q error %s", err)
                 self.set_status(500)
@@ -486,6 +535,7 @@ class FileBackupHandler(threading.Thread):
         self.daemon = True
         self.watcher = watcher
         self.backup_stream = None
+        self.protocol_writer = None
         self.events_in_file = 0
 
         statemon.state.qsize = self.dataQ.qsize()
@@ -509,10 +559,14 @@ class FileBackupHandler(threading.Thread):
         if not os.path.exists(options.backup_disk):
             os.makedirs(options.backup_disk)
             
-        self.backup_stream = \
+        backup_file = \
           open(os.path.join(options.backup_disk,
                             self._generate_log_filename()),
-                            'a')
+                            'wb')
+        self.backup_stream = TTransport.TFileObjectTransport(
+            backup_file)
+        self.protocol_writer = TCompactProtocol.TCompactProtocol(
+            self.backup_stream)
 
     def _prepare_backup_stream(self):
         '''Prepares the backup stream for writing to.
@@ -524,7 +578,7 @@ class FileBackupHandler(threading.Thread):
             self._open_new_backup_file()
 
         # See if the file should be flushed
-        if self.events_in_file % options.backup_flush_interval == 0:
+        if self.events_in_file % options.flume_flush_interval == 0:
             self.backup_stream.flush()
 
         # Check to see if the file should be rolled over
@@ -548,7 +602,7 @@ class FileBackupHandler(threading.Thread):
                     statemon.state.qsize = self.dataQ.qsize()
                     self._prepare_backup_stream()
 
-                    self.backup_stream.write('%s\n' % event)
+                    event.write(self.protocol_writer)
                     self.events_in_file += 1
             except Exception as err:
                 _log.exception("key=file_backup_handler msg=%s", err)
@@ -598,6 +652,7 @@ class Server(threading.Thread):
         schema_url = ('http://%s.s3.amazonaws.com/%s.avsc' % 
                       (options.schema_bucket, schema_hash))
         avro_writer = avro.io.DatumWriter(schema)
+        flume_buffer = FlumeBuffer(options.flume_port, self.backup_queue)
 
         # Make sure that the schema exists at a URL that can be reached
         response = utils.http.send_request(
@@ -609,26 +664,27 @@ class Server(threading.Thread):
             raise response.error
 
         self.application = tornado.web.Application([
-            (r"/", LogLines, dict(q=self.backup_queue,
-                                  watcher=self._watcher,
+            (r"/", LogLines, dict(watcher=self._watcher,
                                   version=1,
                                   avro_writer=avro_writer,
-                                  schema_url=schema_url)),
-            (r"/v2", LogLines, dict(q=self.backup_queue,
-                                    watcher=self._watcher,
+                                  schema_url=schema_url,
+                                  flume_buffer=flume_buffer)),
+            (r"/v2", LogLines, dict(watcher=self._watcher,
                                     version=2,
                                     avro_writer=avro_writer,
-                                    schema_url=schema_url)),
-            (r"/track", LogLines, dict(q=self.backup_queue,
-                                       watcher=self._watcher,
+                                    schema_url=schema_url,
+                                    flume_buffer=flume_buffer)),
+            (r"/track", LogLines, dict(watcher=self._watcher,
                                        version=1,
                                        avro_writer=avro_writer,
-                                       schema_url=schema_url)),
-            (r"/v2/track", LogLines, dict(q=self.backup_queue,
-                                          watcher=self._watcher,
+                                       schema_url=schema_url,
+                                       flume_buffer=flume_buffer)),
+            (r"/v2/track", LogLines, dict(watcher=self._watcher,
                                           version=2,
                                           avro_writer=avro_writer,
-                                          schema_url=schema_url)),
+                                          schema_url=schema_url,
+                                          flume_buffer=flume_buffer
+                                          )),
             (r"/test", TestTracker, dict(version=1)),
             (r"/v2/test", TestTracker, dict(version=2)),
             (r"/healthcheck", HealthCheckHandler),
