@@ -123,15 +123,15 @@
 		</dependency>
 		<dependency>
 			<groupId>org.apache.hadoop</groupId>
-			<artifactId>hadoop-core</artifactId>
-			<version>1.2.1</version>
+			<artifactId>hadoop-client</artifactId>
+			<version>2.4.0</version>
 			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.mrunit</groupId>
 			<artifactId>mrunit</artifactId>
 			<version>1.0.0</version>
-			<classifier>hadoop1</classifier>
+			<classifier>hadoop2</classifier>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.commons</groupId>

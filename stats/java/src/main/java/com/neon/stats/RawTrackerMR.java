@@ -3,16 +3,25 @@
  */
 package com.neon.stats;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
+import org.apache.avro.io.BinaryDecoder;
+import org.apache.avro.io.BinaryEncoder;
+import org.apache.avro.io.DatumReader;
+import org.apache.avro.io.DatumWriter;
+import org.apache.avro.io.DecoderFactory;
+import org.apache.avro.io.EncoderFactory;
 import org.apache.avro.mapred.AvroKey;
 import org.apache.avro.mapred.AvroValue;
 import org.apache.avro.mapreduce.AvroJob;
 import org.apache.avro.mapreduce.AvroKeyInputFormat;
 import org.apache.avro.mapreduce.AvroKeyOutputFormat;
 import org.apache.avro.mapreduce.AvroMultipleOutputs;
+import org.apache.avro.specific.SpecificDatumReader;
+import org.apache.avro.specific.SpecificDatumWriter;
 import org.apache.avro.specific.SpecificRecordBase;
 import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.commons.lang3.tuple.Pair;
@@ -62,77 +71,86 @@ public class RawTrackerMR extends Configured implements Tool {
               + key.datum().getClientIP();
       String videoId;
 
-      switch (key.datum().getEventType()) {
+      try {
 
-      case IMAGES_VISIBLE:
-        List<CharSequence> thumbnailids =
-            ((ImagesVisible) key.datum().getEventData()).getThumbnailIds();
-        for (CharSequence thumbnailId : thumbnailids) {
-          // We don't copy the original event because it doesn't need to be. The
-          // new events are copied when they are written.
-          ImageVisible newEventData = new ImageVisible(thumbnailId);
-          TrackerEvent newEvent = key.datum();
-          newEvent.setEventData(newEventData);
-          newEvent.setEventType(EventType.IMAGE_VISIBLE);
-          context.write(new Text(mapKey
-              + ExtractVideoId(thumbnailId.toString())),
-              new AvroValue<TrackerEvent>(newEvent));
-        }
-        break;
+        switch (key.datum().getEventType()) {
 
-      case IMAGES_LOADED:
-        List<ImageLoad> imageLoads =
-            ((ImagesLoaded) key.datum().getEventData()).getImages();
-        for (ImageLoad imageLoad : imageLoads) {
-          // We don't copy the original event because it doesn't need to be. The
-          // new events are copied when they are written.
-          TrackerEvent newEvent = key.datum();
-          newEvent.setEventData(imageLoad);
-          newEvent.setEventType(EventType.IMAGE_LOAD);
-          context.write(new Text(mapKey
-              + ExtractVideoId(imageLoad.getThumbnailId().toString())),
-              new AvroValue<TrackerEvent>(newEvent));
-        }
-        break;
+        case IMAGES_VISIBLE:
+          List<CharSequence> thumbnailids =
+              ((ImagesVisible) key.datum().getEventData()).getThumbnailIds();
+          for (CharSequence thumbnailId : thumbnailids) {
+            // We don't copy the original event because it doesn't need to be.
+            // The
+            // new events are copied when they are written.
+            ImageVisible newEventData = new ImageVisible(thumbnailId);
+            TrackerEvent newEvent = key.datum();
+            newEvent.setEventData(newEventData);
+            newEvent.setEventType(EventType.IMAGE_VISIBLE);
+            context.write(
+                new Text(mapKey + ExtractVideoId(thumbnailId.toString())),
+                new AvroValue<TrackerEvent>(newEvent));
+          }
+          break;
 
-      case IMAGE_CLICK:
-        String thumbnailId =
-            ((ImageClick) key.datum().getEventData()).getThumbnailId()
-                .toString();
-        context.write(new Text(mapKey + ExtractVideoId(thumbnailId)),
-            new AvroValue<TrackerEvent>(key.datum()));
-        break;
+        case IMAGES_LOADED:
+          List<ImageLoad> imageLoads =
+              ((ImagesLoaded) key.datum().getEventData()).getImages();
+          for (ImageLoad imageLoad : imageLoads) {
+            // We don't copy the original event because it doesn't need to be.
+            // The
+            // new events are copied when they are written.
+            TrackerEvent newEvent = key.datum();
+            newEvent.setEventData(imageLoad);
+            newEvent.setEventType(EventType.IMAGE_LOAD);
+            context.write(new Text(mapKey
+                + ExtractVideoId(imageLoad.getThumbnailId().toString())),
+                new AvroValue<TrackerEvent>(newEvent));
+          }
+          break;
 
-      case VIDEO_CLICK:
-        videoId =
-            ((VideoClick) key.datum().getEventData()).getVideoId().toString();
-        context.write(new Text(mapKey + videoId), new AvroValue<TrackerEvent>(
-            key.datum()));
-        break;
-
-      case VIDEO_PLAY:
-        videoId =
-            ((VideoPlay) key.datum().getEventData()).getVideoId().toString();
-        context.write(new Text(mapKey + videoId), new AvroValue<TrackerEvent>(
-            key.datum()));
-        break;
-
-      case AD_PLAY:
-        // The video id could be null in an ad play. For now don't try to figure
-        // out the associated video id
-        // TODO(mdesnoyer): Figure out the video id in this case.
-        if (((AdPlay) key.datum().getEventData()).getVideoId() == null) {
-          context.write(new Text(mapKey),
+        case IMAGE_CLICK:
+          String thumbnailId =
+              ((ImageClick) key.datum().getEventData()).getThumbnailId()
+                  .toString();
+          context.write(new Text(mapKey + ExtractVideoId(thumbnailId)),
               new AvroValue<TrackerEvent>(key.datum()));
-        } else {
+          break;
+
+        case VIDEO_CLICK:
           videoId =
-              ((AdPlay) key.datum().getEventData()).getVideoId().toString();
+              ((VideoClick) key.datum().getEventData()).getVideoId().toString();
           context.write(new Text(mapKey + videoId),
               new AvroValue<TrackerEvent>(key.datum()));
-        }
-        break;
+          break;
 
-      default:
+        case VIDEO_PLAY:
+          videoId =
+              ((VideoPlay) key.datum().getEventData()).getVideoId().toString();
+          context.write(new Text(mapKey + videoId),
+              new AvroValue<TrackerEvent>(key.datum()));
+          break;
+
+        case AD_PLAY:
+          // The video id could be null in an ad play. For now don't try to
+          // figure
+          // out the associated video id
+          // TODO(mdesnoyer): Figure out the video id in this case.
+          if (((AdPlay) key.datum().getEventData()).getVideoId() == null) {
+            context.write(new Text(mapKey),
+                new AvroValue<TrackerEvent>(key.datum()));
+          } else {
+            videoId =
+                ((AdPlay) key.datum().getEventData()).getVideoId().toString();
+            context.write(new Text(mapKey + videoId),
+                new AvroValue<TrackerEvent>(key.datum()));
+          }
+          break;
+
+        default:
+          context.getCounter("MappingError", "InvalidEvent").increment(1);
+        }
+
+      } catch (ClassCastException e) {
         context.getCounter("MappingError", "InvalidEvent").increment(1);
       }
     }
@@ -178,11 +196,11 @@ public class RawTrackerMR extends Configured implements Tool {
       // analyze the stream.
       ArrayList<TrackerEvent> events = new ArrayList<TrackerEvent>();
       for (AvroValue<TrackerEvent> value : values) {
-        events.add(TrackerEvent.newBuilder(value.datum()).build());
+        events.add(DeepCopyTrackerEvent(value.datum()));
       }
       Collections.sort(events, new Comparator<TrackerEvent>() {
         public int compare(TrackerEvent a, TrackerEvent b) {
-          int timeDiff = (int) (a.getClientTime() - b.getClientTime());
+          int timeDiff = a.getClientTime().compareTo(b.getClientTime());
           if (timeDiff == 0) {
             // Force the event types to be clustered
             return a.getEventType().compareTo(b.getEventType());
@@ -484,7 +502,7 @@ public class RawTrackerMR extends Configured implements Tool {
       SimpleDateFormat timestampFormat = new SimpleDateFormat("YYYY-MM-dd");
       String timestamp = timestampFormat.format(new Date(orig.getServerTime()));
       String partitionPath =
-          "/tai=" + orig.getTrackerAccountId() + "/ts=" + timestamp;
+          "/tai=" + orig.getTrackerAccountId() + "/ts=" + timestamp + "/";
 
       switch (orig.getEventType()) {
       case IMAGE_LOAD:
@@ -507,10 +525,10 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setThumbnailId(
                     ((ImageLoad) orig.getEventData()).getThumbnailId())
                 .setHeight(((ImageLoad) orig.getEventData()).getHeight())
-                .setWidth(((ImageLoad) orig.getEventData()).getWidth())
-                .build();
-        out.write("ImageLoadHive", hiveEvent, NullWritable.get(),
-            "ImageLoadHive" + partitionPath);
+                .setWidth(((ImageLoad) orig.getEventData()).getWidth()).build();
+        out.write("ImageLoadHive", new AvroKey<ImageLoadHive>(
+            (ImageLoadHive) hiveEvent), NullWritable.get(), "ImageLoadHive"
+            + partitionPath + "ImageLoadHive");
         break;
 
       case IMAGE_VISIBLE:
@@ -533,8 +551,9 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setThumbnailId(
                     ((ImageVisible) orig.getEventData()).getThumbnailId())
                 .build();
-        out.write("ImageVisibleHive", hiveEvent, NullWritable.get(),
-            "ImageVisibleHive" + partitionPath);
+        out.write("ImageVisibleHive", new AvroKey<ImageVisibleHive>(
+            (ImageVisibleHive) hiveEvent), NullWritable.get(),
+            "ImageVisibleHive" + partitionPath + "ImageVisibleHive");
         break;
 
       case IMAGE_CLICK:
@@ -566,8 +585,9 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setIsClickInPlayer(false)
                 .setIsRightClick(
                     clickCoords.getX() <= 0 && clickCoords.getY() <= 0).build();
-        out.write("ImageClickHive", hiveEvent, NullWritable.get(),
-            "ImageClickHive" + partitionPath);
+        out.write("ImageClickHive", new AvroKey<ImageClickHive>(
+            (ImageClickHive) hiveEvent), NullWritable.get(), "ImageClickHive"
+            + partitionPath + "ImageClickHive");
         break;
 
       case VIDEO_CLICK:
@@ -594,8 +614,9 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setPageCoords(new Coords(-1f, -1f))
                 .setWindowCoords(new Coords(-1f, -1f)).setIsClickInPlayer(true)
                 .setIsRightClick(false).build();
-        out.write("ImageClickHive", hiveEvent, NullWritable.get(),
-            "ImageClickHive" + partitionPath);
+        out.write("ImageClickHive", new AvroKey<ImageClickHive>(
+            (ImageClickHive) hiveEvent), NullWritable.get(), "ImageClickHive"
+            + partitionPath + "ImageClickHive");
         break;
 
       case AD_PLAY:
@@ -623,8 +644,9 @@ public class RawTrackerMR extends Configured implements Tool {
                     ((AdPlay) orig.getEventData()).getAutoplayDelta())
                 .setPlayCount(((AdPlay) orig.getEventData()).getPlayCount())
                 .build();
-        out.write("AdPlayHive", hiveEvent, NullWritable.get(), "AdPlayHive"
-            + partitionPath);
+        out.write("AdPlayHive",
+            new AvroKey<AdPlayHive>((AdPlayHive) hiveEvent),
+            NullWritable.get(), "AdPlayHive" + partitionPath + "AdPlayHive");
         break;
 
       case VIDEO_PLAY:
@@ -654,8 +676,9 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setPlayCount(((VideoPlay) orig.getEventData()).getPlayCount())
                 .setDidAdPlay(((VideoPlay) orig.getEventData()).getDidAdPlay())
                 .build();
-        out.write("VideoPlayHive", hiveEvent, NullWritable.get(),
-            "VideoPlayHive" + partitionPath);
+        out.write("VideoPlayHive", new AvroKey<VideoPlayHive>(
+            (VideoPlayHive) hiveEvent), NullWritable.get(), "VideoPlayHive"
+            + partitionPath + "VideoPlayHive");
         break;
 
       default:
@@ -672,9 +695,46 @@ public class RawTrackerMR extends Configured implements Tool {
    */
   private static String ExtractVideoId(String thumbnailId) {
     if (thumbnailId == null) {
+      return "";
+    }
+    String[] split = thumbnailId.split("[_\\-]");
+    if (split.length != 3) {
+      // Invalid video id
+      return "";
+    }
+    return split[1];
+  }
+
+  /**
+   * Does a deep copy of an Avro Record the hard way (by serializing and
+   * deserializing)
+   * 
+   * This would ideally not be necessary, but Record.newBuilder(other).build()
+   * seems to have casting problems sometimes.
+   * 
+   * @param other
+   *          The record to copy
+   * @return A deep copy of the record
+   * @throws IOException
+   */
+  private static TrackerEvent DeepCopyTrackerEvent(TrackerEvent other)
+      throws IOException {
+    if (other == null) {
       return null;
     }
-    return thumbnailId.split("_")[1];
+
+    DatumReader<TrackerEvent> datumReader =
+        new SpecificDatumReader<TrackerEvent>(TrackerEvent.class);
+    DatumWriter<TrackerEvent> datumWriter =
+        new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
+    ByteArrayOutputStream byteOutStream = new ByteArrayOutputStream();
+    BinaryEncoder binaryEncoder =
+        EncoderFactory.get().directBinaryEncoder(byteOutStream, null);
+
+    datumWriter.write(other, binaryEncoder);
+    BinaryDecoder binaryDecoder =
+        DecoderFactory.get().binaryDecoder(byteOutStream.toByteArray(), null);
+    return datumReader.read(null, binaryDecoder);
   }
 
   /*
@@ -688,10 +748,11 @@ public class RawTrackerMR extends Configured implements Tool {
       return -1;
     }
 
-    Job job = new Job(getConf());
+    Job job = Job.getInstance(getConf());
     job.setJarByClass(RawTrackerMR.class);
     job.setJobName("Raw Tracker Data Cleaning");
 
+    FileInputFormat.setInputDirRecursive(job, true);
     FileInputFormat.setInputPaths(job, new Path(args[0]));
     FileOutputFormat.setOutputPath(job, new Path(args[1]));
 
@@ -700,6 +761,7 @@ public class RawTrackerMR extends Configured implements Tool {
     job.setInputFormatClass(AvroKeyInputFormat.class);
     AvroJob.setInputKeySchema(job, TrackerEvent.getClassSchema());
     AvroJob.setMapOutputValueSchema(job, TrackerEvent.getClassSchema());
+    job.getConfiguration().set(AvroJob.CONF_OUTPUT_CODEC, "snappy");
     job.setMapOutputKeyClass(Text.class);
     job.setMapOutputValueClass(AvroValue.class);
 

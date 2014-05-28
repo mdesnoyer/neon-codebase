@@ -49,7 +49,7 @@ public class RawTrackerMRTest {
     AvroSerialization.setKeyReaderSchema(conf, TrackerEvent.getClassSchema());
     AvroSerialization.setValueWriterSchema(conf, TrackerEvent.getClassSchema());
     AvroSerialization.setValueReaderSchema(conf, TrackerEvent.getClassSchema());
-    Job job = new Job(conf);
+    Job job = Job.getInstance(conf);
     job.setInputFormatClass(AvroKeyInputFormat.class);
     job.setMapOutputKeyClass(Text.class);
     job.setMapOutputValueClass(AvroValue.class);
@@ -69,6 +69,16 @@ public class RawTrackerMRTest {
         TrackerEvent.getClassSchema());
 
     mapReduceDriver = MapReduceDriver.newMapReduceDriver(mapper, reducer);
+    Configuration integConf = mapReduceDriver.getConfiguration();
+    AvroSerialization.addToConfiguration(integConf);
+    AvroSerialization.setKeyWriterSchema(integConf,
+        TrackerEvent.getClassSchema());
+    AvroSerialization.setKeyReaderSchema(integConf,
+        TrackerEvent.getClassSchema());
+    AvroSerialization.setValueWriterSchema(integConf,
+        TrackerEvent.getClassSchema());
+    AvroSerialization.setValueReaderSchema(integConf,
+        TrackerEvent.getClassSchema());
 
   }
 
@@ -81,19 +91,35 @@ public class RawTrackerMRTest {
   }
 
   protected TrackerEvent.Builder MakeBasicImageLoad() {
-    return MakeBasicTrackerEvent().setEventType(EventType.IMAGE_LOAD)
-        .setEventData(new ImageLoad("acct1_vid1_tid1", 480, 640));
+    return MakeBasicTrackerEvent()
+        .setEventType(EventType.IMAGE_LOAD)
+        .setEventData(new ImageLoad("acct1_vid1_tid1", 480, 640))
+        .setAgentInfo(
+            new AgentInfo(new NmVers("Windows", "7"), new NmVers(
+                "Internet Explorer", "10.01")));
   }
 
   protected ImageLoadHive.Builder MakeBasicImageLoadHive() {
-    return ImageLoadHive.newBuilder().setAgentInfo(null)
-        .setClientIP("56.45.41.124").setClientTime(1400000000f)
+    return ImageLoadHive
+        .newBuilder()
+        .setAgentInfo(null)
+        .setClientIP("56.45.41.124")
+        .setClientTime(1400000000f)
         .setIpGeoData(new GeoData("USA", null, "CA", null, 34.556f, 120.45f))
-        .setNeonUserId("").setPageId("pageid1").setPageURL("http://go.com")
-        .setRefURL("http://ref.com").setServerTime(1400697546f)
-        .setTrackerType(TrackerType.BRIGHTCOVE).setTrackerAccountId("tai1")
-        .setUserAgent("agent1").setHeight(480).setWidth(640)
-        .setThumbnailId("acct1_vid1_tid1");
+        .setNeonUserId("")
+        .setPageId("pageid1")
+        .setPageURL("http://go.com")
+        .setRefURL("http://ref.com")
+        .setServerTime(1400697546f)
+        .setTrackerType(TrackerType.BRIGHTCOVE)
+        .setTrackerAccountId("tai1")
+        .setUserAgent("agent1")
+        .setHeight(480)
+        .setWidth(640)
+        .setThumbnailId("acct1_vid1_tid1")
+        .setAgentInfo(
+            new AgentInfo(new NmVers("Windows", "7"), new NmVers(
+                "Internet Explorer", "10.01")));
   }
 
   protected TrackerEvent.Builder MakeBasicImageVisible() {
@@ -180,7 +206,7 @@ public class RawTrackerMRTest {
 
     ImagesVisible inputEventData =
         new ImagesVisible(true, Arrays.asList((CharSequence) "acct1_vid1_tid1",
-            "acct1_vid2_tid12", "acct_vid31_tid0"));
+            "acct1_vid2_tid12", "acct-vid31-tid0"));
     mapDriver.withInput(
         new AvroKey<TrackerEvent>(baseEvent
             .setEventType(EventType.IMAGES_VISIBLE)
@@ -200,7 +226,7 @@ public class RawTrackerMRTest {
         new Text("tai156.45.41.124vid31"),
         new AvroValue<TrackerEvent>(baseEvent
             .setEventType(EventType.IMAGE_VISIBLE)
-            .setEventData(new ImageVisible("acct_vid31_tid0")).build()));
+            .setEventData(new ImageVisible("acct-vid31-tid0")).build()));
     mapDriver.runTest();
   }
 
@@ -326,8 +352,8 @@ public class RawTrackerMRTest {
     // MultipleOutputs
     reduceDriver.withInput(new Text("tai156.45.41.124vid1"), values).run();
 
-    ArgumentCaptor<SpecificRecordBase> hiveEventCaptor =
-        ArgumentCaptor.forClass(SpecificRecordBase.class);
+    ArgumentCaptor<AvroKey> hiveEventCaptor =
+        ArgumentCaptor.forClass(AvroKey.class);
     ArgumentCaptor<String> outputPathCaptor =
         ArgumentCaptor.forClass(String.class);
     verify(outputCollector).write(eq("ImageLoadHive"),
@@ -345,58 +371,58 @@ public class RawTrackerMRTest {
     verify(outputCollector).write(eq("AdPlayHive"), hiveEventCaptor.capture(),
         eq(NullWritable.get()), outputPathCaptor.capture());
 
-    List<SpecificRecordBase> hiveEvents = hiveEventCaptor.getAllValues();
+    List<AvroKey> hiveEvents = hiveEventCaptor.getAllValues();
     List<String> outputPaths = outputPathCaptor.getAllValues();
     assertEquals(hiveEvents.size(), outputPaths.size());
     assertEquals(hiveEvents.size(), 5);
     Long sequenceId = null;
     for (int i = 0; i < hiveEvents.size(); ++i) {
-      SpecificRecordBase curEvent = hiveEvents.get(i);
-      if (curEvent instanceof ImageLoadHive) {
+      AvroKey curEvent = hiveEvents.get(i);
+      if (curEvent.datum() instanceof ImageLoadHive) {
         sequenceId =
-            sequenceId == null ? ((ImageLoadHive) curEvent).getSequenceId()
+            sequenceId == null ? ((ImageLoadHive) curEvent.datum()).getSequenceId()
                 : sequenceId;
-        assertEquals(curEvent,
+        assertEquals(curEvent.datum(),
             MakeBasicImageLoadHive().setSequenceId(sequenceId).build());
-        assertEquals(outputPaths.get(i), "ImageLoadHive/tai=tai1/ts=2014-05-21");
-      } else if (curEvent instanceof ImageVisibleHive) {
+        assertEquals(outputPaths.get(i), "ImageLoadHive/tai=tai1/ts=2014-05-21/ImageLoadHive");
+      } else if (curEvent.datum() instanceof ImageVisibleHive) {
         sequenceId =
-            sequenceId == null ? ((ImageVisibleHive) curEvent).getSequenceId()
+            sequenceId == null ? ((ImageVisibleHive) curEvent.datum()).getSequenceId()
                 : sequenceId;
-        assertEquals(curEvent,
+        assertEquals(curEvent.datum(),
             MakeBasicImageVisibleHive().setClientTime(1400000000.1f)
                 .setSequenceId(sequenceId).build());
         assertEquals(outputPaths.get(i),
-            "ImageVisibleHive/tai=tai1/ts=2014-05-21");
-      } else if (curEvent instanceof ImageClickHive) {
+            "ImageVisibleHive/tai=tai1/ts=2014-05-21/ImageVisibleHive");
+      } else if (curEvent.datum() instanceof ImageClickHive) {
         sequenceId =
-            sequenceId == null ? ((ImageClickHive) curEvent).getSequenceId()
+            sequenceId == null ? ((ImageClickHive) curEvent.datum()).getSequenceId()
                 : sequenceId;
-        assertEquals(curEvent,
+        assertEquals(curEvent.datum(),
             MakeBasicImageClickHive().setClientTime(1400000000.2f)
                 .setSequenceId(sequenceId).build());
         assertEquals(outputPaths.get(i),
-            "ImageClickHive/tai=tai1/ts=2014-05-21");
-      } else if (curEvent instanceof AdPlayHive) {
+            "ImageClickHive/tai=tai1/ts=2014-05-21/ImageClickHive");
+      } else if (curEvent.datum() instanceof AdPlayHive) {
         sequenceId =
-            sequenceId == null ? ((AdPlayHive) curEvent).getSequenceId()
+            sequenceId == null ? ((AdPlayHive) curEvent.datum()).getSequenceId()
                 : sequenceId;
         assertEquals(
-            curEvent,
+            curEvent.datum(),
             MakeBasicAdPlayHive().setClientTime(1400000000.5f)
                 .setPageId("vidpage").setRefURL("http://go.com")
                 .setSequenceId(sequenceId).build());
-        assertEquals(outputPaths.get(i), "AdPlayHive/tai=tai1/ts=2014-05-21");
-      } else if (curEvent instanceof VideoPlayHive) {
+        assertEquals(outputPaths.get(i), "AdPlayHive/tai=tai1/ts=2014-05-21/AdPlayHive");
+      } else if (curEvent.datum() instanceof VideoPlayHive) {
         sequenceId =
-            sequenceId == null ? ((VideoPlayHive) curEvent).getSequenceId()
+            sequenceId == null ? ((VideoPlayHive) curEvent.datum()).getSequenceId()
                 : sequenceId;
         assertEquals(
-            curEvent,
+            curEvent.datum(),
             MakeBasicVideoPlayHive().setClientTime(1400000000.7f)
                 .setPageId("vidpage").setSequenceId(sequenceId)
                 .setRefURL("http://go.com").build());
-        assertEquals(outputPaths.get(i), "VideoPlayHive/tai=tai1/ts=2014-05-21");
+        assertEquals(outputPaths.get(i), "VideoPlayHive/tai=tai1/ts=2014-05-21/VideoPlayHive");
       }
     }
 
