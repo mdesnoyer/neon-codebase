@@ -37,9 +37,19 @@ record VideoPlayHive {
 
   union { null, string } userAgent;   // The user's agent string
 
-  union { null, AgentInfo } agentInfo; // Translated agent info if available
+  // Translated agent info if available
+  union { null, string } agentInfo_os_name;
+  union { null, string } agentInfo_os_version;
+  union { null, string } agentInfo_browser_name;
+  union { null, string } agentInfo_browser_version;
   
-  GeoData ipGeoData; // The user's location based on IP data
+  // The user's location based on IP data
+  union { null, string } ipGeoData_country; // 3 character country code
+  union { null, string } ipGeoData_city; // City name
+  union { null, string } ipGeoData_region; // Region
+  union { null, string } ipGeoData_zip; // Postal Code
+  union { null, float } ipGeoData_lat; // Latitude
+  union { null, float } ipGeoData_lon; // Longitude
 
   string videoId;
   union{null, string} playerId;

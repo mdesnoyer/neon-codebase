@@ -38,53 +38,35 @@
     "name" : "userAgent",
     "type" : [ "null", "string" ]
   }, {
-    "name" : "agentInfo",
-    "type" : [ "null", {
-      "type" : "record",
-      "name" : "AgentInfo",
-      "fields" : [ {
-        "name" : "os",
-        "type" : [ "null", {
-          "type" : "record",
-          "name" : "NmVers",
-          "fields" : [ {
-            "name" : "name",
-            "type" : [ "null", "string" ]
-          }, {
-            "name" : "version",
-            "type" : [ "null", "string" ]
-          } ]
-        } ]
-      }, {
-        "name" : "browser",
-        "type" : [ "null", "NmVers" ]
-      } ]
-    } ]
+    "name" : "agentInfo_os_name",
+    "type" : [ "null", "string" ]
   }, {
-    "name" : "ipGeoData",
-    "type" : {
-      "type" : "record",
-      "name" : "GeoData",
-      "fields" : [ {
-        "name" : "country",
-        "type" : [ "null", "string" ]
-      }, {
-        "name" : "city",
-        "type" : [ "null", "string" ]
-      }, {
-        "name" : "region",
-        "type" : [ "null", "string" ]
-      }, {
-        "name" : "zip",
-        "type" : [ "null", "string" ]
-      }, {
-        "name" : "lat",
-        "type" : [ "null", "float" ]
-      }, {
-        "name" : "lon",
-        "type" : [ "null", "float" ]
-      } ]
-    }
+    "name" : "agentInfo_os_version",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "agentInfo_browser_name",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "agentInfo_browser_version",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "ipGeoData_country",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "ipGeoData_city",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "ipGeoData_region",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "ipGeoData_zip",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "ipGeoData_lat",
+    "type" : [ "null", "float" ]
+  }, {
+    "name" : "ipGeoData_lon",
+    "type" : [ "null", "float" ]
   }, {
     "name" : "videoId",
     "type" : "string"

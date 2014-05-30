@@ -48,8 +48,9 @@ import com.neon.Tracker.*;
  * 
  */
 public class RawTrackerMR extends Configured implements Tool {
-  // The maximum time that a sequence can occur over (6 hours)
-  private static final long MAX_SEQUENCE_TIME = 21600000;
+  // The maximum time that a sequence can occur over (1 hours)
+  private static final long MAX_SEQUENCE_TIME = 3600000;
+  private static final String UNKNOWN_IP = "";
 
   /**
    * @author mdesnoyer
@@ -66,14 +67,20 @@ public class RawTrackerMR extends Configured implements Tool {
     @Override
     public void map(AvroKey<TrackerEvent> key, NullWritable value,
         Context context) throws IOException, InterruptedException {
+      // Fix any broken ip addresses
+      TrackerEvent curEvent = key.datum();
+      curEvent.setClientIP(NormalizeIpAddress(curEvent.getClientIP()));
+
+      // Build the map key prefix
       String mapKey =
-          key.datum().getTrackerAccountId().toString()
-              + key.datum().getClientIP();
+          curEvent.getTrackerAccountId().toString() + curEvent.getClientIP();
+
       String videoId;
+      String editThumbId;
 
       try {
 
-        switch (key.datum().getEventType()) {
+        switch (curEvent.getEventType()) {
 
         case IMAGES_VISIBLE:
           List<CharSequence> thumbnailids =
@@ -82,12 +89,12 @@ public class RawTrackerMR extends Configured implements Tool {
             // We don't copy the original event because it doesn't need to be.
             // The
             // new events are copied when they are written.
-            ImageVisible newEventData = new ImageVisible(thumbnailId);
+            editThumbId = NormalizeThumbnailId(thumbnailId);
+            ImageVisible newEventData = new ImageVisible(editThumbId);
             TrackerEvent newEvent = key.datum();
             newEvent.setEventData(newEventData);
             newEvent.setEventType(EventType.IMAGE_VISIBLE);
-            context.write(
-                new Text(mapKey + ExtractVideoId(thumbnailId.toString())),
+            context.write(new Text(mapKey + ExtractVideoId(editThumbId)),
                 new AvroValue<TrackerEvent>(newEvent));
           }
           break;
@@ -99,33 +106,38 @@ public class RawTrackerMR extends Configured implements Tool {
             // We don't copy the original event because it doesn't need to be.
             // The
             // new events are copied when they are written.
+            editThumbId = NormalizeThumbnailId(imageLoad.getThumbnailId());
+            imageLoad.setThumbnailId(editThumbId);
             TrackerEvent newEvent = key.datum();
             newEvent.setEventData(imageLoad);
             newEvent.setEventType(EventType.IMAGE_LOAD);
-            context.write(new Text(mapKey
-                + ExtractVideoId(imageLoad.getThumbnailId().toString())),
+            context.write(new Text(mapKey + ExtractVideoId(editThumbId)),
                 new AvroValue<TrackerEvent>(newEvent));
           }
           break;
 
         case IMAGE_CLICK:
-          String thumbnailId =
-              ((ImageClick) key.datum().getEventData()).getThumbnailId()
-                  .toString();
-          context.write(new Text(mapKey + ExtractVideoId(thumbnailId)),
+          ImageClick imageClickData = (ImageClick) key.datum().getEventData();
+          editThumbId = NormalizeThumbnailId(imageClickData.getThumbnailId());
+          imageClickData.setThumbnailId(editThumbId);
+          context.write(new Text(mapKey + ExtractVideoId(editThumbId)),
               new AvroValue<TrackerEvent>(key.datum()));
           break;
 
         case VIDEO_CLICK:
-          videoId =
-              ((VideoClick) key.datum().getEventData()).getVideoId().toString();
+          VideoClick videoClickData = (VideoClick) key.datum().getEventData();
+          videoClickData.setThumbnailId(NormalizeThumbnailId(videoClickData
+              .getThumbnailId()));
+          videoId = videoClickData.getVideoId().toString();
           context.write(new Text(mapKey + videoId),
               new AvroValue<TrackerEvent>(key.datum()));
           break;
 
         case VIDEO_PLAY:
-          videoId =
-              ((VideoPlay) key.datum().getEventData()).getVideoId().toString();
+          VideoPlay videoPlayData = (VideoPlay) key.datum().getEventData();
+          videoPlayData.setThumbnailId(NormalizeThumbnailId(videoPlayData
+              .getThumbnailId()));
+          videoId = videoPlayData.getVideoId().toString();
           context.write(new Text(mapKey + videoId),
               new AvroValue<TrackerEvent>(key.datum()));
           break;
@@ -135,12 +147,14 @@ public class RawTrackerMR extends Configured implements Tool {
           // figure
           // out the associated video id
           // TODO(mdesnoyer): Figure out the video id in this case.
-          if (((AdPlay) key.datum().getEventData()).getVideoId() == null) {
+          AdPlay adPlayData = (AdPlay) key.datum().getEventData();
+          adPlayData.setThumbnailId(NormalizeThumbnailId(adPlayData
+              .getThumbnailId()));
+          if (adPlayData.getVideoId() == null) {
             context.write(new Text(mapKey),
                 new AvroValue<TrackerEvent>(key.datum()));
           } else {
-            videoId =
-                ((AdPlay) key.datum().getEventData()).getVideoId().toString();
+            videoId = adPlayData.getVideoId().toString();
             context.write(new Text(mapKey + videoId),
                 new AvroValue<TrackerEvent>(key.datum()));
           }
@@ -198,6 +212,7 @@ public class RawTrackerMR extends Configured implements Tool {
       for (AvroValue<TrackerEvent> value : values) {
         events.add(DeepCopyTrackerEvent(value.datum()));
       }
+      context.setStatus("Starting sort");
       Collections.sort(events, new Comparator<TrackerEvent>() {
         public int compare(TrackerEvent a, TrackerEvent b) {
           int timeDiff = a.getClientTime().compareTo(b.getClientTime());
@@ -208,12 +223,18 @@ public class RawTrackerMR extends Configured implements Tool {
           return timeDiff;
         }
       });
+      context.setStatus("Done sort");
 
       // Build up the list of events as they will be in their Hive tables
       LinkedList<Pair<TrackerEvent, Long>> seqEvents =
           new LinkedList<Pair<TrackerEvent, Long>>();
+      long eventNum = 0;
       for (ListIterator<TrackerEvent> baseI = events.listIterator(); baseI
           .hasNext();) {
+        if (++eventNum % 100 == 0) {
+          context.setStatus("Processing event " + eventNum);
+        }
+
         TrackerEvent curEvent = baseI.next();
         long curSequenceId = InitializeSequenceId(curEvent, context);
 
@@ -237,7 +258,9 @@ public class RawTrackerMR extends Configured implements Tool {
           break;
         }
 
-        BackfillSequenceId(curEvent, seqEvents, curSequenceId, context);
+        if (!curEvent.getClientIP().equals(UNKNOWN_IP)) {
+          BackfillSequenceId(curEvent, seqEvents, curSequenceId, context);
+        }
 
         // If it is a video click, see if there is an associated image click. If
         // so, ignore the video click.
@@ -252,8 +275,11 @@ public class RawTrackerMR extends Configured implements Tool {
                 foundRealClick = true;
                 break;
               }
-            } else if (oldEvent.getEventType() == EventType.VIDEO_PLAY
-                || oldEvent.getEventType() == EventType.VIDEO_CLICK) {
+            } else if (!curEvent.getClientIP().equals(UNKNOWN_IP)
+                && (oldEvent.getEventType() == EventType.VIDEO_PLAY || oldEvent
+                    .getEventType() == EventType.VIDEO_CLICK)) {
+              // There is another video play from this user so we're done
+              // looking
               break;
             } else if ((curEvent.getClientTime() - oldEvent.getClientTime()) > MAX_SEQUENCE_TIME) {
               // Stop looking because it's too old
@@ -274,6 +300,7 @@ public class RawTrackerMR extends Configured implements Tool {
       }
 
       // Now output the resulting events.
+      context.setStatus("Outputing Events");
       for (Pair<TrackerEvent, Long> pair : seqEvents) {
         OutputEventToHive(pair.getLeft(), pair.getRight(), context);
       }
@@ -501,18 +528,45 @@ public class RawTrackerMR extends Configured implements Tool {
       // Create the output path that partitions based on time and the account id
       SimpleDateFormat timestampFormat = new SimpleDateFormat("YYYY-MM-dd");
       String timestamp = timestampFormat.format(new Date(orig.getServerTime()));
-      String partitionPath =
-          "/tai=" + orig.getTrackerAccountId() + "/ts=" + timestamp + "/";
+
+      // TODO(mdesnoyer): There is a bug in Hive (fixed in 0.12) such that it
+      // cannot read partitioned Avro tables, so, we need to create one single,
+      // gigantic partition now. When this is ported into Elastic MapReduce, we
+      // can partition this data to make it more efficient, but for now, dump it
+      // in a single folder.
+      //String partitionPath =
+      //    "/tai=" + orig.getTrackerAccountId() + "/ts=" + timestamp + "/";
+      String partitionPath = "/";
+
+      // Do some null handling of common structures
+      NmVers browser =
+          orig.getAgentInfo() == null ? null : orig.getAgentInfo().getBrowser();
+      CharSequence browserName = browser == null ? null : browser.getName();
+      CharSequence browserVersion =
+          browser == null ? null : browser.getVersion();
+
+      NmVers os =
+          orig.getAgentInfo() == null ? null : orig.getAgentInfo().getOs();
+      CharSequence osName = os == null ? null : os.getName();
+      CharSequence osVersion = os == null ? null : os.getVersion();
 
       switch (orig.getEventType()) {
       case IMAGE_LOAD:
         hiveEvent =
             ImageLoadHive
                 .newBuilder()
-                .setAgentInfo(orig.getAgentInfo())
+                .setAgentInfoBrowserName(browserName)
+                .setAgentInfoBrowserVersion(browserVersion)
+                .setAgentInfoOsName(osName)
+                .setAgentInfoOsVersion(osVersion)
                 .setClientIP(orig.getClientIP())
                 .setClientTime((float) (orig.getClientTime() / 1000.))
-                .setIpGeoData(orig.getIpGeoData())
+                .setIpGeoDataCity(orig.getIpGeoData().getCity())
+                .setIpGeoDataCountry(orig.getIpGeoData().getCountry())
+                .setIpGeoDataRegion(orig.getIpGeoData().getRegion())
+                .setIpGeoDataZip(orig.getIpGeoData().getZip())
+                .setIpGeoDataLat(orig.getIpGeoData().getLat())
+                .setIpGeoDataLon(orig.getIpGeoData().getLon())
                 .setNeonUserId(orig.getNeonUserId())
                 .setPageId(orig.getPageId())
                 .setPageURL(orig.getPageURL())
@@ -535,10 +589,18 @@ public class RawTrackerMR extends Configured implements Tool {
         hiveEvent =
             ImageVisibleHive
                 .newBuilder()
-                .setAgentInfo(orig.getAgentInfo())
+                .setAgentInfoBrowserName(browserName)
+                .setAgentInfoBrowserVersion(browserVersion)
+                .setAgentInfoOsName(osName)
+                .setAgentInfoOsVersion(osVersion)
                 .setClientIP(orig.getClientIP())
                 .setClientTime((float) (orig.getClientTime() / 1000.))
-                .setIpGeoData(orig.getIpGeoData())
+                .setIpGeoDataCity(orig.getIpGeoData().getCity())
+                .setIpGeoDataCountry(orig.getIpGeoData().getCountry())
+                .setIpGeoDataRegion(orig.getIpGeoData().getRegion())
+                .setIpGeoDataZip(orig.getIpGeoData().getZip())
+                .setIpGeoDataLat(orig.getIpGeoData().getLat())
+                .setIpGeoDataLon(orig.getIpGeoData().getLon())
                 .setNeonUserId(orig.getNeonUserId())
                 .setPageId(orig.getPageId())
                 .setPageURL(orig.getPageURL())
@@ -564,10 +626,18 @@ public class RawTrackerMR extends Configured implements Tool {
         hiveEvent =
             ImageClickHive
                 .newBuilder()
-                .setAgentInfo(orig.getAgentInfo())
+                .setAgentInfoBrowserName(browserName)
+                .setAgentInfoBrowserVersion(browserVersion)
+                .setAgentInfoOsName(osName)
+                .setAgentInfoOsVersion(osVersion)
                 .setClientIP(orig.getClientIP())
                 .setClientTime((float) (orig.getClientTime() / 1000.))
-                .setIpGeoData(orig.getIpGeoData())
+                .setIpGeoDataCity(orig.getIpGeoData().getCity())
+                .setIpGeoDataCountry(orig.getIpGeoData().getCountry())
+                .setIpGeoDataRegion(orig.getIpGeoData().getRegion())
+                .setIpGeoDataZip(orig.getIpGeoData().getZip())
+                .setIpGeoDataLat(orig.getIpGeoData().getLat())
+                .setIpGeoDataLon(orig.getIpGeoData().getLon())
                 .setNeonUserId(orig.getNeonUserId())
                 .setPageId(orig.getPageId())
                 .setPageURL(orig.getPageURL())
@@ -579,9 +649,12 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setSequenceId(sequenceId)
                 .setThumbnailId(thumbnailId)
                 .setVideoId(ExtractVideoId(thumbnailId.toString()))
-                .setPageCoords(clickCoords)
-                .setWindowCoords(
-                    ((ImageClick) orig.getEventData()).getWindowCoords())
+                .setPageCoordsX(clickCoords.getX())
+                .setPageCoordsY(clickCoords.getY())
+                .setWindowCoordsX(
+                    ((ImageClick) orig.getEventData()).getWindowCoords().getX())
+                .setWindowCoordsY(
+                    ((ImageClick) orig.getEventData()).getWindowCoords().getY())
                 .setIsClickInPlayer(false)
                 .setIsRightClick(
                     clickCoords.getX() <= 0 && clickCoords.getY() <= 0).build();
@@ -595,10 +668,18 @@ public class RawTrackerMR extends Configured implements Tool {
         hiveEvent =
             ImageClickHive
                 .newBuilder()
-                .setAgentInfo(orig.getAgentInfo())
+                .setAgentInfoBrowserName(browserName)
+                .setAgentInfoBrowserVersion(browserVersion)
+                .setAgentInfoOsName(osName)
+                .setAgentInfoOsVersion(osVersion)
                 .setClientIP(orig.getClientIP())
                 .setClientTime((float) (orig.getClientTime() / 1000.))
-                .setIpGeoData(orig.getIpGeoData())
+                .setIpGeoDataCity(orig.getIpGeoData().getCity())
+                .setIpGeoDataCountry(orig.getIpGeoData().getCountry())
+                .setIpGeoDataRegion(orig.getIpGeoData().getRegion())
+                .setIpGeoDataZip(orig.getIpGeoData().getZip())
+                .setIpGeoDataLat(orig.getIpGeoData().getLat())
+                .setIpGeoDataLon(orig.getIpGeoData().getLon())
                 .setNeonUserId(orig.getNeonUserId())
                 .setPageId(orig.getPageId())
                 .setPageURL(orig.getPageURL())
@@ -611,8 +692,8 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setThumbnailId(
                     ((VideoClick) orig.getEventData()).getThumbnailId())
                 .setVideoId(((VideoClick) orig.getEventData()).getVideoId())
-                .setPageCoords(new Coords(-1f, -1f))
-                .setWindowCoords(new Coords(-1f, -1f)).setIsClickInPlayer(true)
+                .setPageCoordsX(-1f).setPageCoordsY(-1f).setWindowCoordsX(-1f)
+                .setWindowCoordsY(-1f).setIsClickInPlayer(true)
                 .setIsRightClick(false).build();
         out.write("ImageClickHive", new AvroKey<ImageClickHive>(
             (ImageClickHive) hiveEvent), NullWritable.get(), "ImageClickHive"
@@ -624,10 +705,18 @@ public class RawTrackerMR extends Configured implements Tool {
         hiveEvent =
             AdPlayHive
                 .newBuilder()
-                .setAgentInfo(orig.getAgentInfo())
+                .setAgentInfoBrowserName(browserName)
+                .setAgentInfoBrowserVersion(browserVersion)
+                .setAgentInfoOsName(osName)
+                .setAgentInfoOsVersion(osVersion)
                 .setClientIP(orig.getClientIP())
                 .setClientTime((float) (orig.getClientTime() / 1000.))
-                .setIpGeoData(orig.getIpGeoData())
+                .setIpGeoDataCity(orig.getIpGeoData().getCity())
+                .setIpGeoDataCountry(orig.getIpGeoData().getCountry())
+                .setIpGeoDataRegion(orig.getIpGeoData().getRegion())
+                .setIpGeoDataZip(orig.getIpGeoData().getZip())
+                .setIpGeoDataLat(orig.getIpGeoData().getLat())
+                .setIpGeoDataLon(orig.getIpGeoData().getLon())
                 .setNeonUserId(orig.getNeonUserId())
                 .setPageId(orig.getPageId())
                 .setPageURL(orig.getPageURL())
@@ -654,10 +743,18 @@ public class RawTrackerMR extends Configured implements Tool {
         hiveEvent =
             VideoPlayHive
                 .newBuilder()
-                .setAgentInfo(orig.getAgentInfo())
+                .setAgentInfoBrowserName(browserName)
+                .setAgentInfoBrowserVersion(browserVersion)
+                .setAgentInfoOsName(osName)
+                .setAgentInfoOsVersion(osVersion)
                 .setClientIP(orig.getClientIP())
                 .setClientTime((float) (orig.getClientTime() / 1000.))
-                .setIpGeoData(orig.getIpGeoData())
+                .setIpGeoDataCity(orig.getIpGeoData().getCity())
+                .setIpGeoDataCountry(orig.getIpGeoData().getCountry())
+                .setIpGeoDataRegion(orig.getIpGeoData().getRegion())
+                .setIpGeoDataZip(orig.getIpGeoData().getZip())
+                .setIpGeoDataLat(orig.getIpGeoData().getLat())
+                .setIpGeoDataLon(orig.getIpGeoData().getLon())
                 .setNeonUserId(orig.getNeonUserId())
                 .setPageId(orig.getPageId())
                 .setPageURL(orig.getPageURL())
@@ -685,6 +782,42 @@ public class RawTrackerMR extends Configured implements Tool {
         context.getCounter("ReduceError", "InvalidEventType").increment(1);
       }
     }
+  }
+
+  /**
+   * Converts the thumbnail id into its normalize form of
+   * <api_key>_<video_id>_<thumbnailid>. Sometimes, these can be separated by
+   * dashes instead of underscores.
+   * 
+   * @param thumbnailId
+   * @return The normalized thumbnail id
+   */
+  private static String NormalizeThumbnailId(CharSequence thumbnailId) {
+    if (thumbnailId == null) {
+      return null;
+    }
+    return thumbnailId.toString().replaceAll("\\-", "_");
+  }
+
+  /**
+   * Normalizes the ip address to deal with quirks.
+   * 
+   * For now, we just remove those addresses that actually internal ones and set
+   * it to unknown (empty string)
+   * 
+   * @param ipAddress
+   * @return The normalized ip address
+   */
+  private static CharSequence NormalizeIpAddress(CharSequence ipAddress) {
+    String ipString = ipAddress.toString();
+
+    // Internal addresses are "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"
+    if (ipString.startsWith("10.") || ipString.startsWith("172.16.")
+        || ipString.startsWith("192.168.")) {
+      return UNKNOWN_IP;
+    }
+
+    return ipAddress;
   }
 
   /**

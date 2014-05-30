@@ -100,26 +100,18 @@ public class RawTrackerMRTest {
   }
 
   protected ImageLoadHive.Builder MakeBasicImageLoadHive() {
-    return ImageLoadHive
-        .newBuilder()
-        .setAgentInfo(null)
-        .setClientIP("56.45.41.124")
-        .setClientTime(1400000000f)
-        .setIpGeoData(new GeoData("USA", null, "CA", null, 34.556f, 120.45f))
-        .setNeonUserId("")
-        .setPageId("pageid1")
-        .setPageURL("http://go.com")
-        .setRefURL("http://ref.com")
-        .setServerTime(1400697546f)
-        .setTrackerType(TrackerType.BRIGHTCOVE)
-        .setTrackerAccountId("tai1")
-        .setUserAgent("agent1")
-        .setHeight(480)
-        .setWidth(640)
-        .setThumbnailId("acct1_vid1_tid1")
-        .setAgentInfo(
-            new AgentInfo(new NmVers("Windows", "7"), new NmVers(
-                "Internet Explorer", "10.01")));
+    return ImageLoadHive.newBuilder()
+        .setAgentInfoBrowserName("Internet Explorer")
+        .setAgentInfoBrowserVersion("10.01").setAgentInfoOsName("Windows")
+        .setAgentInfoOsVersion("7").setClientIP("56.45.41.124")
+        .setClientTime(1400000000f).setIpGeoDataCity(null)
+        .setIpGeoDataCountry("USA").setIpGeoDataRegion("CA")
+        .setIpGeoDataZip(null).setIpGeoDataLat(34.556f)
+        .setIpGeoDataLon(120.45f).setNeonUserId("").setPageId("pageid1")
+        .setPageURL("http://go.com").setRefURL("http://ref.com")
+        .setServerTime(1400697546f).setTrackerType(TrackerType.BRIGHTCOVE)
+        .setTrackerAccountId("tai1").setUserAgent("agent1").setHeight(480)
+        .setWidth(640).setThumbnailId("acct1_vid1_tid1");
   }
 
   protected TrackerEvent.Builder MakeBasicImageVisible() {
@@ -128,13 +120,17 @@ public class RawTrackerMRTest {
   }
 
   protected ImageVisibleHive.Builder MakeBasicImageVisibleHive() {
-    return ImageVisibleHive.newBuilder().setAgentInfo(null)
-        .setClientIP("56.45.41.124").setClientTime(1400000000f)
-        .setIpGeoData(new GeoData("USA", null, "CA", null, 34.556f, 120.45f))
-        .setNeonUserId("").setPageId("pageid1").setPageURL("http://go.com")
-        .setRefURL("http://ref.com").setTrackerAccountId("tai1")
-        .setServerTime(1400697546f).setTrackerType(TrackerType.BRIGHTCOVE)
-        .setUserAgent("agent1").setThumbnailId("acct1_vid1_tid1");
+    return ImageVisibleHive.newBuilder().setAgentInfoBrowserName(null)
+        .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
+        .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
+        .setClientTime(1400000000f).setIpGeoDataCity(null)
+        .setIpGeoDataCountry("USA").setIpGeoDataRegion("CA")
+        .setIpGeoDataZip(null).setIpGeoDataLat(34.556f)
+        .setIpGeoDataLon(120.45f).setNeonUserId("").setPageId("pageid1")
+        .setPageURL("http://go.com").setRefURL("http://ref.com")
+        .setTrackerAccountId("tai1").setServerTime(1400697546f)
+        .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
+        .setThumbnailId("acct1_vid1_tid1");
   }
 
   protected TrackerEvent.Builder MakeBasicImageClick() {
@@ -145,16 +141,20 @@ public class RawTrackerMRTest {
   }
 
   protected ImageClickHive.Builder MakeBasicImageClickHive() {
-    return ImageClickHive.newBuilder().setAgentInfo(null)
+    return ImageClickHive.newBuilder().setAgentInfoBrowserName(null)
+        .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
+        .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
         .setClientIP("56.45.41.124").setClientTime(1400000000f)
-        .setIpGeoData(new GeoData("USA", null, "CA", null, 34.556f, 120.45f))
-        .setNeonUserId("").setPageId("pageid1").setPageURL("http://go.com")
+        .setIpGeoDataCity(null).setIpGeoDataCountry("USA")
+        .setIpGeoDataRegion("CA").setIpGeoDataZip(null)
+        .setIpGeoDataLat(34.556f).setIpGeoDataLon(120.45f).setNeonUserId("")
+        .setPageId("pageid1").setPageURL("http://go.com")
         .setRefURL("http://ref.com").setTrackerAccountId("tai1")
         .setServerTime(1400697546f).setTrackerType(TrackerType.BRIGHTCOVE)
         .setUserAgent("agent1").setThumbnailId("acct1_vid1_tid1")
-        .setVideoId("vid1").setPageCoords(new Coords(100f, 200f))
-        .setWindowCoords(new Coords(150f, 250f)).setIsClickInPlayer(false)
-        .setIsRightClick(false);
+        .setVideoId("vid1").setPageCoordsX(100f).setPageCoordsY(200f)
+        .setWindowCoordsX(150f).setWindowCoordsY(250f)
+        .setIsClickInPlayer(false).setIsRightClick(false);
   }
 
   protected TrackerEvent.Builder MakeBasicAdPlay() {
@@ -164,10 +164,14 @@ public class RawTrackerMRTest {
   }
 
   protected AdPlayHive.Builder MakeBasicAdPlayHive() {
-    return AdPlayHive.newBuilder().setAgentInfo(null)
+    return AdPlayHive.newBuilder().setAgentInfoBrowserName(null)
+        .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
+        .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
         .setClientIP("56.45.41.124").setClientTime(1400000000f)
-        .setIpGeoData(new GeoData("USA", null, "CA", null, 34.556f, 120.45f))
-        .setNeonUserId("").setPageId("pageid1").setPageURL("http://go.com")
+        .setIpGeoDataCity(null).setIpGeoDataCountry("USA")
+        .setIpGeoDataRegion("CA").setIpGeoDataZip(null)
+        .setIpGeoDataLat(34.556f).setIpGeoDataLon(120.45f).setNeonUserId("")
+        .setPageId("pageid1").setPageURL("http://go.com")
         .setRefURL("http://ref.com").setTrackerAccountId("tai1")
         .setServerTime(1400697546f).setTrackerType(TrackerType.BRIGHTCOVE)
         .setUserAgent("agent1").setThumbnailId("acct1_vid1_tid1")
@@ -189,10 +193,14 @@ public class RawTrackerMRTest {
   }
 
   protected VideoPlayHive.Builder MakeBasicVideoPlayHive() {
-    return VideoPlayHive.newBuilder().setAgentInfo(null)
+    return VideoPlayHive.newBuilder().setAgentInfoBrowserName(null)
+        .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
+        .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
         .setClientIP("56.45.41.124").setClientTime(1400000000f)
-        .setIpGeoData(new GeoData("USA", null, "CA", null, 34.556f, 120.45f))
-        .setNeonUserId("").setPageId("pageid1").setPageURL("http://go.com")
+        .setIpGeoDataCity(null).setIpGeoDataCountry("USA")
+        .setIpGeoDataRegion("CA").setIpGeoDataZip(null)
+        .setIpGeoDataLat(34.556f).setIpGeoDataLon(120.45f).setNeonUserId("")
+        .setPageId("pageid1").setPageURL("http://go.com")
         .setRefURL("http://ref.com").setTrackerAccountId("tai1")
         .setServerTime(1400697546f).setTrackerType(TrackerType.BRIGHTCOVE)
         .setUserAgent("agent1").setThumbnailId("acct1_vid1_tid1")
@@ -226,7 +234,7 @@ public class RawTrackerMRTest {
         new Text("tai156.45.41.124vid31"),
         new AvroValue<TrackerEvent>(baseEvent
             .setEventType(EventType.IMAGE_VISIBLE)
-            .setEventData(new ImageVisible("acct-vid31-tid0")).build()));
+            .setEventData(new ImageVisible("acct_vid31_tid0")).build()));
     mapDriver.runTest();
   }
 
@@ -236,7 +244,7 @@ public class RawTrackerMRTest {
 
     List<ImageLoad> loadList = new Vector<ImageLoad>();
     loadList.add(new ImageLoad("acct1_vid1_tid1", 56, 48));
-    loadList.add(new ImageLoad("acct1_vid3_tid46", 480, 640));
+    loadList.add(new ImageLoad("acct1-vid3-tid46", 480, 640));
 
     mapDriver.withInput(
         new AvroKey<TrackerEvent>(baseEvent
@@ -290,6 +298,40 @@ public class RawTrackerMRTest {
 
     mapDriver.withOutput(new Text("tai156.45.41.124vid2"),
         new AvroValue<TrackerEvent>(inputEvent));
+
+    mapDriver.runTest();
+  }
+
+  @Test
+  public void testInternalIPMapping() throws IOException {
+    TrackerEvent.Builder eventBuilder =
+        MakeBasicTrackerEvent().setEventType(EventType.VIDEO_CLICK)
+            .setEventData(new VideoClick(true, "vid2", "player2", null))
+            .setClientIP("");
+
+    mapDriver.withInput(
+        new AvroKey<TrackerEvent>(eventBuilder.setClientIP("10.5.216.15")
+            .setPageId("p0").build()), NullWritable.get());
+    mapDriver.withInput(
+        new AvroKey<TrackerEvent>(eventBuilder.setClientIP("172.16.64.15")
+            .setPageId("p1").build()), NullWritable.get());
+    mapDriver.withInput(
+        new AvroKey<TrackerEvent>(eventBuilder.setClientIP("172.160.64.15")
+            .setPageId("p2").build()), NullWritable.get());
+    mapDriver.withInput(
+        new AvroKey<TrackerEvent>(eventBuilder.setClientIP("192.168.67.34")
+            .setPageId("p3").build()), NullWritable.get());
+
+    mapDriver.withOutput(new Text("tai1vid2"), new AvroValue<TrackerEvent>(
+        eventBuilder.setPageId("p0").setClientIP("").build()));
+    mapDriver.withOutput(new Text("tai1vid2"), new AvroValue<TrackerEvent>(
+        eventBuilder.setPageId("p1").setClientIP("").build()));
+    mapDriver.withOutput(
+        new Text("tai1172.160.64.15vid2"),
+        new AvroValue<TrackerEvent>(eventBuilder.setPageId("p2")
+            .setClientIP("172.160.64.15").build()));
+    mapDriver.withOutput(new Text("tai1vid2"), new AvroValue<TrackerEvent>(
+        eventBuilder.setPageId("p3").setClientIP("").build()));
 
     mapDriver.runTest();
   }
@@ -380,49 +422,51 @@ public class RawTrackerMRTest {
       AvroKey curEvent = hiveEvents.get(i);
       if (curEvent.datum() instanceof ImageLoadHive) {
         sequenceId =
-            sequenceId == null ? ((ImageLoadHive) curEvent.datum()).getSequenceId()
-                : sequenceId;
+            sequenceId == null ? ((ImageLoadHive) curEvent.datum())
+                .getSequenceId() : sequenceId;
         assertEquals(curEvent.datum(),
             MakeBasicImageLoadHive().setSequenceId(sequenceId).build());
-        assertEquals(outputPaths.get(i), "ImageLoadHive/tai=tai1/ts=2014-05-21/ImageLoadHive");
+        assertEquals(outputPaths.get(i),
+            "ImageLoadHive/ImageLoadHive");
       } else if (curEvent.datum() instanceof ImageVisibleHive) {
         sequenceId =
-            sequenceId == null ? ((ImageVisibleHive) curEvent.datum()).getSequenceId()
-                : sequenceId;
-        assertEquals(curEvent.datum(),
-            MakeBasicImageVisibleHive().setClientTime(1400000000.1f)
-                .setSequenceId(sequenceId).build());
+            sequenceId == null ? ((ImageVisibleHive) curEvent.datum())
+                .getSequenceId() : sequenceId;
+        assertEquals(curEvent.datum(), MakeBasicImageVisibleHive()
+            .setClientTime(1400000000.1f).setSequenceId(sequenceId).build());
         assertEquals(outputPaths.get(i),
-            "ImageVisibleHive/tai=tai1/ts=2014-05-21/ImageVisibleHive");
+            "ImageVisibleHive/ImageVisibleHive");
       } else if (curEvent.datum() instanceof ImageClickHive) {
         sequenceId =
-            sequenceId == null ? ((ImageClickHive) curEvent.datum()).getSequenceId()
-                : sequenceId;
+            sequenceId == null ? ((ImageClickHive) curEvent.datum())
+                .getSequenceId() : sequenceId;
         assertEquals(curEvent.datum(),
             MakeBasicImageClickHive().setClientTime(1400000000.2f)
                 .setSequenceId(sequenceId).build());
         assertEquals(outputPaths.get(i),
-            "ImageClickHive/tai=tai1/ts=2014-05-21/ImageClickHive");
+            "ImageClickHive/ImageClickHive");
       } else if (curEvent.datum() instanceof AdPlayHive) {
         sequenceId =
-            sequenceId == null ? ((AdPlayHive) curEvent.datum()).getSequenceId()
-                : sequenceId;
+            sequenceId == null ? ((AdPlayHive) curEvent.datum())
+                .getSequenceId() : sequenceId;
         assertEquals(
             curEvent.datum(),
             MakeBasicAdPlayHive().setClientTime(1400000000.5f)
                 .setPageId("vidpage").setRefURL("http://go.com")
                 .setSequenceId(sequenceId).build());
-        assertEquals(outputPaths.get(i), "AdPlayHive/tai=tai1/ts=2014-05-21/AdPlayHive");
+        assertEquals(outputPaths.get(i),
+            "AdPlayHive/AdPlayHive");
       } else if (curEvent.datum() instanceof VideoPlayHive) {
         sequenceId =
-            sequenceId == null ? ((VideoPlayHive) curEvent.datum()).getSequenceId()
-                : sequenceId;
+            sequenceId == null ? ((VideoPlayHive) curEvent.datum())
+                .getSequenceId() : sequenceId;
         assertEquals(
             curEvent.datum(),
             MakeBasicVideoPlayHive().setClientTime(1400000000.7f)
                 .setPageId("vidpage").setSequenceId(sequenceId)
                 .setRefURL("http://go.com").build());
-        assertEquals(outputPaths.get(i), "VideoPlayHive/tai=tai1/ts=2014-05-21/VideoPlayHive");
+        assertEquals(outputPaths.get(i),
+            "VideoPlayHive/VideoPlayHive");
       }
     }
 
