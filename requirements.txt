@@ -4,7 +4,7 @@ FFVideo==0.0.13
 MySQL-python==1.2.5
 PIL==1.1.7
 PyYAML==3.10
-boto==2.6.0
+boto==2.29.1
 botornado==0.0.3
 flickrapi==1.4.2
 futures==2.1.5

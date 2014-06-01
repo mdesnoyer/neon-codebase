@@ -43,7 +43,6 @@
 					</descriptors>
 					<archive>
 						<manifest>
-							<mainClass>com.neon.stats.RawTrackerMR</mainClass>
 						</manifest>
 					</archive>
 				</configuration>

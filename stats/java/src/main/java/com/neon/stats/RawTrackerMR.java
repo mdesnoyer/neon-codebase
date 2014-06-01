@@ -33,6 +33,7 @@ import org.apache.hadoop.io.WritableComparable;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.JobStatus;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
@@ -912,8 +913,13 @@ public class RawTrackerMR extends Configured implements Tool {
         AvroKeyOutputFormat.class, AdPlayHive.getClassSchema());
     AvroMultipleOutputs.addNamedOutput(job, "VideoPlayHive",
         AvroKeyOutputFormat.class, VideoPlayHive.getClassSchema());
+    
+    job.submit();
+    JobStatus jobStatus = job.getStatus();
+    System.out.println("Job ID: " + jobStatus.getJobID());
+    System.out.println("Tracking URL: " + jobStatus.getTrackingUrl());
 
-    return (job.waitForCompletion(true) ? 0 : 1);
+    return 1;
   }
 
   /**
