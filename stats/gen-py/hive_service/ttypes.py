@@ -3,7 +3,7 @@
 #
 # DO NOT EDIT UNLESS YOU ARE SURE THAT YOU KNOW WHAT YOU ARE DOING
 #
-#  options string: py
+#  options string: py:new_style
 #
 
 from thrift.Thrift import TType, TMessageType, TException, TApplicationException
@@ -20,7 +20,7 @@ except:
   fastbinary = None
 
 
-class JobTrackerState:
+class JobTrackerState(object):
   INITIALIZING = 1
   RUNNING = 2
 
@@ -35,7 +35,7 @@ class JobTrackerState:
   }
 
 
-class HiveClusterStatus:
+class HiveClusterStatus(object):
   """
   Attributes:
    - taskTrackers

@@ -3,11 +3,10 @@
 #
 # DO NOT EDIT UNLESS YOU ARE SURE THAT YOU KNOW WHAT YOU ARE DOING
 #
-#  options string: py
+#  options string: py:new_style
 #
 
 from thrift.Thrift import TType, TMessageType, TException, TApplicationException
-import hive_metastore.ThriftHiveMetastore
 from ttypes import *
 from thrift.Thrift import TProcessor
 from thrift.transport import TTransport
@@ -18,307 +17,482 @@ except:
   fastbinary = None
 
 
-class Iface(hive_metastore.ThriftHiveMetastore.Iface):
-  def execute(self, query):
+class Iface(object):
+  """
+  Standard base service
+  """
+  def getName(self, ):
     """
+    Returns a descriptive name of the service
+    """
+    pass
+
+  def getVersion(self, ):
+    """
+    Returns the version of the service
+    """
+    pass
+
+  def getStatus(self, ):
+    """
+    Gets the status of this service
+    """
+    pass
+
+  def getStatusDetails(self, ):
+    """
+    User friendly description of status, such as why the service is in
+    the dead or warning state, or what is being started or stopped.
+    """
+    pass
+
+  def getCounters(self, ):
+    """
+    Gets the counters for this service
+    """
+    pass
+
+  def getCounter(self, key):
+    """
+    Gets the value of a single counter
+
     Parameters:
-     - query
+     - key
     """
     pass
 
-  def fetchOne(self, ):
-    pass
-
-  def fetchN(self, numRows):
+  def setOption(self, key, value):
     """
+    Sets an option
+
     Parameters:
-     - numRows
+     - key
+     - value
     """
     pass
 
-  def fetchAll(self, ):
+  def getOption(self, key):
+    """
+    Gets an option
+
+    Parameters:
+     - key
+    """
     pass
 
-  def getSchema(self, ):
+  def getOptions(self, ):
+    """
+    Gets all options
+    """
     pass
 
-  def getThriftSchema(self, ):
+  def getCpuProfile(self, profileDurationInSec):
+    """
+    Returns a CPU profile over the given time interval (client and server
+    must agree on the profile format).
+
+    Parameters:
+     - profileDurationInSec
+    """
     pass
 
-  def getClusterStatus(self, ):
+  def aliveSince(self, ):
+    """
+    Returns the unix time that the server has been running since
+    """
     pass
 
-  def getQueryPlan(self, ):
+  def reinitialize(self, ):
+    """
+    Tell the server to reload its configuration, reopen log files, etc
+    """
     pass
 
-  def clean(self, ):
+  def shutdown(self, ):
+    """
+    Suggest a shutdown to the server
+    """
     pass
 
 
-class Client(hive_metastore.ThriftHiveMetastore.Client, Iface):
+class Client(Iface):
+  """
+  Standard base service
+  """
   def __init__(self, iprot, oprot=None):
-    hive_metastore.ThriftHiveMetastore.Client.__init__(self, iprot, oprot)
+    self._iprot = self._oprot = iprot
+    if oprot is not None:
+      self._oprot = oprot
+    self._seqid = 0
 
-  def execute(self, query):
+  def getName(self, ):
     """
+    Returns a descriptive name of the service
+    """
+    self.send_getName()
+    return self.recv_getName()
+
+  def send_getName(self, ):
+    self._oprot.writeMessageBegin('getName', TMessageType.CALL, self._seqid)
+    args = getName_args()
+    args.write(self._oprot)
+    self._oprot.writeMessageEnd()
+    self._oprot.trans.flush()
+
+  def recv_getName(self, ):
+    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
+    if mtype == TMessageType.EXCEPTION:
+      x = TApplicationException()
+      x.read(self._iprot)
+      self._iprot.readMessageEnd()
+      raise x
+    result = getName_result()
+    result.read(self._iprot)
+    self._iprot.readMessageEnd()
+    if result.success is not None:
+      return result.success
+    raise TApplicationException(TApplicationException.MISSING_RESULT, "getName failed: unknown result");
+
+  def getVersion(self, ):
+    """
+    Returns the version of the service
+    """
+    self.send_getVersion()
+    return self.recv_getVersion()
+
+  def send_getVersion(self, ):
+    self._oprot.writeMessageBegin('getVersion', TMessageType.CALL, self._seqid)
+    args = getVersion_args()
+    args.write(self._oprot)
+    self._oprot.writeMessageEnd()
+    self._oprot.trans.flush()
+
+  def recv_getVersion(self, ):
+    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
+    if mtype == TMessageType.EXCEPTION:
+      x = TApplicationException()
+      x.read(self._iprot)
+      self._iprot.readMessageEnd()
+      raise x
+    result = getVersion_result()
+    result.read(self._iprot)
+    self._iprot.readMessageEnd()
+    if result.success is not None:
+      return result.success
+    raise TApplicationException(TApplicationException.MISSING_RESULT, "getVersion failed: unknown result");
+
+  def getStatus(self, ):
+    """
+    Gets the status of this service
+    """
+    self.send_getStatus()
+    return self.recv_getStatus()
+
+  def send_getStatus(self, ):
+    self._oprot.writeMessageBegin('getStatus', TMessageType.CALL, self._seqid)
+    args = getStatus_args()
+    args.write(self._oprot)
+    self._oprot.writeMessageEnd()
+    self._oprot.trans.flush()
+
+  def recv_getStatus(self, ):
+    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
+    if mtype == TMessageType.EXCEPTION:
+      x = TApplicationException()
+      x.read(self._iprot)
+      self._iprot.readMessageEnd()
+      raise x
+    result = getStatus_result()
+    result.read(self._iprot)
+    self._iprot.readMessageEnd()
+    if result.success is not None:
+      return result.success
+    raise TApplicationException(TApplicationException.MISSING_RESULT, "getStatus failed: unknown result");
+
+  def getStatusDetails(self, ):
+    """
+    User friendly description of status, such as why the service is in
+    the dead or warning state, or what is being started or stopped.
+    """
+    self.send_getStatusDetails()
+    return self.recv_getStatusDetails()
+
+  def send_getStatusDetails(self, ):
+    self._oprot.writeMessageBegin('getStatusDetails', TMessageType.CALL, self._seqid)
+    args = getStatusDetails_args()
+    args.write(self._oprot)
+    self._oprot.writeMessageEnd()
+    self._oprot.trans.flush()
+
+  def recv_getStatusDetails(self, ):
+    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
+    if mtype == TMessageType.EXCEPTION:
+      x = TApplicationException()
+      x.read(self._iprot)
+      self._iprot.readMessageEnd()
+      raise x
+    result = getStatusDetails_result()
+    result.read(self._iprot)
+    self._iprot.readMessageEnd()
+    if result.success is not None:
+      return result.success
+    raise TApplicationException(TApplicationException.MISSING_RESULT, "getStatusDetails failed: unknown result");
+
+  def getCounters(self, ):
+    """
+    Gets the counters for this service
+    """
+    self.send_getCounters()
+    return self.recv_getCounters()
+
+  def send_getCounters(self, ):
+    self._oprot.writeMessageBegin('getCounters', TMessageType.CALL, self._seqid)
+    args = getCounters_args()
+    args.write(self._oprot)
+    self._oprot.writeMessageEnd()
+    self._oprot.trans.flush()
+
+  def recv_getCounters(self, ):
+    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
+    if mtype == TMessageType.EXCEPTION:
+      x = TApplicationException()
+      x.read(self._iprot)
+      self._iprot.readMessageEnd()
+      raise x
+    result = getCounters_result()
+    result.read(self._iprot)
+    self._iprot.readMessageEnd()
+    if result.success is not None:
+      return result.success
+    raise TApplicationException(TApplicationException.MISSING_RESULT, "getCounters failed: unknown result");
+
+  def getCounter(self, key):
+    """
+    Gets the value of a single counter
+
     Parameters:
-     - query
+     - key
     """
-    self.send_execute(query)
-    self.recv_execute()
+    self.send_getCounter(key)
+    return self.recv_getCounter()
 
-  def send_execute(self, query):
-    self._oprot.writeMessageBegin('execute', TMessageType.CALL, self._seqid)
-    args = execute_args()
-    args.query = query
+  def send_getCounter(self, key):
+    self._oprot.writeMessageBegin('getCounter', TMessageType.CALL, self._seqid)
+    args = getCounter_args()
+    args.key = key
     args.write(self._oprot)
     self._oprot.writeMessageEnd()
     self._oprot.trans.flush()
 
-  def recv_execute(self, ):
+  def recv_getCounter(self, ):
     (fname, mtype, rseqid) = self._iprot.readMessageBegin()
     if mtype == TMessageType.EXCEPTION:
       x = TApplicationException()
       x.read(self._iprot)
       self._iprot.readMessageEnd()
       raise x
-    result = execute_result()
-    result.read(self._iprot)
-    self._iprot.readMessageEnd()
-    if result.ex is not None:
-      raise result.ex
-    return
-
-  def fetchOne(self, ):
-    self.send_fetchOne()
-    return self.recv_fetchOne()
-
-  def send_fetchOne(self, ):
-    self._oprot.writeMessageBegin('fetchOne', TMessageType.CALL, self._seqid)
-    args = fetchOne_args()
-    args.write(self._oprot)
-    self._oprot.writeMessageEnd()
-    self._oprot.trans.flush()
-
-  def recv_fetchOne(self, ):
-    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
-    if mtype == TMessageType.EXCEPTION:
-      x = TApplicationException()
-      x.read(self._iprot)
-      self._iprot.readMessageEnd()
-      raise x
-    result = fetchOne_result()
+    result = getCounter_result()
     result.read(self._iprot)
     self._iprot.readMessageEnd()
     if result.success is not None:
       return result.success
-    if result.ex is not None:
-      raise result.ex
-    raise TApplicationException(TApplicationException.MISSING_RESULT, "fetchOne failed: unknown result");
+    raise TApplicationException(TApplicationException.MISSING_RESULT, "getCounter failed: unknown result");
 
-  def fetchN(self, numRows):
+  def setOption(self, key, value):
     """
+    Sets an option
+
     Parameters:
-     - numRows
+     - key
+     - value
     """
-    self.send_fetchN(numRows)
-    return self.recv_fetchN()
+    self.send_setOption(key, value)
+    self.recv_setOption()
 
-  def send_fetchN(self, numRows):
-    self._oprot.writeMessageBegin('fetchN', TMessageType.CALL, self._seqid)
-    args = fetchN_args()
-    args.numRows = numRows
+  def send_setOption(self, key, value):
+    self._oprot.writeMessageBegin('setOption', TMessageType.CALL, self._seqid)
+    args = setOption_args()
+    args.key = key
+    args.value = value
     args.write(self._oprot)
     self._oprot.writeMessageEnd()
     self._oprot.trans.flush()
 
-  def recv_fetchN(self, ):
+  def recv_setOption(self, ):
     (fname, mtype, rseqid) = self._iprot.readMessageBegin()
     if mtype == TMessageType.EXCEPTION:
       x = TApplicationException()
       x.read(self._iprot)
       self._iprot.readMessageEnd()
       raise x
-    result = fetchN_result()
-    result.read(self._iprot)
-    self._iprot.readMessageEnd()
-    if result.success is not None:
-      return result.success
-    if result.ex is not None:
-      raise result.ex
-    raise TApplicationException(TApplicationException.MISSING_RESULT, "fetchN failed: unknown result");
-
-  def fetchAll(self, ):
-    self.send_fetchAll()
-    return self.recv_fetchAll()
-
-  def send_fetchAll(self, ):
-    self._oprot.writeMessageBegin('fetchAll', TMessageType.CALL, self._seqid)
-    args = fetchAll_args()
-    args.write(self._oprot)
-    self._oprot.writeMessageEnd()
-    self._oprot.trans.flush()
-
-  def recv_fetchAll(self, ):
-    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
-    if mtype == TMessageType.EXCEPTION:
-      x = TApplicationException()
-      x.read(self._iprot)
-      self._iprot.readMessageEnd()
-      raise x
-    result = fetchAll_result()
-    result.read(self._iprot)
-    self._iprot.readMessageEnd()
-    if result.success is not None:
-      return result.success
-    if result.ex is not None:
-      raise result.ex
-    raise TApplicationException(TApplicationException.MISSING_RESULT, "fetchAll failed: unknown result");
-
-  def getSchema(self, ):
-    self.send_getSchema()
-    return self.recv_getSchema()
-
-  def send_getSchema(self, ):
-    self._oprot.writeMessageBegin('getSchema', TMessageType.CALL, self._seqid)
-    args = getSchema_args()
-    args.write(self._oprot)
-    self._oprot.writeMessageEnd()
-    self._oprot.trans.flush()
-
-  def recv_getSchema(self, ):
-    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
-    if mtype == TMessageType.EXCEPTION:
-      x = TApplicationException()
-      x.read(self._iprot)
-      self._iprot.readMessageEnd()
-      raise x
-    result = getSchema_result()
-    result.read(self._iprot)
-    self._iprot.readMessageEnd()
-    if result.success is not None:
-      return result.success
-    if result.ex is not None:
-      raise result.ex
-    raise TApplicationException(TApplicationException.MISSING_RESULT, "getSchema failed: unknown result");
-
-  def getThriftSchema(self, ):
-    self.send_getThriftSchema()
-    return self.recv_getThriftSchema()
-
-  def send_getThriftSchema(self, ):
-    self._oprot.writeMessageBegin('getThriftSchema', TMessageType.CALL, self._seqid)
-    args = getThriftSchema_args()
-    args.write(self._oprot)
-    self._oprot.writeMessageEnd()
-    self._oprot.trans.flush()
-
-  def recv_getThriftSchema(self, ):
-    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
-    if mtype == TMessageType.EXCEPTION:
-      x = TApplicationException()
-      x.read(self._iprot)
-      self._iprot.readMessageEnd()
-      raise x
-    result = getThriftSchema_result()
-    result.read(self._iprot)
-    self._iprot.readMessageEnd()
-    if result.success is not None:
-      return result.success
-    if result.ex is not None:
-      raise result.ex
-    raise TApplicationException(TApplicationException.MISSING_RESULT, "getThriftSchema failed: unknown result");
-
-  def getClusterStatus(self, ):
-    self.send_getClusterStatus()
-    return self.recv_getClusterStatus()
-
-  def send_getClusterStatus(self, ):
-    self._oprot.writeMessageBegin('getClusterStatus', TMessageType.CALL, self._seqid)
-    args = getClusterStatus_args()
-    args.write(self._oprot)
-    self._oprot.writeMessageEnd()
-    self._oprot.trans.flush()
-
-  def recv_getClusterStatus(self, ):
-    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
-    if mtype == TMessageType.EXCEPTION:
-      x = TApplicationException()
-      x.read(self._iprot)
-      self._iprot.readMessageEnd()
-      raise x
-    result = getClusterStatus_result()
-    result.read(self._iprot)
-    self._iprot.readMessageEnd()
-    if result.success is not None:
-      return result.success
-    if result.ex is not None:
-      raise result.ex
-    raise TApplicationException(TApplicationException.MISSING_RESULT, "getClusterStatus failed: unknown result");
-
-  def getQueryPlan(self, ):
-    self.send_getQueryPlan()
-    return self.recv_getQueryPlan()
-
-  def send_getQueryPlan(self, ):
-    self._oprot.writeMessageBegin('getQueryPlan', TMessageType.CALL, self._seqid)
-    args = getQueryPlan_args()
-    args.write(self._oprot)
-    self._oprot.writeMessageEnd()
-    self._oprot.trans.flush()
-
-  def recv_getQueryPlan(self, ):
-    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
-    if mtype == TMessageType.EXCEPTION:
-      x = TApplicationException()
-      x.read(self._iprot)
-      self._iprot.readMessageEnd()
-      raise x
-    result = getQueryPlan_result()
-    result.read(self._iprot)
-    self._iprot.readMessageEnd()
-    if result.success is not None:
-      return result.success
-    if result.ex is not None:
-      raise result.ex
-    raise TApplicationException(TApplicationException.MISSING_RESULT, "getQueryPlan failed: unknown result");
-
-  def clean(self, ):
-    self.send_clean()
-    self.recv_clean()
-
-  def send_clean(self, ):
-    self._oprot.writeMessageBegin('clean', TMessageType.CALL, self._seqid)
-    args = clean_args()
-    args.write(self._oprot)
-    self._oprot.writeMessageEnd()
-    self._oprot.trans.flush()
-
-  def recv_clean(self, ):
-    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
-    if mtype == TMessageType.EXCEPTION:
-      x = TApplicationException()
-      x.read(self._iprot)
-      self._iprot.readMessageEnd()
-      raise x
-    result = clean_result()
+    result = setOption_result()
     result.read(self._iprot)
     self._iprot.readMessageEnd()
     return
 
+  def getOption(self, key):
+    """
+    Gets an option
 
-class Processor(hive_metastore.ThriftHiveMetastore.Processor, Iface, TProcessor):
+    Parameters:
+     - key
+    """
+    self.send_getOption(key)
+    return self.recv_getOption()
+
+  def send_getOption(self, key):
+    self._oprot.writeMessageBegin('getOption', TMessageType.CALL, self._seqid)
+    args = getOption_args()
+    args.key = key
+    args.write(self._oprot)
+    self._oprot.writeMessageEnd()
+    self._oprot.trans.flush()
+
+  def recv_getOption(self, ):
+    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
+    if mtype == TMessageType.EXCEPTION:
+      x = TApplicationException()
+      x.read(self._iprot)
+      self._iprot.readMessageEnd()
+      raise x
+    result = getOption_result()
+    result.read(self._iprot)
+    self._iprot.readMessageEnd()
+    if result.success is not None:
+      return result.success
+    raise TApplicationException(TApplicationException.MISSING_RESULT, "getOption failed: unknown result");
+
+  def getOptions(self, ):
+    """
+    Gets all options
+    """
+    self.send_getOptions()
+    return self.recv_getOptions()
+
+  def send_getOptions(self, ):
+    self._oprot.writeMessageBegin('getOptions', TMessageType.CALL, self._seqid)
+    args = getOptions_args()
+    args.write(self._oprot)
+    self._oprot.writeMessageEnd()
+    self._oprot.trans.flush()
+
+  def recv_getOptions(self, ):
+    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
+    if mtype == TMessageType.EXCEPTION:
+      x = TApplicationException()
+      x.read(self._iprot)
+      self._iprot.readMessageEnd()
+      raise x
+    result = getOptions_result()
+    result.read(self._iprot)
+    self._iprot.readMessageEnd()
+    if result.success is not None:
+      return result.success
+    raise TApplicationException(TApplicationException.MISSING_RESULT, "getOptions failed: unknown result");
+
+  def getCpuProfile(self, profileDurationInSec):
+    """
+    Returns a CPU profile over the given time interval (client and server
+    must agree on the profile format).
+
+    Parameters:
+     - profileDurationInSec
+    """
+    self.send_getCpuProfile(profileDurationInSec)
+    return self.recv_getCpuProfile()
+
+  def send_getCpuProfile(self, profileDurationInSec):
+    self._oprot.writeMessageBegin('getCpuProfile', TMessageType.CALL, self._seqid)
+    args = getCpuProfile_args()
+    args.profileDurationInSec = profileDurationInSec
+    args.write(self._oprot)
+    self._oprot.writeMessageEnd()
+    self._oprot.trans.flush()
+
+  def recv_getCpuProfile(self, ):
+    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
+    if mtype == TMessageType.EXCEPTION:
+      x = TApplicationException()
+      x.read(self._iprot)
+      self._iprot.readMessageEnd()
+      raise x
+    result = getCpuProfile_result()
+    result.read(self._iprot)
+    self._iprot.readMessageEnd()
+    if result.success is not None:
+      return result.success
+    raise TApplicationException(TApplicationException.MISSING_RESULT, "getCpuProfile failed: unknown result");
+
+  def aliveSince(self, ):
+    """
+    Returns the unix time that the server has been running since
+    """
+    self.send_aliveSince()
+    return self.recv_aliveSince()
+
+  def send_aliveSince(self, ):
+    self._oprot.writeMessageBegin('aliveSince', TMessageType.CALL, self._seqid)
+    args = aliveSince_args()
+    args.write(self._oprot)
+    self._oprot.writeMessageEnd()
+    self._oprot.trans.flush()
+
+  def recv_aliveSince(self, ):
+    (fname, mtype, rseqid) = self._iprot.readMessageBegin()
+    if mtype == TMessageType.EXCEPTION:
+      x = TApplicationException()
+      x.read(self._iprot)
+      self._iprot.readMessageEnd()
+      raise x
+    result = aliveSince_result()
+    result.read(self._iprot)
+    self._iprot.readMessageEnd()
+    if result.success is not None:
+      return result.success
+    raise TApplicationException(TApplicationException.MISSING_RESULT, "aliveSince failed: unknown result");
+
+  def reinitialize(self, ):
+    """
+    Tell the server to reload its configuration, reopen log files, etc
+    """
+    self.send_reinitialize()
+
+  def send_reinitialize(self, ):
+    self._oprot.writeMessageBegin('reinitialize', TMessageType.CALL, self._seqid)
+    args = reinitialize_args()
+    args.write(self._oprot)
+    self._oprot.writeMessageEnd()
+    self._oprot.trans.flush()
+  def shutdown(self, ):
+    """
+    Suggest a shutdown to the server
+    """
+    self.send_shutdown()
+
+  def send_shutdown(self, ):
+    self._oprot.writeMessageBegin('shutdown', TMessageType.CALL, self._seqid)
+    args = shutdown_args()
+    args.write(self._oprot)
+    self._oprot.writeMessageEnd()
+    self._oprot.trans.flush()
+
+class Processor(Iface, TProcessor):
   def __init__(self, handler):
-    hive_metastore.ThriftHiveMetastore.Processor.__init__(self, handler)
-    self._processMap["execute"] = Processor.process_execute
-    self._processMap["fetchOne"] = Processor.process_fetchOne
-    self._processMap["fetchN"] = Processor.process_fetchN
-    self._processMap["fetchAll"] = Processor.process_fetchAll
-    self._processMap["getSchema"] = Processor.process_getSchema
-    self._processMap["getThriftSchema"] = Processor.process_getThriftSchema
-    self._processMap["getClusterStatus"] = Processor.process_getClusterStatus
-    self._processMap["getQueryPlan"] = Processor.process_getQueryPlan
-    self._processMap["clean"] = Processor.process_clean
+    self._handler = handler
+    self._processMap = {}
+    self._processMap["getName"] = Processor.process_getName
+    self._processMap["getVersion"] = Processor.process_getVersion
+    self._processMap["getStatus"] = Processor.process_getStatus
+    self._processMap["getStatusDetails"] = Processor.process_getStatusDetails
+    self._processMap["getCounters"] = Processor.process_getCounters
+    self._processMap["getCounter"] = Processor.process_getCounter
+    self._processMap["setOption"] = Processor.process_setOption
+    self._processMap["getOption"] = Processor.process_getOption
+    self._processMap["getOptions"] = Processor.process_getOptions
+    self._processMap["getCpuProfile"] = Processor.process_getCpuProfile
+    self._processMap["aliveSince"] = Processor.process_aliveSince
+    self._processMap["reinitialize"] = Processor.process_reinitialize
+    self._processMap["shutdown"] = Processor.process_shutdown
 
   def process(self, iprot, oprot):
     (name, type, seqid) = iprot.readMessageBegin()
@@ -335,254 +509,145 @@ class Processor(hive_metastore.ThriftHiveMetastore.Processor, Iface, TProcessor)
       self._processMap[name](self, seqid, iprot, oprot)
     return True
 
-  def process_execute(self, seqid, iprot, oprot):
-    args = execute_args()
+  def process_getName(self, seqid, iprot, oprot):
+    args = getName_args()
     args.read(iprot)
     iprot.readMessageEnd()
-    result = execute_result()
-    try:
-      self._handler.execute(args.query)
-    except HiveServerException as ex:
-      result.ex = ex
-    oprot.writeMessageBegin("execute", TMessageType.REPLY, seqid)
+    result = getName_result()
+    result.success = self._handler.getName()
+    oprot.writeMessageBegin("getName", TMessageType.REPLY, seqid)
     result.write(oprot)
     oprot.writeMessageEnd()
     oprot.trans.flush()
 
-  def process_fetchOne(self, seqid, iprot, oprot):
-    args = fetchOne_args()
+  def process_getVersion(self, seqid, iprot, oprot):
+    args = getVersion_args()
     args.read(iprot)
     iprot.readMessageEnd()
-    result = fetchOne_result()
-    try:
-      result.success = self._handler.fetchOne()
-    except HiveServerException as ex:
-      result.ex = ex
-    oprot.writeMessageBegin("fetchOne", TMessageType.REPLY, seqid)
+    result = getVersion_result()
+    result.success = self._handler.getVersion()
+    oprot.writeMessageBegin("getVersion", TMessageType.REPLY, seqid)
     result.write(oprot)
     oprot.writeMessageEnd()
     oprot.trans.flush()
 
-  def process_fetchN(self, seqid, iprot, oprot):
-    args = fetchN_args()
+  def process_getStatus(self, seqid, iprot, oprot):
+    args = getStatus_args()
     args.read(iprot)
     iprot.readMessageEnd()
-    result = fetchN_result()
-    try:
-      result.success = self._handler.fetchN(args.numRows)
-    except HiveServerException as ex:
-      result.ex = ex
-    oprot.writeMessageBegin("fetchN", TMessageType.REPLY, seqid)
+    result = getStatus_result()
+    result.success = self._handler.getStatus()
+    oprot.writeMessageBegin("getStatus", TMessageType.REPLY, seqid)
     result.write(oprot)
     oprot.writeMessageEnd()
     oprot.trans.flush()
 
-  def process_fetchAll(self, seqid, iprot, oprot):
-    args = fetchAll_args()
+  def process_getStatusDetails(self, seqid, iprot, oprot):
+    args = getStatusDetails_args()
     args.read(iprot)
     iprot.readMessageEnd()
-    result = fetchAll_result()
-    try:
-      result.success = self._handler.fetchAll()
-    except HiveServerException as ex:
-      result.ex = ex
-    oprot.writeMessageBegin("fetchAll", TMessageType.REPLY, seqid)
+    result = getStatusDetails_result()
+    result.success = self._handler.getStatusDetails()
+    oprot.writeMessageBegin("getStatusDetails", TMessageType.REPLY, seqid)
     result.write(oprot)
     oprot.writeMessageEnd()
     oprot.trans.flush()
 
-  def process_getSchema(self, seqid, iprot, oprot):
-    args = getSchema_args()
+  def process_getCounters(self, seqid, iprot, oprot):
+    args = getCounters_args()
     args.read(iprot)
     iprot.readMessageEnd()
-    result = getSchema_result()
-    try:
-      result.success = self._handler.getSchema()
-    except HiveServerException as ex:
-      result.ex = ex
-    oprot.writeMessageBegin("getSchema", TMessageType.REPLY, seqid)
+    result = getCounters_result()
+    result.success = self._handler.getCounters()
+    oprot.writeMessageBegin("getCounters", TMessageType.REPLY, seqid)
     result.write(oprot)
     oprot.writeMessageEnd()
     oprot.trans.flush()
 
-  def process_getThriftSchema(self, seqid, iprot, oprot):
-    args = getThriftSchema_args()
+  def process_getCounter(self, seqid, iprot, oprot):
+    args = getCounter_args()
     args.read(iprot)
     iprot.readMessageEnd()
-    result = getThriftSchema_result()
-    try:
-      result.success = self._handler.getThriftSchema()
-    except HiveServerException as ex:
-      result.ex = ex
-    oprot.writeMessageBegin("getThriftSchema", TMessageType.REPLY, seqid)
+    result = getCounter_result()
+    result.success = self._handler.getCounter(args.key)
+    oprot.writeMessageBegin("getCounter", TMessageType.REPLY, seqid)
     result.write(oprot)
     oprot.writeMessageEnd()
     oprot.trans.flush()
 
-  def process_getClusterStatus(self, seqid, iprot, oprot):
-    args = getClusterStatus_args()
+  def process_setOption(self, seqid, iprot, oprot):
+    args = setOption_args()
     args.read(iprot)
     iprot.readMessageEnd()
-    result = getClusterStatus_result()
-    try:
-      result.success = self._handler.getClusterStatus()
-    except HiveServerException as ex:
-      result.ex = ex
-    oprot.writeMessageBegin("getClusterStatus", TMessageType.REPLY, seqid)
+    result = setOption_result()
+    self._handler.setOption(args.key, args.value)
+    oprot.writeMessageBegin("setOption", TMessageType.REPLY, seqid)
     result.write(oprot)
     oprot.writeMessageEnd()
     oprot.trans.flush()
 
-  def process_getQueryPlan(self, seqid, iprot, oprot):
-    args = getQueryPlan_args()
+  def process_getOption(self, seqid, iprot, oprot):
+    args = getOption_args()
     args.read(iprot)
     iprot.readMessageEnd()
-    result = getQueryPlan_result()
-    try:
-      result.success = self._handler.getQueryPlan()
-    except HiveServerException as ex:
-      result.ex = ex
-    oprot.writeMessageBegin("getQueryPlan", TMessageType.REPLY, seqid)
+    result = getOption_result()
+    result.success = self._handler.getOption(args.key)
+    oprot.writeMessageBegin("getOption", TMessageType.REPLY, seqid)
     result.write(oprot)
     oprot.writeMessageEnd()
     oprot.trans.flush()
 
-  def process_clean(self, seqid, iprot, oprot):
-    args = clean_args()
+  def process_getOptions(self, seqid, iprot, oprot):
+    args = getOptions_args()
     args.read(iprot)
     iprot.readMessageEnd()
-    result = clean_result()
-    self._handler.clean()
-    oprot.writeMessageBegin("clean", TMessageType.REPLY, seqid)
+    result = getOptions_result()
+    result.success = self._handler.getOptions()
+    oprot.writeMessageBegin("getOptions", TMessageType.REPLY, seqid)
     result.write(oprot)
     oprot.writeMessageEnd()
     oprot.trans.flush()
+
+  def process_getCpuProfile(self, seqid, iprot, oprot):
+    args = getCpuProfile_args()
+    args.read(iprot)
+    iprot.readMessageEnd()
+    result = getCpuProfile_result()
+    result.success = self._handler.getCpuProfile(args.profileDurationInSec)
+    oprot.writeMessageBegin("getCpuProfile", TMessageType.REPLY, seqid)
+    result.write(oprot)
+    oprot.writeMessageEnd()
+    oprot.trans.flush()
+
+  def process_aliveSince(self, seqid, iprot, oprot):
+    args = aliveSince_args()
+    args.read(iprot)
+    iprot.readMessageEnd()
+    result = aliveSince_result()
+    result.success = self._handler.aliveSince()
+    oprot.writeMessageBegin("aliveSince", TMessageType.REPLY, seqid)
+    result.write(oprot)
+    oprot.writeMessageEnd()
+    oprot.trans.flush()
+
+  def process_reinitialize(self, seqid, iprot, oprot):
+    args = reinitialize_args()
+    args.read(iprot)
+    iprot.readMessageEnd()
+    self._handler.reinitialize()
+    return
+
+  def process_shutdown(self, seqid, iprot, oprot):
+    args = shutdown_args()
+    args.read(iprot)
+    iprot.readMessageEnd()
+    self._handler.shutdown()
+    return
 
 
 # HELPER FUNCTIONS AND STRUCTURES
 
-class execute_args:
-  """
-  Attributes:
-   - query
-  """
-
-  thrift_spec = (
-    None, # 0
-    (1, TType.STRING, 'query', None, None, ), # 1
-  )
-
-  def __init__(self, query=None,):
-    self.query = query
-
-  def read(self, iprot):
-    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
-      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      if fid == 1:
-        if ftype == TType.STRING:
-          self.query = iprot.readString();
-        else:
-          iprot.skip(ftype)
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
-      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
-      return
-    oprot.writeStructBegin('execute_args')
-    if self.query is not None:
-      oprot.writeFieldBegin('query', TType.STRING, 1)
-      oprot.writeString(self.query)
-      oprot.writeFieldEnd()
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def validate(self):
-    return
-
-
-  def __repr__(self):
-    L = ['%s=%r' % (key, value)
-      for key, value in self.__dict__.iteritems()]
-    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-  def __eq__(self, other):
-    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-  def __ne__(self, other):
-    return not (self == other)
-
-class execute_result:
-  """
-  Attributes:
-   - ex
-  """
-
-  thrift_spec = (
-    None, # 0
-    (1, TType.STRUCT, 'ex', (HiveServerException, HiveServerException.thrift_spec), None, ), # 1
-  )
-
-  def __init__(self, ex=None,):
-    self.ex = ex
-
-  def read(self, iprot):
-    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
-      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      if fid == 1:
-        if ftype == TType.STRUCT:
-          self.ex = HiveServerException()
-          self.ex.read(iprot)
-        else:
-          iprot.skip(ftype)
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
-      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
-      return
-    oprot.writeStructBegin('execute_result')
-    if self.ex is not None:
-      oprot.writeFieldBegin('ex', TType.STRUCT, 1)
-      self.ex.write(oprot)
-      oprot.writeFieldEnd()
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def validate(self):
-    return
-
-
-  def __repr__(self):
-    L = ['%s=%r' % (key, value)
-      for key, value in self.__dict__.iteritems()]
-    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-  def __eq__(self, other):
-    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-  def __ne__(self, other):
-    return not (self == other)
-
-class fetchOne_args:
+class getName_args(object):
 
   thrift_spec = (
   )
@@ -605,7 +670,7 @@ class fetchOne_args:
     if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
       oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
       return
-    oprot.writeStructBegin('fetchOne_args')
+    oprot.writeStructBegin('getName_args')
     oprot.writeFieldStop()
     oprot.writeStructEnd()
 
@@ -624,21 +689,18 @@ class fetchOne_args:
   def __ne__(self, other):
     return not (self == other)
 
-class fetchOne_result:
+class getName_result(object):
   """
   Attributes:
    - success
-   - ex
   """
 
   thrift_spec = (
     (0, TType.STRING, 'success', None, None, ), # 0
-    (1, TType.STRUCT, 'ex', (HiveServerException, HiveServerException.thrift_spec), None, ), # 1
   )
 
-  def __init__(self, success=None, ex=None,):
+  def __init__(self, success=None,):
     self.success = success
-    self.ex = ex
 
   def read(self, iprot):
     if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
@@ -654,12 +716,6 @@ class fetchOne_result:
           self.success = iprot.readString();
         else:
           iprot.skip(ftype)
-      elif fid == 1:
-        if ftype == TType.STRUCT:
-          self.ex = HiveServerException()
-          self.ex.read(iprot)
-        else:
-          iprot.skip(ftype)
       else:
         iprot.skip(ftype)
       iprot.readFieldEnd()
@@ -669,14 +725,10 @@ class fetchOne_result:
     if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
       oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
       return
-    oprot.writeStructBegin('fetchOne_result')
+    oprot.writeStructBegin('getName_result')
     if self.success is not None:
       oprot.writeFieldBegin('success', TType.STRING, 0)
       oprot.writeString(self.success)
-      oprot.writeFieldEnd()
-    if self.ex is not None:
-      oprot.writeFieldBegin('ex', TType.STRUCT, 1)
-      self.ex.write(oprot)
       oprot.writeFieldEnd()
     oprot.writeFieldStop()
     oprot.writeStructEnd()
@@ -696,19 +748,896 @@ class fetchOne_result:
   def __ne__(self, other):
     return not (self == other)
 
-class fetchN_args:
+class getVersion_args(object):
+
+  thrift_spec = (
+  )
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('getVersion_args')
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class getVersion_result(object):
   """
   Attributes:
-   - numRows
+   - success
+  """
+
+  thrift_spec = (
+    (0, TType.STRING, 'success', None, None, ), # 0
+  )
+
+  def __init__(self, success=None,):
+    self.success = success
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      if fid == 0:
+        if ftype == TType.STRING:
+          self.success = iprot.readString();
+        else:
+          iprot.skip(ftype)
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('getVersion_result')
+    if self.success is not None:
+      oprot.writeFieldBegin('success', TType.STRING, 0)
+      oprot.writeString(self.success)
+      oprot.writeFieldEnd()
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class getStatus_args(object):
+
+  thrift_spec = (
+  )
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('getStatus_args')
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class getStatus_result(object):
+  """
+  Attributes:
+   - success
+  """
+
+  thrift_spec = (
+    (0, TType.I32, 'success', None, None, ), # 0
+  )
+
+  def __init__(self, success=None,):
+    self.success = success
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      if fid == 0:
+        if ftype == TType.I32:
+          self.success = iprot.readI32();
+        else:
+          iprot.skip(ftype)
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('getStatus_result')
+    if self.success is not None:
+      oprot.writeFieldBegin('success', TType.I32, 0)
+      oprot.writeI32(self.success)
+      oprot.writeFieldEnd()
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class getStatusDetails_args(object):
+
+  thrift_spec = (
+  )
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('getStatusDetails_args')
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class getStatusDetails_result(object):
+  """
+  Attributes:
+   - success
+  """
+
+  thrift_spec = (
+    (0, TType.STRING, 'success', None, None, ), # 0
+  )
+
+  def __init__(self, success=None,):
+    self.success = success
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      if fid == 0:
+        if ftype == TType.STRING:
+          self.success = iprot.readString();
+        else:
+          iprot.skip(ftype)
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('getStatusDetails_result')
+    if self.success is not None:
+      oprot.writeFieldBegin('success', TType.STRING, 0)
+      oprot.writeString(self.success)
+      oprot.writeFieldEnd()
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class getCounters_args(object):
+
+  thrift_spec = (
+  )
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('getCounters_args')
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class getCounters_result(object):
+  """
+  Attributes:
+   - success
+  """
+
+  thrift_spec = (
+    (0, TType.MAP, 'success', (TType.STRING,None,TType.I64,None), None, ), # 0
+  )
+
+  def __init__(self, success=None,):
+    self.success = success
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      if fid == 0:
+        if ftype == TType.MAP:
+          self.success = {}
+          (_ktype1, _vtype2, _size0 ) = iprot.readMapBegin() 
+          for _i4 in xrange(_size0):
+            _key5 = iprot.readString();
+            _val6 = iprot.readI64();
+            self.success[_key5] = _val6
+          iprot.readMapEnd()
+        else:
+          iprot.skip(ftype)
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('getCounters_result')
+    if self.success is not None:
+      oprot.writeFieldBegin('success', TType.MAP, 0)
+      oprot.writeMapBegin(TType.STRING, TType.I64, len(self.success))
+      for kiter7,viter8 in self.success.items():
+        oprot.writeString(kiter7)
+        oprot.writeI64(viter8)
+      oprot.writeMapEnd()
+      oprot.writeFieldEnd()
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class getCounter_args(object):
+  """
+  Attributes:
+   - key
   """
 
   thrift_spec = (
     None, # 0
-    (1, TType.I32, 'numRows', None, None, ), # 1
+    (1, TType.STRING, 'key', None, None, ), # 1
   )
 
-  def __init__(self, numRows=None,):
-    self.numRows = numRows
+  def __init__(self, key=None,):
+    self.key = key
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      if fid == 1:
+        if ftype == TType.STRING:
+          self.key = iprot.readString();
+        else:
+          iprot.skip(ftype)
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('getCounter_args')
+    if self.key is not None:
+      oprot.writeFieldBegin('key', TType.STRING, 1)
+      oprot.writeString(self.key)
+      oprot.writeFieldEnd()
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class getCounter_result(object):
+  """
+  Attributes:
+   - success
+  """
+
+  thrift_spec = (
+    (0, TType.I64, 'success', None, None, ), # 0
+  )
+
+  def __init__(self, success=None,):
+    self.success = success
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      if fid == 0:
+        if ftype == TType.I64:
+          self.success = iprot.readI64();
+        else:
+          iprot.skip(ftype)
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('getCounter_result')
+    if self.success is not None:
+      oprot.writeFieldBegin('success', TType.I64, 0)
+      oprot.writeI64(self.success)
+      oprot.writeFieldEnd()
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class setOption_args(object):
+  """
+  Attributes:
+   - key
+   - value
+  """
+
+  thrift_spec = (
+    None, # 0
+    (1, TType.STRING, 'key', None, None, ), # 1
+    (2, TType.STRING, 'value', None, None, ), # 2
+  )
+
+  def __init__(self, key=None, value=None,):
+    self.key = key
+    self.value = value
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      if fid == 1:
+        if ftype == TType.STRING:
+          self.key = iprot.readString();
+        else:
+          iprot.skip(ftype)
+      elif fid == 2:
+        if ftype == TType.STRING:
+          self.value = iprot.readString();
+        else:
+          iprot.skip(ftype)
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('setOption_args')
+    if self.key is not None:
+      oprot.writeFieldBegin('key', TType.STRING, 1)
+      oprot.writeString(self.key)
+      oprot.writeFieldEnd()
+    if self.value is not None:
+      oprot.writeFieldBegin('value', TType.STRING, 2)
+      oprot.writeString(self.value)
+      oprot.writeFieldEnd()
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class setOption_result(object):
+
+  thrift_spec = (
+  )
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('setOption_result')
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class getOption_args(object):
+  """
+  Attributes:
+   - key
+  """
+
+  thrift_spec = (
+    None, # 0
+    (1, TType.STRING, 'key', None, None, ), # 1
+  )
+
+  def __init__(self, key=None,):
+    self.key = key
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      if fid == 1:
+        if ftype == TType.STRING:
+          self.key = iprot.readString();
+        else:
+          iprot.skip(ftype)
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('getOption_args')
+    if self.key is not None:
+      oprot.writeFieldBegin('key', TType.STRING, 1)
+      oprot.writeString(self.key)
+      oprot.writeFieldEnd()
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class getOption_result(object):
+  """
+  Attributes:
+   - success
+  """
+
+  thrift_spec = (
+    (0, TType.STRING, 'success', None, None, ), # 0
+  )
+
+  def __init__(self, success=None,):
+    self.success = success
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      if fid == 0:
+        if ftype == TType.STRING:
+          self.success = iprot.readString();
+        else:
+          iprot.skip(ftype)
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('getOption_result')
+    if self.success is not None:
+      oprot.writeFieldBegin('success', TType.STRING, 0)
+      oprot.writeString(self.success)
+      oprot.writeFieldEnd()
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class getOptions_args(object):
+
+  thrift_spec = (
+  )
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('getOptions_args')
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class getOptions_result(object):
+  """
+  Attributes:
+   - success
+  """
+
+  thrift_spec = (
+    (0, TType.MAP, 'success', (TType.STRING,None,TType.STRING,None), None, ), # 0
+  )
+
+  def __init__(self, success=None,):
+    self.success = success
+
+  def read(self, iprot):
+    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
+      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
+      return
+    iprot.readStructBegin()
+    while True:
+      (fname, ftype, fid) = iprot.readFieldBegin()
+      if ftype == TType.STOP:
+        break
+      if fid == 0:
+        if ftype == TType.MAP:
+          self.success = {}
+          (_ktype10, _vtype11, _size9 ) = iprot.readMapBegin() 
+          for _i13 in xrange(_size9):
+            _key14 = iprot.readString();
+            _val15 = iprot.readString();
+            self.success[_key14] = _val15
+          iprot.readMapEnd()
+        else:
+          iprot.skip(ftype)
+      else:
+        iprot.skip(ftype)
+      iprot.readFieldEnd()
+    iprot.readStructEnd()
+
+  def write(self, oprot):
+    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
+      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
+      return
+    oprot.writeStructBegin('getOptions_result')
+    if self.success is not None:
+      oprot.writeFieldBegin('success', TType.MAP, 0)
+      oprot.writeMapBegin(TType.STRING, TType.STRING, len(self.success))
+      for kiter16,viter17 in self.success.items():
+        oprot.writeString(kiter16)
+        oprot.writeString(viter17)
+      oprot.writeMapEnd()
+      oprot.writeFieldEnd()
+    oprot.writeFieldStop()
+    oprot.writeStructEnd()
+
+  def validate(self):
+    return
+
+
+  def __repr__(self):
+    L = ['%s=%r' % (key, value)
+      for key, value in self.__dict__.iteritems()]
+    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+  def __eq__(self, other):
+    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+  def __ne__(self, other):
+    return not (self == other)
+
+class getCpuProfile_args(object):
+  """
+  Attributes:
+   - profileDurationInSec
+  """
+
+  thrift_spec = (
+    None, # 0
+    (1, TType.I32, 'profileDurationInSec', None, None, ), # 1
+  )
+
+  def __init__(self, profileDurationInSec=None,):
+    self.profileDurationInSec = profileDurationInSec
 
   def read(self, iprot):
     if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
@@ -721,7 +1650,7 @@ class fetchN_args:
         break
       if fid == 1:
         if ftype == TType.I32:
-          self.numRows = iprot.readI32();
+          self.profileDurationInSec = iprot.readI32();
         else:
           iprot.skip(ftype)
       else:
@@ -733,10 +1662,10 @@ class fetchN_args:
     if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
       oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
       return
-    oprot.writeStructBegin('fetchN_args')
-    if self.numRows is not None:
-      oprot.writeFieldBegin('numRows', TType.I32, 1)
-      oprot.writeI32(self.numRows)
+    oprot.writeStructBegin('getCpuProfile_args')
+    if self.profileDurationInSec is not None:
+      oprot.writeFieldBegin('profileDurationInSec', TType.I32, 1)
+      oprot.writeI32(self.profileDurationInSec)
       oprot.writeFieldEnd()
     oprot.writeFieldStop()
     oprot.writeStructEnd()
@@ -756,21 +1685,18 @@ class fetchN_args:
   def __ne__(self, other):
     return not (self == other)
 
-class fetchN_result:
+class getCpuProfile_result(object):
   """
   Attributes:
    - success
-   - ex
   """
 
   thrift_spec = (
-    (0, TType.LIST, 'success', (TType.STRING,None), None, ), # 0
-    (1, TType.STRUCT, 'ex', (HiveServerException, HiveServerException.thrift_spec), None, ), # 1
+    (0, TType.STRING, 'success', None, None, ), # 0
   )
 
-  def __init__(self, success=None, ex=None,):
+  def __init__(self, success=None,):
     self.success = success
-    self.ex = ex
 
   def read(self, iprot):
     if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
@@ -782,19 +1708,8 @@ class fetchN_result:
       if ftype == TType.STOP:
         break
       if fid == 0:
-        if ftype == TType.LIST:
-          self.success = []
-          (_etype3, _size0) = iprot.readListBegin()
-          for _i4 in xrange(_size0):
-            _elem5 = iprot.readString();
-            self.success.append(_elem5)
-          iprot.readListEnd()
-        else:
-          iprot.skip(ftype)
-      elif fid == 1:
-        if ftype == TType.STRUCT:
-          self.ex = HiveServerException()
-          self.ex.read(iprot)
+        if ftype == TType.STRING:
+          self.success = iprot.readString();
         else:
           iprot.skip(ftype)
       else:
@@ -806,17 +1721,10 @@ class fetchN_result:
     if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
       oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
       return
-    oprot.writeStructBegin('fetchN_result')
+    oprot.writeStructBegin('getCpuProfile_result')
     if self.success is not None:
-      oprot.writeFieldBegin('success', TType.LIST, 0)
-      oprot.writeListBegin(TType.STRING, len(self.success))
-      for iter6 in self.success:
-        oprot.writeString(iter6)
-      oprot.writeListEnd()
-      oprot.writeFieldEnd()
-    if self.ex is not None:
-      oprot.writeFieldBegin('ex', TType.STRUCT, 1)
-      self.ex.write(oprot)
+      oprot.writeFieldBegin('success', TType.STRING, 0)
+      oprot.writeString(self.success)
       oprot.writeFieldEnd()
     oprot.writeFieldStop()
     oprot.writeStructEnd()
@@ -836,7 +1744,7 @@ class fetchN_result:
   def __ne__(self, other):
     return not (self == other)
 
-class fetchAll_args:
+class aliveSince_args(object):
 
   thrift_spec = (
   )
@@ -859,7 +1767,7 @@ class fetchAll_args:
     if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
       oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
       return
-    oprot.writeStructBegin('fetchAll_args')
+    oprot.writeStructBegin('aliveSince_args')
     oprot.writeFieldStop()
     oprot.writeStructEnd()
 
@@ -878,21 +1786,18 @@ class fetchAll_args:
   def __ne__(self, other):
     return not (self == other)
 
-class fetchAll_result:
+class aliveSince_result(object):
   """
   Attributes:
    - success
-   - ex
   """
 
   thrift_spec = (
-    (0, TType.LIST, 'success', (TType.STRING,None), None, ), # 0
-    (1, TType.STRUCT, 'ex', (HiveServerException, HiveServerException.thrift_spec), None, ), # 1
+    (0, TType.I64, 'success', None, None, ), # 0
   )
 
-  def __init__(self, success=None, ex=None,):
+  def __init__(self, success=None,):
     self.success = success
-    self.ex = ex
 
   def read(self, iprot):
     if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
@@ -904,19 +1809,8 @@ class fetchAll_result:
       if ftype == TType.STOP:
         break
       if fid == 0:
-        if ftype == TType.LIST:
-          self.success = []
-          (_etype10, _size7) = iprot.readListBegin()
-          for _i11 in xrange(_size7):
-            _elem12 = iprot.readString();
-            self.success.append(_elem12)
-          iprot.readListEnd()
-        else:
-          iprot.skip(ftype)
-      elif fid == 1:
-        if ftype == TType.STRUCT:
-          self.ex = HiveServerException()
-          self.ex.read(iprot)
+        if ftype == TType.I64:
+          self.success = iprot.readI64();
         else:
           iprot.skip(ftype)
       else:
@@ -928,17 +1822,10 @@ class fetchAll_result:
     if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
       oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
       return
-    oprot.writeStructBegin('fetchAll_result')
+    oprot.writeStructBegin('aliveSince_result')
     if self.success is not None:
-      oprot.writeFieldBegin('success', TType.LIST, 0)
-      oprot.writeListBegin(TType.STRING, len(self.success))
-      for iter13 in self.success:
-        oprot.writeString(iter13)
-      oprot.writeListEnd()
-      oprot.writeFieldEnd()
-    if self.ex is not None:
-      oprot.writeFieldBegin('ex', TType.STRUCT, 1)
-      self.ex.write(oprot)
+      oprot.writeFieldBegin('success', TType.I64, 0)
+      oprot.writeI64(self.success)
       oprot.writeFieldEnd()
     oprot.writeFieldStop()
     oprot.writeStructEnd()
@@ -958,7 +1845,7 @@ class fetchAll_result:
   def __ne__(self, other):
     return not (self == other)
 
-class getSchema_args:
+class reinitialize_args(object):
 
   thrift_spec = (
   )
@@ -981,7 +1868,7 @@ class getSchema_args:
     if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
       oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
       return
-    oprot.writeStructBegin('getSchema_args')
+    oprot.writeStructBegin('reinitialize_args')
     oprot.writeFieldStop()
     oprot.writeStructEnd()
 
@@ -1000,80 +1887,7 @@ class getSchema_args:
   def __ne__(self, other):
     return not (self == other)
 
-class getSchema_result:
-  """
-  Attributes:
-   - success
-   - ex
-  """
-
-  thrift_spec = (
-    (0, TType.STRUCT, 'success', (hive_metastore.ttypes.Schema, hive_metastore.ttypes.Schema.thrift_spec), None, ), # 0
-    (1, TType.STRUCT, 'ex', (HiveServerException, HiveServerException.thrift_spec), None, ), # 1
-  )
-
-  def __init__(self, success=None, ex=None,):
-    self.success = success
-    self.ex = ex
-
-  def read(self, iprot):
-    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
-      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      if fid == 0:
-        if ftype == TType.STRUCT:
-          self.success = hive_metastore.ttypes.Schema()
-          self.success.read(iprot)
-        else:
-          iprot.skip(ftype)
-      elif fid == 1:
-        if ftype == TType.STRUCT:
-          self.ex = HiveServerException()
-          self.ex.read(iprot)
-        else:
-          iprot.skip(ftype)
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
-      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
-      return
-    oprot.writeStructBegin('getSchema_result')
-    if self.success is not None:
-      oprot.writeFieldBegin('success', TType.STRUCT, 0)
-      self.success.write(oprot)
-      oprot.writeFieldEnd()
-    if self.ex is not None:
-      oprot.writeFieldBegin('ex', TType.STRUCT, 1)
-      self.ex.write(oprot)
-      oprot.writeFieldEnd()
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def validate(self):
-    return
-
-
-  def __repr__(self):
-    L = ['%s=%r' % (key, value)
-      for key, value in self.__dict__.iteritems()]
-    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-  def __eq__(self, other):
-    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-  def __ne__(self, other):
-    return not (self == other)
-
-class getThriftSchema_args:
+class shutdown_args(object):
 
   thrift_spec = (
   )
@@ -1096,394 +1910,7 @@ class getThriftSchema_args:
     if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
       oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
       return
-    oprot.writeStructBegin('getThriftSchema_args')
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def validate(self):
-    return
-
-
-  def __repr__(self):
-    L = ['%s=%r' % (key, value)
-      for key, value in self.__dict__.iteritems()]
-    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-  def __eq__(self, other):
-    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-  def __ne__(self, other):
-    return not (self == other)
-
-class getThriftSchema_result:
-  """
-  Attributes:
-   - success
-   - ex
-  """
-
-  thrift_spec = (
-    (0, TType.STRUCT, 'success', (hive_metastore.ttypes.Schema, hive_metastore.ttypes.Schema.thrift_spec), None, ), # 0
-    (1, TType.STRUCT, 'ex', (HiveServerException, HiveServerException.thrift_spec), None, ), # 1
-  )
-
-  def __init__(self, success=None, ex=None,):
-    self.success = success
-    self.ex = ex
-
-  def read(self, iprot):
-    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
-      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      if fid == 0:
-        if ftype == TType.STRUCT:
-          self.success = hive_metastore.ttypes.Schema()
-          self.success.read(iprot)
-        else:
-          iprot.skip(ftype)
-      elif fid == 1:
-        if ftype == TType.STRUCT:
-          self.ex = HiveServerException()
-          self.ex.read(iprot)
-        else:
-          iprot.skip(ftype)
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
-      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
-      return
-    oprot.writeStructBegin('getThriftSchema_result')
-    if self.success is not None:
-      oprot.writeFieldBegin('success', TType.STRUCT, 0)
-      self.success.write(oprot)
-      oprot.writeFieldEnd()
-    if self.ex is not None:
-      oprot.writeFieldBegin('ex', TType.STRUCT, 1)
-      self.ex.write(oprot)
-      oprot.writeFieldEnd()
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def validate(self):
-    return
-
-
-  def __repr__(self):
-    L = ['%s=%r' % (key, value)
-      for key, value in self.__dict__.iteritems()]
-    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-  def __eq__(self, other):
-    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-  def __ne__(self, other):
-    return not (self == other)
-
-class getClusterStatus_args:
-
-  thrift_spec = (
-  )
-
-  def read(self, iprot):
-    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
-      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
-      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
-      return
-    oprot.writeStructBegin('getClusterStatus_args')
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def validate(self):
-    return
-
-
-  def __repr__(self):
-    L = ['%s=%r' % (key, value)
-      for key, value in self.__dict__.iteritems()]
-    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-  def __eq__(self, other):
-    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-  def __ne__(self, other):
-    return not (self == other)
-
-class getClusterStatus_result:
-  """
-  Attributes:
-   - success
-   - ex
-  """
-
-  thrift_spec = (
-    (0, TType.STRUCT, 'success', (HiveClusterStatus, HiveClusterStatus.thrift_spec), None, ), # 0
-    (1, TType.STRUCT, 'ex', (HiveServerException, HiveServerException.thrift_spec), None, ), # 1
-  )
-
-  def __init__(self, success=None, ex=None,):
-    self.success = success
-    self.ex = ex
-
-  def read(self, iprot):
-    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
-      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      if fid == 0:
-        if ftype == TType.STRUCT:
-          self.success = HiveClusterStatus()
-          self.success.read(iprot)
-        else:
-          iprot.skip(ftype)
-      elif fid == 1:
-        if ftype == TType.STRUCT:
-          self.ex = HiveServerException()
-          self.ex.read(iprot)
-        else:
-          iprot.skip(ftype)
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
-      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
-      return
-    oprot.writeStructBegin('getClusterStatus_result')
-    if self.success is not None:
-      oprot.writeFieldBegin('success', TType.STRUCT, 0)
-      self.success.write(oprot)
-      oprot.writeFieldEnd()
-    if self.ex is not None:
-      oprot.writeFieldBegin('ex', TType.STRUCT, 1)
-      self.ex.write(oprot)
-      oprot.writeFieldEnd()
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def validate(self):
-    return
-
-
-  def __repr__(self):
-    L = ['%s=%r' % (key, value)
-      for key, value in self.__dict__.iteritems()]
-    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-  def __eq__(self, other):
-    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-  def __ne__(self, other):
-    return not (self == other)
-
-class getQueryPlan_args:
-
-  thrift_spec = (
-  )
-
-  def read(self, iprot):
-    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
-      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
-      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
-      return
-    oprot.writeStructBegin('getQueryPlan_args')
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def validate(self):
-    return
-
-
-  def __repr__(self):
-    L = ['%s=%r' % (key, value)
-      for key, value in self.__dict__.iteritems()]
-    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-  def __eq__(self, other):
-    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-  def __ne__(self, other):
-    return not (self == other)
-
-class getQueryPlan_result:
-  """
-  Attributes:
-   - success
-   - ex
-  """
-
-  thrift_spec = (
-    (0, TType.STRUCT, 'success', (queryplan.ttypes.QueryPlan, queryplan.ttypes.QueryPlan.thrift_spec), None, ), # 0
-    (1, TType.STRUCT, 'ex', (HiveServerException, HiveServerException.thrift_spec), None, ), # 1
-  )
-
-  def __init__(self, success=None, ex=None,):
-    self.success = success
-    self.ex = ex
-
-  def read(self, iprot):
-    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
-      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      if fid == 0:
-        if ftype == TType.STRUCT:
-          self.success = queryplan.ttypes.QueryPlan()
-          self.success.read(iprot)
-        else:
-          iprot.skip(ftype)
-      elif fid == 1:
-        if ftype == TType.STRUCT:
-          self.ex = HiveServerException()
-          self.ex.read(iprot)
-        else:
-          iprot.skip(ftype)
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
-      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
-      return
-    oprot.writeStructBegin('getQueryPlan_result')
-    if self.success is not None:
-      oprot.writeFieldBegin('success', TType.STRUCT, 0)
-      self.success.write(oprot)
-      oprot.writeFieldEnd()
-    if self.ex is not None:
-      oprot.writeFieldBegin('ex', TType.STRUCT, 1)
-      self.ex.write(oprot)
-      oprot.writeFieldEnd()
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def validate(self):
-    return
-
-
-  def __repr__(self):
-    L = ['%s=%r' % (key, value)
-      for key, value in self.__dict__.iteritems()]
-    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-  def __eq__(self, other):
-    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-  def __ne__(self, other):
-    return not (self == other)
-
-class clean_args:
-
-  thrift_spec = (
-  )
-
-  def read(self, iprot):
-    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
-      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
-      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
-      return
-    oprot.writeStructBegin('clean_args')
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def validate(self):
-    return
-
-
-  def __repr__(self):
-    L = ['%s=%r' % (key, value)
-      for key, value in self.__dict__.iteritems()]
-    return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-  def __eq__(self, other):
-    return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-  def __ne__(self, other):
-    return not (self == other)
-
-class clean_result:
-
-  thrift_spec = (
-  )
-
-  def read(self, iprot):
-    if iprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastbinary is not None:
-      fastbinary.decode_binary(self, iprot.trans, (self.__class__, self.thrift_spec))
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if oprot.__class__ == TBinaryProtocol.TBinaryProtocolAccelerated and self.thrift_spec is not None and fastbinary is not None:
-      oprot.trans.write(fastbinary.encode_binary(self, (self.__class__, self.thrift_spec)))
-      return
-    oprot.writeStructBegin('clean_result')
+    oprot.writeStructBegin('shutdown_args')
     oprot.writeFieldStop()
     oprot.writeStructEnd()
 
