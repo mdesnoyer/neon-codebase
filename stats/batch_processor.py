@@ -25,6 +25,7 @@ import impala.error
 import json
 import paramiko
 import re
+import socket
 import subprocess
 import tempfile
 import threading
@@ -56,10 +57,15 @@ define("input_path", default="s3://neon-tracker-logs-v2/v2.2/*/*/*/*",
        help="Path for the raw input data")
 define("cleaned_output_path", default="s3://neon-tracker-logs-v2/cleaned",
        help="Base path where the cleaned logs will be output")
-define("mr_jar", default=None, help="Mapreduce jar")
+define("mr_jar", default=None, type=str, help="Mapreduce jar")
 define("compiled_schema_path",
        default=os.path.join(__base_path__, 'schema', 'compiled'),
        help='Path to the bucket of compiled avro schema')
+define("get_master_host_key", default=0,
+       help=("If 1, we will get the cluster's master node's ssh key, "
+             "register it, and stop"))
+define("master_host_key_file", default=None, type=str,
+       help='File to output the master host key to')
 
 from utils import statemon
 statemon.define("stats_cleaning_job_failures", int)
@@ -120,16 +126,35 @@ class ClusterSSHConnection:
         key.get_contents_to_file(self.key_file)
 
         self.client = paramiko.SSHClient()
-        self.client.load_system_host_keys()
-        
+        self.client.load_system_host_keys(options.master_host_key_file)
+
+    def _connect(self):
+        try:
+            self.client.connect(self.cluster_info.master_ip,
+                                username="hadoop",
+                                key_filename = self.key_file.name)
+        except socket.error as e:
+            raise ClusterConnectionError("Error connecting to %s: %s" %
+                                         (self.cluster_info.master_ip, e))
+
+    def get_master_host_key(self):
+        _log.info("Retrieving the master host key")
+        self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        self._connect()
+        self.client.close()
+
+        if options.master_host_key_file is not None:
+            self.client.save_host_keys()        
 
     def copy_file(self, local_path, remote_path):
         '''Copies a file from the local path to the cluster.
 
         '''
-        self.client.connect(self.cluster_info.master_ip,
-                            username='hadoop',
-                            key_filename = self.key_file.name)
+        
+        _log.info("Copying %s to %s" % (local_path,
+                                        self.cluster_info.master_ip))
+        self._connect()
+        
         try:
             ftp_client = self.client.open_sftp()
             ftp_client.put(local_path, remote_path)
@@ -144,9 +169,10 @@ class ClusterSSHConnection:
         process failed.
         '''
 
-        self.client.connect(self.cluster_info.master_ip,
-                            username='hadoop',
-                            key_filename = self.key_file.name)
+        _log.info("Executing %s on cluster master at %s" %
+                  (cmd, self.cluster_info.master_ip))
+        self._connect()
+            
         stdout_msg = []
         stderr_msg = []
         retcode = None
@@ -395,6 +421,10 @@ def main():
     cluster_info = ClusterInfo()
 
     ssh_conn = ClusterSSHConnection(cluster_info)
+
+    if options.get_master_host_key:
+        ssh_conn.get_master_host_key()
+        exit(1)
 
     cleaned_output_path = "%s/%s" % (options.cleaned_output_path,
                                      time.strftime("%Y-%m-%d-%H-%M"))
