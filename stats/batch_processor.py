@@ -149,7 +149,7 @@ class ClusterSSHConnection:
         self.client.close()
 
         if options.master_host_key_file is not None:
-            self.client.save_host_keys()        
+            self.client.save_host_keys(options.master_host_key_file)        
 
     def copy_file(self, local_path, remote_path):
         '''Copies a file from the local path to the cluster.
