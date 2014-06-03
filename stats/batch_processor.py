@@ -424,7 +424,7 @@ def main():
 
     if options.get_master_host_key:
         ssh_conn.get_master_host_key()
-        exit(1)
+        exit(0)
 
     cleaned_output_path = "%s/%s" % (options.cleaned_output_path,
                                      time.strftime("%Y-%m-%d-%H-%M"))
