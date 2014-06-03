@@ -55,7 +55,7 @@ define("schema_bucket", default="neon-avro-schema",
              "tables."))
 define("input_path", default="s3://neon-tracker-logs-v2/v2.2/*/*/*/*",
        help="Path for the raw input data")
-define("cleaned_output_path", default="s3://neon-tracker-logs-v2/cleaned",
+define("cleaned_output_path", default="s3://neon-tracker-logs-v2/cleaned/",
        help="Base path where the cleaned logs will be output")
 define("mr_jar", default=None, type=str, help="Mapreduce jar")
 define("compiled_schema_path",
@@ -182,7 +182,7 @@ class ClusterSSHConnection:
         stderr_msg = []
         retcode = None
         try:
-            stdin, stdout, stderr = self.client.exect_command(cmd)
+            stdin, stdout, stderr = self.client.exec_command(cmd)
             for line in stdout:
                 stdout_msg.append(line)
             for line in stderr:
