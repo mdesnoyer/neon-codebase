@@ -35,6 +35,7 @@ from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol
 import time
 import urllib2
+import urlparse
 import utils.neon
 import utils.monitor
 
@@ -240,9 +241,17 @@ def RunMapReduceJob(cluster_info, ssh_conn, jar, main_class, input_path,
     error_count = 0
     while True:
         try:
-            response = urllib2.urlopen(
-                "http://%s/proxy/%s/ws/v1/mapreduce/jobs/%s" % 
-                (host, application_id, job_id))
+            url = "http://%s/proxy/%s/ws/v1/mapreduce/jobs/%s" % 
+                (host, application_id, job_id)
+            response = urllib2.urlopen(url)
+
+            if url != response.geturl():
+                # The job is probably done, so we need to look at the
+                # job history server
+                history_url = ("http://%s/ws/v1/history/mapreduce/jobs/%s" %
+                               (urlparse.urlparse(response.geturl()).netloc,
+                                job_id))
+                response = urllib2.urlopen(history_url)
 
             data = json.load(response)['job']
 
