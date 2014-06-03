@@ -473,7 +473,7 @@ def main():
         thread.join()
         if thread.status != 'SUCCESS':
             _log.error("Error building impala table %s. See logs."
-                       % thread.table_name)
+                       % thread.event)
             return 1
 
     _log.info("Sucess!")
