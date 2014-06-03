@@ -345,8 +345,8 @@ class ImpalaTableBuilder(threading.Thread):
             TBLPROPERTIES (
               'avro.schema.url'='s3://%s/%s.avsc'
             );""" % 
-            (external_table, self.base_input_path, self.hive_event, 
-             options.schema_bucket, self.hive_event))
+            (external_table, self.base_input_path, hive_event, 
+             options.schema_bucket, hive_event))
 
             parq_table = '%ss' % self.event
             _log.info("Building parquet table %s" % parq_table)
