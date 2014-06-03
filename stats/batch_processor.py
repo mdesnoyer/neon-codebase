@@ -364,7 +364,7 @@ class ImpalaTableBuilder(threading.Thread):
             partition(tai, yr, mnth)
             select %s, trackerAccountId, year(cast(serverTime as timestamp)),
             month(cast(serverTime as timestamp)) from %s""" %
-            (parq_table, ','.join(x.name for x in self.schema.fields),
+            (parq_table, ','.join(x.name for x in self.avro_schema.fields),
              external_table))
 
             _log.info("Refreshing table %s in Impala" % parq_table)
@@ -391,7 +391,7 @@ class ImpalaTableBuilder(threading.Thread):
 
         except IncompatibleSchema as e:
             _log.error("Incompatible schema found for event %s: %s" %
-                       (self.event, self.schema))
+                       (self.event, self.avro_schema))
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
 
@@ -410,7 +410,7 @@ class ImpalaTableBuilder(threading.Thread):
             'enum' : 'string'
             }
         cols = []
-        for field in self.schema.fields:
+        for field in self.avro_schema.fields:
             field_type = field.type.type
             if field_type == 'union':
                 # We deal with [NULL, T] unions specially
