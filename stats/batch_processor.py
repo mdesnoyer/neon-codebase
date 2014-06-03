@@ -126,7 +126,11 @@ class ClusterSSHConnection:
         key.get_contents_to_file(self.key_file)
 
         self.client = paramiko.SSHClient()
-        self.client.load_system_host_keys(options.master_host_key_file)
+        if (options.master_host_key_file is not None and 
+            os.path.exists(options.master_host_key_file)):
+            self.client.load_system_host_keys(options.master_host_key_file)
+        else:
+            self.client.load_system_host_keys()
 
     def _connect(self):
         try:
