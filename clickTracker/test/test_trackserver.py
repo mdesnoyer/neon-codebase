@@ -29,7 +29,7 @@ import Queue
 import random
 from thrift import Thrift
 from thrift.transport import TTransport
-from thrift.protocol import TBinaryProtocol
+from thrift.protocol import TCompactProtocol
 import time
 import tornado.testing
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
@@ -151,7 +151,7 @@ class TestFileBackupHandler(unittest.TestCase):
                 # what we expect
                 with self.fake_open(os.path.join(log_dir, files[0])) as f:
                     transport = TTransport.TFileObjectTransport(f)
-                    protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                    protocol = TCompactProtocol.TCompactProtocol(transport)
                     event = ThriftFlumeEvent()
                     event.read(protocol)
                     try:
@@ -228,12 +228,10 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         clickTracker.trackserver.os = self.fake_os
         clickTracker.trackserver.open = self.fake_open
 
-        # Put the schema in the fake filesystem
+        # Put the avro schema in the fake filesystem
         self.fake_os.makedirs(os.path.dirname(schema_path))
         with self.fake_open(schema_path, 'w') as f:
             f.write(schema_str)
-        
-
 
         self.thrift_patcher = patch(
             'clickTracker.trackserver.ThriftSourceProtocol.Client')
@@ -248,14 +246,21 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         self.thrift_transport_mock().open.side_effect = \
           lambda callback: self.io_loop.add_callback(callback)
 
+        self.old_flush_interval = \
+          options.get('clickTracker.trackserver.flume_flush_interval')
+        options._set('clickTracker.trackserver.flume_flush_interval', 1)
+
         self.server_obj = clickTracker.trackserver.Server()
         self.backup_q = self.server_obj.backup_queue
         super(TestFullServer, self).setUp()
 
         random.seed(168984)
+
         
 
     def tearDown(self):
+        options._set('clickTracker.trackserver.flume_flush_interval',
+                     self.old_flush_interval)
         self.thrift_patcher.stop()
         self.thrift_transport_patcher.stop()
         
@@ -649,7 +654,9 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
             
 
 if __name__ == '__main__':
-    utils.neon.InitNeonTest()
+    utils.neon.InitNeon()
     # Turn off the annoying logs
     #logging.getLogger('tornado.access').propagate = False
-    unittest.main()
+
+    import cProfile
+    cProfile.run('unittest.main()', 'trackserver.prof')
