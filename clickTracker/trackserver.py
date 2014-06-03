@@ -174,10 +174,10 @@ class BaseTrackerDataV2(object):
 
         self.eventData = {}
 
-    def get_header_safe(self, request, header_name, typ=str):
+    def get_header_safe(self, request, header_name, typ=unicode):
         '''Returns the header value, or None if it's not there.'''
         try:
-            strval = request.request.headers[header_name]
+            strval = unicode(request.request.headers[header_name], 'utf-8')
             if strval == '':
                 return None
             return typ(strval)

@@ -649,6 +649,14 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         # the data is there.
         self.assertEqual(self.backup_q.qsize(), 1)
 
+    def test_utf8_header(self):
+        # TODO(mdesnoyer): Make this test cleaner
+        response = self.fetch(
+            '/v2/track?a=vc&page=http%3A%2F%2Fwww.stack.com%2F2009%2F05%2F01%2Fnutrition-plan-for-football%2F&pageid=MweOiNTpEmyffwqR&ttype=brightcove&ref=http%3A%2F%2Fwww.google.ca%2Furl&tai=1510551506&cts=1401814012336&vid=16863777001&tid=null&playerid=3147600983001&noCacheIE=1401814012337',
+            headers = {'Geoip_country_code3': 'CAN', 'Accept-Language': 'en-us', 'Accept-Encoding': 'gzip, deflate', 'Geoip_city': 'Qu\xc3\xa9bec', 'X-Forwarded-Port': '80', 'Dnt': '1', 'Connection': 'close', 'X-Real-Ip': '65.94.184.97', 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_2) AppleWebKit/537.75.14 (KHTML, like Gecko) Version/7.0.3 Safari/537.75.14', 'Geoip_postal_code': 'G6K', 'Geoip_latitude': '46.7038', 'Geoip_longitude': '-71.2837', 'X-Forwarded-For': '65.94.184.97, 65.94.184.97', 'Accept': '*/*', 'Geoip_region': 'QC', 'Host': 'trackserver-test-691751517.us-east-1.elb.amazonaws.com', 'X-Forwarded-Proto': 'http', 'Referer': 'http://www.stack.com/2009/05/01/nutrition-plan-for-football/'})
+
+        self.assertEqual(response.code, 200)
+
     # TODO(mdesnoyer) add tests for when the schema isn't on S3 and
     # for when arguments are missing
             
