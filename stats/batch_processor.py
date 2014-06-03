@@ -323,9 +323,9 @@ class ImpalaTableBuilder(threading.Thread):
                 port=options.impala_port)
 
             # Set some parameters
-            hive.execute('SET hive.exec.compress.output=true;')
-            hive.execute('SET avro.output.codec=snappy;')
-            hive.execute('SET hive.exec.dynamic.partition.mode=nonstrict;')
+            hive.execute('SET hive.exec.compress.output=true')
+            hive.execute('SET avro.output.codec=snappy')
+            hive.execute('SET hive.exec.dynamic.partition.mode=nonstrict')
         
             self.status = 'RUNNING'
 
@@ -344,7 +344,7 @@ class ImpalaTableBuilder(threading.Thread):
             LOCATION '%s/%s'
             TBLPROPERTIES (
               'avro.schema.url'='s3://%s/%s.avsc'
-            );""" % 
+            )""" % 
             (external_table, self.base_input_path, hive_event, 
              options.schema_bucket, hive_event))
 
@@ -356,14 +356,14 @@ class ImpalaTableBuilder(threading.Thread):
             partitioned by (tai string, yr int, mnth int)
             ROW FORMAT SERDE 'parquet.hive.serde.ParquetHiveSerDe' 
             STORED AS INPUTFORMAT 'parquet.hive.DeprecatedParquetInputFormat' 
-            OUTPUTFORMAT 'parquet.hive.DeprecatedParquetOutputFormat';
+            OUTPUTFORMAT 'parquet.hive.DeprecatedParquetOutputFormat'
             """ % (parq_table, self._generate_table_definition()))
             
             hive.execute("""
             insert overwrite table %s
             partition(tai, yr, mnth)
             select %s, trackerAccountId, year(cast(serverTime as timestamp)),
-            month(cast(serverTime as timestamp)) from %s;""" %
+            month(cast(serverTime as timestamp)) from %s""" %
             (parq_table, ','.join(x.name for x in self.schema.fields),
              external_table))
 
