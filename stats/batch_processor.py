@@ -220,9 +220,9 @@ def RunMapReduceJob(cluster_info, ssh_conn, jar, main_class, input_path,
     trackURLRe = re.compile(
         r"Tracking URL: https?://(\S+)/proxy/(\S+)/jobhistory/job/(\S+)")
     stdout = ssh_conn.execute_remote_command(
-        ('hadoop jar /home/hadoop/%s '
+        ('hadoop jar /home/hadoop/%s %s '
          '-D mapreduce.output.fileoutputformat.compress=true '
-         '-D avro.output.codec=snappy %s %s %s') % 
+         '-D avro.output.codec=snappy %s %s') % 
          (os.path.basename(jar), main_class, input_path, output_path))
     url_parse = trackURLRe.search(stdout)
     if not url_parse:
