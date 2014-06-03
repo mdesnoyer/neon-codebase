@@ -304,7 +304,7 @@ class ImpalaTableBuilder(threading.Thread):
         key = boto.s3.key.Key(bucket, '%s.avsc' % hive_event)
         key.set_contents_from_filename(
             os.path.join(options.compiled_schema_path,
-                         '%s,avsc' % hive_event),
+                         '%s.avsc' % hive_event),
                          replace=True)
         
         # Create the hive client
@@ -463,7 +463,7 @@ def main():
 
     threads = [] 
     for event in ['ImageLoad', 'ImageVisible',
-                  'ImageClick', 'AdPlay', 'VideoClick', 'VideoPlay']:
+                  'ImageClick', 'AdPlay', 'VideoPlay']:
         thread = ImpalaTableBuilder(cleaned_output_path, cluster_info, event)
         thread.start()
         threads.append(thread)
