@@ -124,6 +124,7 @@ class ClusterSSHConnection:
         bucket = conn.get_bucket(bucket_name)
         key = bucket.get_key(key_name)
         key.get_contents_to_file(self.key_file)
+        self.key_file.flush()
 
         self.client = paramiko.SSHClient()
         if (options.master_host_key_file is not None and 
