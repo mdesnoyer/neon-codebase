@@ -241,8 +241,8 @@ def RunMapReduceJob(cluster_info, ssh_conn, jar, main_class, input_path,
     error_count = 0
     while True:
         try:
-            url = "http://%s/proxy/%s/ws/v1/mapreduce/jobs/%s" % 
-                (host, application_id, job_id)
+            url = ("http://%s/proxy/%s/ws/v1/mapreduce/jobs/%s" % 
+                   (host, application_id, job_id))
             response = urllib2.urlopen(url)
 
             if url != response.geturl():
