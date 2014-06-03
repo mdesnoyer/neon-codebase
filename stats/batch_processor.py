@@ -36,6 +36,7 @@ from thrift.protocol import TBinaryProtocol
 import time
 import urllib2
 import utils.neon
+import utils.monitor
 
 #logging
 import logging
@@ -194,7 +195,7 @@ class ClusterSSHConnection:
 
         if retcode != 0:
             raise ExecutionError(
-                "Error running command on the cluster: %s. Stderr was: %s" % 
+                "Error running command on the cluster: %s. Stderr was: \n%s" % 
                 (cmd, '\n'.join(stderr_msg)))
 
         return '\n'.join(stdout_msg)
@@ -227,7 +228,7 @@ def RunMapReduceJob(cluster_info, ssh_conn, jar, main_class, input_path,
     url_parse = trackURLRe.search(stdout)
     if not url_parse:
         raise MapReduceError(
-            "Could not find the tracking url. Stdout was: %s" % stdout)
+            "Could not find the tracking url. Stdout was: \n%s" % stdout)
     job_id = url_parse.group(3)
     application_id = url_parse.group(2)
     host = url_parse.group(1)
@@ -243,9 +244,12 @@ def RunMapReduceJob(cluster_info, ssh_conn, jar, main_class, input_path,
                 "http://%s/proxy/%s/ws/v1/mapreduce/jobs/%s" % 
                 (host, application_id, job_id))
 
-            data = json.loads(response)
+            data = json.load(response)['job']
 
-            # TODO(mdesnoyer): Send monitoring data about the job
+            # Send monitoring data
+            for key, value in data.iteritems():
+                utils.monitor.send_data('batch_processor.%s' % key, value)
+
             if data['state'] == 'SUCCEEDED':
                 _log.info('Map reduce job %s complete. Results: %s' % 
                           (main_class, 

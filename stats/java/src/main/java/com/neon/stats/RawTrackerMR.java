@@ -919,7 +919,7 @@ public class RawTrackerMR extends Configured implements Tool {
     System.out.println("Job ID: " + jobStatus.getJobID());
     System.out.println("Tracking URL: " + jobStatus.getTrackingUrl());
 
-    return 1;
+    return 0;
   }
 
   /**
