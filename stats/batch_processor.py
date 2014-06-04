@@ -243,6 +243,9 @@ def RunMapReduceJob(cluster_info, ssh_conn, jar, main_class, input_path,
     _log.info('Running batch cleaning job %s. Tracking URL is %s' %
               (job_id, url_parse.group(0)))
 
+    # Sleep so that the job tracker has time to come up
+    time.sleep(60)
+
     # Now poll the job status until it is done
     error_count = 0
     while True:
