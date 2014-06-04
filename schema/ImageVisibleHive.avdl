@@ -1,0 +1,62 @@
+//
+// Schema that defines an ImageVisibleEvent.
+//
+// It is wrapped in a protocol so that we can do the definition using
+// the idl format, which takes comments and is easier to read than the
+// json. To generate the json schema needed by avro use:
+//
+// compile_schema.py
+//
+// Author: Mark Desnoyer (desnoyer@neon-lab.com)
+// Copyright 2014 Neon Labs Inc.
+//
+@namespace("com.neon.Tracker")
+protocol DummyTrackerProtocol {
+
+import idl "CommonTrackerInfo.avdl";
+
+record ImageVisibleHive {
+  string pageId; // Unique page load id
+
+  string trackerAccountId;  // The publisher's tracker account id
+
+  TrackerType trackerType;
+
+  string pageURL;     // Page URL where the event took place
+
+  union { null, string } refURL;  // The referral URL
+
+  float serverTime;    // The server's time in s since epoch
+
+  float clientTime;    // The client's time in s since epoch
+
+  string clientIP;    // The client's ip address
+
+  // The user id from the cookie. Can be an empty string
+  string neonUserId = "";  
+
+  union { null, string } userAgent;   // The user's agent string
+
+  // Translated agent info if available
+  union { null, string } agentInfo_os_name;
+  union { null, string } agentInfo_os_version;
+  union { null, string } agentInfo_browser_name;
+  union { null, string } agentInfo_browser_version;
+  
+  // The user's location based on IP data
+  union { null, string } ipGeoData_country; // 3 character country code
+  union { null, string } ipGeoData_city; // City name
+  union { null, string } ipGeoData_region; // Region
+  union { null, string } ipGeoData_zip; // Postal Code
+  union { null, float } ipGeoData_lat; // Latitude
+  union { null, float } ipGeoData_lon; // Longitude
+  
+  string thumbnail_id; // The thumbnail id for the image that became visible
+
+  // An id used to link a sequence of events together. The sequence is 
+  // ideally an image_load -> image_visible -> image_click -> video_play
+  long sequenceId;
+}
+
+}
+
