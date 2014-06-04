@@ -449,10 +449,9 @@ def main():
                                      time.strftime("%Y-%m-%d-%H-%M"))
 
     try:
-        #RunMapReduceJob(cluster_info, ssh_conn,
-        #                options.mr_jar, 'com.neon.stats.RawTrackerMR',
-        #                options.input_path, cleaned_output_path)
-        pass
+        RunMapReduceJob(cluster_info, ssh_conn,
+                        options.mr_jar, 'com.neon.stats.RawTrackerMR',
+                        options.input_path, cleaned_output_path)
     except Exception as e:
         _log.exception("Error running stats cleaning job %s" % e)
         statemon.state.increment('stats_cleaning_job_failures')
