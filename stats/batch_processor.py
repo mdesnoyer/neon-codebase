@@ -238,7 +238,7 @@ def RunMapReduceJob(cluster_info, ssh_conn, jar, main_class, input_path,
     if not job_id_parse:
         raise MapReduceError(
             "Could not find the job id. Stdout was: \n%s" % stdout)
-    job_id = url_parse.group(1)
+    job_id = job_id_parse.group(1)
 
     _log.info('Running batch cleaning job %s. Tracking URL is %s' %
               (job_id, url_parse.group(0)))
