@@ -220,7 +220,8 @@ def RunMapReduceJob(cluster_info, ssh_conn, jar, main_class, input_path,
     ssh_conn.copy_file(jar, '/home/hadoop/%s' % os.path.basename(jar))
 
     trackURLRe = re.compile(
-        r"Tracking URL: https?://(\S+)/proxy/(\S+)/jobhistory/job/(\S+)")
+        r"Tracking URL: https?://(\S+)/proxy/(\S+)")
+    jobidRe = re.compile("r Job ID: (\S+)")
     stdout = ssh_conn.execute_remote_command(
         ('hadoop jar /home/hadoop/%s %s '
          '-D mapreduce.output.fileoutputformat.compress=true '
@@ -230,9 +231,14 @@ def RunMapReduceJob(cluster_info, ssh_conn, jar, main_class, input_path,
     if not url_parse:
         raise MapReduceError(
             "Could not find the tracking url. Stdout was: \n%s" % stdout)
-    job_id = url_parse.group(3)
     application_id = url_parse.group(2)
     host = url_parse.group(1)
+
+    job_id_parse = jobidRe.search(stdout)
+    if not job_id_parse:
+        raise MapReduceError(
+            "Could not find the job id. Stdout was: \n%s" % stdout)
+    job_id = url_parse.group(1)
 
     _log.info('Running batch cleaning job %s. Tracking URL is %s' %
               (job_id, url_parse.group(0)))
