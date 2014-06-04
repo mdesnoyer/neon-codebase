@@ -244,7 +244,7 @@ def RunMapReduceJob(cluster_info, ssh_conn, jar, main_class, input_path,
               (job_id, url_parse.group(0)))
 
     # Sleep so that the job tracker has time to come up
-    time.sleep(60)
+    time.sleep(30)
 
     # Now poll the job status until it is done
     error_count = 0
@@ -378,8 +378,15 @@ class ImpalaTableBuilder(threading.Thread):
 
             _log.info("Refreshing table %s in Impala" % parq_table)
             impala_cursor = impala_conn.cursor()
-            impala_cursor.execute("refresh %s" % parq_table)
-            impala_cursor.execute("refresh %s" % external_table)
+            impala_cursor.execute("show tables")
+            tables = [x[0] for x in impala_cursor.fetchall()]
+            if parq_table.lower() in tables:
+                # The table is already there, so we just need to refresh it
+                impala_cursor.execute("refresh %s" % parq_table)
+                impala_cursor.execute("refresh %s" % external_table)
+            else:
+                # It's not there, so we need to refresh all the metadata
+                impala_cursor.execute('invalidate metadata')
 
             self.status = 'SUCCESS'
             
