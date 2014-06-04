@@ -360,7 +360,7 @@ class ImpalaTableBuilder(threading.Thread):
             parq_table = '%ss' % self.event
             _log.info("Building parquet table %s" % parq_table)
             hive.execute( """
-            create table %s
+            create table if not exists %s
             (%s)
             partitioned by (tai string, yr int, mnth int)
             ROW FORMAT SERDE 'parquet.hive.serde.ParquetHiveSerDe' 
@@ -465,9 +465,10 @@ def main():
                                      time.strftime("%Y-%m-%d-%H-%M"))
 
     try:
-        RunMapReduceJob(cluster_info, ssh_conn,
-                        options.mr_jar, 'com.neon.stats.RawTrackerMR',
-                        options.input_path, cleaned_output_path)
+        #RunMapReduceJob(cluster_info, ssh_conn,
+        #                options.mr_jar, 'com.neon.stats.RawTrackerMR',
+        #                options.input_path, cleaned_output_path)
+        pass
     except Exception as e:
         _log.exception("Error running stats cleaning job %s" % e)
         statemon.state.increment('stats_cleaning_job_failures')
