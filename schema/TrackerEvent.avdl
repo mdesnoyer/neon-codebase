@@ -5,7 +5,7 @@
 // the idl format, which takes comments and is easier to read than the
 // json. To generate the json schema needed by avro use:
 //
-// java -jar /usr/lib/avro/avro-tools.jar idl2schemata TrackerEvent.avdl outdir
+// compile_schema.py
 //
 // Author: Mark Desnoyer (desnoyer@neon-lab.com)
 // Copyright 2014 Neon Labs Inc.
@@ -13,32 +13,10 @@
 @namespace("com.neon.Tracker")
 protocol DummyTrackerProtocol {
 
+import idl "CommonTrackerInfo.avdl";
+
 enum TrackerType {
   BRIGHTCOVE, OOYALA, BCGALLERY, IGN
-}
-
-record GeoData {
-  union { null, string } country; // 3 character country code
-  union { null, string } city; // City name
-  union { null, string } region; // Region
-  union { null, string } zip; // Postal Code
-  union { null, float } lat; // Latitude
-  union { null, float } lon; // Longitude
-}
-
-record NmVers {
-  union { null, string } name;
-  union { null, string } version;
-}
-
-record AgentInfo {
-  union { null, NmVers } os;
-  union { null, NmVers } browser;
-}
-
-record Coords {
-  float x;
-  float y;
 }
 
 enum EventType {
@@ -79,7 +57,7 @@ record ImageClick {
 record VideoClick {
   boolean isVideoClick = true; // Used so that the event isn't confused in the union.
 
-  string videoId;
+  string videoId;  // External video id
   string playerId;
   union{null, string} thumbnailId;
 }
@@ -88,7 +66,7 @@ record VideoClick {
 record VideoPlay {
   boolean isVideoPlay = true; // Used so that the event isn't confused in the union.
 
-  string videoId;
+  string videoId; // External video id
   union{null, string} playerId;
   union{null, string} thumbnailId;
   boolean didAdPlay = false;  // Was an ad play detected before the video
@@ -99,7 +77,7 @@ record VideoPlay {
   // click
   union{null, int} autoplayDelta;
 
-  // This video is the nth one playing on this page load
+  // This video is the nth one playing on this page load. 1-based index
   int playCount; 
 }
 
@@ -109,7 +87,7 @@ record AdPlay {
 
   // Video id. Can be null if the video click event doesn't fire in time
   // so we can't figure out which video is playing after the ad.
-  union{null, string} videoId;
+  union{null, string} videoId; // External video id
   union{null, string} playerId;
   union{null, string} thumbnailId;
   
@@ -119,7 +97,8 @@ record AdPlay {
   // click
   union{null, int} autoplayDelta;
 
-  // This ad is attached to the nth video playing on this page load.
+  // This ad is attached to the nth video playing on this page load. 
+  // 1-based index
   int playCount; 
 }
 
