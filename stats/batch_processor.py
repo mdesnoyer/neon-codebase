@@ -283,7 +283,7 @@ def RunMapReduceJob(cluster_info, ssh_conn, jar, main_class, input_path,
             error_count = 0
 
             time.sleep(60)
-        except URLError as e:
+        except urllib2.URLError as e:
             _log.exception("Error getting job information: %s" % e)
             statemon.state.increment('master_connection_error')
             error_count = error_count + 1
