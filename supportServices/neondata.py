@@ -524,7 +524,7 @@ class TrackerAccountID(object):
         ''' Generate a CRC 32 for Tracker Account ID'''
         return abs(binascii.crc32(_input))
 
-class TrackerAccountIDMapper(object):
+class TrackerAccountIDMapper(StoredObject):
     '''
     Maps a given Tracker Account ID to API Key 
 
@@ -533,28 +533,43 @@ class TrackerAccountIDMapper(object):
     STAGING = "staging"
     PRODUCTION = "production"
 
-    def __init__(self, tai, api_key, itype):
-        self.key = self.__class__.format_key(tai)
+    def __init__(self, tai, api_key=None, itype=None):
+        super(TrackerAccountIDMapper, self).__init__(
+            self.__class__.format_key(tai))
         self.value = api_key 
         self.itype = itype
+
+    def get_tai(self):
+        '''Retrieves the TrackerAccountId of the object.'''
+        return self.key.partition('_')[2]
 
     @classmethod
     def format_key(cls, tai):
         ''' format db key '''
         return cls.__name__.lower() + '_%s' % tai
-    
-    def to_json(self):
-        ''' to json '''
-        return json.dumps(self, default=lambda o: o.__dict__)
-    
-    def save(self, callback=None):
-        ''' save trackerIDMapper instance '''
-        db_connection = DBConnection(self)
-        value = self.to_json()     
+
+    @classmethod
+    def get_all(cls, callback=None):
+        ''' Get all the TrackerAccountIDMapper objects in the database
+
+        Inputs:
+        callback - Optional callback function to call
+
+        Returns:
+        A list of cls objects.
+        '''
+        retval = []
+        db_connection = DBConnection(cls)
+
+        def process(keys):
+            cls.get_many(keys, callback=callback)
+            
         if callback:
-            db_connection.conn.set(self.key, value, callback)
+            db_connection.conn.keys(cls.__name__.lower() + "_*",
+                                    callback=process)
         else:
-            return db_connection.blocking_conn.set(self.key, value)
+            keys = db_connection.blocking_conn.keys(cls.__name__.lower()+"_*")
+            return cls.get_many(keys)
     
     @classmethod
     def get_neon_account_id(cls, tai, callback=None):

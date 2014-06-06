@@ -28,7 +28,8 @@ from StringIO import StringIO
 from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         YoutubePlatform, NeonUserAccount, DBConnection, NeonApiKey, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
-        ThumbnailMetadata, InternalVideoID, OoyalaPlatform
+        ThumbnailMetadata, InternalVideoID, OoyalaPlatform, \
+        TrackerAccountIDMapper
 
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
@@ -79,7 +80,24 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         nu_accounts = NeonUserAccount.get_all_accounts()
         nu_a_ids = [nu.account_id for nu in nu_accounts]
         #print len(nu_accounts), len(a_ids)
-        #self.assertItemsEqual(a_ids, nu_a_ids)
+        self.assertItemsEqual(a_ids, nu_a_ids)
+
+    def test_get_all_trackerids(self):
+        ''' test get all the tracker ids '''
+        expected = []
+        for i in range(10):
+            tai = 'tracker_%i' % i
+            acct_id = 'account_%i' % i
+            expected.append((tai, acct_id))
+            TrackerAccountIDMapper(tai, acct_id,
+                                   TrackerAccountIDMapper.PRODUCTION).save()
+
+        found_maps = TrackerAccountIDMapper.get_all()
+        self.assertItemsEqual(expected,
+                              [(x.get_tai(), x.value) for x in found_maps])
+        self.assertEqual(
+                TrackerAccountIDMapper.get_neon_account_id('tracker_3'),
+                ('account_3', TrackerAccountIDMapper.PRODUCTION))
 
     def test_default_bcplatform_settings(self):
         ''' brightcove defaults ''' 
