@@ -305,6 +305,10 @@ public class RawTrackerMR extends Configured implements Tool {
       for (Pair<TrackerEvent, Long> pair : seqEvents) {
         OutputEventToHive(pair.getLeft(), pair.getRight(), context);
       }
+
+      // Finally output the sequence events
+      context.setStatus("Outputting sequence events");
+      OutputSequenceEvents(seqEvents, context);
     }
 
     protected void cleanup(Context context) throws IOException,
@@ -526,18 +530,9 @@ public class RawTrackerMR extends Configured implements Tool {
       SpecificRecordBase hiveEvent;
       Coords clickCoords;
 
-      // Create the output path that partitions based on time and the account id
-      SimpleDateFormat timestampFormat = new SimpleDateFormat("YYYY-MM-dd");
-      String timestamp = timestampFormat.format(new Date(orig.getServerTime()));
-
-      // TODO(mdesnoyer): There is a bug in Hive (fixed in 0.12) such that it
-      // cannot read partitioned Avro tables, so, we need to create one single,
-      // gigantic partition now. When this is ported into Elastic MapReduce, we
-      // can partition this data to make it more efficient, but for now, dump it
-      // in a single folder.
-      //String partitionPath =
-      //    "/tai=" + orig.getTrackerAccountId() + "/ts=" + timestamp + "/";
-      String partitionPath = "/";
+      String partitionPath =
+          GeneratePartitionPath(orig.getServerTime(),
+              orig.getTrackerAccountId());
 
       // Do some null handling of common structures
       NmVers browser =
@@ -783,6 +778,259 @@ public class RawTrackerMR extends Configured implements Tool {
         context.getCounter("ReduceError", "InvalidEventType").increment(1);
       }
     }
+
+    private void OutputSequenceEvents(
+        LinkedList<Pair<TrackerEvent, Long>> events, Context context)
+        throws IOException, InterruptedException {
+
+      // First sort the events by their sequence id
+      Collections.sort(events, new Comparator<Pair<TrackerEvent, Long>>() {
+        public int compare(Pair<TrackerEvent, Long> a,
+            Pair<TrackerEvent, Long> b) {
+          int seqDiff = a.getRight().compareTo(b.getRight());
+
+          if (seqDiff == 0) {
+            // Force the event types to be clustered
+            return a.getLeft().getClientTime()
+                .compareTo(b.getLeft().getClientTime());
+          }
+          return seqDiff;
+        }
+      });
+
+      // Now walk through the events and generate an event for each sequence id.
+      TrackerEvent imLoad = null;
+      TrackerEvent imVis = null;
+      TrackerEvent imClick = null;
+      TrackerEvent adPlay = null;
+      TrackerEvent videoClick = null;
+      TrackerEvent videoPlay = null;
+      Long curSequenceId = null;
+      for (Pair<TrackerEvent, Long> pair : events) {
+        if (curSequenceId == null) {
+          curSequenceId = pair.getRight();
+        } else if (!curSequenceId.equals(pair.getRight())) {
+          // It's the start of a new sequence, so output the last sequence
+          OutputSequence(curSequenceId, imLoad, imVis, imClick, adPlay,
+              videoClick, videoPlay);
+          imLoad = null;
+          imVis = null;
+          imClick = null;
+          adPlay = null;
+          videoClick = null;
+          videoPlay = null;
+          curSequenceId = pair.getRight();
+        }
+
+        // Assign the event based on its type
+        switch (pair.getLeft().getEventType()) {
+        case IMAGE_LOAD:
+          imLoad = pair.getLeft();
+          break;
+        case IMAGE_VISIBLE:
+          imVis = pair.getLeft();
+          break;
+        case IMAGE_CLICK:
+          imClick = pair.getLeft();
+          break;
+        case AD_PLAY:
+          adPlay = pair.getLeft();
+          break;
+        case VIDEO_CLICK:
+          videoClick = pair.getLeft();
+          break;
+        case VIDEO_PLAY:
+          videoPlay = pair.getLeft();
+          break;
+        }
+      }
+
+      if (curSequenceId != null) {
+        OutputSequence(curSequenceId, imLoad, imVis, imClick, adPlay,
+            videoClick, videoPlay);
+      }
+    }
+
+    private void OutputSequence(Long sequenceId, TrackerEvent imLoad,
+        TrackerEvent imVis, TrackerEvent imClick, TrackerEvent adPlay,
+        TrackerEvent videoClick, TrackerEvent videoPlay) throws IOException,
+        InterruptedException {
+      long lastServerTime = 0;
+      CharSequence trackerAccountId = "";
+      CharSequence firstRefURL = null;
+      CharSequence thumbnailId = null;
+      EventSequenceHive.Builder builder =
+          EventSequenceHive.newBuilder().setSequenceId(sequenceId);
+
+      if (imLoad != null) {
+        lastServerTime = imLoad.getServerTime();
+        trackerAccountId = imLoad.getTrackerAccountId();
+        firstRefURL = imLoad.getRefURL();
+        thumbnailId = ((ImageLoad) imLoad.getEventData()).getThumbnailId();
+        BuildCommonSequenceFields(builder, imLoad)
+            .setHeight(((ImageLoad) imLoad.getEventData()).getHeight())
+            .setWidth(((ImageLoad) imLoad.getEventData()).getWidth())
+            .setImLoadClientTime((float) (imLoad.getClientTime() / 1000.))
+            .setImLoadServerTime((float) (imLoad.getServerTime() / 1000.))
+            .setImLoadPageURL(imLoad.getPageURL());
+      }
+
+      if (imVis != null) {
+        lastServerTime = imVis.getServerTime();
+        trackerAccountId = imVis.getTrackerAccountId();
+        firstRefURL = firstRefURL == null ? imVis.getRefURL() : firstRefURL;
+        thumbnailId =
+            thumbnailId == null ? ((ImageVisible) imVis.getEventData())
+                .getThumbnailId() : thumbnailId;
+        BuildCommonSequenceFields(builder, imVis)
+            .setImVisClientTime((float) (imVis.getClientTime() / 1000.))
+            .setImVisServerTime((float) (imVis.getServerTime() / 1000.))
+            .setImLoadPageURL(imVis.getPageURL());
+      }
+
+      if (imClick != null) {
+        lastServerTime = imClick.getServerTime();
+        trackerAccountId = imClick.getTrackerAccountId();
+        firstRefURL = firstRefURL == null ? imClick.getRefURL() : firstRefURL;
+        thumbnailId =
+            thumbnailId == null ? ((ImageClick) imClick.getEventData())
+                .getThumbnailId() : thumbnailId;
+        Coords clickCoords =
+            ((ImageClick) imClick.getEventData()).getPageCoords();
+        BuildCommonSequenceFields(builder, imClick)
+            .setPageCoordsX(clickCoords.getX())
+            .setPageCoordsY(clickCoords.getY())
+            .setWindowCoordsX(
+                ((ImageClick) imClick.getEventData()).getWindowCoords().getX())
+            .setWindowCoordsY(
+                ((ImageClick) imClick.getEventData()).getWindowCoords().getY())
+            .setIsRightClick(clickCoords.getX() <= 0 && clickCoords.getY() <= 0)
+            .setIsClickInPlayer(false)
+            .setImClickClientTime((float) (imClick.getClientTime() / 1000.))
+            .setImClickServerTime((float) (imClick.getServerTime() / 1000.))
+            .setImClickPageURL(imClick.getPageURL());
+      }
+
+      if (adPlay != null) {
+        lastServerTime = adPlay.getServerTime();
+        trackerAccountId = adPlay.getTrackerAccountId();
+        firstRefURL = firstRefURL == null ? adPlay.getRefURL() : firstRefURL;
+        thumbnailId =
+            thumbnailId == null ? ((AdPlay) adPlay.getEventData())
+                .getThumbnailId() : thumbnailId;
+        BuildCommonSequenceFields(builder, adPlay)
+            .setPlayerId(((AdPlay) adPlay.getEventData()).getPlayerId())
+            .setVideoId(((AdPlay) adPlay.getEventData()).getVideoId())
+            .setAutoplayDelta(
+                ((AdPlay) adPlay.getEventData()).getAutoplayDelta())
+            .setPlayCount(((AdPlay) adPlay.getEventData()).getPlayCount())
+            .setAdPlayClientTime((float) (adPlay.getClientTime() / 1000.))
+            .setAdPlayServerTime((float) (adPlay.getServerTime() / 1000.))
+            .setVideoPageURL(adPlay.getPageURL());
+      }
+
+      if (videoClick != null) {
+        lastServerTime = videoClick.getServerTime();
+        trackerAccountId = videoClick.getTrackerAccountId();
+        firstRefURL =
+            firstRefURL == null ? videoClick.getRefURL() : firstRefURL;
+        thumbnailId =
+            thumbnailId == null ? ((VideoClick) videoClick.getEventData())
+                .getThumbnailId() : thumbnailId;
+        BuildCommonSequenceFields(builder, videoClick)
+            .setPlayerId(((VideoClick) videoClick.getEventData()).getPlayerId())
+            .setVideoId(((VideoClick) videoClick.getEventData()).getVideoId())
+            .setIsClickInPlayer(true).setIsRightClick(false)
+            .setImClickClientTime((float) (videoClick.getClientTime() / 1000.))
+            .setImClickServerTime((float) (videoClick.getServerTime() / 1000.))
+            .setImClickPageURL(videoClick.getPageURL());
+      }
+      
+      if (videoPlay != null) {
+        lastServerTime = videoPlay.getServerTime();
+        trackerAccountId = videoPlay.getTrackerAccountId();
+        firstRefURL = firstRefURL == null ? videoPlay.getRefURL() : firstRefURL;
+        thumbnailId =
+            thumbnailId == null ? ((VideoPlay) videoPlay.getEventData())
+                .getThumbnailId() : thumbnailId;
+        BuildCommonSequenceFields(builder, videoPlay)
+            .setPlayerId(((VideoPlay) videoPlay.getEventData()).getPlayerId())
+            .setVideoId(((VideoPlay) videoPlay.getEventData()).getVideoId())
+            .setAutoplayDelta(
+                ((VideoPlay) videoPlay.getEventData()).getAutoplayDelta())
+            .setPlayCount(((VideoPlay) videoPlay.getEventData()).getPlayCount())
+            .setVideoPlayClientTime((float) (videoPlay.getClientTime() / 1000.))
+            .setVideoPlayServerTime((float) (videoPlay.getServerTime() / 1000.))
+            .setVideoPageURL(videoPlay.getPageURL());
+      }
+
+      builder.setRefURL(firstRefURL).setThumbnailId(thumbnailId);
+
+      out.write(
+          "EventSequenceHive",
+          new AvroKey<EventSequenceHive>(builder.build()),
+          NullWritable.get(),
+          "EventSequenceHive"
+              + GeneratePartitionPath(lastServerTime, trackerAccountId)
+              + "EventSequenceHive");
+    }
+
+    private static EventSequenceHive.Builder BuildCommonSequenceFields(
+        EventSequenceHive.Builder builder, TrackerEvent event) {
+      // Do some null handling of common structures
+      NmVers browser =
+          event.getAgentInfo() == null ? null : event.getAgentInfo()
+              .getBrowser();
+      CharSequence browserName = browser == null ? null : browser.getName();
+      CharSequence browserVersion =
+          browser == null ? null : browser.getVersion();
+
+      NmVers os =
+          event.getAgentInfo() == null ? null : event.getAgentInfo().getOs();
+      CharSequence osName = os == null ? null : os.getName();
+      CharSequence osVersion = os == null ? null : os.getVersion();
+
+      builder.setTrackerAccountId(event.getTrackerAccountId())
+          .setTrackerType(event.getTrackerType())
+          .setClientIP(event.getClientIP())
+          .setNeonUserId(event.getNeonUserId())
+          .setUserAgent(event.getUserAgent())
+          .setAgentInfoBrowserName(browserName)
+          .setAgentInfoBrowserVersion(browserVersion)
+          .setAgentInfoOsName(osName).setAgentInfoOsVersion(osVersion)
+          .setIpGeoDataCity(event.getIpGeoData().getCity())
+          .setIpGeoDataCountry(event.getIpGeoData().getCountry())
+          .setIpGeoDataRegion(event.getIpGeoData().getRegion())
+          .setIpGeoDataZip(event.getIpGeoData().getZip())
+          .setIpGeoDataLat(event.getIpGeoData().getLat())
+          .setIpGeoDataLon(event.getIpGeoData().getLon());
+
+      return builder;
+    }
+
+    /**
+     * Creates a path for this partition in Hive
+     * 
+     * @param epoch
+     *          - The timestamp in milliseconds since epoch
+     * @param trackerAccountId
+     *          - The tracker account id
+     * @return A string to differentiate the partition
+     */
+    private static String GeneratePartitionPath(long epoch,
+        CharSequence trackerAccountId) {
+      // Create the output path that partitions based on time and the account id
+      SimpleDateFormat timestampFormat = new SimpleDateFormat("YYYY-MM-dd");
+      String timestamp = timestampFormat.format(new Date(epoch));
+
+      // TODO(mdesnoyer): There is a bug in Hive (fixed in 0.12) such that it
+      // cannot read partitioned Avro tables, so, we need to create one single,
+      // gigantic partition now. When this is ported into Impala, we
+      // can partition this data to make it more efficient, but for now, dump it
+      // in a single folder.
+      // return "/tai=" + trackerAccountId + "/ts=" + timestamp + "/";
+      return "/";
+    }
   }
 
   /**
@@ -913,7 +1161,9 @@ public class RawTrackerMR extends Configured implements Tool {
         AvroKeyOutputFormat.class, AdPlayHive.getClassSchema());
     AvroMultipleOutputs.addNamedOutput(job, "VideoPlayHive",
         AvroKeyOutputFormat.class, VideoPlayHive.getClassSchema());
-    
+    AvroMultipleOutputs.addNamedOutput(job, "EventSequenceHive",
+        AvroKeyOutputFormat.class, EventSequenceHive.getClassSchema());
+
     job.submit();
     JobStatus jobStatus = job.getStatus();
     System.out.println("Job ID: " + jobStatus.getJobID());

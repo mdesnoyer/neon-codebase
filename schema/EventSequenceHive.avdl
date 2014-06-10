@@ -1,0 +1,108 @@
+//
+// Schema that defines a sequence of TrackerEvents
+//
+// It is wrapped in a protocol so that we can do the definition using
+// the idl format, which takes comments and is easier to read than the
+// json. To generate the json schema needed by avro use:
+//
+// compile_schema.py
+//
+// Author: Mark Desnoyer (desnoyer@neon-lab.com)
+// Copyright 2014 Neon Labs Inc.
+//
+@namespace("com.neon.Tracker")
+protocol DummyTrackerProtocol {
+
+import idl "CommonTrackerInfo.avdl";
+
+record EventSequenceHive {
+  // An id used to link a sequence of events together. The sequence is 
+  // ideally an image_load -> image_visible -> image_click -> video_play
+  long sequenceId;
+
+  string trackerAccountId;  // The publisher's tracker account id
+
+  TrackerType trackerType;
+
+  string clientIP;    // The client's ip address
+
+  // The user id from the cookie. Can be an empty string
+  string neonUserId = ""; 
+
+  union { null, string } userAgent;   // The user's agent string
+
+  // Translated agent info if available
+  union { null, string } agentInfo_os_name;
+  union { null, string } agentInfo_os_version;
+  union { null, string } agentInfo_browser_name;
+  union { null, string } agentInfo_browser_version;
+  
+  // The user's location based on IP data
+  union { null, string } ipGeoData_country; // 3 character country code
+  union { null, string } ipGeoData_city; // City name
+  union { null, string } ipGeoData_region; // Region
+  union { null, string } ipGeoData_zip; // Postal Code
+  union { null, float } ipGeoData_lat; // Latitude
+  union { null, float } ipGeoData_lon; // Longitude
+
+  // The referral URL for the first event in the sequence.
+  union { null, string } refURL; 
+  
+  // ------- Start Image Load specific fields --------
+  // The thumbnail id for the image that was interacted with
+  union { null, string } thumbnail_id = null;
+  union { null, int } height = null;  // Displayed height of the image
+  union { null, int } width = null;   // Displayed width of the image
+  // ------- End Image Load specific fields --------
+
+  // ------- Start Image Click specific fields --------
+  // Coordinates of the click relative to the page
+  union { null, float } pageCoords_x = null;
+  union { null, float } pageCoords_y = null;
+
+  // Coordinates of the click relative to the visible window
+  union { null, float } windowCoords_x = null;
+  union { null, float } windowCoords_y = null;
+
+  union { null, boolean } isClickInPlayer = null; // Is the click in a video player
+
+  union { null, boolean } isRightClick = null; // Is the click a right click
+
+  // ------- End Image Click specific fields --------
+
+  // ------- Start Video Play specific fields --------
+  union { null, string } videoId = null;
+  union { null, string } playerId = null;
+
+  // Time when the player initiates a request to play the video - the
+  // last time an image or the player was clicked by the user. Used to
+  // identify autoplay. Given in milliseconds, or null if there was no
+  // click
+  union { null, int } autoplayDelta = null;
+
+  // This video is the nth one playing on this page load
+  union { null, int } playCount = null;
+
+  // ------- End Video Play specific fields --------
+ 
+  // Page URL where various events happened
+  union { null, string } videoPageURL = null;
+  union { null, string } imClickPageURL = null;
+  union { null, string } imLoadPageURL = null;
+
+  // The server's time in s since epoch for different events
+  union { null, float } imLoadServerTime = null;
+  union { null, float } imVisServerTime = null;
+  union { null, float } imClickServerTime = null;
+  union { null, float } adPlayServerTime = null;
+  union { null, float } videoPlayServerTime = null;
+
+  // The client's time in s since epoch for different events
+  union { null, float } imLoadClientTime = null;
+  union { null, float } imVisClientTime = null;
+  union { null, float } imClickClientTime = null;
+  union { null, float } adPlayClientTime = null;
+  union { null, float } videoPlayClientTime = null;
+}
+
+}

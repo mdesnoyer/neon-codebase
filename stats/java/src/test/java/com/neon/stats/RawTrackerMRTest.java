@@ -144,17 +144,17 @@ public class RawTrackerMRTest {
     return ImageClickHive.newBuilder().setAgentInfoBrowserName(null)
         .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
         .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
-        .setClientIP("56.45.41.124").setClientTime(1400000000f)
-        .setIpGeoDataCity(null).setIpGeoDataCountry("USA")
-        .setIpGeoDataRegion("CA").setIpGeoDataZip(null)
-        .setIpGeoDataLat(34.556f).setIpGeoDataLon(120.45f).setNeonUserId("")
-        .setPageId("pageid1").setPageURL("http://go.com")
-        .setRefURL("http://ref.com").setTrackerAccountId("tai1")
-        .setServerTime(1400697546f).setTrackerType(TrackerType.BRIGHTCOVE)
-        .setUserAgent("agent1").setThumbnailId("acct1_vid1_tid1")
-        .setVideoId("vid1").setPageCoordsX(100f).setPageCoordsY(200f)
-        .setWindowCoordsX(150f).setWindowCoordsY(250f)
-        .setIsClickInPlayer(false).setIsRightClick(false);
+        .setClientTime(1400000000f).setIpGeoDataCity(null)
+        .setIpGeoDataCountry("USA").setIpGeoDataRegion("CA")
+        .setIpGeoDataZip(null).setIpGeoDataLat(34.556f)
+        .setIpGeoDataLon(120.45f).setNeonUserId("").setPageId("pageid1")
+        .setPageURL("http://go.com").setRefURL("http://ref.com")
+        .setTrackerAccountId("tai1").setServerTime(1400697546f)
+        .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
+        .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
+        .setPageCoordsX(100f).setPageCoordsY(200f).setWindowCoordsX(150f)
+        .setWindowCoordsY(250f).setIsClickInPlayer(false)
+        .setIsRightClick(false);
   }
 
   protected TrackerEvent.Builder MakeBasicAdPlay() {
@@ -167,16 +167,15 @@ public class RawTrackerMRTest {
     return AdPlayHive.newBuilder().setAgentInfoBrowserName(null)
         .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
         .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
-        .setClientIP("56.45.41.124").setClientTime(1400000000f)
-        .setIpGeoDataCity(null).setIpGeoDataCountry("USA")
-        .setIpGeoDataRegion("CA").setIpGeoDataZip(null)
-        .setIpGeoDataLat(34.556f).setIpGeoDataLon(120.45f).setNeonUserId("")
-        .setPageId("pageid1").setPageURL("http://go.com")
-        .setRefURL("http://ref.com").setTrackerAccountId("tai1")
-        .setServerTime(1400697546f).setTrackerType(TrackerType.BRIGHTCOVE)
-        .setUserAgent("agent1").setThumbnailId("acct1_vid1_tid1")
-        .setVideoId("vid1").setPlayerId("player2").setAutoplayDelta(null)
-        .setPlayCount(1);
+        .setClientTime(1400000000f).setIpGeoDataCity(null)
+        .setIpGeoDataCountry("USA").setIpGeoDataRegion("CA")
+        .setIpGeoDataZip(null).setIpGeoDataLat(34.556f)
+        .setIpGeoDataLon(120.45f).setNeonUserId("").setPageId("pageid1")
+        .setPageURL("http://go.com").setRefURL("http://ref.com")
+        .setTrackerAccountId("tai1").setServerTime(1400697546f)
+        .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
+        .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
+        .setPlayerId("player2").setAutoplayDelta(null).setPlayCount(1);
   }
 
   protected TrackerEvent.Builder MakeBasicVideoClick() {
@@ -196,16 +195,39 @@ public class RawTrackerMRTest {
     return VideoPlayHive.newBuilder().setAgentInfoBrowserName(null)
         .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
         .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
-        .setClientIP("56.45.41.124").setClientTime(1400000000f)
-        .setIpGeoDataCity(null).setIpGeoDataCountry("USA")
-        .setIpGeoDataRegion("CA").setIpGeoDataZip(null)
-        .setIpGeoDataLat(34.556f).setIpGeoDataLon(120.45f).setNeonUserId("")
-        .setPageId("pageid1").setPageURL("http://go.com")
-        .setRefURL("http://ref.com").setTrackerAccountId("tai1")
-        .setServerTime(1400697546f).setTrackerType(TrackerType.BRIGHTCOVE)
-        .setUserAgent("agent1").setThumbnailId("acct1_vid1_tid1")
-        .setVideoId("vid1").setPlayerId("player2").setAutoplayDelta(null)
-        .setPlayCount(1).setDidAdPlay(true);
+        .setClientTime(1400000000f).setIpGeoDataCity(null)
+        .setIpGeoDataCountry("USA").setIpGeoDataRegion("CA")
+        .setIpGeoDataZip(null).setIpGeoDataLat(34.556f)
+        .setIpGeoDataLon(120.45f).setNeonUserId("").setPageId("pageid1")
+        .setPageURL("http://go.com").setRefURL("http://ref.com")
+        .setTrackerAccountId("tai1").setServerTime(1400697546f)
+        .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
+        .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
+        .setPlayerId("player2").setAutoplayDelta(null).setPlayCount(1)
+        .setDidAdPlay(true);
+  }
+
+  protected EventSequenceHive.Builder MakeBasicEventSequenceHive() {
+    return EventSequenceHive.newBuilder().setAgentInfoBrowserName(null)
+        .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
+        .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
+        .setImLoadClientTime(1400000000f).setImVisClientTime(1400000000f)
+        .setImClickClientTime(1400000000f).setAdPlayClientTime(1400000000f)
+        .setVideoPlayClientTime(1400000000f).setIpGeoDataCity(null)
+        .setIpGeoDataCountry("USA").setIpGeoDataRegion("CA")
+        .setIpGeoDataZip(null).setIpGeoDataLat(34.556f)
+        .setIpGeoDataLon(120.45f).setNeonUserId("")
+        .setVideoPageURL("http://go.com").setImClickPageURL("http://go.com")
+        .setImLoadPageURL("http://go.com").setRefURL("http://ref.com")
+        .setTrackerAccountId("tai1").setImLoadServerTime(1400697546f)
+        .setImVisServerTime(1400697546f).setImClickServerTime(1400697546f)
+        .setAdPlayServerTime(1400697546f).setVideoPlayServerTime(1400697546f)
+        .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
+        .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
+        .setPlayerId("player2").setAutoplayDelta(null).setPlayCount(1)
+        .setPageCoordsX(100f).setPageCoordsY(200f).setWindowCoordsX(150f)
+        .setWindowCoordsY(250f).setIsClickInPlayer(false)
+        .setIsRightClick(false).setHeight(480).setWidth(640);
   }
 
   @Test
@@ -412,11 +434,14 @@ public class RawTrackerMRTest {
         outputPathCaptor.capture());
     verify(outputCollector).write(eq("AdPlayHive"), hiveEventCaptor.capture(),
         eq(NullWritable.get()), outputPathCaptor.capture());
+    verify(outputCollector).write(eq("EventSequenceHive"),
+        hiveEventCaptor.capture(), eq(NullWritable.get()),
+        outputPathCaptor.capture());
 
     List<AvroKey> hiveEvents = hiveEventCaptor.getAllValues();
     List<String> outputPaths = outputPathCaptor.getAllValues();
     assertEquals(hiveEvents.size(), outputPaths.size());
-    assertEquals(hiveEvents.size(), 5);
+    assertEquals(hiveEvents.size(), 6);
     Long sequenceId = null;
     for (int i = 0; i < hiveEvents.size(); ++i) {
       AvroKey curEvent = hiveEvents.get(i);
@@ -426,16 +451,16 @@ public class RawTrackerMRTest {
                 .getSequenceId() : sequenceId;
         assertEquals(curEvent.datum(),
             MakeBasicImageLoadHive().setSequenceId(sequenceId).build());
-        assertEquals(outputPaths.get(i),
-            "ImageLoadHive/ImageLoadHive");
+        assertEquals(outputPaths.get(i), "ImageLoadHive/ImageLoadHive");
+
       } else if (curEvent.datum() instanceof ImageVisibleHive) {
         sequenceId =
             sequenceId == null ? ((ImageVisibleHive) curEvent.datum())
                 .getSequenceId() : sequenceId;
         assertEquals(curEvent.datum(), MakeBasicImageVisibleHive()
             .setClientTime(1400000000.1f).setSequenceId(sequenceId).build());
-        assertEquals(outputPaths.get(i),
-            "ImageVisibleHive/ImageVisibleHive");
+        assertEquals(outputPaths.get(i), "ImageVisibleHive/ImageVisibleHive");
+
       } else if (curEvent.datum() instanceof ImageClickHive) {
         sequenceId =
             sequenceId == null ? ((ImageClickHive) curEvent.datum())
@@ -443,8 +468,8 @@ public class RawTrackerMRTest {
         assertEquals(curEvent.datum(),
             MakeBasicImageClickHive().setClientTime(1400000000.2f)
                 .setSequenceId(sequenceId).build());
-        assertEquals(outputPaths.get(i),
-            "ImageClickHive/ImageClickHive");
+        assertEquals(outputPaths.get(i), "ImageClickHive/ImageClickHive");
+
       } else if (curEvent.datum() instanceof AdPlayHive) {
         sequenceId =
             sequenceId == null ? ((AdPlayHive) curEvent.datum())
@@ -454,8 +479,8 @@ public class RawTrackerMRTest {
             MakeBasicAdPlayHive().setClientTime(1400000000.5f)
                 .setPageId("vidpage").setRefURL("http://go.com")
                 .setSequenceId(sequenceId).build());
-        assertEquals(outputPaths.get(i),
-            "AdPlayHive/AdPlayHive");
+        assertEquals(outputPaths.get(i), "AdPlayHive/AdPlayHive");
+
       } else if (curEvent.datum() instanceof VideoPlayHive) {
         sequenceId =
             sequenceId == null ? ((VideoPlayHive) curEvent.datum())
@@ -465,8 +490,22 @@ public class RawTrackerMRTest {
             MakeBasicVideoPlayHive().setClientTime(1400000000.7f)
                 .setPageId("vidpage").setSequenceId(sequenceId)
                 .setRefURL("http://go.com").build());
-        assertEquals(outputPaths.get(i),
-            "VideoPlayHive/VideoPlayHive");
+        assertEquals(outputPaths.get(i), "VideoPlayHive/VideoPlayHive");
+
+      } else if (curEvent.datum() instanceof EventSequenceHive) {
+        sequenceId =
+            sequenceId == null ? ((EventSequenceHive) curEvent.datum())
+                .getSequenceId() : sequenceId;
+
+        assertEquals(
+            curEvent.datum(),
+            MakeBasicEventSequenceHive().setSequenceId(sequenceId)
+                .setImVisClientTime(1400000000.1f)
+                .setImClickClientTime(1400000000.2f)
+                .setAdPlayClientTime(1400000000.5f)
+                .setVideoPlayClientTime(1400000000.7f).build());
+
+        assertEquals(outputPaths.get(i), "EventSequenceHive/EventSequenceHive");
       }
     }
 
