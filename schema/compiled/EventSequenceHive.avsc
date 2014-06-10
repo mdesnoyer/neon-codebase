@@ -1,0 +1,166 @@
+{
+  "type" : "record",
+  "name" : "EventSequenceHive",
+  "namespace" : "com.neon.Tracker",
+  "fields" : [ {
+    "name" : "sequenceId",
+    "type" : "long"
+  }, {
+    "name" : "trackerAccountId",
+    "type" : "string"
+  }, {
+    "name" : "trackerType",
+    "type" : {
+      "type" : "enum",
+      "name" : "TrackerType",
+      "symbols" : [ "BRIGHTCOVE", "OOYALA", "BCGALLERY", "IGN" ]
+    }
+  }, {
+    "name" : "clientIP",
+    "type" : "string"
+  }, {
+    "name" : "neonUserId",
+    "type" : "string",
+    "default" : ""
+  }, {
+    "name" : "userAgent",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "agentInfo_os_name",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "agentInfo_os_version",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "agentInfo_browser_name",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "agentInfo_browser_version",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "ipGeoData_country",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "ipGeoData_city",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "ipGeoData_region",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "ipGeoData_zip",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "ipGeoData_lat",
+    "type" : [ "null", "float" ]
+  }, {
+    "name" : "ipGeoData_lon",
+    "type" : [ "null", "float" ]
+  }, {
+    "name" : "refURL",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "thumbnail_id",
+    "type" : [ "null", "string" ],
+    "default" : null
+  }, {
+    "name" : "height",
+    "type" : [ "null", "int" ],
+    "default" : null
+  }, {
+    "name" : "width",
+    "type" : [ "null", "int" ],
+    "default" : null
+  }, {
+    "name" : "pageCoords_x",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
+    "name" : "pageCoords_y",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
+    "name" : "windowCoords_x",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
+    "name" : "windowCoords_y",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
+    "name" : "isClickInPlayer",
+    "type" : [ "null", "boolean" ],
+    "default" : null
+  }, {
+    "name" : "isRightClick",
+    "type" : [ "null", "boolean" ],
+    "default" : null
+  }, {
+    "name" : "videoId",
+    "type" : [ "null", "string" ],
+    "default" : null
+  }, {
+    "name" : "playerId",
+    "type" : [ "null", "string" ],
+    "default" : null
+  }, {
+    "name" : "autoplayDelta",
+    "type" : [ "null", "int" ],
+    "default" : null
+  }, {
+    "name" : "playCount",
+    "type" : [ "null", "int" ],
+    "default" : null
+  }, {
+    "name" : "videoPageURL",
+    "type" : [ "null", "string" ],
+    "default" : null
+  }, {
+    "name" : "imClickPageURL",
+    "type" : [ "null", "string" ],
+    "default" : null
+  }, {
+    "name" : "imLoadPageURL",
+    "type" : [ "null", "string" ],
+    "default" : null
+  }, {
+    "name" : "imLoadServerTime",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
+    "name" : "imVisServerTime",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
+    "name" : "imClickServerTime",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
+    "name" : "adPlayServerTime",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
+    "name" : "videoPlayServerTime",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
+    "name" : "imLoadClientTime",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
+    "name" : "imVisClientTime",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
+    "name" : "imClickClientTime",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
+    "name" : "adPlayClientTime",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
+    "name" : "videoPlayClientTime",
+    "type" : [ "null", "float" ],
+    "default" : null
+  } ]
+}
