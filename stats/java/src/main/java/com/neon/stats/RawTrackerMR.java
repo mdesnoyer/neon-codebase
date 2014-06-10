@@ -1165,6 +1165,7 @@ public class RawTrackerMR extends Configured implements Tool {
         AvroKeyOutputFormat.class, EventSequenceHive.getClassSchema());
 
     job.submit();
+    //job.waitForCompletion(true);
     JobStatus jobStatus = job.getStatus();
     System.out.println("Job ID: " + jobStatus.getJobID());
     System.out.println("Tracking URL: " + jobStatus.getTrackingUrl());
