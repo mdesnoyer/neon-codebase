@@ -222,12 +222,13 @@ public class RawTrackerMRTest {
         .setTrackerAccountId("tai1").setImLoadServerTime(1400697546f)
         .setImVisServerTime(1400697546f).setImClickServerTime(1400697546f)
         .setAdPlayServerTime(1400697546f).setVideoPlayServerTime(1400697546f)
-        .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
-        .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
-        .setPlayerId("player2").setAutoplayDelta(null).setPlayCount(1)
-        .setPageCoordsX(100f).setPageCoordsY(200f).setWindowCoordsX(150f)
-        .setWindowCoordsY(250f).setIsClickInPlayer(false)
-        .setIsRightClick(false).setHeight(480).setWidth(640);
+        .setServerTime(1400697546f).setTrackerType(TrackerType.BRIGHTCOVE)
+        .setUserAgent("agent1").setThumbnailId("acct1_vid1_tid1")
+        .setVideoId("vid1").setPlayerId("player2").setAutoplayDelta(null)
+        .setPlayCount(1).setPageCoordsX(100f).setPageCoordsY(200f)
+        .setWindowCoordsX(150f).setWindowCoordsY(250f)
+        .setIsClickInPlayer(false).setIsRightClick(false).setHeight(480)
+        .setWidth(640);
   }
 
   @Test
