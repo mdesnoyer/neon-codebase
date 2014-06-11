@@ -120,11 +120,8 @@ class TestFlumeHandler(test_utils.neontest.TestCase):
             request.headers)
         flume_data = json.loads(request.body)
         headers = flume_data['headers']
-        record = json.loads(flume_data['body'])
 
-        self.assertEqual(record['msg'], 'I got an INFO log')
-        self.assertEqual(record['levelno'], logging.INFO)
-        self.assertEqual(headers['timestamp'], long(record['created'] * 1000))
+        self.assertRegexpMatches(flume_data['body'], 'I got an INFO log')
         self.assertGreater(headers['timestamp'], 1402444041000)
         self.assertEqual(headers['level'], 'INFO')
 

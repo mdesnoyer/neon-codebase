@@ -237,13 +237,12 @@ class FlumeHandler(TornadoHTTPHandler):
                 'timestamp' : long(record.created * 1000),
                 'level' : record.levelname
             },
-            'body' : json.dumps(self.get_verbose_dict(record))
+            'body' : self.format(record)
         }
         data = json.dumps(flume_event)
         return tornado.httpclient.HTTPRequest(
             self.url, method='POST', 
-            headers={'Content-type' : 'application/json',
-                     'Content-length' : len(data) },
+            headers={'Content-type' : 'application/json' },
             body=data)
 
 def str2level(s):
