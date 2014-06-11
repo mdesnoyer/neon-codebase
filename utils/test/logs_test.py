@@ -118,7 +118,7 @@ class TestFlumeHandler(test_utils.neontest.TestCase):
         self.assertDictContainsSubset(
             {'Content-type' : 'application/json'},
             request.headers)
-        flume_data = json.loads(request.body)
+        flume_data = json.loads(request.body)[0]
         headers = flume_data['headers']
 
         self.assertRegexpMatches(flume_data['body'], 'I got an INFO log')
