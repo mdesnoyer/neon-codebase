@@ -103,6 +103,9 @@ record EventSequenceHive {
   union { null, float } imClickClientTime = null;
   union { null, float } adPlayClientTime = null;
   union { null, float } videoPlayClientTime = null;
+
+  // One of the server times. This is used only to partition the data
+  float serverTime;
 }
 
 }

@@ -945,7 +945,7 @@ public class RawTrackerMR extends Configured implements Tool {
             .setImClickServerTime((float) (videoClick.getServerTime() / 1000.))
             .setImClickPageURL(videoClick.getPageURL());
       }
-      
+
       if (videoPlay != null) {
         lastServerTime = videoPlay.getServerTime();
         trackerAccountId = videoPlay.getTrackerAccountId();
@@ -964,7 +964,8 @@ public class RawTrackerMR extends Configured implements Tool {
             .setVideoPageURL(videoPlay.getPageURL());
       }
 
-      builder.setRefURL(firstRefURL).setThumbnailId(thumbnailId);
+      builder.setRefURL(firstRefURL).setThumbnailId(thumbnailId)
+          .setServerTime((float) (lastServerTime / 1000.));
 
       out.write(
           "EventSequenceHive",
@@ -1165,7 +1166,7 @@ public class RawTrackerMR extends Configured implements Tool {
         AvroKeyOutputFormat.class, EventSequenceHive.getClassSchema());
 
     job.submit();
-    //job.waitForCompletion(true);
+    // job.waitForCompletion(true);
     JobStatus jobStatus = job.getStatus();
     System.out.println("Job ID: " + jobStatus.getJobID());
     System.out.println("Tracking URL: " + jobStatus.getTrackingUrl());
