@@ -106,6 +106,13 @@ record EventSequenceHive {
 
   // One of the server times. This is used only to partition the data
   float serverTime;
+
+  // The page ids for the various events
+  union { null, string } imLoadPageId = null;
+  union { null, string } imVisPageId = null;
+  union { null, string } imClickPageId = null;
+  union { null, string } adPlayPageId = null;
+  union { null, string } videoPlayPageId = null;
 }
 
 }

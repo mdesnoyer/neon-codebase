@@ -228,7 +228,9 @@ public class RawTrackerMRTest {
         .setPlayCount(1).setPageCoordsX(100f).setPageCoordsY(200f)
         .setWindowCoordsX(150f).setWindowCoordsY(250f)
         .setIsClickInPlayer(false).setIsRightClick(false).setHeight(480)
-        .setWidth(640);
+        .setWidth(640).setImLoadPageId("pageid1").setImVisPageId("pageid1")
+        .setImClickPageId("pageid1").setAdPlayPageId("vidpage")
+        .setVideoPlayPageId("vidpage");
   }
 
   @Test

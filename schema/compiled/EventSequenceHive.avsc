@@ -165,5 +165,25 @@
   }, {
     "name" : "serverTime",
     "type" : "float"
+  }, {
+    "name" : "imLoadPageId",
+    "type" : [ "null", "string" ],
+    "default" : null
+  }, {
+    "name" : "imVisPageId",
+    "type" : [ "null", "string" ],
+    "default" : null
+  }, {
+    "name" : "imClickPageId",
+    "type" : [ "null", "string" ],
+    "default" : null
+  }, {
+    "name" : "adPlayPageId",
+    "type" : [ "null", "string" ],
+    "default" : null
+  }, {
+    "name" : "videoPlayPageId",
+    "type" : [ "null", "string" ],
+    "default" : null
   } ]
 }

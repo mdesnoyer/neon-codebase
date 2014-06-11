@@ -872,7 +872,8 @@ public class RawTrackerMR extends Configured implements Tool {
             .setWidth(((ImageLoad) imLoad.getEventData()).getWidth())
             .setImLoadClientTime((float) (imLoad.getClientTime() / 1000.))
             .setImLoadServerTime((float) (imLoad.getServerTime() / 1000.))
-            .setImLoadPageURL(imLoad.getPageURL());
+            .setImLoadPageURL(imLoad.getPageURL())
+            .setImLoadPageId(imLoad.getPageId());
       }
 
       if (imVis != null) {
@@ -885,7 +886,8 @@ public class RawTrackerMR extends Configured implements Tool {
         BuildCommonSequenceFields(builder, imVis)
             .setImVisClientTime((float) (imVis.getClientTime() / 1000.))
             .setImVisServerTime((float) (imVis.getServerTime() / 1000.))
-            .setImLoadPageURL(imVis.getPageURL());
+            .setImLoadPageURL(imVis.getPageURL())
+            .setImVisPageId(imVis.getPageId());
       }
 
       if (imClick != null) {
@@ -908,7 +910,8 @@ public class RawTrackerMR extends Configured implements Tool {
             .setIsClickInPlayer(false)
             .setImClickClientTime((float) (imClick.getClientTime() / 1000.))
             .setImClickServerTime((float) (imClick.getServerTime() / 1000.))
-            .setImClickPageURL(imClick.getPageURL());
+            .setImClickPageURL(imClick.getPageURL())
+            .setImClickPageId(imClick.getPageId());
       }
 
       if (adPlay != null) {
@@ -926,7 +929,8 @@ public class RawTrackerMR extends Configured implements Tool {
             .setPlayCount(((AdPlay) adPlay.getEventData()).getPlayCount())
             .setAdPlayClientTime((float) (adPlay.getClientTime() / 1000.))
             .setAdPlayServerTime((float) (adPlay.getServerTime() / 1000.))
-            .setVideoPageURL(adPlay.getPageURL());
+            .setVideoPageURL(adPlay.getPageURL())
+            .setAdPlayPageId(adPlay.getPageId());
       }
 
       if (videoClick != null) {
@@ -943,7 +947,8 @@ public class RawTrackerMR extends Configured implements Tool {
             .setIsClickInPlayer(true).setIsRightClick(false)
             .setImClickClientTime((float) (videoClick.getClientTime() / 1000.))
             .setImClickServerTime((float) (videoClick.getServerTime() / 1000.))
-            .setImClickPageURL(videoClick.getPageURL());
+            .setImClickPageURL(videoClick.getPageURL())
+            .setImClickPageId(videoClick.getPageId());
       }
 
       if (videoPlay != null) {
@@ -961,7 +966,8 @@ public class RawTrackerMR extends Configured implements Tool {
             .setPlayCount(((VideoPlay) videoPlay.getEventData()).getPlayCount())
             .setVideoPlayClientTime((float) (videoPlay.getClientTime() / 1000.))
             .setVideoPlayServerTime((float) (videoPlay.getServerTime() / 1000.))
-            .setVideoPageURL(videoPlay.getPageURL());
+            .setVideoPageURL(videoPlay.getPageURL())
+            .setVideoPlayPageId(videoPlay.getPageId());
       }
 
       builder.setRefURL(firstRefURL).setThumbnailId(thumbnailId)
