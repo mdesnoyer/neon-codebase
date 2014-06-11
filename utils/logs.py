@@ -16,12 +16,25 @@ Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright 2013 Neon Labs
 '''
 
+import os.path
+import sys
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
+
+import copy
+import json
 import logging
 import logging.handlers
-from .options import define, options
 import SocketServer
 import sys
+import tornado.httpclient
+import urllib
+import urllib2
+import utils.http
 
+from utils.options import define, options
+### Options to define the root logger when AddConfiguredLogger is called ###
 define('file', default=None, type=str,
        help='File to output the default logs')
 define('level', default='info', type=str,
@@ -35,6 +48,17 @@ define('do_stderr', default=1, type=int,
 define('do_stdout', default=1, type=int,
        help=('1 if we will generate a stdout output, 0 otherwise. '
              'The log level will be defined by the --level option'))
+define('flume_url', default=None, type=str,
+       help=('Location of a flume endpoint to send to. '
+             'e.g. http://localhost:6366'))
+define('loggly_tag', default=None, type=str,
+       help=('If set, sends the logs to loggly with the given tag.'))
+
+
+### Typical configuration options that will be applied to multiple loggers ###
+define('loggly_base_url',
+       default='https://logs-01.loggly.com/inputs/520b9697-b7f3-4970-a059-710c28a8188a',
+       help='Base url for the loggly endpoint')
 
 def AddConfiguredLogger():
     '''Adds a root logger defined by the config parameters.'''
@@ -44,6 +68,8 @@ def AddConfiguredLogger():
         
     logger = CreateLogger(stream=stdout_stream,
                           logfile=options.file,
+                          loggly_tag=options.loggly_tag,
+                          flume_url=options.flume_url,
                           fmt=options.format,
                           level=str2level(options.level))
 
@@ -60,6 +86,8 @@ def CreateLogger(name=None,
                  stream=None,
                  logfile=None,
                  socket_info=None,
+                 loggly_tag=None,
+                 flume_url=None,
                  fmt='%(asctime)s %(levelname)s:%(name)s %(message)s',
                  level=logging.INFO):
     '''Adds handlers to the named logger and returns it.
@@ -69,6 +97,8 @@ def CreateLogger(name=None,
     stream - If set, a handler is created for a stream. eg. sys.stdout
     logfile - If set, a handler is created that logs to a file
     socket_info - If (host, port), then a socket handler is added
+    loggly_tag - Loggly tag to send records to
+    flume_url - URL for the flume agent. We use the JSON HTTP source
     fmt - The format of the log
     level - The level for the root logger
 
@@ -101,6 +131,18 @@ def CreateLogger(name=None,
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 
+    # For a loggly output
+    if loggly_tag is not None:
+         handler = LogglyHandler(loggly_tag)
+         handler.setFormatter(formatter)
+         logger.addHandler(handler)
+
+    # For a flume output
+    if flume_url is not None:
+        handler = FlumeHandler(flume_url)
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
     return logger
 
 def FileLogger(name, logfile='error.log'):
@@ -112,23 +154,92 @@ def SocketLogger(name, host='localhost', port=8020):
 def StreamLogger(name, stream=sys.stdout):
     return CreateLogger(name, stream=stream)
 
-class LogServer(SocketServer.BaseRequestHandler):
+def LogglyLogger(name, tag='python'):
+    return CreateLogger(name, loggly_tag=tag)
 
-    logfile = "/var/log/neonserver.log"
+def FlumeLogger(name, host='localhost', port=6366):
+    return CreateLogger(name, flume_url='http://%s:%s' % (host, port))
 
-    def handler(self):
-        # self.request is the TCP socket connected to the client
-        self.data = self.request.recv(1024).strip()
-        #print "{} wrote:".format(self.client_address[0])
-        print self.data
+class TornadoHTTPHandler(logging.Handler):
+    '''
+    A class that sends a tornado based http request
+    '''
+    def __init__(self, url):
+        super(TornadoHTTPHandler, self).__init__()
+        self.url = url
 
-	def start(self):
-	    HOST, PORT = "localhost", 8020
-	    server = SocketServer.TCPServer((HOST, PORT), self.handler)
+    def get_verbose_dict(self, record):
+        '''Returns a verbose dictionary of the record.'''
+        retval = copy.deepcopy(record.__dict__)
+        retval['msg'] = record.getMessage()
+        del retval['args']
+        return retval
 
-	    # Activate the server; this will keep running until you
-	    # interrupt the program with Ctrl-C
-	    server.serve_forever()
+    def generate_request(self, record):
+        '''Create a tornado.httpclient.HTTPRequest from the record.
+
+        Overwrite this in subclasses if necessary.
+        '''
+        data = urllib.urlencode(self.get_verbose_dict(record))
+        return tornado.httpclient.HTTPRequest(
+            self.url, method='POST', 
+            headers={'Content-type' : 'application/x-www-form-urlencoded',
+                     'Content-length' : len(data) },
+            body=data)
+
+    def emit(self, record):
+        # Define the callback function so that we don't block here
+        def handle_response(response):
+            if response.error:
+                try:
+                    raise response.error
+                except:
+                    self.handleError(record)
+
+        try:
+            utils.http.send_request(self.generate_request(record),
+                                    callback=handle_response)
+        except:
+            self.handleError(record)
+
+class LogglyHandler(TornadoHTTPHandler):
+    '''
+    Class that can send the records to loggly.
+    '''
+    def __init__(self, tag):
+        super(LogglyHandler, self).__init__(
+            '%s/tag/%s' % (options.loggly_base_url, tag))
+
+    def generate_request(self, record):
+        log_data = ("PLAINTEXT=" + 
+                    urllib2.quote(json.dumps(self.get_verbose_dict(record))))
+        return tornado.httpclient.HTTPRequest(
+            self.url, method='POST', 
+            headers={'Content-type' : 'application/x-www-form-urlencoded',
+                     'Content-length' : len(log_data) },
+            body=log_data)
+
+class FlumeHandler(TornadoHTTPHandler):
+    '''
+    Class that can send the records to flume.
+    '''
+    def __init__(self, url):
+        super(FlumeHandler, self).__init__(url)
+
+    def generate_request(self, record):
+        flume_event = {
+            'headers' : {
+                'timestamp' : long(record.created * 1000),
+                'level' : record.levelname
+            },
+            'body' : json.dumps(self.get_verbose_dict(record))
+        }
+        data = json.dumps(flume_event)
+        return tornado.httpclient.HTTPRequest(
+            self.url, method='POST', 
+            headers={'Content-type' : 'application/json',
+                     'Content-length' : len(data) },
+            body=data)
 
 def str2level(s):
     '''Converts a string to a logging level.'''
