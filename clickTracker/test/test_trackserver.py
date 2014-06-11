@@ -666,5 +666,4 @@ if __name__ == '__main__':
     # Turn off the annoying logs
     #logging.getLogger('tornado.access').propagate = False
 
-    import cProfile
-    cProfile.run('unittest.main()', 'trackserver.prof')
+    unittest.main()
