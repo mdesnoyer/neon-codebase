@@ -239,7 +239,7 @@ class FlumeHandler(TornadoHTTPHandler):
             },
             'body' : self.format(record)
         }
-        data = json.dumps(flume_event)
+        data = json.dumps([flume_event])
         return tornado.httpclient.HTTPRequest(
             self.url, method='POST', 
             headers={'Content-type' : 'application/json' },
