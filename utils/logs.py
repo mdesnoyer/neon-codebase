@@ -23,9 +23,11 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import copy
+import datetime
 import json
 import logging
 import logging.handlers
+import platform
 import SocketServer
 import sys
 import tornado.httpclient
@@ -211,8 +213,11 @@ class LogglyHandler(TornadoHTTPHandler):
             '%s/tag/%s' % (options.loggly_base_url, tag))
 
     def generate_request(self, record):
+        data = self.get_verbose_dict(record)
+        data['timestamp'] = datetime.datetime.utcnow().isoformat()
+        data['host'] = platform.node()
         log_data = ("PLAINTEXT=" + 
-                    urllib2.quote(json.dumps(self.get_verbose_dict(record))))
+                    urllib2.quote(json.dumps(data)))
         return tornado.httpclient.HTTPRequest(
             self.url, method='POST', 
             headers={'Content-type' : 'application/x-www-form-urlencoded',
