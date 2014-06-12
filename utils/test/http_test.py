@@ -57,7 +57,7 @@ class TestSyncSendRequest(test_utils.neontest.TestCase):
             valid_response
             ]
 
-        with self.assertLogExists(logging.warning, 'key=http_response_error'):
+        with self.assertLogExists(logging.WARNING, 'key=http_response_error'):
             found_response = utils.http.send_request(request, 3)
 
         self.assertEqual(found_response, valid_response)
@@ -71,7 +71,7 @@ class TestSyncSendRequest(test_utils.neontest.TestCase):
             valid_response
             ]
 
-        with self.assertLogExists(logging.warning,
+        with self.assertLogExists(logging.WARNING,
                                   'key=http_connection_error msg=.*500'):
             found_response = utils.http.send_request(request, 3)
 
@@ -87,7 +87,7 @@ class TestSyncSendRequest(test_utils.neontest.TestCase):
             valid_response
             ]
 
-        with self.assertLogExists(logging.warning,
+        with self.assertLogExists(logging.WARNING,
                                   'key=http_connection_error msg=.*500'):
             found_response = utils.http.send_request(request, 3)
 
@@ -155,7 +155,7 @@ class TestAsyncSendRequest(test_utils.neontest.AsyncTestCase):
             valid_response
             ]
 
-        with self.assertLogExists(logging.warning, 'key=http_response_error'):
+        with self.assertLogExists(logging.WARNING, 'key=http_response_error'):
             utils.http.send_request(request, 3, callback=self.stop)
             found_response = self.wait()
             self.assertEqual(found_response, valid_response)
@@ -217,7 +217,7 @@ class TestRequestPool(test_utils.neontest.TestCase):
             valid_response
             ]
 
-        with self.assertLogExists(logging.warning, 'key=http_response_error'):
+        with self.assertLogExists(logging.WARNING, 'key=http_response_error'):
             self.pool.send_request(request, lambda x: self.response_q.put(x))
             self.pool.join()
 
@@ -233,7 +233,7 @@ class TestRequestPool(test_utils.neontest.TestCase):
             invalid_response,
             ]
 
-        with self.assertLogExists(logging.error, 'key=http_too_many_errors'):
+        with self.assertLogExists(logging.ERROR, 'key=http_too_many_errors'):
             self.pool.send_request(request, lambda x: self.response_q.put(x))
             self.pool.join()
 
@@ -251,7 +251,7 @@ class TestRequestPool(test_utils.neontest.TestCase):
             valid_response
             ]
 
-        with self.assertLogExists(logging.warning,
+        with self.assertLogExists(logging.WARNING,
                                   'key=http_connection_error msg=.*599'):
             self.pool.send_request(request, lambda x: self.response_q.put(x))
             self.pool.join()
@@ -268,7 +268,7 @@ class TestRequestPool(test_utils.neontest.TestCase):
             valid_response
             ]
 
-        with self.assertLogExists(logging.warning,
+        with self.assertLogExists(logging.WARNING,
                                   'key=http_connection_error msg=.*500'):
             self.pool.send_request(request, lambda x: self.response_q.put(x))
             self.pool.join()
