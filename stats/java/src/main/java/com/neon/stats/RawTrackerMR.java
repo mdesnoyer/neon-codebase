@@ -256,7 +256,7 @@ public class RawTrackerMR extends Configured implements Tool {
         }
         if (foundDup) {
           context.getCounter("EventStats", "DuplicatesFound").increment(1);
-          break;
+          continue;
         }
 
         if (!curEvent.getClientIP().equals(UNKNOWN_IP)) {
@@ -290,7 +290,7 @@ public class RawTrackerMR extends Configured implements Tool {
           if (foundRealClick) {
             // There is a real click so we can ignore this video click
             context.getCounter("EventStats", "ExtraVideoClicks").increment(1);
-            break;
+            continue;
           }
 
         }
@@ -481,8 +481,9 @@ public class RawTrackerMR extends Configured implements Tool {
       case VIDEO_PLAY:
       case AD_PLAY:
         // TODO(mdesnoyer): Maybe flag play & click events as duplicates if they
-        // are too close in time
-        return a.equals(b);
+        // are too close in time instead of exactly the same time
+        return a.getPageId().equals(b.getPageId())
+            && a.getClientTime().equals(b.getClientTime());
 
       }
 
@@ -535,8 +536,8 @@ public class RawTrackerMR extends Configured implements Tool {
       // gigantic partition now. When this is ported into Elastic MapReduce, we
       // can partition this data to make it more efficient, but for now, dump it
       // in a single folder.
-      //String partitionPath =
-      //    "/tai=" + orig.getTrackerAccountId() + "/ts=" + timestamp + "/";
+      // String partitionPath =
+      // "/tai=" + orig.getTrackerAccountId() + "/ts=" + timestamp + "/";
       String partitionPath = "/";
 
       // Do some null handling of common structures
@@ -913,7 +914,7 @@ public class RawTrackerMR extends Configured implements Tool {
         AvroKeyOutputFormat.class, AdPlayHive.getClassSchema());
     AvroMultipleOutputs.addNamedOutput(job, "VideoPlayHive",
         AvroKeyOutputFormat.class, VideoPlayHive.getClassSchema());
-    
+
     job.submit();
     JobStatus jobStatus = job.getStatus();
     System.out.println("Job ID: " + jobStatus.getJobID());
