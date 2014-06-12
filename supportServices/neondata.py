@@ -21,11 +21,11 @@ if sys.path[0] <> base_path:
 
 import base64
 import binascii
+import concurrent.futures
 import contextlib
 import copy
 import hashlib
 import json
-from multiprocessing.pool import ThreadPool
 import random
 import redis as blockingRedis
 import string
@@ -53,6 +53,10 @@ define("thumbnailDB", default="127.0.0.1", type=str ,help="")
 define("dbPort", default=6379, type=int, help="redis port")
 define("watchdogInterval", default=3, type=int, 
         help="interval for watchdog thread")
+define("maxRedisRetries", default=5, type=int,
+       help="Maximum number of retries when sending a request to redis")
+define("baseRedisRetryWait", default=0.1, type=float,
+       help="On the first retry of a redis command, how long to wait in seconds")
 
 #constants 
 BCOVE_STILL_WIDTH = 480
@@ -135,6 +139,50 @@ class DBConnection(object):
                             object.__new__(cls, *args, **kwargs)
         return cls._singleton_instance[cname]
 
+class RedisRetryWrapper(object):
+    '''Wraps a redis client so that it retries with exponential backoff.
+
+    You use this class exactly the same way that you would use the
+    StrctRedis class. 
+
+    Calls on this object are blocking.
+
+    '''
+
+    def __init__(self, *args, **kwargs):
+        self.client = blockingRedis.StrictRedis(*args, **kwargs)
+        self.max_tries = options.maxRedisRetries
+        self.base_wait = options.baseRedisRetryWait
+
+    def _get_wrapped_retry_func(self, func):
+        '''Returns an blocking retry function wrapped around the given func.
+        '''
+        def RetryWrapper(*args, **kwargs):
+            cur_try = 0
+            while True:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    _log.error('Error talking to redis on attempt %i: %s' % 
+                               (cur_try, e))
+                    cur_try += 1
+                    if cur_try == self.max_tries:
+                        raise
+
+                    # Do an exponential backoff
+                    delay = (1 << cur_try) * self.base_wait # in seconds
+                    time.sleep(delay)
+        return RetryWrapper
+
+    def __getattr__(self, attr):
+        '''Allows us to wrap all of the redis-py functions.'''
+        if hasattr(self.client, attr):
+            if hasattr(getattr(self.client, attr), '__call__'):
+                return self._get_wrapped_retry_func(
+                    getattr(self.client, attr))
+                
+        raise AttributeError(attr)
+
 class RedisAsyncWrapper(object):
     '''
     Replacement class for tornado-redis 
@@ -145,20 +193,21 @@ class RedisAsyncWrapper(object):
     you can write db operations as if they were synchronous.
     
     usage: 
-    value = yield tornado.gen.Task(RedisAsyncWrapper().get,key)
+    value = yield tornado.gen.Task(RedisAsyncWrapper().get, key)
 
 
     #TODO: see if we can completely wrap redis-py calls, helpful if
-    you can get the callback attribuet as well when call is made
+    you can get the callback attribue as well when call is made
     '''
 
-    _thread_pool = ThreadPool(10)
+    _thread_pool = concurrent.futures.ThreadPoolExecutor(10)
     
     def __init__(self, host='127.0.0.1', port=6379):
         self.client = blockingRedis.StrictRedis(host, port, socket_timeout=10)
+        self.max_tries = options.maxRedisRetries
+        self.base_wait = options.baseRedisRetryWait
 
-    @staticmethod
-    def _get_wrapped_async_func(func):
+    def _get_wrapped_async_func(self, func):
         '''Returns an asynchronous function wrapped around the given func.
 
         The asynchronous call has a callback keyword added to it
@@ -176,12 +225,28 @@ class RedisAsyncWrapper(object):
                     raise AttributeError('A callback is necessary')
                     
             io_loop = tornado.ioloop.IOLoop.current()
-            def _cb(result):
-                io_loop.add_callback(lambda: callback(result))
+            
+            def _cb(future, cur_try=0):
+                if future.exception() is None:
+                    callback(future.result())
+                else:
+                    _log.error('Error talking to redis on attempt %i: %s' % 
+                               (cur_try, future.exception()))
+                    cur_try += 1
+                    if cur_try == self.max_tries:
+                        raise future.exception()
 
-            RedisAsyncWrapper._thread_pool.apply_async(
-                func, args=args,
-                kwds=kwargs, callback=_cb)
+                    delay = (1 << cur_try) * self.base_wait # in seconds
+                    io_loop.add_timeout(
+                        time.time() + delay,
+                        lambda: io_loop.add_future(
+                            RedisAsyncWrapper._thread_pool.submit(
+                                func, *args, **kwargs),
+                            lambda x: _cb(x, cur_try)))
+
+            future = RedisAsyncWrapper._thread_pool.submit(
+                func, *args, **kwargs)
+            io_loop.add_future(future, _cb)
         return AsyncWrapper
         
 
@@ -189,7 +254,7 @@ class RedisAsyncWrapper(object):
         '''Allows us to wrap all of the redis-py functions.'''
         if hasattr(self.client, attr):
             if hasattr(getattr(self.client, attr), '__call__'):
-                return RedisAsyncWrapper._get_wrapped_async_func(
+                return self._get_wrapped_async_func(
                     getattr(self.client, attr))
                 
         raise AttributeError(attr)
@@ -252,7 +317,7 @@ class RedisClient(object):
 
     def __init__(self, host='127.0.0.1', port=6379):
         self.client = RedisAsyncWrapper(host, port)
-        self.blocking_client = blockingRedis.StrictRedis(host, port)
+        self.blocking_client = RedisRetryWrapper(host, port)
     
     @staticmethod
     def get_client(host=None, port=None):
@@ -265,7 +330,7 @@ class RedisClient(object):
             port = RedisClient.port
         
         RedisClient.c = RedisAsyncWrapper(host, port)
-        RedisClient.bc = blockingRedis.StrictRedis(
+        RedisClient.bc = RedisRetryWrapper(
                             host, port, socket_timeout=10)
         return RedisClient.c, RedisClient.bc 
 
@@ -547,6 +612,11 @@ class TrackerAccountIDMapper(StoredObject):
     def format_key(cls, tai):
         ''' format db key '''
         return cls.__name__.lower() + '_%s' % tai
+
+    @classmethod
+    def get(cls, tai, callback=None):
+        return StoredObject.get(cls.format_key(tai),
+                                callback=callback)
 
     @classmethod
     def get_all(cls, callback=None):

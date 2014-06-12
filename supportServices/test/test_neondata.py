@@ -11,8 +11,10 @@ import bcove_responses
 import logging
 _log = logging.getLogger(__name__)
 import multiprocessing
-from mock import patch
+from mock import patch, MagicMock
+import redis
 import random
+import socket
 import string
 import test_utils.neontest
 import test_utils.redis
@@ -305,6 +307,111 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                            ThumbnailMetadata.iterate_all_thumbnails()]
         self.assertItemsEqual(found_thumb_ids, [x.key for x in thumbs])
 
+class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        super(TestDbConnectionHandling, self).setUp()
+        self.connection_patcher = patch('supportServices.neondata.blockingRedis.StrictRedis')
+
+        # For the sake of this test, we will only mock the get() function
+        mock_redis = self.connection_patcher.start()
+        self.mock_responses = MagicMock()
+        mock_redis().get.side_effect = self._mocked_get_func
+
+        self.valid_obj = TrackerAccountIDMapper("tai1", "api_key")
+
+        # Speed up the retry delays to make the test faster
+        self.old_delay = options.get('supportServices.neondata.baseRedisRetryWait')
+        options._set('supportServices.neondata.baseRedisRetryWait', 0.01)
+
+    def tearDown(self):
+        options._set('supportServices.neondata.baseRedisRetryWait',
+                     self.old_delay)
+        self.connection_patcher.stop()
+        super(TestDbConnectionHandling, self).tearDown()
+
+    def _mocked_get_func(self, key, callback=None):
+        if callback:
+            self.io_loop.add_callback(callback, self.mock_responses(key))
+        else:
+            return self.mock_responses(key)
+
+    def test_async_good_connection(self):
+        self.mock_responses.side_effect = [self.valid_obj.to_json()]
+        
+        TrackerAccountIDMapper.get("tai1", callback=self.stop)
+        found_obj = self.wait()
+
+        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
+
+    def test_sync_good_connection(self):
+        self.mock_responses.side_effect = [self.valid_obj.to_json()]
+        
+        found_obj = TrackerAccountIDMapper.get("tai1")
+
+        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
+
+    def test_async_some_errors(self):
+        self.mock_responses.side_effect = [
+            redis.ConnectionError("Connection Error"),
+            redis.BusyLoadingError("Loading Error"),
+            socket.timeout("Socket Timeout"),
+            socket.error("Socket Error"),
+            self.valid_obj.to_json()
+            ]
+
+        TrackerAccountIDMapper.get("tai1", callback=self.stop)
+
+        with self.assertLogExists(logging.ERROR, 'Connection Error'):
+            with self.assertLogExists(logging.ERROR, 'Loading Error'):
+                with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
+                    with self.assertLogExists(logging.ERROR, 'Socket Error'):
+                        found_obj = self.wait()
+
+        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
+
+    def test_sync_some_errors(self):
+        self.mock_responses.side_effect = [
+            redis.ConnectionError("Connection Error"),
+            redis.BusyLoadingError("Loading Error"),
+            socket.timeout("Socket Timeout"),
+            socket.error("Socket Error"),
+            self.valid_obj.to_json()
+            ]
+
+        with self.assertLogExists(logging.ERROR, 'Connection Error'):
+            with self.assertLogExists(logging.ERROR, 'Loading Error'):
+                with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
+                    with self.assertLogExists(logging.ERROR, 'Socket Error'):
+                        found_obj =  TrackerAccountIDMapper.get("tai1")
+
+        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
+
+    def test_async_too_many_errors(self):
+        self.mock_responses.side_effect = [
+            redis.ConnectionError("Connection Error"),
+            redis.ConnectionError("Connection Error"),
+            redis.ConnectionError("Connection Error"),
+            redis.ConnectionError("Connection Error"),
+            redis.ConnectionError("Connection Error"),
+            ]
+
+        TrackerAccountIDMapper.get("tai1", callback=self.stop)
+        
+        with self.assertRaises(redis.ConnectionError):
+            self.wait()
+
+    def test_sync_too_many_errors(self):
+        self.mock_responses.side_effect = [
+            redis.ConnectionError("Connection Error"),
+            redis.ConnectionError("Connection Error"),
+            redis.ConnectionError("Connection Error"),
+            redis.ConnectionError("Connection Error"),
+            redis.ConnectionError("Connection Error"),
+            ]
+        
+        with self.assertRaises(redis.ConnectionError):
+            TrackerAccountIDMapper.get("tai1")
+
 class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
     '''
     Thumbnail ID Mapper and other thumbnail helper class tests 
@@ -425,16 +532,4 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
 
 
 if __name__ == '__main__':
-    
-    test_classes_to_run = [TestNeondata, TestThumbnailHelperClass]
-    loader = unittest.TestLoader()
-
-    suites_list = []
-    for test_class in test_classes_to_run:
-        suite = loader.loadTestsFromTestCase(test_class)
-        suites_list.append(suite)
-
-    alltests = unittest.TestSuite(suites_list)
-
-    runner = unittest.TextTestRunner()
-    results = runner.run(alltests)
+    unittest.main()
