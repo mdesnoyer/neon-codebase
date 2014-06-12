@@ -256,7 +256,7 @@ public class RawTrackerMR extends Configured implements Tool {
         }
         if (foundDup) {
           context.getCounter("EventStats", "DuplicatesFound").increment(1);
-          break;
+          continue;
         }
 
         if (!curEvent.getClientIP().equals(UNKNOWN_IP)) {
@@ -290,7 +290,7 @@ public class RawTrackerMR extends Configured implements Tool {
           if (foundRealClick) {
             // There is a real click so we can ignore this video click
             context.getCounter("EventStats", "ExtraVideoClicks").increment(1);
-            break;
+            continue;
           }
 
         }
@@ -485,8 +485,9 @@ public class RawTrackerMR extends Configured implements Tool {
       case VIDEO_PLAY:
       case AD_PLAY:
         // TODO(mdesnoyer): Maybe flag play & click events as duplicates if they
-        // are too close in time
-        return a.equals(b);
+        // are too close in time instead of exactly the same time
+        return a.getPageId().equals(b.getPageId())
+            && a.getClientTime().equals(b.getClientTime());
 
       }
 

@@ -405,6 +405,8 @@ public class RawTrackerMRTest {
         .setClientTime(1400000000100l).build()));
     values.add(new AvroValue<TrackerEvent>(MakeBasicImageClick().setClientTime(
         1400000000200l).build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicImageClick().setClientTime(
+        1400000000200l).build()));
     values.add(new AvroValue<TrackerEvent>(MakeBasicAdPlay()
         .setClientTime(1400000000500l).setPageId("vidpage")
         .setRefURL("http://go.com").build()));
