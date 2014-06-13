@@ -91,21 +91,21 @@ record EventSequenceHive {
   union { null, string } imLoadPageURL = null;
 
   // The server's time in s since epoch for different events
-  union { null, float } imLoadServerTime = null;
-  union { null, float } imVisServerTime = null;
-  union { null, float } imClickServerTime = null;
-  union { null, float } adPlayServerTime = null;
-  union { null, float } videoPlayServerTime = null;
+  union { null, double } imLoadServerTime = null;
+  union { null, double } imVisServerTime = null;
+  union { null, double } imClickServerTime = null;
+  union { null, double } adPlayServerTime = null;
+  union { null, double } videoPlayServerTime = null;
 
   // The client's time in s since epoch for different events
-  union { null, float } imLoadClientTime = null;
-  union { null, float } imVisClientTime = null;
-  union { null, float } imClickClientTime = null;
-  union { null, float } adPlayClientTime = null;
-  union { null, float } videoPlayClientTime = null;
+  union { null, double } imLoadClientTime = null;
+  union { null, double } imVisClientTime = null;
+  union { null, double } imClickClientTime = null;
+  union { null, double } adPlayClientTime = null;
+  union { null, double } videoPlayClientTime = null;
 
   // One of the server times. This is used only to partition the data
-  float serverTime;
+  double serverTime;
 
   // The page ids for the various events
   union { null, string } imLoadPageId = null;

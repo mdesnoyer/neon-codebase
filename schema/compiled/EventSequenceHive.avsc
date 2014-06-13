@@ -124,47 +124,47 @@
     "default" : null
   }, {
     "name" : "imLoadServerTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "imVisServerTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "imClickServerTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "adPlayServerTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "videoPlayServerTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "imLoadClientTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "imVisClientTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "imClickClientTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "adPlayClientTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "videoPlayClientTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "serverTime",
-    "type" : "float"
+    "type" : "double"
   }, {
     "name" : "imLoadPageId",
     "type" : [ "null", "string" ],

@@ -9,7 +9,6 @@ import org.apache.avro.mapred.AvroValue;
 import org.apache.avro.mapreduce.AvroJob;
 import org.apache.avro.mapreduce.AvroKeyInputFormat;
 import org.apache.avro.mapreduce.AvroMultipleOutputs;
-import org.apache.avro.specific.SpecificRecordBase;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.*;
 import org.apache.hadoop.mapreduce.Job;
@@ -104,12 +103,12 @@ public class RawTrackerMRTest {
         .setAgentInfoBrowserName("Internet Explorer")
         .setAgentInfoBrowserVersion("10.01").setAgentInfoOsName("Windows")
         .setAgentInfoOsVersion("7").setClientIP("56.45.41.124")
-        .setClientTime(1400000000f).setIpGeoDataCity(null)
+        .setClientTime(1400000000.).setIpGeoDataCity(null)
         .setIpGeoDataCountry("USA").setIpGeoDataRegion("CA")
         .setIpGeoDataZip(null).setIpGeoDataLat(34.556f)
         .setIpGeoDataLon(120.45f).setNeonUserId("").setPageId("pageid1")
         .setPageURL("http://go.com").setRefURL("http://ref.com")
-        .setServerTime(1400697546f).setTrackerType(TrackerType.BRIGHTCOVE)
+        .setServerTime(1400697546.).setTrackerType(TrackerType.BRIGHTCOVE)
         .setTrackerAccountId("tai1").setUserAgent("agent1").setHeight(480)
         .setWidth(640).setThumbnailId("acct1_vid1_tid1");
   }
@@ -123,12 +122,12 @@ public class RawTrackerMRTest {
     return ImageVisibleHive.newBuilder().setAgentInfoBrowserName(null)
         .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
         .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
-        .setClientTime(1400000000f).setIpGeoDataCity(null)
+        .setClientTime(1400000000.).setIpGeoDataCity(null)
         .setIpGeoDataCountry("USA").setIpGeoDataRegion("CA")
         .setIpGeoDataZip(null).setIpGeoDataLat(34.556f)
         .setIpGeoDataLon(120.45f).setNeonUserId("").setPageId("pageid1")
         .setPageURL("http://go.com").setRefURL("http://ref.com")
-        .setTrackerAccountId("tai1").setServerTime(1400697546f)
+        .setTrackerAccountId("tai1").setServerTime(1400697546.)
         .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
         .setThumbnailId("acct1_vid1_tid1");
   }
@@ -144,12 +143,12 @@ public class RawTrackerMRTest {
     return ImageClickHive.newBuilder().setAgentInfoBrowserName(null)
         .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
         .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
-        .setClientTime(1400000000f).setIpGeoDataCity(null)
+        .setClientTime(1400000000.).setIpGeoDataCity(null)
         .setIpGeoDataCountry("USA").setIpGeoDataRegion("CA")
         .setIpGeoDataZip(null).setIpGeoDataLat(34.556f)
         .setIpGeoDataLon(120.45f).setNeonUserId("").setPageId("pageid1")
         .setPageURL("http://go.com").setRefURL("http://ref.com")
-        .setTrackerAccountId("tai1").setServerTime(1400697546f)
+        .setTrackerAccountId("tai1").setServerTime(1400697546.)
         .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
         .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
         .setPageCoordsX(100f).setPageCoordsY(200f).setWindowCoordsX(150f)
@@ -167,12 +166,12 @@ public class RawTrackerMRTest {
     return AdPlayHive.newBuilder().setAgentInfoBrowserName(null)
         .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
         .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
-        .setClientTime(1400000000f).setIpGeoDataCity(null)
+        .setClientTime(1400000000.).setIpGeoDataCity(null)
         .setIpGeoDataCountry("USA").setIpGeoDataRegion("CA")
         .setIpGeoDataZip(null).setIpGeoDataLat(34.556f)
         .setIpGeoDataLon(120.45f).setNeonUserId("").setPageId("pageid1")
         .setPageURL("http://go.com").setRefURL("http://ref.com")
-        .setTrackerAccountId("tai1").setServerTime(1400697546f)
+        .setTrackerAccountId("tai1").setServerTime(1400697546.)
         .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
         .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
         .setPlayerId("player2").setAutoplayDelta(null).setPlayCount(1);
@@ -195,12 +194,12 @@ public class RawTrackerMRTest {
     return VideoPlayHive.newBuilder().setAgentInfoBrowserName(null)
         .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
         .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
-        .setClientTime(1400000000f).setIpGeoDataCity(null)
+        .setClientTime(1400000000.).setIpGeoDataCity(null)
         .setIpGeoDataCountry("USA").setIpGeoDataRegion("CA")
         .setIpGeoDataZip(null).setIpGeoDataLat(34.556f)
         .setIpGeoDataLon(120.45f).setNeonUserId("").setPageId("pageid1")
         .setPageURL("http://go.com").setRefURL("http://ref.com")
-        .setTrackerAccountId("tai1").setServerTime(1400697546f)
+        .setTrackerAccountId("tai1").setServerTime(1400697546.)
         .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
         .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
         .setPlayerId("player2").setAutoplayDelta(null).setPlayCount(1)
@@ -211,18 +210,18 @@ public class RawTrackerMRTest {
     return EventSequenceHive.newBuilder().setAgentInfoBrowserName(null)
         .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
         .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
-        .setImLoadClientTime(1400000000f).setImVisClientTime(1400000000f)
-        .setImClickClientTime(1400000000f).setAdPlayClientTime(1400000000f)
-        .setVideoPlayClientTime(1400000000f).setIpGeoDataCity(null)
+        .setImLoadClientTime(1400000000.).setImVisClientTime(1400000000.)
+        .setImClickClientTime(1400000000.).setAdPlayClientTime(1400000000.)
+        .setVideoPlayClientTime(1400000000.).setIpGeoDataCity(null)
         .setIpGeoDataCountry("USA").setIpGeoDataRegion("CA")
         .setIpGeoDataZip(null).setIpGeoDataLat(34.556f)
         .setIpGeoDataLon(120.45f).setNeonUserId("")
         .setVideoPageURL("http://go.com").setImClickPageURL("http://go.com")
         .setImLoadPageURL("http://go.com").setRefURL("http://ref.com")
-        .setTrackerAccountId("tai1").setImLoadServerTime(1400697546f)
-        .setImVisServerTime(1400697546f).setImClickServerTime(1400697546f)
-        .setAdPlayServerTime(1400697546f).setVideoPlayServerTime(1400697546f)
-        .setServerTime(1400697546f).setTrackerType(TrackerType.BRIGHTCOVE)
+        .setTrackerAccountId("tai1").setImLoadServerTime(1400697546.)
+        .setImVisServerTime(1400697546.).setImClickServerTime(1400697546.)
+        .setAdPlayServerTime(1400697546.).setVideoPlayServerTime(1400697546.)
+        .setServerTime(1400697546.).setTrackerType(TrackerType.BRIGHTCOVE)
         .setUserAgent("agent1").setThumbnailId("acct1_vid1_tid1")
         .setVideoId("vid1").setPlayerId("player2").setAutoplayDelta(null)
         .setPlayCount(1).setPageCoordsX(100f).setPageCoordsY(200f)
@@ -463,7 +462,7 @@ public class RawTrackerMRTest {
             sequenceId == null ? ((ImageVisibleHive) curEvent.datum())
                 .getSequenceId() : sequenceId;
         assertEquals(curEvent.datum(), MakeBasicImageVisibleHive()
-            .setClientTime(1400000000.1f).setSequenceId(sequenceId).build());
+            .setClientTime(1400000000.1).setSequenceId(sequenceId).build());
         assertEquals(outputPaths.get(i), "ImageVisibleHive/ImageVisibleHive");
 
       } else if (curEvent.datum() instanceof ImageClickHive) {
@@ -471,7 +470,7 @@ public class RawTrackerMRTest {
             sequenceId == null ? ((ImageClickHive) curEvent.datum())
                 .getSequenceId() : sequenceId;
         assertEquals(curEvent.datum(),
-            MakeBasicImageClickHive().setClientTime(1400000000.2f)
+            MakeBasicImageClickHive().setClientTime(1400000000.2)
                 .setSequenceId(sequenceId).build());
         assertEquals(outputPaths.get(i), "ImageClickHive/ImageClickHive");
 
@@ -481,7 +480,7 @@ public class RawTrackerMRTest {
                 .getSequenceId() : sequenceId;
         assertEquals(
             curEvent.datum(),
-            MakeBasicAdPlayHive().setClientTime(1400000000.5f)
+            MakeBasicAdPlayHive().setClientTime(1400000000.5)
                 .setPageId("vidpage").setRefURL("http://go.com")
                 .setSequenceId(sequenceId).build());
         assertEquals(outputPaths.get(i), "AdPlayHive/AdPlayHive");
@@ -492,7 +491,7 @@ public class RawTrackerMRTest {
                 .getSequenceId() : sequenceId;
         assertEquals(
             curEvent.datum(),
-            MakeBasicVideoPlayHive().setClientTime(1400000000.7f)
+            MakeBasicVideoPlayHive().setClientTime(1400000000.7)
                 .setPageId("vidpage").setSequenceId(sequenceId)
                 .setRefURL("http://go.com").build());
         assertEquals(outputPaths.get(i), "VideoPlayHive/VideoPlayHive");
@@ -505,10 +504,10 @@ public class RawTrackerMRTest {
         assertEquals(
             curEvent.datum(),
             MakeBasicEventSequenceHive().setSequenceId(sequenceId)
-                .setImVisClientTime(1400000000.1f)
-                .setImClickClientTime(1400000000.2f)
-                .setAdPlayClientTime(1400000000.5f)
-                .setVideoPlayClientTime(1400000000.7f).build());
+                .setImVisClientTime(1400000000.1)
+                .setImClickClientTime(1400000000.2)
+                .setAdPlayClientTime(1400000000.5)
+                .setVideoPlayClientTime(1400000000.7).build());
 
         assertEquals(outputPaths.get(i), "EventSequenceHive/EventSequenceHive");
       }

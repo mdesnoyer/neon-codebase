@@ -557,7 +557,7 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setAgentInfoOsName(osName)
                 .setAgentInfoOsVersion(osVersion)
                 .setClientIP(orig.getClientIP())
-                .setClientTime((float) (orig.getClientTime() / 1000.))
+                .setClientTime(orig.getClientTime() / 1000.)
                 .setIpGeoDataCity(orig.getIpGeoData().getCity())
                 .setIpGeoDataCountry(orig.getIpGeoData().getCountry())
                 .setIpGeoDataRegion(orig.getIpGeoData().getRegion())
@@ -568,7 +568,7 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setPageId(orig.getPageId())
                 .setPageURL(orig.getPageURL())
                 .setRefURL(orig.getRefURL())
-                .setServerTime((float) (orig.getServerTime() / 1000.))
+                .setServerTime(orig.getServerTime() / 1000.)
                 .setTrackerAccountId(orig.getTrackerAccountId())
                 .setTrackerType(orig.getTrackerType())
                 .setUserAgent(orig.getUserAgent())
@@ -591,7 +591,7 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setAgentInfoOsName(osName)
                 .setAgentInfoOsVersion(osVersion)
                 .setClientIP(orig.getClientIP())
-                .setClientTime((float) (orig.getClientTime() / 1000.))
+                .setClientTime(orig.getClientTime() / 1000.)
                 .setIpGeoDataCity(orig.getIpGeoData().getCity())
                 .setIpGeoDataCountry(orig.getIpGeoData().getCountry())
                 .setIpGeoDataRegion(orig.getIpGeoData().getRegion())
@@ -602,7 +602,7 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setPageId(orig.getPageId())
                 .setPageURL(orig.getPageURL())
                 .setRefURL(orig.getRefURL())
-                .setServerTime((float) (orig.getServerTime() / 1000.))
+                .setServerTime(orig.getServerTime() / 1000.)
                 .setTrackerAccountId(orig.getTrackerAccountId())
                 .setTrackerType(orig.getTrackerType())
                 .setUserAgent(orig.getUserAgent())
@@ -628,7 +628,7 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setAgentInfoOsName(osName)
                 .setAgentInfoOsVersion(osVersion)
                 .setClientIP(orig.getClientIP())
-                .setClientTime((float) (orig.getClientTime() / 1000.))
+                .setClientTime(orig.getClientTime() / 1000.)
                 .setIpGeoDataCity(orig.getIpGeoData().getCity())
                 .setIpGeoDataCountry(orig.getIpGeoData().getCountry())
                 .setIpGeoDataRegion(orig.getIpGeoData().getRegion())
@@ -639,7 +639,7 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setPageId(orig.getPageId())
                 .setPageURL(orig.getPageURL())
                 .setRefURL(orig.getRefURL())
-                .setServerTime((float) (orig.getServerTime() / 1000.))
+                .setServerTime(orig.getServerTime() / 1000.)
                 .setTrackerAccountId(orig.getTrackerAccountId())
                 .setTrackerType(orig.getTrackerType())
                 .setUserAgent(orig.getUserAgent())
@@ -670,7 +670,7 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setAgentInfoOsName(osName)
                 .setAgentInfoOsVersion(osVersion)
                 .setClientIP(orig.getClientIP())
-                .setClientTime((float) (orig.getClientTime() / 1000.))
+                .setClientTime(orig.getClientTime() / 1000.)
                 .setIpGeoDataCity(orig.getIpGeoData().getCity())
                 .setIpGeoDataCountry(orig.getIpGeoData().getCountry())
                 .setIpGeoDataRegion(orig.getIpGeoData().getRegion())
@@ -681,7 +681,7 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setPageId(orig.getPageId())
                 .setPageURL(orig.getPageURL())
                 .setRefURL(orig.getRefURL())
-                .setServerTime((float) (orig.getServerTime() / 1000.))
+                .setServerTime(orig.getServerTime() / 1000.)
                 .setTrackerAccountId(orig.getTrackerAccountId())
                 .setTrackerType(orig.getTrackerType())
                 .setUserAgent(orig.getUserAgent())
@@ -707,7 +707,7 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setAgentInfoOsName(osName)
                 .setAgentInfoOsVersion(osVersion)
                 .setClientIP(orig.getClientIP())
-                .setClientTime((float) (orig.getClientTime() / 1000.))
+                .setClientTime(orig.getClientTime() / 1000.)
                 .setIpGeoDataCity(orig.getIpGeoData().getCity())
                 .setIpGeoDataCountry(orig.getIpGeoData().getCountry())
                 .setIpGeoDataRegion(orig.getIpGeoData().getRegion())
@@ -718,7 +718,7 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setPageId(orig.getPageId())
                 .setPageURL(orig.getPageURL())
                 .setRefURL(orig.getRefURL())
-                .setServerTime((float) (orig.getServerTime() / 1000.))
+                .setServerTime(orig.getServerTime() / 1000.)
                 .setTrackerAccountId(orig.getTrackerAccountId())
                 .setTrackerType(orig.getTrackerType())
                 .setUserAgent(orig.getUserAgent())
@@ -745,7 +745,7 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setAgentInfoOsName(osName)
                 .setAgentInfoOsVersion(osVersion)
                 .setClientIP(orig.getClientIP())
-                .setClientTime((float) (orig.getClientTime() / 1000.))
+                .setClientTime(orig.getClientTime() / 1000.)
                 .setIpGeoDataCity(orig.getIpGeoData().getCity())
                 .setIpGeoDataCountry(orig.getIpGeoData().getCountry())
                 .setIpGeoDataRegion(orig.getIpGeoData().getRegion())
@@ -756,7 +756,7 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setPageId(orig.getPageId())
                 .setPageURL(orig.getPageURL())
                 .setRefURL(orig.getRefURL())
-                .setServerTime((float) (orig.getServerTime() / 1000.))
+                .setServerTime(orig.getServerTime() / 1000.)
                 .setTrackerAccountId(orig.getTrackerAccountId())
                 .setTrackerType(orig.getTrackerType())
                 .setUserAgent(orig.getUserAgent())
@@ -871,8 +871,8 @@ public class RawTrackerMR extends Configured implements Tool {
         BuildCommonSequenceFields(builder, imLoad)
             .setHeight(((ImageLoad) imLoad.getEventData()).getHeight())
             .setWidth(((ImageLoad) imLoad.getEventData()).getWidth())
-            .setImLoadClientTime((float) (imLoad.getClientTime() / 1000.))
-            .setImLoadServerTime((float) (imLoad.getServerTime() / 1000.))
+            .setImLoadClientTime(imLoad.getClientTime() / 1000.)
+            .setImLoadServerTime(imLoad.getServerTime() / 1000.)
             .setImLoadPageURL(imLoad.getPageURL())
             .setImLoadPageId(imLoad.getPageId());
       }
@@ -885,8 +885,8 @@ public class RawTrackerMR extends Configured implements Tool {
             thumbnailId == null ? ((ImageVisible) imVis.getEventData())
                 .getThumbnailId() : thumbnailId;
         BuildCommonSequenceFields(builder, imVis)
-            .setImVisClientTime((float) (imVis.getClientTime() / 1000.))
-            .setImVisServerTime((float) (imVis.getServerTime() / 1000.))
+            .setImVisClientTime(imVis.getClientTime() / 1000.)
+            .setImVisServerTime(imVis.getServerTime() / 1000.)
             .setImLoadPageURL(imVis.getPageURL())
             .setImVisPageId(imVis.getPageId());
       }
@@ -909,8 +909,8 @@ public class RawTrackerMR extends Configured implements Tool {
                 ((ImageClick) imClick.getEventData()).getWindowCoords().getY())
             .setIsRightClick(clickCoords.getX() <= 0 && clickCoords.getY() <= 0)
             .setIsClickInPlayer(false)
-            .setImClickClientTime((float) (imClick.getClientTime() / 1000.))
-            .setImClickServerTime((float) (imClick.getServerTime() / 1000.))
+            .setImClickClientTime(imClick.getClientTime() / 1000.)
+            .setImClickServerTime(imClick.getServerTime() / 1000.)
             .setImClickPageURL(imClick.getPageURL())
             .setImClickPageId(imClick.getPageId());
       }
@@ -928,8 +928,8 @@ public class RawTrackerMR extends Configured implements Tool {
             .setAutoplayDelta(
                 ((AdPlay) adPlay.getEventData()).getAutoplayDelta())
             .setPlayCount(((AdPlay) adPlay.getEventData()).getPlayCount())
-            .setAdPlayClientTime((float) (adPlay.getClientTime() / 1000.))
-            .setAdPlayServerTime((float) (adPlay.getServerTime() / 1000.))
+            .setAdPlayClientTime(adPlay.getClientTime() / 1000.)
+            .setAdPlayServerTime(adPlay.getServerTime() / 1000.)
             .setVideoPageURL(adPlay.getPageURL())
             .setAdPlayPageId(adPlay.getPageId());
       }
@@ -946,8 +946,8 @@ public class RawTrackerMR extends Configured implements Tool {
             .setPlayerId(((VideoClick) videoClick.getEventData()).getPlayerId())
             .setVideoId(((VideoClick) videoClick.getEventData()).getVideoId())
             .setIsClickInPlayer(true).setIsRightClick(false)
-            .setImClickClientTime((float) (videoClick.getClientTime() / 1000.))
-            .setImClickServerTime((float) (videoClick.getServerTime() / 1000.))
+            .setImClickClientTime(videoClick.getClientTime() / 1000.)
+            .setImClickServerTime(videoClick.getServerTime() / 1000.)
             .setImClickPageURL(videoClick.getPageURL())
             .setImClickPageId(videoClick.getPageId());
       }
@@ -965,14 +965,14 @@ public class RawTrackerMR extends Configured implements Tool {
             .setAutoplayDelta(
                 ((VideoPlay) videoPlay.getEventData()).getAutoplayDelta())
             .setPlayCount(((VideoPlay) videoPlay.getEventData()).getPlayCount())
-            .setVideoPlayClientTime((float) (videoPlay.getClientTime() / 1000.))
-            .setVideoPlayServerTime((float) (videoPlay.getServerTime() / 1000.))
+            .setVideoPlayClientTime(videoPlay.getClientTime() / 1000.)
+            .setVideoPlayServerTime(videoPlay.getServerTime() / 1000.)
             .setVideoPageURL(videoPlay.getPageURL())
             .setVideoPlayPageId(videoPlay.getPageId());
       }
 
       builder.setRefURL(firstRefURL).setThumbnailId(thumbnailId)
-          .setServerTime((float) (lastServerTime / 1000.));
+          .setServerTime(lastServerTime / 1000.);
 
       out.write(
           "EventSequenceHive",
