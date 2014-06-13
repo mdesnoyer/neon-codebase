@@ -671,7 +671,7 @@ class NeonUserAccount(object):
     @integrations: all the integrations associated with this acccount
 
     '''
-    def __init__(self, a_id, api_key=None):
+    def __init__(self, a_id, api_key=None, default_width=None):
         self.account_id = a_id
         self.neon_api_key = NeonApiKey.generate(a_id) if api_key is None \
                             else api_key
@@ -682,6 +682,9 @@ class NeonUserAccount(object):
         self.videos = {} #phase out,should be stored in neon integration
         # a mapping from integration id -> get_ovp() string
         self.integrations = {}
+
+        # The default thumbnail width to serve for this account
+        self.default_width = default_width
 
     def add_platform(self, platform):
         '''Adds a platform object to the account.'''
