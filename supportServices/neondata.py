@@ -1808,6 +1808,77 @@ class ThumbnailMD5(AbstractHashGenerator):
             return ThumbnailMD5.generate_from_image(_input)
 
 
+class ThumbnailServingURLs(StoredObject):
+    '''
+    Keeps track of the URLs to serve for each thumbnail id.
+
+    Specifically, maps:
+
+    thumbnail_id -> { (width, height) -> url }
+    '''
+
+    def __init__(self, thumbnail_id, size_map={}):
+        super(ThumbnailServingURLs, self).__init__(
+            ThumbnailServingURLs.format_key(thumbnail_id))
+        self.size_map = size_map
+
+    def get_thumbnail_id(self):
+        '''Return the thumbnail id for this mapping.'''
+        return self.key.partition('_')[2]
+
+    def add_serving_url(self, url, width, height):
+        '''Adds a url to serve for a given width and height.
+
+        If there was a previous entry, it is overwritten.
+        '''
+        self.size_map[(width, height)] = url
+
+    def get_serving_url(self, width, height):
+        '''Get the serving url for a given width and height.
+
+        Raises a KeyError if there isn't one.
+        '''
+        return self.size_map[(width, height)]
+
+    def to_json(self):
+        new_dict = copy.copy(self.__dict__)
+        new_dict['size_map'] = self.size_map.items()
+        return json.dumps(new_dict)
+
+    @classmethod
+    def _create(cls, key, json_data):
+        if json_data:
+            data_dict = json.loads(json_data)
+            #create basic object
+            obj = cls(key)
+
+            #populate the object dictionary
+            for key, value in data_dict.iteritems():
+                obj.__dict__[key] = value
+
+            # Load in the size map as a dictionary
+            obj.size_map = dict([[tuple(x[0]), x[1]] for x in obj.size_map])
+            return obj
+
+    @classmethod
+    def format_key(cls, thumbnail_id):
+        ''' Format the database key '''
+        return cls.__name__.lower() + '_%s' % thumbnail_id
+
+    @classmethod
+    def get(cls, thumbnail_id, callback=None):
+        '''Return the object for a given thumbnail id.'''
+        return super(ThumbnailServingURLs, cls).get(
+            cls.format_key(thumbnail_id),
+            callback=callback)
+
+    @classmethod
+    def get_many(cls, thumbnail_ids, callback=None):
+        '''Returns the list of objects from a list of thumbnail_ids.'''
+        return super(ThumbnailServingURLs, cls).get_many(
+            [cls.format_key(x) for x in thumbnail_ids],
+            callback=callback)
+        
 class ThumbnailURLMapper(object):
     '''
     Schema to map thumbnail url to thumbnail ID. 

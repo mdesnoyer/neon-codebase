@@ -31,7 +31,7 @@ from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         YoutubePlatform, NeonUserAccount, DBConnection, NeonApiKey, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
         ThumbnailMetadata, InternalVideoID, OoyalaPlatform, \
-        TrackerAccountIDMapper
+        TrackerAccountIDMapper, ThumbnailServingURLs
 
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
@@ -45,12 +45,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
     def tearDown(self):
         self.redis.stop()
         super(TestNeondata, self).tearDown()
-
-    # TODO: It should be possible to run this with an IOLoop for each
-    # test, but it's not running. Need to figure out why.
-    def get_new_ioloop(self):
-        ''' new ioloop '''
-        return tornado.ioloop.IOLoop.instance()
 
     def test_neon_api_key(self):
         ''' test api key generation '''
@@ -306,6 +300,36 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         found_thumb_ids = [x.key for x in  
                            ThumbnailMetadata.iterate_all_thumbnails()]
         self.assertItemsEqual(found_thumb_ids, [x.key for x in thumbs])
+
+    def test_ThumbnailServingURLs(self):
+        input1 = ThumbnailServingURLs('acct1_vid1_tid1')
+        input1.add_serving_url('http://that_800_600.jpg', 800, 600) 
+        
+        input1.save()
+        output1 = ThumbnailServingURLs.get('acct1_vid1_tid1')
+        self.assertEqual(output1.get_thumbnail_id(), input1.get_thumbnail_id())
+        self.assertEqual(output1.get_serving_url(800, 600),
+                         'http://that_800_600.jpg')
+        with self.assertRaises(KeyError):
+            output1.get_serving_url(640, 480)
+
+        input1.add_serving_url('http://that_640_480.jpg', 640, 480) 
+        input2 = ThumbnailServingURLs('tid2', {(640, 480) : 'http://this.jpg'})
+        ThumbnailServingURLs.save_all([input1, input2])
+        output1, output2 = ThumbnailServingURLs.get_many(['acct1_vid1_tid1',
+                                                          'tid2'])
+        self.assertEqual(output1.get_thumbnail_id(),
+                         input1.get_thumbnail_id())
+        self.assertEqual(output2.get_thumbnail_id(),
+                         input2.get_thumbnail_id())
+        self.assertEqual(output1.get_serving_url(640, 480),
+                         'http://that_640_480.jpg')
+        self.assertEqual(output1.get_serving_url(800, 600),
+                         'http://that_800_600.jpg')
+        self.assertEqual(output2.get_serving_url(640, 480),
+                         'http://this.jpg')
+        
+        
 
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
