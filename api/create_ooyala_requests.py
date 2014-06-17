@@ -37,14 +37,15 @@ if __name__ == "__main__":
                 print "%s already exists, exiting" % pidfile
                 sys.exit()
             else:
-            os.unlink(pidfile)
+                os.unlink(pidfile)
 
     else:
         file(pidfile, 'w').write(pid)
 
         try:
+            skip_accounts = []
             # Get all Brightcove accounts
-            host = "127.0.0.1" 
+            host = "10.249.34.227"
             port = 6379
             rclient = blockingRedis.StrictRedis(host, port)
             accounts = rclient.keys('ooyalaplatform*')

@@ -125,6 +125,7 @@ class TestVideoClient(unittest.TestCase):
         #s3mocks to mock host_thumbnails_to_s3
         conn = boto_mock.MockConnection()
         conn.create_bucket('host-thumbnails')
+        conn.create_bucket('neon-image-cdn')
         mock_conntype.return_value = conn
         thumb_bucket = conn.buckets['host-thumbnails']
 
@@ -133,7 +134,7 @@ class TestVideoClient(unittest.TestCase):
         i_vid = "i_vid1"
         tdata = api.client.save_thumbnail_to_s3_and_metadata(
                 i_vid, image, 1, thumb_bucket, 
-                keyname, 's3_%s'%keyname, 'neon')
+                keyname, "neon_pub_id" ,'s3_%s'%keyname, 'neon')
         s3_keys = [x for x in thumb_bucket.get_all_keys()]
         self.assertEqual(len(s3_keys), 1)
         self.assertEqual(s3_keys[0].name, keyname)
@@ -146,6 +147,7 @@ class TestVideoClient(unittest.TestCase):
         #s3mocks to mock host_thumbnails_to_s3
         conn = boto_mock.MockConnection()
         conn.create_bucket('host-thumbnails')
+        conn.create_bucket('neon-image-cdn')
         mock_conntype.return_value = conn
        
         api_key = "test_api_key"
@@ -241,6 +243,7 @@ class TestVideoClient(unittest.TestCase):
         
         conn = boto_mock.MockConnection()
         conn.create_bucket('host-thumbnails')
+        conn.create_bucket('neon-image-cdn')
         mock_conntype.return_value = conn
        
         vprocessor = self.setup_video_processor("neon")
@@ -338,6 +341,7 @@ class TestVideoClient(unittest.TestCase):
         
         conn = boto_mock.MockConnection()
         conn.create_bucket('host-thumbnails')
+        conn.create_bucket('neon-image-cdn')
         mock_conntype.return_value = conn
        
         vprocessor = self.setup_video_processor("brightcove")
@@ -433,6 +437,29 @@ class TestVideoClient(unittest.TestCase):
         #Exceed requeue count
         vprocessor.job_params["requeue_count"] = 4
         self.assertFalse(vprocessor.requeue_job())
+
+    @patch('api.client.S3Connection')
+    def test_host_resized_images_cdn(self, mock_conntype):
+        #s3mocks to mock host_thumbnails_to_s3
+        conn = boto_mock.MockConnection()
+        
+        conn.create_bucket('host-thumbnails')
+        conn.create_bucket('neon-image-cdn')
+        mock_conntype.return_value = conn
+        imbucket = conn.get_bucket("neon-image-cdn")
+        image = PILImageUtils.create_random_image(360, 480) 
+        keyname = "test_key"
+        neon_id = "NEON_PUB_ID"
+        tid = "test_tid"
+        tdata = api.client.host_images_cdn(image, neon_id, tid)
+        sizes = api.properties.CDN_IMAGE_SIZES   
+        s3_keys = [x for x in imbucket.get_all_keys()]
+        self.assertEqual(len(s3_keys), len(sizes))
+        #for s3key in s3_keys:
+        #    self.assertEqual()
+
+        #image-cdn/NEON_PUB_ID/neontntest_tid_w800_h600.jpg
+        #Build a per video stats page to monitor each video
 
 if __name__ == '__main__':
     unittest.main()
