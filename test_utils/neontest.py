@@ -9,7 +9,6 @@ Copyright 2013 Neon Labs
 from contextlib import contextmanager
 import logging
 import re
-from StringIO import StringIO
 import tornado.testing
 import unittest
 
@@ -31,27 +30,40 @@ class TestCase(unittest.TestCase):
           _log.info('Hi')
           
         '''
-        log_stream = StringIO()
-        handler = logging.StreamHandler(log_stream)
-        handler.setFormatter(logging.Formatter('%(message)s'))
+        handler = LogCaptureHandler()
         logger = logging.getLogger()
         logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
 
         try:
             yield
 
         finally:
             logger.removeHandler(handler)
-            handler.flush()
             reg = re.compile(regexp)
-            found_log = False
-            for line in log_stream.getvalue().split('\n'):
-                if reg.search(line):
-                    found_log = True
-                    break
-            if not found_log:
-                self.fail('Msg: %s was not logged. The log was: %s' % 
-                          (regexp, log_stream.getvalue()))
+
+            matching_logs = handler.get_matching_logs(reg, level)
+
+            if len(matching_logs) == 0:
+                self.fail(
+                    'Msg: %s was not logged. The log was: %s' % 
+                    (regexp,
+                     '\n'.join(['%s: %s' % (x.levelname, x.getMessage())
+                                for x in handler.logs])))
+
+class LogCaptureHandler(logging.Handler):
+    '''A class that just collects all the logs.'''
+    def __init__(self):
+        super(LogCaptureHandler, self).__init__()
+        self.logs = []
+
+    def emit(self, record):
+        self.logs.append(record)
+
+    def get_matching_logs(self, regexp, level):
+        '''Returns all the logs that match the regexp at a given level.'''
+        return [x for x in self.logs if 
+                x.levelno == level and regexp.search(x.getMessage())]
 
 class AsyncTestCase(tornado.testing.AsyncTestCase, TestCase):
     '''A test case that has access to Neon functions and can do tornado async calls.'''

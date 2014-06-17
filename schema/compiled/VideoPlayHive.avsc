@@ -1,0 +1,93 @@
+{
+  "type" : "record",
+  "name" : "VideoPlayHive",
+  "namespace" : "com.neon.Tracker",
+  "fields" : [ {
+    "name" : "pageId",
+    "type" : "string"
+  }, {
+    "name" : "trackerAccountId",
+    "type" : "string"
+  }, {
+    "name" : "trackerType",
+    "type" : {
+      "type" : "enum",
+      "name" : "TrackerType",
+      "symbols" : [ "BRIGHTCOVE", "OOYALA", "BCGALLERY", "IGN" ]
+    }
+  }, {
+    "name" : "pageURL",
+    "type" : "string"
+  }, {
+    "name" : "refURL",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "serverTime",
+    "type" : "double"
+  }, {
+    "name" : "clientTime",
+    "type" : "double"
+  }, {
+    "name" : "clientIP",
+    "type" : "string"
+  }, {
+    "name" : "neonUserId",
+    "type" : "string",
+    "default" : ""
+  }, {
+    "name" : "userAgent",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "agentInfo_os_name",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "agentInfo_os_version",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "agentInfo_browser_name",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "agentInfo_browser_version",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "ipGeoData_country",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "ipGeoData_city",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "ipGeoData_region",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "ipGeoData_zip",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "ipGeoData_lat",
+    "type" : [ "null", "float" ]
+  }, {
+    "name" : "ipGeoData_lon",
+    "type" : [ "null", "float" ]
+  }, {
+    "name" : "videoId",
+    "type" : "string"
+  }, {
+    "name" : "playerId",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "thumbnailId",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "didAdPlay",
+    "type" : "boolean",
+    "default" : false
+  }, {
+    "name" : "autoplayDelta",
+    "type" : [ "null", "int" ]
+  }, {
+    "name" : "playCount",
+    "type" : "int"
+  }, {
+    "name" : "sequenceId",
+    "type" : "long"
+  } ]
+}

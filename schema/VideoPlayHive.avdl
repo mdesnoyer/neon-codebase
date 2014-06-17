@@ -1,0 +1,73 @@
+//
+// Schema that defines an VideoPlayEvent.
+//
+// It is wrapped in a protocol so that we can do the definition using
+// the idl format, which takes comments and is easier to read than the
+// json. To generate the json schema needed by avro use:
+//
+// compile_schema.py
+//
+// Author: Mark Desnoyer (desnoyer@neon-lab.com)
+// Copyright 2014 Neon Labs Inc.
+//
+@namespace("com.neon.Tracker")
+protocol DummyTrackerProtocol {
+
+import idl "CommonTrackerInfo.avdl";
+
+record VideoPlayHive {
+  string pageId; // Unique page load id
+
+  string trackerAccountId;  // The publisher's tracker account id
+
+  TrackerType trackerType;
+
+  string pageURL;     // Page URL where the event took place
+
+  union { null, string } refURL;  // The referral URL
+
+  double serverTime;    // The server's time in s since epoch
+
+  double clientTime;    // The client's time in s since epoch
+
+  string clientIP;    // The client's ip address
+
+  // The user id from the cookie. Can be an empty string
+  string neonUserId = "";  
+
+  union { null, string } userAgent;   // The user's agent string
+
+  // Translated agent info if available
+  union { null, string } agentInfo_os_name;
+  union { null, string } agentInfo_os_version;
+  union { null, string } agentInfo_browser_name;
+  union { null, string } agentInfo_browser_version;
+  
+  // The user's location based on IP data
+  union { null, string } ipGeoData_country; // 3 character country code
+  union { null, string } ipGeoData_city; // City name
+  union { null, string } ipGeoData_region; // Region
+  union { null, string } ipGeoData_zip; // Postal Code
+  union { null, float } ipGeoData_lat; // Latitude
+  union { null, float } ipGeoData_lon; // Longitude
+
+  string videoId;
+  union{null, string} playerId;
+  union{null, string} thumbnailId;
+  boolean didAdPlay = false;  // Was an ad play detected before the video
+
+  // Time when the player initiates a request to play the video - the
+  // last time an image or the player was clicked by the user. Used to
+  // identify autoplay. Given in milliseconds, or null if there was no
+  // click
+  union{null, int} autoplayDelta;
+
+  // This video is the nth one playing on this page load
+  int playCount;
+
+  // An id used to link a sequence of events together. The sequence is 
+  // ideally an image_load -> image_visible -> image_click -> video_play
+  long sequenceId;
+}
+
+}

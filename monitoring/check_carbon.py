@@ -15,6 +15,7 @@ if sys.path[0] <> base_path:
 
 from docopt import docopt
 import inspect
+import platform
 import requests
 from utils.options import options, define
 
@@ -78,15 +79,16 @@ def check_module(module, program, m_var):
     '''
     with open(base_path + "/" +  options.monitoring_conf, "r") as stream:
         params = options._parse_config_file(stream)
-        servers = params['servers']
         threshold = params['system'][module][program][m_var]
-        server = servers.keys()[0]
+        #servers = params['servers']
+        #server = servers.keys()[0]
+        server = platform.node().replace('.', '-')
         ret_val = 0 
         for server in servers.keys():
             service = "system.%s.%s.%s.%s" %(server, module, program, m_var) 
             json = get_graphite_stats('%s,"5min","avg",true)'%service)
             value = json[0]['datapoints'][-1][0]
-            if float(value) > float(threshold):
+            if value is None or (float(value) > float(threshold)):
                 print >> sys.stderr, \
                     "service %s exceeds threshold: %s"\
                     " current value: %s"%(service, value, threshold)

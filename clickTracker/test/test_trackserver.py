@@ -14,7 +14,9 @@ import avro.io
 import avro.schema
 import base64
 import __builtin__
+from clickTracker.flume.ttypes import *
 import clickTracker.trackserver 
+from clickTracker import TTornado
 from cStringIO import StringIO
 import fake_filesystem
 import json
@@ -25,6 +27,9 @@ from mock import MagicMock
 import os
 import Queue
 import random
+from thrift import Thrift
+from thrift.transport import TTransport
+from thrift.protocol import TCompactProtocol
 import time
 import tornado.testing
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
@@ -142,72 +147,69 @@ class TestFileBackupHandler(unittest.TestCase):
                 files = self.fake_os.listdir(log_dir)
                 self.assertEqual(len(files), 4)
 
-                # Make sure the number of lines in the files is what we expect
-                nlines = 0
-                for fname in files:
-                    with self.fake_open(os.path.join(log_dir, fname)) as f:
-                        for line in f:
-                            nlines += 1
-                self.assertEqual(400, nlines)
-
                 # Open one of the files and check that it contains
                 # what we expect
                 with self.fake_open(os.path.join(log_dir, files[0])) as f:
-                    for line in f:
-                        line = line.strip()
-                        if line == '':
-                            continue
-                        parsed = json.loads(line)
-                        msgbuf = StringIO(base64.b64decode(parsed[0]['body']))
-                        body = self.avro_reader.read(
-                            avro.io.BinaryDecoder(msgbuf))
-                        if body['eventType'] == 'IMAGE_CLICK':
-                            self.assertEqual(body['pageId'], 'pageid234')
-                            self.assertEqual(body['trackerAccountId'],
-                                             'tai234')
-                            self.assertEqual(body['trackerType'], 'BRIGHTCOVE')
-                            self.assertEqual(body['pageURL'], 'http://go.com')
-                            self.assertEqual(body['refURL'], 'http://ref.com')
-                            self.assertEqual(body['clientIP'], '12.43.151.12')
-                            self.assertEqual(body['clientTime'], 23945827)
-                            self.assertGreater(body['serverTime'],
-                                               1300000000000)
-                            self.assertEqual(body['eventData']['thumbnailId'],
-                                             'tid345')
-                            self.assertEqual(
-                                body['eventData']['pageCoords']['x'], 3467)
-                            self.assertEqual(
-                                body['eventData']['pageCoords']['y'], 123)
-                            self.assertEqual(
+                    transport = TTransport.TFileObjectTransport(f)
+                    protocol = TCompactProtocol.TCompactProtocol(transport)
+                    event = ThriftFlumeEvent()
+                    event.read(protocol)
+                    try:
+                        while event.body is not None:
+                            msgbuf = StringIO(event.body)
+                            body = self.avro_reader.read(
+                                avro.io.BinaryDecoder(msgbuf))
+                            if body['eventType'] == 'IMAGE_CLICK':
+                                self.assertEqual(body['pageId'], 'pageid234')
+                                self.assertEqual(body['trackerAccountId'],
+                                                 'tai234')
+                                self.assertEqual(body['trackerType'], 'BRIGHTCOVE')
+                                self.assertEqual(body['pageURL'], 'http://go.com')
+                                self.assertEqual(body['refURL'], 'http://ref.com')
+                                self.assertEqual(body['clientIP'], '12.43.151.12')
+                                self.assertEqual(body['clientTime'], 23945827)
+                                self.assertGreater(body['serverTime'],
+                                                   1300000000000)
+                                self.assertEqual(body['eventData']['thumbnailId'],
+                                                 'tid345')
+                                self.assertEqual(
+                                    body['eventData']['pageCoords']['x'], 3467)
+                                self.assertEqual(
+                                    body['eventData']['pageCoords']['y'], 123)
+                                self.assertEqual(
                                 body['eventData']['windowCoords']['x'], 567)
-                            self.assertEqual(
-                                body['eventData']['windowCoords']['y'], 9678)
-                            self.assertTrue(body['eventData']['isImageClick'])
-                        elif body['eventType'] == 'IMAGES_VISIBLE':
-                            self.assertEqual(body['pageId'], 'pageid67')
-                            self.assertEqual(body['trackerAccountId'], 'tai20')
-                            self.assertEqual(body['trackerType'], 'BRIGHTCOVE')
-                            self.assertEqual(body['pageURL'], 'http://go1.com')
-                            self.assertEqual(body['refURL'], 'http://ref1.com')
-                            self.assertEqual(body['clientIP'], '12.43.151.120')
-                            self.assertEqual(body['clientTime'], 23945898)
-                            self.assertGreater(body['serverTime'],
-                                               1300000000000)
-                            self.assertItemsEqual(
-                                body['eventData']['thumbnailIds'], 
-                                ['tid345', 'tid346'])
-                            self.assertEqual(
-                                body["ipGeoData"]["city"], "San Francisco")
-                            self.assertEqual(
-                                body["ipGeoData"]["country"], "USA"),
-                            self.assertIsNone(body["ipGeoData"]["region"])
-                            self.assertIsNone(body["ipGeoData"]["zip"])
-                            self.assertAlmostEqual(body["ipGeoData"]["lat"],
-                                                   37.7794, 4)
-                            self.assertAlmostEqual(body["ipGeoData"]["lon"],
-                                                   -122.4170, 4)
-                        else:
-                            self.fail('Bad event field %s' % body['eventType'])
+                                self.assertEqual(
+                                    body['eventData']['windowCoords']['y'], 9678)
+                                self.assertTrue(body['eventData']['isImageClick'])
+                            elif body['eventType'] == 'IMAGES_VISIBLE':
+                                self.assertEqual(body['pageId'], 'pageid67')
+                                self.assertEqual(body['trackerAccountId'], 'tai20')
+                                self.assertEqual(body['trackerType'], 'BRIGHTCOVE')
+                                self.assertEqual(body['pageURL'], 'http://go1.com')
+                                self.assertEqual(body['refURL'], 'http://ref1.com')
+                                self.assertEqual(body['clientIP'], '12.43.151.120')
+                                self.assertEqual(body['clientTime'], 23945898)
+                                self.assertGreater(body['serverTime'],
+                                                   1300000000000)
+                                self.assertItemsEqual(
+                                    body['eventData']['thumbnailIds'], 
+                                    ['tid345', 'tid346'])
+                                self.assertEqual(
+                                    body["ipGeoData"]["city"], "San Francisco")
+                                self.assertEqual(
+                                    body["ipGeoData"]["country"], "USA"),
+                                self.assertIsNone(body["ipGeoData"]["region"])
+                                self.assertIsNone(body["ipGeoData"]["zip"])
+                                self.assertAlmostEqual(body["ipGeoData"]["lat"],
+                                                       37.7794, 4)
+                                self.assertAlmostEqual(body["ipGeoData"]["lon"],
+                                                       -122.4170, 4)
+                            else:
+                                self.fail('Bad event field %s' % body['eventType'])
+                        
+                            event.read(protocol)
+                    except EOFError:
+                        pass
         
 
 class TestFullServer(tornado.testing.AsyncHTTPTestCase):
@@ -226,33 +228,41 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         clickTracker.trackserver.os = self.fake_os
         clickTracker.trackserver.open = self.fake_open
 
-        # Put the schema in the fake filesystem
+        # Put the avro schema in the fake filesystem
         self.fake_os.makedirs(os.path.dirname(schema_path))
         with self.fake_open(schema_path, 'w') as f:
             f.write(schema_str)
-        
 
+        self.thrift_patcher = patch(
+            'clickTracker.trackserver.ThriftSourceProtocol.Client')
+        self.thrift_mock = MagicMock()
+        self.thrift_patcher.start().return_value = self.thrift_mock
+        self.thrift_mock.appendBatch.side_effect = \
+          lambda events, callback: self.io_loop.add_callback(callback,
+                                                             Status.OK)
 
-        self.http_patcher = patch(
-            'clickTracker.trackserver.utils.http.send_request')
-        self.http_mock = self.http_patcher.start()
-        def patch_func(url, ntries=5, callback=None):
-            if callback:
-                return self.io_loop.add_callback(callback,
-                                                 HTTPResponse(url, 200))
-            else:
-                return HTTPResponse(url, 200)
-        self.http_mock.side_effect = patch_func
+        self.thrift_transport_patcher = patch('clickTracker.trackserver.TTornado.TTornadoStreamTransport')
+        self.thrift_transport_mock = self.thrift_transport_patcher.start()
+        self.thrift_transport_mock().open.side_effect = \
+          lambda callback: self.io_loop.add_callback(callback)
+
+        self.old_flush_interval = \
+          options.get('clickTracker.trackserver.flume_flush_interval')
+        options._set('clickTracker.trackserver.flume_flush_interval', 1)
 
         self.server_obj = clickTracker.trackserver.Server()
         self.backup_q = self.server_obj.backup_queue
         super(TestFullServer, self).setUp()
 
         random.seed(168984)
+
         
 
     def tearDown(self):
-        self.http_patcher.stop()
+        options._set('clickTracker.trackserver.flume_flush_interval',
+                     self.old_flush_interval)
+        self.thrift_patcher.stop()
+        self.thrift_transport_patcher.stop()
         
         super(TestFullServer, self).tearDown()
         clickTracker.trackserver.os = os
@@ -271,7 +281,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         neon_id - Neon id to store in a cookie
         path - Endpoint for the server
         '''
-        self.http_mock.reset_mock()
+        self.thrift_mock.reset_mock()
         
         headers = {}
         headers['User-Agent'] = (
@@ -288,41 +298,36 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(response.code, 200)
 
         # Check that a response was found
-        self.assertEqual(self.http_mock.call_count, 1)
-        request_saw = self.http_mock.call_args[0][0]
-        self.assertEqual(request_saw.headers,
-                         {'Content-Type': 'application/json'})
-        self.assertEqual(request_saw.method, 'POST')
-
-        json_msg = json.loads(request_saw.body)
-        self.assertEqual(len(json_msg), 1)
-        json_msg = json_msg[0]
-        self.assertTrue(json_msg['headers']['timestamp'])
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 1)
+        request_saw = self.thrift_mock.appendBatch.call_args[0][0][0]
+        headers = request_saw.headers
+        binary_body = request_saw.body
+        
+        self.assertTrue(headers['timestamp'])
         
         if 'v2' in path:
-            msgbuf = StringIO(base64.b64decode(json_msg['body']))
+            msgbuf = StringIO(binary_body)
             body = self.avro_reader.read(avro.io.BinaryDecoder(msgbuf))
         
-            self.assertEqual(json_msg['headers']['track_vers'], '2.1')
-            self.assertEqual(json_msg['headers']['event'], ebody['eventType'])
-            self.assertEqual(json_msg['headers']['timestamp'],
-                         body['serverTime'])
-            self.assertEqual(json_msg['headers']['tai'],
+            self.assertEqual(headers['track_vers'], '2.2')
+            self.assertEqual(headers['event'], ebody['eventType'])
+            self.assertEqual(headers['timestamp'],
+                         str(body['serverTime']))
+            self.assertEqual(headers['tai'],
                              ebody['trackerAccountId'])
             
             self.assertEqual(body['clientIP'], '127.0.0.1')
             if neon_id is not None:
                 self.assertEqual(body['neonUserId'], neon_id)
 
-            self.assertEqual(body['userAgent'], headers['User-Agent'])
             self.assertEqual(
                 body['agentInfo'],
                 {'os': {'name': 'Android', 'version': '2.3.5'},
                  'browser' : {'name' : 'Safari', 'version' : '4.0' }})
         else:
-            self.assertEqual(json_msg['headers']['track_vers'], '1')
-            self.assertEqual(json_msg['headers']['event'], ebody['a'])
-            body = json.loads(json_msg['body'])
+            self.assertEqual(headers['track_vers'], '1')
+            self.assertEqual(headers['event'], ebody['a'])
+            body = json.loads(binary_body)
 
         self.assertDictContainsSubset(ebody, body)
 
@@ -619,10 +624,10 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
 
     def test_error_connecting_to_flume(self):
         # Simulate a connection error
-        self.http_mock.side_effect = \
-          lambda x, callback: self.io_loop.add_callback(
+        self.thrift_mock.appendBatch.side_effect = \
+          lambda events, callback: self.io_loop.add_callback(
               callback,
-              HTTPResponse(x, 599, error=HTTPError(599)))
+              Status.ERROR)
 
         self.assertEqual(self.backup_q.qsize(), 0)
 
@@ -643,15 +648,22 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         # Now check the quere for writing to disk to make sure that
         # the data is there.
         self.assertEqual(self.backup_q.qsize(), 1)
-        msg = json.loads(self.backup_q.get())
-        self.assertEqual(len(msg), 1)
+
+    def test_utf8_header(self):
+        # TODO(mdesnoyer): Make this test cleaner
+        response = self.fetch(
+            '/v2/track?a=vc&page=http%3A%2F%2Fwww.stack.com%2F2009%2F05%2F01%2Fnutrition-plan-for-football%2F&pageid=MweOiNTpEmyffwqR&ttype=brightcove&ref=http%3A%2F%2Fwww.google.ca%2Furl&tai=1510551506&cts=1401814012336&vid=16863777001&tid=null&playerid=3147600983001&noCacheIE=1401814012337',
+            headers = {'Geoip_country_code3': 'CAN', 'Accept-Language': 'en-us', 'Accept-Encoding': 'gzip, deflate', 'Geoip_city': 'Qu\xc3\xa9bec', 'X-Forwarded-Port': '80', 'Dnt': '1', 'Connection': 'close', 'X-Real-Ip': '65.94.184.97', 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_2) AppleWebKit/537.75.14 (KHTML, like Gecko) Version/7.0.3 Safari/537.75.14', 'Geoip_postal_code': 'G6K', 'Geoip_latitude': '46.7038', 'Geoip_longitude': '-71.2837', 'X-Forwarded-For': '65.94.184.97, 65.94.184.97', 'Accept': '*/*', 'Geoip_region': 'QC', 'Host': 'trackserver-test-691751517.us-east-1.elb.amazonaws.com', 'X-Forwarded-Proto': 'http', 'Referer': 'http://www.stack.com/2009/05/01/nutrition-plan-for-football/'})
+
+        self.assertEqual(response.code, 200)
 
     # TODO(mdesnoyer) add tests for when the schema isn't on S3 and
     # for when arguments are missing
             
 
 if __name__ == '__main__':
-    utils.neon.InitNeonTest()
+    utils.neon.InitNeon()
     # Turn off the annoying logs
     #logging.getLogger('tornado.access').propagate = False
+
     unittest.main()
