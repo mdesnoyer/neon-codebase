@@ -649,8 +649,8 @@ public class RawTrackerMRTest {
     CaptureEvents();
 
     VerifySequence(Arrays.asList(
-        MakeBasicVideoPlayHive().setClientTime(1400000000.7)
-            .setAutoplayDelta(10000).build(),
+        MakeBasicVideoPlayHive().setClientTime(1400000010.7)
+            .setAutoplayDelta(10000).setPlayCount(2).build(),
         MakeBasicEventSequenceHive().setVideoPlayClientTime(1400000010.7)
             .setVideoPageURL("http://go.com")
             .setVideoPlayServerTime(1400697546.).setServerTime(1400697546.)
