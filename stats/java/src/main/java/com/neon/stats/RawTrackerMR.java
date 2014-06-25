@@ -363,8 +363,8 @@ public class RawTrackerMR extends Configured implements Tool {
       Pair<TrackerEvent, Long> eventPair;
       if (curEvent.getEventType() == EventType.AD_PLAY
           || curEvent.getEventType() == EventType.VIDEO_PLAY) {
-        boolean fromOtherPage =
-            curEvent.getRefURL() != null && IsFirstAutoplay(curEvent);
+        boolean fromOtherPage = curEvent.getRefURL() != null &&
+            curEvent.getRefURL().length() > 0 && IsFirstAutoplay(curEvent);
         boolean isAutoplay = IsAutoplay(curEvent);
 
         boolean foundClick = false;

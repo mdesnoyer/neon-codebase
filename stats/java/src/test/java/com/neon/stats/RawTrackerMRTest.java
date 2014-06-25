@@ -9,6 +9,7 @@ import org.apache.avro.mapred.AvroValue;
 import org.apache.avro.mapreduce.AvroJob;
 import org.apache.avro.mapreduce.AvroKeyInputFormat;
 import org.apache.avro.mapreduce.AvroMultipleOutputs;
+import org.apache.avro.specific.SpecificRecordBase;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.*;
 import org.apache.hadoop.mapreduce.Job;
@@ -31,6 +32,7 @@ public class RawTrackerMRTest {
   MapReduceDriver<AvroKey<TrackerEvent>, NullWritable, Text, AvroValue<TrackerEvent>, WritableComparable<Object>, NullWritable> mapReduceDriver;
 
   AvroMultipleOutputs outputCollector;
+  Map<Long, HashSet<SpecificRecordBase>> capturedSequences;
 
   @Before
   public void setUp() throws IOException {
@@ -81,6 +83,123 @@ public class RawTrackerMRTest {
 
   }
 
+  /**
+   * Checks that the given event sequence was found
+   * 
+   * @param expectedEvents
+   *          List of Hive events to expect to output from a given run. useful
+   *          in reducer tests
+   */
+  protected void VerifySequence(List<SpecificRecordBase> expectedEventList) {
+
+    HashSet<SpecificRecordBase> expectedEvents =
+        new HashSet<SpecificRecordBase>(expectedEventList);
+
+    for (Map.Entry<Long, HashSet<SpecificRecordBase>> entry : capturedSequences
+        .entrySet()) {
+      Long sequenceId = entry.getKey();
+
+      if (entry.getValue().size() != expectedEvents.size()) {
+        // Not this sequence, it's a different size
+        continue;
+      }
+
+      boolean eventMissing = false;
+      for (Object expectedEvent : expectedEvents) {
+        // Add the sequence id to the expected event
+        if (expectedEvent instanceof ImageLoadHive) {
+          ((ImageLoadHive) expectedEvent).setSequenceId(sequenceId);
+        } else if (expectedEvent instanceof ImageVisibleHive) {
+          ((ImageVisibleHive) expectedEvent).setSequenceId(sequenceId);
+        } else if (expectedEvent instanceof ImageClickHive) {
+          ((ImageClickHive) expectedEvent).setSequenceId(sequenceId);
+        } else if (expectedEvent instanceof AdPlayHive) {
+          ((AdPlayHive) expectedEvent).setSequenceId(sequenceId);
+        } else if (expectedEvent instanceof VideoPlayHive) {
+          ((VideoPlayHive) expectedEvent).setSequenceId(sequenceId);
+        } else if (expectedEvent instanceof EventSequenceHive) {
+          ((EventSequenceHive) expectedEvent).setSequenceId(sequenceId);
+        }
+
+        // See if the event was captured
+        if (!entry.getValue().contains(expectedEvent)) {
+          eventMissing = true;
+        }
+      }
+
+      if (!eventMissing) {
+        // We found the sequence
+        return;
+      }
+    }
+
+    fail("The expected sequence was not found " + expectedEventList.toString());
+  }
+
+  /**
+   * Captures all the events
+   * 
+   * @param eventNames
+   *          - List of event types to capture
+   * @throws InterruptedException
+   * @throws IOException
+   */
+  protected void CaptureEvents() throws IOException,
+      InterruptedException {
+    ArgumentCaptor<AvroKey> hiveEventCaptor =
+        ArgumentCaptor.forClass(AvroKey.class);
+    ArgumentCaptor<String> outputPathCaptor =
+        ArgumentCaptor.forClass(String.class);
+    ArgumentCaptor<String> nameCaptor = ArgumentCaptor.forClass(String.class);
+    
+    verify(outputCollector, atLeastOnce()).write(nameCaptor.capture(),
+        hiveEventCaptor.capture(), eq(NullWritable.get()),
+        outputPathCaptor.capture());
+
+    capturedSequences = new HashMap<Long, HashSet<SpecificRecordBase>>();
+    List<AvroKey> hiveEvents = hiveEventCaptor.getAllValues();
+    List<String> outputPaths = outputPathCaptor.getAllValues();
+    assertEquals(hiveEvents.size(), outputPaths.size());
+    Long sequenceId = null;
+    for (int i = 0; i < hiveEvents.size(); ++i) {
+      AvroKey curEvent = hiveEvents.get(i);
+      if (curEvent.datum() instanceof ImageLoadHive) {
+        sequenceId = ((ImageLoadHive) curEvent.datum()).getSequenceId();
+        assertEquals(outputPaths.get(i), "ImageLoadHive/ImageLoadHive");
+
+      } else if (curEvent.datum() instanceof ImageVisibleHive) {
+        sequenceId = ((ImageVisibleHive) curEvent.datum()).getSequenceId();
+        assertEquals(outputPaths.get(i), "ImageVisibleHive/ImageVisibleHive");
+
+      } else if (curEvent.datum() instanceof ImageClickHive) {
+        sequenceId = ((ImageClickHive) curEvent.datum()).getSequenceId();
+        assertEquals(outputPaths.get(i), "ImageClickHive/ImageClickHive");
+
+      } else if (curEvent.datum() instanceof AdPlayHive) {
+        sequenceId = ((AdPlayHive) curEvent.datum()).getSequenceId();
+        assertEquals(outputPaths.get(i), "AdPlayHive/AdPlayHive");
+
+      } else if (curEvent.datum() instanceof VideoPlayHive) {
+        sequenceId = ((VideoPlayHive) curEvent.datum()).getSequenceId();
+        assertEquals(outputPaths.get(i), "VideoPlayHive/VideoPlayHive");
+
+      } else if (curEvent.datum() instanceof EventSequenceHive) {
+        sequenceId = ((EventSequenceHive) curEvent.datum()).getSequenceId();
+        assertEquals(outputPaths.get(i), "EventSequenceHive/EventSequenceHive");
+      } else {
+        break;
+      }
+
+      // Add the event to the sequence list
+      HashSet<SpecificRecordBase> seqList = capturedSequences.get(sequenceId);
+      if (seqList == null) {
+        seqList = new HashSet<SpecificRecordBase>();
+        capturedSequences.put(sequenceId, seqList);
+      }
+      seqList.add((SpecificRecordBase) curEvent.datum());
+    }
+  }
+
   protected TrackerEvent.Builder MakeBasicTrackerEvent() {
     return TrackerEvent.newBuilder(new TrackerEvent("pageid1", "tai1",
         TrackerType.BRIGHTCOVE, "http://go.com", "http://ref.com",
@@ -110,7 +229,7 @@ public class RawTrackerMRTest {
         .setPageURL("http://go.com").setRefURL("http://ref.com")
         .setServerTime(1400697546.).setTrackerType(TrackerType.BRIGHTCOVE)
         .setTrackerAccountId("tai1").setUserAgent("agent1").setHeight(480)
-        .setWidth(640).setThumbnailId("acct1_vid1_tid1");
+        .setWidth(640).setThumbnailId("acct1_vid1_tid1").setSequenceId(0);
   }
 
   protected TrackerEvent.Builder MakeBasicImageVisible() {
@@ -129,7 +248,7 @@ public class RawTrackerMRTest {
         .setPageURL("http://go.com").setRefURL("http://ref.com")
         .setTrackerAccountId("tai1").setServerTime(1400697546.)
         .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
-        .setThumbnailId("acct1_vid1_tid1");
+        .setThumbnailId("acct1_vid1_tid1").setSequenceId(0);
   }
 
   protected TrackerEvent.Builder MakeBasicImageClick() {
@@ -153,7 +272,7 @@ public class RawTrackerMRTest {
         .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
         .setPageCoordsX(100f).setPageCoordsY(200f).setWindowCoordsX(150f)
         .setWindowCoordsY(250f).setIsClickInPlayer(false)
-        .setIsRightClick(false);
+        .setIsRightClick(false).setSequenceId(0);
   }
 
   protected TrackerEvent.Builder MakeBasicAdPlay() {
@@ -174,13 +293,31 @@ public class RawTrackerMRTest {
         .setTrackerAccountId("tai1").setServerTime(1400697546.)
         .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
         .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
-        .setPlayerId("player2").setAutoplayDelta(null).setPlayCount(1);
+        .setPlayerId("player2").setAutoplayDelta(null).setPlayCount(1)
+        .setSequenceId(0);
   }
 
   protected TrackerEvent.Builder MakeBasicVideoClick() {
     return MakeBasicTrackerEvent().setEventType(EventType.VIDEO_CLICK)
         .setEventData(
             new VideoClick(true, "vid1", "player2", "acct1_vid1_tid1"));
+  }
+
+  protected ImageClickHive.Builder MakeBasicVideoClickHive() {
+    return ImageClickHive.newBuilder().setAgentInfoBrowserName(null)
+        .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
+        .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
+        .setClientTime(1400000000.).setIpGeoDataCity(null)
+        .setIpGeoDataCountry("USA").setIpGeoDataRegion("CA")
+        .setIpGeoDataZip(null).setIpGeoDataLat(34.556f)
+        .setIpGeoDataLon(120.45f).setNeonUserId("").setPageId("pageid1")
+        .setPageURL("http://go.com").setRefURL("http://ref.com")
+        .setTrackerAccountId("tai1").setServerTime(1400697546.)
+        .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
+        .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
+        .setPageCoordsX(-1f).setPageCoordsY(-1f).setWindowCoordsX(-1f)
+        .setWindowCoordsY(-1f).setIsClickInPlayer(true).setIsRightClick(false)
+        .setSequenceId(0);
   }
 
   protected TrackerEvent.Builder MakeBasicVideoPlay() {
@@ -203,33 +340,19 @@ public class RawTrackerMRTest {
         .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
         .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
         .setPlayerId("player2").setAutoplayDelta(null).setPlayCount(1)
-        .setDidAdPlay(true);
+        .setDidAdPlay(true).setSequenceId(0);
   }
 
   protected EventSequenceHive.Builder MakeBasicEventSequenceHive() {
     return EventSequenceHive.newBuilder().setAgentInfoBrowserName(null)
         .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
         .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
-        .setImLoadClientTime(1400000000.).setImVisClientTime(1400000000.)
-        .setImClickClientTime(1400000000.).setAdPlayClientTime(1400000000.)
-        .setVideoPlayClientTime(1400000000.).setIpGeoDataCity(null)
-        .setIpGeoDataCountry("USA").setIpGeoDataRegion("CA")
-        .setIpGeoDataZip(null).setIpGeoDataLat(34.556f)
-        .setIpGeoDataLon(120.45f).setNeonUserId("")
-        .setVideoPageURL("http://go.com").setImClickPageURL("http://go.com")
-        .setImLoadPageURL("http://go.com").setRefURL("http://ref.com")
-        .setTrackerAccountId("tai1").setImLoadServerTime(1400697546.)
-        .setImVisServerTime(1400697546.).setImClickServerTime(1400697546.)
-        .setAdPlayServerTime(1400697546.).setVideoPlayServerTime(1400697546.)
+        .setIpGeoDataCity(null).setIpGeoDataCountry("USA")
+        .setIpGeoDataRegion("CA").setIpGeoDataZip(null)
+        .setIpGeoDataLat(34.556f).setIpGeoDataLon(120.45f).setNeonUserId("")
+        .setRefURL("http://ref.com").setTrackerAccountId("tai1")
         .setServerTime(1400697546.).setTrackerType(TrackerType.BRIGHTCOVE)
-        .setUserAgent("agent1").setThumbnailId("acct1_vid1_tid1")
-        .setVideoId("vid1").setPlayerId("player2").setAutoplayDelta(null)
-        .setPlayCount(1).setPageCoordsX(100f).setPageCoordsY(200f)
-        .setWindowCoordsX(150f).setWindowCoordsY(250f)
-        .setIsClickInPlayer(false).setIsRightClick(false).setHeight(480)
-        .setWidth(640).setImLoadPageId("pageid1").setImVisPageId("pageid1")
-        .setImClickPageId("pageid1").setAdPlayPageId("vidpage")
-        .setVideoPlayPageId("vidpage");
+        .setUserAgent("agent1").setSequenceId(0);
   }
 
   @Test
@@ -420,98 +543,119 @@ public class RawTrackerMRTest {
     // MultipleOutputs
     reduceDriver.withInput(new Text("tai156.45.41.124vid1"), values).run();
 
-    ArgumentCaptor<AvroKey> hiveEventCaptor =
-        ArgumentCaptor.forClass(AvroKey.class);
-    ArgumentCaptor<String> outputPathCaptor =
-        ArgumentCaptor.forClass(String.class);
-    verify(outputCollector).write(eq("ImageLoadHive"),
-        hiveEventCaptor.capture(), eq(NullWritable.get()),
-        outputPathCaptor.capture());
-    verify(outputCollector).write(eq("ImageVisibleHive"),
-        hiveEventCaptor.capture(), eq(NullWritable.get()),
-        outputPathCaptor.capture());
-    verify(outputCollector).write(eq("ImageClickHive"),
-        hiveEventCaptor.capture(), eq(NullWritable.get()),
-        outputPathCaptor.capture());
-    verify(outputCollector).write(eq("VideoPlayHive"),
-        hiveEventCaptor.capture(), eq(NullWritable.get()),
-        outputPathCaptor.capture());
-    verify(outputCollector).write(eq("AdPlayHive"), hiveEventCaptor.capture(),
-        eq(NullWritable.get()), outputPathCaptor.capture());
-    verify(outputCollector).write(eq("EventSequenceHive"),
-        hiveEventCaptor.capture(), eq(NullWritable.get()),
-        outputPathCaptor.capture());
+    CaptureEvents();
 
-    List<AvroKey> hiveEvents = hiveEventCaptor.getAllValues();
-    List<String> outputPaths = outputPathCaptor.getAllValues();
-    assertEquals(hiveEvents.size(), outputPaths.size());
-    assertEquals(hiveEvents.size(), 6);
-    Long sequenceId = null;
-    for (int i = 0; i < hiveEvents.size(); ++i) {
-      AvroKey curEvent = hiveEvents.get(i);
-      if (curEvent.datum() instanceof ImageLoadHive) {
-        sequenceId =
-            sequenceId == null ? ((ImageLoadHive) curEvent.datum())
-                .getSequenceId() : sequenceId;
-        assertEquals(curEvent.datum(),
-            MakeBasicImageLoadHive().setSequenceId(sequenceId).build());
-        assertEquals(outputPaths.get(i), "ImageLoadHive/ImageLoadHive");
+    VerifySequence(Arrays.asList(
+        MakeBasicImageLoadHive().build(),
+        MakeBasicImageVisibleHive().setClientTime(1400000000.1).build(),
+        MakeBasicImageClickHive().setClientTime(1400000000.2).build(),
+        MakeBasicAdPlayHive().setClientTime(1400000000.5).setPageId("vidpage")
+            .setRefURL("http://go.com").build(),
+        MakeBasicVideoPlayHive().setClientTime(1400000000.7)
+            .setPageId("vidpage").setRefURL("http://go.com").build(),
+        MakeBasicEventSequenceHive().setImVisClientTime(1400000000.1)
+            .setImClickClientTime(1400000000.2)
+            .setAdPlayClientTime(1400000000.5)
+            .setVideoPlayClientTime(1400000000.7)
+            .setImLoadClientTime(1400000000.).setVideoPageURL("http://go.com")
+            .setImClickPageURL("http://go.com")
+            .setImLoadPageURL("http://go.com").setImLoadServerTime(1400697546.)
+            .setImVisServerTime(1400697546.).setImClickServerTime(1400697546.)
+            .setAdPlayServerTime(1400697546.)
+            .setVideoPlayServerTime(1400697546.).setServerTime(1400697546.)
+            .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
+            .setPlayerId("player2").setAutoplayDelta(null).setPlayCount(1)
+            .setPageCoordsX(100f).setPageCoordsY(200f).setWindowCoordsX(150f)
+            .setWindowCoordsY(250f).setIsClickInPlayer(false)
+            .setIsRightClick(false).setHeight(480).setWidth(640)
+            .setImLoadPageId("pageid1").setImVisPageId("pageid1")
+            .setImClickPageId("pageid1").setAdPlayPageId("vidpage")
+            .setVideoPlayPageId("vidpage").build()));
+  }
 
-      } else if (curEvent.datum() instanceof ImageVisibleHive) {
-        sequenceId =
-            sequenceId == null ? ((ImageVisibleHive) curEvent.datum())
-                .getSequenceId() : sequenceId;
-        assertEquals(curEvent.datum(), MakeBasicImageVisibleHive()
-            .setClientTime(1400000000.1).setSequenceId(sequenceId).build());
-        assertEquals(outputPaths.get(i), "ImageVisibleHive/ImageVisibleHive");
+  @Test
+  public void testReductionVideoClickSinglePlayer() throws IOException,
+      InterruptedException {
+    // This is a case where the player is a single player where the user can
+    // just click play.
+    List<AvroValue<TrackerEvent>> values =
+        new ArrayList<AvroValue<TrackerEvent>>();
+    values.add(new AvroValue<TrackerEvent>(MakeBasicImageLoad().build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicImageVisible()
+        .setClientTime(1400000000100l).build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicVideoClick().setClientTime(
+        1400000000600l).build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicVideoPlay()
+        .setClientTime(1400000000700l)
+        .setEventData(
+            new VideoPlay(true, "vid1", "player2", "acct1_vid1_tid1", true,
+                200, 1)).build()));
 
-      } else if (curEvent.datum() instanceof ImageClickHive) {
-        sequenceId =
-            sequenceId == null ? ((ImageClickHive) curEvent.datum())
-                .getSequenceId() : sequenceId;
-        assertEquals(curEvent.datum(),
-            MakeBasicImageClickHive().setClientTime(1400000000.2)
-                .setSequenceId(sequenceId).build());
-        assertEquals(outputPaths.get(i), "ImageClickHive/ImageClickHive");
+    // We have to look at the outputs in the mock because MRUnit doesn't handle
+    // MultipleOutputs
+    reduceDriver.withInput(new Text("tai156.45.41.124vid1"), values).run();
 
-      } else if (curEvent.datum() instanceof AdPlayHive) {
-        sequenceId =
-            sequenceId == null ? ((AdPlayHive) curEvent.datum())
-                .getSequenceId() : sequenceId;
-        assertEquals(
-            curEvent.datum(),
-            MakeBasicAdPlayHive().setClientTime(1400000000.5)
-                .setPageId("vidpage").setRefURL("http://go.com")
-                .setSequenceId(sequenceId).build());
-        assertEquals(outputPaths.get(i), "AdPlayHive/AdPlayHive");
+    CaptureEvents();
 
-      } else if (curEvent.datum() instanceof VideoPlayHive) {
-        sequenceId =
-            sequenceId == null ? ((VideoPlayHive) curEvent.datum())
-                .getSequenceId() : sequenceId;
-        assertEquals(
-            curEvent.datum(),
-            MakeBasicVideoPlayHive().setClientTime(1400000000.7)
-                .setPageId("vidpage").setSequenceId(sequenceId)
-                .setRefURL("http://go.com").build());
-        assertEquals(outputPaths.get(i), "VideoPlayHive/VideoPlayHive");
+    VerifySequence(Arrays.asList(
+        MakeBasicImageLoadHive().build(),
+        MakeBasicImageVisibleHive().setClientTime(1400000000.1).build(),
+        MakeBasicVideoClickHive().setClientTime(1400000000.6).build(),
+        MakeBasicVideoPlayHive().setClientTime(1400000000.7)
+            .setAutoplayDelta(200).build(),
+        MakeBasicEventSequenceHive().setImLoadClientTime(1400000000.)
+            .setImVisClientTime(1400000000.1)
+            .setImClickClientTime(1400000000.6)
+            .setVideoPlayClientTime(1400000000.7)
+            .setVideoPageURL("http://go.com")
+            .setImClickPageURL("http://go.com")
+            .setImLoadPageURL("http://go.com").setImLoadServerTime(1400697546.)
+            .setImVisServerTime(1400697546.).setImClickServerTime(1400697546.)
+            .setVideoPlayServerTime(1400697546.).setServerTime(1400697546.)
+            .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
+            .setPlayerId("player2").setAutoplayDelta(200).setPlayCount(1)
+            .setIsClickInPlayer(true).setIsRightClick(false).setHeight(480)
+            .setWidth(640).setImLoadPageId("pageid1").setImVisPageId("pageid1")
+            .setImClickPageId("pageid1").setVideoPlayPageId("pageid1").build()));
+  }
 
-      } else if (curEvent.datum() instanceof EventSequenceHive) {
-        sequenceId =
-            sequenceId == null ? ((EventSequenceHive) curEvent.datum())
-                .getSequenceId() : sequenceId;
+  @Test
+  public void testClickFollowedByAutoplay() throws IOException,
+      InterruptedException {
+    // This is a case where the player is a single page and a click does the
+    // first video play and then an autoplay causes the second
+    List<AvroValue<TrackerEvent>> values =
+        new ArrayList<AvroValue<TrackerEvent>>();
+    values.add(new AvroValue<TrackerEvent>(MakeBasicImageLoad().build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicImageVisible()
+        .setClientTime(1400000000100l).build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicVideoClick().setClientTime(
+        1400000000600l).build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicVideoPlay()
+        .setClientTime(1400000000700l)
+        .setEventData(
+            new VideoPlay(true, "vid1", "player2", "acct1_vid1_tid1", true,
+                200, 1)).build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicVideoClick().setClientTime(
+        1400000010600l).build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicVideoPlay()
+        .setClientTime(1400000010700l)
+        .setEventData(
+            new VideoPlay(true, "vid1", "player2", "acct1_vid1_tid1", true,
+                10000, 2)).build()));
 
-        assertEquals(
-            curEvent.datum(),
-            MakeBasicEventSequenceHive().setSequenceId(sequenceId)
-                .setImVisClientTime(1400000000.1)
-                .setImClickClientTime(1400000000.2)
-                .setAdPlayClientTime(1400000000.5)
-                .setVideoPlayClientTime(1400000000.7).build());
+    reduceDriver.withInput(new Text("tai156.45.41.124vid1"), values).run();
 
-        assertEquals(outputPaths.get(i), "EventSequenceHive/EventSequenceHive");
-      }
-    }
+    CaptureEvents();
 
+    VerifySequence(Arrays.asList(
+        MakeBasicVideoPlayHive().setClientTime(1400000000.7)
+            .setAutoplayDelta(10000).build(),
+        MakeBasicEventSequenceHive().setVideoPlayClientTime(1400000010.7)
+            .setVideoPageURL("http://go.com")
+            .setVideoPlayServerTime(1400697546.).setServerTime(1400697546.)
+            .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
+            .setPlayerId("player2").setAutoplayDelta(10000).setPlayCount(2)
+            .setVideoPlayPageId("pageid1").build()));
   }
 }

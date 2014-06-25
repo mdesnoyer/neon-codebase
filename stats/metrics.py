@@ -28,6 +28,9 @@ def calc_thumb_stats(baseCounts, thumbCounts):
     Outputs:
     (CTR, Extra Conversions, Lift, P Value)
     '''
+    if baseCounts[0] == 0 or thumbCounts[0] == 0:
+        return (0.0, 0.0, 0.0, 0.0)
+    
     ctr_base = float(baseCounts[1]) / baseCounts[0]
     ctr_thumb = float(thumbCounts[1]) / thumbCounts[0]
 
