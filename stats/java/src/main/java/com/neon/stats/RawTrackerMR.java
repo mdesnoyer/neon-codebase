@@ -354,7 +354,9 @@ public class RawTrackerMR extends Configured implements Tool {
         context.getCounter("ReduceError", "InvalidEventType").increment(1);
       }
 
-      return ((long) event.getPageId().hashCode()) << 32 | videoPlayHash;
+      long retval = (((long) event.getPageId().hashCode()) << 32) | 
+          (((long)videoPlayHash) & 0xFFFFFFFFl);
+      return retval;
     }
 
     private static void BackfillSequenceId(TrackerEvent curEvent,
@@ -363,8 +365,8 @@ public class RawTrackerMR extends Configured implements Tool {
       Pair<TrackerEvent, Long> eventPair;
       if (curEvent.getEventType() == EventType.AD_PLAY
           || curEvent.getEventType() == EventType.VIDEO_PLAY) {
-        boolean fromOtherPage =
-            curEvent.getRefURL() != null && IsFirstAutoplay(curEvent);
+        boolean fromOtherPage = curEvent.getRefURL() != null &&
+            curEvent.getRefURL().length() > 0 && IsFirstAutoplay(curEvent);
         boolean isAutoplay = IsAutoplay(curEvent);
 
         boolean foundClick = false;
