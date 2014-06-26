@@ -3,6 +3,7 @@ package com.neon.stats;
 import java.io.IOException;
 import java.util.*;
 
+import org.apache.avro.Schema;
 import org.apache.avro.hadoop.io.AvroSerialization;
 import org.apache.avro.mapred.AvroKey;
 import org.apache.avro.mapred.AvroValue;
@@ -10,6 +11,7 @@ import org.apache.avro.mapreduce.AvroJob;
 import org.apache.avro.mapreduce.AvroKeyInputFormat;
 import org.apache.avro.mapreduce.AvroMultipleOutputs;
 import org.apache.avro.specific.SpecificRecordBase;
+import org.apache.avro.util.Utf8;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.*;
 import org.apache.hadoop.mapreduce.Job;
@@ -95,17 +97,20 @@ public class RawTrackerMRTest {
     HashSet<SpecificRecordBase> expectedEvents =
         new HashSet<SpecificRecordBase>(expectedEventList);
 
+    String missingInfo = "";
+
     for (Map.Entry<Long, HashSet<SpecificRecordBase>> entry : capturedSequences
         .entrySet()) {
       Long sequenceId = entry.getKey();
+      HashSet<SpecificRecordBase> eventsSeen = entry.getValue();
 
-      if (entry.getValue().size() != expectedEvents.size()) {
+      if (eventsSeen.size() != expectedEvents.size()) {
         // Not this sequence, it's a different size
         continue;
       }
 
       boolean eventMissing = false;
-      for (Object expectedEvent : expectedEvents) {
+      for (SpecificRecordBase expectedEvent : expectedEvents) {
         // Add the sequence id to the expected event
         if (expectedEvent instanceof ImageLoadHive) {
           ((ImageLoadHive) expectedEvent).setSequenceId(sequenceId);
@@ -122,8 +127,30 @@ public class RawTrackerMRTest {
         }
 
         // See if the event was captured
-        if (!entry.getValue().contains(expectedEvent)) {
+        if (!eventsSeen.contains(expectedEvent)) {
           eventMissing = true;
+
+          // Try to find the event that it might have been
+          for (SpecificRecordBase eventSeen : eventsSeen) {
+            if (eventSeen.getClass() == expectedEvent.getClass()) {
+              for (Schema.Field field : expectedEvent.getSchema().getFields()) {
+                Object expectedValue = expectedEvent.get(field.pos());
+                if (expectedValue instanceof String) {
+                  // String get turned to utf8 by avro
+                  expectedValue = new Utf8((String) expectedValue);
+                }
+                Object foundValue = eventSeen.get(field.pos());
+                if (expectedValue == null ? foundValue != null : !expectedValue
+                    .equals(foundValue)) {
+                  missingInfo =
+                      "For event type " + expectedEvent.getClass().getName()
+                          + " Field " + field.name()
+                          + " is different. Expected: " + expectedValue
+                          + " Actual: " + foundValue;
+                }
+              }
+            }
+          }
         }
       }
 
@@ -133,7 +160,8 @@ public class RawTrackerMRTest {
       }
     }
 
-    fail("The expected sequence was not found " + expectedEventList.toString());
+    fail("The expected sequence was not found. It might be because: "
+        + missingInfo + ". Sequence: " + expectedEventList.toString());
   }
 
   /**
@@ -144,14 +172,13 @@ public class RawTrackerMRTest {
    * @throws InterruptedException
    * @throws IOException
    */
-  protected void CaptureEvents() throws IOException,
-      InterruptedException {
+  protected void CaptureEvents() throws IOException, InterruptedException {
     ArgumentCaptor<AvroKey> hiveEventCaptor =
         ArgumentCaptor.forClass(AvroKey.class);
     ArgumentCaptor<String> outputPathCaptor =
         ArgumentCaptor.forClass(String.class);
     ArgumentCaptor<String> nameCaptor = ArgumentCaptor.forClass(String.class);
-    
+
     verify(outputCollector, atLeastOnce()).write(nameCaptor.capture(),
         hiveEventCaptor.capture(), eq(NullWritable.get()),
         outputPathCaptor.capture());
@@ -657,5 +684,247 @@ public class RawTrackerMRTest {
             .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
             .setPlayerId("player2").setAutoplayDelta(10000).setPlayCount(2)
             .setVideoPlayPageId("pageid1").build()));
+  }
+
+  @Test
+  public void testViewOnOnePageButClickToPlayOnVideoPage() throws IOException,
+      InterruptedException {
+    // The case where the user saw the image on one page, but got to the video
+    // page by clicking a different video. Then they clicked to play this video
+    // later.
+    List<AvroValue<TrackerEvent>> values =
+        new ArrayList<AvroValue<TrackerEvent>>();
+    // The events on the first page
+    values.add(new AvroValue<TrackerEvent>(MakeBasicImageLoad().build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicImageVisible()
+        .setClientTime(1400000000100l).build()));
+
+    // The events on the second page
+    values.add(new AvroValue<TrackerEvent>(MakeBasicImageLoad()
+        .setPageId("vidpage").setRefURL("http://go.com")
+        .setClientTime(1400000010000l).build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicImageVisible()
+        .setPageId("vidpage").setRefURL("http://go.com")
+        .setClientTime(1400000010100l).build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicAdPlay()
+        .setClientTime(1400000010500l)
+        .setPageId("vidpage")
+        .setRefURL("http://go.com")
+        .setEventData(
+            new AdPlay(true, "vid1", "player2", "acct1_vid1_tid1", 200, 3))
+        .build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicVideoClick()
+        .setClientTime(1400000010600l).setPageId("vidpage")
+        .setRefURL("http://go.com").build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicVideoPlay()
+        .setClientTime(1400000010700l)
+        .setPageId("vidpage")
+        .setRefURL("http://go.com")
+        .setEventData(
+            new VideoPlay(true, "vid1", "player2", "acct1_vid1_tid1", true,
+                200, 3)).build()));
+
+    reduceDriver.withInput(new Text("tai156.45.41.124vid1"), values).run();
+
+    CaptureEvents();
+
+    // Check the sequence on page one, which is just a load and visible
+    VerifySequence(Arrays.asList(MakeBasicImageLoadHive().build(),
+        MakeBasicImageVisibleHive().setClientTime(1400000000.1).build(),
+        MakeBasicEventSequenceHive().setImVisClientTime(1400000000.1)
+            .setImLoadClientTime(1400000000.).setImLoadPageURL("http://go.com")
+            .setImLoadServerTime(1400697546.).setImVisServerTime(1400697546.)
+            .setServerTime(1400697546.).setThumbnailId("acct1_vid1_tid1")
+            .setImLoadPageId("pageid1").setImVisPageId("pageid1").setWidth(640)
+            .setHeight(480).build()));
+
+    // Check the sequence on page 2
+    VerifySequence(Arrays.asList(
+        MakeBasicImageLoadHive().setClientTime(1400000010.0)
+            .setPageId("vidpage").setRefURL("http://go.com").build(),
+        MakeBasicImageVisibleHive().setClientTime(1400000010.1)
+            .setPageId("vidpage").setRefURL("http://go.com").build(),
+        MakeBasicVideoClickHive().setClientTime(1400000010.6)
+            .setPageId("vidpage").setRefURL("http://go.com").build(),
+        MakeBasicAdPlayHive().setClientTime(1400000010.5).setPageId("vidpage")
+            .setRefURL("http://go.com").setAutoplayDelta(200).setPlayCount(3)
+            .build(),
+        MakeBasicVideoPlayHive().setClientTime(1400000010.7)
+            .setPageId("vidpage").setRefURL("http://go.com")
+            .setAutoplayDelta(200).setPlayCount(3).build(),
+        MakeBasicEventSequenceHive().setImVisClientTime(1400000010.1)
+            .setImClickClientTime(1400000010.6)
+            .setAdPlayClientTime(1400000010.5)
+            .setVideoPlayClientTime(1400000010.7)
+            .setImLoadClientTime(1400000010.).setVideoPageURL("http://go.com")
+            .setImClickPageURL("http://go.com")
+            .setImLoadPageURL("http://go.com").setImLoadServerTime(1400697546.)
+            .setImVisServerTime(1400697546.).setImClickServerTime(1400697546.)
+            .setAdPlayServerTime(1400697546.).setRefURL("http://go.com")
+            .setVideoPlayServerTime(1400697546.).setServerTime(1400697546.)
+            .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
+            .setPlayerId("player2").setAutoplayDelta(200).setPlayCount(3)
+            .setIsClickInPlayer(true).setIsRightClick(false).setHeight(480)
+            .setWidth(640).setImLoadPageId("vidpage").setImVisPageId("vidpage")
+            .setImClickPageId("vidpage").setAdPlayPageId("vidpage")
+            .setVideoPlayPageId("vidpage").build()));
+  }
+
+  @Test
+  public void testLoadSameImageOnMultiplePages() throws IOException,
+      InterruptedException {
+    List<AvroValue<TrackerEvent>> values =
+        new ArrayList<AvroValue<TrackerEvent>>();
+    // Page 1
+    values.add(new AvroValue<TrackerEvent>(MakeBasicImageLoad().setPageId(
+        "pageid1").build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicImageVisible()
+        .setPageId("pageid1").setClientTime(1400000000100l).build()));
+
+    // Page 2
+    values.add(new AvroValue<TrackerEvent>(MakeBasicImageLoad()
+        .setPageId("pageid2").setRefURL("http://go.com")
+        .setPageURL("http://there.com").setClientTime(1400000010000l).build()));
+
+    // Page 3 (back to the first page)
+    values.add(new AvroValue<TrackerEvent>(MakeBasicImageLoad()
+        .setPageId("pageid3").setRefURL("http://there.com")
+        .setPageURL("http://go.com").setClientTime(1400000020000l).build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicImageVisible()
+        .setPageId("pageid3").setRefURL("http://there.com")
+        .setPageURL("http://go.com").setClientTime(1400000020100l).build()));
+
+    reduceDriver.withInput(new Text("tai156.45.41.124vid1"), values).run();
+    CaptureEvents();
+
+    // There should be three sequences, one for each page visited
+    VerifySequence(Arrays.asList(MakeBasicImageLoadHive().setPageId("pageid1")
+        .build(), MakeBasicImageVisibleHive().setPageId("pageid1")
+        .setClientTime(1400000000.1).build(), MakeBasicEventSequenceHive()
+        .setImVisClientTime(1400000000.1).setImLoadClientTime(1400000000.)
+        .setImLoadPageURL("http://go.com").setImLoadServerTime(1400697546.)
+        .setImVisServerTime(1400697546.).setServerTime(1400697546.)
+        .setThumbnailId("acct1_vid1_tid1").setImLoadPageId("pageid1")
+        .setImVisPageId("pageid1").setWidth(640).setHeight(480).build()));
+
+    VerifySequence(Arrays.asList(
+        MakeBasicImageLoadHive().setClientTime(1400000010.)
+            .setPageId("pageid2").setRefURL("http://go.com")
+            .setPageURL("http://there.com").build(),
+        MakeBasicEventSequenceHive().setImLoadClientTime(1400000010.)
+            .setImLoadPageURL("http://there.com")
+            .setImLoadServerTime(1400697546.).setRefURL("http://go.com")
+            .setServerTime(1400697546.).setThumbnailId("acct1_vid1_tid1")
+            .setImLoadPageId("pageid2").setWidth(640).setHeight(480)
+            .setAgentInfoBrowserName("Internet Explorer")
+            .setAgentInfoBrowserVersion("10.01").setAgentInfoOsName("Windows")
+            .setAgentInfoOsVersion("7").build()));
+
+    VerifySequence(Arrays.asList(
+        MakeBasicImageLoadHive().setClientTime(1400000020.)
+            .setPageId("pageid3").setRefURL("http://there.com").build(),
+        MakeBasicImageVisibleHive().setPageId("pageid3")
+            .setClientTime(1400000020.1).setRefURL("http://there.com").build(),
+        MakeBasicEventSequenceHive().setImVisClientTime(1400000020.1)
+            .setImLoadClientTime(1400000020.).setImLoadPageURL("http://go.com")
+            .setRefURL("http://there.com").setImLoadServerTime(1400697546.)
+            .setImVisServerTime(1400697546.).setServerTime(1400697546.)
+            .setThumbnailId("acct1_vid1_tid1").setImLoadPageId("pageid3")
+            .setImVisPageId("pageid3").setWidth(640).setHeight(480).build()));
+
+  }
+
+  @Test
+  public void testSequenceCollision() throws IOException, InterruptedException {
+    // We can get sequence id collisions if they the lower bits are not merged
+    // properly. This test checks that case.
+    List<AvroValue<TrackerEvent>> values =
+        new ArrayList<AvroValue<TrackerEvent>>();
+    // Page 1
+    values
+        .add(new AvroValue<TrackerEvent>(
+            MakeBasicImageLoad()
+                .setPageId("SR5CxDD7O7F1qJr0")
+                .setTrackerAccountId("1483115066")
+                .setClientIP("24.3.189.49")
+                .setClientTime(1403640571040l)
+                .setServerTime(1403640570481l)
+                .setEventData(
+                    new ImageLoad(
+                        "6d3d519b15600c372a1f6735711d956e_3627714179001_5e48f414cd3a62ce9cfa6d68762e6e50",
+                        90, 120)).build()));
+
+    // Page 2
+    values
+        .add(new AvroValue<TrackerEvent>(
+            MakeBasicImageLoad()
+                .setPageId("j3bFwKuSFyhekQrr")
+                .setTrackerAccountId("1483115066")
+                .setClientIP("24.3.189.49")
+                .setClientTime(1403036490566l)
+                .setServerTime(1403036487794l)
+                .setEventData(
+                    new ImageLoad(
+                        "6d3d519b15600c372a1f6735711d956e_3627714179001_5e48f414cd3a62ce9cfa6d68762e6e50",
+                        0, 200)).build()));
+
+    reduceDriver.withInput(new Text("tai156.45.41.124vid1"), values).run();
+    CaptureEvents();
+
+    VerifySequence(Arrays
+        .asList(
+            MakeBasicImageLoadHive()
+                .setPageId("SR5CxDD7O7F1qJr0")
+                .setTrackerAccountId("1483115066")
+                .setClientIP("24.3.189.49")
+                .setClientTime(1403640571.040)
+                .setServerTime(1403640570.481)
+                .setHeight(90)
+                .setWidth(120)
+                .setThumbnailId(
+                    "6d3d519b15600c372a1f6735711d956e_3627714179001_5e48f414cd3a62ce9cfa6d68762e6e50")
+                .build(),
+            MakeBasicEventSequenceHive()
+                .setImLoadClientTime(1403640571.040)
+                .setImLoadServerTime(1403640570.481)
+                .setServerTime(1403640570.481)
+                .setClientIP("24.3.189.49")
+                .setTrackerAccountId("1483115066")
+                .setThumbnailId(
+                    "6d3d519b15600c372a1f6735711d956e_3627714179001_5e48f414cd3a62ce9cfa6d68762e6e50")
+                .setImLoadPageId("SR5CxDD7O7F1qJr0")
+                .setImLoadPageURL("http://go.com").setWidth(120).setHeight(90)
+                .setAgentInfoBrowserName("Internet Explorer")
+                .setAgentInfoBrowserVersion("10.01")
+                .setAgentInfoOsName("Windows").setAgentInfoOsVersion("7")
+                .build()));
+
+    VerifySequence(Arrays
+        .asList(
+            MakeBasicImageLoadHive()
+                .setPageId("j3bFwKuSFyhekQrr")
+                .setTrackerAccountId("1483115066")
+                .setClientIP("24.3.189.49")
+                .setClientTime(1403036490.566)
+                .setServerTime(1403036487.794)
+                .setHeight(0)
+                .setWidth(200)
+                .setThumbnailId(
+                    "6d3d519b15600c372a1f6735711d956e_3627714179001_5e48f414cd3a62ce9cfa6d68762e6e50")
+                .build(),
+            MakeBasicEventSequenceHive()
+                .setImLoadClientTime(1403036490.566)
+                .setImLoadServerTime(1403036487.794)
+                .setServerTime(1403036487.794)
+                .setClientIP("24.3.189.49")
+                .setTrackerAccountId("1483115066")
+                .setThumbnailId(
+                    "6d3d519b15600c372a1f6735711d956e_3627714179001_5e48f414cd3a62ce9cfa6d68762e6e50")
+                .setImLoadPageId("j3bFwKuSFyhekQrr")
+                .setImLoadPageURL("http://go.com").setWidth(200).setHeight(0)
+                .setAgentInfoBrowserName("Internet Explorer")
+                .setAgentInfoBrowserVersion("10.01")
+                .setAgentInfoOsName("Windows").setAgentInfoOsVersion("7")
+                .build()));
   }
 }

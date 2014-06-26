@@ -62,8 +62,12 @@ def calc_thumb_stats(baseCounts, thumbCounts):
 def calc_aggregate_ab_metrics(data):
     '''Calculates aggregate A/B metrics for multiple videos
 
-    Using random effects model assumption and meta analysis math from:
+    Using random effects model assumption on the relative risk (or
+    ratio of CTRs) and meta analysis math from:
     http://www.meta-analysis.com/downloads/Intro_Models.pdf
+
+    And Relative Risk approximations from:
+    http://en.wikipedia.org/wiki/Relative_risk
 
     Inputs:
     data - Matrix of ab data where each row corresponds to a video and is of

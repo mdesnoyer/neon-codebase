@@ -354,7 +354,9 @@ public class RawTrackerMR extends Configured implements Tool {
         context.getCounter("ReduceError", "InvalidEventType").increment(1);
       }
 
-      return ((long) event.getPageId().hashCode()) << 32 | videoPlayHash;
+      long retval = (((long) event.getPageId().hashCode()) << 32) | 
+          (((long)videoPlayHash) & 0xFFFFFFFFl);
+      return retval;
     }
 
     private static void BackfillSequenceId(TrackerEvent curEvent,
