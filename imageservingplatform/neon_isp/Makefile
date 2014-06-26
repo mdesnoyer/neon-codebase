@@ -27,6 +27,9 @@ neon_mastermind_tester: neon_mastermind_tester.c
 neon_directive_tester: neon_directive_tester.c
 	g++ -g neon_directive_tester.c neon_mastermind.cpp neonHash.cpp mastermind.cpp publisherHashtable.cpp neon_log.c directiveHashtable.cpp directive.cpp publisher.cpp fraction.cpp scaledImage.cpp neonException.cpp neonLog.cpp neon_utils.c neon_stats.c neon_utc.c -I ../nginx-1.4.7/objs -I ../nginx-1.4.7/src/http/ -I ../nginx-1.4.7/src/core/ -I ../nginx-1.4.7/src/os/unix/ -I ../nginx-1.4.7/src/event/  -I ../nginx-1.4.7/src/mail/  -I ../nginx-1.4.7/src/misc/ -I ../nginx-1.4.7/src/http/modules/ -o neon_directive_tester
 
+neon_mastermind_gtest_tester: neon_mastermind_tester_gtest.c
+	g++ -g neon_mastermind_tester.c neon_mastermind.cpp neonHash.cpp mastermind.cpp publisherHashtable.cpp neon_log.c directiveHashtable.cpp directive.cpp publisher.cpp fraction.cpp scaledImage.cpp neonException.cpp neonLog.cpp -I ../nginx-1.4.7/objs -I ../nginx-1.4.7/src/http/ -I ../nginx-1.4.7/src/core/ -I ../nginx-1.4.7/src/os/unix/ -I ../nginx-1.4.7/src/event/  -I ../nginx-1.4.7/src/mail/  -I ../nginx-1.4.7/src/misc/ -I ../nginx-1.4.7/src/http/modules/ -o neon_mastermind_gtest_tester
+
 neon_mastermind_tester_producer: neon_mastermind_tester_producer.c
 	gcc -g neon_mastermind_tester_producer.c  -o neon_mastermind_tester_producer
 
