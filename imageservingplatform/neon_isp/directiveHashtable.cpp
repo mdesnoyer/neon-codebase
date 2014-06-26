@@ -1,6 +1,6 @@
 #include <iostream>
-#include "neonHash.h"
 #include "directiveHashtable.h"
+#include "neonHash.h"
 
 
 /*
