@@ -384,7 +384,7 @@ class BrightcoveApi(object):
                                image_suffix=image_suffix,
                                callback=add_image_callback)
             else:
-                _log.error('key=async_update_thumbnail' 
+                _log.error('key=async_update_thumbnail ' 
                         'msg=failed to download image for %s' %thumbnail_id)
                 callback(None)
 

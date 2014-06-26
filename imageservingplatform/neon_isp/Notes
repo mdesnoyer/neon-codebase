@@ -1,0 +1,40 @@
+#apt-get install libpcre3 libpcre3-dev
+
+Entry point to the module - ngx_http_neon_module.c  [Neon ISP GOD file]  
+  Declares all the hooks and their correponding http handlers
+  
+  Starts the updater thread   
+  
+There are two major paths -- Neon Service & Neon updater (mastermind file) 
+
+Neon updater 
+
+NOTE: Figure how to read from the nginx.conf or any conf files, use neon_updater_config_init() for it
+
+neon_mastermind.cpp :: Gateway between C & C++ to interact with the mastermind file 
+
+mastermind.cpp:
+ The hash table that stores the parsed mastermind file 
+  neon_mastermind_load: 
+  260: should we throw exception on file close ? 
+  
+  
+directive.cpp :: json parsing is done here
+Directive::Init(rapidjson::Document & document)  --> fraction parsing
+
+
+Tests
+
+neon_utc_tester
+
+neon_updater_tester
+
+neon_mastermind_tester
+
+neon_directive_tester
+
+directiveHashtableTester
+
+publisherHashtableTester
+
+rapidJsonTester
