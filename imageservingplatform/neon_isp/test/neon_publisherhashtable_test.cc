@@ -1,3 +1,6 @@
+/*
+ * Publisher Hashtable
+ * */
 
 #include <gtest/gtest.h>
 #include <stdio.h>
@@ -7,15 +10,15 @@
 #include "neon_updater.h"
 #include "neon_utc.h"
 #include "neon_utils.h"
-#include "publisherHashtable.h"
+#include "../publisherHashtable.h"
 
 using namespace std;                                                                 
 
 class PublisherHashTableTest: public :: testing::Test{
 
-    public:
+public:
         PublisherHashTableTest(){}
-proteced:
+protected:
         virtual void SetUp(){
         
         }

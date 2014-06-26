@@ -11,7 +11,8 @@
 #include "neon_updater.h"
 #include "neon_utc.h"
 #include "neon_utils.h"
-#include "publisherHashtable.h"
+#include "../directiveHashtable.h"
+#include "../publisherHashtable.h"
 
 using namespace std;                                                                 
 
@@ -19,7 +20,7 @@ class DirectiveHashTableTest: public :: testing::Test{
 
 public:
         DirectiveHashTableTest(){}
-proteced:
+protected:
         virtual void SetUp(){
         
         }

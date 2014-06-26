@@ -1,13 +1,18 @@
+/*
+ * Neon utilities 
+ *
+ * */
 
 #include <time.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "neon_utils.h"
+
+#include "neon_error_codes.h"
 #include "neon_stats.h"
 #include "neon_utc.h"
-#include "neon_error_codes.h"
+#include "neon_utils.h"
 
 
 
