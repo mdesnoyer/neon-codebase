@@ -496,4 +496,8 @@ def main():
 
 if __name__ == "__main__":
     utils.neon.InitNeon()
-    exit(main())
+    try:
+        exit(main())
+    finally:
+        # Explicitly send the statemon data at the end of the process
+        utils.monitor.send_statemon_data()

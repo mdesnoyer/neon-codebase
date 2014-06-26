@@ -22,7 +22,7 @@ import logging
 import matplotlib.pyplot as plt
 import numpy
 import pandas
-import stats.utils
+from stats import statutils
 from supportServices import neondata
 import utils.neon
 from utils.options import options, define
@@ -63,8 +63,8 @@ def get_data():
             where imloadclienttime is not null and thumbnail_id = '%s' %s 
             group by hr 
             """ % (thumbnail_id,
-                   stats.utils.get_time_clause(options.start_time,
-                                               options.end_time)))
+                   statutils.get_time_clause(options.start_time,
+                                             options.end_time)))
         cursor.execute(query)
         names = [metadata[0] for metadata in cursor.description]
         cur_data = [dict(zip(names, row)) for row in cursor]

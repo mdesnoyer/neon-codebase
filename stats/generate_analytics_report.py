@@ -22,7 +22,7 @@ import impala.error
 import logging
 import pandas
 import stats.metrics
-import stats.utils
+from stats import statutils
 from supportServices import neondata
 import utils.neon
 from utils.options import options, define
@@ -59,7 +59,7 @@ def get_thumbnail_ids():
     cursor.execute(
     """select distinct thumbnail_id from imageloads where 
     tai='%s' %s""" % (options.pub_id, 
-                      stats.utils.get_time_clause(options.start_time,
+                      statutils.get_time_clause(options.start_time,
                                                   options.end_time)))
 
     retval = [x[0] for x in cursor]
@@ -99,7 +99,7 @@ def collect_stats(thumb_info,
         group by thumbnail_id""" %
         (col_map[impression_metric], options.pub_id,
          col_map[impression_metric],
-         stats.utils.get_time_clause(options.start_time,
+         statutils.get_time_clause(options.start_time,
                                      options.end_time)))
     else:
         
@@ -110,7 +110,7 @@ def collect_stats(thumb_info,
             group by thumbnail_id
             """ % (col_map[impression_metric], col_map[conversion_metric],
                    options.pub_id, col_map[impression_metric],
-                   stats.utils.get_time_clause(options.start_time,
+                   statutils.get_time_clause(options.start_time,
                                                options.end_time)))
     cursor.execute(query)
 
