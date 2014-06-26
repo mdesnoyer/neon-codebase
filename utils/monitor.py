@@ -30,6 +30,15 @@ def send_data(name, value):
         pass
         #print "excp", e
 
+def send_statemon_data():
+    m_vars = statemon.state.get_all_variables()
+    #Nothing to monitor
+    if len(m_vars) <= 0:
+        return
+
+    for variable, m_value in m_vars.iteritems():
+        send_data(variable, m_value.value)
+
 class MonitoringAgent(threading.Thread):
     '''
     Thread that monitors the statemon variables
@@ -44,15 +53,5 @@ class MonitoringAgent(threading.Thread):
             Grab the statemon state variable and send its values
         '''
         while True:
-            self._run()
+            send_statemon_data()
             time.sleep(options.sleep_interval)
-    
-    def _run(self):        
-            m_vars = statemon.state.get_all_variables()
-            #Nothing to monitor
-            if len(m_vars) <= 0:
-                return
-
-            for variable, m_value in m_vars.iteritems():
-                send_data(variable, m_value.value) 
-                statemon.state.reset(variable)

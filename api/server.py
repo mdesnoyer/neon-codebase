@@ -36,7 +36,6 @@ DIRNAME = os.path.dirname(__file__)
 statemon.define('server_queue', int)
 statemon.define('duplicate_requests', int)
 statemon.define('dequeue_requests', int)
-statemon.state.enable_reset()
 
 #=============== Global Handlers ======================================#
 
@@ -85,6 +84,7 @@ class DequeueHandler(tornado.web.RequestHandler):
         
         try:
             statemon.state.increment('dequeue_requests')
+            statemon.state.server_queue = global_api_work_queue.qsize()
             element = global_api_work_queue.get_nowait()
             #send http response
             h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
@@ -109,6 +109,7 @@ class RequeueHandler(tornado.web.RequestHandler):
             data = self.request.body
             #TODO Verify data Format
             global_api_work_queue.put(data)
+            statemon.state.server_queue = global_api_work_queue.qsize()
         except Exception,e:
             _log.error("key=requeue_handler msg=error " + e.__str__())
             raise tornado.web.HTTPError(500)
@@ -350,6 +351,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             #TODO (2): keep a video id queue in db for hot swapping the Q
             json_data = api_request.to_json()
             global_api_work_queue.put(json_data)
+            statemon.state.server_queue = global_api_work_queue.qsize()
             
             #Response for the submission of request
             response_data = "{\"job_id\":\"" + job_id + "\"}"
@@ -369,7 +371,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     self.set_status(201)
                     self.write(response_data)
                     self.finish()
-                    statemon.state.increment('server_queue')
 
         except Exception, e:
             _log.exception("key=thumbnail_handler msg= %s"%e)

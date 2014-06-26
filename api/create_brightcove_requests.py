@@ -19,6 +19,7 @@ from supportServices.neondata import *
 import json
 import urllib2
 import utils.neon
+import utils.monitor
 from utils.options import define, options
 from utils import statemon
 
@@ -87,3 +88,4 @@ if __name__ == "__main__":
 
         os.unlink(pidfile)
     statemon.state.increment('cron_finished')
+    utils.monitor.send_statemon_data()
