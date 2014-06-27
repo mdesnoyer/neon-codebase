@@ -1770,6 +1770,7 @@ class ThumbnailType(object):
     RANDOM      = "random"
     FILTERED    = "filtered"
     DEFAULT     = "default" #sent via api request
+    CUSTOMUPLOAD = "customupload" #uploaded by the customer/editor 
 
 class ThumbnailID(AbstractHashGenerator):
     '''
