@@ -2113,7 +2113,7 @@ class VideoMetadata(StoredObject):
     
     def __init__(self, video_id, tids=None, request_id=None, video_url=None,
                  duration=None, vid_valence=None, model_version=None,
-                 i_id=None, frame_size=None, abtest=True):
+                 i_id=None, frame_size=None, testing_enabled=True):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids 
         self.url = video_url 
@@ -2123,7 +2123,8 @@ class VideoMetadata(StoredObject):
         self.job_id = request_id
         self.integration_id = i_id
         self.frame_size = frame_size #(w,h)
-        self.abtest = abtest # Is A/B testing enabled for this video?
+        # Is A/B testing enabled for this video?
+        self.testing_enabled = testing_enabled 
 
     def get_id(self):
         ''' get internal video id '''
