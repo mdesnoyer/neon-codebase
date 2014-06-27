@@ -18,10 +18,14 @@ add_subdirectory(api)
 add_subdirectory(imageservingplatform/neon_isp)
 #add_subdirectory(testinclude(ExternalProject)
 
-
+include(ExternalProject)
 externalproject_add(Nginx
+    PREFIX ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/Nginx
     SOURCE_DIR ${PROJECT_SOURCE_DIR}/imageservingplatform/nginx-1.4.7/
-    CONFIGURE_COMMAND ${PROJECT_SOURCE_DIR}/imageservingplatform/nginx-1.4.7/configure --add-module=../neon_isp/ --with-http_realip_module
+    CONFIGURE_COMMAND
+    ${PROJECT_SOURCE_DIR}/imageservingplatform/nginx-1.4.7/configure
+    --add-module=../neon_isp/ --with-http_realip_module
+    --prefix=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
     BUILD_COMMAND make
     BUILD_IN_SOURCE 1
 )
