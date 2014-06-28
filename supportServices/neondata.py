@@ -517,6 +517,38 @@ class StoredObject(object):
         db_connection = DBConnection(cls)
         db_connection.clear_db()
 
+class NamespacedStoredObject(StoredObject):
+    '''An abstract StoredObject that is namespaced by its classname.'''
+    def __init__(self, key):
+        super(NamespacedStoredObject, self).__init__(
+            self.__class__.format_key(key))
+
+    @classmethod
+    def format_key(cls, key):
+        ''' Format the database key with a class specific prefix '''
+        return cls.__name__.lower() + '_%s' % key
+
+    @classmethod
+    def get(cls, key, callback=None):
+        '''Return the object for a given key.'''
+        return super(NamespacedStoredObject, cls).get(
+            cls.format_key(key),
+            callback=callback)
+
+    @classmethod
+    def get_many(cls, keys, callback=None):
+        '''Returns the list of objects from a list of keys.'''
+        return super(NamespacedStoredObject, cls).get_many(
+            [cls.format_key(x) for x in keys],
+            callback=callback)
+
+    @classmethod
+    def modify(cls, key, func, callback=None):
+        super(NamespacedStoredObject, cls).modify(
+            cls.format_key(x),
+            func
+            callback=callback)
+
 class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
 
@@ -607,11 +639,6 @@ class TrackerAccountIDMapper(StoredObject):
     def get_tai(self):
         '''Retrieves the TrackerAccountId of the object.'''
         return self.key.partition('_')[2]
-
-    @classmethod
-    def format_key(cls, tai):
-        ''' format db key '''
-        return cls.__name__.lower() + '_%s' % tai
 
     @classmethod
     def get(cls, tai, callback=None):
@@ -795,6 +822,16 @@ class NeonUserAccount(object):
             nu = NeonUserAccount.get_account(api_key)
             nuser_accounts.append(nu)
         return nuser_accounts
+
+class ExperimentStrategy(StoredObject):
+    '''Stores information about the experimental strategy to use.
+
+    Keyed by account_id (aka api_key)
+    '''
+    def __init__(self, account_id):
+        super(ExperimentStrategy, self).__init__(
+            ExperimentStrategy.format_key(account_id))
+         
 
 class AbstractPlatform(object):
     ''' Abstract Platform/ Integration class '''
@@ -1808,7 +1845,7 @@ class ThumbnailMD5(AbstractHashGenerator):
             return ThumbnailMD5.generate_from_image(_input)
 
 
-class ThumbnailServingURLs(StoredObject):
+class ThumbnailServingURLs(NamespacedStoredObject):
     '''
     Keeps track of the URLs to serve for each thumbnail id.
 
@@ -1859,25 +1896,6 @@ class ThumbnailServingURLs(StoredObject):
             # Load in the size map as a dictionary
             obj.size_map = dict([[tuple(x[0]), x[1]] for x in obj.size_map])
             return obj
-
-    @classmethod
-    def format_key(cls, thumbnail_id):
-        ''' Format the database key '''
-        return cls.__name__.lower() + '_%s' % thumbnail_id
-
-    @classmethod
-    def get(cls, thumbnail_id, callback=None):
-        '''Return the object for a given thumbnail id.'''
-        return super(ThumbnailServingURLs, cls).get(
-            cls.format_key(thumbnail_id),
-            callback=callback)
-
-    @classmethod
-    def get_many(cls, thumbnail_ids, callback=None):
-        '''Returns the list of objects from a list of thumbnail_ids.'''
-        return super(ThumbnailServingURLs, cls).get_many(
-            [cls.format_key(x) for x in thumbnail_ids],
-            callback=callback)
         
 class ThumbnailURLMapper(object):
     '''
