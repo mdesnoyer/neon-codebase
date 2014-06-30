@@ -37,7 +37,9 @@ typedef enum {
 	NEON_SERVER_API_ACCOUNT_ID_NOT_FOUND,
 	NEON_SERVER_API_URL_NOT_FOUND,
 
-        // Out of memory counter ?
+    // Out of memory counter ?
+    NGINX_OUT_OF_MEMORY,
+
 	NEON_STATS_NUM_OF_ELEMENTS
 } NEON_STATS;
 

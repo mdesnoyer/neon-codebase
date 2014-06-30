@@ -105,6 +105,10 @@ neon_service_get_uri_token(ngx_http_request_t *req, ngx_str_t * base_url,
     // make a null terminated string to use with strtok_r
     size_t uri_size = (req->uri).len + 1;
     unsigned char * uri = ngx_pcalloc(req->pool, uri_size);
+    if(uri == NULL){
+        neon_stats[NGINX_OUT_OF_MEMORY] ++;
+        return NULL;
+    }
     memset(uri, 0 , uri_size);
     memcpy((char*)uri, (char*)(req->uri).data, (size_t)(req->uri).len);
     
@@ -136,6 +140,10 @@ neon_service_get_uri_token(ngx_http_request_t *req, ngx_str_t * base_url,
             // allocate result token, uri len is a safe size
             size_t token_size = (req->uri).len + 1;
             unsigned char * token = ngx_pcalloc(req->pool, token_size);
+            if(token == NULL){
+                neon_stats[NGINX_OUT_OF_MEMORY] ++;
+                return NULL;
+            }
             memset(token, 0 , token_size);
             
             size_t found_size = strlen(found_token);
@@ -192,9 +200,9 @@ neon_service_set_neon_cookie(ngx_http_request_t *request)
     size_t id_len = 16; //16 char long id
     char neon_id[16] = {0};
     
-    ngx_str_t neon_cookie_name = ngx_string("neonglobaluserid=");
-    ngx_str_t expires = ngx_string( "; expires=Thu, 31-Dec-37 23:59:59 GMT"); //expires 2038
-    ngx_str_t domain = ngx_string("; Domain=.neon-lab.com; Path=/;"); // should we add HttpOnly?
+    static ngx_str_t neon_cookie_name = ngx_string("neonglobaluserid=");
+    static ngx_str_t expires = ngx_string( "; expires=Thu, 31-Dec-37 23:59:59 GMT"); //expires 2038
+    static ngx_str_t domain = ngx_string("; Domain=.neon-lab.com; Path=/;"); // should we add HttpOnly?
 
     // Get Neon ID
     neon_get_uuid((char*)neon_id, id_len);
@@ -278,7 +286,10 @@ neon_service_server_api_not_found(ngx_http_request_t *request,
     
     ngx_buf_t * b;
     b = (ngx_buf_t *) ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
-    
+    if(b == NULL){
+        neon_stats[NGINX_OUT_OF_MEMORY] ++;
+        return;
+    }   
     chain->buf = b;
     chain->next = NULL;
     
@@ -305,6 +316,11 @@ neon_service_server_api_img_url_found(ngx_http_request_t *request,
     int response_body_len = 0;
     response_body_len = response_body_start.len + response_body_end.len + url_len;
     response_body = ngx_pnalloc(request->pool, response_body_len);
+    if (response_body == NULL){
+        //TODO: send a 500 error ? 
+        neon_stats[NGINX_OUT_OF_MEMORY] ++;
+        return;
+    }
     p = ngx_copy(response_body, 
             response_body_start.data, 
             response_body_start.len);
@@ -313,7 +329,10 @@ neon_service_server_api_img_url_found(ngx_http_request_t *request,
  
     ngx_buf_t * b;
     b = (ngx_buf_t *) ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
-    
+    if(b == NULL){
+        neon_stats[NGINX_OUT_OF_MEMORY] ++;
+        return;
+    } 
     chain->buf = b;
     chain->next = NULL;
     
@@ -340,6 +359,10 @@ neon_service_server_api(ngx_http_request_t *request,
     ngx_buf_t * b;
     
     b = ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
+    if(b == NULL){
+        neon_stats[NGINX_OUT_OF_MEMORY] ++;
+        return NEON_SERVER_API_FAIL;
+    } 
     
     chain->buf = b;
     chain->next = NULL;
@@ -435,6 +458,10 @@ neon_service_client_api_not_found(ngx_http_request_t *request,
     
     ngx_buf_t * b;
     b = (ngx_buf_t *) ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
+    if(b == NULL){
+        neon_stats[NGINX_OUT_OF_MEMORY] ++;
+        return;
+    } 
     
     chain->buf = b;
     chain->next = NULL;
@@ -466,6 +493,10 @@ neon_service_client_api_redirect(ngx_http_request_t *request,
 
     ngx_buf_t * b;
     b = (ngx_buf_t *) ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
+    if(b == NULL){
+        neon_stats[NGINX_OUT_OF_MEMORY] ++;
+        return;
+    } 
     
     chain->buf = b;
     chain->next = NULL;
@@ -507,6 +538,10 @@ neon_service_client_api(ngx_http_request_t *request,
     ngx_buf_t * b;
     
     b = ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
+    if(b == NULL){
+        neon_stats[NGINX_OUT_OF_MEMORY] ++;
+        return NEON_CLIENT_API_FAIL;
+    } 
     
     chain->buf = b;
     chain->next = NULL;
@@ -640,7 +675,7 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
                                           &account_id,
                                           &account_id_size);
     
-    if(error_account_id != NEON_MASTERMIND_ACCOUNT_ID_LOOKUP_OK) {
+    if(error_account_id != NEON_MASTERMIND_ACCOUNT_ID_LOOKUP_OK){
         neon_stats[NEON_CLIENT_API_ACCOUNT_ID_NOT_FOUND] ++;
         neon_service_client_api_not_found(request, chain);
         return NEON_GETTHUMB_API_FAIL;

@@ -35,7 +35,7 @@ static time_t sleep_time = 10;
 static time_t fetch_timeout = 30;
 static const char * mastermind_url = 0; //"http://neon-test.s3.amazonaws.com/mastermind";
 static const char * mastermind_filepath             = "/tmp/mastermind";
-static const char * validated_mastermind_filepath   = "/tmp/mastermind.validated";
+static const char * validated_mastermind_filepath   = 0; //"/tmp/mastermind.validated";
 
 static const int test_config = 1;
 
@@ -43,12 +43,22 @@ static const int test_config = 1;
  * Initialize the config parameters for the updater thread
  *
  * */
-void neon_updater_config_init(unsigned char *m_url)
+void neon_updater_config_init(unsigned char *m_url, unsigned char *m_valid_path, time_t s_time)
 {
+    // Mastermind REST URI
 	if (mastermind_url == 0)
 		mastermind_url = strdup((const char *)m_url);
 	else
-		free((void *)mastermind_url);
+		free((void *) mastermind_url);
+
+    // Validater Mastermind file path
+    if (m_valid_path == 0)
+        validated_mastermind_filepath = strdup((const char *)m_valid_path);
+    else
+        free((void*) validated_mastermind_filepath);
+
+    // Updater Sleep time in seconds
+    sleep_time = s_time;
 }	
 
 

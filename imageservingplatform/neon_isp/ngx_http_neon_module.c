@@ -31,10 +31,12 @@ static char *ngx_http_neon_healthcheck_hook(ngx_conf_t *cf, ngx_command_t *cmd, 
 static char *ngx_http_neon_stats_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_neon_mastermind_file_url(ngx_conf_t *cf, void *post, void *data);
 static char *ngx_http_neon_mastermind_validated_filepath(ngx_conf_t *cf, void *post, void *data);
+static char *ngx_http_neon_updater_sleep_time(ngx_conf_t *cf, void *post, void *data);
 
 static ngx_int_t ngx_http_neon_handler_healthcheck(ngx_http_request_t *r);
 static ngx_conf_post_handler_pt ngx_http_neon_mastermind_file_url_p = ngx_http_neon_mastermind_file_url;
 static ngx_conf_post_handler_pt ngx_http_neon_mastermind_validated_filepath_p = ngx_http_neon_mastermind_validated_filepath;
+static ngx_conf_post_handler_pt ngx_http_neon_updater_sleep_time_p = ngx_http_neon_updater_sleep_time;
 
 /*
  * Neon specific configuration structure
@@ -48,6 +50,7 @@ typedef struct {
     ngx_str_t mastermind_validated_filepath;
 } ngx_http_neon_loc_conf_t;
 
+static time_t updater_sleep_time;
 static ngx_str_t mastermind_file_url_str;
 static ngx_str_t mastermind_validated_filepath;
 
@@ -105,7 +108,14 @@ static ngx_command_t  ngx_http_neon_commands[] = {
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_neon_loc_conf_t, mastermind_validated_filepath),
         &ngx_http_neon_mastermind_validated_filepath_p },
-
+    
+    { ngx_string("updater_sleep_interval"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_sec_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_neon_loc_conf_t, updater_sleep_time),
+        &ngx_http_neon_updater_sleep_time_p},
+    
     ngx_null_command
 };
 
@@ -126,6 +136,7 @@ ngx_http_neon_create_loc_conf(ngx_conf_t * cf)
     }
     
     //conf->mastermind_url = NGX_CONF_UNSET;
+    conf->updater_sleep_time = NGX_CONF_UNSET_UINT;
     return conf;
 }
 
@@ -169,7 +180,8 @@ ngx_http_neon_mastermind_file_url(ngx_conf_t *cf, void *post, void *data)
 }
 
 /*
- * Mastermind file path
+ * Read the Mastermind valided filepath file path
+ * This filepath is used to store the validated file
  * */
 static char *
 ngx_http_neon_mastermind_validated_filepath(ngx_conf_t *cf, void *post, void *data)
@@ -190,6 +202,22 @@ ngx_http_neon_mastermind_validated_filepath(ngx_conf_t *cf, void *post, void *da
     neon_log_error("Parsed mastermind fp %s", mastermind_validated_filepath.data);
     return NGX_CONF_OK;
 }
+
+    
+static char *
+ngx_http_neon_updater_sleep_time(ngx_conf_t *cf, void *post, void *data)
+{
+    time_t *name = data; // i.e., first field of var
+   
+    if(name == NULL){
+        return NGX_CONF_ERROR;
+    }    
+    
+    updater_sleep_time = *name; 
+    neon_log_error("Parsed updater sleep time %d", updater_sleep_time);
+    return NGX_CONF_OK;
+}
+
 
 /* Module Context
  *
@@ -253,7 +281,7 @@ ngx_module_t ngx_http_neon_module = {
 
 ngx_int_t neon_init_process(ngx_cycle_t *cycle)
 {
-       neon_updater_config_init(mastermind_file_url_str.data); 
+    neon_updater_config_init(mastermind_file_url_str.data, mastermind_validated_filepath.data, updater_sleep_time); 
     neon_start_updater();
     return 0;
 }
