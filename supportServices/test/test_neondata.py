@@ -41,6 +41,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         super(TestNeondata, self).setUp()
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
+        self.maxDiff = 5000
 
     def tearDown(self):
         self.redis.stop()
@@ -348,9 +349,9 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
         options._set('supportServices.neondata.baseRedisRetryWait', 0.01)
 
     def tearDown(self):
+        self.connection_patcher.stop()
         options._set('supportServices.neondata.baseRedisRetryWait',
                      self.old_delay)
-        self.connection_patcher.stop()
         super(TestDbConnectionHandling, self).tearDown()
 
     def _mocked_get_func(self, key, callback=None):

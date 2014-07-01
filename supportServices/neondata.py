@@ -543,10 +543,34 @@ class NamespacedStoredObject(StoredObject):
             callback=callback)
 
     @classmethod
+    def get_all(cls, callback=None):
+        ''' Get all the TrackerAccountIDMapper objects in the database
+
+        Inputs:
+        callback - Optional callback function to call
+
+        Returns:
+        A list of cls objects.
+        '''
+        retval = []
+        db_connection = DBConnection(cls)
+
+        def process(keys):
+            super(NamespacedStoredObject, cls).get_many(keys,
+                                                        callback=callback)
+            
+        if callback:
+            db_connection.conn.keys(cls.__name__.lower() + "_*",
+                                    callback=process)
+        else:
+            keys = db_connection.blocking_conn.keys(cls.__name__.lower()+"_*")
+            return  super(NamespacedStoredObject, cls).get_many(keys)
+
+    @classmethod
     def modify(cls, key, func, callback=None):
         super(NamespacedStoredObject, cls).modify(
             cls.format_key(x),
-            func
+            func,
             callback=callback)
 
 class AbstractHashGenerator(object):
@@ -621,7 +645,7 @@ class TrackerAccountID(object):
         ''' Generate a CRC 32 for Tracker Account ID'''
         return abs(binascii.crc32(_input))
 
-class TrackerAccountIDMapper(StoredObject):
+class TrackerAccountIDMapper(NamespacedStoredObject):
     '''
     Maps a given Tracker Account ID to API Key 
 
@@ -631,42 +655,13 @@ class TrackerAccountIDMapper(StoredObject):
     PRODUCTION = "production"
 
     def __init__(self, tai, api_key=None, itype=None):
-        super(TrackerAccountIDMapper, self).__init__(
-            self.__class__.format_key(tai))
+        super(TrackerAccountIDMapper, self).__init__(tai)
         self.value = api_key 
         self.itype = itype
 
     def get_tai(self):
         '''Retrieves the TrackerAccountId of the object.'''
         return self.key.partition('_')[2]
-
-    @classmethod
-    def get(cls, tai, callback=None):
-        return StoredObject.get(cls.format_key(tai),
-                                callback=callback)
-
-    @classmethod
-    def get_all(cls, callback=None):
-        ''' Get all the TrackerAccountIDMapper objects in the database
-
-        Inputs:
-        callback - Optional callback function to call
-
-        Returns:
-        A list of cls objects.
-        '''
-        retval = []
-        db_connection = DBConnection(cls)
-
-        def process(keys):
-            cls.get_many(keys, callback=callback)
-            
-        if callback:
-            db_connection.conn.keys(cls.__name__.lower() + "_*",
-                                    callback=process)
-        else:
-            keys = db_connection.blocking_conn.keys(cls.__name__.lower()+"_*")
-            return cls.get_many(keys)
     
     @classmethod
     def get_neon_account_id(cls, tai, callback=None):
@@ -1855,8 +1850,7 @@ class ThumbnailServingURLs(NamespacedStoredObject):
     '''
 
     def __init__(self, thumbnail_id, size_map={}):
-        super(ThumbnailServingURLs, self).__init__(
-            ThumbnailServingURLs.format_key(thumbnail_id))
+        super(ThumbnailServingURLs, self).__init__(thumbnail_id)
         self.size_map = size_map
 
     def get_thumbnail_id(self):
