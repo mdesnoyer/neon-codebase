@@ -8,94 +8,7 @@
 #include "neon_service.h"
 #include "neon_stats.h"
 #include "neon_utils.h"
-
-
-/*
- * Header Search Function (Used to get custom headers)
- *
- * */
-
-static ngx_table_elt_t *
-search_headers_in(ngx_http_request_t *r, u_char *name, size_t len) {
-    ngx_list_part_t            *part;
-    ngx_table_elt_t            *h;
-    ngx_uint_t                  i;
- 
-    /*
-    Get the first part of the list. There is usual only one part.
-    */
-    part = &r->headers_in.headers.part;
-    h = part->elts;
- 
-    /*
-    Headers list array may consist of more than one part,
-    so loop through all of it
-    */
-    for (i = 0; /* void */ ; i++) {
-        if (i >= part->nelts) {
-            if (part->next == NULL) {
-                /* The last part, search is done. */
-                break;
-            }
- 
-            part = part->next;
-            h = part->elts;
-            i = 0;
-        }
- 
-        /*
-        Just compare the lengths and then the names case insensitively.
-        */
-        if (len != h[i].key.len || ngx_strcasecmp(name, h[i].key.data) != 0) {
-            /* This header doesn't match. */
-            continue;
-        }
- 
-        /*
-        Ta-da, we got one!
-        Note, we'v stop the search at the first matched header
-        while more then one header may fit.
-        */
-        return &h[i];
-    }
- 
-    /*
-    No headers was found
-    */
-    return NULL;
-}
-
-static long neon_service_parse_number(ngx_str_t * value)
-{
-    int base = 10;
-    static const int bufferSize = 16;
-    char buffer[bufferSize];
-    char *endptr = 0;
-    long val;
-
-    memset(buffer, 0, 16);
-    
-    // must be smaller than buffer + terminating zero
-    if((int)value->len > (bufferSize-1))
-        return -1;
-    
-    strncpy(buffer, (char*)value->data, (size_t)value->len);
-    
-    errno = 0;
-    val = strtol(buffer, &endptr, base);
-    
-    if ((errno == ERANGE && (val == LONG_MAX || val == LONG_MIN))
-        || (errno != 0 && val == 0)) {
-        return -1;
-    }
-    
-    if (endptr == buffer) {
-        // no digits were found
-        return -1;
-    }
-    
-    return val;
-}
+#include "neon_service_helper.c"
 
 static unsigned char *
 neon_service_get_uri_token(ngx_http_request_t *req, ngx_str_t * base_url, 
@@ -164,7 +77,6 @@ neon_service_get_uri_token(ngx_http_request_t *req, ngx_str_t * base_url,
  * 
  * @return neon_userid string is filled with the  
  * */
-
 static NEON_BOOLEAN 
 neon_service_isset_neon_cookie(ngx_http_request_t *request)
 {
@@ -278,6 +190,63 @@ neon_service_build_api_response(ngx_http_request_t *request,
 }
 */
 
+/*
+ * Helper method to parse arguments (pub id, video_id) the REST API URL
+ * Maps publisher id to account id, parses IP Address 
+ * */
+
+static 
+int neon_service_parse_api_args(ngx_http_request_t *request, 
+        ngx_str_t *base_url, const char ** account_id, int * account_id_size, 
+        unsigned char ** video_id, ngx_str_t * ipAddress, int *width, int *height){
+
+    static const ngx_str_t height_key = ngx_string("height");
+    static const ngx_str_t width_key = ngx_string("width");
+   
+    // get publisher id
+    unsigned char * publisher_id = neon_service_get_uri_token(request, base_url, 0);
+
+    // get video id
+    *video_id = neon_service_get_uri_token(request, base_url, 1);
+    
+    // get height and width
+    ngx_str_t value;
+    *height = 0;
+    *width = 0;
+    
+    ngx_http_arg(request, height_key.data, height_key.len, &value);
+    *height = neon_service_parse_number(&value);
+    ngx_http_arg(request, width_key.data, width_key.len, &value);
+    *width = neon_service_parse_number(&value);
+   
+    ngx_str_t cip_key = ngx_string("cip");
+    ngx_http_arg(request, cip_key.data, cip_key.len, ipAddress);
+    
+    //static ngx_str_t xf = ngx_string("X-Client-IP");
+    static ngx_str_t xf = ngx_string("X-Forwarded-For");
+    ngx_table_elt_t * xf_header;
+    
+    //Check if CIP argument is present, else look for the header
+    // TODO: Validate the IPAddress string
+    if(ipAddress->len == 0 || ipAddress->len > 15){
+        xf_header = search_headers_in(request, xf.data, xf.len); 
+        if (xf_header){
+            *ipAddress = xf_header->value;
+        }
+    }
+    
+    NEON_MASTERMIND_ACCOUNT_ID_LOOKUP_ERROR error_account_id =
+        neon_mastermind_account_id_lookup((char*)publisher_id,
+                                          account_id,
+                                          account_id_size);
+        
+    if(error_account_id != NEON_MASTERMIND_ACCOUNT_ID_LOOKUP_OK) {
+        neon_stats[NEON_SERVER_API_ACCOUNT_ID_NOT_FOUND] ++;    
+        return 1;
+    }
+    return 0;
+} 
+
 static void
 neon_service_server_api_not_found(ngx_http_request_t *request,
                                          ngx_chain_t  * chain)
@@ -351,13 +320,11 @@ neon_service_server_api_img_url_found(ngx_http_request_t *request,
  *
  * */
 
-
 NEON_SERVER_API_ERROR
 neon_service_server_api(ngx_http_request_t *request,
                                 ngx_chain_t  * chain)
 {
     ngx_buf_t * b;
-    
     b = ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
     if(b == NULL){
         neon_stats[NGINX_OUT_OF_MEMORY] ++;
@@ -366,60 +333,20 @@ neon_service_server_api(ngx_http_request_t *request,
     
     chain->buf = b;
     chain->next = NULL;
-
+    
     ngx_str_t base_url = ngx_string("/v1/server/");
-    ngx_str_t height_key = ngx_string("height");
-    ngx_str_t width_key = ngx_string("width");
    
-    // get publisher id
-    unsigned char * publisher_id = neon_service_get_uri_token(
-                                            request, &base_url, 0);
-    
-    // get video id
-    unsigned char * video_id = neon_service_get_uri_token(request, &base_url, 1);
-    
-    // get height and width
-    ngx_str_t value;
-    int height = 0;
-    int width = 0;
-    
-    ngx_http_arg(request, height_key.data, height_key.len, &value);
-    height = neon_service_parse_number(&value);
-    ngx_http_arg(request, width_key.data, width_key.len, &value);
-    width = neon_service_parse_number(&value);
-
-    // Account ID
-
-    ngx_str_t ipAddress;
     const char * account_id = 0;
-    int account_id_size = 0;
+    unsigned char * video_id = 0;
+    int account_id_size;
+    ngx_str_t ipAddress = ngx_string("");
+    int width;
+    int height;
 
-    // Client IP    
-    ngx_str_t cip_key = ngx_string("cip");
-    ngx_str_t cip;
-    ngx_http_arg(request, cip_key.data, cip_key.len, &cip);
-    
-    static ngx_str_t xf = ngx_string("X-Client-IP");
-    ngx_table_elt_t * xf_header;
-    
-    //Check if CIP argument is present, else look for the header
-    if(cip.data){
-        ipAddress = cip;
-    }
-    else{
-        xf_header = search_headers_in(request, xf.data, xf.len); 
-        if (xf_header){
-            ipAddress = xf_header->value;
-        }
-    }
+    int ret = neon_service_parse_api_args(request, &base_url, &account_id, 
+                       &account_id_size, &video_id, &ipAddress, &width, &height);
 
-    NEON_MASTERMIND_ACCOUNT_ID_LOOKUP_ERROR error_account_id =
-        neon_mastermind_account_id_lookup((char*)publisher_id,
-                                          &account_id,
-                                          &account_id_size);
-        
-    
-    if(error_account_id != NEON_MASTERMIND_ACCOUNT_ID_LOOKUP_OK) {
+    if(ret !=0 ){
         neon_stats[NEON_SERVER_API_ACCOUNT_ID_NOT_FOUND] ++;    
         neon_service_server_api_not_found(request, chain);
         return NEON_SERVER_API_FAIL;
@@ -427,7 +354,7 @@ neon_service_server_api(ngx_http_request_t *request,
     
     // look up thumbnail image url
     
-    const char * url= 0;
+    const char * url = 0;
     int url_size = 0;
     
     NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR error_url =
@@ -442,13 +369,12 @@ neon_service_server_api(ngx_http_request_t *request,
     if(error_url != NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK) {
         neon_stats[NEON_SERVER_API_URL_NOT_FOUND] ++;
         neon_service_server_api_not_found(request, chain);
-    return NEON_SERVER_API_FAIL;
+        return NEON_SERVER_API_FAIL;
     }
 
     neon_service_server_api_img_url_found(request, chain, (char *)url, url_size); 
-
     return NEON_SERVER_API_OK;
-}    
+}
 
 static void
 neon_service_client_api_not_found(ngx_http_request_t *request,
@@ -547,49 +473,18 @@ neon_service_client_api(ngx_http_request_t *request,
     chain->next = NULL;
     
     ngx_str_t base_url = ngx_string("/v1/client/");
-    ngx_str_t height_key = ngx_string("height");
-    ngx_str_t width_key = ngx_string("width");
    
-    // get publisher id
-    unsigned char * publisher_id = neon_service_get_uri_token(request, &base_url, 0);
-    
-    // get video id
-    unsigned char * video_id = neon_service_get_uri_token(request, &base_url, 1);
-    
-    // get height and width
-    ngx_str_t value;
-    int height = 0;
-    int width = 0;
-    
-    ngx_http_arg(request, height_key.data, height_key.len, &value);
-    height = neon_service_parse_number(&value);
-    ngx_http_arg(request, width_key.data, width_key.len, &value);
-    width = neon_service_parse_number(&value);
-   
-       // get ip address
-    ngx_str_t ipAddress;
-    static ngx_str_t xf = ngx_string("X-Forwarded-For");
-    ngx_table_elt_t * xf_header;
-    xf_header = search_headers_in(request, xf.data, xf.len); 
-       
-    // Check if X-Forwarded-For header is set (Its set by the load balancer)
-    if (xf_header){
-        ipAddress = xf_header->value;
-    }
-
-    /*
-    *   look up account id using publisher id
-    */
     const char * account_id = 0;
-    int account_id_size = 0;
-    
-    NEON_MASTERMIND_ACCOUNT_ID_LOOKUP_ERROR error_account_id =
-        neon_mastermind_account_id_lookup((char*)publisher_id,
-                                          &account_id,
-                                          &account_id_size);
+    unsigned char * video_id = 0;
+    int account_id_size;
+    ngx_str_t ipAddress = ngx_string("");
+    int width;
+    int height;
+
+    int ret = neon_service_parse_api_args(request, &base_url, &account_id, 
+                       &account_id_size, &video_id, &ipAddress, &width, &height);
         
-    
-    if(error_account_id != NEON_MASTERMIND_ACCOUNT_ID_LOOKUP_OK) {
+    if (ret !=0){ 
         neon_stats[NEON_CLIENT_API_ACCOUNT_ID_NOT_FOUND] ++;
         neon_service_client_api_not_found(request, chain);
         return NEON_CLIENT_API_FAIL;
