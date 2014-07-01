@@ -1,4 +1,4 @@
-#define NGX_CONFIGURE " --add-module=../neon_isp/ --with-http_realip_module"
+#define NGX_CONFIGURE " --add-module=../neon_isp/ --with-http_realip_module --prefix=/home/mdesnoyer/src/neon/build/Debug/lib"
 
 #ifndef NGX_COMPILER
 #define NGX_COMPILER  "gcc 4.6.3 (Ubuntu/Linaro 4.6.3-1ubuntu5) "
@@ -329,7 +329,7 @@
 
 
 #ifndef NGX_PREFIX
-#define NGX_PREFIX  "/usr/local/nginx/"
+#define NGX_PREFIX  "/home/mdesnoyer/src/neon/build/Debug/lib/"
 #endif
 
 

@@ -1279,47 +1279,47 @@ objs/addon/neon_isp/scaledImage.o:	$(ADDON_DEPS) \
 manpage:	objs/nginx.8
 
 objs/nginx.8:	man/nginx.8 objs/ngx_auto_config.h
-	sed -e "s|%%PREFIX%%|/usr/local/nginx|" \
-		-e "s|%%PID_PATH%%|/usr/local/nginx/logs/nginx.pid|" \
-		-e "s|%%CONF_PATH%%|/usr/local/nginx/conf/nginx.conf|" \
-		-e "s|%%ERROR_LOG_PATH%%|/usr/local/nginx/logs/error.log|" \
+	sed -e "s|%%PREFIX%%|/home/mdesnoyer/src/neon/build/Debug/lib|" \
+		-e "s|%%PID_PATH%%|/home/mdesnoyer/src/neon/build/Debug/lib/logs/nginx.pid|" \
+		-e "s|%%CONF_PATH%%|/home/mdesnoyer/src/neon/build/Debug/lib/conf/nginx.conf|" \
+		-e "s|%%ERROR_LOG_PATH%%|/home/mdesnoyer/src/neon/build/Debug/lib/logs/error.log|" \
 		< man/nginx.8 > $@
 
 install:	objs/nginx 		
-	test -d '$(DESTDIR)/usr/local/nginx' || mkdir -p '$(DESTDIR)/usr/local/nginx'
+	test -d '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib' || mkdir -p '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib'
 
-	test -d '$(DESTDIR)/usr/local/nginx/sbin' 		|| mkdir -p '$(DESTDIR)/usr/local/nginx/sbin'
-	test ! -f '$(DESTDIR)/usr/local/nginx/sbin/nginx' 		|| mv '$(DESTDIR)/usr/local/nginx/sbin/nginx' 			'$(DESTDIR)/usr/local/nginx/sbin/nginx.old'
-	cp objs/nginx '$(DESTDIR)/usr/local/nginx/sbin/nginx'
+	test -d '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/sbin' 		|| mkdir -p '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/sbin'
+	test ! -f '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/sbin/nginx' 		|| mv '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/sbin/nginx' 			'$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/sbin/nginx.old'
+	cp objs/nginx '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/sbin/nginx'
 
-	test -d '$(DESTDIR)/usr/local/nginx/conf' 		|| mkdir -p '$(DESTDIR)/usr/local/nginx/conf'
+	test -d '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf' 		|| mkdir -p '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf'
 
-	cp conf/koi-win '$(DESTDIR)/usr/local/nginx/conf'
-	cp conf/koi-utf '$(DESTDIR)/usr/local/nginx/conf'
-	cp conf/win-utf '$(DESTDIR)/usr/local/nginx/conf'
+	cp conf/koi-win '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf'
+	cp conf/koi-utf '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf'
+	cp conf/win-utf '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf'
 
-	test -f '$(DESTDIR)/usr/local/nginx/conf/mime.types' 		|| cp conf/mime.types '$(DESTDIR)/usr/local/nginx/conf'
-	cp conf/mime.types '$(DESTDIR)/usr/local/nginx/conf/mime.types.default'
+	test -f '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf/mime.types' 		|| cp conf/mime.types '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf'
+	cp conf/mime.types '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf/mime.types.default'
 
-	test -f '$(DESTDIR)/usr/local/nginx/conf/fastcgi_params' 		|| cp conf/fastcgi_params '$(DESTDIR)/usr/local/nginx/conf'
-	cp conf/fastcgi_params 		'$(DESTDIR)/usr/local/nginx/conf/fastcgi_params.default'
+	test -f '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf/fastcgi_params' 		|| cp conf/fastcgi_params '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf'
+	cp conf/fastcgi_params 		'$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf/fastcgi_params.default'
 
-	test -f '$(DESTDIR)/usr/local/nginx/conf/fastcgi.conf' 		|| cp conf/fastcgi.conf '$(DESTDIR)/usr/local/nginx/conf'
-	cp conf/fastcgi.conf '$(DESTDIR)/usr/local/nginx/conf/fastcgi.conf.default'
+	test -f '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf/fastcgi.conf' 		|| cp conf/fastcgi.conf '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf'
+	cp conf/fastcgi.conf '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf/fastcgi.conf.default'
 
-	test -f '$(DESTDIR)/usr/local/nginx/conf/uwsgi_params' 		|| cp conf/uwsgi_params '$(DESTDIR)/usr/local/nginx/conf'
-	cp conf/uwsgi_params 		'$(DESTDIR)/usr/local/nginx/conf/uwsgi_params.default'
+	test -f '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf/uwsgi_params' 		|| cp conf/uwsgi_params '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf'
+	cp conf/uwsgi_params 		'$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf/uwsgi_params.default'
 
-	test -f '$(DESTDIR)/usr/local/nginx/conf/scgi_params' 		|| cp conf/scgi_params '$(DESTDIR)/usr/local/nginx/conf'
-	cp conf/scgi_params 		'$(DESTDIR)/usr/local/nginx/conf/scgi_params.default'
+	test -f '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf/scgi_params' 		|| cp conf/scgi_params '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf'
+	cp conf/scgi_params 		'$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf/scgi_params.default'
 
-	test -f '$(DESTDIR)/usr/local/nginx/conf/nginx.conf' 		|| cp conf/nginx.conf '$(DESTDIR)/usr/local/nginx/conf/nginx.conf'
-	cp conf/nginx.conf '$(DESTDIR)/usr/local/nginx/conf/nginx.conf.default'
+	test -f '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf/nginx.conf' 		|| cp conf/nginx.conf '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf/nginx.conf'
+	cp conf/nginx.conf '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/conf/nginx.conf.default'
 
-	test -d '$(DESTDIR)/usr/local/nginx/logs' 		|| mkdir -p '$(DESTDIR)/usr/local/nginx/logs'
+	test -d '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/logs' 		|| mkdir -p '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/logs'
 
-	test -d '$(DESTDIR)/usr/local/nginx/logs' || 		mkdir -p '$(DESTDIR)/usr/local/nginx/logs'
+	test -d '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/logs' || 		mkdir -p '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/logs'
 
-	test -d '$(DESTDIR)/usr/local/nginx/html' 		|| cp -R html '$(DESTDIR)/usr/local/nginx'
+	test -d '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/html' 		|| cp -R html '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib'
 
-	test -d '$(DESTDIR)/usr/local/nginx/logs' || 		mkdir -p '$(DESTDIR)/usr/local/nginx/logs'
+	test -d '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/logs' || 		mkdir -p '$(DESTDIR)/home/mdesnoyer/src/neon/build/Debug/lib/logs'
