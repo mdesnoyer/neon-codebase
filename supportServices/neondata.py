@@ -823,9 +823,33 @@ class ExperimentStrategy(StoredObject):
 
     Keyed by account_id (aka api_key)
     '''
-    def __init__(self, account_id):
-        super(ExperimentStrategy, self).__init__(
-            ExperimentStrategy.format_key(account_id))
+    ONE_AT_A_TIME='one_at_a_time'
+    MULTIARMED_BANDIT='multi_armed_bandit'
+    
+    
+    def __init__(self, account_id, exp_frac=0.01, holdback_frac=0.01,
+                 non_push_exp=False, always_show_rand=True,
+                 experiment_type=ExperimentStrategy.MULTIARMED_BANDIT):
+        super(ExperimentStrategy, self).__init__(account_id)
+         # Fraction of traffic to experiment on
+        self.exp_frac = exp_frac
+        
+        # Fraction of traffic in the holdback experiment once
+        # convergence is complete
+        self.holdback_frac = holdback_frac 
+
+        # If True, then experiments will even be run on videos that
+        # have not been pushed by an editor (it'll be the holdback
+        # percentage though)
+        self.non_push_exp = non_push_exp
+
+        # If True, a random baseline will always be used in the
+        # experiment. The other baseline could be an editor generated
+        # one.
+        self.always_show_rand = always_show_rand
+
+        # The strategy used to run the experiment phase
+        self.experiment_type = experiment_type
          
 
 class AbstractPlatform(object):
