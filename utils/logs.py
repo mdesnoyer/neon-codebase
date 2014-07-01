@@ -172,7 +172,7 @@ class TornadoHTTPHandler(logging.Handler):
 
     def get_verbose_dict(self, record):
         '''Returns a verbose dictionary of the record.'''
-        retval = copy.deepcopy(record.__dict__)
+        retval = copy.copy(record.__dict__)
         retval['msg'] = record.getMessage()
         del retval['args']
         return retval
