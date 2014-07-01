@@ -102,35 +102,27 @@ neon_service_isset_neon_cookie(ngx_http_request_t *request)
  * */
 
 static NEON_BOOLEAN 
-neon_service_set_neon_cookie(ngx_http_request_t *request)
-{
+neon_service_set_custom_cookie(ngx_http_request_t *request, ngx_str_t * neon_cookie_name, 
+                    ngx_str_t * expires, ngx_str_t * domain, char * value, int value_len){
+    
     //http://forum.nginx.org/read.php?2,169118,169118#msg-169118
 
     u_char *cookie, *p = 0;
     ngx_table_elt_t *set_cookie;
     size_t c_len = 0;
-    size_t id_len = 16; //16 char long id
-    char neon_id[16] = {0};
-    
-    static ngx_str_t neon_cookie_name = ngx_string("neonglobaluserid=");
-    static ngx_str_t expires = ngx_string( "; expires=Thu, 31-Dec-37 23:59:59 GMT"); //expires 2038
-    static ngx_str_t domain = ngx_string("; Domain=.neon-lab.com; Path=/;"); // should we add HttpOnly?
-
-    // Get Neon ID
-    neon_get_uuid((char*)neon_id, id_len);
 
     // Allocate cookie
-    c_len = neon_cookie_name.len + id_len + expires.len + domain.len; 
+    c_len = neon_cookie_name->len + value_len + expires->len + domain->len; 
     cookie = ngx_pnalloc(request->pool, c_len);
     if (cookie == NULL) {
         neon_log_error("Failed to allocate memory in the pool for cookie");
         return NEON_FALSE;
     }
 
-    p = ngx_copy(cookie, neon_cookie_name.data, neon_cookie_name.len);
-    p = ngx_copy(p, neon_id, id_len);
-    p = ngx_copy(p, expires.data, expires.len);
-    p = ngx_copy(p, domain.data, domain.len);
+    p = ngx_copy(cookie, neon_cookie_name->data, neon_cookie_name->len);
+    p = ngx_copy(p, value, value_len);
+    p = ngx_copy(p, expires->data, expires->len);
+    p = ngx_copy(p, domain->data, domain->len);
 
     // Add cookie to the headers list
     set_cookie = ngx_list_push(&request->headers_out.headers);
@@ -148,6 +140,25 @@ neon_service_set_neon_cookie(ngx_http_request_t *request)
     neon_stats[NEON_SERVICE_COOKIE_SET] ++;
     return NEON_TRUE;    
 }
+
+static NEON_BOOLEAN 
+neon_service_set_neon_cookie(ngx_http_request_t *request){
+
+    static ngx_str_t neon_cookie_name = ngx_string("neonglobaluserid=");
+    static ngx_str_t expires = ngx_string( "; expires=Thu, 31-Dec-37 23:59:59 GMT"); //expires 2038
+    static ngx_str_t domain = ngx_string("; Domain=.neon-lab.com; Path=/;"); // should we add HttpOnly?
+
+    char neon_id[16] = {0};
+    size_t id_len = 16; //16 char long id
+    
+    // Get Neon ID
+    neon_get_uuid((char*)neon_id, id_len);
+
+    return neon_service_set_custom_cookie(request, &neon_cookie_name, 
+                        &expires, &domain, neon_id, id_len);
+
+}
+
 
 // Function to determine the AB test for the current request
 // based on the IP address and the video id requested 
