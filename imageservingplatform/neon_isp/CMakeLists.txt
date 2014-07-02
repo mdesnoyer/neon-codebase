@@ -44,12 +44,13 @@ add_cc_test(NeonMastermindTest
   test/neon_mastermind_test.cc
   test/neon_isp_misc_test.cc
   test/rapidjson_test.cc
-  #  test/neon_publisherhashtable_test.cc
-  #test/neon_directivehashtable_test.cc
+  test/neon_publisherhashtable_test.cc
+  test/neon_directivehashtable_test.cc
 )
 
 target_link_libraries( NeonMastermindTest 
     NeonMastermind
 )
 
-
+### python tests ###
+enable_python()

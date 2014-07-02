@@ -297,7 +297,7 @@ neon_service_server_api_img_url_found(ngx_http_request_t *request,
     response_body_len = response_body_start.len + response_body_end.len + url_len;
     response_body = ngx_pnalloc(request->pool, response_body_len);
     if (response_body == NULL){
-        //TODO: send a 500 error ? 
+        request->headers_out.status = NGX_HTTP_INTERNAL_SERVER_ERROR; //500
         neon_stats[NGINX_OUT_OF_MEMORY] ++;
         return;
     }
@@ -310,6 +310,7 @@ neon_service_server_api_img_url_found(ngx_http_request_t *request,
     ngx_buf_t * b;
     b = (ngx_buf_t *) ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
     if(b == NULL){
+        request->headers_out.status = NGX_HTTP_INTERNAL_SERVER_ERROR; //500
         neon_stats[NGINX_OUT_OF_MEMORY] ++;
         return;
     } 
@@ -338,6 +339,7 @@ neon_service_server_api(ngx_http_request_t *request,
     ngx_buf_t * b;
     b = ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
     if(b == NULL){
+        request->headers_out.status = NGX_HTTP_INTERNAL_SERVER_ERROR; //500
         neon_stats[NGINX_OUT_OF_MEMORY] ++;
         return NEON_SERVER_API_FAIL;
     } 
@@ -396,6 +398,7 @@ neon_service_client_api_not_found(ngx_http_request_t *request,
     ngx_buf_t * b;
     b = (ngx_buf_t *) ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
     if(b == NULL){
+        request->headers_out.status = NGX_HTTP_INTERNAL_SERVER_ERROR; //500
         neon_stats[NGINX_OUT_OF_MEMORY] ++;
         return;
     } 
@@ -431,6 +434,7 @@ neon_service_client_api_redirect(ngx_http_request_t *request,
     ngx_buf_t * b;
     b = (ngx_buf_t *) ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
     if(b == NULL){
+        request->headers_out.status = NGX_HTTP_INTERNAL_SERVER_ERROR; //500
         neon_stats[NGINX_OUT_OF_MEMORY] ++;
         return;
     } 
@@ -476,6 +480,7 @@ neon_service_client_api(ngx_http_request_t *request,
     
     b = ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
     if(b == NULL){
+        request->headers_out.status = NGX_HTTP_INTERNAL_SERVER_ERROR; //500
         neon_stats[NGINX_OUT_OF_MEMORY] ++;
         return NEON_CLIENT_API_FAIL;
     } 

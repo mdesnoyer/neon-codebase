@@ -112,7 +112,7 @@ class DBConnection(object):
         self.blocking_conn.flushdb()
 
     @classmethod
-    def update_instance(cls,cname):
+    def update_instance(cls, cname):
         ''' Method to update the connection object in case of 
         db config update '''
         if cls._singleton_instance.has_key(cname):
