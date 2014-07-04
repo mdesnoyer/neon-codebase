@@ -817,6 +817,16 @@ class NeonUserAccount(object):
             nu = NeonUserAccount.get_account(api_key)
             nuser_accounts.append(nu)
         return nuser_accounts
+    
+    @classmethod
+    def get_neon_publisher_id(cls, api_key):
+        '''
+        Get Neon publisher ID; This is also the Tracker Account ID
+        '''
+        na = cls.get_account(api_key)
+        if nc:
+            return na.tracker_account_id  
+
 
 class ExperimentStrategy(StoredObject):
     '''Stores information about the experimental strategy to use.
@@ -1832,6 +1842,7 @@ class ThumbnailType(object):
     RANDOM      = "random"
     FILTERED    = "filtered"
     DEFAULT     = "default" #sent via api request
+    CUSTOMUPLOAD = "customupload" #uploaded by the customer/editor 
 
 class ThumbnailID(AbstractHashGenerator):
     '''

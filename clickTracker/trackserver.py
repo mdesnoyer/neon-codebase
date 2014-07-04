@@ -152,8 +152,8 @@ class BaseTrackerDataV2(object):
         self.pageURL = request.get_argument('page') # page_url
         self.refURL = request.get_argument('ref', None) # referral_url
 
-        self.serverTime = int(time.time() * 1000) # Server time stamp in ms
-        self.clientTime = int(request.get_argument('cts')) # client_time in ms
+        self.serverTime = long(time.time() * 1000) # Server time stamp in ms
+        self.clientTime = long(request.get_argument('cts')) # client_time in ms
         self.clientIP = request.request.remote_ip # client_ip
         # Neon's user id
         self.neonUserId = request.get_cookie('neonglobaluserid', default="") 

@@ -56,6 +56,7 @@ from boto.exception import S3ResponseError
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
 from boto.s3.bucket import Bucket
+from utils.imageutils import PILImageUtils
 from StringIO import StringIO
 from supportServices import neondata
 import utils.s3
@@ -162,6 +163,8 @@ def host_images_s3(api_key, video_id, img_and_scores, base_filename,
     
     i_vid = neondata.InternalVideoID.generate(api_key, video_id)
 
+    neon_publisher_id = neondata.NeonUserAccount.get_neon_publisher_id #TAI
+
     #upload the images to s3
     rank = 0 
     for image, score in img_and_scores:
@@ -170,7 +173,8 @@ def host_images_s3(api_key, video_id, img_and_scores, base_filename,
         tdata = save_thumbnail_to_s3_and_metadata(
                                     i_vid, image, score, 
                                     s3bucket, keyname,
-                                    s3fname, ttype, rank, model_version)
+                                    s3fname, ttype, neon_publisher_id, 
+                                    rank, model_version)
         thumbnails.append(tdata)
         rank = rank+1
         s3_urls.append(s3fname)
@@ -178,7 +182,7 @@ def host_images_s3(api_key, video_id, img_and_scores, base_filename,
     return (thumbnails, s3_urls)
 
 def save_thumbnail_to_s3_and_metadata(i_vid, image, score, s3bucket,
-                keyname, s3fname, ttype, rank=0, model_version=0):
+                keyname, s3fname, ttype, neon_pub_id, rank=0, model_version=0):
     '''
     Save a thumbnail to s3 and its metadata in the DB
 
@@ -211,7 +215,45 @@ def save_thumbnail_to_s3_and_metadata(i_vid, image, score, s3bucket,
     tdata = neondata.ThumbnailMetadata(tid, i_vid, urls, created, width, height,
                               ttype, score, model_version, rank=rank)
     tdata.update_phash(image)
+
+    #Host this image on the Neon Image CDN in diff sizes
+    host_images_cdn(image, neon_pub_id, tid)
+
     return tdata
+
+###########################################################################
+# CDN Hosting of Images of specified sizes
+###########################################################################
+
+def host_images_cdn(image, neon_pub_id, tid):
+    '''
+    Host images on the CDN
+
+    The sizes for a given image is specified in the properties file
+    size is a tuple (width, height)
+    '''
+    
+    s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
+    s3bucket_name = properties.S3_IMAGE_CDN_BUCKET_NAME
+    s3bucket = s3conn.get_bucket(s3bucket_name)
+    sizes = properties.CDN_IMAGE_SIZES
+    s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
+    #s3fname = s3_url_prefix + "/%s/%s%s.jpeg" %(base_filename, fname_prefix, rank)
+    fname_fmt = "neontn%s_w%s_h%s.jpg" 
+    
+    for sz in sizes:
+        im = PILImageUtils.resize(image, im_w=sz[0], im_h=sz[1])
+        fname = fname_fmt % (tid, sz[0], sz[1])
+        keyname = "image-cdn/%s/%s" % (neon_pub_id, fname)
+        fmt = 'jpeg'
+        filestream = StringIO()
+        im.save(filestream, fmt, quality=90) 
+        filestream.seek(0)
+        imgdata = filestream.read()
+        k = s3bucket.new_key(keyname)
+        utils.s3.set_contents_from_string(k, imgdata, {"Content-Type":"image/jpeg"})
+        s3bucket.set_acl('public-read', keyname)
+
 
 ###########################################################################
 # Process Video File
@@ -667,11 +709,14 @@ class VideoProcessor(object):
                 keyname =  self.base_filename + "/default.jpeg" 
 
             s3fname = s3_url_prefix + "/" + keyname
+
+            #get neon pub id
+            neon_pub_id = neondata.NeonUserAccount.get_neon_publisher_id #TAI
             tdata = save_thumbnail_to_s3_and_metadata(
                                             i_vid, image, 
                                             score, s3bucket,
                                             keyname, s3fname, 
-                                            ttype, rank=1)
+                                            ttype, neon_pub_id, rank=1)
             if tdata:
                 self.thumbnails.append(tdata)
             api_request.previous_thumbnail = s3fname

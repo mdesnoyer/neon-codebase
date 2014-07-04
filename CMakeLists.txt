@@ -15,5 +15,25 @@ add_subdirectory(clickTracker)
 add_subdirectory(controllers)
 add_subdirectory(supportServices)
 add_subdirectory(api)
+add_subdirectory(imageservingplatform/neon_isp)
+#add_subdirectory(testinclude(ExternalProject)
 
-add_subdirectory(test)
+include(ExternalProject)
+externalproject_add(Nginx
+    PREFIX ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/Nginx
+    SOURCE_DIR ${PROJECT_SOURCE_DIR}/imageservingplatform/nginx-1.4.7/
+    CONFIGURE_COMMAND
+    ${PROJECT_SOURCE_DIR}/imageservingplatform/nginx-1.4.7/configure
+    --add-module=../neon_isp/ --with-http_realip_module
+    --prefix=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+    BUILD_COMMAND make
+    BUILD_IN_SOURCE 1
+)
+
+#After the ExternalProject_Add call for Nginx 
+#ExternalProject_Add_Step(Nginx forceconfigure
+#    COMMAND ${CMAKE_COMMAND} -E echo "Force configure of nginx"
+#    DEPENDEES update
+#    DEPENDERS configure
+#    ALWAYS 1
+#    ))
