@@ -17,7 +17,7 @@ neon_service_get_uri_token(ngx_http_request_t *req, ngx_str_t * base_url,
     
     // make a null terminated string to use with strtok_r
     size_t uri_size = (req->uri).len + 1;
-    unsigned char * uri = ngx_pcalloc(req->pool, uri_size);
+    unsigned char * uri = (unsigned char*) ngx_pcalloc(req->pool, uri_size);
     if(uri == NULL){
         neon_stats[NGINX_OUT_OF_MEMORY] ++;
         return NULL;
@@ -52,7 +52,7 @@ neon_service_get_uri_token(ngx_http_request_t *req, ngx_str_t * base_url,
         
             // allocate result token, uri len is a safe size
             size_t token_size = (req->uri).len + 1;
-            unsigned char * token = ngx_pcalloc(req->pool, token_size);
+            unsigned char * token = (unsigned char*) ngx_pcalloc(req->pool, token_size);
             if(token == NULL){
                 neon_stats[NGINX_OUT_OF_MEMORY] ++;
                 return NULL;

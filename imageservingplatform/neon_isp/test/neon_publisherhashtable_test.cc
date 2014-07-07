@@ -41,4 +41,7 @@ TEST_F(PublisherHashTableTest, test_pub_table){
         std::string correct = "acc1";
         Publisher * result = table.Find("pub1");
         EXPECT_STREQ(result->GetAccountId(), correct.c_str());
+        
 }
+
+// Test hash_publisher method

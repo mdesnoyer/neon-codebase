@@ -46,3 +46,6 @@ rapidJsonTester: rapidJsonTester.cpp
 
 neon_service_test: neon_service_test.cc
 	g++ -g neon_service_test.cc neon_service.c neon_mastermind.cpp neonHash.cpp mastermind.cpp publisherHashtable.cpp neon_log.c directiveHashtable.cpp directive.cpp publisher.cpp fraction.cpp scaledImage.cpp neonException.cpp neonLog.cpp neon_utils.c neon_stats.c neon_utc.c -I ../nginx-1.4.7/objs -I ../nginx-1.4.7/src/http/ -I ../nginx-1.4.7/src/core/ -I ../nginx-1.4.7/src/os/unix/ -I ../nginx-1.4.7/src/event/  -I ../nginx-1.4.7/src/mail/  -I ../nginx-1.4.7/src/misc/ -I ../nginx-1.4.7/src/http/modules/ -o neon_directive_tester
+
+neon_mastermind_gtest: test/neon_mastermind_test.cc
+	g++ -fpermissive -g test/neon_mastermind_test.cc neon_mastermind.cpp neonHash.cpp mastermind.cpp publisherHashtable.cpp neon_log.c directiveHashtable.cpp directive.cpp publisher.cpp fraction.cpp scaledImage.cpp neonException.cpp neonLog.cpp neon_utils.c neon_stats.c neon_utc.c -I ../nginx-1.4.7/objs -I ../nginx-1.4.7/src/http/ -I ../nginx-1.4.7/src/core/ -I ../nginx-1.4.7/src/os/unix/ -I ../nginx-1.4.7/src/event/  -I ../nginx-1.4.7/src/mail/  -I ../nginx-1.4.7/src/misc/ -I ../nginx-1.4.7/src/http/modules/ -I ../../externalLibs/gtest-1.6.0/include/ -I ./ -o neon_mastermind_gtest

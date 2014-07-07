@@ -95,7 +95,7 @@ class MyHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
         return cls.redirect_response
 
 
-class TestISPApi(unittest.TestCase):
+class TestImageServingPlatformAPI(unittest.TestCase):
     '''
     API testing
     '''
@@ -108,8 +108,8 @@ class TestISPApi(unittest.TestCase):
 
     def setUp(self):
 
-        port = "8080"
-        self.base_url = "http://localhost:"+ port +"/v1/%s/%s/%s/"
+        self.port = "8080"
+        self.base_url = "http://localhost:"+ self.port +"/v1/%s/%s/%s/"
         self.get_params = "?width=%s&height=%s"
         #default ids
         self.pub_id = "pub1"
@@ -122,6 +122,17 @@ class TestISPApi(unittest.TestCase):
     def tearDownClass(cls):
         cls.isp.stop()
 
+    @classmethod
+    def get_header_value(cls, headers, key):
+        '''
+        helper function to return the header
+        value from a list of headers
+        '''
+
+        for header in headers:
+            if key in header:
+                return header.split(key + ": ")
+        
     def make_api_request(self, url, headers):
         '''
         helper method to make outbound request
@@ -139,6 +150,12 @@ class TestISPApi(unittest.TestCase):
             pass
 
     def server_api_request(self, pub_id, vid, width, height, ip=None):
+        '''
+        server api requester
+
+        Add X-Client-IP header if ip is not None
+        '''
+
         url = self.base_url % ("server", pub_id, vid)
         url += self.get_params % (width, height)
         headers = {}
@@ -214,7 +231,8 @@ class TestISPApi(unittest.TestCase):
         headers = response.info().headers
         im_url = json.loads(response.read())["data"]
         self.assertIsNotNone(im_url)
-        #self.assertIn("application/json", headers)
+        self.assertIsNotNone(TestImageServingPlatformAPI.get_header_value(headers,
+                                "application/json"))
     
     def test_server_api_request_without_custom_header(self):
         '''
@@ -265,7 +283,44 @@ class TestISPApi(unittest.TestCase):
         pass
 
     def test_get_thumbnailid(self):
-        pass
+        '''
+        Test get thumbnailid API
+        '''
+
+        url = "http://localhost:" + self.port + "/v1/%s/%s/?params=%s" %\
+                ("getthumbnailid", self.pub_id, self.vid)
+        ip = "203.02.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response = self.make_api_request(url, headers)
+        self.assertIsNotNone(response)
+        self.assertEqual(response.read(), "thumb1")
+
+    def test_multiple_thumbnailids(self):
+        '''
+        Test CSV response from the API
+        '''
+
+        url = "http://localhost:" + self.port + "/v1/%s/%s/?params=%s,%s" %\
+                ("getthumbnailid", self.pub_id, self.vid, self.vid)
+        ip = "203.02.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response = self.make_api_request(url, headers)
+        self.assertIsNotNone(response)
+        self.assertEqual(response.read(), "thumb1,thumb1")
+    
+    def test_multiple_thumbnailids_with_invalid_vid(self):
+        '''
+        Test that the API return "null" for invalid video id
+        '''
+
+        url = "http://localhost:" + self.port + "/v1/%s/%s/?params=%s,%s" %\
+                ("getthumbnailid", self.pub_id, self.vid, "invalid_vid")
+        ip = "203.02.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response = self.make_api_request(url, headers)
+        self.assertIsNotNone(response)
+        self.assertEqual(response.read(), "thumb1,null")
+
 
 if __name__ == '__main__':
     unittest.main()

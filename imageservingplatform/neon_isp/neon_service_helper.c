@@ -19,7 +19,7 @@ search_headers_in(ngx_http_request_t *r, u_char *name, size_t len) {
     Get the first part of the list. There is usual only one part.
     */
     part = &r->headers_in.headers.part;
-    h = part->elts;
+    h = (ngx_table_elt_t *) part->elts;
  
     /*
     Headers list array may consist of more than one part,
@@ -33,7 +33,7 @@ search_headers_in(ngx_http_request_t *r, u_char *name, size_t len) {
             }
  
             part = part->next;
-            h = part->elts;
+            h = (ngx_table_elt_t *) part->elts;
             i = 0;
         }
  

@@ -33,9 +33,10 @@ static int neon_shutdown = 0;
 // Configuration
 static time_t sleep_time = 10;
 static time_t fetch_timeout = 30;
-static const char * mastermind_url = 0; //"http://neon-test.s3.amazonaws.com/mastermind";
-static const char * mastermind_filepath             = "/tmp/mastermind";
-static const char * validated_mastermind_filepath   = 0; //"/tmp/mastermind.validated";
+static const char * mastermind_url = 0; // HTTP REST URL to marstermind file 
+// TODO: Need to lock the download path if >1 worker process will be spun
+static const char * mastermind_filepath             = "/tmp/mastermind"; // download the file here
+static const char * validated_mastermind_filepath   = 0; 
 
 static const int test_config = 1;
 
@@ -43,28 +44,31 @@ static const int test_config = 1;
  * Initialize the config parameters for the updater thread
  *
  * */
-void neon_updater_config_init(unsigned char *m_url, unsigned char *m_valid_path, time_t s_time)
-{
+void neon_updater_config_init(unsigned char *m_url, unsigned char *m_valid_path, time_t s_time){
+    
     // Mastermind REST URI
 	if (mastermind_url == 0)
-		mastermind_url = strdup((const char *)m_url);
+		mastermind_url = strdup((const char *) m_url);
 	else
 		free((void *) mastermind_url);
 
     // Validater Mastermind file path
     if (m_valid_path == 0)
-        validated_mastermind_filepath = strdup((const char *)m_valid_path);
+        validated_mastermind_filepath = strdup((const char *) m_valid_path);
     else
         free((void*) validated_mastermind_filepath);
 
     // Updater Sleep time in seconds
-    sleep_time = s_time;
+    srand(time(NULL));
+    int r = rand() % 100;
+    sleep_time += s_time + r;
+    neon_log_error("NEON Config sleep time %d", sleep_time);
 }	
 
 
 void *
-neon_runloop(void * arg)
-{
+neon_runloop(void * arg){
+    
     // turn off all signals here
     /*
     sigset_t set;
@@ -100,24 +104,23 @@ neon_runloop(void * arg)
     //  Runloop
     ///////////////////////////////////////////
     
-    neon_log_error("Neon updater run loop");
-    while(neon_shutdown != NEON_TRUE)
-    {
+    while(neon_shutdown != NEON_TRUE){
+        neon_log_error("Neon updater run loop");
+        
         // check if the current mastermind's expiry is approaching
-        if(neon_mastermind_expired() == NEON_TRUE)
-        {
+        if(neon_mastermind_expired() == NEON_TRUE){
         
             neon_log_error("mastermind expired");
             /*
              *  fetch new mastermind file from S3
              */
-            if( neon_fetch(mastermind_url, mastermind_filepath, fetch_timeout) == NEON_FETCH_FAIL) {
+            if(neon_fetch(mastermind_url, mastermind_filepath, fetch_timeout) == NEON_FETCH_FAIL) {
                 
                 // log
                 neon_log_error("failed to fetch mastermind file, error: %s",
                                neon_fetch_error);
                 // alert
-                
+                neon_stats[NEON_UPDATER_HTTP_FETCH_FAIL]++; 
                 neon_sleep(sleep_time);
                 continue;
             }
@@ -129,7 +132,7 @@ neon_runloop(void * arg)
            	// TODO(Sunil) : Spawn a process to validate the Expiry 
            	if (neon_get_expiry(mastermind_filepath) < time(0)){
                 neon_log_error("mastermind file has expired, hence not loading it");
-
+                neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
                 neon_sleep(sleep_time);
 				continue;	
 			} 
@@ -144,7 +147,7 @@ neon_runloop(void * arg)
                 neon_log_error("failed to load mastermind file");
                 
                 // alert
-                
+                neon_stats[NEON_UPDATER_MASTERMIND_LOAD_FAIL]++;
                 neon_sleep(sleep_time);
                 continue;
             }
@@ -159,30 +162,31 @@ neon_runloop(void * arg)
                                neon_rename_error);
                 
                 // alert
-                
+                neon_stats[NEON_UPDATER_MASTERMIND_RENAME_FAIL]++;
                 neon_sleep(sleep_time);
                 continue;
             }
         }
         
         // go to sleep until next cycle
+        neon_sleep(sleep_time);
         
     }
-    
     
     return 0;
 }
 
 
+/*
+ * Updater thread creation 
+ *
+ * */
+
 int
-neon_start_updater()
-{
+neon_start_updater(){
     
     int ret = 0;
     long t = 0;
-    
-    //neon_log(NEON_DEBUG, "starting updater thread");
-    //system("echo starting_updater >> /tmp/neon_echo_log");
     
     ret = pthread_create(&neon_updater_thread, NULL, neon_runloop, (void *)t);
     
@@ -193,10 +197,13 @@ neon_start_updater()
     return 0;
 }
 
+/*
+ * Updater thread shutdown
+ * */
 
 int
-neon_terminate_updater()
-{
+neon_terminate_updater(){
+    
     neon_shutdown = 1;
     
     int ret = pthread_join(neon_updater_thread, 0);

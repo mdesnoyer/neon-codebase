@@ -1,3 +1,10 @@
+/*
+ * Directive class 
+ *
+ * This is class that reprents each of the directives from the
+ * mastermind file. All directives are stored in the directiveHashtable
+ * */
+
 #ifndef _NEON_DIRECTIVE__
 #define _NEON_DIRECTIVE__
 
@@ -36,7 +43,7 @@ public:
     
     const Fraction * GetFraction(unsigned char * hash_string, int hash_string_len) const;
     
-    unsigned long neon_sdbm_hash(unsigned char *str, int s_len) const;
+    static unsigned long neon_sdbm_hash(unsigned char *str, int s_len) ;
     
 protected:
     

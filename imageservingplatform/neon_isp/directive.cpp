@@ -152,7 +152,7 @@ Directive::GetFraction(unsigned char * hash_string, int hash_string_len) const
         individual_fractions.push_back(pcnt);
         cumulative_fractions.push_back(total_pcnt);
     }
-    unsigned long hash = neon_sdbm_hash(hash_string, hash_string_len);
+    unsigned long hash = Directive::neon_sdbm_hash(hash_string, hash_string_len);
     if(hash_string == 0){
         // hash_string is empty for some reason
         // Pick the fraction with max pcnt
@@ -187,7 +187,7 @@ Directive::GetKey() const
 }
 
 unsigned long
-Directive::neon_sdbm_hash(unsigned char *str, int s_len) const
+Directive::neon_sdbm_hash(unsigned char *str, int s_len) 
 {
     unsigned long hash = 0;
     int c, i=0;
@@ -197,7 +197,7 @@ Directive::neon_sdbm_hash(unsigned char *str, int s_len) const
             hash = c + (hash << 6) + (hash << 16) - hash;
         }
     }
+
     return hash;
 }
-
 
