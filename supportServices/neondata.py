@@ -833,28 +833,30 @@ class ExperimentStrategy(StoredObject):
 
     Keyed by account_id (aka api_key)
     '''
-    ONE_AT_A_TIME='one_at_a_time'
+    SEQUENTIAL='sequential'
     MULTIARMED_BANDIT='multi_armed_bandit'
     
     
-    def __init__(self, account_id, exp_frac=0.01, chosen_exp_frac=0.85,
+    def __init__(self, account_id, exp_frac=0.01,
                  holdback_frac=0.01,
+                 only_exp_if_chosen=False,
                  always_show_baseline=True,
                  baseline_type=ThumbnailType.CENTERFRAME,
                  chose_thumb_overrides=False,
+                 override_when_done=True,
                  experiment_type=ExperimentStrategy.MULTIARMED_BANDIT):
         super(ExperimentStrategy, self).__init__(account_id)
-        # Fraction of traffic to experiment on when there is no
-        # explicitly chosen thumbnail.
+        # Fraction of traffic to experiment on.
         self.exp_frac = exp_frac
-
-        # Fraction of traffic to run experiment on when the thumbnail
-        # is chosen explicitly
-        self.chosen_exp_frac = chosen_exp_frac
         
         # Fraction of traffic in the holdback experiment once
         # convergence is complete
-        self.holdback_frac = holdback_frac 
+        self.holdback_frac = holdback_frac
+
+        # If true, an experiment will only be run if a thumb is
+        # explicitly chosen. This and chosen_thumb_overrides had
+        # better not both be true.
+        self.only_exp_if_chosen = only_exp_if_chosen
 
         # If True, a baseline of baseline_type will always be used in the
         # experiment. The other baseline could be an editor generated
@@ -867,6 +869,14 @@ class ExperimentStrategy(StoredObject):
         # If true, if there is a chosen thumbnail, it automatically
         # takes 100% of the traffic and the experiment is shutdown.
         self.chosen_thumb_overrides =  chosen_thumb_overrides
+
+        # If true, then when the experiment has converged on a best
+        # thumbnail, it overrides the majority one and leaves a
+        # holdback. If this is false, when the experiment is done, we
+        # will only run the best thumbnail in the experiment
+        # percentage. This is useful for pilots that are hidden from
+        # the editors.
+        self.override_when_done = override_when_done
 
         # The strategy used to run the experiment phase
         self.experiment_type = experiment_type

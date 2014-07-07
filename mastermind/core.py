@@ -242,12 +242,12 @@ class Mastermind(object):
         # Find the different types of thumbnails. We are looking for:
         # - The baseline
         # - The editor's selected thumbnails
-        # - All the Neon thumbnails
+        # - All the candidate thumbnails
         baseline = None
         editor = None
         chosen = None
         default = None
-        neon_thumbs = []
+        candidate_thumbs = set()
         run_frac = {} # thumb_id -> fraction
         for thumb in video_info.thumbnails:
             run_frac[thumb.id] = 0.0
@@ -255,8 +255,9 @@ class Mastermind(object):
                 continue
 
             # A neon thumbnail
-            if thumb.metadata.type == neondata.ThumbnailType.NEON:
-                neon_thumbs.append(thumb)
+            if thumb.metadata.type in [neondata.ThumbnailType.NEON,
+                                       neondata.ThumbnailType.CUSTOMUPLOAD]:
+                candidate_thumbs.add(thumb)
 
             # A thumbnail that was explicitly chosen in the database
             if thumb.metadata.chosen:
@@ -289,71 +290,87 @@ class Mastermind(object):
             run_frac[chosen.id] = 1.0
             return run_frame.items()
         editor = chosen or default
+
+        if editor is None and baseline is None:
+            _log.warn('Could not find a baseline for video id: %s' %
+                      video_id)
+
+        if (strategy.experiment_type == 
+            neondata.ExperimentStrategy.MULTIARMED_BANDIT):
+            run_frac.update(self._get_bandit_fracs(strategy, baseline, editor,
+                                                   candidates))
+        elif (strategy.experiment_type == 
+            neondata.ExperimentStrategy.ONE_AT_A_TIME):
+            run_frac.update(self._get_sequential_fracs(strategy, baseline,
+                                                       editor,
+                                                       candidates))
+        else:
+            _log.error('Invalid experiment type for video %s : %s' % 
+                       (video_id, strategy.experiment_type))
+            return None
+        return run_frac.items()
+
+    def _get_bandit_fracs(self, strategy, baseline, editor, candidates):
+        '''Gets the serving fractions for a multi-armed bandit strategy.
+
+        This uses the Thompson Sampling heuristic solution.
+        '''
+        run_frac = {}
+        valid_bandits = copy.copy(candidates)
+        
+        # First allocate the non-experiment portion
+        if strategy.exp_frac >= 1.0:
+            # When the experimental fraction is 100%, put everything
+            # into the valid bandits that makes sense.
+            if editor is not None:
+                valid_bandits.append(editor)
+                if baseline and strategy.always_show_baseline:
+                    valid_bandits.append(baseline)
+            elif baseline is not None:
+                valid_bandits.append(baseline)
+        else:
+            if editor is None:
+                if baseline:
+                    run_frac[baseline.id] = 1.0 - strategy.exp_frac
+            else:
+                run_frac[editor.id] = 1.0 - strategy.exp_frac
+
+        # Now determine the serving percentages for each valid bandit
+        # based on a prior of its model score and its measured ctr.
+        
+        
+
+    def _get_sequential_fracs(self, strategy, baseline, editor, candidates):
+        '''Gets the serving fractions for a sequential testing strategy.'''
+        pass
+
+    def _get_experiment_done_fracs(self, strategy, baseline, editor, winner):
+        '''Returns the serving fractions for when the experiment is complete.''' 
+        if self.override_when_done:
+            majority = baseline or editor
+            if majority:
+                return { winner.id : 1.0 - strategy.holdback_frac,
+                         majority.id : strategy.holdback_frac }
+        else:
+            majority = editor or baseline
+            if majority:
+                return { winner.id : strategy.exp_frac,
+                         majority.id : 1.0 - strategy.exp_frac }
+            
+        return { winner.id : 1.0 }
+                
+        
+        
         if (editor is not None and 
             baseline is not None and 
-            hamming_dist(editor.metadata.phash, default.metadata.phash) < 10):
+            hamming_dist(editor.metadata.phash, baseline.metadata.phash) < 10):
             # The editor thumbnail looks exactly like the baseline one
             # so ignore the editor one.
             editor = None
-                    
-            
-        default = None
-        chosen = None
-        neon_chosen = None
-        run_frac = {} # thumb_id -> fraction
-        chosen_flagged = False
-        for thumb in video_info.thumbnails:
-            run_frac[thumb.id] = 0.0
-            if not thumb.enabled:
-                continue
-            
-            if thumb.origin <> 'neon':
-                if default is not None:
-                    _log.error('There were multiple default thumbnails for '
-                               'video: %s' % video_id)
-                default = thumb
-            
-            if thumb.chosen:
-                if chosen_flagged:
-                    _log.error('There were multiple thumbnails chosen for '
-                               'video id: %s' % video_id)
-                chosen = thumb
-                chosen_flagged = True
 
-            if thumb.origin == 'neon':
-                if neon_chosen is None or thumb.rank < neon_chosen.rank:
-                    neon_chosen = thumb
-
-        if default is None and chosen is None and neon_chosen is None:
-            _log.error('Could not find any thumbnails to show for video %s'
-                       % video_info)
-            return []
-
-        if default is None:
-            _log.error('Could not find default thumbnail for video: %s' %
-                       video_info)
-            if chosen is None:
-                run_frac[neon_chosen.id] = 1.0
-            else:
-                run_frac[chosen.id] = 1.0
-        elif chosen is None:
-            run_frac[default.id] = 1.0
-        elif default.id == chosen.id or not video_info.testing_enabled:
-            run_frac[chosen.id] = 1.0
-        else:
-            # We are A/B testing
-            if self._chosen_thumb_bad(chosen, default):
-                # The chosen thumbnail is bad for some reason, so show
-                # the default.
-                run_frac[default.id] = 1.0
-            else:
-                # Run the A/B test.  The default thumb is running the
-                # equivalent of 10 min an hour because we're starting
-                # primarily with brightcove.
-                run_frac[default.id] = 0.15
-                run_frac[chosen.id] = 0.85
-
-        return run_frac.items()
+        # Add the baseline to the candidates
+        if strategy.always_show_baseline and baseline is not None:
+            candidate_thumbs.add(baseline)
 
     def _chosen_thumb_bad(self, chosen, default):
         '''Returns True if the chosen thumbnail is bad.
