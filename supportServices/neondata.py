@@ -836,7 +836,6 @@ class ExperimentStrategy(StoredObject):
     SEQUENTIAL='sequential'
     MULTIARMED_BANDIT='multi_armed_bandit'
     
-    
     def __init__(self, account_id, exp_frac=0.01,
                  holdback_frac=0.01,
                  only_exp_if_chosen=False,
@@ -2008,7 +2007,6 @@ class ThumbnailURLMapper(object):
         db_connection = DBConnection(cls)
         db_connection.clear_db()
 
-
 class ThumbnailMetadata(StoredObject):
     '''
     Class schema for Thumbnail information.
@@ -2018,7 +2016,8 @@ class ThumbnailMetadata(StoredObject):
     def __init__(self, tid, internal_vid, urls=None, created=None,
                  width=None, height=None, ttype=None,
                  model_score=None, model_version=None, enabled=True,
-                 chosen=False, rank=None, refid=None, phash=None):
+                 chosen=False, rank=None, refid=None, phash=None,
+                 serving_frac=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
         self.urls = urls  # List of all urls associated with single image
@@ -2034,6 +2033,8 @@ class ThumbnailMetadata(StoredObject):
         #TODO: remove refid. It's not necessary
         self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
         self.phash = phash # Perceptual hash of the image. None if unknown
+        # Fraction of traffic currently being served by this thumbnail.
+        self.seving_frac = serving_frac 
 
     def update_phash(self, image):
         '''Update the phash from a PIL image.'''
@@ -2171,6 +2172,14 @@ class ThumbnailMetadata(StoredObject):
                         video_metadata.thumbnail_ids):
                     yield thumb
 
+class ExperimentState:
+    '''A class that acts like an enum for the state of the experiment.'''
+    UNKNOWN = 'unknown'
+    RUNNING = 'running'
+    COMPLETE = 'complete'
+    DISABLED = 'disabled'
+    OVERRIDE = 'override' # Experiment has be manually overridden
+
 class VideoMetadata(StoredObject):
     '''
     Schema for metadata associated with video which gets stored
@@ -2183,7 +2192,9 @@ class VideoMetadata(StoredObject):
     
     def __init__(self, video_id, tids=None, request_id=None, video_url=None,
                  duration=None, vid_valence=None, model_version=None,
-                 i_id=None, frame_size=None, testing_enabled=True):
+                 i_id=None, frame_size=None, testing_enabled=True,
+                 experiment_state=ExperimentState.UNKNOWN,
+                 experiment_value_remaining=None):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids 
         self.url = video_url 
@@ -2194,7 +2205,13 @@ class VideoMetadata(StoredObject):
         self.integration_id = i_id
         self.frame_size = frame_size #(w,h)
         # Is A/B testing enabled for this video?
-        self.testing_enabled = testing_enabled 
+        self.testing_enabled = testing_enabled
+        self.experiment_state = \
+          experiment_state if testing_enabled else ExperimentState.DISABLED
+
+        # For the multi-armed bandit strategy, the value remaining
+        # from the monte carlo analysis.
+        self.experiment_value_remaining = experiment_value_remaining
 
     def get_id(self):
         ''' get internal video id '''

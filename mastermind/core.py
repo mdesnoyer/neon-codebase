@@ -12,6 +12,8 @@ if sys.path[0] != __base_path__:
 
 import logging
 import math
+import numpy as np
+import scipy as sp
 from supportServices import neondata
 import threading
 from utils import strutils
@@ -69,6 +71,8 @@ class Mastermind(object):
     This object is thread safe, so only one thread is allow in at a time
     as long as you keep to the public interface.
     '''
+    PRIOR_IMPRESSION_SIZE = 1000
+    PRIOR_CTR = 0.01
     
     def __init__(self):
         self.video_info = {} # video_id -> VideoInfo
@@ -313,7 +317,10 @@ class Mastermind(object):
     def _get_bandit_fracs(self, strategy, baseline, editor, candidates):
         '''Gets the serving fractions for a multi-armed bandit strategy.
 
-        This uses the Thompson Sampling heuristic solution.
+        This uses the Thompson Sampling heuristic solution. See
+        https://support.google.com/analytics/answer/2844870?hl=en for
+        more details.
+        
         '''
         run_frac = {}
         valid_bandits = copy.copy(candidates)
@@ -334,15 +341,73 @@ class Mastermind(object):
                     run_frac[baseline.id] = 1.0 - strategy.exp_frac
             else:
                 run_frac[editor.id] = 1.0 - strategy.exp_frac
+                if baseline and strategy.always_show_baseline:
+                    valid_bandits.append(baseline)
 
         # Now determine the serving percentages for each valid bandit
         # based on a prior of its model score and its measured ctr.
+        bandit_ids = [x.id for x in valid_bandits]
+        conversions = dict([(x.id, self._get_prior_conversions(x) + x.clicks
+                             for x in valid_bandits)])
+        impressions = dict([(x.id, PRIOR_IMPRESSION_SIZE * (1 - PRIOR_CTR) + 
+                             x.views - x.clicks
+                             for x in valid_bandits)])
+
+        # Run the monte carlo series
+        MC_SAMPLES = 10000.
+        mc_series = [sp.stats.beta.rvs(conversions[x],
+                                       impressions[x],
+                                       size=MC_SAMPLES)
+                                       for x in bandit_ids]
+
+        win_frac = np.array(np.bincount(np.argmax(mc_series, axis=0)),
+                            dtype=np.float) / MC_SAMPLES
+
+        winner_idx = np.argmax(win_frac)
+
+        if win_frac[winner_idx] >= 0.95:
+            # The experiment is done
+            
+            # TODO(mdesnoyer): Update the VideoMetadata and log to reflect the
+            # state chage
+            return self._get_experiment_done_fracs(
+                strategy, baseline, editor, valid_bandits[winner_idx])
+
+        # Determine the value remaining. This is equivalent to
+        # determing that one of the other arms might beat the winner
+        # by x%
+        lost_value = ((np.max(win_frac, 0) = win_frac[:][winner_idx]) / 
+                      win_frac[:][winner_idx])
+        value_remaining = np.sort(lost_value)[0.95*MC_SAMPLES]
+        # TODO(mdesnoyer): Update the value remaining in the VideoMetadata
+
+        # The serving fractions for the experiment are just the
+        # fraction of time that each thumb won the Monte Carlo
+        # simulation.
+        for thumb_id, frac in zip(bandit_ids, win_frac):
+            run_frac[thumb_id] = frac * strategy.exp_frac
+
+        return run_frac
         
-        
+
+    def _get_prior_conversions(self, thumb_info):
+        '''Get the number of clicks we would expect based on the model score.'''
+        score = thumb_info.metadata.model_score
+        if score is None or score < 1e-4:
+            if thumb_info.metadata.chosen:
+                # An editor chose this thumb, so give it a 5% lift
+                return PRIOR_CTR * PRIOR_IMPRESSION_SIZE * 1.05
+            else:
+                return PRIOR_CTR * PRIOR_IMPRESSION_SIZE
+
+        # Peg a score of 5.5 as a 5% lift and a score of 4.0 as neutral
+        return (0.05*(score-4.0)/1.5 + 1) * PRIOR_CTR * PRIOR_IMPRESSION_SIZE
 
     def _get_sequential_fracs(self, strategy, baseline, editor, candidates):
         '''Gets the serving fractions for a sequential testing strategy.'''
-        pass
+        _log.fatal('Sequetial seving strategy is not implemented. '
+                   'Falling back to the multi armed bandit')
+        return self._get_bandit_fracs(strategy, baseline, editor, candidates)
 
     def _get_experiment_done_fracs(self, strategy, baseline, editor, winner):
         '''Returns the serving fractions for when the experiment is complete.''' 
