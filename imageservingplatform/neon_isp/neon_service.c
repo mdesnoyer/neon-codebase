@@ -10,6 +10,11 @@
 #include "neon_utils.h"
 #include "neon_service_helper.c"
 
+/* 
+ * Get a particular URI token relative to the base url 
+ *
+ * */
+
 static unsigned char *
 neon_service_get_uri_token(ngx_http_request_t *req, ngx_str_t * base_url, 
                             int token_index)
@@ -71,26 +76,37 @@ neon_service_get_uri_token(ngx_http_request_t *req, ngx_str_t * base_url,
     return NULL;
 }
 
+//////////////////// Cookie Helper methods ////////////////////////////
+
+/*
+ * Check the presence of a cookie given the cookie key string
+ * 
+ * */
+
+static NEON_BOOLEAN 
+neon_service_isset_cookie(ngx_http_request_t *request, ngx_str_t *key){
+
+    ngx_str_t value;
+    if (ngx_http_parse_multi_header_lines(&request->headers_in.cookies,
+                key, &value) == NGX_DECLINED) {
+        return NEON_FALSE;
+    }
+
+    return NEON_TRUE;
+}
 
 /*
  * Method to get the Neon cookie from the request
  * 
- * @return neon_userid string is filled with the  
+ * @return Boolean 
  * */
 static NEON_BOOLEAN 
-neon_service_isset_neon_cookie(ngx_http_request_t *request)
-{
-
+neon_service_isset_neon_cookie(ngx_http_request_t *request){
     ngx_str_t key = (ngx_str_t)ngx_string("neonglobaluserid");
-    ngx_str_t value;
-    if (ngx_http_parse_multi_header_lines(&request->headers_in.cookies,
-                &key, &value) == NGX_DECLINED) {
-            neon_stats[NEON_SERVICE_COOKIE_PRESENT] ++;
-        return NEON_FALSE;
-    }
-
-    neon_log_error("Neon cookie is %s", value.data);
-    return NEON_TRUE;
+    NEON_BOOLEAN ret = neon_service_isset_cookie(request, &key);
+    if(ret == NEON_FALSE)
+        neon_stats[NEON_SERVICE_COOKIE_PRESENT] ++;
+    return ret;
 }
 
 /*
@@ -115,7 +131,8 @@ neon_service_set_custom_cookie(ngx_http_request_t *request, ngx_str_t * neon_coo
     c_len = neon_cookie_name->len + value_len + expires->len + domain->len; 
     cookie = ngx_pnalloc(request->pool, c_len);
     if (cookie == NULL) {
-        neon_log_error("Failed to allocate memory in the pool for cookie");
+        //neon_log_error("Failed to allocate memory in the pool for cookie");
+        neon_stats[NGINX_OUT_OF_MEMORY] ++;
         return NEON_FALSE;
     }
 
@@ -141,6 +158,12 @@ neon_service_set_custom_cookie(ngx_http_request_t *request, ngx_str_t * neon_coo
     return NEON_TRUE;    
 }
 
+/*
+ * Set Neon userId cookie with infinite expiry
+ * with root path
+ *
+ * */
+
 static NEON_BOOLEAN 
 neon_service_set_neon_cookie(ngx_http_request_t *request){
 
@@ -159,14 +182,17 @@ neon_service_set_neon_cookie(ngx_http_request_t *request){
 
 }
 
-
-// Function to determine the AB test for the current request
-// based on the IP address and the video id requested 
-//static int neon_service_get_ab_bucket(ngx_http_request_t *req)
-//{
-//
-//    
-//}    
+/*
+ *
+ * */
+/*
+static NEON_BOOLEAN
+neon_service_set_abtest_bucket(ngx_http_request_t *request, ngx_str_t *video_id, ngx_str_t *pub_id){
+    //ngx_str_t expires = ngx_string( "; expires=Thu, 31-Dec-37 23:59:59 GMT"); // Current time + 10mins
+    // set path with prefix /v1/client/{PUB}/{VID}
+    //ngx_str_t domain = ngx_string("; Domain=.neon-lab.com; Path=/;"); //set
+}
+*/
 
 /*
 * Generic helper function to build the api response
@@ -202,8 +228,10 @@ neon_service_build_api_response(ngx_http_request_t *request,
 */
 
 /*
- * Helper method to parse arguments (pub id, video_id) the REST API URL
- * Maps publisher id to account id, parses IP Address 
+ * Helper method to 
+ * 1. parse the following arguments i) pub id ii) video_id from REST URL
+ * 2. Maps publisher id to account id 
+ * 3. Extracts IP Address from X-Forwarded-For header or from cip argument 
  * */
 
 static 
@@ -237,11 +265,12 @@ int neon_service_parse_api_args(ngx_http_request_t *request,
     static ngx_str_t xf = ngx_string("X-Forwarded-For");
     ngx_table_elt_t * xf_header;
     
-    //Check if CIP argument is present, else look for the header
-    // TODO: Validate the IPAddress string
+    // Check if CIP argument is present, else look for the header
+    // Validate the IPAddress string
+
     if(ipAddress->len == 0 || ipAddress->len > 15){
         xf_header = search_headers_in(request, xf.data, xf.len); 
-        if (xf_header){
+        if (xf_header && neon_is_valid_ip_string(xf_header->value.data)){
             *ipAddress = xf_header->value;
         }
     }
@@ -257,6 +286,11 @@ int neon_service_parse_api_args(ngx_http_request_t *request,
     }
     return 0;
 } 
+
+/*
+ * Format the not found video response for server api call
+ *
+ * */
 
 static void
 neon_service_server_api_not_found(ngx_http_request_t *request,
@@ -283,12 +317,17 @@ neon_service_server_api_not_found(ngx_http_request_t *request,
     b->last_buf = 1;
 }
 
+/*
+ * Format response when image is found for server API
+ *
+ * */
+
 static void
 neon_service_server_api_img_url_found(ngx_http_request_t *request,
-        ngx_chain_t  * chain,
-        char * url,
-        int url_len)
-{
+                                        ngx_chain_t  * chain,
+                                        char * url,
+                                        int url_len){
+
     static ngx_str_t response_body_start = ngx_string("{\"data\":\"");
     static ngx_str_t response_body_end = ngx_string("\",\"error\":\"\"}");
        
@@ -389,6 +428,8 @@ neon_service_server_api(ngx_http_request_t *request,
     return NEON_SERVER_API_OK;
 }
 
+/////////// CLIENT API METHODS ////////////
+
 static void
 neon_service_client_api_not_found(ngx_http_request_t *request,
                                      ngx_chain_t  * chain)
@@ -467,7 +508,7 @@ neon_service_client_api_redirect(ngx_http_request_t *request,
 /*
  * Function that resolves the request which comes from the user's browser
  *
- * input: video_id, height, width, IP address
+ * input: http request, nginx buffer chain
  *
  * @return: NEON_CLIENT_API_OK or NEON_CLIENT_API_FAIL 
  */
@@ -529,7 +570,7 @@ neon_service_client_api(ngx_http_request_t *request,
     // Check if the cookie is present
     if (neon_service_isset_neon_cookie(request) == NEON_FALSE){
         if(neon_service_set_neon_cookie(request) == NEON_TRUE) {
-            neon_log_error("Neon cookie has been set");
+            //neon_log_error("Neon cookie has been set");
         }    
     }
 
@@ -556,13 +597,6 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
     ngx_str_t params_key = ngx_string("params");
     ngx_str_t video_ids; 
     ngx_http_arg(request, params_key.data, params_key.len, &video_ids);
-
-    // Response 
-    // {
-    //   "vid1": "Thumbnail ID 1",
-    //     "vid2": "Thumbnail ID 2"
-    // }
-    //
     
     ngx_str_t ipAddress;
     static ngx_str_t xf = ngx_string("X-Forwarded-For");

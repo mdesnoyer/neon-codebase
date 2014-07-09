@@ -22,7 +22,7 @@ import utils.neon
 import utils.http
 from utils.options import options, define
 
-define("carbon_server", default="127.0.0.1", help="Montioring server", type=str)
+define("carbon_server", default="54.225.235.97", help="Montioring server", type=str)
 define("carbon_port", default=8090, help="Monitoring port", type=int)
 define("interval", default=60, help="time between stats", type=int)
 
@@ -34,7 +34,7 @@ def send_data(name, value):
     '''
     node = platform.node().replace('.', '-')
     timestamp = int(time.time())
-    data = 'system.%s.%s %s %d\n' % (node, name, value, timestamp)
+    data = 'system.%s.%s.%s %s %d\n' % (node, "isp", name, value, timestamp)
     sock = socket.socket()
     try:
         sock.connect((options.carbon_server, options.carbon_port))
@@ -65,7 +65,7 @@ def main():
         jvals = query_neon_isp()
         vals = json.loads(jvals)
         for name, val in vals.iteritems():
-            send_data(name, val)
+            send_data(name.lower(), val)
         time.sleep(options.interval)
 
 if __name__ == "__main__":

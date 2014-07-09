@@ -27,6 +27,8 @@ import utils
 import utils.ps
 import time
 import tempfile
+import nginx_isp_test_conf
+from test_utils import net
 
 _log = logging.getLogger(__name__)
 
@@ -46,13 +48,21 @@ class ISP:
     '''
 
     def __init__(self, port=None):
-        self.config_file = base_path + "/imageservingplatform/neon_isp/test/nginx-test.conf"
+        self.port = port
+        if self.port is None:
+            self.port = net.find_free_port()
+        
+        self.config_file = tempfile.NamedTemporaryFile()
+        self.config_file.write(nginx_isp_test_conf.conf % self.port)
+        self.config_file.flush()
+
+        #self.config_file = base_path + "/imageservingplatform/neon_isp/test/nginx-test.conf"
         self.nginx_path = base_path + "/imageservingplatform/nginx-1.4.7/objs/nginx" #get build path
 
     def start(self):
         self.proc = subprocess.Popen([
             '/usr/bin/env', self.nginx_path, "-c",
-            self.config_file],
+            self.config_file.name],
             stdout=subprocess.PIPE)
 
     def stop(self):
@@ -65,6 +75,9 @@ class ISP:
             self.proc.kill()
 
         self.proc.wait()
+    
+    def get_port(self):
+        return self.port
 
 ### URLLIB2 Redirect Handler
 class MyHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
@@ -108,7 +121,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
     def setUp(self):
 
-        self.port = "8080"
+        self.port = str(TestImageServingPlatformAPI.isp.get_port())
         self.base_url = "http://localhost:"+ self.port +"/v1/%s/%s/%s/"
         self.get_params = "?width=%s&height=%s"
         #default ids

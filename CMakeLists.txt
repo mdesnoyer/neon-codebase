@@ -16,7 +16,6 @@ add_subdirectory(controllers)
 add_subdirectory(supportServices)
 add_subdirectory(api)
 add_subdirectory(imageservingplatform/neon_isp)
-#add_subdirectory(testinclude(ExternalProject)
 
 include(ExternalProject)
 externalproject_add(Nginx

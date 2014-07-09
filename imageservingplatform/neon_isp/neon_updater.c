@@ -53,7 +53,7 @@ void neon_updater_config_init(unsigned char *m_url, unsigned char *m_valid_path,
 		free((void *) mastermind_url);
 
     // Validater Mastermind file path
-    if (m_valid_path == 0)
+    if (validated_mastermind_filepath == 0)
         validated_mastermind_filepath = strdup((const char *) m_valid_path);
     else
         free((void*) validated_mastermind_filepath);

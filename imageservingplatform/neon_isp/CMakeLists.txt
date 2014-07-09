@@ -14,9 +14,7 @@ include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.4.7/src/misc)
 include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.4.7/src/http/modules)
 include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.4.7/src/os/unix)
 
-#TODO: make nginx
-
-add_library(NeonMastermind STATIC
+add_library(NeonISP STATIC
  neon_mastermind.cpp
  neon_updater.c
  neon_utils.c
@@ -40,7 +38,7 @@ add_library(NeonMastermind STATIC
 
 ######## All tests after this point #########
 
-add_cc_test(NeonMastermindTest
+add_cc_test(NeonISPTest
   test/neon_mastermind_test.cc
   test/neon_isp_misc_test.cc
   test/rapidjson_test.cc
@@ -48,9 +46,13 @@ add_cc_test(NeonMastermindTest
   test/neon_directivehashtable_test.cc
 )
 
-target_link_libraries( NeonMastermindTest 
-    NeonMastermind
+target_link_libraries( NeonISPTest 
+    NeonISP
 )
 
 ### python tests ###
 enable_python()
+
+#add_test(neon_isp_integration_test
+#    ${imageservingplatform_SOURCE_DIR}/test/isp_api_test.py 
+#      )
