@@ -18,203 +18,251 @@ import decimal
 import fake_filesystem
 import fake_tempfile
 from mock import patch
+import numpy.random
+from supportServices import neondata
+from supportServices.neondata import ThumbnailMetadata, ExperimentStrategy
 import utils.neon
 import unittest
 
-def build_thumb(id=None, origin=None, rank=None, enabled=True, chosen=False,
-                score=0, loads=0, clicks=0):
-    return ThumbnailInfo(id, origin, rank, enabled, chosen, score, loads,
-                         clicks)
+def build_thumb(metadata=neondata.ThumbnailMetadata(None, None),
+                loads=0, views=0, clicks=0, plays=0, phash=None):
+    if phash is None:
+        metadata.phash = numpy.random.randint(1<<30)
+    else:
+        metadata.phash = phash
+    return ThumbnailInfo(metadata, loads, views, clicks, plays)
 
 #TODO(mdesnoyer) what happens when a video is removed from the db?!?
-
 class TestBadThumbCheck(unittest.TestCase):
     def setUp(self):
         self.mastermind = Mastermind()
         
     def test_better_chosen(self):
         self.assertFalse(self.mastermind._chosen_thumb_bad(
-            build_thumb(loads=50000, clicks=1000),
-            build_thumb(loads=60000, clicks=200)))
+            build_thumb(views=50000, clicks=1000),
+            build_thumb(views=60000, clicks=200)))
 
     def test_insignificant_difference(self):
         self.assertFalse(self.mastermind._chosen_thumb_bad(
-            build_thumb(loads=50000, clicks=1000),
-            build_thumb(loads=50000, clicks=1050)))
+            build_thumb(views=50000, clicks=1000),
+            build_thumb(views=50000, clicks=1050)))
 
     def test_not_enough_views(self):
         self.assertFalse(self.mastermind._chosen_thumb_bad(
-            build_thumb(loads=500, clicks=1),
-            build_thumb(loads=499, clicks=300)))
+            build_thumb(views=500, clicks=1),
+            build_thumb(views=499, clicks=300)))
         self.assertFalse(self.mastermind._chosen_thumb_bad(
-            build_thumb(loads=10000, clicks=1),
-            build_thumb(loads=499, clicks=300)))
+            build_thumb(views=10000, clicks=1),
+            build_thumb(views=499, clicks=300)))
         self.assertFalse(self.mastermind._chosen_thumb_bad(
-            build_thumb(loads=499, clicks=1),
-            build_thumb(loads=10000, clicks=300)))
+            build_thumb(views=499, clicks=1),
+            build_thumb(views=10000, clicks=300)))
 
     def test_better_default(self):
         self.assertTrue(self.mastermind._chosen_thumb_bad(
-            build_thumb(loads=50000, clicks=1000),
-            build_thumb(loads=70000, clicks=1520)))
+            build_thumb(views=50000, clicks=1000),
+            build_thumb(views=70000, clicks=1520)))
 
     def test_no_data(self):
         self.assertFalse(self.mastermind._chosen_thumb_bad(
-            build_thumb(loads=0, clicks=0),
-            build_thumb(loads=0, clicks=0)))
+            build_thumb(views=0, clicks=0),
+            build_thumb(views=0, clicks=0)))
         self.assertFalse(self.mastermind._chosen_thumb_bad(
-            build_thumb(loads=0, clicks=0),
-            build_thumb(loads=1, clicks=0)))
+            build_thumb(views=0, clicks=0),
+            build_thumb(views=1, clicks=0)))
         self.assertFalse(self.mastermind._chosen_thumb_bad(
-            build_thumb(loads=1, clicks=0),
-            build_thumb(loads=0, clicks=0)))
+            build_thumb(views=1, clicks=0),
+            build_thumb(views=0, clicks=0)))
+
 
 class TestCurrentServingDirective(unittest.TestCase):
     def setUp(self):
+        numpy.random.seed(1984934)
         self.mastermind = Mastermind()
 
-    def test_no_default_or_chosen(self):
-        self.assertEqual([],
-                         self.mastermind._calculate_current_serving_directive(
-            VideoInfo(True, [])))
-        self.assertEqual([],
-                         self.mastermind._calculate_current_serving_directive(
-            VideoInfo(True,
-                      [build_thumb(origin='neon', rank=2, enabled=False)])))
+        # Mock out the redis connection so that it doesn't throw an error
+        redis_patcher = patch(
+            'supportServices.neondata.blockingRedis.StrictRedis')
+        redis_patcher.start()
+        self.addCleanup(redis_patcher.stop)
 
-    def test_no_ab_testing(self):
-        self.assertItemsEqual([('a', 1.0), ('b', 0.0)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(False,
-                          [build_thumb(id='a', origin='bc'),
-                           build_thumb(id='b', origin='neon', rank=0)])))
-        self.assertItemsEqual([('a', 1.0), ('b', 0.0)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(False,
-                          [build_thumb(id='a', origin='bc', chosen=True),
-                           build_thumb(id='b', origin='neon', rank=0)])))
-        self.assertItemsEqual([('a', 0.0), ('b', 1.0)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(False,
-                          [build_thumb(id='a', origin='bc'),
-                           build_thumb(id='b', origin='neon', rank=0,
-                                       chosen=True)])))
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1'))
 
-    def test_no_default(self):
-        self.assertItemsEqual([('a', 0.0), ('b', 1.0)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(True,
-                          [build_thumb(id='a', origin='neon', rank=1),
-                           build_thumb(id='b', origin='neon', rank=0)])))
-        self.assertItemsEqual([('a', 1.0)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(True,
-                          [build_thumb(id='a', origin='neon', rank=0)])))
-
-    def test_no_chosen(self):
-        self.assertItemsEqual([('b', 1.0)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(True,
-                          [build_thumb(id='b', origin='bc', rank=0)])))
-        self.assertItemsEqual([('a', 0), ('aa', 0), ('b', 1.0)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(True,
-                          [build_thumb(id='a', origin='neon', rank=0),
-                           build_thumb(id='aa', origin='neon', rank=1),
-                           build_thumb(id='b', origin='bc')])))
+    def test_priors(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
         
-    def test_chosen_default(self):
-        self.assertItemsEqual([('a', 0), ('b', 1.0)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(True,
-                          [build_thumb(id='a', origin='neon', rank=0),
-                           build_thumb(id='b', origin='bc', chosen=True)])))
+        directive = self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1',
+                                               ttype='neon', model_score=5.8)),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1',
+                                               ttype='neon', model_score=3.5)),
+                 build_thumb(ThumbnailMetadata('ctr', 'vid1',
+                                               ttype='centerframe')),
+                 build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
+                                               ttype='brightcove'))]))
 
-    def test_doing_ab_test(self):
-        self.assertItemsEqual([('a', 0.85), ('aa', 0), ('b', 0.15)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(True,
-                          [build_thumb(id='a', origin='neon', rank=0,
-                                       chosen=True),
-                           build_thumb(id='aa', origin='neon', rank=1),
-                           build_thumb(id='b', origin='bc')])))
-        self.assertItemsEqual([('a', 0), ('aa', 0.85), ('b', 0.15)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(True,
-                          [build_thumb(id='a', origin='neon', rank=0),
-                           build_thumb(id='aa', origin='neon', rank=1,
-                                       chosen=True),
-                           build_thumb(id='b', origin='bc')])))
-
-    def test_chosen_did_bad(self):
-        self.assertItemsEqual([('a', 0), ('b', 1.0)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(True,
-                          [build_thumb(id='a', origin='neon', rank=0,
-                                       loads=1500, clicks=3, chosen=True),
-                           build_thumb(id='b', origin='bc',
-                                       loads=1000, clicks=600)])))
-        self.assertItemsEqual([('a', 0), ('aa', 0), ('b', 1.0)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(True,
-                          [build_thumb(id='a', origin='neon', rank=0,
-                                       loads=10, clicks=0),
-                           build_thumb(id='aa', origin='neon', rank=1,
-                                       loads=1500, clicks=3, chosen=True),          
-                           build_thumb(id='b', origin='bc',
-                                       loads=1000, clicks=600)])))
+        self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
+                         ['n2', 'ctr', 'bc', 'n1'])
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+        for val in directive.values():
+            self.assertGreater(val, 0.0)
 
     def test_disabled_videos(self):
-        self.assertItemsEqual([('a', 0.0), ('aa', 0.85), ('b', 0.15)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(True,
-                          [build_thumb(id='a', origin='neon', rank=0,
-                                       enabled=False, chosen=True),
-                           build_thumb(id='aa', origin='neon', rank=1,
-                                       chosen=True),
-                           build_thumb(id='b', origin='bc')])))
-        
-        self.assertItemsEqual([('a', 0.0), ('aa', 0.0), ('b', 1.0)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(True,
-                          [build_thumb(id='a', origin='neon', rank=0,
-                                       enabled=False, chosen=True),
-                           build_thumb(id='aa', origin='neon', rank=1),
-                           build_thumb(id='b', origin='bc')])))
-        
-        self.assertItemsEqual([('a', 0.0), ('aa', 1.0), ('b', 0.0)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(True,
-                          [build_thumb(id='a', origin='neon', rank=0,
-                                       enabled=False),
-                           build_thumb(id='aa', origin='neon', rank=1),
-                           build_thumb(id='b', origin='bc', enabled=False)])))
-        
-        self.assertItemsEqual([('a', 1.0), ('aa', 0.0), ('b', 0.0)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(True,
-                          [build_thumb(id='a', origin='neon', rank=0),
-                           build_thumb(id='aa', origin='neon', rank=1),
-                           build_thumb(id='b', origin='bc', enabled=False)])))
-        
-        self.assertItemsEqual([('a', 0.0), ('aa', 0.0), ('b', 1.0)],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(True,
-                          [build_thumb(id='a', origin='neon', rank=0,
-                                       enabled=False),
-                           build_thumb(id='aa', origin='neon', rank=1,
-                                       enabled=False),
-                           build_thumb(id='b', origin='bc')])))
+        directive = self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1',
+                                               ttype='neon', model_score=5.8,
+                                               enabled=False)),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1',
+                                               ttype='neon', model_score=3.5)),
+                 build_thumb(ThumbnailMetadata('ctr', 'vid1',
+                                               ttype='centerframe'))]))
+        self.assertEqual(directive, {'n1': 0.0, 'n2':0.01, 'ctr':0.99 })
 
-        self.assertEqual([],
-            self.mastermind._calculate_current_serving_directive(
-                VideoInfo(True,
-                          [build_thumb(id='a', origin='neon', rank=0,
-                                       enabled=False),
-                           build_thumb(id='aa', origin='neon', rank=1,
-                                       enabled=False),
-                           build_thumb(id='b', origin='bc', enabled=False)])))
+    def test_experiments_off(self):
+        directive = self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', False,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1',
+                                               ttype='neon', model_score=5.8)),
+                 build_thumb(ThumbnailMetadata('ctr', 'vid1',
+                                               ttype='brightcove'))]))
+        self.assertEqual(directive, {'n1': 0.0, 'ctr':1.0 })
 
+    def test_multiple_partner_thumbs(self):
+        directive = self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1',
+                                               ttype='neon', model_score=5.8)),
+                 build_thumb(ThumbnailMetadata('ctr', 'vid1',
+                                               ttype='centerframe')),
+                 build_thumb(ThumbnailMetadata('bc1', 'vid1', rank=1,
+                                               ttype='brightcove')),
+                 build_thumb(ThumbnailMetadata('bc2', 'vid1', rank=2,
+                                               ttype='brightcove'))]))
+        self.assertAlmostEqual(directive['bc1'], 0.99)
+        self.assertAlmostEqual(directive['bc2'], 0.0)
+        self.assertGreater(directive['n1'], 0.0)
+        self.assertGreater(directive['ctr'], 0.0)
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+
+    def test_editor_uploaded_baseline_thumb(self):
+        directive = self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1',
+                                               ttype='neon', model_score=5.8)),
+                 build_thumb(ThumbnailMetadata('ctr', 'vid1',
+                                               ttype='centerframe'),
+                                               phash=64),
+                 build_thumb(ThumbnailMetadata('bc1', 'vid1', rank=1,
+                                               ttype='brightcove')),
+                 build_thumb(ThumbnailMetadata('cust', 'vid1', chosen=True,
+                                               ttype='customupload'),
+                                               phash=67)]))
+        self.assertAlmostEqual(directive['ctr'], 0.99)
+        self.assertAlmostEqual(directive['cust'], 0.0)
+        self.assertAlmostEqual(directive['bc1'], 0.0)
+        self.assertAlmostEqual(directive['n1'], 0.01)
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+
+    def test_chosen_neon_thumb(self):
+        directive = self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1',
+                                               ttype='neon', model_score=5.8)),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', chosen=True,
+                                               ttype='neon', model_score=3.5)),
+                 build_thumb(ThumbnailMetadata('ctr', 'vid1',
+                                               ttype='centerframe')),
+                 build_thumb(ThumbnailMetadata('bc', 'vid1',
+                                               ttype='brightcove'))]))
+        
+        self.assertAlmostEqual(directive['n2'], 0.99)
+        self.assertAlmostEqual(directive['bc'], 0.0)
+        self.assertGreater(directive['n1'], directive['ctr'])
+        self.assertGreater(directive['ctr'], 0.0)
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+        
+    def test_chosen_override(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', chosen_thumb_overrides=True))
+
+        video_info = VideoInfo(
+            'acct1', True,
+            [ build_thumb(ThumbnailMetadata('n1', 'vid1',
+                                           ttype='neon', model_score=5.8)),
+              build_thumb(ThumbnailMetadata('n2', 'vid1',
+                                            ttype='neon', model_score=3.5)),
+              build_thumb(ThumbnailMetadata('ctr', 'vid1',
+                                            ttype='centerframe')),
+              build_thumb(ThumbnailMetadata('bc', 'vid1',
+                                            ttype='brightcove'))])
+
+        directive = self.mastermind._calculate_current_serving_directive(
+            video_info)
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+        for val in directive.values():
+            self.assertGreater(val, 0.0)
+
+        # Choose the n2 thumbnail
+        video_info.thumbnails[1].metadata.chosen=True
+        directive = self.mastermind._calculate_current_serving_directive(
+            video_info)
+        self.assertEqual(directive, {'n1': 0.0, 'n2': 1.0, 'ctr': 0.0,
+                                     'bc': 0.0})
+
+        # Choose the brightcove thumbnail
+        video_info.thumbnails[1].metadata.chosen=False
+        video_info.thumbnails[3].metadata.chosen=True
+        directive = self.mastermind._calculate_current_serving_directive(
+            video_info)
+        self.assertEqual(directive, {'n1': 0.0, 'n2': 0.0, 'ctr': 0.0,
+                                     'bc': 1.0})
+
+    def test_only_experiment_if_chosen(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', only_exp_if_chosen=True))
+
+        video_info = VideoInfo(
+            'acct1', True,
+            [ build_thumb(ThumbnailMetadata('n1', 'vid1',
+                                           ttype='neon', model_score=5.8)),
+              build_thumb(ThumbnailMetadata('n2', 'vid1',
+                                            ttype='neon', model_score=3.5)),
+              build_thumb(ThumbnailMetadata('ctr', 'vid1',
+                                            ttype='centerframe')),
+              build_thumb(ThumbnailMetadata('bc', 'vid1',
+                                            ttype='brightcove'))])
+
+        # The default thumbnail will be shown 100% of the time because
+        # nothing is chosen.
+        directive = self.mastermind._calculate_current_serving_directive(
+            video_info)
+        self.assertEqual(directive, {'n1': 0.0, 'n2': 0.0, 'ctr': 0.0,
+                                     'bc': 1.0})
+
+        # Choose the n2 thumbnail and now both the center frame and n1
+        # will show in the experiment fraction
+        video_info.thumbnails[1].metadata.chosen=True
+        directive = self.mastermind._calculate_current_serving_directive(
+            video_info)
+        self.assertAlmostEqual(directive['n2'], 0.99)
+        self.assertAlmostEqual(directive['bc'], 0.0)
+        self.assertGreater(directive['n1'], 0.0)
+        self.assertGreater(directive['ctr'], 0.0)
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+
+
+    
+@unittest.skip('ignore')
 class TestStatUpdating(unittest.TestCase):
     def setUp(self):
         self.mastermind = Mastermind()
@@ -301,7 +349,7 @@ class TestStatUpdating(unittest.TestCase):
         self.assertItemsEqual([('a', 0.85), ('aa', 0.0),
                                ('az', 0.15)], result['vidA'])
         
-
+@unittest.skip('ignore')
 class TestVideoInfoUpdate(unittest.TestCase):
     def setUp(self):
         self.mastermind = Mastermind()

@@ -351,7 +351,29 @@ def id_generator(size=32,
     return ''.join(random.choice(chars) for x in range(size))
 
 ##############################################################################
+## Enum types
+############################################################################## 
 
+class ThumbnailType(object):
+    ''' Thumbnail type enumeration '''
+    NEON        = "neon"
+    CENTERFRAME = "centerframe"
+    BRIGHTCOVE  = "brightcove"
+    OOYALA      = "ooyala"
+    RANDOM      = "random"
+    FILTERED    = "filtered"
+    DEFAULT     = "default" #sent via api request
+    CUSTOMUPLOAD = "customupload" #uploaded by the customer/editor
+
+class ExperimentState:
+    '''A class that acts like an enum for the state of the experiment.'''
+    UNKNOWN = 'unknown'
+    RUNNING = 'running'
+    COMPLETE = 'complete'
+    DISABLED = 'disabled'
+    OVERRIDE = 'override' # Experiment has be manually overridden
+
+##############################################################################
 class StoredObject(object):
     '''Abstract class to represent an object that is stored in the database.
 
@@ -457,29 +479,68 @@ class StoredObject(object):
         Example usage:
         SoredObject.modify('thumb_a', lambda thumb: thumb.update_phash())
         '''
+        def _process_one(d):
+            val = d[key]
+            if val is not None:
+                func(val)
+
+        if callback:
+            return cls.modify_many([key], _process_one,
+                                   callback=lambda d: callback(d[key]))
+        else:
+            updated_d = cls.modify_many([key], _process_one)
+            return updated_d[key]
+
+    @classmethod
+    def modify_many(cls, keys, func, callback=None):
+        '''Allows you to modify objects in the database atomically.
+
+        While in func, you have a lock on the objects so you are
+        guaranteed for them not to change. The objects are
+        automatically saved at the end of func.
+        
+        Inputs:
+        func - Function that takes a single parameter (dictionary of key -> object being edited)
+        keys - List of keys of the objects to modify
+
+        Returns: A dictionary of {key -> updated object}. The updated
+        object could be None if it wasn't in the database and thus
+        couldn't be modified
+
+        Example usage:
+        SoredObject.modify(['thumb_a'], 
+          lambda d: thumb.update_phash() for thumb in d.iteritems())
+        '''
         def _getandset(pipe):
-            json_data = pipe.get(key)
+            items = pipe.mget(keys)
             pipe.multi()
 
-            if json_data is None:
-                _log.error('Could not get redis object: %s' % key)
-                return None
-            
-            obj = cls._create(key, json_data)
+            mappings = {}
+            for key, item in zip(keys, items):
+                if item is None:
+                    _log.error('Could not get redis object: %s' % key)
+                    mappings[key] = None
+                else:
+                    mappings[key] = cls._create(key, item)
             try:
-                func(obj)
+                func(mappings)
             finally:
-                pipe.set(key, obj.to_json())
-            return obj
+                to_set = {}
+                for key, obj in mappings.iteritems():
+                    if obj is not None:
+                        to_set[key] = obj.to_json()
+                        
+                pipe.mset(to_set)
+            return mappings
 
         db_connection = DBConnection(cls)
         if callback:
-            return db_connection.conn.transaction(_getandset, key,
+            return db_connection.conn.transaction(_getandset, *keys,
                                                   callback=callback,
                                                   value_from_callable=True)
         else:
             return db_connection.blocking_conn.transaction(
-                _getandset, key, value_from_callable=True)
+                _getandset, *keys, value_from_callable=True)
             
     @classmethod
     def save_all(cls, objects, callback=None):
@@ -569,7 +630,14 @@ class NamespacedStoredObject(StoredObject):
     @classmethod
     def modify(cls, key, func, callback=None):
         super(NamespacedStoredObject, cls).modify(
-            cls.format_key(x),
+            cls.format_key(key),
+            func,
+            callback=callback)
+
+    @classmethod
+    def modify_many(cls, keys, func, callback=None):
+        super(NamespacedStoredObject, cls).modify(
+            [cls.format_key(x) for x in keys],
             func,
             callback=callback)
 
@@ -841,9 +909,9 @@ class ExperimentStrategy(StoredObject):
                  only_exp_if_chosen=False,
                  always_show_baseline=True,
                  baseline_type=ThumbnailType.CENTERFRAME,
-                 chose_thumb_overrides=False,
+                 chosen_thumb_overrides=False,
                  override_when_done=True,
-                 experiment_type=ExperimentStrategy.MULTIARMED_BANDIT):
+                 experiment_type=MULTIARMED_BANDIT):
         super(ExperimentStrategy, self).__init__(account_id)
         # Fraction of traffic to experiment on.
         self.exp_frac = exp_frac
@@ -1840,18 +1908,7 @@ class YoutubeApiRequest(NeonApiRequest):
 
 ###############################################################################
 ## Thumbnail store T_URL => TID => Metadata
-###############################################################################
-
-class ThumbnailType(object):
-    ''' Thumbnail type enumeration '''
-    NEON        = "neon"
-    CENTERFRAME = "centerframe"
-    BRIGHTCOVE  = "brightcove"
-    OOYALA      = "ooyala"
-    RANDOM      = "random"
-    FILTERED    = "filtered"
-    DEFAULT     = "default" #sent via api request
-    CUSTOMUPLOAD = "customupload" #uploaded by the customer/editor 
+############################################################################### 
 
 class ThumbnailID(AbstractHashGenerator):
     '''
@@ -2171,14 +2228,6 @@ class ThumbnailMetadata(StoredObject):
                 for thumb in ThumbnailMetadata.get_many(
                         video_metadata.thumbnail_ids):
                     yield thumb
-
-class ExperimentState:
-    '''A class that acts like an enum for the state of the experiment.'''
-    UNKNOWN = 'unknown'
-    RUNNING = 'running'
-    COMPLETE = 'complete'
-    DISABLED = 'disabled'
-    OVERRIDE = 'override' # Experiment has be manually overridden
 
 class VideoMetadata(StoredObject):
     '''

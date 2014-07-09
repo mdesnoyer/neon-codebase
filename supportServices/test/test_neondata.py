@@ -437,6 +437,9 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
         with self.assertRaises(redis.ConnectionError):
             TrackerAccountIDMapper.get("tai1")
 
+    # TODO(mdesnoyer): Add test for the modify if there is a failure
+    # on one of the underlying commands.
+
 class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
     '''
     Thumbnail ID Mapper and other thumbnail helper class tests 
@@ -507,6 +510,41 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         self.assertEqual(thumb.rank, 6)
         self.assertItemsEqual(thumb.urls,
                               ['one.jpg', 'two.jpg', 'url3.jpg'])
+
+    def test_atomic_modify_many(self):
+        vid1 = InternalVideoID.generate('api1', 'vid1')
+        tid1 = ThumbnailID.generate(self.image, vid1)
+        tdata1 = ThumbnailMetadata(tid1, vid1, ['one.jpg', 'two.jpg'],
+                                   None, self.image.size[1],
+                                   self.image.size[0],
+                                   'brightcove', 1.0, '1.2')
+        vid2 = InternalVideoID.generate('api1', 'vid2')
+        tid2 = ThumbnailID.generate(self.image, vid2)
+        tdata2 = ThumbnailMetadata(tid2, vid2, ['1.jpg', '2.jpg'],
+                                   None, self.image.size[1],
+                                   self.image.size[0],
+                                   'brightcove', 1.0, '1.2')
+        self.assertFalse(tdata2.chosen)
+        self.assertFalse(tdata1.chosen)
+        self.assertTrue(tdata2.enabled)
+        self.assertTrue(tdata1.enabled)
+
+        ThumbnailMetadata.save_all([tdata1, tdata2])
+
+        def _change_thumb_data(d):
+            d[tid1].chosen = True
+            d[tid2].enabled = False
+
+        updated = ThumbnailMetadata.modify_many([tid1, tid2],
+                                                _change_thumb_data)
+        self.assertTrue(updated[tid1].chosen)
+        self.assertFalse(updated[tid2].chosen)
+        self.assertTrue(updated[tid1].enabled)
+        self.assertFalse(updated[tid2].enabled)
+        self.assertTrue(ThumbnailMetadata.get(tid1).chosen)
+        self.assertFalse(ThumbnailMetadata.get(tid2).chosen)
+        self.assertTrue(ThumbnailMetadata.get(tid1).enabled)
+        self.assertFalse(ThumbnailMetadata.get(tid2).enabled)
         
 
     def test_read_thumbnail_old_format(self):
