@@ -91,7 +91,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                                ttype='centerframe')),
                  build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
-                                               ttype='brightcove'))]))
+                                               ttype='brightcove'))]))[1]
 
         self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
                          ['n2', 'ctr', 'bc', 'n1'])
@@ -114,7 +114,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
              build_thumb(ThumbnailMetadata('n2', 'vid1',
                                            ttype='neon', model_score=3.5))])
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
             self.assertGreater(val, 0.0)
@@ -124,7 +124,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                           ttype='centerframe')))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertGreater(directive['ctr'], 0.0)
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
@@ -137,7 +137,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             build_thumb(ThumbnailMetadata('o1', 'vid1', chosen=True,
                                           ttype='ooyala')))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         self.assertGreater(directive['o1'], 0.0)
         self.assertAlmostEqual(sum(directive.values()), 1.0)
@@ -149,7 +149,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1', ExperimentStrategy('acct1', exp_frac=1.0,
                                         always_show_baseline=False))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertGreater(directive['n2'], 0.0)
         self.assertGreater(directive['n1'], 0.0)
         self.assertGreater(directive['o1'], 0.0)
@@ -166,7 +166,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('n2', 'vid1',
                                                ttype='neon', model_score=3.5)),
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                               ttype='centerframe'))]))
+                                               ttype='centerframe'))]))[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2':0.01, 'ctr':0.99 })
 
     def test_finding_baseline_thumb(self):
@@ -178,7 +178,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.WARNING, ('Could not find a '
                                                     'baseline')):
             directive = self.mastermind._calculate_current_serving_directive(
-                video_info)
+                video_info)[1]
         self.assertEqual(directive, {'n1': 1.0})
 
         # Now we add a baseline of highish rank
@@ -186,7 +186,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             build_thumb(ThumbnailMetadata('ctr1', 'vid1', rank=3,
                                           ttype='centerframe')))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.01, 'ctr1': 0.99 })
 
         # Finally add a lower rank baseline
@@ -194,7 +194,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             build_thumb(ThumbnailMetadata('ctr2', 'vid1', rank=1,
                                           ttype='centerframe')))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.01, 'ctr1': 0.0, 'ctr2': 0.99})
 
     def test_baseline_is_different_type(self):
@@ -215,7 +215,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('rnd', 'vid1', ttype='random')))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'rnd': 1.0, 'ctr': 0.0})
 
     def test_baseline_is_also_default_type(self):
@@ -230,14 +230,14 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('n1', 'vid1', ttype='neon')))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'bc': 0.99, 'ctr': 0.0, 'n1': 0.01})
 
         # When the baseline wins, it should be shown for 100%
         video_info.thumbnails[1].clicks = 5000
         video_info.thumbnails[1].views = 5000
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'bc': 1.0, 'ctr': 0.0, 'n1': 0.0})
 
     def test_baseline_is_neon(self):
@@ -253,14 +253,14 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('n1', 'vid1', ttype='neon')))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'bc': 0.99, 'ctr': 0.0, 'n1': 0.01})
 
         # When the baseline wins, it should be shown for all 100%
         video_info.thumbnails[2].clicks = 5000
         video_info.thumbnails[2].views = 5000
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'bc': 0.0, 'ctr': 0.0, 'n1': 1.0})
 
         # If the default one wins, we show the baseline for the holdback
@@ -269,7 +269,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         video_info.thumbnails[1].clicks = 5000
         video_info.thumbnails[1].views = 5000
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'bc': 0.98, 'ctr': 0.0, 'n1': 0.02})
 
     def test_always_show_baseline(self):
@@ -289,7 +289,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                            ttype='brightcove'))])
 
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertAlmostEqual(directive['bc1'], 0.99)
         for val in directive.values():
             self.assertGreater(val, 0.0)
@@ -300,7 +300,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1', ExperimentStrategy('acct1', always_show_baseline=False,
                                         holdback_frac=0.02))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertAlmostEqual(directive['bc1'], 0.99)
         self.assertAlmostEqual(directive['ctr'], 0.0)
         self.assertGreater(directive['n1'], 0.0)
@@ -313,7 +313,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             build_thumb(ThumbnailMetadata('n1', 'vid1', ttype='neon',
                                           chosen=True, rank=3)))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 1.0 })
 
         # Choose an ooyala thumb, we will experiment on the Neon one still
@@ -322,7 +322,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                           chosen=True, rank=2)))
         with self.assertLogExists(logging.WARNING, 'More than one chosen'):
             directive = self.mastermind._calculate_current_serving_directive(
-                video_info)
+                video_info)[1]
         self.assertEqual(directive, {'n1': 0.01, 'o1': 0.99})
 
         # Choose a better neon thumb and the Ooyala one is no longer served
@@ -331,7 +331,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                           chosen=True, rank=1)))
         with self.assertLogExists(logging.WARNING, 'More than one chosen'):
             directive = self.mastermind._calculate_current_serving_directive(
-                video_info)
+                video_info)[1]
         self.assertEqual(directive, {'n1': 0.01, 'o1': 0.0, 'n2': 0.99})
         
 
@@ -354,7 +354,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                           ttype='centerframe')))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'ctr':1.0 })
 
         # Now add a default thumb and make it is shown all the time
@@ -362,14 +362,14 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             build_thumb(ThumbnailMetadata('bc', 'vid1',
                                           ttype='brightcove')))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'ctr':0.0, 'bc':1.0 })
 
         # Finally, the editor selects the Neon thumb and it should be
         # shown all the time.
         video_info.thumbnails[0].metadata.chosen = True
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 1.0, 'ctr':0.0, 'bc':0.0 })
 
     def test_multiple_partner_thumbs(self):
@@ -383,7 +383,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('bc1', 'vid1', rank=1,
                                                ttype='brightcove')),
                  build_thumb(ThumbnailMetadata('bc2', 'vid1', rank=2,
-                                               ttype='brightcove'))]))
+                                               ttype='brightcove'))]))[1]
         self.assertAlmostEqual(directive['bc1'], 0.99)
         self.assertAlmostEqual(directive['bc2'], 0.0)
         self.assertGreater(directive['n1'], 0.0)
@@ -403,7 +403,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                ttype='brightcove')),
                  build_thumb(ThumbnailMetadata('cust', 'vid1', chosen=True,
                                                ttype='customupload'),
-                                               phash=67)]))
+                                               phash=67)]))[1]
         self.assertAlmostEqual(directive['ctr'], 0.99)
         self.assertAlmostEqual(directive['cust'], 0.0)
         self.assertAlmostEqual(directive['bc1'], 0.0)
@@ -421,7 +421,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                                ttype='centerframe')),
                  build_thumb(ThumbnailMetadata('bc', 'vid1',
-                                               ttype='brightcove'))]))
+                                               ttype='brightcove'))]))[1]
         
         self.assertAlmostEqual(directive['n2'], 0.99)
         self.assertAlmostEqual(directive['bc'], 0.0)
@@ -445,7 +445,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                             ttype='brightcove'))])
 
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
             self.assertGreater(val, 0.0)
@@ -453,7 +453,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # Choose the n2 thumbnail
         video_info.thumbnails[1].metadata.chosen=True
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 1.0, 'ctr': 0.0,
                                      'bc': 0.0})
 
@@ -461,7 +461,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         video_info.thumbnails[1].metadata.chosen=False
         video_info.thumbnails[3].metadata.chosen=True
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.0, 'ctr': 0.0,
                                      'bc': 1.0})
 
@@ -487,15 +487,15 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.WARNING,
                                   'Could not find the default thumbnail'):
             directive = self.mastermind._calculate_current_serving_directive(
-                video_info)
-        self.assertEqual(directive, {'n1': 1.0, 'n2': 0.0})                                  
+                video_info)[1]
+        self.assertEqual(directive, {'n1': 1.0, 'n2': 0.0})
                                           
         # The baseline thumb will be shown because nothing was chosen
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                           ttype='centerframe')))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.0, 'ctr': 1.0})
 
         # The default thumbnail will be shown 100% of the time because
@@ -503,7 +503,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('bc', 'vid1', ttype='brightcove')))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.0, 'ctr': 0.0,
                                      'bc': 1.0})
 
@@ -511,7 +511,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # will show in the experiment fraction
         video_info.thumbnails[0].metadata.chosen=True
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertAlmostEqual(directive['n2'], 0.99)
         self.assertAlmostEqual(directive['bc'], 0.0)
         self.assertGreater(directive['n1'], 0.0)
@@ -538,7 +538,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.WARNING,
                                   'Could not find a baseline'):
             directive = self.mastermind._calculate_current_serving_directive(
-                video_info)
+                video_info)[1]
         self.assertEqual(directive, {'n1': 1.0, 'ctr': 0.0, 'bc': 0.0})
 
 
@@ -572,7 +572,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         with self.assertLogExists(logging.ERROR, 'not implemented'):
             directive = self.mastermind._calculate_current_serving_directive(
-                video_info)
+                video_info)[1]
 
         self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
                          ['n2', 'ctr', 'n1', 'bc'])
@@ -625,7 +625,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # In the default case with no editor selection or baseline,
         # just show the winner 100% of the time
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 1.0})
 
         # Now add a baseline, which should be shown as the holdback
@@ -633,13 +633,13 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                           ttype='centerframe')))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.98, 'ctr': 0.02})
 
         # If the baseline wins, it should be shown for 100%
         _set_winner('ctr')
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.0, 'ctr': 1.0})
 
         # Now add a chosen thumb to the party. We use the baseline as
@@ -649,21 +649,21 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                           ttype='brightcove')))
         _set_winner('n2')
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.98, 'ctr': 0.02,
                                      'bc': 0.0})
 
         # If the chosen one wins, still show the baseline as a holdback
         _set_winner('bc')
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.0, 'ctr': 0.02,
                                      'bc': 0.98})
 
         # If the baseline wins, still give it 100%
         _set_winner('ctr')
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.0, 'ctr': 1.0,
                                      'bc': 0.0})
 
@@ -687,7 +687,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         _set_winner('n2')
         # There is no editor choice, so show the winner for 100%
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 1.0})
 
         # Now add a baseline, which should be shown as the majority
@@ -695,13 +695,13 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                           ttype='centerframe')))
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.01, 'ctr': 0.99})
 
         # If the baseline wins, it should be shown for 100%
         _set_winner('ctr')
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.0, 'ctr': 1.0})
 
         # Now add a chosen thumb to the party
@@ -710,21 +710,21 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                           ttype='brightcove')))
         _set_winner('n2')
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.01, 'ctr': 0.0,
                                      'bc': 0.99})
 
         # If the chosen one wins, still show the baseline as a holdback
         _set_winner('bc')
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.0, 'ctr': 0.02,
                                      'bc': 0.98})
 
         # But if the baseline beats the editor, give it the experiment traffic
         _set_winner('ctr')
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.0, 'ctr': 0.01,
                                      'bc': 0.99})
 
@@ -742,7 +742,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                                ttype='brightcove'))])
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
                          ['n2', 'ctr', 'bc', 'n1'])
 
@@ -757,7 +757,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         video_info.thumbnails[3].clicks = 10
 
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
                          ['ctr', 'bc', 'n1', 'n2'])
         self.assertAlmostEqual(sum(directive.values()), 1.0)
@@ -781,7 +781,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
              build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                            ttype='brightcove'))])
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         self.assertAlmostEqual(max(directive.values()), directive['n1'])
@@ -793,7 +793,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         video_info.thumbnails[0].views=499
         video_info.thumbnails[0].clicks=200
         directive = self.mastermind._calculate_current_serving_directive(
-            video_info)
+            video_info)[1]
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
             self.assertGreater(val, 0.0)
@@ -1018,7 +1018,8 @@ class TestStatusUpdatesInDb(test_utils.neontest.TestCase):
         self.mastermind = Mastermind()
 
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
+            'acct1', ExperimentStrategy('acct1', exp_frac=1.0,
+                                        holdback_frac=0.02))
 
         # Add some initial data to the database
         self.thumbnails = [
@@ -1059,11 +1060,39 @@ class TestStatusUpdatesInDb(test_utils.neontest.TestCase):
         video = VideoMetadata.get('acct1_vid1')
         thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
         directive = dict([(x.key, x.serving_frac) for x in thumbs])
-        self.assertEqual(directive, {'bc':True, 'n1':0.0, 'n2':0.0,
+        self.assertEqual(directive, {'bc':1.0, 'n1':0.0, 'n2':0.0,
                                      'ctr':0.0})
         self.assertEqual(video.experiment_state,
-                         neondata.ExperimentState.RUNNING)
-            
+                         neondata.ExperimentState.DISABLED)
+
+    def test_db_experiment_finished(self):
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'n2', 5000, 5000, 200, 200)])
+
+        video = VideoMetadata.get('acct1_vid1')
+        thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
+        directive = dict([(x.key, x.serving_frac) for x in thumbs])
+        self.assertEqual(directive, {'bc':0.0, 'n1':0.0, 'n2':0.98,
+                                     'ctr':0.02})
+        self.assertEqual(video.experiment_state,
+                         neondata.ExperimentState.COMPLETE)
+        self.assertLess(video.experiment_value_remaining,
+                        0.05)
+
+    def test_db_override_thumb(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', exp_frac=1.0,
+                                        holdback_frac=0.02,
+                                        chosen_thumb_overrides=True))
+
+        
+        video = VideoMetadata.get('acct1_vid1')
+        thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
+        directive = dict([(x.key, x.serving_frac) for x in thumbs])
+        self.assertEqual(directive, {'bc':1.0, 'n1':0.0, 'n2':0.0,
+                                     'ctr':0.0})
+        self.assertEqual(video.experiment_state,
+                         neondata.ExperimentState.OVERRIDE)    
 
 if __name__ == '__main__':
     utils.neon.InitNeonTest()

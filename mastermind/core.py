@@ -238,30 +238,37 @@ class Mastermind(object):
                 % video_id)
             return
         
-        new_directive = self._calculate_current_serving_directive(
+        result = self._calculate_current_serving_directive(
             video_info, video_id)
-        if new_directive is None:
+        if result is None:
             # There was an error, so stop here
-            return
+            return 
 
+        experiment_state, new_directive, value_left = result
+                    
+        try:
+            old_directive = self.serving_directive[video_id][1]
+            if new_directive.items() == old_directive:
+                return
+            
+        except KeyError:
+            pass
+        
+        # Update the serving percentages in the database
         def _set_serving_fracs(d):
             for thumb_id, new_frac in new_directive.iteritems():
                 obj = d[thumb_id]
                 if obj is not None:
-                    obj.serving_frac = new_frac 
-                    
-        try:
-            old_directive = self.serving_directive[video_id][1]
-            if new_directive.items() != old_directive:
-                # Update the serving percentages in the database
-                neondata.ThumbnailMetadata.modify_many(new_directive.keys(),
-                                                       _set_serving_fracs,
-                                                       callback=lambda x: x)
-        except KeyError:
-            # Update the serving percentages in the database
-            neondata.ThumbnailMetadata.modify_many(new_directive.keys(),
-                                                   _set_serving_fracs,
-                                                   callback=lambda x: x)
+                    obj.serving_frac = new_frac
+        neondata.ThumbnailMetadata.modify_many(new_directive.keys(),
+                                               _set_serving_fracs,
+                                               callback=lambda x: x)
+        def _update_experiment_info(x):
+            x.experiment_state = experiment_state
+            if value_left is not None:
+                x.experiment_value_remaining = value_left
+        neondata.VideoMetadata.modify(video_id, _update_experiment_info,
+                                      callback=lambda x: x)
             
         self.serving_directive[video_id] = ((video_info.account_id,
                                              video_id),
@@ -276,7 +283,8 @@ class Mastermind(object):
         video_info - A VideoInfo object
 
         Outputs:
-        {thumb_id => fraction} or None if we had an error
+        (experiment_state, {thumb_id => fraction}, value_left) or 
+        None if we had an error
         '''
         try:
             strategy = self.experiment_strategy[video_info.account_id]
@@ -293,6 +301,8 @@ class Mastermind(object):
         editor = None
         chosen = None
         default = None
+        experiment_state = neondata.ExperimentState.UNKNOWN
+        value_left=None
         candidates = set()
         run_frac = {} # thumb_id -> fraction
         for thumb in video_info.thumbnails:
@@ -334,7 +344,8 @@ class Mastermind(object):
 
         if strategy.chosen_thumb_overrides and chosen is not None:
             run_frac[chosen.id] = 1.0
-            return run_frac
+            experiment_state = neondata.ExperimentState.OVERRIDE
+            return (experiment_state, run_frac, None)
         editor = chosen or default
         if editor:
             candidates.discard(editor)
@@ -357,6 +368,7 @@ class Mastermind(object):
                 run_frac[baseline.id] = 1.0
             else:
                 run_frac[editor.id] = 1.0
+            experiment_state = neondata.ExperimentState.DISABLED
 
         elif strategy.only_exp_if_chosen and chosen is None:
             # We aren't experimenting because no thumb was chosen
@@ -372,21 +384,24 @@ class Mastermind(object):
                                                x.metadata.type != 
                                                neondata.ThumbnailType.NEON))
                 run_frac[ranked_candidates[0].id] = 1.0
+            experiment_state = neondata.ExperimentState.DISABLED
 
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.MULTIARMED_BANDIT):
-            run_frac.update(self._get_bandit_fracs(strategy, baseline, editor,
-                                                   candidates))
+            experiment_state, bandit_frac, value_left = \
+              self._get_bandit_fracs(strategy, baseline, editor, candidates)
+            run_frac.update(bandit_frac)
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.SEQUENTIAL):
-            run_frac.update(self._get_sequential_fracs(strategy, baseline,
-                                                       editor,
-                                                       candidates))
+            experiment_state, seq_frac, value_left = \
+              self._get_sequential_fracs(strategy, baseline, editor,
+                                         candidates)
+            run_frac.update(seq_frac)
         else:
             _log.error('Invalid experiment type for video %s : %s' % 
                        (video_id, strategy.experiment_type))
             return None
-        return run_frac
+        return (experiment_state, run_frac, value_left)
 
     def _get_bandit_fracs(self, strategy, baseline, editor, candidates):
         '''Gets the serving fractions for a multi-armed bandit strategy.
@@ -398,7 +413,8 @@ class Mastermind(object):
         '''
         run_frac = {}
         valid_bandits = copy.copy(candidates)
-
+        experiment_state = neondata.ExperimentState.RUNNING
+        value_remaining = None
                 
         if (editor is not None and 
             baseline is not None and 
@@ -470,19 +486,26 @@ class Mastermind(object):
         else:
             winner_views = valid_bandits[winner_idx].views
 
+        # Determine the value remaining. This is equivalent to
+        # determing that one of the other arms might beat the winner
+        # by x%
+        lost_value = ((np.max(mc_series, 0) - mc_series[:][winner_idx]) / 
+                      mc_series[:][winner_idx])
+        value_remaining = np.sort(lost_value)[0.95*MC_SAMPLES]
+
         if win_frac[winner_idx] >= 0.95:
             # There is a winner. See if there were enough views to call it
             if win_frac.shape[0] == 1 or winner_views >= 500:
                 # The experiment is done
-            
-                # TODO(mdesnoyer): Update the VideoMetadata and log to
-                # reflect the state chage
+                experiment_state = neondata.ExperimentState.COMPLETE
                 try:
                     winner = valid_bandits[winner_idx]
                 except IndexError:
                     winner = non_exp_thumb
-                return self._get_experiment_done_fracs(
-                    strategy, baseline, editor, winner)
+                return (experiment_state,
+                        self._get_experiment_done_fracs(
+                            strategy, baseline, editor, winner),
+                        value_remaining)
 
             else:
                 # Only allow the winner to have 90% of the views
@@ -496,15 +519,6 @@ class Mastermind(object):
                 else:
                     win_frac[other_idx] = \
                       0.1 / np.sum(win_frac[other_idx]) * win_frac[other_idx]
-                
-
-        # Determine the value remaining. This is equivalent to
-        # determing that one of the other arms might beat the winner
-        # by x%
-        lost_value = ((np.max(mc_series, 0) - mc_series[:][winner_idx]) / 
-                      mc_series[:][winner_idx])
-        value_remaining = np.sort(lost_value)[0.95*MC_SAMPLES]
-        # TODO(mdesnoyer): Update the value remaining in the VideoMetadata
 
         # The serving fractions for the experiment are just the
         # fraction of time that each thumb won the Monte Carlo
@@ -515,7 +529,7 @@ class Mastermind(object):
         for thumb_id, frac in zip(bandit_ids, win_frac):
             run_frac[thumb_id] = frac * strategy.exp_frac
 
-        return run_frac
+        return (experiment_state, run_frac, value_remaining)
         
 
     def _get_prior_conversions(self, thumb_info):
@@ -542,7 +556,10 @@ class Mastermind(object):
         return self._get_bandit_fracs(strategy, baseline, editor, candidates)
 
     def _get_experiment_done_fracs(self, strategy, baseline, editor, winner):
-        '''Returns the serving fractions for when the experiment is complete.'''
+        '''Returns the serving fractions for when the experiment is complete.
+
+        Just returns a dictionary of the directive { id -> frac }
+        '''
         majority = editor or baseline
         if majority and majority.id == winner.id:
             # The winner was the default so put in the baseline as a holdback

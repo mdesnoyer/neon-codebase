@@ -538,8 +538,9 @@ class StoredObject(object):
                 for key, obj in mappings.iteritems():
                     if obj is not None:
                         to_set[key] = obj.to_json()
-                        
-                pipe.mset(to_set)
+
+                if len(to_set) > 0:
+                    pipe.mset(to_set)
             return mappings
 
         db_connection = DBConnection(cls)
