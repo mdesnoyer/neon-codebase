@@ -74,6 +74,8 @@ neon_mastermind_load(const char * filepath)
         candidate = new Mastermind();
         
         candidate->Init(filepath, mastermind_current->GetExpiry());
+        NeonLog::Error("Neon mastermind load complete");
+
     }
     catch (NeonException * error)
     {
@@ -213,6 +215,10 @@ neon_mastermind_expired()
     return NEON_FALSE;
 }
 
+/*
+ * Health Check handler
+ *
+ * */
 
 int
 neon_mastermind_healthcheck()

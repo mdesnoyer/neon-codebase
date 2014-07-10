@@ -454,6 +454,7 @@ class TestVideoClient(unittest.TestCase):
         tdata = api.client.host_images_cdn(image, neon_id, tid)
         sizes = api.properties.CDN_IMAGE_SIZES   
         s3_keys = [x for x in imbucket.get_all_keys()]
+        print s3_keys
         self.assertEqual(len(s3_keys), len(sizes))
         #for s3key in s3_keys:
         #    self.assertEqual()

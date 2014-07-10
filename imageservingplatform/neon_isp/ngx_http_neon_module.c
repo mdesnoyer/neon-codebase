@@ -309,6 +309,8 @@ neon_init_module(ngx_cycle_t *cycle){
 
 static ngx_int_t ngx_http_neon_handler_server(ngx_http_request_t *request)
 {
+    neon_stats[NEON_SERVER_API_REQUESTS] ++;
+
     ngx_chain_t chain;
     
     neon_service_server_api(request, &chain);
@@ -329,6 +331,8 @@ static ngx_int_t ngx_http_neon_handler_server(ngx_http_request_t *request)
 
 static ngx_int_t ngx_http_neon_handler_client(ngx_http_request_t *request)
 {
+    neon_stats[NEON_CLIENT_API_REQUESTS] ++;
+
     ngx_chain_t  chain;
  
     neon_service_client_api(request, &chain);
@@ -346,6 +350,8 @@ static ngx_int_t ngx_http_neon_handler_client(ngx_http_request_t *request)
 
 static ngx_int_t ngx_http_neon_handler_getthumbnailid(ngx_http_request_t *request)
 {
+    neon_stats[NEON_GETTHUMBNAIL_API_REQUESTS] ++;
+
     ngx_chain_t   chain;
     
     neon_service_getthumbnailid(request, &chain);
@@ -442,6 +448,9 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
     ",\"NEON_UPDATER_MASTERMIND_EXPIRED\": %llu"
     ",\"NEON_UPDATER_MASTERMIND_LOAD_FAIL\": %llu"
     ",\"NEON_UPDATER_MASTERMIND_RENAME_FAIL\": %llu"
+    ",\"NEON_SERVER_API_REQUESTS\": %llu"
+    ",\"NEON_CLIENT_API_REQUESTS\": %llu"
+    ",\"NEON_GETTHUMBNAIL_API_REQUESTS\": %llu"
     "}";
 
     static u_char resp[2048];
@@ -479,7 +488,10 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
           neon_stats[15],
           neon_stats[16],
           neon_stats[17],
-          neon_stats[18]
+          neon_stats[18],
+          neon_stats[19],
+          neon_stats[20],
+          neon_stats[21]
           );
     
     b->pos = resp;

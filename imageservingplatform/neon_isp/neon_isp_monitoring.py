@@ -1,8 +1,8 @@
+#!/usr/bin/env python
 '''
 Send Neon ISP counters to carbon to be alerted on
 '''
 
-#!/usr/bin/env python
 
 import os
 import os.path
