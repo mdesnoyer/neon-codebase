@@ -35,6 +35,12 @@ class VideoInfo(object):
 
     def __str__(self):
         return strutils.full_object_str(self)
+
+    def __repr__(self):
+        return str(self)
+
+    def __cmp__(self, other):
+        return cmp(self.__dict__, other.__dict__)
         
 
 class ThumbnailInfo(object):
@@ -50,6 +56,12 @@ class ThumbnailInfo(object):
 
     def __str__(self):
         return strutils.full_object_str(self)
+
+    def __repr__(self):
+        return str(self)
+
+    def __cmp__(self, other):
+        return cmp(self.__dict__, other.__dict__)
 
     def update_stats(self, other_info):
         '''Updates the statistics from another ThumbnailInfo.'''
@@ -89,7 +101,7 @@ class Mastermind(object):
         # For thread safety
         self.lock = threading.RLock()
 
-    def get_directives(self, video_ids):
+    def get_directives(self, video_ids=None):
         '''Returns a generator for the serving directives for all the video ids
 
         ***Warning*** The generator returned from this function cannot
@@ -116,8 +128,9 @@ class Mastermind(object):
                     directive = self.serving_directive[video_id]
                 yield directive
             except KeyError:
-                # Some other thread changed the data so we don't have
-                # information about this video id anymore. Oh well.
+                # Some other thread probably changed the data so we
+                # don't have information about this video id
+                # anymore. Oh well.
                 pass
 
     def update_video_info(self, video_metadata, thumbnails,
@@ -146,7 +159,7 @@ class Mastermind(object):
                 video_info.thumbnails = thumbnail_infos
                 video_info.testing_enabled = testing_enabled
                 if video_metadata.get_account_id() != video_info.account_id:
-                    _log.error(('The account has changed for video if %s, '
+                    _log.error(('The account has changed for video id %s, '
                                 'account id %s and it should not have') % 
                                 (video_id, video_metadata.get_account_id()))
                     video_info.account_id = video_metadata.get_account_id()
@@ -171,7 +184,7 @@ class Mastermind(object):
         
         '''
         with self.lock:
-            for video_id, thumb_id, loads, clicks in data:
+            for video_id, thumb_id, loads, views, clicks, plays in data:
                 # Load up all the data
                 thumb = self._find_thumb(video_id, thumb_id)
                 if thumb is None:
@@ -201,8 +214,11 @@ class Mastermind(object):
 
             self.experiment_strategy[account_id] = strategy
 
+            _log.info(('The experiment strategy has changed for account %s. '
+                      'Building new serving directives.') % account_id)
+
             # Now update all the serving directives
-            for video_info in self.video_info.values():
+            for video_id, video_info in self.video_info.items():
                 if video_info.account_id == account_id:
                     self._calculate_new_serving_directive(video_id)
 
@@ -236,7 +252,7 @@ class Mastermind(object):
                     
         try:
             old_directive = self.serving_directive[video_id][1]
-            if new_directive != old_directive:
+            if new_directive.items() != old_directive:
                 # Update the serving percentages in the database
                 neondata.ThumbnailMetadata.modify_many(new_directive.keys(),
                                                        _set_serving_fracs,
@@ -247,8 +263,9 @@ class Mastermind(object):
                                                    _set_serving_fracs,
                                                    callback=lambda x: x)
             
-        self.serving_directive[video_id] = ((account_id, video_id),
-                                            new_directive.items())
+        self.serving_directive[video_id] = ((video_info.account_id,
+                                             video_id),
+                                             new_directive.items())
 
     def _calculate_current_serving_directive(self, video_info, video_id=''):
         '''Decide the amount of time each thumb should show for each video.
@@ -323,12 +340,18 @@ class Mastermind(object):
             candidates.discard(editor)
 
         if editor is None and baseline is None:
+            if len(candidates) == 0:
+                _log.error("No valid thumbnails for video %s" % video_id)
+                return None
+            
             _log.warn('Could not find a baseline for video id: %s' %
                       video_id)
             if not video_info.testing_enabled:
-                _log.error('Testing was disabled and there was no baseline')
+                _log.error('Testing was disabled and there was no baseline for'
+                           'video %s' % video_id)
                 return None
 
+        # Done finding all the thumbnail types, so start doing the allocations 
         if not video_info.testing_enabled:
             if editor is None:
                 run_frac[baseline.id] = 1.0
@@ -344,16 +367,18 @@ class Mastermind(object):
             else:
                 _log.warn("Could not find the default thumbnail to show for "
                           "video %s. Trying a Neon one instead." % video_id)
-                if len(candidates) == 0:
-                    _log.error("No thumbnails for video %s" % video_id)
-                    return None
+                ranked_candidates = sorted(
+                    candidates, key=lambda x: (x.metadata.rank,
+                                               x.metadata.type != 
+                                               neondata.ThumbnailType.NEON))
+                run_frac[ranked_candidates[0].id] = 1.0
 
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.MULTIARMED_BANDIT):
             run_frac.update(self._get_bandit_fracs(strategy, baseline, editor,
                                                    candidates))
         elif (strategy.experiment_type == 
-            neondata.ExperimentStrategy.ONE_AT_A_TIME):
+            neondata.ExperimentStrategy.SEQUENTIAL):
             run_frac.update(self._get_sequential_fracs(strategy, baseline,
                                                        editor,
                                                        candidates))
@@ -434,20 +459,44 @@ class Mastermind(object):
 
         win_frac = np.array(np.bincount(np.argmax(mc_series, axis=0)),
                             dtype=np.float) / MC_SAMPLES
+        win_frac = np.append(win_frac, [0.0 for x in range(len(mc_series) - 
+                                                           win_frac.shape[0])])
 
         winner_idx = np.argmax(win_frac)
 
+        winner_views = None
+        if winner_idx == len(bandit_ids):
+            winner_views = non_exp_thumb.views
+        else:
+            winner_views = valid_bandits[winner_idx].views
+
         if win_frac[winner_idx] >= 0.95:
-            # The experiment is done
+            # There is a winner. See if there were enough views to call it
+            if win_frac.shape[0] == 1 or winner_views >= 500:
+                # The experiment is done
             
-            # TODO(mdesnoyer): Update the VideoMetadata and log to reflect the
-            # state chage
-            try:
-                winner = valid_bandits[winner_idx]
-            except IndexError:
-                winner = non_exp_thumb
-            return self._get_experiment_done_fracs(
-                strategy, baseline, editor, winner)
+                # TODO(mdesnoyer): Update the VideoMetadata and log to
+                # reflect the state chage
+                try:
+                    winner = valid_bandits[winner_idx]
+                except IndexError:
+                    winner = non_exp_thumb
+                return self._get_experiment_done_fracs(
+                    strategy, baseline, editor, winner)
+
+            else:
+                # Only allow the winner to have 90% of the views
+                # because there aren't enough views to make a good
+                # decision.
+                win_frac[winner_idx] = 0.90
+                other_idx = [x for x in range(win_frac.shape[0])
+                             if x != winner_idx]
+                if np.sum(win_frac[other_idx]) < 1e-5:
+                    win_frac[other_idx] = 0.1 / len(other_idx)
+                else:
+                    win_frac[other_idx] = \
+                      0.1 / np.sum(win_frac[other_idx]) * win_frac[other_idx]
+                
 
         # Determine the value remaining. This is equivalent to
         # determing that one of the other arms might beat the winner
@@ -488,14 +537,14 @@ class Mastermind(object):
 
     def _get_sequential_fracs(self, strategy, baseline, editor, candidates):
         '''Gets the serving fractions for a sequential testing strategy.'''
-        _log.fatal('Sequetial seving strategy is not implemented. '
+        _log.error('Sequential seving strategy is not implemented. '
                    'Falling back to the multi armed bandit')
         return self._get_bandit_fracs(strategy, baseline, editor, candidates)
 
     def _get_experiment_done_fracs(self, strategy, baseline, editor, winner):
         '''Returns the serving fractions for when the experiment is complete.'''
         majority = editor or baseline
-        if majority.id == winner.id:
+        if majority and majority.id == winner.id:
             # The winner was the default so put in the baseline as a holdback
             if baseline and majority.id != baseline.id:
                 return { winner.id : 1.0 - strategy.holdback_frac,
@@ -504,7 +553,7 @@ class Mastermind(object):
             # The experiment is done and we want to serve the winner
             # most of the time.
             majority = baseline or editor
-            if majority:
+            if majority and majority.id != winner.id:
                 return { winner.id : 1.0 - strategy.holdback_frac,
                          majority.id : strategy.holdback_frac }
         else:
@@ -517,29 +566,6 @@ class Mastermind(object):
                          majority.id : 1.0 - strategy.exp_frac }
             
         return { winner.id : 1.0 }
-
-    def _chosen_thumb_bad(self, chosen, default):
-        '''Returns True if the chosen thumbnail is worse than the default.
-
-        We do a statistical significance test on the views and clicks
-        to see if the chosen thumbnail is worse than the default.
-        '''
-        if chosen.views < 500 or default.views < 500:
-            return False
-
-        if chosen.clicks < 1 or default.clicks < 1:
-            return False
-        
-        p_chosen = float(chosen.clicks) / chosen.views
-        p_default = float(default.clicks) / default.views
-
-        se2_chosen = (p_chosen * (1-p_chosen)) / chosen.views
-        se2_default = (p_default * (1-p_default)) / default.views
-
-        zscore = (p_default - p_chosen) / math.sqrt(se2_chosen + se2_default)
-
-        # Threshold on a 90% one way confidence interval
-        return zscore > 1.65
             
 
     def _find_thumb(self, video_id, thumb_id):

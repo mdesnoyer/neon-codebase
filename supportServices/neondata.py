@@ -383,6 +383,15 @@ class StoredObject(object):
     def __init__(self, key):
         self.key = key
 
+    def __str__(self):
+        return str(self.__dict__)
+
+    def __repr__(self):
+        return str(self)
+
+    def __cmp__(self, other):
+        return cmp(self.__dict__, other.__dict__)
+
     def to_json(self):
         '''Returns a json version of the object'''
         return json.dumps(self, default=lambda o: o.__dict__)
