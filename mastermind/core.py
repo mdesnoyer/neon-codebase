@@ -66,8 +66,8 @@ class ThumbnailInfo(object):
     def update_stats(self, other_info):
         '''Updates the statistics from another ThumbnailInfo.'''
         if self.id <> other_info.id:
-            _log.critical("Two thumbnail ids don't match. %s vs %s" %
-                          (self.id, other_info.id))
+            _log.error("Two thumbnail ids don't match. %s vs %s" %
+                       (self.id, other_info.id))
             return self
 
         self.loads = other_info.loads
@@ -589,3 +589,7 @@ class Mastermind(object):
         except KeyError:
             _log.warn('Could not find information for video %s' % video_id)
             return None
+
+        _log.warn('Could not find information for thumbnail %s in video %s' % 
+                  (thumb_id, video_id))
+        return None

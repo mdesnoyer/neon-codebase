@@ -15,4 +15,6 @@ def hamming_int(x, y):
 
     The hamming distance is the number of bits that have changed.
     '''
+    if x is None or y is None:
+        return float('inf')
     return sum( b == '1' for b in bin(x ^ y)[2:] )

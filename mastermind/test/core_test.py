@@ -23,6 +23,7 @@ import numpy.random
 from supportServices import neondata
 from supportServices.neondata import ThumbnailMetadata, ExperimentStrategy, VideoMetadata
 import test_utils.neontest
+import test_utils.redis
 import utils.neon
 import unittest
 
@@ -52,6 +53,15 @@ class TestObjects(test_utils.neontest.TestCase):
 
         self.assertEqual(video_info_1, video_info_2)
         self.assertEqual(repr(video_info_1), repr(video_info_2))
+
+    def test_update_stats_with_wrong_id(self):
+        thumb1 = ThumbnailInfo(ThumbnailMetadata('t1', 'v1'), loads=300)
+        thumb2 = ThumbnailInfo(ThumbnailMetadata('t2', 'v1'), loads=400)
+
+        with self.assertLogExists(logging.ERROR,
+                                  "Two thumbnail ids don't match"):
+            self.assertEqual(thumb1.update_stats(thumb2), thumb1)
+        self.assertEqual(thumb1.loads, 300)
     
 class TestCurrentServingDirective(test_utils.neontest.TestCase):
     def setUp(self):
@@ -923,7 +933,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.assertItemsEqual(directives[0][1], [('tid1', 0.99),
                                                  ('tid2', 0.01)])
     
-class TestStatUpdating(unittest.TestCase):
+class TestStatUpdating(test_utils.neontest.TestCase):
     def setUp(self):
         numpy.random.seed(1984934)
         self.mastermind = Mastermind()
@@ -960,55 +970,100 @@ class TestStatUpdating(unittest.TestCase):
         for val in [x[1] for x in directives[('acct1', 'acct1_vid2')]]:
             self.assertGreater(val, 0.0)
 
-    def _test_decimal_from_db(self):
-        result = dict(self.mastermind.update_stats_info(100, [
-            ('vidA', 'a', decimal.Decimal(1000), decimal.Decimal(5)),
-            ('vidA', 'az', decimal.Decimal(1000), decimal.Decimal(100)),
-            ('vidB', 'b', decimal.Decimal(10), decimal.Decimal(5)),
-            ('vidB', 'ba', decimal.Decimal(1000), decimal.Decimal(100)),
-            ('vidB', 'bz', decimal.Decimal(1000), decimal.Decimal(100))]))
-        self.assertIn('vidA', result)
-        self.assertNotIn('vidB', result)
-        self.assertItemsEqual([('a', 0.0), ('aa', 0.0),
-                               ('az', 1.0)], result['vidA'])
+    def test_decimal_from_db(self):
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'v1t1', decimal.Decimal(1000),
+             decimal.Decimal(1000), decimal.Decimal(5), decimal.Decimal(5)),
+            ('acct1_vid1', 'v1t2', decimal.Decimal(1000),
+             decimal.Decimal(1000), decimal.Decimal(100),
+             decimal.Decimal(100)),
+            ('acct1_vid2', 'v2t1', decimal.Decimal(10), decimal.Decimal(10), 
+             decimal.Decimal(5), decimal.Decimal(5)),
+            ('acct1_vid2', 'v2t2', decimal.Decimal(1000),
+             decimal.Decimal(1000), decimal.Decimal(100),
+             decimal.Decimal(100)),
+            ('acct1_vid2', 'v2t3', decimal.Decimal(1000), 
+             decimal.Decimal(1000), decimal.Decimal(100),
+             decimal.Decimal(100))])
 
-    def _test_deltas_on_clean_state(self):
-        self.assertIsNone(self.mastermind.incorporate_delta_stats(
-            100, 'vidA', 'a', 1000, 5))
-        result = self.mastermind.incorporate_delta_stats(
-            101, 'vidA', 'az', 1000, 100)
-        self.assertEqual(result[0], 'vidA')
-        self.assertItemsEqual([('a', 0.0), ('aa', 0.0),
-                               ('az', 1.0)], result[1])
+        directives = dict([x for x in self.mastermind.get_directives()])
+        self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
+                              [('v1t1', 0.01), ('v1t2', 0.99)])
+        for val in [x[1] for x in directives[('acct1', 'acct1_vid2')]]:
+            self.assertGreater(val, 0.0)
 
-
-    def _test_negative_deltas(self):
-        with self.assertRaises(ValueError):
-            self.mastermind.incorporate_delta_stats(100, 'vidA', 'a', 1000,-5)
-        with self.assertRaises(ValueError):
-            self.mastermind.incorporate_delta_stats(100, 'vidA', 'a', -1000,5)
-
-    def _test_deltas_replayed(self):
-        '''Test that deltas are replayed after a db update.'''
-        self.mastermind.incorporate_delta_stats(100, 'vidA', 'a', 1000, 5)
-        self.mastermind.incorporate_delta_stats(101, 'vidA', 'az', 1000, 100)
-        result = self.mastermind.incorporate_delta_stats(200, 'vidA', 'a',
-                                                         100, 100)
-        self.assertEqual('vidA', result[0])
-        self.assertItemsEqual([('a', 0.85),('aa', 0.0),('az', 0.15)],result[1])
-
-
-        # Now get a database update at t=150. Even though there is no
-        # net change, when the database updates, it changes, but then
-        # changes back with the replayed delta, so that's ok to
-        # trigger an extra change event.
-        result = dict(self.mastermind.update_stats_info(150, [
-            ('vidA', 'a', 1000, 5),
-            ('vidA', 'az', 1000, 100)]))
-        self.assertIn('vidA', result)
-        self.assertItemsEqual([('a', 0.85), ('aa', 0.0),
-                               ('az', 0.15)], result['vidA'])
+    def test_update_stats_for_unknown_video(self):
+        with self.assertLogExists(logging.WARNING,
+                                  'Could not find information for video'):
         
+            self.mastermind.update_stats_info([
+                ('acct1_unknown', 'v1t1', 1000, 1000, 5, 5)
+                ])
+
+    def test_update_stats_for_unknown_thumb(self):
+        with self.assertLogExists(logging.WARNING,
+                                  'Could not find information for thumbnail'):
+        
+            self.mastermind.update_stats_info([
+                ('acct1_vid1', 'v1t_where', 1000, 1000, 5, 5)
+                ])
+
+class TestStatusUpdatesInDb(test_utils.neontest.TestCase):
+    def setUp(self):
+        redis = test_utils.redis.RedisServer()
+        redis.start()
+        self.addCleanup(redis.stop)
+        
+        numpy.random.seed(1984934)
+        self.mastermind = Mastermind()
+
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
+
+        # Add some initial data to the database
+        self.thumbnails = [
+            ThumbnailMetadata('n1', 'acct1_vid1',
+                              ttype='neon', model_score=5.8),
+            ThumbnailMetadata('n2', 'acct1_vid1',
+                              ttype='neon', model_score=3.5),
+            ThumbnailMetadata('ctr', 'acct1_vid1',
+                              ttype='centerframe'),
+            ThumbnailMetadata('bc', 'acct1_vid1', chosen=True,
+                              ttype='brightcove')]
+        
+        ThumbnailMetadata.save_all(self.thumbnails)
+        self.video_metadata = VideoMetadata(
+            'acct1_vid1',tids=[x.key for x in self.thumbnails])
+        self.video_metadata.save()
+        self.mastermind.update_video_info(self.video_metadata, self.thumbnails)
+
+    def test_db_when_experiment_running(self):
+        video = VideoMetadata.get('acct1_vid1')
+        thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
+        directive = dict([(x.key, x.serving_frac) for x in thumbs])
+        self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
+                         ['n2', 'ctr', 'bc', 'n1'])
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+        for val in directive.values():
+            self.assertGreater(val, 0.0)
+            
+        self.assertEqual(video.experiment_state,
+                         neondata.ExperimentState.RUNNING)
+        self.assertGreater(video.experiment_value_remaining,
+                           0.10)
+
+    def test_db_experiment_disabled(self):
+        self.mastermind.update_video_info(self.video_metadata, self.thumbnails,
+                                          False)
+
+        video = VideoMetadata.get('acct1_vid1')
+        thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
+        directive = dict([(x.key, x.serving_frac) for x in thumbs])
+        self.assertEqual(directive, {'bc':True, 'n1':0.0, 'n2':0.0,
+                                     'ctr':0.0})
+        self.assertEqual(video.experiment_state,
+                         neondata.ExperimentState.RUNNING)
+            
 
 if __name__ == '__main__':
     utils.neon.InitNeonTest()
