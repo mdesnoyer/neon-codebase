@@ -112,7 +112,7 @@ class DBConnection(object):
         self.blocking_conn.flushdb()
 
     @classmethod
-    def update_instance(cls, cname):
+    def update_instance(cls,cname):
         ''' Method to update the connection object in case of 
         db config update '''
         if cls._singleton_instance.has_key(cname):
@@ -351,7 +351,29 @@ def id_generator(size=32,
     return ''.join(random.choice(chars) for x in range(size))
 
 ##############################################################################
+## Enum types
+############################################################################## 
 
+class ThumbnailType(object):
+    ''' Thumbnail type enumeration '''
+    NEON        = "neon"
+    CENTERFRAME = "centerframe"
+    BRIGHTCOVE  = "brightcove"
+    OOYALA      = "ooyala"
+    RANDOM      = "random"
+    FILTERED    = "filtered"
+    DEFAULT     = "default" #sent via api request
+    CUSTOMUPLOAD = "customupload" #uploaded by the customer/editor
+
+class ExperimentState:
+    '''A class that acts like an enum for the state of the experiment.'''
+    UNKNOWN = 'unknown'
+    RUNNING = 'running'
+    COMPLETE = 'complete'
+    DISABLED = 'disabled'
+    OVERRIDE = 'override' # Experiment has be manually overridden
+
+##############################################################################
 class StoredObject(object):
     '''Abstract class to represent an object that is stored in the database.
 
@@ -360,6 +382,15 @@ class StoredObject(object):
     '''
     def __init__(self, key):
         self.key = key
+
+    def __str__(self):
+        return str(self.__dict__)
+
+    def __repr__(self):
+        return str(self)
+
+    def __cmp__(self, other):
+        return cmp(self.__dict__, other.__dict__)
 
     def to_json(self):
         '''Returns a json version of the object'''
@@ -457,29 +488,68 @@ class StoredObject(object):
         Example usage:
         SoredObject.modify('thumb_a', lambda thumb: thumb.update_phash())
         '''
+        def _process_one(d):
+            val = d[key]
+            if val is not None:
+                func(val)
+
+        if callback:
+            return cls.modify_many([key], _process_one,
+                                   callback=lambda d: callback(d[key]))
+        else:
+            updated_d = cls.modify_many([key], _process_one)
+            return updated_d[key]
+
+    @classmethod
+    def modify_many(cls, keys, func, callback=None):
+        '''Allows you to modify objects in the database atomically.
+
+        While in func, you have a lock on the objects so you are
+        guaranteed for them not to change. The objects are
+        automatically saved at the end of func.
+        
+        Inputs:
+        func - Function that takes a single parameter (dictionary of key -> object being edited)
+        keys - List of keys of the objects to modify
+
+        Returns: A dictionary of {key -> updated object}. The updated
+        object could be None if it wasn't in the database and thus
+        couldn't be modified
+
+        Example usage:
+        SoredObject.modify(['thumb_a'], 
+          lambda d: thumb.update_phash() for thumb in d.iteritems())
+        '''
         def _getandset(pipe):
-            json_data = pipe.get(key)
+            items = pipe.mget(keys)
             pipe.multi()
 
-            if json_data is None:
-                _log.error('Could not get redis object: %s' % key)
-                return None
-            
-            obj = cls._create(key, json_data)
+            mappings = {}
+            for key, item in zip(keys, items):
+                if item is None:
+                    _log.error('Could not get redis object: %s' % key)
+                    mappings[key] = None
+                else:
+                    mappings[key] = cls._create(key, item)
             try:
-                func(obj)
+                func(mappings)
             finally:
-                pipe.set(key, obj.to_json())
-            return obj
+                to_set = {}
+                for key, obj in mappings.iteritems():
+                    if obj is not None:
+                        to_set[key] = obj.to_json()
+                if len(to_set) > 0:        
+                    pipe.mset(to_set)
+            return mappings
 
         db_connection = DBConnection(cls)
         if callback:
-            return db_connection.conn.transaction(_getandset, key,
+            return db_connection.conn.transaction(_getandset, *keys,
                                                   callback=callback,
                                                   value_from_callable=True)
         else:
             return db_connection.blocking_conn.transaction(
-                _getandset, key, value_from_callable=True)
+                _getandset, *keys, value_from_callable=True)
             
     @classmethod
     def save_all(cls, objects, callback=None):
@@ -516,6 +586,69 @@ class StoredObject(object):
         '''Clear the database that contains objects of this type '''
         db_connection = DBConnection(cls)
         db_connection.clear_db()
+
+class NamespacedStoredObject(StoredObject):
+    '''An abstract StoredObject that is namespaced by its classname.'''
+    def __init__(self, key):
+        super(NamespacedStoredObject, self).__init__(
+            self.__class__.format_key(key))
+
+    @classmethod
+    def format_key(cls, key):
+        ''' Format the database key with a class specific prefix '''
+        return cls.__name__.lower() + '_%s' % key
+
+    @classmethod
+    def get(cls, key, callback=None):
+        '''Return the object for a given key.'''
+        return super(NamespacedStoredObject, cls).get(
+            cls.format_key(key),
+            callback=callback)
+
+    @classmethod
+    def get_many(cls, keys, callback=None):
+        '''Returns the list of objects from a list of keys.'''
+        return super(NamespacedStoredObject, cls).get_many(
+            [cls.format_key(x) for x in keys],
+            callback=callback)
+
+    @classmethod
+    def get_all(cls, callback=None):
+        ''' Get all the TrackerAccountIDMapper objects in the database
+
+        Inputs:
+        callback - Optional callback function to call
+
+        Returns:
+        A list of cls objects.
+        '''
+        retval = []
+        db_connection = DBConnection(cls)
+
+        def process(keys):
+            super(NamespacedStoredObject, cls).get_many(keys,
+                                                        callback=callback)
+            
+        if callback:
+            db_connection.conn.keys(cls.__name__.lower() + "_*",
+                                    callback=process)
+        else:
+            keys = db_connection.blocking_conn.keys(cls.__name__.lower()+"_*")
+            return  super(NamespacedStoredObject, cls).get_many(keys)
+
+    @classmethod
+    def modify(cls, key, func, callback=None):
+        super(NamespacedStoredObject, cls).modify(
+            cls.format_key(key),
+            func,
+            callback=callback)
+
+    @classmethod
+    def modify_many(cls, keys, func, callback=None):
+        super(NamespacedStoredObject, cls).modify(
+            [cls.format_key(x) for x in keys],
+            func,
+            callback=callback)
 
 class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
@@ -589,7 +722,7 @@ class TrackerAccountID(object):
         ''' Generate a CRC 32 for Tracker Account ID'''
         return abs(binascii.crc32(_input))
 
-class TrackerAccountIDMapper(StoredObject):
+class TrackerAccountIDMapper(NamespacedStoredObject):
     '''
     Maps a given Tracker Account ID to API Key 
 
@@ -599,47 +732,13 @@ class TrackerAccountIDMapper(StoredObject):
     PRODUCTION = "production"
 
     def __init__(self, tai, api_key=None, itype=None):
-        super(TrackerAccountIDMapper, self).__init__(
-            self.__class__.format_key(tai))
+        super(TrackerAccountIDMapper, self).__init__(tai)
         self.value = api_key 
         self.itype = itype
 
     def get_tai(self):
         '''Retrieves the TrackerAccountId of the object.'''
         return self.key.partition('_')[2]
-
-    @classmethod
-    def format_key(cls, tai):
-        ''' format db key '''
-        return cls.__name__.lower() + '_%s' % tai
-
-    @classmethod
-    def get(cls, tai, callback=None):
-        return StoredObject.get(cls.format_key(tai),
-                                callback=callback)
-
-    @classmethod
-    def get_all(cls, callback=None):
-        ''' Get all the TrackerAccountIDMapper objects in the database
-
-        Inputs:
-        callback - Optional callback function to call
-
-        Returns:
-        A list of cls objects.
-        '''
-        retval = []
-        db_connection = DBConnection(cls)
-
-        def process(keys):
-            cls.get_many(keys, callback=callback)
-            
-        if callback:
-            db_connection.conn.keys(cls.__name__.lower() + "_*",
-                                    callback=process)
-        else:
-            keys = db_connection.blocking_conn.keys(cls.__name__.lower()+"_*")
-            return cls.get_many(keys)
     
     @classmethod
     def get_neon_account_id(cls, tai, callback=None):
@@ -671,7 +770,7 @@ class NeonUserAccount(object):
     @integrations: all the integrations associated with this acccount
 
     '''
-    def __init__(self, a_id, api_key=None):
+    def __init__(self, a_id, api_key=None, default_width=None):
         self.account_id = a_id
         self.neon_api_key = NeonApiKey.generate(a_id) if api_key is None \
                             else api_key
@@ -682,6 +781,9 @@ class NeonUserAccount(object):
         self.videos = {} #phase out,should be stored in neon integration
         # a mapping from integration id -> get_ovp() string
         self.integrations = {}
+
+        # The default thumbnail width to serve for this account
+        self.default_width = default_width
 
     def add_platform(self, platform):
         '''Adds a platform object to the account.'''
@@ -802,6 +904,62 @@ class NeonUserAccount(object):
         if nc:
             return na.tracker_account_id  
 
+
+class ExperimentStrategy(StoredObject):
+    '''Stores information about the experimental strategy to use.
+
+    Keyed by account_id (aka api_key)
+    '''
+    SEQUENTIAL='sequential'
+    MULTIARMED_BANDIT='multi_armed_bandit'
+    
+    def __init__(self, account_id, exp_frac=0.01,
+                 holdback_frac=0.01,
+                 only_exp_if_chosen=False,
+                 always_show_baseline=True,
+                 baseline_type=ThumbnailType.CENTERFRAME,
+                 chosen_thumb_overrides=False,
+                 override_when_done=True,
+                 experiment_type=MULTIARMED_BANDIT):
+        super(ExperimentStrategy, self).__init__(account_id)
+        # Fraction of traffic to experiment on.
+        self.exp_frac = exp_frac
+        
+        # Fraction of traffic in the holdback experiment once
+        # convergence is complete
+        self.holdback_frac = holdback_frac
+
+        # If true, an experiment will only be run if a thumb is
+        # explicitly chosen. This and chosen_thumb_overrides had
+        # better not both be true.
+        self.only_exp_if_chosen = only_exp_if_chosen
+
+        # If True, a baseline of baseline_type will always be used in the
+        # experiment. The other baseline could be an editor generated
+        # one, which is always shown if it's there.
+        self.always_show_baseline = always_show_baseline
+
+        # The type of thumbnail to consider the baseline
+        self.baseline_type = baseline_type
+
+        # If true, if there is a chosen thumbnail, it automatically
+        # takes 100% of the traffic and the experiment is shutdown.
+        self.chosen_thumb_overrides =  chosen_thumb_overrides
+
+        # If true, then when the experiment has converged on a best
+        # thumbnail, it overrides the majority one and leaves a
+        # holdback. If this is false, when the experiment is done, we
+        # will only run the best thumbnail in the experiment
+        # percentage. This is useful for pilots that are hidden from
+        # the editors.
+        self.override_when_done = override_when_done
+
+        # The strategy used to run the experiment phase
+        self.experiment_type = experiment_type
+
+    def __eq__(self, other):
+        return self.__dict__ == other.__dict__
+         
 
 class AbstractPlatform(object):
     ''' Abstract Platform/ Integration class '''
@@ -1759,18 +1917,7 @@ class YoutubeApiRequest(NeonApiRequest):
 
 ###############################################################################
 ## Thumbnail store T_URL => TID => Metadata
-###############################################################################
-
-class ThumbnailType(object):
-    ''' Thumbnail type enumeration '''
-    NEON        = "neon"
-    CENTERFRAME = "centerframe"
-    BRIGHTCOVE  = "brightcove"
-    OOYALA      = "ooyala"
-    RANDOM      = "random"
-    FILTERED    = "filtered"
-    DEFAULT     = "default" #sent via api request
-    CUSTOMUPLOAD = "customupload" #uploaded by the customer/editor 
+############################################################################### 
 
 class ThumbnailID(AbstractHashGenerator):
     '''
@@ -1816,6 +1963,57 @@ class ThumbnailMD5(AbstractHashGenerator):
             return ThumbnailMD5.generate_from_image(_input)
 
 
+class ThumbnailServingURLs(NamespacedStoredObject):
+    '''
+    Keeps track of the URLs to serve for each thumbnail id.
+
+    Specifically, maps:
+
+    thumbnail_id -> { (width, height) -> url }
+    '''
+
+    def __init__(self, thumbnail_id, size_map={}):
+        super(ThumbnailServingURLs, self).__init__(thumbnail_id)
+        self.size_map = size_map
+
+    def get_thumbnail_id(self):
+        '''Return the thumbnail id for this mapping.'''
+        return self.key.partition('_')[2]
+
+    def add_serving_url(self, url, width, height):
+        '''Adds a url to serve for a given width and height.
+
+        If there was a previous entry, it is overwritten.
+        '''
+        self.size_map[(width, height)] = url
+
+    def get_serving_url(self, width, height):
+        '''Get the serving url for a given width and height.
+
+        Raises a KeyError if there isn't one.
+        '''
+        return self.size_map[(width, height)]
+
+    def to_json(self):
+        new_dict = copy.copy(self.__dict__)
+        new_dict['size_map'] = self.size_map.items()
+        return json.dumps(new_dict)
+
+    @classmethod
+    def _create(cls, key, json_data):
+        if json_data:
+            data_dict = json.loads(json_data)
+            #create basic object
+            obj = cls(key)
+
+            #populate the object dictionary
+            for key, value in data_dict.iteritems():
+                obj.__dict__[key] = value
+
+            # Load in the size map as a dictionary
+            obj.size_map = dict([[tuple(x[0]), x[1]] for x in obj.size_map])
+            return obj
+        
 class ThumbnailURLMapper(object):
     '''
     Schema to map thumbnail url to thumbnail ID. 
@@ -1875,7 +2073,6 @@ class ThumbnailURLMapper(object):
         db_connection = DBConnection(cls)
         db_connection.clear_db()
 
-
 class ThumbnailMetadata(StoredObject):
     '''
     Class schema for Thumbnail information.
@@ -1885,7 +2082,8 @@ class ThumbnailMetadata(StoredObject):
     def __init__(self, tid, internal_vid, urls=None, created=None,
                  width=None, height=None, ttype=None,
                  model_score=None, model_version=None, enabled=True,
-                 chosen=False, rank=None, refid=None, phash=None):
+                 chosen=False, rank=None, refid=None, phash=None,
+                 serving_frac=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
         self.urls = urls  # List of all urls associated with single image
@@ -1901,6 +2099,8 @@ class ThumbnailMetadata(StoredObject):
         #TODO: remove refid. It's not necessary
         self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
         self.phash = phash # Perceptual hash of the image. None if unknown
+        # Fraction of traffic currently being served by this thumbnail.
+        self.seving_frac = serving_frac 
 
     def update_phash(self, image):
         '''Update the phash from a PIL image.'''
@@ -2050,7 +2250,9 @@ class VideoMetadata(StoredObject):
     
     def __init__(self, video_id, tids=None, request_id=None, video_url=None,
                  duration=None, vid_valence=None, model_version=None,
-                 i_id=None, frame_size=None):
+                 i_id=None, frame_size=None, testing_enabled=True,
+                 experiment_state=ExperimentState.UNKNOWN,
+                 experiment_value_remaining=None):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids 
         self.url = video_url 
@@ -2060,6 +2262,14 @@ class VideoMetadata(StoredObject):
         self.job_id = request_id
         self.integration_id = i_id
         self.frame_size = frame_size #(w,h)
+        # Is A/B testing enabled for this video?
+        self.testing_enabled = testing_enabled
+        self.experiment_state = \
+          experiment_state if testing_enabled else ExperimentState.DISABLED
+
+        # For the multi-armed bandit strategy, the value remaining
+        # from the monte carlo analysis.
+        self.experiment_value_remaining = experiment_value_remaining
 
     def get_id(self):
         ''' get internal video id '''
