@@ -101,6 +101,14 @@ class Mastermind(object):
         # For thread safety
         self.lock = threading.RLock()
 
+        # Counter for the number of pending modify calls to the database
+        self.pending_modifies = 0
+
+    def _incr_pending_modify(self, count):
+        '''Safely increment the number of pending modifies by count.'''
+        with self.lock:
+            self.pending_modifies += count
+
     def get_directives(self, video_ids=None):
         '''Returns a generator for the serving directives for all the video ids
 
@@ -183,8 +191,8 @@ class Mastermind(object):
                (video_id, thumb_id, loads, views, clicks, plays)
         
         '''
-        with self.lock:
-            for video_id, thumb_id, loads, views, clicks, plays in data:
+        for video_id, thumb_id, loads, views, clicks, plays in data:
+            with self.lock:
                 # Load up all the data
                 thumb = self._find_thumb(video_id, thumb_id)
                 if thumb is None:
@@ -203,6 +211,11 @@ class Mastermind(object):
         account_id - Account id that may be updated
         strategy - A neondata.ExperimentStrategy object
         '''
+        if strategy is None or account_id is None:
+            _log.error('Invalid account id %s and strategy: %s' %
+                       (account_id, strategy))
+            return
+        
         with self.lock:
             try:
                 old_strategy = self.experiment_strategy[account_id]
@@ -255,20 +268,25 @@ class Mastermind(object):
             pass
         
         # Update the serving percentages in the database
+        self._incr_pending_modify(1)
         def _set_serving_fracs(d):
             for thumb_id, new_frac in new_directive.iteritems():
                 obj = d[thumb_id]
                 if obj is not None:
                     obj.serving_frac = new_frac
-        neondata.ThumbnailMetadata.modify_many(new_directive.keys(),
-                                               _set_serving_fracs,
-                                               callback=lambda x: x)
+        neondata.ThumbnailMetadata.modify_many(
+            new_directive.keys(),
+            _set_serving_fracs,
+            callback=lambda x: self._incr_pending_modify(-1))
+        
         def _update_experiment_info(x):
             x.experiment_state = experiment_state
             if value_left is not None:
                 x.experiment_value_remaining = value_left
-        neondata.VideoMetadata.modify(video_id, _update_experiment_info,
-                                      callback=lambda x: x)
+        self._incr_pending_modify(1)
+        neondata.VideoMetadata.modify(
+            video_id, _update_experiment_info,
+            callback=lambda x: self._incr_pending_modify(-1))
             
         self.serving_directive[video_id] = ((video_info.account_id,
                                              video_id),

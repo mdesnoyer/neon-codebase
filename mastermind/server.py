@@ -15,10 +15,10 @@ from mastermind.core import DistributionType, VideoInfo, ThumbnailInfo, \
      Mastermind
 from datetime import datetime
 from mastermind import directive_pusher
+import impala.dbapi
+import impala.error
 import json
 import logging
-import MySQLdb as sqldb
-import stats.db
 from supportServices import neondata
 import time
 import threading
@@ -41,20 +41,13 @@ define('bc_controller_url', default=None,
 define('youtube_controller_url', default=None,
        help='URL to send the directives to the youtube ab controller')
 
-# Stats database options
-# TODO(mdesnoyer): Remove the default username and password after testing
-define('stats_host',
-       default='stats.cnvazyzlgq2v.us-east-1.rds.amazonaws.com',
+# Stats database options. It is an Impala database
+define('stats_host', default='54.197.233.118',
        help='Host of the stats database')
-define('stats_port', type=int, default=3306,
+define('stats_port', type=int, default=21050,
        help='Port to the stats database')
-define('stats_user', default='mastermind',
-       help='User for the stats database')
-define('stats_pass', default='pignar4iuf434',
-       help='Password for the stats database')
-define('stats_db', default='stats_dev', help='Stats database to connect to')
 define('stats_db_polling_delay', default=57, type=float,
-       help='Number of seconds between polls of the video db')
+       help='Number of seconds between polls of the stats db')
 
 # Video db options
 define('video_db_polling_delay', default=300, type=float,
@@ -94,7 +87,6 @@ class VideoDBWatcher(threading.Thread):
                  activity_watcher=utils.ps.ActivityWatcher()):
         super(VideoDBWatcher, self).__init__(name='VideoDBWatcher')
         self.mastermind = mastermind
-        self.ab_manager = ab_manager
         self.daemon = True
         self.activity_watcher = activity_watcher
 
@@ -118,7 +110,14 @@ class VideoDBWatcher(threading.Thread):
         self.is_loaded.wait()
 
     def _process_db_data(self):
+        _log.info('Polling the video database')
+        
         for platform in neondata.AbstractPlatform.get_all_instances():
+            # Update the experimental strategy for the account
+            self.mastermind.update_experiment_strategy(
+                platform.neon_api_key,
+                neondata.ExperimentStrategy.get(platform.neon_api_key))
+            
             video_ids = platform.get_internal_video_ids()
             all_video_metadata = neondata.VideoMetadata.get_many(video_ids)
             for video_id, video_metadata in zip(video_ids, all_video_metadata):
@@ -130,27 +129,21 @@ class VideoDBWatcher(threading.Thread):
                 thumbnails = []
                 data_missing = False
                 thumbs = neondata.ThumbnailMetadata.get_many(
-                                        video_metadata.thumbnail_ids)
+                    video_metadata.thumbnail_ids)
                 for thumb_id, meta in zip(video_metadata.thumbnail_ids, thumbs):
                     if meta is None:
                         _log.error('Could not find metadata for thumb %s' %
                                    thumb_id)
                         data_missing = True
                     else:
-                        thumbnails.append(ThumbnailInfo.from_db_data(meta))
+                        thumbnails.append(meta)
 
                 if data_missing:
                     continue
 
-                self.ab_manager.register_video_distribution(
-                    video_id, DistributionType.fromString(platform.get_ovp()))
-
-                directive = self.mastermind.update_video_info(video_id,
-                                                              platform.abtest,
-                                                              thumbnails)
-                if directive:
-                    self.ab_manager.send(directive)
-
+                self.mastermind.update_video_info(video_metadata,
+                                                  thumbnails,
+                                                  platform.abtest)
         
         self.is_loaded.set()
 
@@ -174,8 +167,8 @@ class StatsDBWatcher(threading.Thread):
         self.is_loaded.wait()
 
     def run(self):
-        _log.info('Statistics database is at host=%s port=%i database=%s' %
-                  (options.stats_host, options.stats_port, options.stats_db))
+        _log.info('Statistics database is at host=%s port=%i' %
+                  (options.stats_host, options.stats_port))
         while True:
             try:
                 with self.activity_watcher.activate():
@@ -189,50 +182,45 @@ class StatsDBWatcher(threading.Thread):
 
     def _process_db_data(self):
         try:
-            conn = sqldb.connect(
-                user=options.stats_user,
-                passwd=options.stats_pass,
-                host=options.stats_host,
-                port=options.stats_port,
-                db=options.stats_db)
-        except sqldb.Error as e:
+            conn = impala.dbapi.connect(host=options.stats_host,
+                                        port=options.stats_port)
+        except exception as e:
             _log.exception('Error connecting to stats db: %s' % e)
             return
 
         cursor = conn.cursor()
+
+        _log.info('Polling the stats database')
         
         # See if there are any new entries
+        curtime = datetime.utcnow()
         stats.db.execute(
             cursor,
-            '''SELECT logtime FROM last_update WHERE tablename = %s''',
-            (stats.db.get_hourly_events_table(),))
+            '''SELECT max(serverTime) FROM videoplays WHERE 
+            mnth >= %i and yr >= %i''',
+            (curtime.month, curtime.year))
         result = cursor.fetchall()
         if len(result) == 0:
             _log.error('Cannot determine when the database was last updated')
             self.is_loaded.set()
             return
         cur_update = result[0][0]
-        if isinstance(cur_update, basestring):
-            cur_update = datetime.strptime(cur_update, '%Y-%m-%d %H:%M:%S')
         if self.last_update is None or cur_update > self.last_update:
-            _log.info('The stats database was updated at %s. Processing' 
-                      % cur_update)
+            _log.info('The newest entry in the stats database is from %s. '
+                      'Processing' % 
+                      datetime.utcfromtimestamp(cur_update).isoformat())
 
-            # The database was updated, so process the new state.
-            cursor.execute('''SELECT thumbnail_id,
-                           sum(loads), sum(clicks) 
-                           FROM %s group by thumbnail_id''' %
+            # The database was updated, so process the new state for
+            # views in the last month.
+            last_month = datetime.utcfromtimestamp(cur_update - 60*60*24*28)
+            cursor.execute('''SELECT tai, thumbnail_id, count(%s), count(%s)
+                           FROM EventSequences where %s is not null and yr >= %i and mnth >= %i group by tai, thumbnail_id''' %
                 stats.db.get_hourly_events_table())
-            result = cursor.fetchall()
-            if result:
-                data = ((self._find_video_id(x[0]), x[0], x[1], x[2]) 
-                        for x in result)
+
+                data = ((self._find_video_id(x[0]), x[0], x[1], x[2])
+                        for x in cursor)
                     
-                directives = self.mastermind.update_stats_info(
-                    (cur_update - datetime(1970,1, 1)).total_seconds(),
-                    data)
-                for directive in directives:
-                    self.ab_manager.send(directive)
+                self.mastermind.update_stats_info(data)
                     
         self.last_update = cur_update
         self.is_loaded.set()
@@ -245,43 +233,6 @@ class StatsDBWatcher(threading.Thread):
             video_id = neondata.ThumbnailMetadata.get_video_id(thumb_id)
             self.video_id_cache[thumb_id] = video_id
         return video_id
-
-class ApplyDelta(tornado.web.RequestHandler):
-    '''Handle the request to apply a delta of the statistics.
-
-    Expects a POST request containing json lines. Each line is of the form:
-
-    {"d": [t, vid, tid, dload, dclick]}
-    
-    t - UTC timestamp of seconds since epoch
-    vid - The video id
-    tid - The thumbnail id
-    dload - The number of loads in this delta
-    dclick - The number of clicks in this delta
-    '''
-    def initialize(self, mastermind, ab_manager,
-                   activity_watcher=utils.ps.ActivityWatcher()):
-        self.mastermind = mastermind
-        self.ab_manager = ab_manager
-        self.activity_watcher = activity_watcher
-        
-    def post(self):
-        with self.activity_watcher.activate():
-            for line in self.request.body:
-                try:
-                    parsed_data = json.loads(line)
-                    try:
-                        parsed_args = parsed_data['d']
-                    except KeyError:
-                        _log.warn('Invalid delta format: %s' % line)
-                        continue
-                    directive = self.mastermind.incorporate_delta_stats(
-                        *parsed_args)
-                    if directive:
-                        self.ab_manager.send(directive)
-                except TypeError:
-                    _log.warn('Problem using delta from: %s' % line)
-            self.finish()
     
 
 class GetDirectives(tornado.web.RequestHandler):
@@ -336,9 +287,6 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
 
     _log.info('Starting server on port %i' % options.port)
     application = tornado.web.Application([
-        (r'/delta', ApplyDelta,
-         dict(mastermind=mastermind, ab_manager=ab_manager,
-              activity_watcher=activity_watcher)),
         (r'/get_directives', GetDirectives,
          dict(mastermind=mastermind, ab_manager=ab_manager,
               activity_watcher=activity_watcher))])

@@ -906,7 +906,7 @@ class NeonUserAccount(object):
             return na.tracker_account_id  
 
 
-class ExperimentStrategy(StoredObject):
+class ExperimentStrategy(NamespacedStoredObject):
     '''Stores information about the experimental strategy to use.
 
     Keyed by account_id (aka api_key)
@@ -957,9 +957,6 @@ class ExperimentStrategy(StoredObject):
 
         # The strategy used to run the experiment phase
         self.experiment_type = experiment_type
-
-    def __eq__(self, other):
-        return self.__dict__ == other.__dict__
          
 
 class AbstractPlatform(object):

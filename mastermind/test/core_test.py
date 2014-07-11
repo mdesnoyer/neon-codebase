@@ -27,6 +27,8 @@ import test_utils.redis
 import utils.neon
 import unittest
 
+_log = logging.getLogger(__name__)
+
 def build_thumb(metadata=neondata.ThumbnailMetadata(None, None),
                 loads=0, views=0, clicks=0, plays=0, phash=None):
     if phash is None:
@@ -65,6 +67,7 @@ class TestObjects(test_utils.neontest.TestCase):
     
 class TestCurrentServingDirective(test_utils.neontest.TestCase):
     def setUp(self):
+        super(TestCurrentServingDirective, self).setUp()
         numpy.random.seed(1984934)
         self.mastermind = Mastermind()
 
@@ -801,6 +804,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
+        super(TestUpdatingFuncs, self).setUp()
         numpy.random.seed(1984934)
         self.mastermind = Mastermind()
 
@@ -820,6 +824,13 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def test_no_data_yet(self):
         self.assertItemsEqual(self.mastermind.get_directives(['acct2_vid1']),
                               [])
+
+    def test_update_with_empty_experiment_strategy(self):
+        with self.assertLogExists(logging.ERROR,
+                                  'Invalid account id.* and strategy'):
+            self.mastermind.update_experiment_strategy('acct1', None)
+
+        self.assertIsNotNone(self.mastermind.experiment_strategy['acct1'])
 
     def test_update_experiment_strategy(self):        
         with self.assertLogExists(logging.INFO, 'strategy has changed'):
@@ -935,6 +946,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
     
 class TestStatUpdating(test_utils.neontest.TestCase):
     def setUp(self):
+        super(TestStatUpdating, self).setUp()
         numpy.random.seed(1984934)
         self.mastermind = Mastermind()
 
@@ -955,7 +967,6 @@ class TestStatUpdating(test_utils.neontest.TestCase):
             [ThumbnailMetadata('v2t1', 'acct1_vid2', ttype='centerframe'),
              ThumbnailMetadata('v2t2', 'acct1_vid2', ttype='neon', rank=0),
              ThumbnailMetadata('v2t3', 'acct1_vid2', ttype='neon', rank=3)])
-
     def test_initial_stats_update(self):
         self.mastermind.update_stats_info([
             ('acct1_vid1', 'v1t1', 1000, 1000, 5, 5),
@@ -1008,8 +1019,9 @@ class TestStatUpdating(test_utils.neontest.TestCase):
                 ('acct1_vid1', 'v1t_where', 1000, 1000, 5, 5)
                 ])
 
-class TestStatusUpdatesInDb(test_utils.neontest.TestCase):
+class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
     def setUp(self):
+        super(TestStatusUpdatesInDb, self).setUp()
         redis = test_utils.redis.RedisServer()
         redis.start()
         self.addCleanup(redis.stop)
@@ -1038,7 +1050,21 @@ class TestStatusUpdatesInDb(test_utils.neontest.TestCase):
         self.video_metadata.save()
         self.mastermind.update_video_info(self.video_metadata, self.thumbnails)
 
+
+    def _wait_for_db_updates(self, timeout=5, poll_interval=0.1):
+        cnt = 0
+        while 1:
+            try:
+                self.wait(timeout=0.1)
+            except self.failureException:
+                if self.mastermind.pending_modifies == 0:
+                    return
+                cnt += 1
+                if cnt > (timeout / poll_interval):
+                    raise
+
     def test_db_when_experiment_running(self):
+        self._wait_for_db_updates()
         video = VideoMetadata.get('acct1_vid1')
         thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
         directive = dict([(x.key, x.serving_frac) for x in thumbs])
@@ -1056,6 +1082,7 @@ class TestStatusUpdatesInDb(test_utils.neontest.TestCase):
     def test_db_experiment_disabled(self):
         self.mastermind.update_video_info(self.video_metadata, self.thumbnails,
                                           False)
+        self._wait_for_db_updates()
 
         video = VideoMetadata.get('acct1_vid1')
         thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
@@ -1068,6 +1095,7 @@ class TestStatusUpdatesInDb(test_utils.neontest.TestCase):
     def test_db_experiment_finished(self):
         self.mastermind.update_stats_info([
             ('acct1_vid1', 'n2', 5000, 5000, 200, 200)])
+        self._wait_for_db_updates()
 
         video = VideoMetadata.get('acct1_vid1')
         thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
@@ -1084,7 +1112,7 @@ class TestStatusUpdatesInDb(test_utils.neontest.TestCase):
             'acct1', ExperimentStrategy('acct1', exp_frac=1.0,
                                         holdback_frac=0.02,
                                         chosen_thumb_overrides=True))
-
+        self._wait_for_db_updates()
         
         video = VideoMetadata.get('acct1_vid1')
         thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
