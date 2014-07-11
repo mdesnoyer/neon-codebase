@@ -45,14 +45,11 @@ class VideoInfo(object):
 
 class ThumbnailInfo(object):
     '''Container to store information about a thumbnail.'''
-    def __init__(self, metadata, loads=0, views=0, clicks=0, plays=0):
+    def __init__(self, metadata, impressions=0, conversions=0):
         self.metadata = metadata # neondata.ThumbnailMetadata
         self.id = self.metadata.key # Thumbnail id
-        self.loads = loads # no. of loads
-        self.views = views # no. of views
-        self.clicks = clicks # no. of clicks
-        self.plays = plays # no. of video plays
-        
+        self.impressions = impressions # no. of impressions
+        self.conversions = conversions # no. of conversions
 
     def __str__(self):
         return strutils.full_object_str(self)
@@ -70,10 +67,8 @@ class ThumbnailInfo(object):
                        (self.id, other_info.id))
             return self
 
-        self.loads = other_info.loads
-        self.views = other_info.views
-        self.clicks = other_info.clicks
-        self.plays = other_info.plays
+        self.impressions = other_info.impressions
+        self.conversions = other_info.conversions
         return self
 
 class Mastermind(object):
@@ -188,18 +183,18 @@ class Mastermind(object):
 
         Inputs:
         data - generator that creates a stream of 
-               (video_id, thumb_id, loads, views, clicks, plays)
+               (video_id, thumb_id, loads, impressions, conversions, plays)
         
         '''
-        for video_id, thumb_id, loads, views, clicks, plays in data:
+        for video_id, thumb_id, loads, impressions, conversions, plays in data:
             with self.lock:
                 # Load up all the data
                 thumb = self._find_thumb(video_id, thumb_id)
                 if thumb is None:
                     continue
                 thumb.loads = float(loads)
-                thumb.views = float(views)
-                thumb.clicks = float(clicks)
+                thumb.impressions = float(impressions)
+                thumb.conversions = float(conversions)
                 thumb.plays = float(plays)
 
                 self._calculate_new_serving_directive(video_id)
@@ -469,11 +464,11 @@ class Mastermind(object):
         # Now determine the serving percentages for each valid bandit
         # based on a prior of its model score and its measured ctr.
         bandit_ids = [x.id for x in valid_bandits]
-        conversions = dict([(x.id, self._get_prior_conversions(x) + x.clicks)
+        conversions = dict([(x.id, self._get_prior_conversions(x) + x.conversions)
                              for x in valid_bandits])
         impressions = dict([(x.id, Mastermind.PRIOR_IMPRESSION_SIZE * 
                              (1 - Mastermind.PRIOR_CTR) + 
-                             x.views - x.clicks)
+                             x.impressions - x.conversions)
                              for x in valid_bandits])
 
         # Run the monte carlo series
@@ -485,10 +480,10 @@ class Mastermind(object):
         if non_exp_thumb is not None:
             mc_series.append(
                 spstats.beta.rvs(self._get_prior_conversions(non_exp_thumb) + 
-                                 non_exp_thumb.clicks,
+                                 non_exp_thumb.conversions,
                                  Mastermind.PRIOR_IMPRESSION_SIZE * 
                                  (1 - Mastermind.PRIOR_CTR) + 
-                                 non_exp_thumb.views - non_exp_thumb.clicks,
+                                 non_exp_thumb.impressions - non_exp_thumb.conversions,
                                  size=MC_SAMPLES))
 
         win_frac = np.array(np.bincount(np.argmax(mc_series, axis=0)),
@@ -498,11 +493,11 @@ class Mastermind(object):
 
         winner_idx = np.argmax(win_frac)
 
-        winner_views = None
+        winner_impressions = None
         if winner_idx == len(bandit_ids):
-            winner_views = non_exp_thumb.views
+            winner_impressions = non_exp_thumb.impressions
         else:
-            winner_views = valid_bandits[winner_idx].views
+            winner_impressions = valid_bandits[winner_idx].impressions
 
         # Determine the value remaining. This is equivalent to
         # determing that one of the other arms might beat the winner
@@ -512,8 +507,8 @@ class Mastermind(object):
         value_remaining = np.sort(lost_value)[0.95*MC_SAMPLES]
 
         if win_frac[winner_idx] >= 0.95:
-            # There is a winner. See if there were enough views to call it
-            if win_frac.shape[0] == 1 or winner_views >= 500:
+            # There is a winner. See if there were enough impressions to call it
+            if win_frac.shape[0] == 1 or winner_impressions >= 500:
                 # The experiment is done
                 experiment_state = neondata.ExperimentState.COMPLETE
                 try:
@@ -526,8 +521,8 @@ class Mastermind(object):
                         value_remaining)
 
             else:
-                # Only allow the winner to have 90% of the views
-                # because there aren't enough views to make a good
+                # Only allow the winner to have 90% of the impressions
+                # because there aren't enough impressions to make a good
                 # decision.
                 win_frac[winner_idx] = 0.90
                 other_idx = [x for x in range(win_frac.shape[0])
@@ -551,7 +546,8 @@ class Mastermind(object):
         
 
     def _get_prior_conversions(self, thumb_info):
-        '''Get the number of clicks we would expect based on the model score.'''
+        '''Get the number of conversions we would expect based on the model 
+        score.'''
         score = thumb_info.metadata.model_score
         if score is None or score < 1e-4:
             if thumb_info.metadata.chosen:

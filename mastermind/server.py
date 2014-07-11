@@ -209,14 +209,52 @@ class StatsDBWatcher(threading.Thread):
             _log.info('The newest entry in the stats database is from %s. '
                       'Processing' % 
                       datetime.utcfromtimestamp(cur_update).isoformat())
-
-            # The database was updated, so process the new state for
-            # views in the last month.
             last_month = datetime.utcfromtimestamp(cur_update - 60*60*24*28)
-            cursor.execute('''SELECT thumbnail_id, count(%s), count(%s)
-                           FROM EventSequences where %s is not null and 
-                           yr >= %i and mnth >= %i group by thumbnail_id''' %
-                )
+            col_map = {
+                neondata.MetricTypes.LOADS: 'imloadclienttime',
+                neondata.MetricTypes.VIEWS: 'imvisclienttime',
+                neondata.MetricTypes.CLICKS: 'imclickclienttime'
+                neondata.MetricTypes.PLAYS: 'videoplayclienttime'
+                }
+
+            # We are going to walk through the db by tracker id
+            # because it is partitioned that way and it makes the
+            # calls faster
+            for tai_info in neondata.TrackerAccountIDMapper.get_all():
+                if (tai_info.itype != 
+                    neondata.TrackerAccountIDMapper.PRODUCTION):
+                    continue
+
+                # Build the query for all the data in the last month
+                strategy = neondata.ExperimentStrategy.get(tai_info.value)
+                if strategy.conversion_type == neondata.MeasurementType.PLAYS:
+                    query = (
+                        """select thumbnail_id, count({imp_type}), 
+                        sum(cast(imclickclienttime is not null and 
+                        (adplayclienttime is not null or 
+                        videoplayclienttime is not null) as int))
+                        from EventSequences where tai='{tai}' and 
+                        {imp_type} is not null 
+                        and yr >= {yr:d} and mnth >= {mnth:d}
+                        group by thumbnail_id""".format(
+                            imp_type=col_map[strategy.impression_type],
+                            tai=tai_info.get_tai(),
+                            yr=last_month.year,
+                            mnth=last_month.month))
+                else:
+                    query = (
+                        """select thumbnail_id, count({imp_type}), 
+                        count({conv_type})
+                        from EventSequences where tai='{tai}' and 
+                        {imp_type} is not null 
+                        and yr >= {yr:d} and mnth >= {mnth:d}
+                        group by thumbnail_id""".format(
+                            imp_type=col_map[strategy.impression_type],
+                            conv_type=col_map[strategy.conversion_type],
+                            tai=tai_info.get_tai(),
+                            yr=last_month.year,
+                            mnth=last_month.month))
+                cursor.execute(query)
 
                 data = ((self._find_video_id(x[0]), x[0], x[1], x[2])
                         for x in cursor)
@@ -225,6 +263,8 @@ class StatsDBWatcher(threading.Thread):
                     
         self.last_update = cur_update
         self.is_loaded.set()
+
+    def _
 
     def _find_video_id(self, thumb_id):
         '''Finds the video id for a thumbnail id.'''

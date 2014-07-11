@@ -30,12 +30,12 @@ import unittest
 _log = logging.getLogger(__name__)
 
 def build_thumb(metadata=neondata.ThumbnailMetadata(None, None),
-                loads=0, views=0, clicks=0, plays=0, phash=None):
+                impressions=0, conversions=0, phash=None):
     if phash is None:
         metadata.phash = numpy.random.randint(1<<30)
     else:
         metadata.phash = phash
-    return ThumbnailInfo(metadata, loads, views, clicks, plays)
+    return ThumbnailInfo(metadata, impressions, conversions)
 
 #TODO(mdesnoyer) what happens when a video is removed from the db?!?
 
@@ -57,13 +57,13 @@ class TestObjects(test_utils.neontest.TestCase):
         self.assertEqual(repr(video_info_1), repr(video_info_2))
 
     def test_update_stats_with_wrong_id(self):
-        thumb1 = ThumbnailInfo(ThumbnailMetadata('t1', 'v1'), loads=300)
-        thumb2 = ThumbnailInfo(ThumbnailMetadata('t2', 'v1'), loads=400)
+        thumb1 = ThumbnailInfo(ThumbnailMetadata('t1', 'v1'), impressions=300)
+        thumb2 = ThumbnailInfo(ThumbnailMetadata('t2', 'v1'), impressions=400)
 
         with self.assertLogExists(logging.ERROR,
                                   "Two thumbnail ids don't match"):
             self.assertEqual(thumb1.update_stats(thumb2), thumb1)
-        self.assertEqual(thumb1.loads, 300)
+        self.assertEqual(thumb1.impressions, 300)
     
 class TestCurrentServingDirective(test_utils.neontest.TestCase):
     def setUp(self):
@@ -237,8 +237,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertEqual(directive, {'bc': 0.99, 'ctr': 0.0, 'n1': 0.01})
 
         # When the baseline wins, it should be shown for 100%
-        video_info.thumbnails[1].clicks = 5000
-        video_info.thumbnails[1].views = 5000
+        video_info.thumbnails[1].conversions = 5000
+        video_info.thumbnails[1].impressions = 5000
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'bc': 1.0, 'ctr': 0.0, 'n1': 0.0})
@@ -260,17 +260,17 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertEqual(directive, {'bc': 0.99, 'ctr': 0.0, 'n1': 0.01})
 
         # When the baseline wins, it should be shown for all 100%
-        video_info.thumbnails[2].clicks = 5000
-        video_info.thumbnails[2].views = 5000
+        video_info.thumbnails[2].conversions = 5000
+        video_info.thumbnails[2].impressions = 5000
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'bc': 0.0, 'ctr': 0.0, 'n1': 1.0})
 
         # If the default one wins, we show the baseline for the holdback
-        video_info.thumbnails[2].clicks = 0
-        video_info.thumbnails[2].views = 0
-        video_info.thumbnails[1].clicks = 5000
-        video_info.thumbnails[1].views = 5000
+        video_info.thumbnails[2].conversions = 0
+        video_info.thumbnails[2].impressions = 0
+        video_info.thumbnails[1].conversions = 5000
+        video_info.thumbnails[1].impressions = 5000
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'bc': 0.98, 'ctr': 0.0, 'n1': 0.02})
@@ -620,8 +620,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         def _set_winner(thumb_name):
             for thumb in video_info.thumbnails:
-                thumb.clicks = 5000 if thumb.id == thumb_name else 0
-                thumb.views = 5000 if thumb.id == thumb_name else 0
+                thumb.conversions = 5000 if thumb.id == thumb_name else 0
+                thumb.impressions = 5000 if thumb.id == thumb_name else 0
 
         _set_winner('n2')
 
@@ -684,8 +684,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         def _set_winner(thumb_name):
             for thumb in video_info.thumbnails:
-                thumb.clicks = 5000 if thumb.id == thumb_name else 0
-                thumb.views = 5000 if thumb.id == thumb_name else 0
+                thumb.conversions = 5000 if thumb.id == thumb_name else 0
+                thumb.impressions = 5000 if thumb.id == thumb_name else 0
 
         _set_winner('n2')
         # There is no editor choice, so show the winner for 100%
@@ -750,14 +750,14 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                          ['n2', 'ctr', 'bc', 'n1'])
 
         # Add some stats where n2 starts to bubble up but doesn't win
-        video_info.thumbnails[0].views = 1000
-        video_info.thumbnails[0].clicks = 10
-        video_info.thumbnails[1].views = 1000
-        video_info.thumbnails[1].clicks = 20
-        video_info.thumbnails[2].views = 1000
-        video_info.thumbnails[2].clicks = 10
-        video_info.thumbnails[3].views = 1000
-        video_info.thumbnails[3].clicks = 10
+        video_info.thumbnails[0].impressions = 1000
+        video_info.thumbnails[0].conversions = 10
+        video_info.thumbnails[1].impressions = 1000
+        video_info.thumbnails[1].conversions = 20
+        video_info.thumbnails[2].impressions = 1000
+        video_info.thumbnails[2].conversions = 10
+        video_info.thumbnails[3].impressions = 1000
+        video_info.thumbnails[3].conversions = 10
 
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
@@ -767,8 +767,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         for val in directive.values():
             self.assertGreater(val, 0.0)
 
-    def test_not_enough_views_for_winner(self):
-        # There needs to be 500 views of the winner in order to declare it
+    def test_not_enough_impressions_for_winner(self):
+        # There needs to be 500 impressions of the winner in order to declare it
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
         
@@ -776,7 +776,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1', True,
             [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                            ttype='neon', model_score=5.8),
-                         views=50, clicks=20),
+                         impressions=50, conversions=20),
              build_thumb(ThumbnailMetadata('n2', 'vid1',
                                            ttype='neon', model_score=3.5)),
              build_thumb(ThumbnailMetadata('ctr', 'vid1',
@@ -793,8 +793,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         # Now test with a large enough number that floating point
         # numbers go to zero
-        video_info.thumbnails[0].views=499
-        video_info.thumbnails[0].clicks=200
+        video_info.thumbnails[0].impressions=499
+        video_info.thumbnails[0].conversions=200
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertAlmostEqual(sum(directive.values()), 1.0)

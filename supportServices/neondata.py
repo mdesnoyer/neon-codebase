@@ -373,6 +373,13 @@ class ExperimentState:
     DISABLED = 'disabled'
     OVERRIDE = 'override' # Experiment has be manually overridden
 
+class MeasurementType:
+    '''The different kinds of measurements that we care about.'''
+    LOADS = 'loads'
+    VIEWS = 'views'
+    CLICKS = 'clicks'
+    PLAYS = 'plays'
+
 ##############################################################################
 class StoredObject(object):
     '''Abstract class to represent an object that is stored in the database.
@@ -921,7 +928,9 @@ class ExperimentStrategy(NamespacedStoredObject):
                  baseline_type=ThumbnailType.CENTERFRAME,
                  chosen_thumb_overrides=False,
                  override_when_done=True,
-                 experiment_type=MULTIARMED_BANDIT):
+                 experiment_type=MULTIARMED_BANDIT,
+                 impression_type=MeasurementType.VIEWS,
+                 conversion_type=MeasurementType.CLICKS):
         super(ExperimentStrategy, self).__init__(account_id)
         # Fraction of traffic to experiment on.
         self.exp_frac = exp_frac
@@ -957,6 +966,10 @@ class ExperimentStrategy(NamespacedStoredObject):
 
         # The strategy used to run the experiment phase
         self.experiment_type = experiment_type
+
+        # The types of measurements that mean an impression or a conversion for this account
+        self.impression_type = impression_type
+        self.conversion_type = conversion_type
          
 
 class AbstractPlatform(object):
