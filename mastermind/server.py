@@ -213,9 +213,10 @@ class StatsDBWatcher(threading.Thread):
             # The database was updated, so process the new state for
             # views in the last month.
             last_month = datetime.utcfromtimestamp(cur_update - 60*60*24*28)
-            cursor.execute('''SELECT tai, thumbnail_id, count(%s), count(%s)
-                           FROM EventSequences where %s is not null and yr >= %i and mnth >= %i group by tai, thumbnail_id''' %
-                stats.db.get_hourly_events_table())
+            cursor.execute('''SELECT thumbnail_id, count(%s), count(%s)
+                           FROM EventSequences where %s is not null and 
+                           yr >= %i and mnth >= %i group by thumbnail_id''' %
+                )
 
                 data = ((self._find_video_id(x[0]), x[0], x[1], x[2])
                         for x in cursor)

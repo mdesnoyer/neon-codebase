@@ -615,7 +615,7 @@ class NamespacedStoredObject(StoredObject):
 
     @classmethod
     def get_all(cls, callback=None):
-        ''' Get all the TrackerAccountIDMapper objects in the database
+        ''' Get all the objects in the database of this type
 
         Inputs:
         callback - Optional callback function to call
