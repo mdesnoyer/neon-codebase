@@ -11,35 +11,30 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-from mastermind.core import DistributionType, VideoInfo, ThumbnailInfo, \
-     Mastermind
-from datetime import datetime
-from mastermind import directive_pusher
+import atexit
+
+from boto.s3.connection import S3Connection
+import boto.s3.key
+import datetime
 import impala.dbapi
 import impala.error
 import json
 import logging
+from mastermind import directive_pusher
+from mastermind.core import DistributionType, VideoInfo, ThumbnailInfo, \
+     Mastermind
+import signal
 from supportServices import neondata
+import tempfile
 import time
 import threading
-import tornado.httpserver
 import tornado.ioloop
-import tornado.web
 import utils.neon
 from utils.options import define, options
 import utils.ps
 
 # This server's options
 define('port', default=8080, help='Port to listen on', type=int)
-
-# A/B Controller options
-define('max_controller_connections', default=100, type=int,
-       help='Maximum number of open connections to push changes to the '
-       'AB controllers.')
-define('bc_controller_url', default=None,
-       help='URL to send the directives to the brightcove ab controller')
-define('youtube_controller_url', default=None,
-       help='URL to send the directives to the youtube ab controller')
 
 # Stats database options. It is an Impala database
 define('stats_host', default='54.197.233.118',
@@ -53,33 +48,17 @@ define('stats_db_polling_delay', default=57, type=float,
 define('video_db_polling_delay', default=300, type=float,
        help='Number of seconds between polls of the video db')
 
+# Publishing options
+define('s3_bucket', default='neon-image-serving-directives',
+       help='Bucket to publish the serving directives to')
+define('directive_filename', default='mastermind',
+       help='Filename in the S3 bucket that will hold the directive.')
+define('publishing_period', type=int, default=300,
+       help='Time in seconds between when the directive file is published.')
+define('expiry_buffer', type=int, default=30,
+       help='Buffer in seconds for the expiry of the directives file')
+
 _log = logging.getLogger(__name__)
-
-def initialize():
-    '''Intializes the data structures needed by the server.
-
-    Does this by reading from the video database.
-
-    Returns (mastermind, ab_manager)
-    '''
-    _log.info('Initializing the server.')
-
-    ab_manager = directive_pusher.Manager(options.max_controller_connections)
-    if options.bc_controller_url is not None:
-        _log.info('Brightcove directives will be sent to: %s' %
-                  options.bc_controller_url)
-        ab_manager.register_destination(DistributionType.BRIGHTCOVE,
-                                        options.bc_controller_url)
-    if options.youtube_controller_url is not None:
-        _log.info('YouTube directives will be sent to: %s' %
-                  options.youtube_controller_url)
-        ab_manager.register_destination(DistributionType.YOUTUBE,
-                                        options.youtube_controller_url)
-  
-    #TODO(Mark): Need to disable the AB managers once Image platform is live 
-    mastermind = Mastermind()
-
-    return mastermind, ab_manager
 
 class VideoDBWatcher(threading.Thread):
     '''This thread polls the video database for changes.'''
@@ -193,7 +172,7 @@ class StatsDBWatcher(threading.Thread):
         _log.info('Polling the stats database')
         
         # See if there are any new entries
-        curtime = datetime.utcnow()
+        curtime = datetime.datetime.utcnow()
         stats.db.execute(
             cursor,
             '''SELECT max(serverTime) FROM videoplays WHERE 
@@ -208,8 +187,9 @@ class StatsDBWatcher(threading.Thread):
         if self.last_update is None or cur_update > self.last_update:
             _log.info('The newest entry in the stats database is from %s. '
                       'Processing' % 
-                      datetime.utcfromtimestamp(cur_update).isoformat())
-            last_month = datetime.utcfromtimestamp(cur_update - 60*60*24*28)
+                      datetime.datetime.utcfromtimestamp(cur_update).
+                      isoformat())
+            last_month = cur_update - datetime.timedelta(weeks=4)
             col_map = {
                 neondata.MetricTypes.LOADS: 'imloadclienttime',
                 neondata.MetricTypes.VIEWS: 'imvisclienttime',
@@ -264,8 +244,6 @@ class StatsDBWatcher(threading.Thread):
         self.last_update = cur_update
         self.is_loaded.set()
 
-    def _
-
     def _find_video_id(self, thumb_id):
         '''Finds the video id for a thumbnail id.'''
         try:
@@ -274,67 +252,206 @@ class StatsDBWatcher(threading.Thread):
             video_id = neondata.ThumbnailMetadata.get_video_id(thumb_id)
             self.video_id_cache[thumb_id] = video_id
         return video_id
-    
 
-class GetDirectives(tornado.web.RequestHandler):
-    '''Handle a request to receive all the serving directive we know about.
+class DirectivePublisher(threading.Thread):
+    '''Manages the publishing of the Masermind directive files.
 
-    The directives are streamed one per line as a json group of the form:
-    {'d': (video_id, [(thumb_id, fraction)])}
+    The files are published to S3.
 
-    Expects a get request with the following optional parameters:
-    vid - If set, returns the directive for a single video id. 
-          Otherwise, return them all.
-    push - If true, push to the known controllers. Default: True
+    The files are a list of json entries, one per line. The entries
+    can be of two types. The first is a mapping from the publisher id
+    (aka TrackerAccountId) to the account id (aka api key). Those
+    entries look like:
+
+    {"type" : "pub", "pid":"publisher1_prod", "aid":"account1"}
+
+    The second type of file is a serving directive for a video. The
+    reference json is:
+    {
+    "type":"dir",
+    "aid":"account1",
+    "vid":"vid1",
+    "sla":"2014-03-27T23:23:02Z",
+    "fractions":
+    [
+      {
+        "pct":0.8,
+        "tid": "thumb1",
+        "default_url" : "http://neon/thumb1_480_640.jpg", 
+        "imgs":
+        [
+          {
+            "h":480,
+            "w":640,
+            "url":"http://neon/thumb1_480_640.jpg"
+          },
+          {
+            "h":600,
+            "w":800,
+            "url":"http://neon/thumb1_600_800.jpg"
+          }
+        ]
+      },
+      {
+        "pct":0.2,
+        "tid": "thumb2",
+        “default_url” : “http://neon/thumb2_480_640.jpg”,
+        "imgs":
+        [
+          {
+            "h":480,
+            "w":640,
+            "url":"http://neon/thumb2_480_640.jpg"
+          },
+          {
+            "h":600,
+            "w":800,
+            "url":"http://neon/thumb2_600_800.jpg"
+          }
+        ]
+      }
+    ]
+    }
     '''
-    def initialize(self, mastermind, ab_manager,
-                   activity_watcher=utils.ps.ActivityWatcher()):
+    def __init__(self, mastermind, tracker_id_map={}, serving_urls={}):
+        '''Creates the publisher.
+
+        Inputs:
+        mastermind - The mastermind.core.Mastermind object that has the logic
+        tracker_id_map - A map of tracker_id -> account_id
+        serving_urls - A map of thumbnail_id -> { (width, height) -> url }
+        '''
+        super(DirectivePublisher, self).__init__(name='DirectivePublisher')
         self.mastermind = mastermind
-        self.ab_manager = ab_manager
-        self.activity_watcher = activity_watcher
+        self.tracker_id_map = tracker_id_map
+        self.serving_urls = serving_urls
 
-    def get(self):
-        with self.activity_watcher.activate():
-            video_id = self.get_argument('vid', None)
-            push = self.get_argument('push', True)
+        self.lock = threading.RLock()
+        self._stopped = threading.Event()
 
-            if video_id is not None:
-                video_id = [video_id]
+    def run(self):
+        self._stopped.clear()
+        while not self._stopped.is_set():
+            last_woke_up = datetime.datetime.now()
 
-            firstLine = True
-            for directive in self.mastermind.get_directives(video_id):
-                if push:
-                    self.ab_manager.send(directive)
-                if firstLine:
-                    firstLine = False
-                else:
-                    self.write('\n')
-                self.write(json.dumps({'d': directive}))
-                self.flush()
-            self.finish()
+            try:
+                self._publish_directives()
+            except Exception as e:
+                _log.exception('Uncaught exception when publishing %s' %
+                               e)
 
+            self._stopped.wait(options.publishing_period -
+                               (datetime.datetime.now() - 
+                                last_woke_up).total_seconds())
+
+    def stop(self):
+        '''Stop this thread safely and allow it to finish what is is doing.'''
+        self._stopped.set()
+
+    def update_tracker_id_map(self, new_map):
+        with self.lock:
+            self.tracker_id_map = new_map
+
+    def update_serving_urls(self, new_map):
+        with self.lock:
+            self.update_serving_urls = new_map
+
+    def _publish_directives():
+        '''Publishes the directives to S3'''
+        # Create the directives file
+        curtime = datetime.datetime.utcnow()
+        directive_file = tempfile.TemporaryFile()
+        directive_file.write(
+            'expiry=%sZ\n' % 
+            (curtime + datetime.timedelta(seconds=options.expiry.buffer))
+            .isoformat())
+        with self.lock:
+            self._write_directives(directive_file)
+
+        filename = '%s.%s' % (curtime.strftime('%Y%m%d%H%M%S'),
+                              options.directive_filename)
+        _log.info('Publishing directive to s3://%s/%s.%s' %
+                  (options.s3_bucket, filename))
+
+        # Create the connection to S3
+        s3conn = S3Connection()
+        try:
+            bucket = s3conn.get_bucket(options.s3_bucket)
+        except boto.exception as e:
+            _log.error('Could not find bucket %s: %s' % (options.s3_bucket,
+                                                         e))
+
+        # Write the file that is timestamped
+        key = boto.s3.key.Key(bucket, filename)
+        key.content_type = 'text/plain'
+        key.set_contents_from_file(directive_file,
+                                   rewind=True,
+                                   encrypt_key=True)
+
+        # Copy the file to the REST endpoint
+        key.copy(bucket, options.directive_filename, encrypt_key=True,
+                 preserve_acl=True)
+
+    def _write_directives(self, stream):
+        '''Write the current directives to the stream.'''
+        # First write out the tracker id maps
+        for tracker_id, account_id in self.tracker_id_map.iteritems():
+            stream.write(json.dumps({'type': 'pub', 'pid': tracker_id,
+                                     'aid': account_id}) + '\n')
+
+        # Now write the directives
+        for key, directive in self.get_directives():
+            account_id, video_id = key
+            try:
+                data = {
+                    'type': 'dir',
+                    'aid': account_id,
+                    'vid': video_id,
+                    'sla': datetime.datetime.utcnow().isoformat() + 'Z',
+                    'fractions': [
+                        {
+                            'pct': x[1],
+                            'tid': x[0],
+                            'default_url':,
+                            'imgs': [ 
+                                {
+                                    'w': k[0],
+                                    'h': k[1],
+                                    'url': v
+                                } 
+                                for k, v in self.serving_urls[x[0]].iteritems()
+                                ]
+                        }
+                        for x in directive ]
+                }
+                stream.write(json.dumps(data) + "\n")
+                
+            except KeyError:
+                _log.error('Could not find all serving URLs for video: %s' %
+                           video_id)
+        
+        
+                 
+        
 def main(activity_watcher = utils.ps.ActivityWatcher()):
     with activity_watcher.activate():
-        mastermind, ab_manager = initialize()
+        mastermind = Mastermind()
+        publisher = DirectivePublisher()
 
-        videoDbThread = VideoDBWatcher(mastermind, ab_manager,
+        videoDbThread = VideoDBWatcher(mastermind, publisher,
                                        activity_watcher)
         videoDbThread.start()
         videoDbThread.wait_until_loaded()
-        statsDbThread = StatsDBWatcher(mastermind, ab_manager,
-                                       activity_watcher)
+        statsDbThread = StatsDBWatcher(mastermind, activity_watcher)
         statsDbThread.start()
         statsDbThread.wait_until_loaded()
 
-    _log.info('Starting server on port %i' % options.port)
-    application = tornado.web.Application([
-        (r'/get_directives', GetDirectives,
-         dict(mastermind=mastermind, ab_manager=ab_manager,
-              activity_watcher=activity_watcher))])
-    server = tornado.httpserver.HTTPServer(application)
-    utils.ps.register_tornado_shutdown(server)
-    server.listen(options.port)
-    
+        publisher.start()
+
+    atexit.register(tornado.ioloop.IOLoop.current().stop)
+    atexit.register(publisher.stop)
+    signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
+    signal.signal(signal.SIGINT, lambda sig, y: sys.exit(-sig))
     tornado.ioloop.IOLoop.current().start()
     
 if __name__ == "__main__":

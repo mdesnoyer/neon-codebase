@@ -29,7 +29,7 @@ class Manager:
             max_workers=max_connections)
         self.destinations = {} # distribution_type -> [destinations]
         self.video_dists = {} # video_id -> distribution type
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
     def register_destination(self, distribution_type, destination):
         '''Registers a destination for a particular distribution type.
