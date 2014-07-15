@@ -373,8 +373,8 @@ class ExperimentState:
     DISABLED = 'disabled'
     OVERRIDE = 'override' # Experiment has be manually overridden
 
-class MeasurementType:
-    '''The different kinds of measurements that we care about.'''
+class MetricType:
+    '''The different kinds of metrics that we care about.'''
     LOADS = 'loads'
     VIEWS = 'views'
     CLICKS = 'clicks'
@@ -633,16 +633,21 @@ class NamespacedStoredObject(StoredObject):
         retval = []
         db_connection = DBConnection(cls)
 
-        def process(keys):
-            super(NamespacedStoredObject, cls).get_many(keys,
-                                                        callback=callback)
+        def filtered_callback(data_list):
+            callback([x for x in data_list if x is not None])
+
+        def process_keylist(keys):
+            super(NamespacedStoredObject, cls).get_many(
+                keys, callback=filtered_callback)
             
         if callback:
             db_connection.conn.keys(cls.__name__.lower() + "_*",
-                                    callback=process)
+                                    callback=process_keylist)
         else:
             keys = db_connection.blocking_conn.keys(cls.__name__.lower()+"_*")
-            return  super(NamespacedStoredObject, cls).get_many(keys)
+            return  [x for x in 
+                     super(NamespacedStoredObject, cls).get_many(keys)
+                     if x is not None]
 
     @classmethod
     def modify(cls, key, func, callback=None):
@@ -916,7 +921,7 @@ class NeonUserAccount(object):
 class ExperimentStrategy(NamespacedStoredObject):
     '''Stores information about the experimental strategy to use.
 
-    Keyed by account_id (aka api_key)
+    Keyed by account_id 2(aka api_key)
     '''
     SEQUENTIAL='sequential'
     MULTIARMED_BANDIT='multi_armed_bandit'
@@ -929,8 +934,8 @@ class ExperimentStrategy(NamespacedStoredObject):
                  chosen_thumb_overrides=False,
                  override_when_done=True,
                  experiment_type=MULTIARMED_BANDIT,
-                 impression_type=MeasurementType.VIEWS,
-                 conversion_type=MeasurementType.CLICKS):
+                 impression_type=MetricType.VIEWS,
+                 conversion_type=MetricType.CLICKS):
         super(ExperimentStrategy, self).__init__(account_id)
         # Fraction of traffic to experiment on.
         self.exp_frac = exp_frac
@@ -1713,18 +1718,6 @@ class OoyalaPlatform(AbstractPlatform):
         for key in params:
             oo.__dict__[key] = params[key]
         return oo
-    
-    @classmethod
-    def get_all_instances(cls, callback=None):
-        ''' get all ooyala instances'''
-
-        platforms = OoyalaPlatform.get_all_platform_data()
-        instances = [] 
-        for pdata in platforms:
-            platform = OoyalaPlatform.create(pdata)
-            if platform:
-                instances.append(platform)
-        return instances
 
     @classmethod
     def get_all_instances(cls, callback=None):

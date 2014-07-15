@@ -40,16 +40,16 @@ class TestCase(unittest.TestCase):
 
         finally:
             logger.removeHandler(handler)
-            reg = re.compile(regexp)
+            
+        reg = re.compile(regexp)
+        matching_logs = handler.get_matching_logs(reg, level)
 
-            matching_logs = handler.get_matching_logs(reg, level)
-
-            if len(matching_logs) == 0:
-                self.fail(
-                    'Msg: %s was not logged. The log was: %s' % 
-                    (regexp,
-                     '\n'.join(['%s: %s' % (x.levelname, x.getMessage())
-                                for x in handler.logs])))
+        if len(matching_logs) == 0:
+            self.fail(
+                'Msg: %s was not logged. The log was: %s' % 
+                (regexp,
+                 '\n'.join(['%s: %s' % (x.levelname, x.getMessage())
+                            for x in handler.logs])))
 
     @contextmanager
     def assertLogNotExists(self, level, regexp):
@@ -76,17 +76,17 @@ class TestCase(unittest.TestCase):
 
         finally:
             logger.removeHandler(handler)
-            reg = re.compile(regexp)
 
-            matching_logs = handler.get_matching_logs(reg, level)
+        reg = re.compile(regexp)
+        matching_logs = handler.get_matching_logs(reg, level)
 
-            if len(matching_logs) > 0:
-                self.fail(
-                    'Msg: %s was logged and it should not have. '
-                    'The log was: %s' % 
-                    (regexp,
-                     '\n'.join(['%s: %s' % (x.levelname, x.getMessage())
-                                for x in handler.logs])))
+        if len(matching_logs) > 0:
+            self.fail(
+                'Msg: %s was logged and it should not have. '
+                'The log was: %s' % 
+                (regexp,
+                '\n'.join(['%s: %s' % (x.levelname, x.getMessage())
+                            for x in handler.logs])))
 
 class LogCaptureHandler(logging.Handler):
     '''A class that just collects all the logs.'''

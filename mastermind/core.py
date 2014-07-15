@@ -183,19 +183,17 @@ class Mastermind(object):
 
         Inputs:
         data - generator that creates a stream of 
-               (video_id, thumb_id, loads, impressions, conversions, plays)
+               (video_id, thumb_id, impressions, conversions, plays)
         
         '''
-        for video_id, thumb_id, loads, impressions, conversions, plays in data:
+        for video_id, thumb_id, impressions, conversions in data:
             with self.lock:
                 # Load up all the data
                 thumb = self._find_thumb(video_id, thumb_id)
                 if thumb is None:
                     continue
-                thumb.loads = float(loads)
                 thumb.impressions = float(impressions)
                 thumb.conversions = float(conversions)
-                thumb.plays = float(plays)
 
                 self._calculate_new_serving_directive(video_id)
 
@@ -428,6 +426,7 @@ class Mastermind(object):
         valid_bandits = copy.copy(candidates)
         experiment_state = neondata.ExperimentState.RUNNING
         value_remaining = None
+        experiment_frac = strategy.exp_frac
                 
         if (editor is not None and 
             baseline is not None and 
@@ -453,6 +452,10 @@ class Mastermind(object):
                 if baseline:
                     run_frac[baseline.id] = 1.0 - strategy.exp_frac
                     non_exp_thumb = baseline
+                else:
+                    # There is nothing to run in the main fraction, so
+                    # run the experiment over everything.
+                    experiment_frac = 1.0
             else:
                 run_frac[editor.id] = 1.0 - strategy.exp_frac
                 non_exp_thumb = editor
@@ -540,7 +543,7 @@ class Mastermind(object):
             win_frac = win_frac[:-1]
             win_frac = win_frac / np.sum(win_frac)
         for thumb_id, frac in zip(bandit_ids, win_frac):
-            run_frac[thumb_id] = frac * strategy.exp_frac
+            run_frac[thumb_id] = frac * experiment_frac
 
         return (experiment_state, run_frac, value_remaining)
         

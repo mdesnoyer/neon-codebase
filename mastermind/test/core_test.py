@@ -802,6 +802,21 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             self.assertGreater(val, 0.0)
         self.assertAlmostEqual(max(directive.values()), directive['n1'])
 
+    def test_multiple_candidates_no_baseline(self):
+        video_info = VideoInfo(
+            'acct1', True,
+            [build_thumb(ThumbnailMetadata('n1', 'vid1',
+                                           ttype='neon', model_score=5.8)),
+             build_thumb(ThumbnailMetadata('n2', 'vid1',
+                                           ttype='neon', model_score=3.5))
+            ])
+
+        directive = self.mastermind._calculate_current_serving_directive(
+            video_info)[1]
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+        self.assertGreater(directive['n2'], 0.0)
+        self.assertGreater(directive['n1'], directive['n2'])
+
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestUpdatingFuncs, self).setUp()
@@ -969,11 +984,11 @@ class TestStatUpdating(test_utils.neontest.TestCase):
              ThumbnailMetadata('v2t3', 'acct1_vid2', ttype='neon', rank=3)])
     def test_initial_stats_update(self):
         self.mastermind.update_stats_info([
-            ('acct1_vid1', 'v1t1', 1000, 1000, 5, 5),
-            ('acct1_vid1', 'v1t2', 1000, 1000, 100, 100),
-            ('acct1_vid2', 'v2t1', 10, 10, 5, 5),
-            ('acct1_vid2', 'v2t2', 1000, 1000, 100, 100),
-            ('acct1_vid2', 'v2t3', 1000, 1000, 100, 100)])
+            ('acct1_vid1', 'v1t1', 1000, 5),
+            ('acct1_vid1', 'v1t2', 1000, 100),
+            ('acct1_vid2', 'v2t1', 10, 5),
+            ('acct1_vid2', 'v2t2', 1000, 100),
+            ('acct1_vid2', 'v2t3', 1000, 100)])
 
         directives = dict([x for x in self.mastermind.get_directives()])
         self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
@@ -984,17 +999,13 @@ class TestStatUpdating(test_utils.neontest.TestCase):
     def test_decimal_from_db(self):
         self.mastermind.update_stats_info([
             ('acct1_vid1', 'v1t1', decimal.Decimal(1000),
-             decimal.Decimal(1000), decimal.Decimal(5), decimal.Decimal(5)),
+             decimal.Decimal(5)),
             ('acct1_vid1', 'v1t2', decimal.Decimal(1000),
-             decimal.Decimal(1000), decimal.Decimal(100),
              decimal.Decimal(100)),
-            ('acct1_vid2', 'v2t1', decimal.Decimal(10), decimal.Decimal(10), 
-             decimal.Decimal(5), decimal.Decimal(5)),
+            ('acct1_vid2', 'v2t1', decimal.Decimal(10),decimal.Decimal(5)),
             ('acct1_vid2', 'v2t2', decimal.Decimal(1000),
-             decimal.Decimal(1000), decimal.Decimal(100),
              decimal.Decimal(100)),
-            ('acct1_vid2', 'v2t3', decimal.Decimal(1000), 
-             decimal.Decimal(1000), decimal.Decimal(100),
+            ('acct1_vid2', 'v2t3', decimal.Decimal(1000),
              decimal.Decimal(100))])
 
         directives = dict([x for x in self.mastermind.get_directives()])
@@ -1008,7 +1019,7 @@ class TestStatUpdating(test_utils.neontest.TestCase):
                                   'Could not find information for video'):
         
             self.mastermind.update_stats_info([
-                ('acct1_unknown', 'v1t1', 1000, 1000, 5, 5)
+                ('acct1_unknown', 'v1t1', 1000, 5)
                 ])
 
     def test_update_stats_for_unknown_thumb(self):
@@ -1016,7 +1027,7 @@ class TestStatUpdating(test_utils.neontest.TestCase):
                                   'Could not find information for thumbnail'):
         
             self.mastermind.update_stats_info([
-                ('acct1_vid1', 'v1t_where', 1000, 1000, 5, 5)
+                ('acct1_vid1', 'v1t_where', 1000, 5)
                 ])
 
 class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
@@ -1094,7 +1105,7 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
 
     def test_db_experiment_finished(self):
         self.mastermind.update_stats_info([
-            ('acct1_vid1', 'n2', 5000, 5000, 200, 200)])
+            ('acct1_vid1', 'n2', 5000, 200)])
         self._wait_for_db_updates()
 
         video = VideoMetadata.get('acct1_vid1')

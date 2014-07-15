@@ -21,9 +21,10 @@ import impala.error
 import json
 import logging
 from mastermind import directive_pusher
-from mastermind.core import DistributionType, VideoInfo, ThumbnailInfo, \
-     Mastermind
+from mastermind.core import VideoInfo, ThumbnailInfo, Mastermind
 import signal
+import socket
+import stats.db
 from supportServices import neondata
 import tempfile
 import time
@@ -62,12 +63,13 @@ _log = logging.getLogger(__name__)
 
 class VideoDBWatcher(threading.Thread):
     '''This thread polls the video database for changes.'''
-    def __init__(self, mastermind, ab_manager,
+    def __init__(self, mastermind, directive_pusher,
                  activity_watcher=utils.ps.ActivityWatcher()):
         super(VideoDBWatcher, self).__init__(name='VideoDBWatcher')
         self.mastermind = mastermind
         self.daemon = True
         self.activity_watcher = activity_watcher
+        self.directive_pusher = directive_pusher
 
         # Is the initial data loaded
         self.is_loaded = threading.Event()
@@ -90,7 +92,18 @@ class VideoDBWatcher(threading.Thread):
 
     def _process_db_data(self):
         _log.info('Polling the video database')
-        
+
+        # Get an update for the serving urls
+        self.directive_pusher.update_serving_urls(
+            dict(((x.get_thumbnail_id(), x.size_map) for x in
+                  neondata.ThumbnailServingURLs.get_all())))
+
+        # Get an update for the tracker id map
+        self.directive_pusher.update_tracker_id_map(
+            dict(((x.get_tai(), x.value) for x in
+                  neondata.TrackerAccountIDMapper.get_all())))
+
+        # Update the video data
         for platform in neondata.AbstractPlatform.get_all_instances():
             # Update the experimental strategy for the account
             self.mastermind.update_experiment_strategy(
@@ -128,11 +141,10 @@ class VideoDBWatcher(threading.Thread):
 
 class StatsDBWatcher(threading.Thread):
     '''This thread polls the stats database for changes.'''
-    def __init__(self, mastermind, ab_manager,
+    def __init__(self, mastermind,
                  activity_watcher=utils.ps.ActivityWatcher()):
         super(StatsDBWatcher, self).__init__(name='StatsDBWatcher')
         self.mastermind = mastermind
-        self.ab_manager = ab_manager
         self.video_id_cache = {} # Thumb_id -> video_id
         self.last_update = None
         self.daemon = True
@@ -163,7 +175,7 @@ class StatsDBWatcher(threading.Thread):
         try:
             conn = impala.dbapi.connect(host=options.stats_host,
                                         port=options.stats_port)
-        except exception as e:
+        except Exception as e:
             _log.exception('Error connecting to stats db: %s' % e)
             return
 
@@ -173,28 +185,25 @@ class StatsDBWatcher(threading.Thread):
         
         # See if there are any new entries
         curtime = datetime.datetime.utcnow()
-        stats.db.execute(
-            cursor,
+        cursor.execute(
             '''SELECT max(serverTime) FROM videoplays WHERE 
-            mnth >= %i and yr >= %i''',
-            (curtime.month, curtime.year))
+            yr >= {yr:d} or (yr == {yr:d} and mnth >= {mnth:d})'''.format(
+            mnth=curtime.month, yr=curtime.year))
         result = cursor.fetchall()
-        if len(result) == 0:
+        if len(result) == 0 or result[0][0] is None:
             _log.error('Cannot determine when the database was last updated')
             self.is_loaded.set()
             return
-        cur_update = result[0][0]
+        cur_update = datetime.datetime.utcfromtimestamp(result[0][0])
         if self.last_update is None or cur_update > self.last_update:
-            _log.info('The newest entry in the stats database is from %s. '
-                      'Processing' % 
-                      datetime.datetime.utcfromtimestamp(cur_update).
-                      isoformat())
+            _log.info('Found a newer entry in the stats database from %s. '
+                      'Processing' % cur_update.isoformat())
             last_month = cur_update - datetime.timedelta(weeks=4)
             col_map = {
-                neondata.MetricTypes.LOADS: 'imloadclienttime',
-                neondata.MetricTypes.VIEWS: 'imvisclienttime',
-                neondata.MetricTypes.CLICKS: 'imclickclienttime'
-                neondata.MetricTypes.PLAYS: 'videoplayclienttime'
+                neondata.MetricType.LOADS: 'imloadclienttime',
+                neondata.MetricType.VIEWS: 'imvisclienttime',
+                neondata.MetricType.CLICKS: 'imclickclienttime',
+                neondata.MetricType.PLAYS: 'videoplayclienttime'
                 }
 
             # We are going to walk through the db by tracker id
@@ -207,7 +216,7 @@ class StatsDBWatcher(threading.Thread):
 
                 # Build the query for all the data in the last month
                 strategy = neondata.ExperimentStrategy.get(tai_info.value)
-                if strategy.conversion_type == neondata.MeasurementType.PLAYS:
+                if strategy.conversion_type == neondata.MetricType.PLAYS:
                     query = (
                         """select thumbnail_id, count({imp_type}), 
                         sum(cast(imclickclienttime is not null and 
@@ -215,7 +224,8 @@ class StatsDBWatcher(threading.Thread):
                         videoplayclienttime is not null) as int))
                         from EventSequences where tai='{tai}' and 
                         {imp_type} is not null 
-                        and yr >= {yr:d} and mnth >= {mnth:d}
+                        and (yr >= {yr:d} or 
+                        (yr = {yr:d} and mnth >= {mnth:d}))
                         group by thumbnail_id""".format(
                             imp_type=col_map[strategy.impression_type],
                             tai=tai_info.get_tai(),
@@ -236,8 +246,8 @@ class StatsDBWatcher(threading.Thread):
                             mnth=last_month.month))
                 cursor.execute(query)
 
-                data = ((self._find_video_id(x[0]), x[0], x[1], x[2])
-                        for x in cursor)
+                data = [(self._find_video_id(x[0]), x[0], x[1], x[2])
+                        for x in cursor]
                     
                 self.mastermind.update_stats_info(data)
                     
@@ -295,7 +305,7 @@ class DirectivePublisher(threading.Thread):
       {
         "pct":0.2,
         "tid": "thumb2",
-        “default_url” : “http://neon/thumb2_480_640.jpg”,
+        "default_url" : "http://neon/thumb2_480_640.jpg",
         "imgs":
         [
           {
@@ -313,7 +323,8 @@ class DirectivePublisher(threading.Thread):
     ]
     }
     '''
-    def __init__(self, mastermind, tracker_id_map={}, serving_urls={}):
+    def __init__(self, mastermind, tracker_id_map={}, serving_urls={},
+                 activity_watcher=utils.ps.ActivityWatcher()):
         '''Creates the publisher.
 
         Inputs:
@@ -325,6 +336,7 @@ class DirectivePublisher(threading.Thread):
         self.mastermind = mastermind
         self.tracker_id_map = tracker_id_map
         self.serving_urls = serving_urls
+        self.activity_watcher = activity_watcher
 
         self.lock = threading.RLock()
         self._stopped = threading.Event()
@@ -335,7 +347,8 @@ class DirectivePublisher(threading.Thread):
             last_woke_up = datetime.datetime.now()
 
             try:
-                self._publish_directives()
+                with self.activity_watcher.activate():
+                    self._publish_directives()
             except Exception as e:
                 _log.exception('Uncaught exception when publishing %s' %
                                e)
@@ -354,42 +367,51 @@ class DirectivePublisher(threading.Thread):
 
     def update_serving_urls(self, new_map):
         with self.lock:
-            self.update_serving_urls = new_map
+            self.serving_urls = new_map
 
-    def _publish_directives():
+    def _publish_directives(self):
         '''Publishes the directives to S3'''
         # Create the directives file
         curtime = datetime.datetime.utcnow()
         directive_file = tempfile.TemporaryFile()
+        valid_length = options.expiry_buffer + options.publishing_period
         directive_file.write(
             'expiry=%sZ\n' % 
-            (curtime + datetime.timedelta(seconds=options.expiry.buffer))
+            (curtime + datetime.timedelta(seconds=valid_length))
             .isoformat())
         with self.lock:
             self._write_directives(directive_file)
 
         filename = '%s.%s' % (curtime.strftime('%Y%m%d%H%M%S'),
                               options.directive_filename)
-        _log.info('Publishing directive to s3://%s/%s.%s' %
+        _log.info('Publishing directive to s3://%s/%s' %
                   (options.s3_bucket, filename))
 
         # Create the connection to S3
         s3conn = S3Connection()
         try:
             bucket = s3conn.get_bucket(options.s3_bucket)
-        except boto.exception as e:
-            _log.error('Could not find bucket %s: %s' % (options.s3_bucket,
+        except boto.exception.BotoServerError as e:
+            _log.error('Could not get bucket %s: %s' % (options.s3_bucket,
                                                          e))
+            return
+        except boto.exception.BotoClientError as e:
+            _log.error('Could not get bucket %s: %s' % (options.s3_bucket,
+                                                         e))
+            return
+        except socket.error as e:
+            _log.error('Error connecting to S3: %s' % e)
+            return
 
         # Write the file that is timestamped
-        key = boto.s3.key.Key(bucket, filename)
+        key = bucket.new_key(filename)
         key.content_type = 'text/plain'
+        directive_file.seek(0)
         key.set_contents_from_file(directive_file,
-                                   rewind=True,
                                    encrypt_key=True)
 
         # Copy the file to the REST endpoint
-        key.copy(bucket, options.directive_filename, encrypt_key=True,
+        key.copy(bucket.name, options.directive_filename, encrypt_key=True,
                  preserve_acl=True)
 
     def _write_directives(self, stream):
@@ -400,7 +422,7 @@ class DirectivePublisher(threading.Thread):
                                      'aid': account_id}) + '\n')
 
         # Now write the directives
-        for key, directive in self.get_directives():
+        for key, directive in self.mastermind.get_directives():
             account_id, video_id = key
             try:
                 data = {
@@ -410,41 +432,59 @@ class DirectivePublisher(threading.Thread):
                     'sla': datetime.datetime.utcnow().isoformat() + 'Z',
                     'fractions': [
                         {
-                            'pct': x[1],
-                            'tid': x[0],
-                            'default_url':,
+                            'pct': frac,
+                            'tid': thumb_id,
+                            'default_url': self._get_default_url(thumb_id),
                             'imgs': [ 
                                 {
                                     'w': k[0],
                                     'h': k[1],
                                     'url': v
                                 } 
-                                for k, v in self.serving_urls[x[0]].iteritems()
+                                for k, v in 
+                                self.serving_urls[thumb_id].iteritems()
                                 ]
                         }
-                        for x in directive ]
+                        for thumb_id, frac in directive if 
+                        frac <= 1e-7 or thumb_id in self.serving_urls]
                 }
                 stream.write(json.dumps(data) + "\n")
                 
             except KeyError:
-                _log.error('Could not find all serving URLs for video: %s' %
-                           video_id)
-        
-        
-                 
+                _log.error(('Could not find all serving URLs for video: %s. '
+                            'The directives will not be published.' %
+                            video_id))
+
+    def _get_default_url(self, thumb_id):
+        '''Returns the default url for this thumbnail id.'''
+        # For now, set the default to 120x90
+        # TODO(mdesnoyer): Maybe change this to a per account default? 
+        #                  Or the full size of the image?
+        serving_urls = self.serving_urls[thumb_id]
+        try:
+            return serving_urls[(120, 90)]
+        except KeyError:
+            mindiff = min([abs(x[0] - 120) for x in serving_urls.keys()])
+            closest_size = [x for x in serving_urls.keys() if
+                            abs(x[0] - 120) == mindiff][0]
+            _log.warn('There is no serving thumb of size (120, 90) for thumb'
+                      '%s. Using (%i, %i) instead'
+                      % (thumb_id, closest_size[0], closest_size[1]))
+            return serving_urls[closest_size]
         
 def main(activity_watcher = utils.ps.ActivityWatcher()):
     with activity_watcher.activate():
         mastermind = Mastermind()
-        publisher = DirectivePublisher()
+        publisher = DirectivePublisher(mastermind, 
+                                       activity_watcher=activity_watcher)
 
         videoDbThread = VideoDBWatcher(mastermind, publisher,
                                        activity_watcher)
         videoDbThread.start()
-        videoDbThread.wait_until_loaded()
         statsDbThread = StatsDBWatcher(mastermind, activity_watcher)
         statsDbThread.start()
         statsDbThread.wait_until_loaded()
+        videoDbThread.wait_until_loaded()
 
         publisher.start()
 
