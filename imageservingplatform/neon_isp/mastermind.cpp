@@ -356,12 +356,15 @@ Mastermind::GetImageUrl(const char * account_id, const char * video_id,
         //neon_log_error("Fraction for the directive is NULL");
         return 0;
     }
-    
+   
+    // If height or width doesn't match serve the default image URL
+    if (height == -1 || width == -1)
+        return fraction->GetDefaultURL();
+
     const ScaledImage * image = fraction->GetScaledImage(height, width);
     
-    // If height or width doesn't match serve the default image URL
     if (image == 0)
-        return fraction->GetDefaultURL();
+        return 0;
 
     return image->GetUrl(size);
 }

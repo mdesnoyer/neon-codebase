@@ -14,10 +14,12 @@
 
 /// String Constants used by Neon Service 
 static ngx_str_t neon_cookie_name = ngx_string("neonglobaluserid");
-static ngx_str_t cookie_root_domain = ngx_string("; Domain=.neon-lab.com; Path=/;"); 
+//static ngx_str_t cookie_root_domain = ngx_string("; Domain=.neon-lab.com; Path=/;"); 
+//static ngx_str_t cookie_neon_domain_prefix = ngx_string("; Domain=.neon-lab.com; Path=");
+static ngx_str_t cookie_root_domain = ngx_string("; Domain=.neon-images.com; Path=/;"); 
+static ngx_str_t cookie_neon_domain_prefix = ngx_string("; Domain=.neon-images.com; Path=");
 static ngx_str_t cookie_max_expiry = ngx_string( "; expires=Thu, 31-Dec-37 23:59:59 GMT"); //expires 2038
 static ngx_str_t cookie_expiry_str = ngx_string("; expires=");
-static ngx_str_t cookie_neon_domain_prefix = ngx_string("; Domain=.neon-lab.com; Path=");
 static ngx_str_t cookie_client_api = ngx_string("/v1/client/");
 static ngx_str_t cookie_semi_colon = ngx_string(";");
 static ngx_str_t cookie_fwd_slash = ngx_string("/");
@@ -468,6 +470,7 @@ neon_service_server_api(ngx_http_request_t *request,
                 &url_size);
     
     if(error_url != NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK) {
+        ngx_log_error(NGX_LOG_ERR, request->connection->log, 0, "IM URL Not Found");
         neon_stats[NEON_SERVER_API_URL_NOT_FOUND] ++;
         neon_service_server_api_not_found(request, chain);
         return NEON_SERVER_API_FAIL;

@@ -302,8 +302,9 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
     def test_server_api_with_non_standard_size(self):
         response = self.server_api_request(self.pub_id, self.vid, 1, 1)
-        im_url = json.loads(response.read())["data"]
-        self.assertEqual(im_url, "")
+        self.assertIsNone(response)
+        #im_url = json.loads(response.read())["data"]
+        #self.assertEqual(im_url, "")
     
     def test_server_api_with_invalid_pubid(self):
         response = self.server_api_request("invalid_pub", self.vid, 1, 1)

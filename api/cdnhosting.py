@@ -18,6 +18,7 @@ from boto.s3.bucket import Bucket
 from supportServices import neondata
 from StringIO import StringIO
 from utils.imageutils import PILImageUtils
+from utils import pycvutils
 
 class CDNHosting(object):
 
@@ -42,7 +43,10 @@ class CDNHosting(object):
         serving_urls = neondata.ThumbnailServingURLs(tid)
 
         for sz in sizes:
-            im = PILImageUtils.resize(image, im_w=sz[0], im_h=sz[1])
+            #im = PILImageUtils.resize(image, im_w=sz[0], im_h=sz[1])
+            cv_im = pycvutils.from_pil(image)
+            cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
+            im = pycvutils.to_pil(cv_im_r)
             fname = fname_fmt % (tid, sz[0], sz[1])
             keyname = "%s/%s" % (neon_pub_id, fname)
             cdn_url = "http://%s/%s" % (properties.CDN_URL_PREFIX, keyname)
