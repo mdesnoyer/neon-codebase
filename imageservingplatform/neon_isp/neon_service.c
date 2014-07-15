@@ -10,6 +10,8 @@
 #include "neon_utils.h"
 #include "neon_service_helper.c"
 
+#define ngx_uchar_to_string(str)     { strlen((const char*)str), (u_char *) str }
+
 /// String Constants used by Neon Service 
 static ngx_str_t neon_cookie_name = ngx_string("neonglobaluserid");
 static ngx_str_t cookie_root_domain = ngx_string("; Domain=.neon-lab.com; Path=/;"); 
@@ -289,15 +291,20 @@ int neon_service_parse_api_args(ngx_http_request_t *request,
     *video_id = neon_service_get_uri_token(request, base_url, 1);
     
     // get height and width
-    ngx_str_t value;
+    ngx_str_t value = ngx_string("");
     *height = 0;
     *width = 0;
     
     ngx_http_arg(request, height_key.data, height_key.len, &value);
     *height = neon_service_parse_number(&value);
-    ngx_http_arg(request, width_key.data, width_key.len, &value);
-    *width = neon_service_parse_number(&value);
    
+    ngx_str_t w_value = ngx_string("");
+    ngx_http_arg(request, width_key.data, width_key.len, &w_value);
+    *width = neon_service_parse_number(&w_value);
+  
+    // If height or width == -1, i.e if weren't specified then serve
+    // default url
+
     ngx_str_t cip_key = ngx_string("cip");
     ngx_http_arg(request, cip_key.data, cip_key.len, ipAddress);
     
@@ -618,8 +625,8 @@ neon_service_client_api(ngx_http_request_t *request,
             //neon_log_error("Neon cookie has been set");
         }    
     }else{
-        ngx_str_t vid = ngx_string(video_id);
-        ngx_str_t pid = ngx_string(pub_id);
+        ngx_str_t vid = ngx_uchar_to_string(video_id);
+        ngx_str_t pid = ngx_uchar_to_string(pub_id);
         ngx_str_t bucket_id = ngx_string("b12");
        
         // TODO: Generate bucket id & bucket key, use vid as key now
@@ -657,7 +664,7 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
     ngx_str_t video_ids; 
     ngx_http_arg(request, params_key.data, params_key.len, &video_ids);
     
-    ngx_str_t ipAddress;
+    ngx_str_t ipAddress = ngx_string("");
     static ngx_str_t xf = ngx_string("X-Forwarded-For");
     ngx_table_elt_t * xf_header;
     xf_header = search_headers_in(request, xf.data, xf.len); 
@@ -776,4 +783,9 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
     video_buf->last_buf = 1; //Mark the last buffer   
         
     return NEON_GETTHUMB_API_OK;
-} 
+}
+
+// Getting geoip stuff in nginx
+//ngx_str_t variable_name = ngx_string("geoip_country_code");
+//    ngx_http_variable_value_t * geoip_country_code_var =
+//    ngx_http_get_variable( r, &variable_name, 0);

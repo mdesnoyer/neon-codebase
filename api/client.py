@@ -59,6 +59,8 @@ from boto.s3.bucket import Bucket
 from utils.imageutils import PILImageUtils
 from StringIO import StringIO
 from supportServices import neondata
+from cdnhosting import CDNHosting
+
 import utils.s3
 
 import logging
@@ -217,43 +219,9 @@ def save_thumbnail_to_s3_and_metadata(i_vid, image, score, s3bucket,
     tdata.update_phash(image)
 
     #Host this image on the Neon Image CDN in diff sizes
-    host_images_cdn(image, neon_pub_id, tid)
+    CDNHosting.host_images_neon_cdn(image, neon_pub_id, tid)
 
     return tdata
-
-###########################################################################
-# CDN Hosting of Images of specified sizes
-###########################################################################
-
-def host_images_cdn(image, neon_pub_id, tid):
-    '''
-    Host images on the CDN
-
-    The sizes for a given image is specified in the properties file
-    size is a tuple (width, height)
-    '''
-    
-    s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
-    s3bucket_name = properties.S3_IMAGE_CDN_BUCKET_NAME
-    s3bucket = s3conn.get_bucket(s3bucket_name)
-    sizes = properties.CDN_IMAGE_SIZES
-    s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
-    #s3fname = s3_url_prefix + "/%s/%s%s.jpeg" %(base_filename, fname_prefix, rank)
-    fname_fmt = "neontn%s_w%s_h%s.jpg" 
-    
-    for sz in sizes:
-        im = PILImageUtils.resize(image, im_w=sz[0], im_h=sz[1])
-        fname = fname_fmt % (tid, sz[0], sz[1])
-        keyname = "image-cdn/%s/%s" % (neon_pub_id, fname)
-        fmt = 'jpeg'
-        filestream = StringIO()
-        im.save(filestream, fmt, quality=90) 
-        filestream.seek(0)
-        imgdata = filestream.read()
-        k = s3bucket.new_key(keyname)
-        utils.s3.set_contents_from_string(k, imgdata, {"Content-Type":"image/jpeg"})
-        s3bucket.set_acl('public-read', keyname)
-
 
 ###########################################################################
 # Process Video File

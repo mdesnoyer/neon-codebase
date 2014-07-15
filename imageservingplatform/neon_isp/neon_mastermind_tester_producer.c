@@ -44,7 +44,7 @@ char * directiveFormat =
 "                  {  "
 "                       \"h\":500, "
 "                       \"w\":600,  "
-"                       \"url\":\"https://host-thumbnails.s3.amazonaws.com/5cbcbb8e8ea526235f2eea41b572cf36/2292e2b89415baf28e9b5b38bebdb853/neon0.jpeg\""
+"                       \"url\":\"http://neon-image-cdn.s3.amazonaws.com/pixel.jpg\""
 "                  },  "
 "                  {   "
 "                       \"h\":700,  "

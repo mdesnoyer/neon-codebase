@@ -56,8 +56,9 @@ def get_system_memory():
     return psutil.virtual_memory()[2]
 
 def get_cpu_usage():
-    #normalize by num
-    return psutil.cpu_times()[0] /psutil.NUM_CPUS
+    # sum(user, system), normalize by num
+    #return (psutil.cpu_times()[0] + psutil.cpu_times()[2]) /psutil.NUM_CPUS
+    return psutil.cpu_percent(interval=0.1)
 
 def get_loadavg():
     # For more details, "man proc" and "man uptime"  

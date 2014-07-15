@@ -176,7 +176,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
             headers = {"X-Client-IP" : ip}
         return self.make_api_request(url, headers)
 
-    def client_api_request(self, pub_id, vid, width, height, ip):
+    def client_api_request(self, pub_id, vid, width, height, ip, **kwargs):
         '''
         Client request api requester 
         '''
@@ -187,7 +187,12 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         
         url = self.base_url % ("client", pub_id, vid)
         url += self.get_params % (width, height)
-        headers = {"X-Forwarded-For" : ip}
+        headers = kwargs.get('headers', {})
+        if len(headers) == 0: 
+            headers = {"X-Forwarded-For" : ip}
+        else:
+            headers["X-Forwarded-For"] = ip
+
         req = urllib2.Request(url, headers=headers)
         
         try:
@@ -229,7 +234,32 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         #self.assertTrue(response.code, 302)
 
     def test_client_api_request_with_cookie(self):
-        pass
+        '''
+        Test client api request when a neonglobaluserid 
+        cookie is present
+
+        expect only the bucketid cookie
+        '''
+        
+        h = {"Cookie" : "neonglobaluserid=dummyid"}
+        response = self.client_api_request(self.pub_id, self.vid, 600, 500,
+                "12.2.2.4", headers=h)
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+        
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1]
+            if "Set-Cookie" in header:
+                cookie = header.split("Set-Cookie: ")[-1]
+                cookie = cookie.split("=")
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(cookie[0], self.vid)
 
     ### Server API tests
 

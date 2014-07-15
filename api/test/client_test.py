@@ -18,6 +18,7 @@ if sys.path[0] != __base_path__:
         sys.path.insert(0, __base_path__)
 
 import api.client
+import api.cdnhosting
 import json
 import logging
 import mock
@@ -118,15 +119,20 @@ class TestVideoClient(unittest.TestCase):
     def tearDown(self):
         self.redis.stop()
 
+    @patch('api.cdnhosting.S3Connection')
     @patch('api.client.S3Connection')
-    def test_save_thumbnail_to_s3_and_metadata(self, mock_conntype):
+    def test_save_thumbnail_to_s3_and_metadata(self, mock_conntype,
+            mock_conntype_cdn):
         random.seed(215)
 
         #s3mocks to mock host_thumbnails_to_s3
         conn = boto_mock.MockConnection()
+        c_conn = boto_mock.MockConnection()
         conn.create_bucket('host-thumbnails')
-        conn.create_bucket('neon-image-cdn')
+        c_conn.create_bucket('neon-image-cdn')
         mock_conntype.return_value = conn
+        mock_conntype_cdn.return_value = c_conn
+        
         thumb_bucket = conn.buckets['host-thumbnails']
 
         image = PILImageUtils.create_random_image(360, 480) 
@@ -140,15 +146,18 @@ class TestVideoClient(unittest.TestCase):
         self.assertEqual(s3_keys[0].name, keyname)
         self.assertEqual(tdata.video_id, i_vid)
 
+    @patch('api.cdnhosting.S3Connection')
     @patch('api.client.S3Connection')
-    def test_host_images_s3(self, mock_conntype):
+    def test_host_images_s3(self, mock_conntype, mock_conntype_cdn):
         
         random.seed(1251)
         #s3mocks to mock host_thumbnails_to_s3
         conn = boto_mock.MockConnection()
+        c_conn = boto_mock.MockConnection()
         conn.create_bucket('host-thumbnails')
-        conn.create_bucket('neon-image-cdn')
+        c_conn.create_bucket('neon-image-cdn')
         mock_conntype.return_value = conn
+        mock_conntype_cdn.return_value = c_conn
        
         api_key = "test_api_key"
         vid = "tvid1"
@@ -231,20 +240,25 @@ class TestVideoClient(unittest.TestCase):
         self.assertGreater(len(vprocessor.timecodes), 0)
         self.assertNotIn(float('-inf'), vprocessor.valence_scores[1])
     
+    @patch('api.cdnhosting.S3Connection')
     @patch('api.client.VideoProcessor.finalize_api_request')
     @patch('utils.http')
     @patch('api.client.S3Connection')
-    def test_finalize_request(self, mock_conntype, mock_client, mock_finalize_api):
+    def test_finalize_request(self, mock_conntype, mock_client,
+            mock_finalize_api, mock_conntype_cdn):
         request = tornado.httpclient.HTTPRequest("http://xyz")
         response = tornado.httpclient.HTTPResponse(request, 200,
                             buffer=StringIO(''))
         mock_client.send_request.return_value = response
         mock_finalize_api.return_value = True
         
+        #s3mocks to mock host_thumbnails_to_s3
         conn = boto_mock.MockConnection()
+        c_conn = boto_mock.MockConnection()
         conn.create_bucket('host-thumbnails')
-        conn.create_bucket('neon-image-cdn')
+        c_conn.create_bucket('neon-image-cdn')
         mock_conntype.return_value = conn
+        mock_conntype_cdn.return_value = c_conn
        
         vprocessor = self.setup_video_processor("neon")
         vprocessor.process_video(self.test_video_file)
@@ -320,8 +334,9 @@ class TestVideoClient(unittest.TestCase):
         
 
     @patch('api.client.tornado.httpclient.HTTPClient')
+    @patch('api.cdnhosting.S3Connection')
     @patch('api.client.S3Connection')
-    def test_save_previous_thumbnail(self, mock_conntype, mock_client):
+    def test_save_previous_thumbnail(self, mock_conntype, mock_conntype_cdn, mock_client):
         '''
         Test saving previous thumbnail for 
         Neon/ bcove/ ooyala requests
@@ -339,10 +354,13 @@ class TestVideoClient(unittest.TestCase):
         mclient.fetch.return_value = response
         mock_client.return_value = mclient 
         
+        #s3mocks to mock host_thumbnails_to_s3
         conn = boto_mock.MockConnection()
+        c_conn = boto_mock.MockConnection()
         conn.create_bucket('host-thumbnails')
-        conn.create_bucket('neon-image-cdn')
+        c_conn.create_bucket('neon-image-cdn')
         mock_conntype.return_value = conn
+        mock_conntype_cdn.return_value = c_conn
        
         vprocessor = self.setup_video_processor("brightcove")
         tdata = vprocessor.save_previous_thumbnail(self.api_request)
@@ -438,12 +456,11 @@ class TestVideoClient(unittest.TestCase):
         vprocessor.job_params["requeue_count"] = 4
         self.assertFalse(vprocessor.requeue_job())
 
-    @patch('api.client.S3Connection')
+    @patch('api.cdnhosting.S3Connection')
     def test_host_resized_images_cdn(self, mock_conntype):
+        
         #s3mocks to mock host_thumbnails_to_s3
         conn = boto_mock.MockConnection()
-        
-        conn.create_bucket('host-thumbnails')
         conn.create_bucket('neon-image-cdn')
         mock_conntype.return_value = conn
         imbucket = conn.get_bucket("neon-image-cdn")
@@ -451,13 +468,21 @@ class TestVideoClient(unittest.TestCase):
         keyname = "test_key"
         neon_id = "NEON_PUB_ID"
         tid = "test_tid"
-        tdata = api.client.host_images_cdn(image, neon_id, tid)
+        tdata = api.cdnhosting.CDNHosting.host_images_neon_cdn(image, neon_id, tid)
         sizes = api.properties.CDN_IMAGE_SIZES   
         s3_keys = [x for x in imbucket.get_all_keys()]
-        print s3_keys
         self.assertEqual(len(s3_keys), len(sizes))
         #for s3key in s3_keys:
         #    self.assertEqual()
+        
+        # Verify the contents in serving url 
+        serving_urls = neondata.ThumbnailServingURLs.get_many([tid])[0]
+        for w, h in sizes:
+            url = serving_urls.get_serving_url(w, h)
+            fname = "neontn%s_w%s_h%s.jpg" % (tid, w, h) 
+            keyname = "%s/%s" % (neon_id, fname)
+            exp_url = "http://%s/%s" % ("imagecdn.neon-lab.com", keyname)
+            self.assertEqual(exp_url, url)
 
         #image-cdn/NEON_PUB_ID/neontntest_tid_w800_h600.jpg
         #Build a per video stats page to monitor each video
