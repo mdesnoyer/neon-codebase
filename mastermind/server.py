@@ -20,7 +20,6 @@ import impala.dbapi
 import impala.error
 import json
 import logging
-from mastermind import directive_pusher
 from mastermind.core import VideoInfo, ThumbnailInfo, Mastermind
 import signal
 import socket
@@ -42,11 +41,11 @@ define('stats_host', default='54.197.233.118',
        help='Host of the stats database')
 define('stats_port', type=int, default=21050,
        help='Port to the stats database')
-define('stats_db_polling_delay', default=57, type=float,
+define('stats_db_polling_delay', default=247, type=float,
        help='Number of seconds between polls of the stats db')
 
 # Video db options
-define('video_db_polling_delay', default=300, type=float,
+define('video_db_polling_delay', default=261, type=float,
        help='Number of seconds between polls of the video db')
 
 # Publishing options
@@ -74,8 +73,10 @@ class VideoDBWatcher(threading.Thread):
         # Is the initial data loaded
         self.is_loaded = threading.Event()
 
+        self._stopped = threading.Event()
+
     def run(self):
-        while True:
+        while not self._stopped.is_set():
             try:
                 with self.activity_watcher.activate():
                     self._process_db_data()
@@ -84,11 +85,15 @@ class VideoDBWatcher(threading.Thread):
                 _log.exception('Uncaught video DB Error: %s' % e)
 
             # Now we wait so that we don't hit the database too much.
-            time.sleep(options.video_db_polling_delay)
+            self._stopped.wait(options.video_db_polling_delay)
 
     def wait_until_loaded(self):
         '''Blocks until the data is loaded.'''
         self.is_loaded.wait()
+
+    def stop(self):
+        '''Stop this thread safely and allow it to finish what is is doing.'''
+        self._stopped.set()
 
     def _process_db_data(self):
         _log.info('Polling the video database')
@@ -102,6 +107,11 @@ class VideoDBWatcher(threading.Thread):
         self.directive_pusher.update_tracker_id_map(
             dict(((x.get_tai(), x.value) for x in
                   neondata.TrackerAccountIDMapper.get_all())))
+
+        # Get an update for the default widths
+        self.directive_pusher.update_default_sizes(
+            dict(((x.neon_api_key, x.default_size) for x in
+                  neondata.NeonUserAccount.get_all_accounts())))
 
         # Update the video data
         for platform in neondata.AbstractPlatform.get_all_instances():
@@ -153,14 +163,20 @@ class StatsDBWatcher(threading.Thread):
         # Is the initial data loaded
         self.is_loaded = threading.Event()
 
+        self._stopped = threading.Event()
+
     def wait_until_loaded(self):
         '''Blocks until the data is loaded.'''
         self.is_loaded.wait()
 
+    def stop(self):
+        '''Stop this thread safely and allow it to finish what is is doing.'''
+        self._stopped.set()
+
     def run(self):
         _log.info('Statistics database is at host=%s port=%i' %
                   (options.stats_host, options.stats_port))
-        while True:
+        while not self._stopped.is_set():
             try:
                 with self.activity_watcher.activate():
                     self._process_db_data()            
@@ -169,7 +185,7 @@ class StatsDBWatcher(threading.Thread):
                 _log.exception('Uncaught stats DB Error: %s' % e)
 
             # Now we wait so that we don't hit the database too much.
-            time.sleep(options.stats_db_polling_delay)
+            self._stopped.wait(options.stats_db_polling_delay)
 
     def _process_db_data(self):
         try:
@@ -216,6 +232,10 @@ class StatsDBWatcher(threading.Thread):
 
                 # Build the query for all the data in the last month
                 strategy = neondata.ExperimentStrategy.get(tai_info.value)
+                if strategy is None:
+                    _log.error('Could not find experimental strategy for '
+                               'account %s. Skipping' % tai_info.value)
+                    continue
                 if strategy.conversion_type == neondata.MetricType.PLAYS:
                     query = (
                         """select thumbnail_id, count({imp_type}), 
@@ -324,6 +344,7 @@ class DirectivePublisher(threading.Thread):
     }
     '''
     def __init__(self, mastermind, tracker_id_map={}, serving_urls={},
+                 default_sizes={},
                  activity_watcher=utils.ps.ActivityWatcher()):
         '''Creates the publisher.
 
@@ -331,11 +352,14 @@ class DirectivePublisher(threading.Thread):
         mastermind - The mastermind.core.Mastermind object that has the logic
         tracker_id_map - A map of tracker_id -> account_id
         serving_urls - A map of thumbnail_id -> { (width, height) -> url }
+        default_widths - A map of account_id (aka api_key) -> 
+                                             default thumbnail width
         '''
         super(DirectivePublisher, self).__init__(name='DirectivePublisher')
         self.mastermind = mastermind
         self.tracker_id_map = tracker_id_map
         self.serving_urls = serving_urls
+        self.default_sizes = default_sizes
         self.activity_watcher = activity_watcher
 
         self.lock = threading.RLock()
@@ -369,6 +393,10 @@ class DirectivePublisher(threading.Thread):
         with self.lock:
             self.serving_urls = new_map
 
+    def update_default_sizes(self, new_map):
+        with self.lock:
+            self.default_sizes = new_map
+
     def _publish_directives(self):
         '''Publishes the directives to S3'''
         # Create the directives file
@@ -376,7 +404,7 @@ class DirectivePublisher(threading.Thread):
         directive_file = tempfile.TemporaryFile()
         valid_length = options.expiry_buffer + options.publishing_period
         directive_file.write(
-            'expiry=%sZ\n' % 
+            'expiry=%sZ' % 
             (curtime + datetime.timedelta(seconds=valid_length))
             .isoformat())
         with self.lock:
@@ -418,58 +446,73 @@ class DirectivePublisher(threading.Thread):
         '''Write the current directives to the stream.'''
         # First write out the tracker id maps
         for tracker_id, account_id in self.tracker_id_map.iteritems():
-            stream.write(json.dumps({'type': 'pub', 'pid': tracker_id,
-                                     'aid': account_id}) + '\n')
+            stream.write('\n' + json.dumps({'type': 'pub', 'pid': tracker_id,
+                                            'aid': account_id}))
 
         # Now write the directives
         for key, directive in self.mastermind.get_directives():
             account_id, video_id = key
-            try:
-                data = {
-                    'type': 'dir',
-                    'aid': account_id,
-                    'vid': video_id,
-                    'sla': datetime.datetime.utcnow().isoformat() + 'Z',
-                    'fractions': [
-                        {
-                            'pct': frac,
-                            'tid': thumb_id,
-                            'default_url': self._get_default_url(thumb_id),
-                            'imgs': [ 
-                                {
-                                    'w': k[0],
-                                    'h': k[1],
-                                    'url': v
-                                } 
-                                for k, v in 
-                                self.serving_urls[thumb_id].iteritems()
-                                ]
-                        }
-                        for thumb_id, frac in directive if 
-                        frac <= 1e-7 or thumb_id in self.serving_urls]
-                }
-                stream.write(json.dumps(data) + "\n")
-                
-            except KeyError:
-                _log.error(('Could not find all serving URLs for video: %s. '
-                            'The directives will not be published.' %
-                            video_id))
+            fractions = []
+            missing_urls = False
+            for thumb_id, frac in directive:
+                try:
+                    fractions.append({
+                        'pct': frac,
+                        'tid': thumb_id,
+                        'default_url': self._get_default_url(account_id,
+                                                             thumb_id),
+                        'imgs': [ 
+                            {
+                                'w': k[0],
+                                'h': k[1],
+                                'url': v
+                            } 
+                            for k, v in 
+                            self.serving_urls[thumb_id].iteritems()
+                            ]
+                    })
+                except KeyError:
+                    if frac > 1e-7:
+                        _log.error('Could not find all serving URLs for '
+                                   'video: %s. The directives will not '
+                                   'be published.' % video_id)
+                        missing_urls = True
+                        break
 
-    def _get_default_url(self, thumb_id):
+            if missing_urls:
+                continue
+            
+            data = {
+                'type': 'dir',
+                'aid': account_id,
+                'vid': video_id,
+                'sla': datetime.datetime.utcnow().isoformat() + 'Z',
+                'fractions': fractions
+            }
+            stream.write('\n' + json.dumps(data))
+
+    def _get_default_url(self, account_id, thumb_id):
         '''Returns the default url for this thumbnail id.'''
-        # For now, set the default to 120x90
-        # TODO(mdesnoyer): Maybe change this to a per account default? 
-        #                  Or the full size of the image?
+        # Figure out the default width for this account
+        default_size = self.default_sizes.get(account_id, None)
+        if default_size is None:
+            default_size = (160, 90)
+        
         serving_urls = self.serving_urls[thumb_id]
         try:
-            return serving_urls[(120, 90)]
+            return serving_urls[tuple(default_size)]
         except KeyError:
-            mindiff = min([abs(x[0] - 120) for x in serving_urls.keys()])
+            # We couldn't find that exact size, so pick the one with the minimum 
+            mindiff = min([abs(x[0] - default_size[0]) +
+                           abs(x[1] - default_size[1]) 
+                           for x in serving_urls.keys()])
             closest_size = [x for x in serving_urls.keys() if
-                            abs(x[0] - 120) == mindiff][0]
-            _log.warn('There is no serving thumb of size (120, 90) for thumb'
+                            (abs(x[0] - default_size[0]) +
+                             abs(x[1] - default_size[1])) == mindiff][0]
+            _log.warn('There is no serving thumb of size (%i, %i) for thumb'
                       '%s. Using (%i, %i) instead'
-                      % (thumb_id, closest_size[0], closest_size[1]))
+                      % (default_size[0], default_size[1], thumb_id,
+                         closest_size[0], closest_size[1]))
             return serving_urls[closest_size]
         
 def main(activity_watcher = utils.ps.ActivityWatcher()):
@@ -481,14 +524,16 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
         videoDbThread = VideoDBWatcher(mastermind, publisher,
                                        activity_watcher)
         videoDbThread.start()
+        videoDbThread.wait_until_loaded()
         statsDbThread = StatsDBWatcher(mastermind, activity_watcher)
         statsDbThread.start()
         statsDbThread.wait_until_loaded()
-        videoDbThread.wait_until_loaded()
 
         publisher.start()
 
     atexit.register(tornado.ioloop.IOLoop.current().stop)
+    atexit.register(publisher.stop)
+    atexit.register(videoDbThread.stop)
     atexit.register(publisher.stop)
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
     signal.signal(signal.SIGINT, lambda sig, y: sys.exit(-sig))
