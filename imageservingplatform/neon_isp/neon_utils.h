@@ -54,6 +54,8 @@ unsigned long neon_sdbm_hash(unsigned char *str);
 
 void neon_get_uuid(char *dest, size_t length);
 
+NEON_BOOLEAN neon_is_valid_ip_string(unsigned char *ip);
+
 #endif
 
 

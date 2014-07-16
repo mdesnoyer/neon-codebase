@@ -13,7 +13,6 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <time.h>
-#include "neon_cfg.h"
 #include "neon_log.h"
 #include "neon_mastermind.h"
 #include "neon_service.h"
@@ -31,10 +30,19 @@ static char *ngx_http_neon_healthcheck_hook(ngx_conf_t *cf, ngx_command_t *cmd, 
 static char *ngx_http_neon_stats_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_neon_mastermind_file_url(ngx_conf_t *cf, void *post, void *data);
 static char *ngx_http_neon_mastermind_validated_filepath(ngx_conf_t *cf, void *post, void *data);
-
+static char *ngx_http_neon_updater_sleep_time(ngx_conf_t *cf, void *post, void *data);
 static ngx_int_t ngx_http_neon_handler_healthcheck(ngx_http_request_t *r);
+
+// config handlers
 static ngx_conf_post_handler_pt ngx_http_neon_mastermind_file_url_p = ngx_http_neon_mastermind_file_url;
 static ngx_conf_post_handler_pt ngx_http_neon_mastermind_validated_filepath_p = ngx_http_neon_mastermind_validated_filepath;
+static ngx_conf_post_handler_pt ngx_http_neon_updater_sleep_time_p = ngx_http_neon_updater_sleep_time;
+
+// Module Hook Methods
+ngx_int_t neon_init_process(ngx_cycle_t *cycle);
+void neon_exit_process(ngx_cycle_t *cycle);
+ngx_int_t neon_init_module(ngx_cycle_t *cycle);
+
 
 /*
  * Neon specific configuration structure
@@ -48,6 +56,7 @@ typedef struct {
     ngx_str_t mastermind_validated_filepath;
 } ngx_http_neon_loc_conf_t;
 
+static time_t updater_sleep_time;
 static ngx_str_t mastermind_file_url_str;
 static ngx_str_t mastermind_validated_filepath;
 
@@ -105,14 +114,21 @@ static ngx_command_t  ngx_http_neon_commands[] = {
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_neon_loc_conf_t, mastermind_validated_filepath),
         &ngx_http_neon_mastermind_validated_filepath_p },
-
+    
+    { ngx_string("updater_sleep_interval"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_sec_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_neon_loc_conf_t, updater_sleep_time),
+        &ngx_http_neon_updater_sleep_time_p},
+    
     ngx_null_command
 };
 
 
-/* Create loc conf
- * It takes a directive struct (ngx_conf_t) and returns a newly created module configuration struct
- * 
+/* Create loc conf to be used by the module
+ * It takes a directive struct (ngx_conf_t) and returns a newly 
+ * created module configuration struct
  */
 static void *
 ngx_http_neon_create_loc_conf(ngx_conf_t * cf)
@@ -126,6 +142,7 @@ ngx_http_neon_create_loc_conf(ngx_conf_t * cf)
     }
     
     //conf->mastermind_url = NGX_CONF_UNSET;
+    conf->updater_sleep_time = NGX_CONF_UNSET_UINT;
     return conf;
 }
 
@@ -137,9 +154,10 @@ ngx_http_neon_merge_loc_conf(ngx_conf_t * cf, void * parent, void * child)
     //ngx_http_neon_loc_conf_t * prev = parent;
     //ngx_http_neon_loc_conf_t * conf = child;
     
-    
     return NGX_CONF_OK;
 }
+
+///// NGINX & ISP custom config parsing //////  
 
 /*
  * Get the location 
@@ -169,7 +187,8 @@ ngx_http_neon_mastermind_file_url(ngx_conf_t *cf, void *post, void *data)
 }
 
 /*
- * Mastermind file path
+ * Read the Mastermind valided filepath file path
+ * This filepath is used to store the validated file
  * */
 static char *
 ngx_http_neon_mastermind_validated_filepath(ngx_conf_t *cf, void *post, void *data)
@@ -191,6 +210,21 @@ ngx_http_neon_mastermind_validated_filepath(ngx_conf_t *cf, void *post, void *da
     return NGX_CONF_OK;
 }
 
+    
+static char *
+ngx_http_neon_updater_sleep_time(ngx_conf_t *cf, void *post, void *data){
+    time_t *name = data; // i.e., first field of var
+   
+    if(name == NULL){
+        return NGX_CONF_ERROR;
+    }    
+    
+    updater_sleep_time = *name; 
+    neon_log_error("Parsed updater sleep time %d", updater_sleep_time);
+    return NGX_CONF_OK;
+}
+
+
 /* Module Context
  *
  * This is a static ngx_http_module_t struct, which just has a bunch of function
@@ -206,6 +240,7 @@ ngx_http_neon_mastermind_validated_filepath(ngx_conf_t *cf, void *post, void *da
  * creating the location conf
  * merging it with the server conf
  */
+
 static ngx_http_module_t  ngx_http_neon_module_ctx = {
     NULL,                          /* preconfiguration */
     NULL,                          /* postconfiguration */
@@ -219,11 +254,6 @@ static ngx_http_module_t  ngx_http_neon_module_ctx = {
     ngx_http_neon_merge_loc_conf   /* merge location configuration */
 };
 
-// Module Hook Methods
-
-ngx_int_t neon_init_process(ngx_cycle_t *cycle);
-void neon_exit_process(ngx_cycle_t *cycle);
-ngx_int_t neon_init_module(ngx_cycle_t *cycle);
 
 
 /* Module Definition
@@ -251,26 +281,21 @@ ngx_module_t ngx_http_neon_module = {
 
 
 
-ngx_int_t neon_init_process(ngx_cycle_t *cycle)
-{
-       neon_updater_config_init(mastermind_file_url_str.data); 
+ngx_int_t neon_init_process(ngx_cycle_t *cycle){
+    neon_updater_config_init(mastermind_file_url_str.data, mastermind_validated_filepath.data, updater_sleep_time); 
     neon_start_updater();
     return 0;
 }
 
 
 void
-neon_exit_process(ngx_cycle_t *cycle)
-{
+neon_exit_process(ngx_cycle_t *cycle){
     neon_terminate_updater();
 }
 
 
-
-
 ngx_int_t
-neon_init_module(ngx_cycle_t *cycle)
-{
+neon_init_module(ngx_cycle_t *cycle){
     return 0;
 }
 
@@ -284,8 +309,8 @@ neon_init_module(ngx_cycle_t *cycle)
 
 static ngx_int_t ngx_http_neon_handler_server(ngx_http_request_t *request)
 {
-    neon_log_error("INFO: Server API Handler");
-    
+    neon_stats[NEON_SERVER_API_REQUESTS] ++;
+
     ngx_chain_t chain;
     
     neon_service_server_api(request, &chain);
@@ -306,6 +331,8 @@ static ngx_int_t ngx_http_neon_handler_server(ngx_http_request_t *request)
 
 static ngx_int_t ngx_http_neon_handler_client(ngx_http_request_t *request)
 {
+    neon_stats[NEON_CLIENT_API_REQUESTS] ++;
+
     ngx_chain_t  chain;
  
     neon_service_client_api(request, &chain);
@@ -323,28 +350,11 @@ static ngx_int_t ngx_http_neon_handler_client(ngx_http_request_t *request)
 
 static ngx_int_t ngx_http_neon_handler_getthumbnailid(ngx_http_request_t *request)
 {
+    neon_stats[NEON_GETTHUMBNAIL_API_REQUESTS] ++;
+
     ngx_chain_t   chain;
     
     neon_service_getthumbnailid(request, &chain);
-
-    ///////////
-    //  config
-    //////////
-    /*
-     ngx_http_neon_loc_conf_t  * neon_config = 0;
-     neon_config = ngx_http_conf_get_module_loc_conf(r, ngx_http_neon_module);
-     
-     neon_log_error("ttatatatatat");
-     
-     if(neon_config != NULL) {
-     if(neon_config->mastermind_url.len == 0)
-     neon_log_error("neon_config->mastermind_url is zero");
-     }
-     else
-     neon_log_error("neon_config is null");
-     
-     neon_log_error("titititititi");
-     */
     
     ngx_http_send_header(request);
     
@@ -434,7 +444,13 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
     ",\"NEON_CLIENT_API_URL_NOT_FOUND\": %llu"
     ",\"NEON_SERVER_API_ACCOUNT_ID_NOT_FOUND\": %llu"
     ",\"NEON_SERVER_API_URL_NOT_FOUND\": %llu"
-
+    ",\"NEON_UPDATER_HTTP_FETCH_FAIL\": %llu"
+    ",\"NEON_UPDATER_MASTERMIND_EXPIRED\": %llu"
+    ",\"NEON_UPDATER_MASTERMIND_LOAD_FAIL\": %llu"
+    ",\"NEON_UPDATER_MASTERMIND_RENAME_FAIL\": %llu"
+    ",\"NEON_SERVER_API_REQUESTS\": %llu"
+    ",\"NEON_CLIENT_API_REQUESTS\": %llu"
+    ",\"NEON_GETTHUMBNAIL_API_REQUESTS\": %llu"
     "}";
 
     static u_char resp[2048];
@@ -445,9 +461,6 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
     
     r->headers_out.content_type.len = sizeof("text/plain") - 1;
     r->headers_out.content_type.data = (u_char *) "text/plain";
-    
-    
-    neon_log_error("stats");
     
     b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
     
@@ -471,7 +484,14 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
           neon_stats[11],
           neon_stats[12],
           neon_stats[13],
-          neon_stats[14]
+          neon_stats[14],
+          neon_stats[15],
+          neon_stats[16],
+          neon_stats[17],
+          neon_stats[18],
+          neon_stats[19],
+          neon_stats[20],
+          neon_stats[21]
           );
     
     b->pos = resp;
@@ -490,9 +510,7 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
 
 
 
-/*
- *   Handlers installers
- */
+ // Handlers installers : Hooks for each of the Interface handlers
 
 static char *ngx_http_neon_client_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -536,8 +554,8 @@ static char *ngx_http_neon_healthcheck_hook(ngx_conf_t *cf, ngx_command_t *cmd, 
 }
 
 
-static char *ngx_http_neon_stats_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
-{
+static char *ngx_http_neon_stats_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf){
+
     ngx_http_core_loc_conf_t  *clcf;
     clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
     clcf->handler = ngx_http_neon_handler_stats;

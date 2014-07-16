@@ -1,3 +1,9 @@
+/* 
+ * Scaled Image class used to represent the Image object
+ * in the json array of the mastermind file
+ *
+ * */
+
 #ifndef _NEON_SCALE_IMAGE__
 #define _NEON_SCALE_IMAGE__
 

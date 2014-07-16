@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <arpa/inet.h>
 
 #include "neon_error_codes.h"
 #include "neon_stats.h"
@@ -151,6 +152,16 @@ void neon_get_uuid(char *dest, size_t length){
         *dest++ = charset[index];
     }
     *dest = '\0';
+}
+
+// Verify if the given string is a valid ip address
+
+NEON_BOOLEAN neon_is_valid_ip_string(unsigned char *ip){
+  struct sockaddr_in sa;
+  int result = inet_pton(AF_INET, (char *)ip, &(sa.sin_addr)); // only IPV4
+  if (result <= 0) 
+    return NEON_FALSE; 
+  return NEON_TRUE;
 }
 
 const char * neon_rename_error = 0;

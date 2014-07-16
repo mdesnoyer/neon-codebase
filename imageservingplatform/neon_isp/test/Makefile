@@ -24,7 +24,7 @@
 #     VERSION_FROM => q[lib/Test/Nginx.pm]
 #     dist => {  }
 #     realclean => { FILES=>q[MYMETA.yml] }
-#     test => { TESTS=>q[t/apply_moves.t t/check_response_body.t t/get_req_from_block.t t/parse_request.t t/pod-coverage.t t/pod.t t/syntax.t t/test_minify_css.t t/test_minify_js.t] }
+#     test => { TESTS=>q[] }
 
 # --- MakeMaker post_initialize section:
 
@@ -156,15 +156,23 @@ BASEEXT = Nginx
 PARENT_NAME = Test
 DLBASE = $(BASEEXT)
 VERSION_FROM = lib/Test/Nginx.pm
-OBJECT = 
+OBJECT = $(BASEEXT)$(OBJ_EXT)
 LDFROM = $(OBJECT)
 LINKTYPE = dynamic
 BOOTDEP = 
 
 # Handy lists of source code files:
 XS_FILES = 
-C_FILES  = 
-O_FILES  = 
+C_FILES  = neon_directivehashtable_test.cc \
+	neon_isp_misc_test.cc \
+	neon_mastermind_test.cc \
+	neon_publisherhashtable_test.cc \
+	rapidjson_test.cc
+O_FILES  = neon_directivehashtable_test.o \
+	neon_isp_misc_test.o \
+	neon_mastermind_test.o \
+	neon_publisherhashtable_test.o \
+	rapidjson_test.o
 H_FILES  = 
 MAN1PODS = 
 MAN3PODS = lib/Test/Nginx.pm \
@@ -181,9 +189,9 @@ INST_ARCHLIBDIR  = $(INST_ARCHLIB)/Test
 INST_AUTODIR     = $(INST_LIB)/auto/$(FULLEXT)
 INST_ARCHAUTODIR = $(INST_ARCHLIB)/auto/$(FULLEXT)
 
-INST_STATIC      = 
-INST_DYNAMIC     = 
-INST_BOOT        = 
+INST_STATIC      = $(INST_ARCHAUTODIR)/$(BASEEXT)$(LIB_EXT)
+INST_DYNAMIC     = $(INST_ARCHAUTODIR)/$(DLBASE).$(DLEXT)
+INST_BOOT        = $(INST_ARCHAUTODIR)/$(BASEEXT).bs
 
 # Extra linker info
 EXPORT_LIST        = 
@@ -218,6 +226,14 @@ AUTOSPLITFILE = $(ABSPERLRUN)  -e 'use AutoSplit;  autosplit($$ARGV[0], $$ARGV[1
 
 
 # --- MakeMaker tool_xsubpp section:
+
+XSUBPPDIR = /opt/local/lib/perl5/5.12.4/ExtUtils
+XSUBPP = $(XSUBPPDIR)$(DFSEP)xsubpp
+XSUBPPRUN = $(PERLRUN) $(XSUBPP)
+XSPROTOARG = 
+XSUBPPDEPS = /opt/local/lib/perl5/5.12.4/ExtUtils/typemap $(XSUBPP)
+XSUBPPARGS = -typemap /opt/local/lib/perl5/5.12.4/ExtUtils/typemap
+XSUBPP_EXTRA_ARGS = 
 
 
 # --- MakeMaker tools_other section:
@@ -283,12 +299,24 @@ DISTVNAME = Test-Nginx-0.21
 
 # --- MakeMaker cflags section:
 
+CCFLAGS = -pipe -O2 -fno-common -DPERL_DARWIN -I/opt/local/include -no-cpp-precomp -fno-strict-aliasing -fstack-protector -I/opt/local/include
+OPTIMIZE = -O3
+PERLTYPE = 
+MPOLLUTE = 
+
 
 # --- MakeMaker const_loadlibs section:
 
+# Test::Nginx might depend on some other libraries:
+# See ExtUtils::Liblist for details
+#
+
 
 # --- MakeMaker const_cccmd section:
-
+CCCMD = $(CC) -c $(PASTHRU_INC) $(INC) \
+	$(CCFLAGS) $(OPTIMIZE) \
+	$(PERLTYPE) $(MPOLLUTE) $(DEFINE_VERSION) \
+	$(XS_DEFINE_VERSION)
 
 # --- MakeMaker post_constants section:
 
@@ -297,6 +325,7 @@ DISTVNAME = Test-Nginx-0.21
 
 PASTHRU = LIBPERL_A="$(LIBPERL_A)"\
 	LINKTYPE="$(LINKTYPE)"\
+	OPTIMIZE="$(OPTIMIZE)"\
 	PREFIX="$(PREFIX)"
 
 
@@ -309,11 +338,42 @@ PASTHRU = LIBPERL_A="$(LIBPERL_A)"\
 
 # --- MakeMaker c_o section:
 
+.c.i:
+	/usr/bin/clang -E -c $(PASTHRU_INC) $(INC) \
+	$(CCFLAGS) $(OPTIMIZE) \
+	$(PERLTYPE) $(MPOLLUTE) $(DEFINE_VERSION) \
+	$(XS_DEFINE_VERSION) $(CCCDLFLAGS) "-I$(PERL_INC)" $(PASTHRU_DEFINE) $(DEFINE) $*.c > $*.i
+
+.c.s:
+	$(CCCMD) -S $(CCCDLFLAGS) "-I$(PERL_INC)" $(PASTHRU_DEFINE) $(DEFINE) $*.c
+
+.c$(OBJ_EXT):
+	$(CCCMD) $(CCCDLFLAGS) "-I$(PERL_INC)" $(PASTHRU_DEFINE) $(DEFINE) $*.c
+
+.cpp$(OBJ_EXT):
+	$(CCCMD) $(CCCDLFLAGS) "-I$(PERL_INC)" $(PASTHRU_DEFINE) $(DEFINE) $*.cpp
+
+.cxx$(OBJ_EXT):
+	$(CCCMD) $(CCCDLFLAGS) "-I$(PERL_INC)" $(PASTHRU_DEFINE) $(DEFINE) $*.cxx
+
+.cc$(OBJ_EXT):
+	$(CCCMD) $(CCCDLFLAGS) "-I$(PERL_INC)" $(PASTHRU_DEFINE) $(DEFINE) $*.cc
+
+.C$(OBJ_EXT):
+	$(CCCMD) $(CCCDLFLAGS) "-I$(PERL_INC)" $(PASTHRU_DEFINE) $(DEFINE) $*.C
+
 
 # --- MakeMaker xs_c section:
 
+.xs.c:
+	$(XSUBPPRUN) $(XSPROTOARG) $(XSUBPPARGS) $(XSUBPP_EXTRA_ARGS) $*.xs > $*.xsc && $(MV) $*.xsc $*.c
+
 
 # --- MakeMaker xs_o section:
+
+.xs$(OBJ_EXT):
+	$(XSUBPPRUN) $(XSPROTOARG) $(XSUBPPARGS) $*.xs > $*.xsc && $(MV) $*.xsc $*.c
+	$(CCCMD) $(CCCDLFLAGS) "-I$(PERL_INC)" $(PASTHRU_DEFINE) $(DEFINE) $*.c
 
 
 # --- MakeMaker top_targets section:
@@ -400,11 +460,40 @@ dynamic :: $(FIRST_MAKEFILE) $(INST_DYNAMIC) $(INST_BOOT)
 
 
 # --- MakeMaker dynamic_bs section:
+BOOTSTRAP = $(BASEEXT).bs
 
-BOOTSTRAP =
+# As Mkbootstrap might not write a file (if none is required)
+# we use touch to prevent make continually trying to remake it.
+# The DynaLoader only reads a non-empty file.
+$(BOOTSTRAP) : $(FIRST_MAKEFILE) $(BOOTDEP) $(INST_ARCHAUTODIR)$(DFSEP).exists
+	$(NOECHO) $(ECHO) "Running Mkbootstrap for $(NAME) ($(BSLOADLIBS))"
+	$(NOECHO) $(PERLRUN) \
+		"-MExtUtils::Mkbootstrap" \
+		-e "Mkbootstrap('$(BASEEXT)','$(BSLOADLIBS)');"
+	$(NOECHO) $(TOUCH) $@
+	$(CHMOD) $(PERM_RW) $@
+
+$(INST_BOOT) : $(BOOTSTRAP) $(INST_ARCHAUTODIR)$(DFSEP).exists
+	$(NOECHO) $(RM_RF) $@
+	- $(CP) $(BOOTSTRAP) $@
+	$(CHMOD) $(PERM_RW) $@
 
 
 # --- MakeMaker dynamic_lib section:
+
+# This section creates the dynamically loadable $(INST_DYNAMIC)
+# from $(OBJECT) and possibly $(MYEXTLIB).
+ARMAYBE = :
+OTHERLDFLAGS = 
+INST_DYNAMIC_DEP = 
+INST_DYNAMIC_FIX = 
+
+$(INST_DYNAMIC): $(OBJECT) $(MYEXTLIB) $(BOOTSTRAP) $(INST_ARCHAUTODIR)$(DFSEP).exists $(EXPORT_LIST) $(PERL_ARCHIVE) $(PERL_ARCHIVE_AFTER) $(INST_DYNAMIC_DEP)
+	$(RM_F) $@
+	$(LD)  $(LDDLFLAGS) $(LDFROM) $(OTHERLDFLAGS) -o $@ $(MYEXTLIB)	\
+	  $(PERL_ARCHIVE) $(LDLOADLIBS) $(PERL_ARCHIVE_AFTER) $(EXPORT_LIST)	\
+	  $(INST_DYNAMIC_FIX)
+	$(CHMOD) $(PERM_RWX) $@
 
 
 # --- MakeMaker static section:
@@ -416,6 +505,12 @@ static :: $(FIRST_MAKEFILE) $(INST_STATIC)
 
 
 # --- MakeMaker static_lib section:
+
+$(INST_STATIC) : $(OBJECT) $(MYEXTLIB) $(INST_ARCHAUTODIR)$(DFSEP).exists
+	$(RM_RF) $@
+	$(FULL_AR) $(AR_STATIC_ARGS) $@ $(OBJECT) && $(RANLIB) $@
+	$(CHMOD) $(PERM_RWX) $@
+	$(NOECHO) $(ECHO) "$(EXTRALIBS)" > $(INST_ARCHAUTODIR)/extralibs.ld
 
 
 # --- MakeMaker manifypods section:
@@ -487,7 +582,8 @@ realclean_subdirs :
 # Delete temporary files (via clean) and also delete dist files
 realclean purge ::  clean realclean_subdirs
 	- $(RM_F) \
-	  $(MAKEFILE_OLD) $(FIRST_MAKEFILE) 
+	  $(OBJECT) $(MAKEFILE_OLD) \
+	  $(FIRST_MAKEFILE) 
 	- $(RM_RF) \
 	  MYMETA.yml $(DISTVNAME) 
 
@@ -719,8 +815,56 @@ FORCE :
 
 # --- MakeMaker perldepend section:
 
+PERL_HDRS = \
+	$(PERL_INC)/EXTERN.h		\
+	$(PERL_INC)/INTERN.h		\
+	$(PERL_INC)/XSUB.h		\
+	$(PERL_INC)/av.h		\
+	$(PERL_INC)/cc_runtime.h	\
+	$(PERL_INC)/config.h		\
+	$(PERL_INC)/cop.h		\
+	$(PERL_INC)/cv.h		\
+	$(PERL_INC)/dosish.h		\
+	$(PERL_INC)/embed.h		\
+	$(PERL_INC)/embedvar.h		\
+	$(PERL_INC)/fakethr.h		\
+	$(PERL_INC)/form.h		\
+	$(PERL_INC)/gv.h		\
+	$(PERL_INC)/handy.h		\
+	$(PERL_INC)/hv.h		\
+	$(PERL_INC)/intrpvar.h		\
+	$(PERL_INC)/iperlsys.h		\
+	$(PERL_INC)/keywords.h		\
+	$(PERL_INC)/mg.h		\
+	$(PERL_INC)/nostdio.h		\
+	$(PERL_INC)/op.h		\
+	$(PERL_INC)/opcode.h		\
+	$(PERL_INC)/patchlevel.h	\
+	$(PERL_INC)/perl.h		\
+	$(PERL_INC)/perlio.h		\
+	$(PERL_INC)/perlsdio.h		\
+	$(PERL_INC)/perlsfio.h		\
+	$(PERL_INC)/perlvars.h		\
+	$(PERL_INC)/perly.h		\
+	$(PERL_INC)/pp.h		\
+	$(PERL_INC)/pp_proto.h		\
+	$(PERL_INC)/proto.h		\
+	$(PERL_INC)/regcomp.h		\
+	$(PERL_INC)/regexp.h		\
+	$(PERL_INC)/regnodes.h		\
+	$(PERL_INC)/scope.h		\
+	$(PERL_INC)/sv.h		\
+	$(PERL_INC)/thread.h		\
+	$(PERL_INC)/unixish.h		\
+	$(PERL_INC)/util.h
+
+$(OBJECT) : $(PERL_HDRS)
+
 
 # --- MakeMaker makefile section:
+
+$(OBJECT) : $(FIRST_MAKEFILE)
+
 # We take a very conservative approach here, but it's worth it.
 # We move Makefile to Makefile.old here to avoid gnu make looping.
 $(FIRST_MAKEFILE) : Makefile.PL $(CONFIGDEP)
@@ -758,7 +902,7 @@ $(MAKE_APERL_FILE) : $(FIRST_MAKEFILE) pm_to_blib
 TEST_VERBOSE=0
 TEST_TYPE=test_$(LINKTYPE)
 TEST_FILE = test.pl
-TEST_FILES = t/apply_moves.t t/check_response_body.t t/get_req_from_block.t t/parse_request.t t/pod-coverage.t t/pod.t t/syntax.t t/test_minify_css.t t/test_minify_js.t
+TEST_FILES = 
 TESTDB_SW = -d
 
 testdb :: testdb_$(LINKTYPE)
@@ -768,17 +912,20 @@ test :: $(TEST_TYPE) subdirs-test
 subdirs-test ::
 	$(NOECHO) $(NOOP)
 
+	$(NOECHO) $(ECHO) 'No tests defined for $(NAME) extension.'
 
 test_dynamic :: pure_all
-	PERL_DL_NONLAZY=1 $(FULLPERLRUN) "-MExtUtils::Command::MM" "-e" "test_harness($(TEST_VERBOSE), 'inc', '$(INST_LIB)', '$(INST_ARCHLIB)')" $(TEST_FILES)
 
 testdb_dynamic :: pure_all
 	PERL_DL_NONLAZY=1 $(FULLPERLRUN) $(TESTDB_SW) "-Iinc" "-I$(INST_LIB)" "-I$(INST_ARCHLIB)" $(TEST_FILE)
 
 test_ : test_dynamic
 
-test_static :: test_dynamic
-testdb_static :: testdb_dynamic
+test_static :: pure_all $(MAP_TARGET)
+
+testdb_static :: pure_all $(MAP_TARGET)
+	PERL_DL_NONLAZY=1 ./$(MAP_TARGET) $(TESTDB_SW) "-Iinc" "-I$(INST_LIB)" "-I$(INST_ARCHLIB)" $(TEST_FILE)
+
 
 
 # --- MakeMaker ppd section:
@@ -843,20 +990,20 @@ checkdeps ::
 	$(PERL) Makefile.PL --checkdeps
 
 installdeps ::
-	$(PERL) Makefile.PL --config= --installdeps=Text::Diff,0,Test::LongString,0,LWP::UserAgent,0,HTTP::Response,0,URI::Escape,0,List::MoreUtils,0
+	$(NOECHO) $(NOOP)
 
 installdeps_notest ::
-	$(PERL) Makefile.PL --config=notest,1 --installdeps=Text::Diff,0,Test::LongString,0,LWP::UserAgent,0,HTTP::Response,0,URI::Escape,0,List::MoreUtils,0
+	$(NOECHO) $(NOOP)
 
 upgradedeps ::
-	$(PERL) Makefile.PL --config= --upgradedeps=Text::Diff,0,Test::LongString,0,LWP::UserAgent,0,HTTP::Response,0,URI::Escape,0,List::MoreUtils,0,Test::Base,0,IO::Socket,0,Time::HiRes,0,Fcntl,0,POSIX,0,IO::Select,0,File::Path,0,File::Temp,0,File::Path,2.06_05,List::Util,0,Encode,0,ExtUtils::MakeMaker,0,File::Find,0,IO::Socket::INET,0,Filter::Util::Call,0
+	$(PERL) Makefile.PL --config= --upgradedeps=Test::Base,0,Text::Diff,0,Test::LongString,0,IO::Socket,0,Time::HiRes,0,LWP::UserAgent,0,HTTP::Response,0,Fcntl,0,POSIX,0,URI::Escape,0,IO::Select,0,File::Path,0,File::Temp,0,File::Path,2.06_05,List::MoreUtils,0,List::Util,0,Encode,0,ExtUtils::MakeMaker,0,File::Find,0,IO::Socket::INET,0,Filter::Util::Call,0
 
 upgradedeps_notest ::
-	$(PERL) Makefile.PL --config=notest,1 --upgradedeps=Text::Diff,0,Test::LongString,0,LWP::UserAgent,0,HTTP::Response,0,URI::Escape,0,List::MoreUtils,0,Test::Base,0,IO::Socket,0,Time::HiRes,0,Fcntl,0,POSIX,0,IO::Select,0,File::Path,0,File::Temp,0,File::Path,2.06_05,List::Util,0,Encode,0,ExtUtils::MakeMaker,0,File::Find,0,IO::Socket::INET,0,Filter::Util::Call,0
+	$(PERL) Makefile.PL --config=notest,1 --upgradedeps=Test::Base,0,Text::Diff,0,Test::LongString,0,IO::Socket,0,Time::HiRes,0,LWP::UserAgent,0,HTTP::Response,0,Fcntl,0,POSIX,0,URI::Escape,0,IO::Select,0,File::Path,0,File::Temp,0,File::Path,2.06_05,List::MoreUtils,0,List::Util,0,Encode,0,ExtUtils::MakeMaker,0,File::Find,0,IO::Socket::INET,0,Filter::Util::Call,0
 
 listdeps ::
-	@$(PERL) -le "print for @ARGV" Text::Diff Test::LongString LWP::UserAgent HTTP::Response URI::Escape List::MoreUtils
+	@$(PERL) -le "print for @ARGV" 
 
 listalldeps ::
-	@$(PERL) -le "print for @ARGV" Text::Diff Test::LongString LWP::UserAgent HTTP::Response URI::Escape List::MoreUtils Test::Base IO::Socket Time::HiRes Fcntl POSIX IO::Select File::Path File::Temp File::Path List::Util Encode ExtUtils::MakeMaker File::Find IO::Socket::INET Filter::Util::Call
+	@$(PERL) -le "print for @ARGV" Test::Base Text::Diff Test::LongString IO::Socket Time::HiRes LWP::UserAgent HTTP::Response Fcntl POSIX URI::Escape IO::Select File::Path File::Temp File::Path List::MoreUtils List::Util Encode ExtUtils::MakeMaker File::Find IO::Socket::INET Filter::Util::Call
 

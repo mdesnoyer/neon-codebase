@@ -10,7 +10,10 @@
 #include "neon_updater.h"
 #include "neon_utc.h"
 #include "neon_utils.h"
-#include "../publisherHashtable.h"
+
+#include "publisher.h"
+#include "publisherHashtable.h"
+#include "rapidjson/document.h"
 
 using namespace std;                                                                 
 
@@ -25,16 +28,20 @@ protected:
 };
 
 TEST_F(PublisherHashTableTest, test_pub_table){
-
-        PublisherHashTable table;
-        table.Init(10);
         
-        table.AddPublisher("pub1", "acct1");
-        table.AddPublisher("pub2", "acct2");
-        table.AddPublisher("pub3", "acct3");
-    
-        std::string result;
-        std::string correct = "acct2";
-        PublisherHashTable::EFindError err = table.Find("pub2", result);
-        EXPECT_EQ(result, correct);
+        char * pub = "{\"pid\": \"pub1\", \"aid\" : \"acc1\" }\n";
+                       //"{\"pid\": \"pub2\", \"aid\" : \"acc2\" }\n"
+                       // "{\"pid\": \"pub3\", \"aid\" : \"acc3\" }\n";
+        rapidjson::Document document;
+        document.Parse<0>(pub);
+        
+        PublisherHashtable table;
+        table.Init(3);
+        table.AddPublisher(document);
+        std::string correct = "acc1";
+        Publisher * result = table.Find("pub1");
+        EXPECT_STREQ(result->GetAccountId(), correct.c_str());
+        
 }
+
+// Test hash_publisher method

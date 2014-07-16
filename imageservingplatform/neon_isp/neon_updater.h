@@ -4,14 +4,13 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
-#include "neon_cfg.h"
 #include "neon_error_codes.h"
 
 /*
  * Config Init method
  * */
 
-void neon_updater_config_init(unsigned char *);
+void neon_updater_config_init(unsigned char *, unsigned char *, time_t);
 
 /*
  *  Starts updater thread

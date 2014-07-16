@@ -1,3 +1,8 @@
+/*
+ * Publisher Data class
+ *
+ * */
+
 #ifndef _NEON_PUBLISHER__
 #define _NEON_PUBLISHER__
 
