@@ -1976,9 +1976,9 @@ class ThumbnailServingURLs(NamespacedStoredObject):
     thumbnail_id -> { (width, height) -> url }
     '''
 
-    def __init__(self, thumbnail_id, size_map={}):
+    def __init__(self, thumbnail_id, size_map=None):
         super(ThumbnailServingURLs, self).__init__(thumbnail_id)
-        self.size_map = size_map
+        self.size_map = size_map or {}
 
     def get_thumbnail_id(self):
         '''Return the thumbnail id for this mapping.'''
