@@ -373,6 +373,13 @@ class ExperimentState:
     DISABLED = 'disabled'
     OVERRIDE = 'override' # Experiment has be manually overridden
 
+class MetricType:
+    '''The different kinds of metrics that we care about.'''
+    LOADS = 'loads'
+    VIEWS = 'views'
+    CLICKS = 'clicks'
+    PLAYS = 'plays'
+
 ##############################################################################
 class StoredObject(object):
     '''Abstract class to represent an object that is stored in the database.
@@ -538,7 +545,8 @@ class StoredObject(object):
                 for key, obj in mappings.iteritems():
                     if obj is not None:
                         to_set[key] = obj.to_json()
-                if len(to_set) > 0:        
+
+                if len(to_set) > 0:
                     pipe.mset(to_set)
             return mappings
 
@@ -614,7 +622,7 @@ class NamespacedStoredObject(StoredObject):
 
     @classmethod
     def get_all(cls, callback=None):
-        ''' Get all the TrackerAccountIDMapper objects in the database
+        ''' Get all the objects in the database of this type
 
         Inputs:
         callback - Optional callback function to call
@@ -625,16 +633,21 @@ class NamespacedStoredObject(StoredObject):
         retval = []
         db_connection = DBConnection(cls)
 
-        def process(keys):
-            super(NamespacedStoredObject, cls).get_many(keys,
-                                                        callback=callback)
+        def filtered_callback(data_list):
+            callback([x for x in data_list if x is not None])
+
+        def process_keylist(keys):
+            super(NamespacedStoredObject, cls).get_many(
+                keys, callback=filtered_callback)
             
         if callback:
             db_connection.conn.keys(cls.__name__.lower() + "_*",
-                                    callback=process)
+                                    callback=process_keylist)
         else:
             keys = db_connection.blocking_conn.keys(cls.__name__.lower()+"_*")
-            return  super(NamespacedStoredObject, cls).get_many(keys)
+            return  [x for x in 
+                     super(NamespacedStoredObject, cls).get_many(keys)
+                     if x is not None]
 
     @classmethod
     def modify(cls, key, func, callback=None):
@@ -770,7 +783,7 @@ class NeonUserAccount(object):
     @integrations: all the integrations associated with this acccount
 
     '''
-    def __init__(self, a_id, api_key=None, default_width=None):
+    def __init__(self, a_id, api_key=None, default_size=(160,90)):
         self.account_id = a_id
         self.neon_api_key = NeonApiKey.generate(a_id) if api_key is None \
                             else api_key
@@ -782,8 +795,8 @@ class NeonUserAccount(object):
         # a mapping from integration id -> get_ovp() string
         self.integrations = {}
 
-        # The default thumbnail width to serve for this account
-        self.default_width = default_width
+        # The default thumbnail (w, h) to serve for this account
+        self.default_size = default_size
 
     def add_platform(self, platform):
         '''Adds a platform object to the account.'''
@@ -920,7 +933,9 @@ class ExperimentStrategy(NamespacedStoredObject):
                  baseline_type=ThumbnailType.CENTERFRAME,
                  chosen_thumb_overrides=False,
                  override_when_done=True,
-                 experiment_type=MULTIARMED_BANDIT):
+                 experiment_type=MULTIARMED_BANDIT,
+                 impression_type=MetricType.VIEWS,
+                 conversion_type=MetricType.CLICKS):
         super(ExperimentStrategy, self).__init__(account_id)
         # Fraction of traffic to experiment on.
         self.exp_frac = exp_frac
@@ -957,8 +972,9 @@ class ExperimentStrategy(NamespacedStoredObject):
         # The strategy used to run the experiment phase
         self.experiment_type = experiment_type
 
-    def __eq__(self, other):
-        return self.__dict__ == other.__dict__
+        # The types of measurements that mean an impression or a conversion for this account
+        self.impression_type = impression_type
+        self.conversion_type = conversion_type
          
 
 class AbstractPlatform(object):
@@ -1702,18 +1718,6 @@ class OoyalaPlatform(AbstractPlatform):
         for key in params:
             oo.__dict__[key] = params[key]
         return oo
-    
-    @classmethod
-    def get_all_instances(cls, callback=None):
-        ''' get all ooyala instances'''
-
-        platforms = OoyalaPlatform.get_all_platform_data()
-        instances = [] 
-        for pdata in platforms:
-            platform = OoyalaPlatform.create(pdata)
-            if platform:
-                instances.append(platform)
-        return instances
 
     @classmethod
     def get_all_instances(cls, callback=None):
@@ -1972,9 +1976,9 @@ class ThumbnailServingURLs(NamespacedStoredObject):
     thumbnail_id -> { (width, height) -> url }
     '''
 
-    def __init__(self, thumbnail_id, size_map={}):
+    def __init__(self, thumbnail_id, size_map=None):
         super(ThumbnailServingURLs, self).__init__(thumbnail_id)
-        self.size_map = size_map
+        self.size_map = size_map or {}
 
     def get_thumbnail_id(self):
         '''Return the thumbnail id for this mapping.'''

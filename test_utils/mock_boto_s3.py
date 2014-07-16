@@ -138,7 +138,8 @@ class MockKey(object):
     def set_contents_from_file(self, fp, headers=None, replace=NOT_IMPL,
                                cb=NOT_IMPL, num_cb=NOT_IMPL,
                                policy=NOT_IMPL, md5=NOT_IMPL,
-                               res_upload_handler=NOT_IMPL):
+                               res_upload_handler=NOT_IMPL,
+                               encrypt_key=NOT_IMPL):
         self.data = fp.read()
         self.set_etag()
         self.size = len(self.data)
@@ -148,7 +149,7 @@ class MockKey(object):
     def set_contents_from_stream(self, fp, headers=None, replace=NOT_IMPL,
                                cb=NOT_IMPL, num_cb=NOT_IMPL, policy=NOT_IMPL,
                                reduced_redundancy=NOT_IMPL, query_args=NOT_IMPL,
-                               size=NOT_IMPL):
+                               size=NOT_IMPL, encrypt_key=NOT_IMPL):
         self.data = ''
         chunk = fp.read(self.BufferSize)
         while chunk:
@@ -160,7 +161,8 @@ class MockKey(object):
 
     def set_contents_from_string(self, s, headers=NOT_IMPL, replace=NOT_IMPL,
                                  cb=NOT_IMPL, num_cb=NOT_IMPL, policy=NOT_IMPL,
-                                 md5=NOT_IMPL, reduced_redundancy=NOT_IMPL):
+                                 md5=NOT_IMPL, reduced_redundancy=NOT_IMPL,
+                                 encrypt_key=NOT_IMPL):
         self.data = copy.copy(s)
         self.set_etag()
         self.size = len(s)
@@ -170,14 +172,16 @@ class MockKey(object):
     def set_contents_from_filename(self, filename, headers=None,
                                    replace=NOT_IMPL, cb=NOT_IMPL,
                                    num_cb=NOT_IMPL, policy=NOT_IMPL,
-                                   md5=NOT_IMPL, res_upload_handler=NOT_IMPL):
+                                   md5=NOT_IMPL, res_upload_handler=NOT_IMPL,
+                                   encrypt_key=NOT_IMPL):
         fp = open(filename, 'rb')
         self.set_contents_from_file(fp, headers, replace, cb, num_cb,
                                     policy, md5, res_upload_handler)
         fp.close()
 
     def copy(self, dst_bucket_name, dst_key, metadata=NOT_IMPL,
-             reduced_redundancy=NOT_IMPL, preserve_acl=NOT_IMPL):
+             reduced_redundancy=NOT_IMPL, preserve_acl=NOT_IMPL,
+             encrypt_key=NOT_IMPL ):
         dst_bucket = self.bucket.connection.get_bucket(dst_bucket_name)
         return dst_bucket.copy_key(dst_key, self.bucket.name,
                                    self.name, metadata)
