@@ -32,6 +32,7 @@ import tornado.ioloop
 import utils.neon
 from utils.options import define, options
 import utils.ps
+from utils import statemon
 
 # This server's options
 define('port', default=8080, help='Port to listen on', type=int)
@@ -58,6 +59,13 @@ define('publishing_period', type=int, default=300,
 define('expiry_buffer', type=int, default=30,
        help='Buffer in seconds for the expiry of the directives file')
 
+# Monitoring variables
+statemon.define('last_stats_update', float)
+statemon.define('last_publish_time', float)
+statemon.define('statsdb_error', int)
+statemon.define('videodb_error', int)
+statemon.define('publish_error', int)
+
 _log = logging.getLogger(__name__)
 
 class VideoDBWatcher(threading.Thread):
@@ -83,6 +91,7 @@ class VideoDBWatcher(threading.Thread):
 
             except Exception as e:
                 _log.exception('Uncaught video DB Error: %s' % e)
+                statemon.state.increment('videodb_error')
 
             # Now we wait so that we don't hit the database too much.
             self._stopped.wait(options.video_db_polling_delay)
@@ -183,6 +192,7 @@ class StatsDBWatcher(threading.Thread):
 
             except Exception as e:
                 _log.exception('Uncaught stats DB Error: %s' % e)
+                statemon.state.increment('statsdb_error')
 
             # Now we wait so that we don't hit the database too much.
             self._stopped.wait(options.stats_db_polling_delay)
@@ -193,6 +203,7 @@ class StatsDBWatcher(threading.Thread):
                                         port=options.stats_port)
         except Exception as e:
             _log.exception('Error connecting to stats db: %s' % e)
+            statemon.state.increment('statsdb_error')
             return
 
         cursor = conn.cursor()
@@ -208,9 +219,11 @@ class StatsDBWatcher(threading.Thread):
         result = cursor.fetchall()
         if len(result) == 0 or result[0][0] is None:
             _log.error('Cannot determine when the database was last updated')
+            statemon.state.increment('statsdb_error')
             self.is_loaded.set()
             return
         cur_update = datetime.datetime.utcfromtimestamp(result[0][0])
+        statemon.state.last_stats_update = result[0][0]
         if self.last_update is None or cur_update > self.last_update:
             _log.info('Found a newer entry in the stats database from %s. '
                       'Processing' % cur_update.isoformat())
@@ -376,6 +389,7 @@ class DirectivePublisher(threading.Thread):
             except Exception as e:
                 _log.exception('Uncaught exception when publishing %s' %
                                e)
+                statemon.state.increment('publish_error')
 
             self._stopped.wait(options.publishing_period -
                                (datetime.datetime.now() - 
@@ -422,13 +436,16 @@ class DirectivePublisher(threading.Thread):
         except boto.exception.BotoServerError as e:
             _log.error('Could not get bucket %s: %s' % (options.s3_bucket,
                                                          e))
+            statemon.state.increment('publish_error')
             return
         except boto.exception.BotoClientError as e:
             _log.error('Could not get bucket %s: %s' % (options.s3_bucket,
                                                          e))
+            statemon.state.increment('publish_error')
             return
         except socket.error as e:
             _log.error('Error connecting to S3: %s' % e)
+            statemon.state.increment('publish_error')
             return
 
         # Write the file that is timestamped
@@ -441,6 +458,9 @@ class DirectivePublisher(threading.Thread):
         # Copy the file to the REST endpoint
         key.copy(bucket.name, options.directive_filename, encrypt_key=True,
                  preserve_acl=True)
+
+        statemon.state.last_publish_time = (
+            curtime - datetime.datetime(1970,1,1)).total_seconds()
 
     def _write_directives(self, stream):
         '''Write the current directives to the stream.'''

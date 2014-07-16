@@ -41,6 +41,9 @@ define("service_url", default="http://localhost:8083",
         help="service url", type=str)
 define("mastermind_url", default="http://localhost:8086/get_directives", 
         help="mastermind url", type=str)
+define('directive_address',
+       default='s3://neon-image-serving-directives/mastermind', 
+       help='Address to get the directive file from')
 define("max_thumb_check_threads", default=10,
        help=("Maximum number of threads used to check the brightcove "
              "thumbnail state"))

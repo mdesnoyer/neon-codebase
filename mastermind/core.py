@@ -19,9 +19,14 @@ import scipy.stats as spstats
 from supportServices import neondata
 import threading
 import utils.dists
+from utils import statemon
 from utils import strutils
 
 _log = logging.getLogger(__name__)
+
+statemon.define('n_directives', int)
+statemon.define('directive_changes', int)
+statemon.define('pending_modifies', int)
 
 class MastermindError(Exception): pass
 class UpdateError(MastermindError): pass
@@ -103,6 +108,7 @@ class Mastermind(object):
         '''Safely increment the number of pending modifies by count.'''
         with self.lock:
             self.pending_modifies += count
+        statemon.state.pending_modifies = self.pending_modifies
 
     def get_directives(self, video_ids=None):
         '''Returns a generator for the serving directives for all the video ids
@@ -284,6 +290,9 @@ class Mastermind(object):
         self.serving_directive[video_id] = ((video_info.account_id,
                                              video_id),
                                              new_directive.items())
+
+        statemon.state.n_directives = len(self.serving_directive)
+        statemon.state.increment('directive_changes')
 
     def _calculate_current_serving_directive(self, video_info, video_id=''):
         '''Decide the amount of time each thumb should show for each video.
