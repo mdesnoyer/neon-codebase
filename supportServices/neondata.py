@@ -921,7 +921,7 @@ class NeonUserAccount(object):
 class ExperimentStrategy(NamespacedStoredObject):
     '''Stores information about the experimental strategy to use.
 
-    Keyed by account_id 2(aka api_key)
+    Keyed by account_id (aka api_key)
     '''
     SEQUENTIAL='sequential'
     MULTIARMED_BANDIT='multi_armed_bandit'
