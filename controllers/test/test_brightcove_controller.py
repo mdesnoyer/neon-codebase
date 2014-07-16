@@ -17,6 +17,7 @@ from supportServices import neondata
 from supportServices.url2thumbnail import URL2ThumbnailIndex
 import time
 import test_utils.redis
+import test_utils.mock_boto_s3
 import test_utils.neontest
 import tornado
 from tornado.gen import YieldPoint, Task
@@ -52,7 +53,7 @@ class TestScheduler(test_utils.neontest.TestCase):
 
         
         self.controller.apply_directive(
-            json.dumps({'d': ("int_vid1", [('B', 0.2), ('A', 0.8)])}),
+            ("int_vid1", [('B', 0.2), ('A', 0.8)]),
             self.max_interval)
         
     def tearDown(self):
@@ -150,9 +151,9 @@ class TestScheduler(test_utils.neontest.TestCase):
         self.get_video_task_map() 
         neondata.ThumbnailMetadata('C', 'int_vid1', []).save()
         
-        new_video_distribution =\
-                {"d": ("int_vid1", [('B', 0.9), ('A', 0.1), ('C', 0.0)])}
-        self.controller.apply_directive(json.dumps(new_video_distribution))
+        new_video_distribution =("int_vid1", [('B', 0.9), ('A', 0.1),
+                                              ('C', 0.0)])
+        self.controller.apply_directive(new_video_distribution)
         
         task_map = self.get_video_task_map() 
         expected_order = ["ThumbnailCheckTask", "ThumbnailChangeTask_B",
@@ -160,8 +161,8 @@ class TestScheduler(test_utils.neontest.TestCase):
                 "ThumbnailChangeTask_B", "TimesliceEndTask"]
         self._verify_task_map(task_map, new_video_distribution, expected_order)
         
-        new_video_distribution = {"d": ("int_vid1", [('B', 0.51),('A', 0.49)])}
-        self.controller.apply_directive(json.dumps(new_video_distribution)) 
+        new_video_distribution = ("int_vid1", [('B', 0.51),('A', 0.49)])
+        self.controller.apply_directive(new_video_distribution)
        
         task_map = self.get_video_task_map() 
         expected_order = ["ThumbnailCheckTask", "ThumbnailChangeTask_B",
@@ -175,7 +176,7 @@ class TestScheduler(test_utils.neontest.TestCase):
         for vid, tasks in task_map.iteritems():
             
             #if vid in new_video_distribution.keys():
-            if vid == new_video_distribution["d"][0]:
+            if vid == new_video_distribution[0]:
                 task_order = []
                 for (task, priority) in tasks:
                     tname = task.__class__.__name__
@@ -218,9 +219,9 @@ class TestScheduler(test_utils.neontest.TestCase):
         scheduled to run. all other thumbs have 0.0 % of timeslice 
         '''
         i_vid = 'int_vid1'
-        new_video_distribution = {"d": (i_vid, [('B', 1.0), ('A', 0.0)])} 
+        new_video_distribution = (i_vid, [('B', 1.0), ('A', 0.0)])
         
-        self.controller.apply_directive(json.dumps(new_video_distribution)) 
+        self.controller.apply_directive(new_video_distribution)
         
         task_map = self.get_video_task_map() 
         #Verify no task created for i_vid 
@@ -233,11 +234,11 @@ class TestScheduler(test_utils.neontest.TestCase):
         where a thumbnail is Chosen
         '''
         i_vid = 'int_vid1'
-        new_video_distribution = {"d": (i_vid, [('A', 1.0), ('B', 0.0)])}
+        new_video_distribution = (i_vid, [('A', 1.0), ('B', 0.0)])
         def choose(x): x.chosen = True
         neondata.ThumbnailMetadata.modify('A', choose)
         
-        self.controller.apply_directive(json.dumps(new_video_distribution)) 
+        self.controller.apply_directive(new_video_distribution) 
         
         task_map = self.get_video_task_map()
         expected_order = ["ThumbnailCheckTask", "ThumbnailChangeTask_A"]
@@ -266,9 +267,8 @@ class TestScheduler(test_utils.neontest.TestCase):
             rand = random.random()
             a = max(rand, 1 - rand)
             b = 1 - a
-            new_video_distribution = {'d': ("int_vid1", [('B', b), ('A', a)])}
-            self.controller.apply_directive(
-                json.dumps(new_video_distribution))
+            new_video_distribution = ("int_vid1", [('B', b), ('A', a)])
+            self.controller.apply_directive(new_video_distribution)
             self._test_add_tasks()
 
 class TestThumbnailCheckTask(test_utils.neontest.TestCase):
@@ -446,81 +446,61 @@ class TestThumbnailCheckTask(test_utils.neontest.TestCase):
         # Finally make sure the new thumbnail was added to the index
         self.assertEqual(self.url2thumb.get_thumbnail_info('three.jpg').key,
                          tid)
-            
 
-@unittest.skip("Test is borked and not worth fixing at the moment")
-class TestDryRunBrighcoveController(AsyncHTTPTestCase):
-
-    '''
-    Dry Run - end to end with reduced time
-    '''
-
+class TestS3DirectiveFileLoad(test_utils.neontest.TestCase):
     def setUp(self):
-        self.controller = \
-          controllers.brightcove_controller.BrightcoveABController(
-            timeslice=10.0, cushion_time=0)
-        super(TestDryRunBrighcoveController, self).setUp()
-
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-
-        self.max_interval = 10
-
-        # Add a video
-        v1 = neondata.VideoMetadata('int_vid1', tids=['A', 'B'])
-        v1.save()
-        t1 = neondata.ThumbnailMetadata('A', v1.key, [])
-        t2 = neondata.ThumbnailMetadata('B', v1.key, [])
-        neondata.ThumbnailMetadata.save_all([t1, t2])
+        super(TestS3DirectiveFileLoad, self).setUp()
         
-        self.test_video_distribution = {'d': ("int_vid1", [('B', 0.2), ('A', 0.8)])}
+        # Mock out the connection to S3
+        self.s3_patcher = patch(
+            'controllers.brightcove_controller.S3Connection')
+        self.s3conn = test_utils.mock_boto_s3.MockConnection()
+        self.s3_patcher.start().return_value = self.s3conn
+        self.s3conn.create_bucket('neon-image-serving-directives')
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives')
+        key = bucket.new_key('mastermind')
+        key.set_contents_from_string(
+            'expiry=2014-05-06T12:00:00Z\n'
+            '{"type":"pub","pid":"pub0","aid":"acc0"}\n'
+            '{"type":"pub","pid":"pub1","aid":"acc1"}\n'
+            '{"type":"dir","aid":"acc0","vid":"vid0","sla":"expiry=2014-07-13T07:09:56Z","fractions":[{"pct":0.7,"tid":"thumb1","default_url":"http://default_image_url.jpg","imgs":[{"h":500,"w":600,"url":"http://neon-image-cdn.s3.amazonaws.com/pixel.jpg"},{"h":700,"w":800,"url":"http://neon/thumb2_700_800.jpg"}]},{"pct":0.2,"tid":"thumb2","default_url":"http://default_image_url.jpg","imgs":[{"h":500,"w":600,"url":"http://neont2/thumb1_500_600.jpg"},{"h":300,"w":400,"url":"http://neont2/thumb2_300_400.jpg"}]},{"pct":0.1,"tid":"thumb3","default_url":"http://default_image_url.jpg","imgs":[{"h":500,"w":600,"url":"http://neont3/thumb1_500_600.jpg"},{"h":300,"w":400,"url":"http://neont3/thumb2_300_400.jpg"}]}]}')
 
-        self.client_sync_patcher = patch(
-            'controllers.brightcove_controller.tornado.httpclient.HTTPClient') 
-        self.client_async_patcher = patch(
-            'controllers.brightcove_controller.tornado.httpclient.AsyncHTTPClient') 
-        self.client_mock_client = self.client_sync_patcher.start()
-        self.client_mock_async_client = self.client_async_patcher.start()
+        self.controller = \
+          controllers.brightcove_controller.BrightcoveABController()
+
+        # Mock out the apply_directive function
+        self.controller.apply_directive = MagicMock()
 
     def tearDown(self):
-        self.redis.stop()
-        self.client_sync_patcher.stop()
-        self.client_async_patcher.stop()
-        super(TestDryRunBrighcoveController, self).tearDown()
-   
-    def get_app(self):
-        return self.controller.tornado_app
+        self.s3_patcher.stop()
+        super(TestS3DirectiveFileLoad, self).tearDown()
 
-    def test_task_execution(self):
-        #TODO: Recreate scheduler logic and exec task one by one; 
-        #verify return value 
-       
-        request = HTTPRequest('http://neon-lab.com')
-        response = HTTPResponse(request, 200,
-            buffer=StringIO('{"some response"}'))
-        def _sf(*args, **kwargs):
-            return response
+    def test_load_directives(self):
+        with self.assertLogExists(logging.INFO, 'New directive file found'):
+            self.controller.load_directives()
 
-        #genmock = MagicMock()
-        #genmock().is_ready().return_value = True
-        #genmock().get_result().return_value = [response]
-        self.client_mock_client().fetch.side_effect = _sf 
-        self.client_mock_async_client().fetch.side_effect = _sf 
+        # Make sure that a directive was received
+        self.controller.apply_directive.assert_called_once_with(
+            ('vid0', [('thumb1', 0.7), ('thumb2', 0.2), ('thumb3', 0.1)]),
+            0)
 
-        #send the new directive
-        self.fetch('/',
-                   method='POST',
-                   body=json.dumps(self.test_video_distribution))
+        # Check the directive file again and it shouldn't be applied
+        self.controller.apply_directive.reset_mock()
+        with self.assertLogNotExists(logging.INFO, 'New directive file found'):
+            self.controller.load_directives()
+        self.assertFalse(self.controller.apply_directive.called)
 
-        # Wait for the directives to come out
-        def do_wait():
-            while 1: pass
-        self.io_loop.run_sync(do_wait, 11)
+    def test_file_missing(self):
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives')
+        key = bucket.delete_key('mastermind')
 
-        # Make sure that the thumbnail was changed 3 times.
-        # TODO: This isn't the correct way to do this test, but it's 
-        # something fast.
-        self.assertEqual(self.client_mock_async_client.call_count, 3)
+        with self.assertLogExists(logging.ERROR,
+                                  'Error getting directive file'):
+            self.controller.load_directives()
+        self.assertFalse(self.controller.apply_directive.called)
+        
+        
+
 
 if __name__ == '__main__':
     unittest.main()

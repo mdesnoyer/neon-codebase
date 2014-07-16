@@ -15,11 +15,14 @@ if sys.path[0] <> base_path:
     sys.path.insert(0, base_path)
 
 from api.brightcove_api import BrightcoveApi
+from boto.s3.connection import S3Connection
 import datetime
 from heapq import heappush, heappop
 import itertools
+import json
 from multiprocessing.pool import ThreadPool
 import random
+import re
 from supportServices.neondata import VideoMetadata, ThumbnailMetadata, \
      InMemoryCache, InternalVideoID, ThumbnailID, BrightcovePlatform
 from supportServices.url2thumbnail import URL2ThumbnailIndex
@@ -34,13 +37,11 @@ import tornado.httpclient
 import urllib
 from utils.imageutils import PILImageUtils
 import utils.neon
+
 from utils.options import define, options
-define("port", default=8888, help="run on the given port", type=int)
 define("delay", default=10, help="initial delay", type=int)
 define("service_url", default="http://localhost:8083", 
         help="service url", type=str)
-define("mastermind_url", default="http://localhost:8086/get_directives", 
-        help="mastermind url", type=str)
 define('directive_address',
        default='s3://neon-image-serving-directives/mastermind', 
        help='Address to get the directive file from')
@@ -59,6 +60,7 @@ statemon.define('pqsize', int)
 statemon.define('thumbchangetask', int)
 statemon.define('thumbchangetask_fail', int)
 statemon.define('thumbchecktask_fail', int)
+statemon.define('loaddirective_fail', int)
 # The number of videos being ab tested
 statemon.define('nvideos_abtesting', int)
 # The number of videos being monitored by this controller
@@ -380,13 +382,18 @@ class BrightcoveABController(object):
         self.monitored_videos = set()
         self.thumb_check_pool = ThreadPool(options.max_thumb_check_threads)
         
-        self.tornado_app = tornado.web.Application([
-            (r"/(.*)", GetData, dict(controller=self)),
-            ])
         # Check brightcove for the thumbnail state at least every 5 minutes
         tornado.ioloop.PeriodicCallback(
             self.check_thumbnails,
             options.thumbnail_sampling_period * 1000).start()
+
+        # Check for new directives every minute
+        tornado.ioloop.PeriodicCallback(
+            self.load_directives,
+            60000).start()
+
+        self.directives = {} # Map of video_id -> directive
+        self.directive_etag = None
 
         self._initialized = False
 
@@ -395,25 +402,65 @@ class BrightcoveABController(object):
         
         self.url2thumb.build_index_from_neondata()
 
-        # Load the state from Mastermind
-        response = utils.http.send_request(tornado.httpclient.HTTPRequest(
-            url=options.mastermind_url))
-        if response.error:
-            _log.error('key=load_initial_state '
-                       'msg=Failed to load data from mastermind')
-            raise response.error
-        directives = response.body.split('\n')
-        for directive in directives:
-            self.apply_directive(directive, options.delay)
+        self.load_directives(options.delay)
 
-        self._initialized = True
+    def load_directives(self, max_update_delay=0):
+        s3regex = re.compile('s3://([0-9a-zA-Z_\-]+)/(.+)')
+        match = s3regex.match(options.directive_address)
+        if not match:
+            _log.error('Invalid directive address: %s' %
+                       options.directive_address)
+            statemon.state.increment('loaddirective_fail')
+            return 
+        
+        # Get the directives file from S3
+        s3conn = S3Connection()
+        try:
+            bucket = s3conn.get_bucket(match.group(1))
+            key = bucket.get_key(match.group(2))
+            if key is None:
+                raise boto.exception.StorageResponseError(
+                    404, 'Key %s does not exist' % match.group(2))
+        except Exception as e:
+            _log.error('Error getting directive file %s from S3: %s' % (
+                options.directive_address, e))
+            statemon.state.increment('loaddirective_fail')
+            return
 
-    def apply_directive(self, json_directive, max_update_delay=0):
+        if key.etag == self.directive_etag:
+            # The file hasn't changed so we are done
+            return
+        self.directive_etag = key.etag
+
+        _log.info('New directive file found. Processing.')
+        
+        lines = key.get_contents_as_string().split('\n')
+        for line in lines[1:]:
+            record = json.loads(line)
+            if record['type'] == 'dir':
+                # Create the directive from the record
+                directive = (
+                    record['vid'],
+                    [(x['tid'], x['pct']) for x in record['fractions']])
+
+                # See if it is a new directive
+                try:
+                    old_directive = self.directives[record['vid']]
+                    if old_directive == directive:
+                        continue
+                except KeyError:
+                    pass
+
+                # There is a new directive so apply it
+                self.apply_directive(directive, max_update_delay)
+                statemon.state.decrement('nvideos_abtesting')
+        
+
+    def apply_directive(self, directive, max_update_delay=0):
         '''Apply a directive to a controller.
 
         Inputs:
-        json_directive - JSON specifying the directive as 
-                         {'d': (video_id, [(thumb_id, fraction)])}
+        directive - The directive as (video_id, [(thumb_id, fraction)])
         max_update_delay - Maximum delay to apply the directive
         '''
         #if not self._initialized:
@@ -421,8 +468,9 @@ class BrightcoveABController(object):
         #                  'are trying to load a directive.')
         #    raise RuntimeError('Controller must be initialized first')
 
-        parsed = tornado.escape.json_decode(json_directive)
-        video_id, distribution = parsed['d']
+        video_id, distribution = directive
+        _log.info('New directive for video %s: %s' % (video_id,
+                                                      distribution))
 
         self.monitored_videos.add(video_id)
 
@@ -446,9 +494,6 @@ class BrightcoveABController(object):
 
         Blocks until the controller is shut down.
         '''
-        
-        server = tornado.httpserver.HTTPServer(self.tornado_app)
-        server.listen(options.port)
         tornado.ioloop.IOLoop.current().start()
 
     def thumbnail_change_scheduler(self, video_id, distribution,
@@ -588,26 +633,6 @@ class BrightcoveABController(object):
         
         sorted_time_dist = sorted(time_dist, key=lambda tup: tup[1], reverse=True)
         return sorted_time_dist 
-
-###################################################################################
-# Create Tornado server application
-###################################################################################
-
-class GetData(tornado.web.RequestHandler):
-
-    def initialize(self, controller=None):
-        self.controller = controller
-    
-    @tornado.web.asynchronous
-    def post(self, *args, **kwargs):
-        
-        '''
-        Handler that recieves data from mastermind
-        '''
-        self.controller.apply_directive(self.request.body)
-        self.set_status(201)
-        statemon.state.decrement('nvideos_abtesting')
-        self.finish()
    
 ###################################################################################
 # MAIN

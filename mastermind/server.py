@@ -14,7 +14,6 @@ if sys.path[0] != __base_path__:
 import atexit
 
 from boto.s3.connection import S3Connection
-import boto.s3.key
 import datetime
 import impala.dbapi
 import impala.error
