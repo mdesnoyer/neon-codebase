@@ -40,6 +40,7 @@ import tornado.escape
 import utils.http
 from utils.inputsanitizer import InputSanitizer
 import utils.neon
+import utils.sync
 import utils.ps
 
 import boto.exception
@@ -424,6 +425,11 @@ class FlumeBuffer:
         if len(self.buffer) >= self.flush_interval:
             yield self._send_buffer()
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def flush(self):
+        yield self._send_buffer()
+
     @tornado.gen.coroutine
     def _send_buffer(self):
         '''Sends all the events in the buffer to flume.'''
@@ -652,7 +658,7 @@ class Server(threading.Thread):
         schema_url = ('http://%s.s3.amazonaws.com/%s.avsc' % 
                       (options.schema_bucket, schema_hash))
         avro_writer = avro.io.DatumWriter(schema)
-        flume_buffer = FlumeBuffer(options.flume_port, self.backup_queue)
+        self.flume_buffer = FlumeBuffer(options.flume_port, self.backup_queue)
 
         # Make sure that the schema exists at a URL that can be reached
         response = utils.http.send_request(
@@ -668,22 +674,22 @@ class Server(threading.Thread):
                                   version=1,
                                   avro_writer=avro_writer,
                                   schema_url=schema_url,
-                                  flume_buffer=flume_buffer)),
+                                  flume_buffer=self.flume_buffer)),
             (r"/v2", LogLines, dict(watcher=self._watcher,
                                     version=2,
                                     avro_writer=avro_writer,
                                     schema_url=schema_url,
-                                    flume_buffer=flume_buffer)),
+                                    flume_buffer=self.flume_buffer)),
             (r"/track", LogLines, dict(watcher=self._watcher,
                                        version=1,
                                        avro_writer=avro_writer,
                                        schema_url=schema_url,
-                                       flume_buffer=flume_buffer)),
+                                       flume_buffer=self.flume_buffer)),
             (r"/v2/track", LogLines, dict(watcher=self._watcher,
                                           version=2,
                                           avro_writer=avro_writer,
                                           schema_url=schema_url,
-                                          flume_buffer=flume_buffer
+                                          flume_buffer=self.flume_buffer
                                           )),
             (r"/test", TestTracker, dict(version=1)),
             (r"/v2/test", TestTracker, dict(version=2)),
@@ -709,6 +715,9 @@ class Server(threading.Thread):
             self._is_running.set()
         self.io_loop.start()
         server.stop()
+
+        # Flush any extra events in the buffer
+        self.flume_buffer.flush()
 
     @tornado.gen.engine
     def wait_until_running(self):
