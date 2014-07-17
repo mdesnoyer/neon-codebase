@@ -109,15 +109,13 @@ TEST_F(NeonMastermindTest, test_neon_mastermind_image_url_lookup_invalids){
     // invalid height
     h = 1000;	
     err = neon_mastermind_image_url_lookup(aid, vid, &ip, h, w, &url, &size);
-    EXPECT_EQ(err, NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK);
-    EXPECT_STRNE(url, NULL);
+    EXPECT_EQ(err, NEON_MASTERMIND_IMAGE_URL_LOOKUP_NOT_FOUND);
     h = 500;
 
     // invalid width
     w = 1000;
     err = neon_mastermind_image_url_lookup(aid, vid, &ip, h, w, &url, &size);
-    EXPECT_EQ(err, NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK);
-    EXPECT_STRNE(url, NULL);
+    EXPECT_EQ(err, NEON_MASTERMIND_IMAGE_URL_LOOKUP_NOT_FOUND);
     w = 600;	
 
 }

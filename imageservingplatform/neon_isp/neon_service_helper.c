@@ -1,3 +1,6 @@
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
 /*
  * Static helper functions for use by neon_service
  *
@@ -40,7 +43,7 @@ search_headers_in(ngx_http_request_t *r, u_char *name, size_t len) {
         /*
         Just compare the lengths and then the names case insensitively.
         */
-        if (len != h[i].key.len || ngx_strcasecmp(name, h[i].key.data) != 0) {
+        if (len != h[i].key.len || strcasecmp((const char*)name, (const char*)h[i].key.data) != 0) {
             /* This header doesn't match. */
             continue;
         }

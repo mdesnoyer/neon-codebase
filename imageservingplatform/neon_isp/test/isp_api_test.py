@@ -56,7 +56,6 @@ class ISP:
         self.config_file.write(nginx_isp_test_conf.conf % self.port)
         self.config_file.flush()
 
-        #self.config_file = base_path + "/imageservingplatform/neon_isp/test/nginx-test.conf"
         self.nginx_path = base_path + "/imageservingplatform/nginx-1.4.7/objs/nginx" #get build path
 
     def start(self):
@@ -116,8 +115,9 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.isp.start()
-        time.sleep(1)
+        #TODO: Start Fake S3
+        cls.isp.start() 
+        time.sleep(1) # allow mastermind file to be parsed
 
     def setUp(self):
 
@@ -259,9 +259,11 @@ class TestImageServingPlatformAPI(unittest.TestCase):
                 cookie = cookie.split("=")
 
         self.assertIsNotNone(im_url)
+        
+        #Assert that the cookie is keyed by video_id
         self.assertEqual(cookie[0], self.vid)
 
-    ### Server API tests
+    ### Server API tests #####
 
     def test_server_api_request(self):
         '''
@@ -333,7 +335,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
         url = "http://localhost:" + self.port + "/v1/%s/%s/?params=%s" %\
                 ("getthumbnailid", self.pub_id, self.vid)
-        ip = "203.02.113.7"
+        ip = "203.2.113.7"
         headers = {"X-Forwarded-For" : ip}
         response = self.make_api_request(url, headers)
         self.assertIsNotNone(response)
@@ -346,7 +348,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
         url = "http://localhost:" + self.port + "/v1/%s/%s/?params=%s,%s" %\
                 ("getthumbnailid", self.pub_id, self.vid, self.vid)
-        ip = "203.02.113.7"
+        ip = "203.2.113.7"
         headers = {"X-Forwarded-For" : ip}
         response = self.make_api_request(url, headers)
         self.assertIsNotNone(response)
@@ -359,7 +361,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
         url = "http://localhost:" + self.port + "/v1/%s/%s/?params=%s,%s" %\
                 ("getthumbnailid", self.pub_id, self.vid, "invalid_vid")
-        ip = "203.02.113.7"
+        ip = "203.2.113.7"
         headers = {"X-Forwarded-For" : ip}
         response = self.make_api_request(url, headers)
         self.assertIsNotNone(response)
