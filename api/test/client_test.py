@@ -61,6 +61,8 @@ class TestVideoClient(unittest.TestCase):
     Test Video Processing client
     '''
     def setUp(self):
+        super(TestVideoClient, self).setUp()
+        
         #setup properties,model
         self.model_file = os.path.join(os.path.dirname(__file__), "model.pkl")
         self.model_version = "test" 
@@ -79,6 +81,10 @@ class TestVideoClient(unittest.TestCase):
        
         #setup process video object
         self.api_request = None
+        
+    def tearDown(self):
+        self.redis.stop()
+        super(TestVideoClient, self).tearDown()
         
     def setup_video_processor(self, request_type):
         '''
@@ -116,9 +122,6 @@ class TestVideoClient(unittest.TestCase):
         vprocessor = api.client.VideoProcessor(job, self.model, self.model_version)
         return vprocessor 
 
-    def tearDown(self):
-        self.redis.stop()
-
     @patch('api.cdnhosting.S3Connection')
     @patch('api.client.S3Connection')
     def test_save_thumbnail_to_s3_and_metadata(self, mock_conntype,
@@ -140,7 +143,7 @@ class TestVideoClient(unittest.TestCase):
         i_vid = "i_vid1"
         tdata = api.client.save_thumbnail_to_s3_and_metadata(
                 i_vid, image, 1, thumb_bucket, 
-                keyname, "neon_pub_id" ,'s3_%s'%keyname, 'neon')
+                keyname, 's3_%s'%keyname, 'neon')
         s3_keys = [x for x in thumb_bucket.get_all_keys()]
         self.assertEqual(len(s3_keys), 1)
         self.assertEqual(s3_keys[0].name, keyname)
@@ -455,37 +458,6 @@ class TestVideoClient(unittest.TestCase):
         #Exceed requeue count
         vprocessor.job_params["requeue_count"] = 4
         self.assertFalse(vprocessor.requeue_job())
-
-    @patch('api.cdnhosting.S3Connection')
-    def test_host_resized_images_cdn(self, mock_conntype):
-        
-        #s3mocks to mock host_thumbnails_to_s3
-        conn = boto_mock.MockConnection()
-        conn.create_bucket('neon-image-cdn')
-        mock_conntype.return_value = conn
-        imbucket = conn.get_bucket("neon-image-cdn")
-        image = PILImageUtils.create_random_image(360, 480) 
-        keyname = "test_key"
-        neon_id = "NEON_PUB_ID"
-        tid = "test_tid"
-        tdata = api.cdnhosting.CDNHosting.host_images_neon_cdn(image, neon_id, tid)
-        sizes = api.properties.CDN_IMAGE_SIZES   
-        s3_keys = [x for x in imbucket.get_all_keys()]
-        self.assertEqual(len(s3_keys), len(sizes))
-        #for s3key in s3_keys:
-        #    self.assertEqual()
-        
-        # Verify the contents in serving url 
-        serving_urls = neondata.ThumbnailServingURLs.get_many([tid])[0]
-        for w, h in sizes:
-            url = serving_urls.get_serving_url(w, h)
-            fname = "neontn%s_w%s_h%s.jpg" % (tid, w, h) 
-            keyname = "%s/%s" % (neon_id, fname)
-            exp_url = "http://%s/%s" % ("imagecdn.neon-lab.com", keyname)
-            self.assertEqual(exp_url, url)
-
-        #image-cdn/NEON_PUB_ID/neontntest_tid_w800_h600.jpg
-        #Build a per video stats page to monitor each video
 
 if __name__ == '__main__':
     unittest.main()

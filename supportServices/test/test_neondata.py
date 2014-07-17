@@ -312,6 +312,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEqual(output1.get_serving_url(800, 600),
                          'http://that_800_600.jpg')
         with self.assertRaises(KeyError):
+            _log.info('Output1 %s' % output1)
             output1.get_serving_url(640, 480)
 
         input1.add_serving_url('http://that_640_480.jpg', 640, 480) 

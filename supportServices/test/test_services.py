@@ -479,7 +479,12 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         
         #verify account id added to Neon user account
         nuser = neondata.NeonUserAccount.get_account(self.api_key)
-        self.assertTrue(self.b_id in nuser.integrations.keys()) 
+        self.assertTrue(self.b_id in nuser.integrations.keys())
+
+        #Verifty that there is an experiment strategy for the account
+        strategy = neondata.ExperimentStrategy.get(self.api_key)
+        self.assertIsNotNone(strategy)
+        self.assertTrue(strategy.only_exp_if_chosen)
         
         reqs = self._create_neon_api_requests()
         self._process_neon_api_requests(reqs)
@@ -538,6 +543,11 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.api_key = self.create_neon_account()
         self.assertEqual(self.api_key, 
                 neondata.NeonApiKey.get_api_key(self.a_id))
+        
+        #Verify that there is an experiment strategy for the account
+        strategy = neondata.ExperimentStrategy.get(self.api_key)
+        self.assertIsNotNone(strategy)
+        self.assertFalse(strategy.only_exp_if_chosen)
 
         #Setup Side effect for the http clients
         #self.bapi_mock_client().fetch.side_effect = \
@@ -577,7 +587,8 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertFalse(platform.auto_update)
         self.assertEqual(platform.write_token, self.wtoken)
 
-    def _test_autopublish_brightcove_account(self):
+    @unittest.skip('TODO(sunil): explain why this is turned off')
+    def test_autopublish_brightcove_account(self):
         with options._set_bounded('supportServices.neondata.dbPort',
                                   self.redis.port):
 
@@ -1330,9 +1341,14 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         process_neon_api_requests(api_requests, self.api_key,
                                   self.i_id, "ooyala")
 
-    def _test_create_ooyala_requests(self):
+    def test_create_ooyala_requests(self):
 
         self._create_request_from_feed()
+
+        #Verify that there is an experiment strategy for the account
+        strategy = neondata.ExperimentStrategy.get(self.api_key)
+        self.assertIsNotNone(strategy)
+        self.assertTrue(strategy.only_exp_if_chosen)
 
         #Assert the job ids in the ooyala account
         oo_account = neondata.OoyalaPlatform.get_account(self.api_key, self.i_id)

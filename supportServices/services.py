@@ -900,6 +900,15 @@ class AccountHandler(tornado.web.RequestHandler):
                 if not (staging_resp and resp):
                     _log.error("key=create_neon_user "
                             " msg=failed to save tai %s" %user.tracker_account_id)
+
+                # Set the default experimental strategy
+                strategy = neondata.ExperimentStrategy(api_key)
+                res = yield tornado.gen.Task(strategy.save)
+                if not res:
+                    _log.error('Bad database response when adding '
+                               'the default strategy for Neon account %s'
+                               % api_key)
+                    
                 data = ('{ "neon_api_key": "%s", "tracker_account_id":"%s",'
                             '"staging_tracker_account_id": "%s" }'
                             %(user.neon_api_key, user.tracker_account_id,
@@ -957,6 +966,16 @@ class AccountHandler(tornado.web.RequestHandler):
                 
                 #Saved platform
                 if res:
+                    # Set the default experimental strategy for
+                    # Brightcove Customers.
+                    strategy = neondata.ExperimentStrategy(
+                        self.api_key, only_exp_if_chosen=True)
+                    res = yield tornado.gen.Task(strategy.save)
+                    if not res:
+                        _log.error('Bad database response when adding '
+                                   'the default strategy for BC account %s'
+                                   % self.api_key)
+                    
                     response = bc.verify_token_and_create_requests_for_video(10)
                     
                     # TODO: investigate further, 
@@ -1146,6 +1165,16 @@ class AccountHandler(tornado.web.RequestHandler):
                 #save & update acnt
                 res = yield tornado.gen.Task(na.save_platform, oo_account)
                 if res:
+                    # Set the default experimental strategy for
+                    # Ooyala Customers.
+                    strategy = neondata.ExperimentStrategy(
+                        self.api_key, only_exp_if_chosen=True)
+                    res = yield tornado.gen.Task(strategy.save)
+                    if not res:
+                        _log.error('Bad database response when adding '
+                                   'the default strategy for Ooyala account %s'
+                                   % self.api_key)
+                    
                     response = yield tornado.gen.Task(
                             oo_account.create_video_requests_on_signup, 10)
                     ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

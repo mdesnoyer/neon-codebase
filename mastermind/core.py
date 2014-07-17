@@ -10,105 +10,107 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import copy
 import logging
 import math
-import cPickle as pickle
-import tempfile
+import numpy as np
+import scipy as sp
+import scipy.stats as spstats
+from supportServices import neondata
 import threading
+import utils.dists
+from utils import statemon
 from utils import strutils
 
 _log = logging.getLogger(__name__)
 
-# Enum for different distribution types
-class DistributionType:
-    NEON = 0
-    BRIGHTCOVE = 1
-    YOUTUBE = 2
-    OOYALA = 3
+statemon.define('n_directives', int)
+statemon.define('directive_changes', int)
+statemon.define('pending_modifies', int)
 
-    @classmethod
-    def fromString(cls, string):
-        d = {'neon' : cls.NEON,
-             'brightcove' : cls.BRIGHTCOVE,
-             'youtube' : cls.YOUTUBE,
-             'ooyala' : cls.OOYALA
-             }
-        return d[string.lower()]
+class MastermindError(Exception): pass
+class UpdateError(MastermindError): pass
 
 class VideoInfo(object):
     '''Container to store information needed about each video.'''
-    def __init__(self, testing_enabled, thumbnails=[]):
+    def __init__(self, account_id, testing_enabled, thumbnails=[]):
+        self.account_id = account_id
         self.thumbnails = thumbnails # [ThumbnailInfo]
         self.testing_enabled = testing_enabled # Is A/B testing enabled?
 
     def __str__(self):
         return strutils.full_object_str(self)
+
+    def __repr__(self):
+        return str(self)
+
+    def __cmp__(self, other):
+        return cmp(self.__dict__, other.__dict__)
         
 
 class ThumbnailInfo(object):
     '''Container to store information about a thumbnail.'''
-    def __init__(self, _id, origin, rank, enabled, chosen, score,
-                 loads=0, clicks=0):
-        self.id = _id # thumbnail id
-        self.origin = origin # who created thumb. "neon", "brightcove", etc...
-        self.rank = rank # For the same origin, a rank of importance. 0 is best
-        self.enabled = enabled # Can this thumbnail be shown?
-        self.chosen = chosen # Is this thumbnail chosen to show as the primary.
-        self.score = score # The model's prediction for this thumbnail
-        self.loads = loads # no. of loads
-        self.clicks = clicks # no. of clicks
+    def __init__(self, metadata, impressions=0, conversions=0):
+        self.metadata = metadata # neondata.ThumbnailMetadata
+        self.id = self.metadata.key # Thumbnail id
+        self.impressions = impressions # no. of impressions
+        self.conversions = conversions # no. of conversions
 
     def __str__(self):
         return strutils.full_object_str(self)
 
+    def __repr__(self):
+        return str(self)
+
+    def __cmp__(self, other):
+        return cmp(self.__dict__, other.__dict__)
+
     def update_stats(self, other_info):
         '''Updates the statistics from another ThumbnailInfo.'''
         if self.id <> other_info.id:
-            _log.critical("Two thumbnail ids don't match. %s vs %s" %
-                          (self.id, other_info.id))
+            _log.error("Two thumbnail ids don't match. %s vs %s" %
+                       (self.id, other_info.id))
             return self
 
-        self.loads = other_info.loads
-        self.clicks = other_info.clicks
+        self.impressions = other_info.impressions
+        self.conversions = other_info.conversions
         return self
-
-    @staticmethod
-    def from_db_data(data):
-        '''Returns a ThumbnailInfo object from a database object.
-
-        Inputs:
-        data - A neondata.ThumbnailMetaData object
-        '''
-        return ThumbnailInfo(data.key,
-                             data.type,
-                             data.rank,
-                             data.enabled,
-                             data.chosen,
-                             data.model_score)
 
 class Mastermind(object):
     '''Class that defines the core logic of how much to show each thumbnail.
 
     All of the update_* functions return an updated serving directive
-    that is in the form (video_id, [(thumb_id, fraction)]) if it has changed
+    that is in the form ((account_id, video_id), [(thumb_id, fraction)]) if it has changed
     since last time. Otherwise None is returned.
 
     This object is thread safe, so only one thread is allow in at a time
     as long as you keep to the public interface.
     '''
+    PRIOR_IMPRESSION_SIZE = 1000
+    PRIOR_CTR = 0.01
     
     def __init__(self):
         self.video_info = {} # video_id -> VideoInfo
-        self.last_serving_directive = {} # video -> (video_id, [(thumb_id, fraction)])
-
-        # To record deltas so that we can replay recent ones when a
-        # full stats db update arrives.
-        self.delta_log = tempfile.TemporaryFile()
-
+        
+        # account_id -> neondata.ExperimentStrategy
+        self.experiment_strategy = {} 
+        
+        # video_id -> ((account_id, video_id), [(thumb_id, fraction)])
+        self.serving_directive = {} 
+        
         # For thread safety
         self.lock = threading.RLock()
 
-    def get_directives(self, video_ids):
+        # Counter for the number of pending modify calls to the database
+        self.pending_modifies = 0
+
+    def _incr_pending_modify(self, count):
+        '''Safely increment the number of pending modifies by count.'''
+        with self.lock:
+            self.pending_modifies += count
+        statemon.state.pending_modifies = self.pending_modifies
+
+    def get_directives(self, video_ids=None):
         '''Returns a generator for the serving directives for all the video ids
 
         ***Warning*** The generator returned from this function cannot
@@ -119,7 +121,8 @@ class Mastermind(object):
 
         Returns:
 
-        Generator that spits out (video_id, [(thumb_id, fraction)])
+        Generator that spits out ((account_id, video_id), 
+                                  [(thumb_id, fraction)])
         tuples.  It's thread safe as long as you keep the generator
         that's returned in a single thread.
         
@@ -131,164 +134,113 @@ class Mastermind(object):
         for video_id in video_ids:
             try:
                 with self.lock:
-                    directive = self._calculate_current_serving_directive(
-                        self.video_info[video_id], video_id)
-                yield (video_id, directive)
+                    directive = self.serving_directive[video_id]
+                yield directive
             except KeyError:
-                # Some other thread changed the data so we don't have
-                # information about this video id anymore. Oh well.
+                # Some other thread probably changed the data so we
+                # don't have information about this video id
+                # anymore. Oh well.
                 pass
 
-    def update_video_info(self, video_id, testing_enabled, thumbnails):
+    def update_video_info(self, video_metadata, thumbnails,
+                          testing_enabled=True):
         '''Updates information about the video.
 
         Inputs:
-        video_id - The video id to update
+        video_metadata - neondata.VideoMetadata object
         testing_enable - True if testing should be enabled for this video
-        thumbnails - List of ThumbnailInfo objects. Stats are ignored.
-
-        Output:
-        (video_id, [(thumb_id, fraction)]) if there was an actionable change,
-        None otherwise
+        thumbnails - List of ThumbnailMetadata objects. Stats are ignored.
         '''
+        video_id = video_metadata.get_id()
+        testing_enabled = testing_enabled and video_metadata.testing_enabled
+        thumbnail_infos = [ThumbnailInfo(x) for x in thumbnails]
         with self.lock:
             try:
                 video_info = self.video_info[video_id]
+                
                 # Update the statistics for all the thumbnails based
                 # on our known state.
-                for new_thumb in thumbnails:
+                for new_thumb in thumbnail_infos:
                     for old_thumb in video_info.thumbnails:
                         if new_thumb.id == old_thumb.id:
                             new_thumb.update_stats(old_thumb)
 
-                video_info.thumbnails = thumbnails
+                video_info.thumbnails = thumbnail_infos
                 video_info.testing_enabled = testing_enabled
+                if video_metadata.get_account_id() != video_info.account_id:
+                    _log.error(('The account has changed for video id %s, '
+                                'account id %s and it should not have') % 
+                                (video_id, video_metadata.get_account_id()))
+                    video_info.account_id = video_metadata.get_account_id()
                 
             except KeyError:
                 # No information about this video yet, so add it to the index
-                video_info = VideoInfo(testing_enabled, thumbnails)
+                video_info = VideoInfo(
+                    video_metadata.get_account_id(),
+                    testing_enabled,
+                    thumbnail_infos)
                 self.video_info[video_id] = video_info
 
-            return self._calculate_new_serving_directive(video_id)
-            
-
-    def update_thumbnail_info(self, video_id, thumb_id, enabled, chosen):
-        '''Updates the information for a single thumbnail.
-
-        Inputs:
-        video_id - The video id for the thumbnail
-        thumb_id - Thumbnail id to update
-        enabled - True if the thumbnail should be possible to show
-        chosen - True if the thumbnail is chosen explicitly as the primary.
-
-        Output:
-        (video_id, [(thumb_id, fraction)]) if there was an actionable change,
-        None otherwise
-        '''
-        with self.lock:
-            thumb = self._find_thumb(self, video_id, thumb_id)
-            if thumb is None:
-                return None
-            thumb.enabled = enabled
-            thumb.chosen = chosen
-
-            return self._calculate_new_serving_directive(video_id)
+            self._calculate_new_serving_directive(video_id)
                 
 
-    def update_stats_info(self, time, data):
+    def update_stats_info(self, data):
         '''Update the stats info from a ground truth in the database.
 
         Inputs:
-        time - Timestamp in seconds since epoch of when this stats info is
-               current.
         data - generator that creates a stream of 
-               (video_id, thumb_id, loads, clicks)
-
-        Output:
-        A generator that produces (video_id, [(thumb_id,
-        fraction)]) for all changes. Note, there may be some extra
-        changes that are unnecessary.
+               (video_id, thumb_id, impressions, conversions, plays)
         
         '''
-        with self.lock:
-            changes = {} # video_id -> directive
-            for video_id, thumb_id, loads, clicks in data:
+        for video_id, thumb_id, impressions, conversions in data:
+            with self.lock:
                 # Load up all the data
                 thumb = self._find_thumb(video_id, thumb_id)
                 if thumb is None:
                     continue
-                thumb.loads = float(loads)
-                thumb.clicks = float(clicks)
+                thumb.impressions = float(impressions)
+                thumb.conversions = float(conversions)
 
-                new_directive = self._calculate_new_serving_directive(video_id)
-                if new_directive is not None:
-                    changes[video_id] = new_directive
+                self._calculate_new_serving_directive(video_id)
 
-            # Now replay all the deltas since the last db update
-
-            # First step is to swap out the delta buffer
-            old_delta_logs = self.delta_log
-            self.delta_log = tempfile.TemporaryFile()
-            old_delta_logs.flush()
-            old_delta_logs.seek(0)
-
-            # Now read through the old deltas and apply any that are
-            # after the database timestamp
-            try:
-                while True:
-                    delta = pickle.load(old_delta_logs)
-                    if delta[0] > time:
-                        new_directive = self.incorporate_delta_stats(*delta)
-                        if new_directive is not None:
-                            changes[video_id] = new_directive
-            except EOFError:
-                # Done reading the stream of pickles
-                pass
-        
-            return changes.values()
-
-    def incorporate_delta_stats(self, time, video_id, thumb_id, dloads,
-                                dclicks):
-        '''Take a delta in the statistics and add it to the state
+    def update_experiment_strategy(self, account_id, strategy):
+        '''Updates the experiment strategy for a given account.
 
         Inputs:
-        video_id - The video id to update
-        thumb_id - The thumbnail id to update
-        loads - The number of loads of the thumbnail to add
-        clicks - The number of clicks to add
-        time - Timestamp in seconds since epoch when this delta was generated
-
-        Output:
-        (video_id, [(thumb_id, fraction)]) if there was an actionable change,
-        None otherwise
+        account_id - Account id that may be updated
+        strategy - A neondata.ExperimentStrategy object
         '''
-        if dclicks < 0 or dloads < 0:
-            raise ValueError('Invalid delta stat (%i, %i)' % (dloads, dclicks))
+        if strategy is None or account_id is None:
+            _log.error('Invalid account id %s and strategy: %s' %
+                       (account_id, strategy))
+            return
         
-        # Grab the lock
         with self.lock:
-            # Log the delta for replaying later
-            pickle.dump((time, video_id, thumb_id, dloads, dclicks),
-                        self.delta_log, pickle.HIGHEST_PROTOCOL)
+            try:
+                old_strategy = self.experiment_strategy[account_id]
+                if old_strategy == strategy:
+                    # No change in strategy so we're done
+                    return
+            except KeyError:
+                pass
 
-            # Add the delta to the current state
-            thumb = self._find_thumb(video_id, thumb_id)
-            if thumb is None:
-                return None
+            self.experiment_strategy[account_id] = strategy
 
-            thumb.loads += dloads
-            thumb.clicks += dclicks
-            
-            return self._calculate_new_serving_directive(video_id)
+            _log.info(('The experiment strategy has changed for account %s. '
+                      'Building new serving directives.') % account_id)
+
+            # Now update all the serving directives
+            for video_id, video_info in self.video_info.items():
+                if video_info.account_id == account_id:
+                    self._calculate_new_serving_directive(video_id)
 
     def _calculate_new_serving_directive(self, video_id):
         '''Decide the amount of time each thumb should show for each video.
 
+        Updates the self.serving_directive entries if it changes
+
         Inputs:
         video_id - Id for the video
-
-        Outputs:
-        (video_id, [(thumb_id, fraction)]) or None if no change
         '''
         try:
             video_info = self.video_info[video_id]
@@ -296,25 +248,51 @@ class Mastermind(object):
             _log.critical(
                 'Could not find video_id %s. This should never happen' 
                 % video_id)
-            return None
+            return
         
-        new_directive = self._calculate_current_serving_directive(
+        result = self._calculate_current_serving_directive(
             video_info, video_id)
+        if result is None:
+            # There was an error, so stop here
+            return 
+
+        experiment_state, new_directive, value_left = result
+                    
         try:
-            if self.last_serving_directive[video_id] == new_directive:
-                return None
-            else:
-                #Establish that there is only 1 thumb chosen (1,0,0)
-                thumb_id, fraction = max(new_directive, key=lambda tup:tup[1])
-                if fraction == 1.0:
-                    _log.info("Only showing thumbnail %s for video id %s"
-                        %(thumb_id, video_id))
+            old_directive = self.serving_directive[video_id][1]
+            if new_directive.items() == old_directive:
+                return
+            
         except KeyError:
             pass
+        
+        # Update the serving percentages in the database
+        self._incr_pending_modify(1)
+        def _set_serving_fracs(d):
+            for thumb_id, new_frac in new_directive.iteritems():
+                obj = d[thumb_id]
+                if obj is not None:
+                    obj.serving_frac = new_frac
+        neondata.ThumbnailMetadata.modify_many(
+            new_directive.keys(),
+            _set_serving_fracs,
+            callback=lambda x: self._incr_pending_modify(-1))
+        
+        def _update_experiment_info(x):
+            x.experiment_state = experiment_state
+            if value_left is not None:
+                x.experiment_value_remaining = value_left
+        self._incr_pending_modify(1)
+        neondata.VideoMetadata.modify(
+            video_id, _update_experiment_info,
+            callback=lambda x: self._incr_pending_modify(-1))
             
-        self.last_serving_directive[video_id] = new_directive
-                
-        return (video_id, new_directive)
+        self.serving_directive[video_id] = ((video_info.account_id,
+                                             video_id),
+                                             new_directive.items())
+
+        statemon.state.n_directives = len(self.serving_directive)
+        statemon.state.increment('directive_changes')
 
     def _calculate_current_serving_directive(self, video_info, video_id=''):
         '''Decide the amount of time each thumb should show for each video.
@@ -325,89 +303,312 @@ class Mastermind(object):
         video_info - A VideoInfo object
 
         Outputs:
-        [(thumb_id, fraction)] or None if we had an error
+        (experiment_state, {thumb_id => fraction}, value_left) or 
+        None if we had an error
         '''
-        # Find the default and chosen thumbnails
-        default = None
+        try:
+            strategy = self.experiment_strategy[video_info.account_id]
+        except KeyError:
+            _log.error(('Could not find the experimental strategy for account'
+                        ' %s' % video_info.account_id))
+            return None
+            
+        # Find the different types of thumbnails. We are looking for:
+        # - The baseline
+        # - The editor's selected thumbnails
+        # - All the candidate thumbnails
+        baseline = None
+        editor = None
         chosen = None
-        neon_chosen = None
+        default = None
+        experiment_state = neondata.ExperimentState.UNKNOWN
+        value_left=None
+        candidates = set()
         run_frac = {} # thumb_id -> fraction
-        chosen_flagged = False
         for thumb in video_info.thumbnails:
             run_frac[thumb.id] = 0.0
-            if not thumb.enabled:
+            if not thumb.metadata.enabled:
                 continue
-            
-            if thumb.origin <> 'neon':
-                if default is not None:
-                    _log.error('There were multiple default thumbnails for '
-                               'video: %s' % video_id)
-                default = thumb
-            
-            if thumb.chosen:
-                if chosen_flagged:
-                    _log.error('There were multiple thumbnails chosen for '
-                               'video id: %s' % video_id)
-                chosen = thumb
-                chosen_flagged = True
 
-            if thumb.origin == 'neon':
-                if neon_chosen is None or thumb.rank < neon_chosen.rank:
-                    neon_chosen = thumb
+            # A neon thumbnail
+            if thumb.metadata.type in [neondata.ThumbnailType.NEON,
+                                       neondata.ThumbnailType.CUSTOMUPLOAD]:
+                candidates.add(thumb)
 
-        if default is None and chosen is None and neon_chosen is None:
-            _log.error('Could not find any thumbnails to show for video %s'
-                       % video_info)
-            return []
+            # A thumbnail that was explicitly chosen in the database
+            if thumb.metadata.chosen:
+                if chosen is not None:
+                    _log.warn(('More than one chosen thumbnail for video %s '
+                               '. Choosing the one of lowest rank' % video_id))
+                    if thumb.metadata.rank < chosen.metadata.rank:
+                        chosen = thumb
+                else:
+                    chosen = thumb
 
-        if default is None:
-            _log.error('Could not find default thumbnail for video: %s' %
-                       video_info)
-            if chosen is None:
-                run_frac[neon_chosen.id] = 1.0
-            else:
-                run_frac[chosen.id] = 1.0
-        elif chosen is None:
-            run_frac[default.id] = 1.0
-        elif default.id == chosen.id or not video_info.testing_enabled:
+            # This is identified as the baseline thumbnail
+            if thumb.metadata.type == strategy.baseline_type:
+                if (baseline is None or 
+                    thumb.metadata.rank < baseline.metadata.rank):
+                    baseline = thumb
+
+            # A default thumbnail that comes from a partner source or
+            # is explicitly set in the API
+            if thumb.metadata.type not in [neondata.ThumbnailType.NEON,
+                                           neondata.ThumbnailType.CENTERFRAME,
+                                           neondata.ThumbnailType.RANDOM,
+                                           neondata.ThumbnailType.FILTERED]:
+                if (default is None or 
+                    default.metadata.type == neondata.ThumbnailType.DEFAULT 
+                    or thumb.metadata.rank < default.metadata.rank):
+                    default = thumb
+
+        if strategy.chosen_thumb_overrides and chosen is not None:
             run_frac[chosen.id] = 1.0
-        else:
-            # We are A/B testing
-            if self._chosen_thumb_bad(chosen, default):
-                # The chosen thumbnail is bad for some reason, so show
-                # the default.
-                run_frac[default.id] = 1.0
+            experiment_state = neondata.ExperimentState.OVERRIDE
+            return (experiment_state, run_frac, None)
+        editor = chosen or default
+        if editor:
+            candidates.discard(editor)
+
+        if editor is None and baseline is None:
+            if len(candidates) == 0:
+                _log.error("No valid thumbnails for video %s" % video_id)
+                return None
+            
+            _log.warn('Could not find a baseline for video id: %s' %
+                      video_id)
+            if not video_info.testing_enabled:
+                _log.error('Testing was disabled and there was no baseline for'
+                           'video %s' % video_id)
+                return None
+
+        # Done finding all the thumbnail types, so start doing the allocations 
+        if not video_info.testing_enabled:
+            if editor is None:
+                run_frac[baseline.id] = 1.0
             else:
-                # Run the A/B test.  The default thumb is running the
-                # equivalent of 10 min an hour because we're starting
-                # primarily with brightcove.
-                run_frac[default.id] = 0.15
-                run_frac[chosen.id] = 0.85
+                run_frac[editor.id] = 1.0
+            experiment_state = neondata.ExperimentState.DISABLED
 
-        return run_frac.items()
+        elif strategy.only_exp_if_chosen and chosen is None:
+            # We aren't experimenting because no thumb was chosen
+            if default:
+                run_frac[default.id] = 1.0
+            elif baseline:
+                run_frac[baseline.id] = 1.0
+            else:
+                _log.warn("Could not find the default thumbnail to show for "
+                          "video %s. Trying a Neon one instead." % video_id)
+                ranked_candidates = sorted(
+                    candidates, key=lambda x: (x.metadata.rank,
+                                               x.metadata.type != 
+                                               neondata.ThumbnailType.NEON))
+                run_frac[ranked_candidates[0].id] = 1.0
+            experiment_state = neondata.ExperimentState.DISABLED
 
-    def _chosen_thumb_bad(self, chosen, default):
-        '''Returns True if the chosen thumbnail is bad.
+        elif (strategy.experiment_type == 
+            neondata.ExperimentStrategy.MULTIARMED_BANDIT):
+            experiment_state, bandit_frac, value_left = \
+              self._get_bandit_fracs(strategy, baseline, editor, candidates)
+            run_frac.update(bandit_frac)
+        elif (strategy.experiment_type == 
+            neondata.ExperimentStrategy.SEQUENTIAL):
+            experiment_state, seq_frac, value_left = \
+              self._get_sequential_fracs(strategy, baseline, editor,
+                                         candidates)
+            run_frac.update(seq_frac)
+        else:
+            _log.error('Invalid experiment type for video %s : %s' % 
+                       (video_id, strategy.experiment_type))
+            return None
+        return (experiment_state, run_frac, value_left)
 
-        We do a statistical significance test on the loads and clicks
-        to see if the chosen thumbnail is worse than the default.
-        '''
-        if chosen.loads < 500 or default.loads < 500:
-            return False
+    def _get_bandit_fracs(self, strategy, baseline, editor, candidates):
+        '''Gets the serving fractions for a multi-armed bandit strategy.
 
-        if chosen.clicks < 1 or default.clicks < 1:
-            return False
+        This uses the Thompson Sampling heuristic solution. See
+        https://support.google.com/analytics/answer/2844870?hl=en for
+        more details.
         
-        p_chosen = float(chosen.clicks) / chosen.loads
-        p_default = float(default.clicks) / default.loads
+        '''
+        run_frac = {}
+        valid_bandits = copy.copy(candidates)
+        experiment_state = neondata.ExperimentState.RUNNING
+        value_remaining = None
+        experiment_frac = strategy.exp_frac
+                
+        if (editor is not None and 
+            baseline is not None and 
+            utils.dists.hamming_int(editor.metadata.phash,
+                                    baseline.metadata.phash) < 10):
+            # The editor thumbnail looks exactly like the baseline one
+            # so ignore the editor one.
+            editor = None
+        
+        # First allocate the non-experiment portion
+        non_exp_thumb = None
+        if strategy.exp_frac >= 1.0:
+            # When the experimental fraction is 100%, put everything
+            # into the valid bandits that makes sense.
+            if editor is not None:
+                valid_bandits.add(editor)
+                if baseline and strategy.always_show_baseline:
+                    valid_bandits.add(baseline)
+            elif baseline is not None:
+                valid_bandits.add(baseline)
+        else:
+            if editor is None:
+                if baseline:
+                    run_frac[baseline.id] = 1.0 - strategy.exp_frac
+                    non_exp_thumb = baseline
+                else:
+                    # There is nothing to run in the main fraction, so
+                    # run the experiment over everything.
+                    experiment_frac = 1.0
+            else:
+                run_frac[editor.id] = 1.0 - strategy.exp_frac
+                non_exp_thumb = editor
+                if baseline and strategy.always_show_baseline:
+                    valid_bandits.add(baseline)
 
-        se2_chosen = (p_chosen * (1-p_chosen)) / chosen.loads
-        se2_default = (p_default * (1-p_default)) / default.loads
+        valid_bandits = list(valid_bandits)
 
-        zscore = (p_default - p_chosen) / math.sqrt(se2_chosen + se2_default)
+        # Now determine the serving percentages for each valid bandit
+        # based on a prior of its model score and its measured ctr.
+        bandit_ids = [x.id for x in valid_bandits]
+        conversions = dict([(x.id, self._get_prior_conversions(x) + x.conversions)
+                             for x in valid_bandits])
+        impressions = dict([(x.id, Mastermind.PRIOR_IMPRESSION_SIZE * 
+                             (1 - Mastermind.PRIOR_CTR) + 
+                             x.impressions - x.conversions)
+                             for x in valid_bandits])
 
-        # Threshold on a 90% one way confidence interval
-        return zscore > 1.65
+        # Run the monte carlo series
+        MC_SAMPLES = 10000.
+        mc_series = [spstats.beta.rvs(conversions[x],
+                                      impressions[x],
+                                      size=MC_SAMPLES)
+                                      for x in bandit_ids]
+        if non_exp_thumb is not None:
+            mc_series.append(
+                spstats.beta.rvs(self._get_prior_conversions(non_exp_thumb) + 
+                                 non_exp_thumb.conversions,
+                                 Mastermind.PRIOR_IMPRESSION_SIZE * 
+                                 (1 - Mastermind.PRIOR_CTR) + 
+                                 non_exp_thumb.impressions - non_exp_thumb.conversions,
+                                 size=MC_SAMPLES))
+
+        win_frac = np.array(np.bincount(np.argmax(mc_series, axis=0)),
+                            dtype=np.float) / MC_SAMPLES
+        win_frac = np.append(win_frac, [0.0 for x in range(len(mc_series) - 
+                                                           win_frac.shape[0])])
+
+        winner_idx = np.argmax(win_frac)
+
+        winner_impressions = None
+        if winner_idx == len(bandit_ids):
+            winner_impressions = non_exp_thumb.impressions
+        else:
+            winner_impressions = valid_bandits[winner_idx].impressions
+
+        # Determine the value remaining. This is equivalent to
+        # determing that one of the other arms might beat the winner
+        # by x%
+        lost_value = ((np.max(mc_series, 0) - mc_series[:][winner_idx]) / 
+                      mc_series[:][winner_idx])
+        value_remaining = np.sort(lost_value)[0.95*MC_SAMPLES]
+
+        if win_frac[winner_idx] >= 0.95:
+            # There is a winner. See if there were enough impressions to call it
+            if win_frac.shape[0] == 1 or winner_impressions >= 500:
+                # The experiment is done
+                experiment_state = neondata.ExperimentState.COMPLETE
+                try:
+                    winner = valid_bandits[winner_idx]
+                except IndexError:
+                    winner = non_exp_thumb
+                return (experiment_state,
+                        self._get_experiment_done_fracs(
+                            strategy, baseline, editor, winner),
+                        value_remaining)
+
+            else:
+                # Only allow the winner to have 90% of the impressions
+                # because there aren't enough impressions to make a good
+                # decision.
+                win_frac[winner_idx] = 0.90
+                other_idx = [x for x in range(win_frac.shape[0])
+                             if x != winner_idx]
+                if np.sum(win_frac[other_idx]) < 1e-5:
+                    win_frac[other_idx] = 0.1 / len(other_idx)
+                else:
+                    win_frac[other_idx] = \
+                      0.1 / np.sum(win_frac[other_idx]) * win_frac[other_idx]
+
+        # The serving fractions for the experiment are just the
+        # fraction of time that each thumb won the Monte Carlo
+        # simulation.
+        if non_exp_thumb is not None:
+            win_frac = win_frac[:-1]
+            win_frac = win_frac / np.sum(win_frac)
+        for thumb_id, frac in zip(bandit_ids, win_frac):
+            run_frac[thumb_id] = frac * experiment_frac
+
+        return (experiment_state, run_frac, value_remaining)
+        
+
+    def _get_prior_conversions(self, thumb_info):
+        '''Get the number of conversions we would expect based on the model 
+        score.'''
+        score = thumb_info.metadata.model_score
+        if score is None or score < 1e-4:
+            if thumb_info.metadata.chosen:
+                # An editor chose this thumb, so give it a 5% lift
+                return (Mastermind.PRIOR_CTR * 
+                        Mastermind.PRIOR_IMPRESSION_SIZE * 1.05)
+            else:
+                return (Mastermind.PRIOR_CTR * 
+                        Mastermind.PRIOR_IMPRESSION_SIZE)
+
+        # Peg a score of 5.5 as a 10% lift over random and a score of
+        # 4.0 as neutral
+        return ((0.10*(score-4.0)/1.5 + 1) * Mastermind.PRIOR_CTR * 
+                Mastermind.PRIOR_IMPRESSION_SIZE)
+
+    def _get_sequential_fracs(self, strategy, baseline, editor, candidates):
+        '''Gets the serving fractions for a sequential testing strategy.'''
+        _log.error('Sequential seving strategy is not implemented. '
+                   'Falling back to the multi armed bandit')
+        return self._get_bandit_fracs(strategy, baseline, editor, candidates)
+
+    def _get_experiment_done_fracs(self, strategy, baseline, editor, winner):
+        '''Returns the serving fractions for when the experiment is complete.
+
+        Just returns a dictionary of the directive { id -> frac }
+        '''
+        majority = editor or baseline
+        if majority and majority.id == winner.id:
+            # The winner was the default so put in the baseline as a holdback
+            if baseline and majority.id != baseline.id:
+                return { winner.id : 1.0 - strategy.holdback_frac,
+                         baseline.id : strategy.holdback_frac }
+        elif strategy.override_when_done:
+            # The experiment is done and we want to serve the winner
+            # most of the time.
+            majority = baseline or editor
+            if majority and majority.id != winner.id:
+                return { winner.id : 1.0 - strategy.holdback_frac,
+                         majority.id : strategy.holdback_frac }
+        else:
+            # The experiment is done, but we do not show the winner
+            # for most of the traffic (usually because it's still a
+            # pilot). So instead, just show it for the full
+            # experimental percentage.
+            if majority:
+                return { winner.id : strategy.exp_frac,
+                         majority.id : 1.0 - strategy.exp_frac }
+            
+        return { winner.id : 1.0 }
             
 
     def _find_thumb(self, video_id, thumb_id):
@@ -431,3 +632,7 @@ class Mastermind(object):
         except KeyError:
             _log.warn('Could not find information for video %s' % video_id)
             return None
+
+        _log.warn('Could not find information for thumbnail %s in video %s' % 
+                  (thumb_id, video_id))
+        return None

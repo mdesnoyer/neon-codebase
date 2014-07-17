@@ -82,7 +82,7 @@ def execute(cursor, command, args=[]):
 
     elif pstyle == 'format':
         pass 
-
+    
     else:
         raise NotImplementedError('This DB backend type is not supported.')
 
