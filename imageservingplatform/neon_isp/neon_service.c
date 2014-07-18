@@ -217,6 +217,11 @@ neon_service_set_abtest_bucket_cookie(ngx_http_request_t *request, ngx_str_t *vi
     cp = ngx_cpymem(cp, underscore.data, underscore.len);
     cp = ngx_cpymem(cp, video_id->data, video_id->len);
     cookie_name.len = cp - cookie_name.data;
+    
+    if (neon_service_isset_cookie(request, &cookie_name) == NEON_TRUE){
+        return NEON_TRUE;
+    }
+
 
     // alloc memory, use cookie_max_expiry as a template
     expires.data = (u_char *) ngx_palloc(request->pool, cookie_max_expiry.len);
