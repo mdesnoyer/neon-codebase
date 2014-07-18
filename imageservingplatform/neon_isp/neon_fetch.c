@@ -1,5 +1,4 @@
 // Fetch the document from S3 using wget.
-// TODO: The call to be sandboxed in a process, so that on crash it doesn't affect the current proc/ thread
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -25,6 +24,8 @@ neon_fetch(const char * const mastermind_url,
     
     neon_log_error("neon_fetch");
     sprintf(command, format, timeout, mastermind_filepath, mastermind_url);
+    //static const char * const format = "s3cmd get --check-md5 %s %s";
+    //sprintf(command, format, mastermind_url, mastermind_filepath);
     
     errno = 0;
     ret = system(command);
