@@ -43,8 +43,8 @@ public:
     
     const Fraction * GetFraction(unsigned char * hash_string, int hash_string_len) const;
     
-    static unsigned long neon_sdbm_hash(unsigned char *str, int s_len) ;
-    
+    Fraction * GetFraction(int index) {return fractions[index];};
+
 protected:
     
     std::string  accountId;

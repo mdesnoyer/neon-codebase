@@ -342,6 +342,7 @@ Mastermind::GetImageUrl(const char * account_id, const char * video_id,
         return 0;
    
     // Hash string to be a combination of ipAddress & video id
+    // TODO: Use bucket ID to change
     unsigned char hashstring[256]; // max size = 15 + sizeof(vid)
     int offset = 0;
     memcpy(hashstring + offset, ipAddress, ip_len);

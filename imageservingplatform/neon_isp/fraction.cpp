@@ -40,14 +40,14 @@ Fraction::Init(double floor, const rapidjson::Value& frac)
     threshold = floor + pct;
 
     // Default URL
-    //if (frac.HasMember("default_url") == false) 
-    //    throw new NeonException("Fraction::Init: no default_url id key found");
+    if (frac.HasMember("default_url") == false) 
+        throw new NeonException("Fraction::Init: no default_url id key found");
     
     defaultURL = strdup(frac["default_url"].GetString()); 
 
     // Thumbnail ID
-    //if (frac.HasMember("tid") == false) 
-    //    throw new NeonException("Fraction::Init: no tid key found");
+    if (frac.HasMember("tid") == false) 
+        throw new NeonException("Fraction::Init: no tid key found");
     
     tid = strdup(frac["tid"].GetString());
 

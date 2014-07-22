@@ -1,5 +1,5 @@
 /*
- * Directive Hash table test
+ * Fractions class test
  */
 
 
@@ -11,15 +11,15 @@
 #include "neon_updater.h"
 #include "neon_utc.h"
 #include "neon_utils.h"
-#include "directiveHashtable.h"
-#include "publisherHashtable.h"
+#include "directive.h"
+#include "fraction.h"
 
 using namespace std;                                                                 
 
-class DirectiveHashtableTest: public :: testing::Test{
+class FractionsTest: public :: testing::Test, public Directive{
 
 public:
-        DirectiveHashtableTest(){}
+        FractionsTest(){}
 protected:
         virtual void SetUp(){
             char dir[] =
@@ -69,39 +69,23 @@ protected:
                 "     ]                                                                 "
                 "}                                                                      "
                 ;
-            rapidjson::Document document;
+            
             document.Parse<0>(dir);
 
-            table.Init(10);
-            table.AddDirective(document);
-
         }
-        DirectiveHashtable table;
+        rapidjson::Document document;
+        Directive directive;
 };
 
 
-// Test basic operations on hash table
-TEST_F(DirectiveHashtableTest, test_directive_table){
+TEST_F(FractionsTest, test_parsing_single_fraction){
 
-        std::string acct = "acc1";
-        std::string vid = "vid1";
-        
-        const Directive * r1 = table.Find(acct, vid);
-        
-        EXPECT_EQ(r1->GetAccountId(), acct);
-        EXPECT_EQ(r1->GetVideoId(), vid);
-        
+    directive.Init(document);
+    Fraction *f = directive.GetFraction(0);
+    EXPECT_EQ(0.9, f->GetPct());
+    //EXPECT_EQ(,f->GetThreshold());
 }
 
-// Test invalid account id 
-TEST_F(DirectiveHashtableTest, test_invalid_acc_key){
+TEST_F(FractionsTest, test_scaled_image){
 
-        std::string acct = "_acc1";
-        std::string vid = "vid1";
-        
-        const Directive * r1 = table.Find(acct, vid);
-        
-        EXPECT_TRUE(r1 == NULL);
-        
 }
-

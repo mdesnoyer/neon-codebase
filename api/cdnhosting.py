@@ -72,3 +72,15 @@ class AWSHosting(CDNHosting):
             serving_urls.add_serving_url(cdn_url, sz[0], sz[1])
         
         serving_urls.save()
+
+class CloudindaryHosting(CDNHosting):
+    
+    '''
+    Upload a single sized base image to Cloudinary
+    '''
+    service_url  = "https://api.cloudinary.com/v1_1/%s/image/upload"
+    def upload(self, image, tid):
+        '''
+        '''
+        pass
+

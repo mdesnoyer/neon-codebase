@@ -41,11 +41,12 @@ add_library(NeonISP STATIC
 
 add_cc_test(NeonISPTest
   test/neon_mastermind_test.cc
-  test/neon_isp_misc_test.cc
+  test/neon_utils_test.cc
   test/rapidjson_test.cc
   test/neon_publisherhashtable_test.cc
   test/neon_directivehashtable_test.cc
   test/neon_service_helper_test.cc
+  test/fractions_test.cc
 )
 
 target_link_libraries( NeonISPTest 

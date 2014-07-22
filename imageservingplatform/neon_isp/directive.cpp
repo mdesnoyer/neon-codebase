@@ -4,6 +4,9 @@
 #include "directive.h"
 #include "neonException.h"
 #include "mastermind.h"
+extern "C" {
+    #include "neon_utils.h"
+}
 
 /*
  *   Directive
@@ -152,9 +155,11 @@ Directive::GetFraction(unsigned char * hash_string, int hash_string_len) const
         individual_fractions.push_back(pcnt);
         cumulative_fractions.push_back(total_pcnt);
     }
-    unsigned long hash = Directive::neon_sdbm_hash(hash_string, hash_string_len);
+    
+    unsigned long hash = neon_sdbm_hash(hash_string, hash_string_len);
+    
     if(hash_string == 0){
-        // hash_string is empty for some reason
+        // If hash_string is empty for some reason
         // Pick the fraction with max pcnt
         index = std::distance(individual_fractions.begin(), 
                                 std::max_element(individual_fractions.begin(), 
@@ -185,19 +190,3 @@ Directive::GetKey() const
     composite.append(videoId);
     return composite;
 }
-
-unsigned long
-Directive::neon_sdbm_hash(unsigned char *str, int s_len) 
-{
-    unsigned long hash = 0;
-    int c, i=0;
-
-    if(str){
-        while ((c = *str++) && i++ < s_len){
-            hash = c + (hash << 6) + (hash << 16) - hash;
-        }
-    }
-
-    return hash;
-}
-

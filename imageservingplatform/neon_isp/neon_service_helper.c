@@ -1,17 +1,16 @@
+/*
+ * Static helper functions for use by neon_service
+ * 
+ * */
+
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
-/*
- * Static helper functions for use by neon_service
- *
- * */
 
 /*
  * Header Search Function (Used to get custom headers)
  *
  * */
-
-
 static ngx_table_elt_t *
 search_headers_in(ngx_http_request_t *r, u_char *name, size_t len) {
     ngx_list_part_t            *part;
@@ -66,8 +65,8 @@ search_headers_in(ngx_http_request_t *r, u_char *name, size_t len) {
  * Parse a ngx_str value in to long 
  *
  * */
-static long neon_service_parse_number(ngx_str_t * value)
-{
+static long neon_service_parse_number(ngx_str_t * value){
+
     int base = 10;
     static const int bufferSize = 16;
     char buffer[bufferSize];

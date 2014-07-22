@@ -50,7 +50,7 @@ NEON_RENAME_ERROR neon_rename(const char * const oldname, const char * const new
 
 extern const char * neon_rename_error;
 
-unsigned long neon_sdbm_hash(unsigned char *str);
+unsigned long neon_sdbm_hash(unsigned char *str, int s_len);
 
 void neon_get_uuid(char *dest, size_t length);
 

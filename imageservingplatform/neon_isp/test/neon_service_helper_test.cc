@@ -1,5 +1,8 @@
 /*
- * Test all the lookup methods in neon_mastermind.cpp
+ * Tests for service helper  
+ *
+ * Currently all functions that can be tested independenly
+ * without nginx core, are in the helper.c file
  *
  * */
 
@@ -47,6 +50,13 @@ TEST_F(NeonServiceTest, test_parse_number){
     v = ngx_string("z1");
     ret = neon_service_parse_number(&v);
     EXPECT_EQ(ret, -1);
+}
+
+// Test the search headers function
+TEST_F(NeonServiceTest, test_search_headers_in){
+
+    ngx_http_request_t request;
+    ngx_table_elt_t header_x;
 }
 
 /*

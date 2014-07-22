@@ -125,17 +125,18 @@ neon_rename(const char * const old_filepath, const char * const new_filepath)
 // String hash function 
 
 unsigned long
-neon_sdbm_hash(unsigned char *str)
+neon_sdbm_hash(unsigned char *str, int s_len) 
 {
-	unsigned long hash = 0;
-        int c;
+    unsigned long hash = 0;
+    int c, i=0;
 
-	if(str){
-	    while ((c = *str++)){
-		hash = c + (hash << 6) + (hash << 16) - hash;
-	    }
-	}
-        return hash;
+    if(str){
+        while ((c = *str++) && i++ < s_len){
+            hash = c + (hash << 6) + (hash << 16) - hash;
+        }
+    }
+
+    return hash;
 }
 
 
