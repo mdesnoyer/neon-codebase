@@ -41,12 +41,19 @@ public:
     // searches the publisher hashtable
     const char * GetAccountId(const char * publisherId, int & size);
     
-    // searches the publisher hashtable
-    //const std::string & GetAccountIdRef(const char * publisherId);
+    const char * GetImageUrl(const char * accountId, 
+                                const char * videoId, 
+                                unsigned char * bucketId,
+                                int bucketIdLen,
+                                int height, 
+                                int width, 
+                                int & size);
     
-    const char * GetImageUrl(const char * accountId, const char * videoId, unsigned char * ipAddress, int ipAddress_len, int height, int width, int & size);
-    
-    const char * GetThumbnailID(const char * account_id, const char * video_id, unsigned char* ipAddress, int ipAddress_len, int &size);
+    const char * GetThumbnailID(const char * c_accountId, 
+                                const char * c_videoId, 
+                                unsigned char * bucketId,
+                                int bucketIdLen,
+                                int &size);
    
 
 protected:

@@ -24,15 +24,14 @@ static Mastermind * mastermind_old = 0;
 
 
 Mastermind *
-neon_get_mastermind()
-{
+neon_get_mastermind(){
+
     return  mastermind_current;
 }
 
 
 static NEON_BOOLEAN
-deallocate_mastermind(Mastermind * m)
-{
+deallocate_mastermind(Mastermind * m){
     if(m == 0)
         return NEON_TRUE;
     
@@ -44,8 +43,7 @@ deallocate_mastermind(Mastermind * m)
 
 
 NEON_BOOLEAN
-neon_mastermind_init()
-{
+neon_mastermind_init(){
     Mastermind::InitStatic();
 
     mastermind_current = new Mastermind();
@@ -58,8 +56,8 @@ neon_mastermind_init()
 const char * neon_load_error = 0;
 
 NEON_LOAD_ERROR
-neon_mastermind_load(const char * filepath)
-{
+neon_mastermind_load(const char * filepath){
+
     Mastermind * to_delete = 0;
     Mastermind * candidate = 0;
     
@@ -125,8 +123,7 @@ neon_mastermind_load(const char * filepath)
 NEON_MASTERMIND_ACCOUNT_ID_LOOKUP_ERROR
 neon_mastermind_account_id_lookup(const char * publisher_id,
                                   const char ** account_id,
-                                  int * account_id_size)
-{
+                                  int * account_id_size){
 
     Mastermind * mastermind = neon_get_mastermind();
     
@@ -148,13 +145,13 @@ neon_mastermind_account_id_lookup(const char * publisher_id,
  */
 NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR
 neon_mastermind_image_url_lookup(const char * accountId,
-        const char * videoId,
-        ngx_str_t * ipAddress,
-        int height,
-        int width,
-        const char ** url,
-        int * size)
-{
+                                    const char * videoId,
+                                    ngx_str_t * bucketId,
+                                    int height,
+                                    int width,
+                                    const char ** url,
+                                    int * size){
+    
     Mastermind * mastermind = neon_get_mastermind();
     
     if(mastermind_current == 0)
@@ -162,8 +159,8 @@ neon_mastermind_image_url_lookup(const char * accountId,
 
     
     (*url) = mastermind->GetImageUrl(accountId, videoId, 
-            ipAddress->data, ipAddress->len, 
-            height, width, *size);
+                                      bucketId->data, bucketId->len,
+                                      height, width, *size);
     
     if(*url == 0)
         return NEON_MASTERMIND_IMAGE_URL_LOOKUP_NOT_FOUND;
@@ -179,11 +176,10 @@ neon_mastermind_image_url_lookup(const char * accountId,
 
 NEON_MASTERMIND_TID_LOOKUP_ERROR
 neon_mastermind_tid_lookup(const char * accountId,
-        const char * videoId,
-        ngx_str_t * ipAddress,
-        const char ** tid,
-        int * size)
-{
+                            const char * videoId,
+                            ngx_str_t * bucketId,
+                            const char ** tid,
+                            int * size){
 
     Mastermind * mastermind = neon_get_mastermind();
     
@@ -191,7 +187,8 @@ neon_mastermind_tid_lookup(const char * accountId,
         return NEON_MASTERMIND_TID_LOOKUP_FAIL;
 
     
-    (*tid) = mastermind->GetThumbnailID(accountId, videoId, ipAddress->data, ipAddress->len, *size); 
+    (*tid) = mastermind->GetThumbnailID(accountId, videoId, bucketId->data, 
+                                        bucketId->len, *size); 
 
     
     if(*tid == 0)
@@ -201,9 +198,14 @@ neon_mastermind_tid_lookup(const char * accountId,
     return NEON_MASTERMIND_TID_LOOKUP_OK;
 }
 
+/*
+ * Check if the current mastermind data has expired
+ *
+ * */
+
 NEON_BOOLEAN
-neon_mastermind_expired()
-{
+neon_mastermind_expired(){
+    
     if(mastermind_current == NULL)
         return NEON_TRUE;
     
@@ -217,6 +219,9 @@ neon_mastermind_expired()
 
 /*
  * Health Check handler
+ *
+ * This is used by the ISP nginx module hook to 
+ * determine the state of the Image Platform
  *
  * */
 

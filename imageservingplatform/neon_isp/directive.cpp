@@ -139,7 +139,7 @@ Directive::GetVideoIdRef() const
 
 
 const Fraction *
-Directive::GetFraction(unsigned char * hash_string, int hash_string_len) const
+Directive::GetFraction(unsigned char * bucketId, int bucketIdLen) const
 {
     //GDB: print *(fractions._M_impl._M_start)@fractions.size()
     if(fractions.size() == 0)
@@ -156,21 +156,23 @@ Directive::GetFraction(unsigned char * hash_string, int hash_string_len) const
         cumulative_fractions.push_back(total_pcnt);
     }
     
-    unsigned long hash = neon_sdbm_hash(hash_string, hash_string_len);
     
-    if(hash_string == 0){
-        // If hash_string is empty for some reason
+    if(bucketId == 0 or bucketIdLen <= 0){
+        // If bucketId is empty, the user isnt' part of AB test yet 
         // Pick the fraction with max pcnt
         index = std::distance(individual_fractions.begin(), 
                                 std::max_element(individual_fractions.begin(), 
                                 individual_fractions.end())); 
     }else{
         // Pick the AB test bucket
-        for(i=0 ; i< cumulative_fractions.size(); i++){
-            if ((double)hash < (cumulative_fractions[i] * ULONG_MAX))
-                break;    
-        }
-        index = i;
+        // TODO: Map the bucket id to a fraction  
+        //for(i=0 ; i< cumulative_fractions.size(); i++){
+        //    if ((double)hash < (cumulative_fractions[i] * ULONG_MAX))
+        //        break;    
+        //}
+        //index = i;
+        
+        index = 0; //TEMP: Update logic after discussion 
     }
 
     return fractions[index];

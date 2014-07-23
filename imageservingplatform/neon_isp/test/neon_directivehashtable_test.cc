@@ -7,11 +7,11 @@
 #include <stdio.h>
 #include <time.h>
 
+#include "directiveHashtable.h"
 #include "neon_error_codes.h"
 #include "neon_updater.h"
 #include "neon_utc.h"
 #include "neon_utils.h"
-#include "directiveHashtable.h"
 #include "publisherHashtable.h"
 
 using namespace std;                                                                 

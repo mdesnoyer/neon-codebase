@@ -388,23 +388,21 @@ static ngx_int_t ngx_http_neon_handler_healthcheck(ngx_http_request_t *r)
     int status = neon_mastermind_healthcheck();
     
     // no mastermind data available, no service
-    if(status == 0) {
-        r->headers_out.status = NGX_HTTP_SERVICE_UNAVAILABLE ;
+    if(status == 0){
+        r->headers_out.status = NGX_HTTP_SERVICE_UNAVAILABLE;
         body = pageOutOfService;
     }
-    
     // mastermind data available
     else {
         
         r->headers_out.status = NGX_HTTP_OK;
        
-           //TODO: status to be 400 for others
-        
         // expired but otherwise serviceable
         if(status == 1)
             body = pageInServiceExpired;
+
         // status 2, mastermind data is current
-        else
+        if(status == 2)
             body = pageInServiceCurrent;
     }
     

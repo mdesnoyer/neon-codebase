@@ -1,5 +1,6 @@
 /*
  * Publisher Hashtable
+ *
  * */
 
 #include <gtest/gtest.h>
@@ -44,4 +45,3 @@ TEST_F(PublisherHashTableTest, test_pub_table){
         
 }
 
-// Test hash_publisher method
