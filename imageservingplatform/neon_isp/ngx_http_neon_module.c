@@ -206,7 +206,7 @@ ngx_http_neon_mastermind_validated_filepath(ngx_conf_t *cf, void *post, void *da
     mastermind_validated_filepath.data = name->data;
     mastermind_validated_filepath.len = ngx_strlen(name->data);
     
-    neon_log_error("Parsed mastermind fp %s", mastermind_validated_filepath.data);
+    //neon_log_error("Parsed mastermind fp %s", mastermind_validated_filepath.data);
     return NGX_CONF_OK;
 }
 
@@ -220,7 +220,7 @@ ngx_http_neon_updater_sleep_time(ngx_conf_t *cf, void *post, void *data){
     }    
     
     updater_sleep_time = *name; 
-    neon_log_error("Parsed updater sleep time %d", updater_sleep_time);
+    //neon_log_error("Parsed updater sleep time %d", updater_sleep_time);
     return NGX_CONF_OK;
 }
 

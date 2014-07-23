@@ -5,6 +5,8 @@
 
 #include <string.h>
 #include <errno.h>
+
+#include "neon_constants.h"
 #include "neon_log.h"
 #include "neon_mastermind.h"
 #include "neon_service.h"
@@ -12,11 +14,6 @@
 #include "neon_utils.h"
 #include "neon_service_helper.c"
 
-#define NEON_UUID_TS_LEN 10  // Length of the timestamp part of UUID
-#define NEON_UUID_RAND_LEN 8  // Length of the random part of UUID
-#define NEON_UUID_LEN NEON_UUID_RAND_LEN + NEON_UUID_TS_LEN // Length of neonglobaluserid
-#define N_ABTEST_BUCKETS 100 // Number of ABTest buckets
-#define N_ABTEST_BUCKET_DIGITS 3 // digits for ABTest bucket chars
 #define ngx_uchar_to_string(str)     { strlen((const char*)str), (u_char *) str }
 
 /// String Constants used by Neon Service 
@@ -532,7 +529,8 @@ neon_service_server_api(ngx_http_request_t *request,
     int height;
 
     int ret = neon_service_parse_api_args(request, &base_url, &account_id, 
-                       &account_id_size, &video_id, &pub_id, &ipAddress, &width, &height);
+                                           &account_id_size, &video_id, &pub_id, 
+                                           &ipAddress, &width, &height);
 
     if(ret !=0 ){
         neon_stats[NEON_SERVER_API_ACCOUNT_ID_NOT_FOUND] ++;    
@@ -542,13 +540,16 @@ neon_service_server_api(ngx_http_request_t *request,
     
     // look up thumbnail image url
     
+    //dummy bucket id, server api doesn't use bucket id currently 
+    ngx_str_t bucket_id = ngx_string(""); 
+    
     const char * url = 0;
     int url_size = 0;
     
     NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR error_url =
         neon_mastermind_image_url_lookup(account_id,
                 (char*)video_id,
-                &ipAddress,
+                &bucket_id,
                 height,
                 width,
                 &url,
@@ -740,17 +741,24 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
     ngx_str_t base_url = ngx_string("/v1/getthumbnailid/");
     ngx_str_t params_key = ngx_string("params");
     ngx_str_t video_ids; 
+    ngx_str_t bucket_id = ngx_string(""); 
+    ngx_str_t neonglobaluserid;
+    NEON_BOOLEAN abtest_ready = NEON_FALSE;
+    
     ngx_http_arg(request, params_key.data, params_key.len, &video_ids);
     
-    ngx_str_t ipAddress = ngx_string("");
-    static ngx_str_t xf = ngx_string("X-Forwarded-For");
-    ngx_table_elt_t * xf_header;
-    xf_header = search_headers_in(request, xf.data, xf.len); 
+    // Check if the user is ready to be in a A/B test bucket
+    abtest_ready = neon_service_userid_abtest_ready(request, &neonglobaluserid);
+    
+    //ngx_str_t ipAddress = ngx_string("");
+    //static ngx_str_t xf = ngx_string("X-Forwarded-For");
+    //ngx_table_elt_t * xf_header;
+    //xf_header = search_headers_in(request, xf.data, xf.len); 
 
     // Check if X-Forwarded-For header is set (Its set by the load balancer)
-    if (xf_header){
-        ipAddress = xf_header->value;
-    }
+    //if (xf_header){
+    //    ipAddress = xf_header->value;
+    //}
 
     // get publisher id
     unsigned char * publisher_id = neon_service_get_uri_token(request, &base_url, 0);
@@ -808,11 +816,18 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
         unsigned char * video_id = ngx_pcalloc(request->pool, sz);
         memset(video_id, 0, sz);
         strncpy((char*) video_id, vtoken, sz);
-            
+        
+        ngx_str_t vid_str = ngx_uchar_to_string(video_id);
+
+        // Get the bucket id for a given video
+        if(abtest_ready == NEON_TRUE){
+            neon_service_get_bucket_id(&neonglobaluserid, &vid_str, &bucket_id);
+        }
+
         NEON_MASTERMIND_TID_LOOKUP_ERROR err =
             neon_mastermind_tid_lookup(account_id,
                     (const char*)video_id,
-                    &ipAddress,
+                    &bucket_id,
                     &tid,
                     &tid_size);
 

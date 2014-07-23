@@ -9,8 +9,10 @@
 #define _NEON_DIRECTIVE__
 
 #include <vector>
-#include "rapidjson/document.h"
+
 #include "fraction.h"
+#include "neon_constants.h"
+#include "rapidjson/document.h"
 
 
 /*

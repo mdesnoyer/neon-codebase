@@ -130,9 +130,11 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         #default ids
         self.pub_id = "pub1"
         self.vid = "vid1"
-        self.expected_img_url = "http://neont2/thumb1_500_600.jpg"
+        self.expected_img_url =\
+                        "http://neon-image-cdn.s3.amazonaws.com/pixel.jpg"
         self.neon_cookie_name = "neonglobaluserid"
         self.cookie_domain = ".neon-images.com"
+
 
     def tearDown(self):
         pass
@@ -219,6 +221,17 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         except urllib2.URLError, e:
             # ok to throw urlerror, the image url returned are invalid
             pass
+
+    def test_healthcheck(self):
+        '''
+        Verify the healthcheck
+        '''
+
+        url = "http://localhost:%s/healthcheck" % self.port
+        req = urllib2.Request(url)
+        r = urllib2.urlopen(req)
+        self.assertEqual(r.code, 200)
+        self.assertEqual(r.read(), 'In service with current Mastermind')
 
     def test_client_api_request(self):
         '''

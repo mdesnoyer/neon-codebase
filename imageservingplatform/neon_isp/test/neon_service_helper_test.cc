@@ -53,31 +53,8 @@ TEST_F(NeonServiceTest, test_parse_number){
 }
 
 // Test the search headers function
-TEST_F(NeonServiceTest, test_search_headers_in){
-
-    ngx_http_request_t request;
-    ngx_table_elt_t header_x;
-}
-
-/*
-// Test token index parsing
-TEST_F(NeonServiceTest, get_uri_token){
-    ngx_http_request_t request;
-    ngx_str_t base_url = ngx_string("/v1/server/");
-    int token_index = 1;
-    neon_service_get_uri_token(&request, &base_url, token_index);
-} 
-*/
-
-// Test Cookie presence 
-// Cookie set; verfiy contents
+//TEST_F(NeonServiceTest, test_search_headers_in){
 //
-// neon_service_parse_api_args
-// parse ip address with header (xf, cip, client_ip)
-//
-
-
-// Service response test cases
-// Client API
-// Server API
-// Thumbnail API
+//    ngx_http_request_t request;
+//    ngx_table_elt_t header_x;
+//}

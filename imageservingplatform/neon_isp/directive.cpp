@@ -137,6 +137,10 @@ Directive::GetVideoIdRef() const
     return videoId;
 }
 
+/*
+ * For a given bucketId, select the fraction  
+ *
+ * */
 
 const Fraction *
 Directive::GetFraction(unsigned char * bucketId, int bucketIdLen) const
@@ -165,14 +169,12 @@ Directive::GetFraction(unsigned char * bucketId, int bucketIdLen) const
                                 individual_fractions.end())); 
     }else{
         // Pick the AB test bucket
-        // TODO: Map the bucket id to a fraction  
-        //for(i=0 ; i< cumulative_fractions.size(); i++){
-        //    if ((double)hash < (cumulative_fractions[i] * ULONG_MAX))
-        //        break;    
-        //}
-        //index = i;
-        
-        index = 0; //TEMP: Update logic after discussion 
+        double bId = (double) atoi((const char *)bucketId); // BucketId is int
+        for(i=0 ; i< cumulative_fractions.size(); i++){
+            if (bId < (cumulative_fractions[i] * N_ABTEST_BUCKETS))
+                break;    
+        }
+        index = i;
     }
 
     return fractions[index];
