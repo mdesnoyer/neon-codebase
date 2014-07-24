@@ -341,8 +341,9 @@ class AccountHandler(tornado.web.RequestHandler):
                 i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
                 if "brightcove_integrations" == itype:
                     try:
-                        new_tid = self.get_argument('thumbnail_id')
-                        #new_tid = self.get_argument('thumbnail_id', None)
+                        new_tid = self.get_argument('thumbnail_id', None)
+                        if new_tid is None:
+                            new_tid = self.get_argument('current_thumbnail')
                     except Exception, e:
                         data = '{"error": "missing thumbnail_id argument"}'
                         self.send_json_response(data, 400)
@@ -355,7 +356,14 @@ class AccountHandler(tornado.web.RequestHandler):
                     return
                 
                 elif "ooyala_integrations" == itype:
+                    #Temp support for both arguments
                     new_tid = self.get_argument('thumbnail_id', None)
+                    if new_tid is None:
+                        self.get_argument('current_thumbnail', None)
+                        if new_tid is None:
+                            data = '{"error": "missing thumbnail_id argument"}'
+                            self.send_json_response(data, 400)
+                            return
                     self.update_video_ooyala(i_id, i_vid, new_tid)
                     return
             else:
