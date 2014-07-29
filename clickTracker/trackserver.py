@@ -81,40 +81,6 @@ statemon.define('internal_server_error', int)
 #### DATA FORMAT ###
 #############################################
 
-class TrackerData(object):
-    '''
-    Schema for click tracker data
-    '''
-    def __init__(self, action, _id, ttype, cts, sts, page, cip, imgs, tai,
-                 cvid=None, xy=None):
-        #TODO: handle unicode data too 
-        
-        self.a = action # load/ click
-        self.id = _id    # page load id
-        self.ttype = ttype #tracker type
-        self.ts = cts #client timestamp
-        self.sts = sts #server timestamp
-        self.cip = cip #client IP
-        self.page = page # Page where the video is shown
-        self.tai = tai # Tracker account id
-        if isinstance(imgs, list):        
-            self.imgs = imgs #image list
-            self.cvid = cvid #current video in the player
-        else:
-            self.img = imgs  #clicked image
-            if xy:
-                self.xy = xy 
-
-    def to_flume_event(self, writer=None, schema_hash=None):
-        '''Coverts the data to a flume event.'''
-        return ThriftFlumeEvent(headers = {
-                'timestamp' : str(self.sts),
-                'tai' : self.tai,
-                'track_vers' : '1',
-                'event': self.a,
-                'schema': schema_hash
-                }, body = json.dumps(self.__dict__))
-
 class BaseTrackerDataV2(object):
     '''
     Object that mirrors the the Avro TrackerEvent schema and is used to 
@@ -296,7 +262,7 @@ class VideoClick(BaseTrackerDataV2):
         
         self.eventType = 'VIDEO_CLICK'
         # Thumbnail id that was in the player
-        self.eventData['videoId'] = request.get_argument('vid') # Video id
+        self.eventData['videoId'] = request.get_argument('vid') # External Video id
          # Thumbnail id
         self.eventData['thumbnailId'] = \
           InputSanitizer.sanitize_null(request.get_argument('tid'))
@@ -311,7 +277,7 @@ class VideoPlay(BaseTrackerDataV2):
         self.eventType = 'VIDEO_PLAY'
         # Thumbnail id
         self.eventData['thumbnailId'] = InputSanitizer.sanitize_null(request.get_argument('tid')) 
-        self.eventData['videoId'] = request.get_argument('vid') # Video id
+        self.eventData['videoId'] = request.get_argument('vid') # External Video id
         self.eventData['playerId'] = request.get_argument('playerid', None) # Player id
          # If an adplay preceeded video play 
         self.eventData['didAdPlay'] = InputSanitizer.to_bool(
@@ -357,38 +323,11 @@ class TrackerDataHandler(tornado.web.RequestHandler):
         returns:
         TrackerData object
         '''
-        if version == 1:
-            return self._parse_v1_tracker_data()
-        elif version == 2:
+        if version == 2:
             return BaseTrackerDataV2.generate(self)
         else:
             _log.fatal('Invalid api version %s' % version)
             raise ValueError('Bad version %s' % version)
-        
-
-    def _parse_v1_tracker_data(self):
-        ttype = self.get_argument('ttype')
-        action = self.get_argument('a')
-        _id = self.get_argument('id')
-        cts = self.get_argument('ts')
-        sts = int(time.time())
-        page = self.get_argument('page') #url decode
-        tai = self.get_argument('tai') #tracker account id 
-        cvid = None
-
-        #On load the current video loaded in the player is logged
-        if action == 'load':
-            imgs = self.get_argument('imgs')
-            imgs = [e.strip('"\' ') for e in imgs.strip('[]').split(',')]
-            if ttype != 'imagetracker':
-                cvid = self.get_argument('cvid')
-        else:
-            imgs = self.get_argument('img')
-
-        xy = self.get_argument('xy', None) #click on image
-        cip = self.request.remote_ip
-        return TrackerData(action, _id, ttype, cts, sts, page, cip, imgs, tai,
-                           cvid, xy)
 
 class FlumeBuffer:
     '''Class that handles buffering messages to flume.'''
@@ -670,28 +609,17 @@ class Server(threading.Thread):
             raise response.error
 
         self.application = tornado.web.Application([
-            (r"/", LogLines, dict(watcher=self._watcher,
-                                  version=1,
-                                  avro_writer=avro_writer,
-                                  schema_url=schema_url,
-                                  flume_buffer=self.flume_buffer)),
             (r"/v2", LogLines, dict(watcher=self._watcher,
                                     version=2,
                                     avro_writer=avro_writer,
                                     schema_url=schema_url,
                                     flume_buffer=self.flume_buffer)),
-            (r"/track", LogLines, dict(watcher=self._watcher,
-                                       version=1,
-                                       avro_writer=avro_writer,
-                                       schema_url=schema_url,
-                                       flume_buffer=self.flume_buffer)),
             (r"/v2/track", LogLines, dict(watcher=self._watcher,
                                           version=2,
                                           avro_writer=avro_writer,
                                           schema_url=schema_url,
                                           flume_buffer=self.flume_buffer
                                           )),
-            (r"/test", TestTracker, dict(version=1)),
             (r"/v2/test", TestTracker, dict(version=2)),
             (r"/healthcheck", HealthCheckHandler),
             ])
