@@ -233,8 +233,10 @@ neon_mastermind_healthcheck()
         return 0;
     
     // in service but expired mastermind information
-    if(neon_mastermind_expired() == NEON_TRUE)
+    if(neon_mastermind_expired() == NEON_TRUE){
+        NeonLog::Error("mastermind expired: %d", mastermind_current->GetExpiry());
         return 1;
+    }
     
     // in service
     return 2;
