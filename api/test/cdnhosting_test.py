@@ -8,8 +8,9 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import api.cdnhosting
+import json
 import logging
-from mock import patch
+from mock import MagicMock, patch
 from supportServices import neondata
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.redis
@@ -59,6 +60,21 @@ class TestCDNHosting(unittest.TestCase):
 
         #image-cdn/NEON_PUB_ID/neontntest_tid_w800_h600.jpg
         #Build a per video stats page to monitor each video
+
+    @patch('api.cdnhosting.urllib2')
+    def test_cloudinary_hosting(self, mock_http):
+        
+        mock_response = '{"public_id":"bfea94933dc752a2def8a6d28f9ac4c2","version":1406671711,"signature":"26bd2ffa2b301b9a14507d152325d7692c0d4957","width":480,"height":268,"format":"jpg","resource_type":"image","created_at":"2014-07-29T22:08:19Z","bytes":74827,"type":"upload","etag":"99fd609b49a802fdef7e2952a5e75dc3","url":"http://res.cloudinary.com/neon-labs/image/upload/v1406671711/bfea94933dc752a2def8a6d28f9ac4c2.jpg","secure_url":"https://res.cloudinary.com/neon-labs/image/upload/v1406671711/bfea94933dc752a2def8a6d28f9ac4c2.jpg"}'
+
+        cd = api.cdnhosting.CloudinaryHosting()
+        im = 'https://host-thumbnails.s3.amazonaws.com/image.jpg'
+        tid = 'bfea94933dc752a2def8a6d28f9ac4c2'
+        mresponse = MagicMock()
+        mresponse.read.return_value = mock_response
+        mock_http.urlopen.return_value = mresponse 
+        uploaded_url = cd.upload(im, tid)
+        self.assertEqual(uploaded_url, json.loads(mock_response)['url'])
+
 
 if __name__ == '__main__':
     unittest.main()
