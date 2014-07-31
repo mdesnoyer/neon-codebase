@@ -16,12 +16,18 @@ if sys.path[0] <> base_path:
     sys.path.insert(0, base_path)
    
 import atexit
+from boto.s3.connection import S3Connection
+from boto.s3.bucketlistresultset import BucketListResultSet
 import json
 import logging
+import nginx_isp_test_conf
 import os
 import random
+import re
 import signal
+import shutil
 import subprocess
+import s3cmd_fakes3cfg
 import unittest
 import urllib
 import urllib2
@@ -29,10 +35,57 @@ import utils
 import utils.ps
 import time
 import tempfile
-import nginx_isp_test_conf
 from test_utils import net
 
 _log = logging.getLogger(__name__)
+
+def LaunchFakeS3(s3host, s3port, s3disk, fakes3root):
+    '''Launch a fakes3 instance if the settings call for it.'''
+    if s3host == 'localhost':
+        _log.info('Launching fakes3')
+        proc = subprocess.Popen([
+            '/usr/bin/env', 'fakes3',
+            '--root', fakes3root,
+            '--port', str(s3port)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT)
+
+        upRe = re.compile('port=')
+        fakes3_log = []
+        while proc.poll() is None:
+            line = proc.stdout.readline()
+            fakes3_log.append(line)
+            if upRe.search(line):
+                break
+
+        if proc.poll() is not None:
+            raise Exception('Error starting fake s3. Log:\n%s' %
+                            '\n'.join(fakes3_log))
+        _log.info('FakeS3 is up with pid %i' % proc.pid)
+        return proc  
+
+def ShutdownFakeS3(proc):
+        still_running = utils.ps.send_signal_and_wait(signal.SIGTERM,
+                                                      [proc.pid],
+                                                      timeout=10)
+        if still_running:
+            proc.kill()
+
+        proc.wait()
+
+def FakeS3Upload(fpath, s3cfg, s3fname):
+    '''
+    Upload a file to s3 using s3cmd
+    '''
+    ret = subprocess.call(["s3cmd", "--config=%s" % s3cfg, "put", "%s" % fpath,
+        "%s" % s3fname]) 
+    
+    #cmd = "s3cmd --config=%s put %s %s" % (s3cfg, fpath, s3fname)
+    #os.system(cmd)
+
+def FakeS3CreateBucket(bucket, s3cfg):
+    ret = subprocess.call(["s3cmd", "--config=%s" % s3cfg, "mb", "%s" % bucket])
+
 
 class ISP:
     '''
@@ -49,13 +102,14 @@ class ISP:
     in setUpClass & tearDownClass respectively
     '''
 
-    def __init__(self, port=None):
+    def __init__(self, mastermind_s3file_url, s3cfg, port=None):
         self.port = port
         if self.port is None:
             self.port = net.find_free_port()
         
         self.config_file = tempfile.NamedTemporaryFile()
-        self.config_file.write(nginx_isp_test_conf.conf % self.port)
+        self.config_file.write(nginx_isp_test_conf.conf % \
+                                (mastermind_s3file_url, s3cfg, self.port))
         self.config_file.flush()
 
         self.nginx_path = base_path + "/imageservingplatform/nginx-1.4.7/objs/nginx" #get build path
@@ -113,12 +167,31 @@ class TestImageServingPlatformAPI(unittest.TestCase):
     '''
     API testing
     '''
-    isp = ISP()
 
     @classmethod
     def setUpClass(cls):
-        #TODO: Start Fake S3
-        cls.isp.start() 
+        
+        s3host = 'localhost'
+        s3port = net.find_free_port()
+        cls.s3disk = tempfile.mkdtemp()
+        cls.fakes3root = tempfile.mkdtemp()
+        cls.fakes3proc = LaunchFakeS3(s3host, s3port, cls.s3disk, cls.fakes3root)
+        
+        s3cmd_fakes3cfg.conf % (s3port, '%', s3port)  
+        cls.s3cfg = tempfile.NamedTemporaryFile()
+        cls.s3cfg.write(s3cmd_fakes3cfg.conf % (s3port, '%', s3port))
+        cls.s3cfg.flush()
+        os.chmod(cls.s3cfg.name, 644) #required as s3cmd runs as user nobody
+  
+        mfile_path = base_path + \
+                        "/imageservingplatform/neon_isp/test/mastermind.api.test"
+
+        bucket_name = "s3://my_bucket"
+        FakeS3CreateBucket(bucket_name, cls.s3cfg.name)
+        cls.s3_mfile_url = "%s/mastermind.api.test" % bucket_name # mastermind s3 file url
+        FakeS3Upload(mfile_path, cls.s3cfg.name, cls.s3_mfile_url)
+        cls.isp = ISP(cls.s3_mfile_url, cls.s3cfg.name)
+        cls.isp.start()
         time.sleep(1) # allow mastermind file to be parsed
 
     def setUp(self):
@@ -142,6 +215,9 @@ class TestImageServingPlatformAPI(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.isp.stop()
+        shutil.rmtree(cls.s3disk, True)
+        shutil.rmtree(cls.fakes3root, True)
+        ShutdownFakeS3(cls.fakes3proc)
 
     @classmethod
     def get_header_value(cls, headers, key):

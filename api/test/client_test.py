@@ -122,10 +122,11 @@ class TestVideoClient(unittest.TestCase):
         vprocessor = api.client.VideoProcessor(job, self.model, self.model_version)
         return vprocessor 
 
+    @patch('api.cdnhosting.urllib2')
     @patch('api.cdnhosting.S3Connection')
     @patch('api.client.S3Connection')
     def test_save_thumbnail_to_s3_and_metadata(self, mock_conntype,
-            mock_conntype_cdn):
+            mock_conntype_cdn, mock_urllib2):
         random.seed(215)
 
         #s3mocks to mock host_thumbnails_to_s3
@@ -135,6 +136,10 @@ class TestVideoClient(unittest.TestCase):
         c_conn.create_bucket('neon-image-cdn')
         mock_conntype.return_value = conn
         mock_conntype_cdn.return_value = c_conn
+        
+        mresponse = MagicMock()
+        mresponse.read.return_value = '{"url": "http://cloudinary.jpg"}' 
+        mock_urllib2.urlopen.return_value = mresponse 
         
         thumb_bucket = conn.buckets['host-thumbnails']
 
@@ -149,9 +154,10 @@ class TestVideoClient(unittest.TestCase):
         self.assertEqual(s3_keys[0].name, keyname)
         self.assertEqual(tdata.video_id, i_vid)
 
+    @patch('api.cdnhosting.urllib2')
     @patch('api.cdnhosting.S3Connection')
     @patch('api.client.S3Connection')
-    def test_host_images_s3(self, mock_conntype, mock_conntype_cdn):
+    def test_host_images_s3(self, mock_conntype, mock_conntype_cdn, mock_urllib2):
         
         random.seed(1251)
         #s3mocks to mock host_thumbnails_to_s3
@@ -161,6 +167,10 @@ class TestVideoClient(unittest.TestCase):
         c_conn.create_bucket('neon-image-cdn')
         mock_conntype.return_value = conn
         mock_conntype_cdn.return_value = c_conn
+        
+        mresponse = MagicMock()
+        mresponse.read.return_value = '{"url": "http://cloudinary.jpg"}' 
+        mock_urllib2.urlopen.return_value = mresponse 
        
         api_key = "test_api_key"
         vid = "tvid1"
@@ -243,12 +253,13 @@ class TestVideoClient(unittest.TestCase):
         self.assertGreater(len(vprocessor.timecodes), 0)
         self.assertNotIn(float('-inf'), vprocessor.valence_scores[1])
     
+    @patch('api.cdnhosting.urllib2')
     @patch('api.cdnhosting.S3Connection')
     @patch('api.client.VideoProcessor.finalize_api_request')
     @patch('utils.http')
     @patch('api.client.S3Connection')
     def test_finalize_request(self, mock_conntype, mock_client,
-            mock_finalize_api, mock_conntype_cdn):
+            mock_finalize_api, mock_conntype_cdn, mock_urllib2):
         request = tornado.httpclient.HTTPRequest("http://xyz")
         response = tornado.httpclient.HTTPResponse(request, 200,
                             buffer=StringIO(''))
@@ -262,6 +273,10 @@ class TestVideoClient(unittest.TestCase):
         c_conn.create_bucket('neon-image-cdn')
         mock_conntype.return_value = conn
         mock_conntype_cdn.return_value = c_conn
+        
+        mresponse = MagicMock()
+        mresponse.read.return_value = '{"url": "http://cloudinary.jpg"}' 
+        mock_urllib2.urlopen.return_value = mresponse 
        
         vprocessor = self.setup_video_processor("neon")
         vprocessor.process_video(self.test_video_file)
@@ -336,10 +351,12 @@ class TestVideoClient(unittest.TestCase):
         self.assertEqual(api_request.state, neondata.RequestState.FINISHED)
         
 
+    @patch('api.cdnhosting.urllib2')
     @patch('api.client.tornado.httpclient.HTTPClient')
     @patch('api.cdnhosting.S3Connection')
     @patch('api.client.S3Connection')
-    def test_save_previous_thumbnail(self, mock_conntype, mock_conntype_cdn, mock_client):
+    def test_save_previous_thumbnail(self, mock_conntype, mock_conntype_cdn,
+                                      mock_client, mock_urllib2):
         '''
         Test saving previous thumbnail for 
         Neon/ bcove/ ooyala requests
@@ -356,6 +373,10 @@ class TestVideoClient(unittest.TestCase):
         mclient = MagicMock()
         mclient.fetch.return_value = response
         mock_client.return_value = mclient 
+        
+        mresponse = MagicMock()
+        mresponse.read.return_value = '{"url": "http://cloudinary.jpg"}' 
+        mock_urllib2.urlopen.return_value = mresponse 
         
         #s3mocks to mock host_thumbnails_to_s3
         conn = boto_mock.MockConnection()

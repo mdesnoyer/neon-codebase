@@ -21,6 +21,7 @@ extern const char * neon_fetch_error;
  */
 NEON_FETCH_ERROR neon_fetch(const char * const mastermind_url,
                             const char * const mastermind_filepath,
+                            const char * const s3cmd_conf_fpath,
                             time_t timeout);
 
 
