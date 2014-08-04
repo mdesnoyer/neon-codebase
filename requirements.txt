@@ -35,3 +35,4 @@ avro==1.7.6
 thrift==0.9.1
 paramiko==1.14.0
 pandas==0.14.0
+impala==0.1.2
