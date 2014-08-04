@@ -577,50 +577,6 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'neonUserId' : 'neon_id1'},
               'neon_id1'
             )
-    def test_v1_valid_messages(self):
-        # A load message
-        self.check_message_sent(
-            { 'a' : 'load',
-              'id' : 'pageid123',
-              'tai' : 'tai123',
-              'ttype' : 'html5',
-              'page' : 'http://go.com',
-              'ts' : '2345623',
-              'cvid' : 'vid1',
-              'imgs' : '["http://img1.jpg", "img2.jpg"]'},
-            { 'a' : 'load',
-              'id' : 'pageid123',
-              'tai' : 'tai123',
-              'ttype' : 'html5',
-              'page' : 'http://go.com',
-              'ts' : '2345623',
-              'cvid' : 'vid1',
-              'imgs' : ["http://img1.jpg", "img2.jpg"],
-              'cip': '127.0.0.1'},
-              path='/track'
-            )
-
-        # An image click message
-        self.check_message_sent(
-            { 'a' : 'click',
-              'id' : 'pageid123',
-              'tai' : 'tai123',
-              'ttype' : 'html5',
-              'page' : 'http://go.com',
-              'ts' : '2345623',
-              'img' : 'http://img1.jpg',
-              'xy' : '23,45'},
-            { 'a' : 'click',
-              'id' : 'pageid123',
-              'tai' : 'tai123',
-              'ttype' : 'html5',
-              'page' : 'http://go.com',
-              'ts' : '2345623',
-              'img' : "http://img1.jpg",
-              'xy' : '23,45',
-              'cip': '127.0.0.1'},
-              path='/track'
-            )
 
     def test_error_connecting_to_flume(self):
         # Simulate a connection error
