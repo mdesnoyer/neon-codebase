@@ -66,6 +66,10 @@ define("message_schema",
         help='Path to the output avro message schema (avsc) file')
 define("schema_bucket", default="neon-avro-schema",
        help='S3 Bucket that contains schemas')
+define("isp_host", default="127.0.0.1",
+       help="Host where the image serving platform is.")
+define("isp_port", default=8089,
+       help="Host where the image serving platform resides")
 
 from utils import statemon
 statemon.define('qsize', int)
