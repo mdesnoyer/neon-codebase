@@ -29,6 +29,33 @@ from utils import pycvutils
 import logging
 _log = logging.getLogger(__name__)
 
+def upload_to_s3_host_thumbnails(keyname, data, s3conn=None):
+    '''
+    Upload image to s3 bucket 'host-thumbnails' 
+
+    This is the bucket where the primary copy of thumbnails are stored.
+    ThumbnailMetadata structure stores these thumbnails
+    CMS API returns these urls to be populated in the Neon UI
+    
+    Uses AWS keys from the properties file
+
+    @s3fname: the basename of the file or name relative to bucket 
+    @data: string data (of image) to be uploaded to S3 
+    '''
+    
+    if s3conn is None:
+        s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
+
+    s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
+    s3bucket = s3conn.get_bucket(s3bucket_name)
+    s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
+
+    k = s3bucket.new_key(keyname)
+    ret = utils.s3.set_contents_from_string(k, data, {"Content-Type":"image/jpeg"})
+    ret_acl = s3bucket.set_acl('public-read', keyname)
+
+    return (ret and ret_acl)
+
 class CDNHosting(object):
     '''Abstract class for hosting images on a CDN.'''
 

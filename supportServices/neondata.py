@@ -40,6 +40,7 @@ import api.brightcove_api #coz of cyclic import
 import api.youtube_api
 
 from api.cdnhosting import CDNHosting
+from api.cdnhosting import upload_to_s3_host_thumbnails 
 from api import ooyala_api
 from PIL import Image
 from StringIO import StringIO
@@ -2349,14 +2350,13 @@ class VideoMetadata(StoredObject):
 
         return tid
 
-    def save_thumbnail_to_s3_and_store_metadata(self, image, score, s3bucket,
-                        keyname, s3fname, ttype, rank=0, model_version=0):
+    def save_thumbnail_to_s3_and_store_metadata(self, image, score, keyname,
+                                        s3fname, ttype, rank=0, model_version=0):
 
         '''
         Save a thumbnail to s3 and its metadata in the DB
         @image: Image object
         @score: model score of the image
-        @s3bucket: s3conn bucket object
         @keyname: the basename or filename of the image
 
         @s3fname: s3 URI
@@ -2373,10 +2373,10 @@ class VideoMetadata(StoredObject):
         image.save(filestream, fmt, quality=90) 
         filestream.seek(0)
         imgdata = filestream.read()
-        k = s3bucket.new_key(keyname)
-        utils.s3.set_contents_from_string(k, imgdata, {"Content-Type":"image/jpeg"})
-        s3bucket.set_acl('public-read', keyname)
         
+        #upload to the host-thumbnail s3 bucket
+        upload_to_s3_host_thumbnails(keyname, imgdata) 
+
         urls = []
         tid = ThumbnailID.generate(imgdata, i_vid)
 
@@ -2408,7 +2408,7 @@ class VideoMetadata(StoredObject):
 
         return tdata
 
-    def download_and_add_thumbnail(self, image_url, s3bucket, keyname,
+    def download_and_add_thumbnail(self, image_url, keyname,
                                     s3url, ttype, rank=1):
         '''
         Download the image and save its metadata. Used to save thumbnail
@@ -2417,7 +2417,6 @@ class VideoMetadata(StoredObject):
         Note: s3bucket to upload to and the filename(keyname) of the thumbnail
         to be speicified to this function.
 
-        @s3bucket: bucket to upload the image to 
         '''
         
         score = 0 # no score assigned currently
@@ -2432,7 +2431,7 @@ class VideoMetadata(StoredObject):
             imgdata = response.body
             image = Image.open(StringIO(imgdata))
             tdata = self.save_thumbnail_to_s3_and_store_metadata(image, score,
-                                    s3bucket, keyname, s3url, ttype, rank)
+                                                keyname, s3url, ttype, rank)
             return tdata
         else:
             _log.error("failed to download the image")

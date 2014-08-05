@@ -169,63 +169,19 @@ def host_images_s3(vmdata, api_key, img_and_scores, base_filename,
     rank = 0 
     for image, score in img_and_scores:
         keyname = base_filename + "/" + fname_prefix + str(rank) + "." + fmt
-        s3fname = s3_url_prefix + "/%s/%s%s.jpeg" %(base_filename, fname_prefix, rank)
-        tdata = vmdata.save_thumbnail_to_s3_and_store_metadata(
-                                                image, score, 
-                                                s3bucket, keyname,
-                                                s3fname, ttype, 
-                                                rank, model_version)
+        s3fname = s3_url_prefix + "/%s/%s%s.jpeg" % (base_filename, fname_prefix, rank)
+        tdata = vmdata.save_thumbnail_to_s3_and_store_metadata(image, score, 
+                                                                keyname,
+                                                                s3fname,
+                                                                ttype, 
+                                                                rank, 
+                                                                model_version)
         thumbnails.append(tdata)
         rank = rank+1
         s3_urls.append(s3fname)
 
     vmdata.save()
     return (thumbnails, s3_urls)
-
-def save_thumbnail_to_s3_and_metadata(i_vid, image, score, s3bucket,
-                keyname, s3fname, ttype, rank=0, model_version=0):
-    '''
-    Save a thumbnail to s3 and its metadata in the DB
-
-    @return thumbnail metadata object
-    '''
-
-    fmt = 'jpeg'
-    filestream = StringIO()
-    image.save(filestream, fmt, quality=90) 
-    filestream.seek(0)
-    imgdata = filestream.read()
-    k = s3bucket.new_key(keyname)
-    utils.s3.set_contents_from_string(k, imgdata, {"Content-Type":"image/jpeg"})
-    s3bucket.set_acl('public-read', keyname)
-    
-    urls = []
-    tid = neondata.ThumbnailID.generate(imgdata, i_vid)
-
-    #If tid already exists, then skip saving metadata
-    if neondata.ThumbnailMetadata.get(tid) is not None:
-        _log.warn('Already have thumbnail id: %s' % tid)
-        return
-
-    urls.append(s3fname)
-    created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    width   = image.size[0]
-    height  = image.size[1] 
-
-    #populate thumbnails
-    tdata = neondata.ThumbnailMetadata(tid, i_vid, urls, created, width, height,
-                              ttype, score, model_version, rank=rank)
-    tdata.update_phash(image)
-
-    #Host this image on the Neon Image CDN in diff sizes
-    hoster = CDNHosting.create(None)
-    hoster.upload(image, tid)
-
-    #Host this image on Cloudinary for dynamic resizing
-    cloudinary_hoster = CDNHosting.create('cloudinary')
-    cloudinary_hoster.upload(s3fname, tid)
-
-    return tdata
 
 ###########################################################################
 # Process Video File
@@ -683,9 +639,8 @@ class VideoProcessor(object):
         vmdata = neondata.VideoMetadata.get(i_vid)
 
         #get neon pub id
-        tdata = vmdata.download_and_add_thumbnail(p_url, s3bucket, 
-                                                keyname, s3fname, 
-                                                ttype, rank=1)
+        tdata = vmdata.download_and_add_thumbnail(p_url, keyname, s3fname, 
+                                                  ttype, rank=1)
         if tdata:
             self.thumbnails.append(tdata)
             if not vmdata.save():
