@@ -142,7 +142,7 @@ def notification_response_builder(a_id, i_id, video_json,
                                 connect_timeout=10.0)
         return nt_response_request
     
-def host_images_s3(api_key, video_id, img_and_scores, base_filename, 
+def host_images_s3(vmdata, api_key, img_and_scores, base_filename, 
                    model_version=0, ttype=neondata.ThumbnailType.NEON):
     ''' 
     Host images on s3 which is available publicly 
@@ -163,22 +163,23 @@ def host_images_s3(api_key, video_id, img_and_scores, base_filename,
     s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
     s3_urls = []
     
-    i_vid = neondata.InternalVideoID.generate(api_key, video_id)
+    i_vid = vmdata.key 
 
     #upload the images to s3
     rank = 0 
     for image, score in img_and_scores:
         keyname = base_filename + "/" + fname_prefix + str(rank) + "." + fmt
         s3fname = s3_url_prefix + "/%s/%s%s.jpeg" %(base_filename, fname_prefix, rank)
-        tdata = save_thumbnail_to_s3_and_metadata(
-                                    i_vid, image, score, 
-                                    s3bucket, keyname,
-                                    s3fname, ttype, 
-                                    rank, model_version)
+        tdata = vmdata.save_thumbnail_to_s3_and_store_metadata(
+                                                image, score, 
+                                                s3bucket, keyname,
+                                                s3fname, ttype, 
+                                                rank, model_version)
         thumbnails.append(tdata)
         rank = rank+1
         s3_urls.append(s3fname)
 
+    vmdata.save()
     return (thumbnails, s3_urls)
 
 def save_thumbnail_to_s3_and_metadata(i_vid, image, score, s3bucket,
@@ -572,9 +573,16 @@ class VideoProcessor(object):
                img_score_list.append((image, score))
             ranked_frames = [x[0] for x in res]
             data = ranked_frames[:topn]
-            
+           
+            #Create the video metadata object
+            vmdata = self.save_video_metadata()
+            if not vmdata:
+                _log.error("save_video_metadata failed to save")
+                statemon.state.increment('save_vmdata_error')
+                #TODO: Send error
+
             #host top MAX_T images on s3
-            thumbnails, s3_urls = host_images_s3(api_key, video_id, img_score_list, 
+            thumbnails, s3_urls = host_images_s3(vmdata, api_key, img_score_list, 
                                             self.base_filename, model_version=0, 
                                             ttype=neondata.ThumbnailType.NEON)
             self.thumbnails.extend(thumbnails)
@@ -635,9 +643,9 @@ class VideoProcessor(object):
                 _log.error("save_thumbnail_metadata failed")
                 statemon.state.increment('save_tmdata_error')
 
-            if not self.save_video_metadata():
-                _log.error("save_video_metadata failed to save")
-                statemon.state.increment('save_vmdata_error')
+            #if not self.save_video_metadata():
+            #    _log.error("save_video_metadata failed to save")
+            #    statemon.state.increment('save_vmdata_error')
         else:
             _log.error("key=finalize_api_request msg=failed to save request")
     
@@ -654,45 +662,38 @@ class VideoProcessor(object):
         video_id = self.job_params[properties.VIDEO_ID]
         i_vid = neondata.InternalVideoID.generate(api_key, video_id)
 
-        http_client = tornado.httpclient.HTTPClient()
-        req = tornado.httpclient.HTTPRequest(url=p_url,
-                                             method="GET",
-                                             request_timeout=60.0,
-                                             connect_timeout=10.0)
-
-        response = http_client.fetch(req)
-        if not response.error:
-            imgdata = response.body
-            image = Image.open(StringIO(imgdata))
-            score = self.valence_score(image) 
-            s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
-            s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
-            s3bucket = s3conn.get_bucket(s3bucket_name)
-            s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
-            if api_request.request_type == "brightcove":
-                keyname =  self.base_filename + "/brightcove.jpeg" 
-                ttype = neondata.ThumbnailType.BRIGHTCOVE
-            elif api_request.request_type == "ooyala":
-                keyname =  self.base_filename + "/ooyala.jpeg" 
-                ttype = neondata.ThumbnailType.OOYALA
-            else:
-                ttype = neondata.ThumbnailType.DEFAULT
-                keyname =  self.base_filename + "/default.jpeg" 
-
-            s3fname = s3_url_prefix + "/" + keyname
-
-            #get neon pub id
-            tdata = save_thumbnail_to_s3_and_metadata(
-                                            i_vid, image, 
-                                            score, s3bucket,
-                                            keyname, s3fname, 
-                                            ttype, rank=1)
-            if tdata:
-                self.thumbnails.append(tdata)
-            api_request.previous_thumbnail = s3fname
-            return tdata
+        score = 0 #no score for previous thumbnails
+        s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
+        s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
+        s3bucket = s3conn.get_bucket(s3bucket_name)
+        s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
+        if api_request.request_type == "brightcove":
+            keyname =  self.base_filename + "/brightcove.jpeg" 
+            ttype = neondata.ThumbnailType.BRIGHTCOVE
+        elif api_request.request_type == "ooyala":
+            keyname =  self.base_filename + "/ooyala.jpeg" 
+            ttype = neondata.ThumbnailType.OOYALA
         else:
-            _log.error("key=save_previous_thumbnail msg=failed to download image")
+            ttype = neondata.ThumbnailType.DEFAULT
+            keyname =  self.base_filename + "/default.jpeg" 
+
+        s3fname = s3_url_prefix + "/" + keyname
+
+        #get vmdata
+        vmdata = neondata.VideoMetadata.get(i_vid)
+
+        #get neon pub id
+        tdata = vmdata.download_and_add_thumbnail(p_url, s3bucket, 
+                                                keyname, s3fname, 
+                                                ttype, rank=1)
+        if tdata:
+            self.thumbnails.append(tdata)
+            if not vmdata.save():
+                _log.error("key=save_previous_thumbnail msg=failed to save videometadata")
+                #TODO: requeue the video ? 
+
+        api_request.previous_thumbnail = s3fname
+        return tdata
 
     def autosync(self, api_request, image):
         '''
@@ -778,7 +779,8 @@ class VideoProcessor(object):
 
         vmdata = neondata.VideoMetadata(i_vid, tids, job_id, url, duration,
                     video_valence, model_version, i_id, frame_size)
-        return vmdata.save()
+        if vmdata.save():
+            return vmdata
 
     def requeue_job(self):
         """ Requeue the api request on failure 

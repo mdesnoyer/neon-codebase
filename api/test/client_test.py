@@ -118,6 +118,12 @@ class TestVideoClient(unittest.TestCase):
                                        'oo_key', 'oo_secret', 'http://p_thumb', 'cb')
 
         job = json.loads(jparams)
+        
+        i_vid = neondata.InternalVideoID.generate(api_key, vid)
+        vmdata = neondata.VideoMetadata(i_vid, [], j_id, "url", 10,
+                                        4, None, i_id, [640,480])
+        vmdata.save()
+        
         self.api_request.save()
         vprocessor = api.client.VideoProcessor(job, self.model, self.model_version)
         return vprocessor 
@@ -173,7 +179,9 @@ class TestVideoClient(unittest.TestCase):
         mock_urllib2.urlopen.return_value = mresponse 
        
         api_key = "test_api_key"
+        i_id = "i_id" 
         vid = "tvid1"
+        i_vid = "test_api_key_%s" %vid
         bfname = "%s/%s" %(api_key, "job_id")
         images = []
         N = 6
@@ -181,7 +189,10 @@ class TestVideoClient(unittest.TestCase):
             images.append((
                 PILImageUtils.create_random_image(360, 480), random.random()))
 
-        thumbnails, s3_urls = api.client.host_images_s3(api_key, vid, images, bfname)
+        vmdata = neondata.VideoMetadata(i_vid, [], "j_id", "url", 10,
+                                        4, None, i_id, [640,480])
+        vmdata.save()
+        thumbnails, s3_urls = api.client.host_images_s3(vmdata, api_key, images, bfname)
 
         s3_keys = [x for x in conn.buckets['host-thumbnails'].get_all_keys()]
         self.assertEqual(len(thumbnails), N)

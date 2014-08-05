@@ -28,6 +28,9 @@ class InputSanitizer(object):
     @classmethod
     def to_bool(cls, _input):
 
+        if isinstance(_input, bool):
+            return _input
+
         if _input is None:
             raise Exception("Missing _input or None")
         
@@ -36,9 +39,6 @@ class InputSanitizer(object):
                return False 
             if _input.lower() == 'true':
                return True
-        
-        elif isinstance(_input, bool):
-            return _input
 
         else:
             raise Exception("Conversion not supported")

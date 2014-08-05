@@ -6,13 +6,14 @@ import os.path
 import sys
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+    sys.path.insert(0, base_path)
 
 import base64
 import json
 import hashlib
 import properties
 import socket
+import supportServices.neondata
 import time
 import urllib
 import urllib2
@@ -21,10 +22,12 @@ import utils.s3
 from boto.exception import S3ResponseError
 from boto.s3.connection import S3Connection
 from poster.encode import multipart_encode
-from supportServices import neondata
 from StringIO import StringIO
 from utils.imageutils import PILImageUtils
 from utils import pycvutils
+
+import logging
+_log = logging.getLogger(__name__)
 
 class CDNHosting(object):
     '''Abstract class for hosting images on a CDN.'''
@@ -64,7 +67,7 @@ class AWSHosting(CDNHosting):
         sizes = properties.CDN_IMAGE_SIZES
         s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
         fname_fmt = "neontn%s_w%s_h%s.jpg" 
-        serving_urls = neondata.ThumbnailServingURLs(tid)
+        serving_urls = supportServices.neondata.ThumbnailServingURLs(tid)
 
         for sz in sizes:
             #im = PILImageUtils.resize(image, im_w=sz[0], im_h=sz[1])
@@ -105,9 +108,12 @@ class CloudinaryHosting(CDNHosting):
         Note: No support for uploading raw images yet 
         '''
 
+        # 0, 0 indicates original (base image size)
+        img_name = "neontn%s_w%s_h%s.jpg" % (tid, "0", "0") 
+        
         params = {}
         params['timestamp'] = int(time.time())
-        params['public_id'] = tid
+        params['public_id'] = img_name 
         #params['use_filename'] = True #original file name of the uploaded image
         #params['unique_filename'] = False #don't add random characters at the end of the filename
 
@@ -148,13 +154,18 @@ class CloudinaryHosting(CDNHosting):
                 return resp['url']
             else:
                 # There was an error uploading the image
-                return
+                _log.error("Error uploading image to cloudinary %s" %\
+                            params['public_id'])
+                return 
 
         except socket.error, e:
-            print e
-            #raise GeneralError("Socket Error: %s" % (str(e)))
+            _log.error("Socket error uploading image to cloudinary %s" %\
+                        params['public_id'])
+            return
         except urllib2.HTTPError, e:
-            print e
+            _log.error("http error uploading image to cloudinary %s" %\
+                        params['public_id'])
+            return
 
     def sign_request(self, params):
 
