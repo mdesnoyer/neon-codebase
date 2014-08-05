@@ -38,7 +38,7 @@ import signal
 import SimpleHTTPServer
 import SocketServer
 import stats.db
-import stats.stats_processor
+#import stats.stats_processor
 import string
 from StringIO import StringIO
 import subprocess
