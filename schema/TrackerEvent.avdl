@@ -21,7 +21,7 @@ enum TrackerType {
 
 enum EventType {
   IMAGE_VISIBLE, IMAGES_VISIBLE, IMAGE_LOAD, IMAGES_LOADED, IMAGE_CLICK,
-  VIDEO_CLICK, VIDEO_PLAY, AD_PLAY
+  VIDEO_CLICK, VIDEO_PLAY, AD_PLAY, VIDEO_VIEW_PERCENTAGE
 }
 
 
@@ -102,6 +102,18 @@ record AdPlay {
   int playCount; 
 }
 
+record VideoViewPercentage {
+  boolean isVideoViewPercentage = true;
+
+  string videoId; // External video id
+
+  // This video is the nth one playing on this page load. 1-based index
+  int playCount;
+
+  // The percentage of the video that has been viewed. 0-100
+  float percent;
+}
+
 // A generic tracker event
 record TrackerEvent {
   string pageId; // Unique page load id
@@ -139,6 +151,7 @@ record TrackerEvent {
          ImageClick,
          VideoClick,
          VideoPlay,
-         AdPlay} eventData;
+         AdPlay,
+         VideoViewPercentage} eventData;
 }
 }
