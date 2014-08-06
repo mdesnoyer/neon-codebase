@@ -34,6 +34,7 @@ import time
 import tornado.testing
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
 import urllib
+import urlparse
 import unittest
 import utils.neon
 from utils.options import options
@@ -77,7 +78,9 @@ class TestFileBackupHandler(unittest.TestCase):
                         'x' : '3467',
                         'y' : '123',
                         'wx' : '567',
-                        'wy' : '9678'}
+                        'wy' : '9678',
+                        'cx' : '49',
+                        'cy' : '65'}
         def mock_click_get_argument(field, default=[]):
             return click_fields[field]
         mock_click_request.get_argument.side_effect = mock_click_get_argument
@@ -241,6 +244,12 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
           lambda events, callback: self.io_loop.add_callback(callback,
                                                              Status.OK)
 
+        self.isp_patcher = patch(
+            'clickTracker.trackserver.utils.http.send_request')
+        self.bn_map = {}
+        self.isp_mock = self.isp_patcher.start()
+        self.isp_mock.side_effect = self.mock_isp_response
+
         self.thrift_transport_patcher = patch('clickTracker.trackserver.TTornado.TTornadoStreamTransport')
         self.thrift_transport_mock = self.thrift_transport_patcher.start()
         self.thrift_transport_mock().open.side_effect = \
@@ -256,13 +265,12 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
 
         random.seed(168984)
 
-        
-
     def tearDown(self):
         options._set('clickTracker.trackserver.flume_flush_interval',
                      self.old_flush_interval)
         self.thrift_patcher.stop()
         self.thrift_transport_patcher.stop()
+        self.isp_patcher.stop()
         
         super(TestFullServer, self).tearDown()
         clickTracker.trackserver.os = os
@@ -270,6 +278,25 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
 
     def get_app(self):
         return self.server_obj.application
+
+    
+    def mock_isp_response(self, request, retries=1, callback=None):
+        if request.url.endswith('.avsc'):
+            retval = tornado.httpclient.HTTPResponse(
+                request, 200)
+        else:
+            bns = urlparse.parse_qs(urlparse.urlparse(request.url).query
+                                    )['params'][0].split(',')
+            retval = tornado.httpclient.HTTPResponse(
+                request,
+                200,
+                buffer=StringIO(','.join([self.bn_map.get(x, "null") 
+                                          for x in bns])))
+
+        if callback:
+            callback(retval)
+        else:
+            return retval
 
     def check_message_sent(self, url_params, ebody, neon_id=None,
                            path='/v2'):
@@ -400,7 +427,9 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'x' : '56',
               'y' : '23',
               'wx' : '78',
-              'wy' : '34'},
+              'wy' : '34',
+              'cx' : '6',
+              'cy' : '8'},
             { 'eventType' : 'IMAGE_CLICK',
               'pageId' : 'pageid123',
               'trackerAccountId' : 'tai123',
@@ -418,7 +447,11 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
                   'windowCoords' : {
                       'x' : 78,
                       'y' : 34
-                      }
+                      },
+                  'imageCoords' : {
+                      'x' : 6,
+                      'y' : 8
+                      },
                   },
               'neonUserId' : 'neon_id1'},
               'neon_id1'
@@ -522,6 +555,36 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'neonUserId' : 'neon_id1'},
               'neon_id1'
             )
+
+        # Video view percentage
+        self.check_message_sent(
+            { 'a' : 'vvp',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'vid' : 'vid1',
+              'pcount' : '1',
+              'prcnt' : '23'
+              },
+            { 'eventType' : 'VIDEO_VIEW_PERCENTAGE',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'videoId' : 'vid1',
+                  'playCount': 1,
+                  'percent': 23.0,
+                  'isVideoViewPercentage' : True
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
     def test_v2_secondary_endpoint(self):
         self.check_message_sent(
             { 'a' : 'iv',
@@ -578,6 +641,477 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'neon_id1'
             )
 
+    def test_no_tids_but_basename(self):
+        self.bn_map = {
+            'acct1_vid2' : 'acct1_vid2_tid1',
+            'acct1_vid3' : 'acct1_vid3_tid0',
+            'acct1_vid5' : 'acct1_vid5_tid5'
+            }
+
+        # Image Visible Message
+        self.check_message_sent(
+            { 'a' : 'iv',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'bns' : ('neonvid_acct1_vid2,neonvid_acct1_vid5,'
+                       'neontn_acct1_vid3_tid2.jpg')},
+            { 'eventType' : 'IMAGES_VISIBLE',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData': { 
+                  'isImagesVisible' : True,
+                  'thumbnailIds' : ['acct1_vid2_tid1',
+                                    'acct1_vid5_tid5',
+                                    'acct1_vid3_tid2']
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
+        bnrequest = self.isp_mock.call_args[0][0]
+        self.assertEqual(bnrequest.url, 'http://127.0.0.1:8089/getthumbnailid/tai123?params=acct1_vid2,acct1_vid5')
+        self.assertDictContainsSubset({'Cookie' : 'neonglobaluserid=neon_id1'},
+                                      bnrequest.headers)
+
+        # Image loaded message
+        self.check_message_sent(
+            { 'a' : 'il',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'bns' : ('neonvid_acct1_vid2 56 67,'
+                       'neontn_acct1_vid3_tid2.jpg 89 123')}, #tornado converts + to " "
+            { 'eventType' : 'IMAGES_LOADED',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData': {
+                  'isImagesLoaded' : True,
+                  'images' : [
+                  {'thumbnailId': 'acct1_vid2_tid1',
+                   'height' : 67,
+                   'width' :56 },
+                  {'thumbnailId': 'acct1_vid3_tid2',
+                   'height' : 123,
+                   'width' : 89}]},
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
+
+        # Image clicked message
+        self.check_message_sent(
+            { 'a' : 'ic',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'bn' : 'neonvid_acct1_vid3',
+              'x' : '56',
+              'y' : '23',
+              'wx' : '78',
+              'wy' : '34',
+              'cx' : '6',
+              'cy' : '8'},
+            { 'eventType' : 'IMAGE_CLICK',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'isImageClick' : True,
+                  'thumbnailId' : 'acct1_vid3_tid0',
+                  'pageCoords' : {
+                      'x' : 56,
+                      'y' : 23,
+                      },
+                  'windowCoords' : {
+                      'x' : 78,
+                      'y' : 34
+                      },
+                  'imageCoords' : {
+                      'x' : 6,
+                      'y' : 8
+                      },
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
+        
+        #Video clicked message
+        self.check_message_sent(
+            { 'a' : 'vc',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'vid' : 'vid1',
+              'bn' : 'neontn_acct1_vid2_tid1.png',
+              'playerid' : 'brightcoveP123',
+              },
+            { 'eventType' : 'VIDEO_CLICK',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'videoId' : 'vid1',
+                  'thumbnailId' : 'acct1_vid2_tid1',
+                  'playerId' : 'brightcoveP123',
+                  'isVideoClick' : True
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
+
+        # Video play message
+        self.check_message_sent(
+            { 'a' : 'vp',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'bn' : 'neonvid_acct1_vid3',
+              'vid' : 'vid1',
+              'adplay': 'False',
+              'adelta': 'null',
+              'pcount': '1',
+              'playerid' : 'brightcoveP123'},
+            { 'eventType' : 'VIDEO_PLAY',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'thumbnailId' : 'acct1_vid3_tid0',
+                  'videoId' : 'vid1',
+                  'didAdPlay': False,
+                  'autoplayDelta': None,
+                  'playCount': 1,
+                  'playerId' : 'brightcoveP123',
+                  'isVideoPlay' : True
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
+
+        # Ad play message
+        self.check_message_sent(
+            { 'a' : 'ap',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'bn' : 'neonvid_acct1_vid3',
+              'vid' : 'vid1',
+              'adelta': '214',
+              'pcount' : '1',
+              'playerid' : 'brightcoveP123',
+              },
+            { 'eventType' : 'AD_PLAY',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'thumbnailId' : 'acct1_vid3_tid0',
+                  'videoId' : 'vid1',
+                  'autoplayDelta': 214,
+                  'playCount': 1,
+                  'playerId' : 'brightcoveP123',
+                  'isAdPlay' : True
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
+
+    def test_unknown_basename(self):
+        # If the basename is unknown, we should return 200 because it
+        # could be a video we don't care about. However, if there's
+        # nothing we care about, the data shouldn't be sent on.
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'iv',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bns' : 'neonvid_acct1_vid2'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
+
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'il',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bns' : 'some_video.jpg 56 84'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
+
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'ic',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bn' : 'some_video.jpg'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
+
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'vp',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bn' : 'some_video.jpg',
+             'vid' : 'some_video',
+             'adelta' : '520',
+             'pcount' : '2'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
+
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'ap',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bn' : 'some_video.jpg',
+             'vid' : 'some_video',
+             'adelta' : '520',
+             'pcount' : '2'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
+
+    def test_some_valid_basenames(self):
+        # In this case, we will return a 200, and a subset of the data
+        # is sent on.
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'iv',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bns' : 'acct1_vid2,neontn_acct1_vid3_tid.jpg'}))
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 1)
+        request_saw = self.thrift_mock.appendBatch.call_args[0][0][0]
+        msgbuf = StringIO(request_saw.body)
+        body = self.avro_reader.read(avro.io.BinaryDecoder(msgbuf))
+        self.assertEqual(body['eventData']['thumbnailIds'], ['acct1_vid3_tid'])
+
+        self.thrift_mock.appendBatch.reset_mock()
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'il',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bns' : 'acct1_vid2 32 45,neontn_acct1_vid3_tid.jpg 78 94'}))
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 1)
+        request_saw = self.thrift_mock.appendBatch.call_args[0][0][0]
+        msgbuf = StringIO(request_saw.body)
+        body = self.avro_reader.read(avro.io.BinaryDecoder(msgbuf))
+        self.assertEqual(body['eventData']['images'],
+                         [{'thumbnailId' : 'acct1_vid3_tid',
+                           'height' : 94,
+                           'width' : 78}])
+
+    def test_bad_connection_to_isp(self):
+        def _mock_isp(request, retries=1, callback=None):
+            if request.url.endswith('.avsc'):
+                retval = tornado.httpclient.HTTPResponse(
+                    request, 200)
+            else:
+                retval = tornado.httpclient.HTTPResponse(
+                    request, 404, error=tornado.httpclient.HTTPError(404))
+
+            if callback:
+                callback(retval)
+            else:
+                return retval
+        
+        self.isp_mock.side_effect = _mock_isp
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'iv',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bns' : 'neonvid_acct1_vid2'}))
+        self.assertEqual(response.code, 500)
+
+    def test_invalid_event_type(self):
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'abc',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'tids' : 'acct1_vid2_tid1'}))
+        self.assertEqual(response.code, 400)
+
+    def test_caseinsentive_tracker_type(self):
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'iv',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'BRIGHTCOVE',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'tids' : 'acct1_vid2_tid1'}))
+        self.assertEqual(response.code, 200)
+
+    def test_invalid_tracker_type(self):
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'il',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'monkeyland',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'tids' : 'acct1_vid2_tid1'}))
+        self.assertEqual(response.code, 400)
+
+    def test_heartbeat(self):
+        response = self.fetch('/healthcheck')
+        self.assertEqual(response.code, 200)
+
+    def test_test_endpoint(self):
+        response = self.fetch('/v2/test?%s' % urllib.urlencode(
+            { 'a' : 'iv',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'tids' : 'tid1,tid2'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
+
+    def test_optional_tid(self):
+        # Video Play
+        self.check_message_sent(
+            { 'a' : 'vp',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'vid' : 'vid1',
+              'adplay': 'False',
+              'adelta': 'null',
+              'pcount': '1',
+              'playerid' : 'brightcoveP123'},
+            { 'eventType' : 'VIDEO_PLAY',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'thumbnailId' : None,
+                  'videoId' : 'vid1',
+                  'didAdPlay': False,
+                  'autoplayDelta': None,
+                  'playCount': 1,
+                  'playerId' : 'brightcoveP123',
+                  'isVideoPlay' : True
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
+
+        # Ad play message
+        self.check_message_sent(
+            { 'a' : 'ap',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'vid' : 'vid1',
+              'adelta': '214',
+              'pcount' : '1',
+              'playerid' : 'brightcoveP123',
+              },
+            { 'eventType' : 'AD_PLAY',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'thumbnailId' : None,
+                  'videoId' : 'vid1',
+                  'autoplayDelta': 214,
+                  'playCount': 1,
+                  'playerId' : 'brightcoveP123',
+                  'isAdPlay' : True
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
+        
+
     def test_error_connecting_to_flume(self):
         # Simulate a connection error
         self.thrift_mock.appendBatch.side_effect = \
@@ -604,6 +1138,22 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         # Now check the quere for writing to disk to make sure that
         # the data is there.
         self.assertEqual(self.backup_q.qsize(), 1)
+
+    def test_bad_percent_viewed_format(self):
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            { 'a' : 'vvp',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'vid' : 'vid1',
+              'pcount' : '1',
+              'prcnt' : 'fifty'
+              }))
+
+        self.assertEqual(response.code, 400)
 
     def test_utf8_header(self):
         # TODO(mdesnoyer): Make this test cleaner

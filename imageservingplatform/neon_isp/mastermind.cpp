@@ -305,8 +305,8 @@ Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
  */
 
 const char *
-Mastermind::GetAccountId(const char * publisherId, int & size)
-{
+Mastermind::GetAccountId(const char * publisherId, int & size){
+    
     Publisher * pub = 0;
     pub = publisherTable.Find(publisherId);
     
@@ -328,10 +328,14 @@ Mastermind::GetAccountId(const char * publisherId, int & size)
  * */
 
 const char *
-Mastermind::GetImageUrl(const char * account_id, const char * video_id, 
-        unsigned char * ipAddress, int ip_len, int height, 
-        int width, int & size)
-{
+Mastermind::GetImageUrl(const char * account_id, 
+                        const char * video_id, 
+                        unsigned char * bucketId,
+                        int bucketIdLen,
+                        int height, 
+                        int width, 
+                        int & size){
+    
     string accountId = account_id;
     string videoId = video_id;
 
@@ -341,17 +345,8 @@ Mastermind::GetImageUrl(const char * account_id, const char * video_id,
     if(directive == 0)
         return 0;
    
-    // Hash string to be a combination of ipAddress & video id
-    unsigned char hashstring[256]; // max size = 15 + sizeof(vid)
-    int offset = 0;
-    memcpy(hashstring + offset, ipAddress, ip_len);
-    offset += ip_len;
-    if(offset + strlen(video_id) < 256){
-        memcpy(hashstring + offset, video_id, strlen(video_id));
-        offset += strlen(video_id);
-    }
-
-    const Fraction * fraction = directive->GetFraction(hashstring, offset);
+    const Fraction * fraction = directive->GetFraction(bucketId, bucketIdLen);
+    
     if (fraction == 0){
         //neon_log_error("Fraction for the directive is NULL");
         return 0;
@@ -373,11 +368,14 @@ Mastermind::GetImageUrl(const char * account_id, const char * video_id,
  * Get Thumbnail ID for a given video id
  * */
 const char *
-Mastermind::GetThumbnailID(const char * account_id, const char * video_id,
-        unsigned char * ipAddress, int ip_len, int &size)
-{
-    string accountId = account_id;
-    string videoId = video_id;
+Mastermind::GetThumbnailID(const char * c_accountId, 
+                            const char * c_videoId,
+                            unsigned char * bucketId,
+                            int bucketIdLen,
+                            int &size){
+    
+    string accountId = c_accountId;
+    string videoId = c_videoId;
 
     const Directive * directive = 0;
     directive = directiveTable.Find(accountId, videoId);
@@ -385,17 +383,8 @@ Mastermind::GetThumbnailID(const char * account_id, const char * video_id,
     if(directive == 0)
         return 0;
     
-    // Hash string to be a combination of ipAddress & video id
-    unsigned char hashstring[256]; // max size = 15 + sizeof(vid)
-    int offset = 0;
-    memcpy(hashstring + offset, ipAddress, ip_len);
-    offset += ip_len;
-    if(offset + strlen(video_id) < 256){
-        memcpy(hashstring + offset, video_id, strlen(video_id));
-        offset += strlen(video_id);
-    }
+    const Fraction * fraction = directive->GetFraction(bucketId, bucketIdLen);
 
-    const Fraction * fraction = directive->GetFraction(hashstring, offset);
     if (fraction == 0){
         //neon_log_error("Fraction for the directive is NULL");
         return 0;
@@ -413,8 +402,8 @@ Mastermind::GetThumbnailID(const char * account_id, const char * video_id,
  * */
 
 void
-Mastermind::Shutdown()
-{
+Mastermind::Shutdown(){
+    
     publisherTable.Shutdown();
     directiveTable.Shutdown();
 }

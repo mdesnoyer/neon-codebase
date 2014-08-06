@@ -90,7 +90,7 @@
     "type" : {
       "type" : "enum",
       "name" : "EventType",
-      "symbols" : [ "IMAGE_VISIBLE", "IMAGES_VISIBLE", "IMAGE_LOAD", "IMAGES_LOADED", "IMAGE_CLICK", "VIDEO_CLICK", "VIDEO_PLAY", "AD_PLAY" ]
+      "symbols" : [ "IMAGE_VISIBLE", "IMAGES_VISIBLE", "IMAGE_LOAD", "IMAGES_LOADED", "IMAGE_CLICK", "VIDEO_CLICK", "VIDEO_PLAY", "AD_PLAY", "VIDEO_VIEW_PERCENTAGE" ]
     }
   }, {
     "name" : "eventData",
@@ -168,6 +168,9 @@
       }, {
         "name" : "windowCoords",
         "type" : "Coords"
+      }, {
+        "name" : "imageCoords",
+        "type" : "Coords"
       } ]
     }, {
       "type" : "record",
@@ -235,6 +238,23 @@
       }, {
         "name" : "playCount",
         "type" : "int"
+      } ]
+    }, {
+      "type" : "record",
+      "name" : "VideoViewPercentage",
+      "fields" : [ {
+        "name" : "isVideoViewPercentage",
+        "type" : "boolean",
+        "default" : true
+      }, {
+        "name" : "videoId",
+        "type" : "string"
+      }, {
+        "name" : "playCount",
+        "type" : "int"
+      }, {
+        "name" : "percent",
+        "type" : "float"
       } ]
     } ]
   } ]

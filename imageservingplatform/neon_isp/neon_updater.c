@@ -37,14 +37,17 @@ static const char * mastermind_url = 0; // HTTP REST URL to marstermind file
 // TODO: Need to lock the download path if >1 worker process will be spun
 static const char * mastermind_filepath             = "/tmp/mastermind"; // download the file here
 static const char * validated_mastermind_filepath   = 0; 
-
+static const char * s3cmd_config_filepath = 0;
 static const int test_config = 1;
 
 /*
  * Initialize the config parameters for the updater thread
  *
  * */
-void neon_updater_config_init(unsigned char *m_url, unsigned char *m_valid_path, time_t s_time){
+void neon_updater_config_init(unsigned char *m_url, 
+                                unsigned char *m_valid_path, 
+                                unsigned char * s3cmd_conf_fpath, 
+                                time_t s_time){
     
     // Mastermind REST URI
 	if (mastermind_url == 0)
@@ -62,9 +65,14 @@ void neon_updater_config_init(unsigned char *m_url, unsigned char *m_valid_path,
     srand(time(NULL));
     int r = rand() % 100;
     sleep_time += s_time + r;
-    neon_log_error("NEON Config sleep time %d", sleep_time);
-}	
+    //neon_log_error("NEON Config sleep time %d", sleep_time);
 
+    // s3cmd config filepath
+	if (s3cmd_config_filepath == 0 && s3cmd_conf_fpath != NULL)
+		s3cmd_config_filepath = strdup((const char *) s3cmd_conf_fpath);
+	else
+		free((void *) s3cmd_config_filepath);
+}	
 
 void *
 neon_runloop(void * arg){
@@ -114,7 +122,7 @@ neon_runloop(void * arg){
             /*
              *  fetch new mastermind file from S3
              */
-            if(neon_fetch(mastermind_url, mastermind_filepath, fetch_timeout) == NEON_FETCH_FAIL) {
+            if(neon_fetch(mastermind_url, mastermind_filepath, s3cmd_config_filepath, fetch_timeout) == NEON_FETCH_FAIL) {
                 
                 // log
                 neon_log_error("failed to fetch mastermind file, error: %s",
@@ -124,6 +132,8 @@ neon_runloop(void * arg){
                 neon_sleep(sleep_time);
                 continue;
             }
+            
+            neon_stats[MASTERMIND_FILE_FETCH_SUCCESS]++; 
             
             /*
              *  validate meta data of new file 
@@ -166,6 +176,8 @@ neon_runloop(void * arg){
                 neon_sleep(sleep_time);
                 continue;
             }
+
+            neon_stats[MASTERMIND_RENAME_SUCCESS]++;
         }
         
         // go to sleep until next cycle

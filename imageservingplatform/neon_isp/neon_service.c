@@ -1,8 +1,12 @@
-// Neon Service 
-// Actual work to be done on the service calls are defined here  
+/* 
+ * Neon Service
+ * Actual work to be done on the service calls are defined here  
+*/
 
 #include <string.h>
 #include <errno.h>
+
+#include "neon_constants.h"
 #include "neon_log.h"
 #include "neon_mastermind.h"
 #include "neon_service.h"
@@ -23,6 +27,7 @@ static ngx_str_t cookie_expiry_str = ngx_string("; expires=");
 static ngx_str_t cookie_client_api = ngx_string("/v1/client/");
 static ngx_str_t cookie_semi_colon = ngx_string(";");
 static ngx_str_t cookie_fwd_slash = ngx_string("/");
+//static char * cloudinary_formatter = "http://res.cloudinary.com/neon-labs/image/upload/w_%d,h_%d/%s.jpg"
 
 /* 
  * Get a particular URI token relative to the base url 
@@ -30,9 +35,9 @@ static ngx_str_t cookie_fwd_slash = ngx_string("/");
  * */
 
 static unsigned char *
-neon_service_get_uri_token(ngx_http_request_t *req, ngx_str_t * base_url, 
-                            int token_index)
-{
+neon_service_get_uri_token(ngx_http_request_t *req, 
+                            ngx_str_t * base_url, 
+                            int token_index){
     
     // make a null terminated string to use with strtok_r
     size_t uri_size = (req->uri).len + 1;
@@ -71,7 +76,8 @@ neon_service_get_uri_token(ngx_http_request_t *req, ngx_str_t * base_url,
         
             // allocate result token, uri len is a safe size
             size_t token_size = (req->uri).len + 1;
-            unsigned char * token = (unsigned char*) ngx_pcalloc(req->pool, token_size);
+            unsigned char * token = (unsigned char*) ngx_pcalloc(req->pool, 
+                                                                 token_size);
             if(token == NULL){
                 neon_stats[NGINX_OUT_OF_MEMORY] ++;
                 return NULL;
@@ -93,16 +99,48 @@ neon_service_get_uri_token(ngx_http_request_t *req, ngx_str_t * base_url,
 //////////////////// Cookie Helper methods ////////////////////////////
 
 /*
+ * TODO: Complete this logic
+ * Get bucket id; dummy function now
+ *
+ * BucketID -> TID Mapping to be defined
+ * */
+
+
+static void 
+neon_service_get_bucket_id(ngx_str_t *neon_uuid, 
+                            ngx_str_t *video_id, 
+                            ngx_str_t * bucket_id){
+
+    unsigned char hashstring[256]; // max size = 18 + sizeof(vid)
+    int offset = 0;
+    memcpy(hashstring + offset, neon_uuid->data, neon_uuid->len);
+    offset += neon_uuid->len;
+    if(offset + video_id->len < 256){
+        memcpy(hashstring + offset, video_id->data, video_id->len);
+        offset += video_id->len;
+    }
+    
+    unsigned long bucket_hash = neon_sdbm_hash(hashstring, offset);
+    bucket_hash %= N_ABTEST_BUCKETS;
+    char bid[N_ABTEST_BUCKET_DIGITS] = {0}; 
+    sprintf(bid, "%ld", bucket_hash);
+    bucket_id->data = (unsigned char*) strdup(bid);
+    bucket_id->len = strlen(bid);
+}
+
+/*
  * Check the presence of a cookie given the cookie key string
+ * Also set the value of the cookie
  * 
  * */
 
 static NEON_BOOLEAN 
-neon_service_isset_cookie(ngx_http_request_t *request, ngx_str_t *key){
+neon_service_isset_cookie(ngx_http_request_t *request, 
+                            ngx_str_t *key, 
+                            ngx_str_t *value){
 
-    ngx_str_t value;
     if (ngx_http_parse_multi_header_lines(&request->headers_in.cookies,
-                key, &value) == NGX_DECLINED) {
+                key, value) == NGX_DECLINED) {
         return NEON_FALSE;
     }
 
@@ -116,7 +154,10 @@ neon_service_isset_cookie(ngx_http_request_t *request, ngx_str_t *key){
  * */
 static NEON_BOOLEAN 
 neon_service_isset_neon_cookie(ngx_http_request_t *request){
-    NEON_BOOLEAN ret = neon_service_isset_cookie(request, &neon_cookie_name);
+    ngx_str_t value;
+    NEON_BOOLEAN ret = neon_service_isset_cookie(request, 
+                                                 &neon_cookie_name, 
+                                                 &value);
     if(ret == NEON_FALSE)
         neon_stats[NEON_SERVICE_COOKIE_PRESENT] ++;
     return ret;
@@ -131,8 +172,12 @@ neon_service_isset_neon_cookie(ngx_http_request_t *request){
  * */
 
 static NEON_BOOLEAN 
-neon_service_set_custom_cookie(ngx_http_request_t *request, ngx_str_t * neon_cookie_name, 
-                    ngx_str_t * expires, ngx_str_t * domain, char * value, int value_len){
+neon_service_set_custom_cookie(ngx_http_request_t *request, 
+                                ngx_str_t * neon_cookie_name, 
+                                ngx_str_t * expires, 
+                                ngx_str_t * domain, 
+                                char * value, 
+                                int value_len){
     
     //http://forum.nginx.org/read.php?2,169118,169118#msg-169118
 
@@ -169,7 +214,6 @@ neon_service_set_custom_cookie(ngx_http_request_t *request, ngx_str_t * neon_coo
     set_cookie->value.len = p - cookie;
     set_cookie->value.data = cookie;
 
-    neon_stats[NEON_SERVICE_COOKIE_SET] ++;
     return NEON_TRUE;    
 }
 
@@ -177,35 +221,109 @@ neon_service_set_custom_cookie(ngx_http_request_t *request, ngx_str_t * neon_coo
  * Set Neon userId cookie with infinite expiry
  * with root path
  *
+ * The userid cookie is generated as follows
+ * {Random 8 chars}{first 8 digits of timestamp} 
+ *
+ * The timestamp part of the cookie is used while setting the bucket
+ * id cookie for videos. It is used to delay the start of the AB testing.
+ * Since the AB Test bucket is based on the hash of user id & video id, 
+ * this prevents the race condition in the browser where the AB test bucket
+ * cookie gets assigned from an old cookie which gets overwritten by a delayed
+ * initial request with no user id cookie. 
+ * 
  * */
 
 static NEON_BOOLEAN 
 neon_service_set_neon_cookie(ngx_http_request_t *request){
 
-    char neon_id[16] = {0};
-    size_t id_len = 16; //16 char long id
-    
+    char neon_id[NEON_UUID_LEN] = {0};
+    char timestamp[NEON_UUID_TS_LEN];
+    sprintf(timestamp, "%u", (unsigned)time(NULL));
+
     // Get Neon ID
-    neon_get_uuid((char*)neon_id, id_len);
+    neon_get_uuid((char*)neon_id, (size_t)NEON_UUID_RAND_LEN);
+
+    // Add timestamp part to the UUID
+    ngx_memcpy(neon_id + NEON_UUID_RAND_LEN, timestamp, NEON_UUID_TS_LEN);
 
     return neon_service_set_custom_cookie(request, &neon_cookie_name, 
-                        &cookie_max_expiry, &cookie_root_domain, neon_id, id_len);
+                        &cookie_max_expiry, &cookie_root_domain, neon_id, (size_t)NEON_UUID_LEN);
 
+}
+
+/*
+ * Determine if the user is ready start AB Testing
+ *
+ * If the userid is present, set the uuid param
+ *
+ * */
+static NEON_BOOLEAN
+neon_service_userid_abtest_ready(ngx_http_request_t *request, ngx_str_t *uuid){ 
+
+    unsigned int cur_timestamp = (unsigned int) time(NULL);
+    
+    // check for the neonglobaluserid cookie
+    if (neon_service_isset_cookie(request, &neon_cookie_name, uuid) == NEON_TRUE){
+       
+        char ts[NEON_UUID_TS_LEN];
+        ngx_memcpy(ts, uuid->data + NEON_UUID_RAND_LEN, NEON_UUID_TS_LEN);
+        unsigned int cookie_ts = atoi((const char*)ts);
+        if (cur_timestamp >= cookie_ts + 120)
+            return NEON_TRUE;
+    }
+    
+    return NEON_FALSE;
 }
 
 /*
  * Set the AB test bucket cookie
  *
+ * The AB test cookie is not set in the following cases :
+ * 1. The ts part of the neonglobaluserid is < 100secs 
+ * 2. Skip setting the cookie if the cookie is already set
+ *
+ * TODO: In future may be invalidate the old cookie, if the AB test bucket
+ * needs to be reset fast. Currently its not required since the expiry on cookie
+ * is 10 mins
+ *
  * */
 
 static NEON_BOOLEAN
-neon_service_set_abtest_bucket_cookie(ngx_http_request_t *request, ngx_str_t *video_id, 
-                                        ngx_str_t *pub_id, ngx_str_t *bucket_id){
+neon_service_set_abtest_bucket_cookie(ngx_http_request_t *request, 
+                                        ngx_str_t *video_id, 
+                                        ngx_str_t *pub_id,
+                                        ngx_str_t *bucket_id){ 
 
+    ngx_str_t c_prefix = ngx_string("neonimg_");
+    ngx_str_t underscore = ngx_string("_");
     ngx_str_t expires, domain;
-    u_char *p = 0, *dp = 0;
+    u_char *p = 0, *dp = 0, *cp = 0;
     time_t add_expiry = 10 *60; //10 mins
+   
+    // Format the cookie name for bucket id : neonimg_{pub}_{vid}
+    ngx_str_t cookie_name;
+    int cookie_name_len = c_prefix.len + pub_id->len + 1 + video_id->len;
+    cookie_name.data = (u_char *) ngx_palloc(request->pool, cookie_name_len);
+    cp = ngx_cpymem(cookie_name.data, c_prefix.data, c_prefix.len); 
+    cp = ngx_cpymem(cp, pub_id->data, pub_id->len);
+    cp = ngx_cpymem(cp, underscore.data, underscore.len);
+    cp = ngx_cpymem(cp, video_id->data, video_id->len);
+    cookie_name.len = cp - cookie_name.data;
+    
+    ngx_str_t value;
+    ngx_str_t neonglobaluserid;
+    
+    // Skip setting the cookie if the ABTest bucket cookie is present
+    // Or if the userid isnt' ready for AB Testing !
+    if (neon_service_isset_cookie(request, &cookie_name, &value) == NEON_TRUE || 
+            neon_service_userid_abtest_ready(request, &neonglobaluserid) == NEON_FALSE){
+        return NEON_TRUE; // skip 
+    }
 
+    // Bucket ID
+    neon_service_get_bucket_id(&neonglobaluserid, video_id, bucket_id); 
+
+    
     // alloc memory, use cookie_max_expiry as a template
     expires.data = (u_char *) ngx_palloc(request->pool, cookie_max_expiry.len);
     p = ngx_cpymem(expires.data, cookie_expiry_str.data, cookie_expiry_str.len); 
@@ -213,7 +331,6 @@ neon_service_set_abtest_bucket_cookie(ngx_http_request_t *request, ngx_str_t *vi
     expires.len = p - expires.data;
 
     // set cookie path with prefix /v1/client/{PUB}/{VID}
-
     int d_len = cookie_neon_domain_prefix.len + cookie_client_api.len +  pub_id->len \
                 + cookie_fwd_slash.len + video_id->len + cookie_semi_colon.len;
     domain.data = (u_char *) ngx_palloc(request->pool, d_len);
@@ -225,51 +342,10 @@ neon_service_set_abtest_bucket_cookie(ngx_http_request_t *request, ngx_str_t *vi
     dp = ngx_cpymem(dp, cookie_semi_colon.data, cookie_semi_colon.len);
     domain.len = dp - domain.data;
 
-    return neon_service_set_custom_cookie(request, video_id, 
+    return neon_service_set_custom_cookie(request, &cookie_name, 
                         &expires, &domain, (char *)bucket_id->data, bucket_id->len);
 }
 
-/*
- * Get bucket id; dummy function now
- * */
-
-//static void 
-//neon_service_get_bucket_id(ngx_str_t * bucket_id){
-//   bucket_id = ngx_string("b23");
-//}
-
-/*
-* Generic helper function to build the api response
-* Allocates memory from buffer chain and "stiches" it to the request chain
-* 
-* @input: http_status, content type and response body
-*
-static void
-neon_service_build_api_response(ngx_http_request_t *request,
-                                 ngx_chain_t  * chain,
-                                 ngx_int_t http_status,
-                                 const char * content_type,
-                                 int content_type_size,
-                                 const char * response_body,
-                                 int response_body_size)
-{
-    ngx_buf_t * b;
-    b = (ngx_buf_t *) ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
-    
-    chain->buf = b;
-    chain->next = NULL;
-    
-    request->headers_out.status = http_status; 
-    request->headers_out.content_type.len = content_type_size; 
-    request->headers_out.content_type.data = (u_char *) content_type;
-    request->headers_out.content_length_n = response_body_size;
-    b->pos = (u_char *) response_body;
-    b->last = response_body + response_body_size;
-    b->memory = 1;
-    b->last_buf = 1;
-
-}
-*/
 
 /*
  * Helper method to 
@@ -280,8 +356,14 @@ neon_service_build_api_response(ngx_http_request_t *request,
 
 static 
 int neon_service_parse_api_args(ngx_http_request_t *request, 
-        ngx_str_t *base_url, const char ** account_id, int * account_id_size, 
-        unsigned char ** video_id, unsigned char **publisher_id, ngx_str_t * ipAddress, int *width, int *height){
+                                ngx_str_t *base_url, 
+                                const char ** account_id, 
+                                int * account_id_size, 
+                                unsigned char ** video_id, 
+                                unsigned char **publisher_id, 
+                                ngx_str_t * ipAddress, 
+                                int *width, 
+                                int *height){
 
     static const ngx_str_t height_key = ngx_string("height");
     static const ngx_str_t width_key = ngx_string("width");
@@ -344,8 +426,8 @@ int neon_service_parse_api_args(ngx_http_request_t *request,
 
 static void
 neon_service_server_api_not_found(ngx_http_request_t *request,
-                                         ngx_chain_t  * chain)
-{
+                                    ngx_chain_t  * chain){
+    
     static unsigned char error_response_body[] = "{\"error\":\"thumbnail for video id not found\"}";
     
     ngx_buf_t * b;
@@ -423,8 +505,8 @@ neon_service_server_api_img_url_found(ngx_http_request_t *request,
 
 NEON_SERVER_API_ERROR
 neon_service_server_api(ngx_http_request_t *request,
-                                ngx_chain_t  * chain)
-{
+                         ngx_chain_t  * chain){
+
     ngx_buf_t * b;
     b = ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
     if(b == NULL){
@@ -447,7 +529,8 @@ neon_service_server_api(ngx_http_request_t *request,
     int height;
 
     int ret = neon_service_parse_api_args(request, &base_url, &account_id, 
-                       &account_id_size, &video_id, &pub_id, &ipAddress, &width, &height);
+                                           &account_id_size, &video_id, &pub_id, 
+                                           &ipAddress, &width, &height);
 
     if(ret !=0 ){
         neon_stats[NEON_SERVER_API_ACCOUNT_ID_NOT_FOUND] ++;    
@@ -457,13 +540,16 @@ neon_service_server_api(ngx_http_request_t *request,
     
     // look up thumbnail image url
     
+    //dummy bucket id, server api doesn't use bucket id currently 
+    ngx_str_t bucket_id = ngx_string(""); 
+    
     const char * url = 0;
     int url_size = 0;
     
     NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR error_url =
         neon_mastermind_image_url_lookup(account_id,
                 (char*)video_id,
-                &ipAddress,
+                &bucket_id,
                 height,
                 width,
                 &url,
@@ -484,8 +570,8 @@ neon_service_server_api(ngx_http_request_t *request,
 
 static void
 neon_service_client_api_not_found(ngx_http_request_t *request,
-                                     ngx_chain_t  * chain)
-{
+                                  ngx_chain_t  * chain){
+
     static ngx_str_t error_response_body = ngx_string("image not found");
     
     ngx_buf_t * b;
@@ -518,9 +604,8 @@ static void
 neon_service_client_api_redirect(ngx_http_request_t *request,
                                     ngx_chain_t  * chain,
                                     const char * url_data,
-                                    int url_size)
-{
-    // Do we need to send this data in the redirect ? 
+                                    int url_size){
+
     static ngx_str_t redirect_response_body = ngx_string("redirect to image");
     static ngx_str_t location_header = ngx_string("Location");
 
@@ -567,8 +652,8 @@ neon_service_client_api_redirect(ngx_http_request_t *request,
 
 NEON_CLIENT_API_ERROR
 neon_service_client_api(ngx_http_request_t *request,
-                                ngx_chain_t  * chain)
-{
+                        ngx_chain_t  * chain){
+    
     ngx_buf_t * b;
     
     b = ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
@@ -592,7 +677,8 @@ neon_service_client_api(ngx_http_request_t *request,
     int height;
 
     int ret = neon_service_parse_api_args(request, &base_url, &account_id, 
-                       &account_id_size, &video_id, &pub_id, &ipAddress, &width, &height);
+                                           &account_id_size, &video_id, &pub_id,
+                                           &ipAddress, &width, &height);
         
     if (ret !=0){ 
         neon_stats[NEON_CLIENT_API_ACCOUNT_ID_NOT_FOUND] ++;
@@ -600,6 +686,20 @@ neon_service_client_api(ngx_http_request_t *request,
         return NEON_CLIENT_API_FAIL;
     }
    
+    ngx_str_t vid = ngx_uchar_to_string(video_id);
+    ngx_str_t pid = ngx_uchar_to_string(pub_id);
+    
+    // Check if the cookie is present
+    if (neon_service_isset_neon_cookie(request) == NEON_FALSE){
+        if(neon_service_set_neon_cookie(request) == NEON_TRUE) {
+            // Neonglobaluserid cookie set
+            neon_stats[NEON_SERVICE_COOKIE_SET] ++;
+        }    
+    }
+    
+    // Set the AB Test bucket cookie
+    ngx_str_t bucket_id = ngx_string(""); 
+    neon_service_set_abtest_bucket_cookie(request, &vid, &pid, &bucket_id);
 
     // look up thumbnail image url
     
@@ -609,7 +709,7 @@ neon_service_client_api(ngx_http_request_t *request,
     NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR error_url =
         neon_mastermind_image_url_lookup(account_id,
                 (char*)video_id,
-                &ipAddress,
+                &bucket_id,
                 height,
                 width,
                 &url,
@@ -621,34 +721,11 @@ neon_service_client_api(ngx_http_request_t *request,
         return NEON_CLIENT_API_FAIL;
     }
 
-    // Check if the cookie is present
-    if (neon_service_isset_neon_cookie(request) == NEON_FALSE){
-        // TODO: May be send bucket id with set cookie request ?
-        if(neon_service_set_neon_cookie(request) == NEON_TRUE) {
-            //neon_log_error("Neon cookie has been set");
-        }    
-    }else{
-        ngx_str_t vid = ngx_uchar_to_string(video_id);
-        ngx_str_t pid = ngx_uchar_to_string(pub_id);
-        ngx_str_t bucket_id = ngx_string("b12");
-       
-        // TODO: Generate bucket id & bucket key, use vid as key now
-        // check if bucket id is already assigned
-        if(neon_service_isset_cookie(request, &vid) == NEON_TRUE){
-            // check if value needs to be updated ?
-        }else{
-            // Add the bucket cookie 
-            //neon_service_get_bucket_id(&bucket_id); 
-            neon_service_set_abtest_bucket_cookie(request, &vid, &pid, &bucket_id);
-        }
-    }
-
     // set up the response with a redirect
     neon_service_client_api_redirect(request,
             chain,
             url,
             url_size);
-    
     
     return NEON_CLIENT_API_OK;
 }
@@ -657,25 +734,31 @@ neon_service_client_api(ngx_http_request_t *request,
 
 NEON_GETTHUMB_API_ERROR 
 neon_service_getthumbnailid(ngx_http_request_t *request,
-                            ngx_chain_t  * chain)
-{
+                            ngx_chain_t  * chain){
 
     int clen = 0; 
 
     ngx_str_t base_url = ngx_string("/v1/getthumbnailid/");
     ngx_str_t params_key = ngx_string("params");
     ngx_str_t video_ids; 
+    ngx_str_t bucket_id = ngx_string(""); 
+    ngx_str_t neonglobaluserid;
+    NEON_BOOLEAN abtest_ready = NEON_FALSE;
+    
     ngx_http_arg(request, params_key.data, params_key.len, &video_ids);
     
-    ngx_str_t ipAddress = ngx_string("");
-    static ngx_str_t xf = ngx_string("X-Forwarded-For");
-    ngx_table_elt_t * xf_header;
-    xf_header = search_headers_in(request, xf.data, xf.len); 
+    // Check if the user is ready to be in a A/B test bucket
+    abtest_ready = neon_service_userid_abtest_ready(request, &neonglobaluserid);
+    
+    //ngx_str_t ipAddress = ngx_string("");
+    //static ngx_str_t xf = ngx_string("X-Forwarded-For");
+    //ngx_table_elt_t * xf_header;
+    //xf_header = search_headers_in(request, xf.data, xf.len); 
 
     // Check if X-Forwarded-For header is set (Its set by the load balancer)
-    if (xf_header){
-        ipAddress = xf_header->value;
-    }
+    //if (xf_header){
+    //    ipAddress = xf_header->value;
+    //}
 
     // get publisher id
     unsigned char * publisher_id = neon_service_get_uri_token(request, &base_url, 0);
@@ -733,11 +816,18 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
         unsigned char * video_id = ngx_pcalloc(request->pool, sz);
         memset(video_id, 0, sz);
         strncpy((char*) video_id, vtoken, sz);
-            
+        
+        ngx_str_t vid_str = ngx_uchar_to_string(video_id);
+
+        // Get the bucket id for a given video
+        if(abtest_ready == NEON_TRUE){
+            neon_service_get_bucket_id(&neonglobaluserid, &vid_str, &bucket_id);
+        }
+
         NEON_MASTERMIND_TID_LOOKUP_ERROR err =
             neon_mastermind_tid_lookup(account_id,
                     (const char*)video_id,
-                    &ipAddress,
+                    &bucket_id,
                     &tid,
                     &tid_size);
 

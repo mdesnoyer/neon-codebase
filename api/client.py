@@ -220,6 +220,10 @@ def save_thumbnail_to_s3_and_metadata(i_vid, image, score, s3bucket,
     hoster = CDNHosting.create(None)
     hoster.upload(image, tid)
 
+    #Host this image on Cloudinary for dynamic resizing
+    cloudinary_hoster = CDNHosting.create('cloudinary')
+    cloudinary_hoster.upload(s3fname, tid)
+
     return tdata
 
 ###########################################################################

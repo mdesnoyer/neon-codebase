@@ -87,6 +87,14 @@
     "type" : [ "null", "float" ],
     "default" : null
   }, {
+    "name" : "imageCoords_x",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
+    "name" : "imageCoords_y",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
     "name" : "isClickInPlayer",
     "type" : [ "null", "boolean" ],
     "default" : null
@@ -109,6 +117,10 @@
   }, {
     "name" : "playCount",
     "type" : [ "null", "int" ],
+    "default" : null
+  }, {
+    "name" : "videoViewPercent",
+    "type" : [ "null", "float" ],
     "default" : null
   }, {
     "name" : "videoPageURL",

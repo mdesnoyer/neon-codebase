@@ -4,8 +4,9 @@ conf=" daemon off; \
 error_log  /tmp/error.log;  events {     worker_connections  1024; }\
 http {     default_type  application/octet-stream; \
     sendfile        on;     keepalive_timeout  65;      \
-    mastermind_file_url http://neon-test.s3.amazonaws.com/mastermind; \
-    mastermind_validated_filepath /tmp/mastermind.validated; \
+    mastermind_file_url %s; \
+    s3cmd_config_filepath %s; \
+    mastermind_validated_filepath /tmp/mastermind.apitest.validated; \
     updater_sleep_interval 60;      \
         server {  listen       %s; \
                 server_name localhost; \

@@ -1,10 +1,12 @@
-'''
-Neon Image serving platform API tests
-
-Test the responses for all the defined APIs for ISP
-
-'''
 #!/usr/bin/env python
+
+'''
+API/ Integration tests
+
+Neon Image serving platform API tests
+Test the responses for all the defined APIs for ISP
+'''
+
 import os
 import os.path
 import sys
@@ -14,12 +16,18 @@ if sys.path[0] <> base_path:
     sys.path.insert(0, base_path)
    
 import atexit
+from boto.s3.connection import S3Connection
+from boto.s3.bucketlistresultset import BucketListResultSet
 import json
 import logging
+import nginx_isp_test_conf
 import os
 import random
+import re
 import signal
+import shutil
 import subprocess
+import s3cmd_fakes3cfg
 import unittest
 import urllib
 import urllib2
@@ -27,10 +35,57 @@ import utils
 import utils.ps
 import time
 import tempfile
-import nginx_isp_test_conf
 from test_utils import net
 
 _log = logging.getLogger(__name__)
+
+def LaunchFakeS3(s3host, s3port, s3disk, fakes3root):
+    '''Launch a fakes3 instance if the settings call for it.'''
+    if s3host == 'localhost':
+        _log.info('Launching fakes3')
+        proc = subprocess.Popen([
+            '/usr/bin/env', 'fakes3',
+            '--root', fakes3root,
+            '--port', str(s3port)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT)
+
+        upRe = re.compile('port=')
+        fakes3_log = []
+        while proc.poll() is None:
+            line = proc.stdout.readline()
+            fakes3_log.append(line)
+            if upRe.search(line):
+                break
+
+        if proc.poll() is not None:
+            raise Exception('Error starting fake s3. Log:\n%s' %
+                            '\n'.join(fakes3_log))
+        _log.info('FakeS3 is up with pid %i' % proc.pid)
+        return proc  
+
+def ShutdownFakeS3(proc):
+        still_running = utils.ps.send_signal_and_wait(signal.SIGTERM,
+                                                      [proc.pid],
+                                                      timeout=10)
+        if still_running:
+            proc.kill()
+
+        proc.wait()
+
+def FakeS3Upload(fpath, s3cfg, s3fname):
+    '''
+    Upload a file to s3 using s3cmd
+    '''
+    ret = subprocess.call(["s3cmd", "--config=%s" % s3cfg, "put", "%s" % fpath,
+        "%s" % s3fname]) 
+    
+    #cmd = "s3cmd --config=%s put %s %s" % (s3cfg, fpath, s3fname)
+    #os.system(cmd)
+
+def FakeS3CreateBucket(bucket, s3cfg):
+    ret = subprocess.call(["s3cmd", "--config=%s" % s3cfg, "mb", "%s" % bucket])
+
 
 class ISP:
     '''
@@ -47,16 +102,16 @@ class ISP:
     in setUpClass & tearDownClass respectively
     '''
 
-    def __init__(self, port=None):
+    def __init__(self, mastermind_s3file_url, s3cfg, port=None):
         self.port = port
         if self.port is None:
             self.port = net.find_free_port()
         
         self.config_file = tempfile.NamedTemporaryFile()
-        self.config_file.write(nginx_isp_test_conf.conf % self.port)
+        self.config_file.write(nginx_isp_test_conf.conf % \
+                                (mastermind_s3file_url, s3cfg, self.port))
         self.config_file.flush()
 
-        #self.config_file = base_path + "/imageservingplatform/neon_isp/test/nginx-test.conf"
         self.nginx_path = base_path + "/imageservingplatform/nginx-1.4.7/objs/nginx" #get build path
 
     def start(self):
@@ -112,21 +167,47 @@ class TestImageServingPlatformAPI(unittest.TestCase):
     '''
     API testing
     '''
-    isp = ISP()
 
     @classmethod
     def setUpClass(cls):
+        
+        s3host = 'localhost'
+        s3port = net.find_free_port()
+        cls.s3disk = tempfile.mkdtemp()
+        cls.fakes3root = tempfile.mkdtemp()
+        cls.fakes3proc = LaunchFakeS3(s3host, s3port, cls.s3disk, cls.fakes3root)
+        
+        s3cmd_fakes3cfg.conf % (s3port, '%', s3port)  
+        cls.s3cfg = tempfile.NamedTemporaryFile()
+        cls.s3cfg.write(s3cmd_fakes3cfg.conf % (s3port, '%', s3port))
+        cls.s3cfg.flush()
+        os.chmod(cls.s3cfg.name, 644) #required as s3cmd runs as user nobody
+  
+        mfile_path = base_path + \
+                        "/imageservingplatform/neon_isp/test/mastermind.api.test"
+
+        bucket_name = "s3://my_bucket"
+        FakeS3CreateBucket(bucket_name, cls.s3cfg.name)
+        cls.s3_mfile_url = "%s/mastermind.api.test" % bucket_name # mastermind s3 file url
+        FakeS3Upload(mfile_path, cls.s3cfg.name, cls.s3_mfile_url)
+        cls.isp = ISP(cls.s3_mfile_url, cls.s3cfg.name)
         cls.isp.start()
-        time.sleep(1)
+        time.sleep(1) # allow mastermind file to be parsed
 
     def setUp(self):
 
         self.port = str(TestImageServingPlatformAPI.isp.get_port())
         self.base_url = "http://localhost:"+ self.port +"/v1/%s/%s/%s/"
         self.get_params = "?width=%s&height=%s"
+        
         #default ids
         self.pub_id = "pub1"
         self.vid = "vid1"
+        self.expected_img_url =\
+                        "http://neon-image-cdn.s3.amazonaws.com/pixel.jpg"
+        self.neon_cookie_name = "neonglobaluserid"
+        self.cookie_domain = ".neon-images.com"
+
 
     def tearDown(self):
         pass
@@ -134,6 +215,9 @@ class TestImageServingPlatformAPI(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.isp.stop()
+        shutil.rmtree(cls.s3disk, True)
+        shutil.rmtree(cls.fakes3root, True)
+        ShutdownFakeS3(cls.fakes3proc)
 
     @classmethod
     def get_header_value(cls, headers, key):
@@ -145,7 +229,19 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         for header in headers:
             if key in header:
                 return header.split(key + ": ")
-        
+    
+    def parse_cookie(self, cookie_header_value):
+        '''
+        Parse a simple cookie in to parts
+        '''
+        cookie_parts = cookie_header_value.rstrip('\r\n').split('; ')
+        cookie_pair = cookie_parts[0]
+        cookie_expiry = cookie_parts[1]
+        cookie_domain = cookie_parts[2].split("=")[-1]
+        cookie_path = cookie_parts[3].rstrip(";").split("=")[-1]
+
+        return cookie_pair, cookie_expiry, cookie_domain, cookie_path 
+
     def make_api_request(self, url, headers):
         '''
         helper method to make outbound request
@@ -164,7 +260,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
     def server_api_request(self, pub_id, vid, width, height, ip=None):
         '''
-        server api requester
+        basic server api requester
 
         Add X-Client-IP header if ip is not None
         '''
@@ -202,6 +298,17 @@ class TestImageServingPlatformAPI(unittest.TestCase):
             # ok to throw urlerror, the image url returned are invalid
             pass
 
+    def test_healthcheck(self):
+        '''
+        Verify the healthcheck
+        '''
+
+        url = "http://localhost:%s/healthcheck" % self.port
+        req = urllib2.Request(url)
+        r = urllib2.urlopen(req)
+        self.assertEqual(r.code, 200)
+        self.assertEqual(r.read(), 'In service with current Mastermind')
+
     def test_client_api_request(self):
         '''
         Test Client API call
@@ -223,25 +330,37 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
         for header in headers:
             if "Location" in header:
-                im_url = header.split("Location: ")[-1]
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
             if "Set-Cookie" in header:
                 cookie = header.split("Set-Cookie: ")[-1]
 
         self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, self.expected_img_url)
         self.assertIsNotNone(cookie)
         
-        #headers = response.info().headers
-        #self.assertTrue(response.code, 302)
+        #verify cookie values
+        cookie_pair, cookie_expiry, cookie_domain, cookie_path = \
+                                                self.parse_cookie(cookie)
+
+        cookie_name, cookie_value = cookie_pair.split('=')
+        self.assertEqual(cookie_name, self.neon_cookie_name)
+        self.assertEqual(cookie_domain, self.cookie_domain)
+        self.assertEqual(cookie_path, "/")
+
+        #Verify cookie inclusion of timestamp in the cookie
+        ts = int(time.time()) / 100
+        self.assertTrue(str(ts) in cookie_value)
 
     def test_client_api_request_with_cookie(self):
         '''
         Test client api request when a neonglobaluserid 
         cookie is present
 
-        expect only the bucketid cookie
+        Expect only the bucketid cookie
         '''
-        
-        h = {"Cookie" : "neonglobaluserid=dummyid"}
+       
+        # use an old timestamp for the neonglobaluseridcookie
+        h = {"Cookie" : "neonglobaluserid=dummyuid1406003475"}
         response = self.client_api_request(self.pub_id, self.vid, 600, 500,
                 "12.2.2.4", headers=h)
         redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
@@ -253,15 +372,51 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         cookie = None
         for header in headers:
             if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+            if "Set-Cookie" in header:
+                cookie = header.split("Set-Cookie: ")[-1]
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, self.expected_img_url)
+        
+        #Assert that the cookie is keyed by neonimg_{PUB}_{VID} 
+        cookie_pair, cookie_expiry, cookie_domain, cookie_path = \
+                                                self.parse_cookie(cookie)
+
+        cookie_name, cookie_value = cookie_pair.split('=')
+        exp_cookie_name = "neonimg_%s_%s" % (self.pub_id, self.vid)
+        self.assertEqual(cookie_name, exp_cookie_name)
+        self.assertEqual(cookie_domain, self.cookie_domain)
+        self.assertEqual(cookie_path, "/v1/client/%s/%s" % (self.pub_id,
+                            self.vid))
+
+    def test_client_api_request_with_fresh_uuid_cookie(self):
+        '''
+        Test with a newly generated neonglobaluserid cookie
+        
+        Expect no cookie to be sent back since the user isnt'
+        ready for AB Testing yet!
+        '''
+        ts = int(time.time())
+        h = {"Cookie" : "neonglobaluserid=dummyuid%s" % ts}
+        response = self.client_api_request(self.pub_id, self.vid, 600, 500,
+                "12.2.2.4", headers=h)
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+        
+        im_url = None
+        cookie = None
+        for header in headers:
+            if "Location" in header:
                 im_url = header.split("Location: ")[-1]
             if "Set-Cookie" in header:
                 cookie = header.split("Set-Cookie: ")[-1]
-                cookie = cookie.split("=")
 
         self.assertIsNotNone(im_url)
-        self.assertEqual(cookie[0], self.vid)
+        self.assertIsNone(cookie)
 
-    ### Server API tests
+    ################### Server API tests #####################
 
     def test_server_api_request(self):
         '''
@@ -318,11 +473,22 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         '''
         use cip argument
         '''
-        pass
+        cip = "12.12.12.24"
+        width = 600
+        height = 500
+        url = self.base_url % ("server", self.pub_id, self.vid)
+        url += self.get_params % (width, height)
+        url += "&cip=%s" % cip
+        headers = {}
+        response = self.make_api_request(url, headers)
+        data = json.loads(response.read())["data"]
+        self.assertIsNotNone(data)
 
     def test_ab_test_ratio(self):
         '''
         Test sending a bunch of requests
+
+        TODO: How do you verify this ?
         '''
         pass
 
@@ -333,7 +499,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
         url = "http://localhost:" + self.port + "/v1/%s/%s/?params=%s" %\
                 ("getthumbnailid", self.pub_id, self.vid)
-        ip = "203.02.113.7"
+        ip = "203.2.113.7"
         headers = {"X-Forwarded-For" : ip}
         response = self.make_api_request(url, headers)
         self.assertIsNotNone(response)
@@ -346,7 +512,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
         url = "http://localhost:" + self.port + "/v1/%s/%s/?params=%s,%s" %\
                 ("getthumbnailid", self.pub_id, self.vid, self.vid)
-        ip = "203.02.113.7"
+        ip = "203.2.113.7"
         headers = {"X-Forwarded-For" : ip}
         response = self.make_api_request(url, headers)
         self.assertIsNotNone(response)
@@ -359,12 +525,11 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
         url = "http://localhost:" + self.port + "/v1/%s/%s/?params=%s,%s" %\
                 ("getthumbnailid", self.pub_id, self.vid, "invalid_vid")
-        ip = "203.02.113.7"
+        ip = "203.2.113.7"
         headers = {"X-Forwarded-For" : ip}
         response = self.make_api_request(url, headers)
         self.assertIsNotNone(response)
         self.assertEqual(response.read(), "thumb1,null")
-
 
 if __name__ == '__main__':
     unittest.main()

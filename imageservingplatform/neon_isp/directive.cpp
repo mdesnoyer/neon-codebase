@@ -4,6 +4,9 @@
 #include "directive.h"
 #include "neonException.h"
 #include "mastermind.h"
+extern "C" {
+    #include "neon_utils.h"
+}
 
 /*
  *   Directive
@@ -134,9 +137,13 @@ Directive::GetVideoIdRef() const
     return videoId;
 }
 
+/*
+ * For a given bucketId, select the fraction  
+ *
+ * */
 
 const Fraction *
-Directive::GetFraction(unsigned char * hash_string, int hash_string_len) const
+Directive::GetFraction(unsigned char * bucketId, int bucketIdLen) const
 {
     //GDB: print *(fractions._M_impl._M_start)@fractions.size()
     if(fractions.size() == 0)
@@ -152,17 +159,19 @@ Directive::GetFraction(unsigned char * hash_string, int hash_string_len) const
         individual_fractions.push_back(pcnt);
         cumulative_fractions.push_back(total_pcnt);
     }
-    unsigned long hash = Directive::neon_sdbm_hash(hash_string, hash_string_len);
-    if(hash_string == 0){
-        // hash_string is empty for some reason
+    
+    
+    if(bucketId == 0 or bucketIdLen <= 0){
+        // If bucketId is empty, the user isnt' part of AB test yet 
         // Pick the fraction with max pcnt
         index = std::distance(individual_fractions.begin(), 
                                 std::max_element(individual_fractions.begin(), 
                                 individual_fractions.end())); 
     }else{
         // Pick the AB test bucket
+        double bId = (double) atoi((const char *)bucketId); // BucketId is int
         for(i=0 ; i< cumulative_fractions.size(); i++){
-            if ((double)hash < (cumulative_fractions[i] * ULONG_MAX))
+            if (bId < (cumulative_fractions[i] * N_ABTEST_BUCKETS))
                 break;    
         }
         index = i;
@@ -185,19 +194,3 @@ Directive::GetKey() const
     composite.append(videoId);
     return composite;
 }
-
-unsigned long
-Directive::neon_sdbm_hash(unsigned char *str, int s_len) 
-{
-    unsigned long hash = 0;
-    int c, i=0;
-
-    if(str){
-        while ((c = *str++) && i++ < s_len){
-            hash = c + (hash << 6) + (hash << 16) - hash;
-        }
-    }
-
-    return hash;
-}
-

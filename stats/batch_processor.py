@@ -482,6 +482,7 @@ def main():
         thread = ImpalaTableBuilder(cleaned_output_path, cluster_info, event)
         thread.start()
         threads.append(thread)
+        time.sleep(1)
 
     # Wait for all of the tables to be built
     for thread in threads:

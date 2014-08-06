@@ -27,16 +27,19 @@ static char *ngx_http_neon_client_hook(ngx_conf_t *cf, ngx_command_t *cmd, void 
 static char *ngx_http_neon_server_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_neon_getthumbnailid_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_neon_healthcheck_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+static ngx_int_t ngx_http_neon_handler_healthcheck(ngx_http_request_t *r);
+
 static char *ngx_http_neon_stats_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_neon_mastermind_file_url(ngx_conf_t *cf, void *post, void *data);
 static char *ngx_http_neon_mastermind_validated_filepath(ngx_conf_t *cf, void *post, void *data);
 static char *ngx_http_neon_updater_sleep_time(ngx_conf_t *cf, void *post, void *data);
-static ngx_int_t ngx_http_neon_handler_healthcheck(ngx_http_request_t *r);
+static char *ngx_http_neon_fetch_s3cmd_config_filepath(ngx_conf_t *cf, void *post, void *data);
 
 // config handlers
 static ngx_conf_post_handler_pt ngx_http_neon_mastermind_file_url_p = ngx_http_neon_mastermind_file_url;
 static ngx_conf_post_handler_pt ngx_http_neon_mastermind_validated_filepath_p = ngx_http_neon_mastermind_validated_filepath;
 static ngx_conf_post_handler_pt ngx_http_neon_updater_sleep_time_p = ngx_http_neon_updater_sleep_time;
+static ngx_conf_post_handler_pt ngx_http_neon_fetch_s3cmd_config_filepath_p = ngx_http_neon_fetch_s3cmd_config_filepath;
 
 // Module Hook Methods
 ngx_int_t neon_init_process(ngx_cycle_t *cycle);
@@ -54,11 +57,10 @@ typedef struct {
     time_t updater_fetch_timeout;
     ngx_str_t mastermind_filepath;
     ngx_str_t mastermind_validated_filepath;
+    ngx_str_t neon_fetch_s3cmd_config_filepath;
 } ngx_http_neon_loc_conf_t;
 
-static time_t updater_sleep_time;
-static ngx_str_t mastermind_file_url_str;
-static ngx_str_t mastermind_validated_filepath;
+static ngx_http_neon_loc_conf_t ngx_http_neon_loc_conf;
 
 /*
  *  Our directives in config
@@ -122,6 +124,13 @@ static ngx_command_t  ngx_http_neon_commands[] = {
         offsetof(ngx_http_neon_loc_conf_t, updater_sleep_time),
         &ngx_http_neon_updater_sleep_time_p},
     
+    { ngx_string("s3cmd_config_filepath"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1|NGX_CONF_NOARGS,
+        ngx_conf_set_str_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_neon_loc_conf_t, neon_fetch_s3cmd_config_filepath),
+        &ngx_http_neon_fetch_s3cmd_config_filepath_p},
+    
     ngx_null_command
 };
 
@@ -160,7 +169,7 @@ ngx_http_neon_merge_loc_conf(ngx_conf_t * cf, void * parent, void * child)
 ///// NGINX & ISP custom config parsing //////  
 
 /*
- * Get the location 
+ * Get the location of file to download  
  * */
 static char *
 ngx_http_neon_mastermind_file_url(ngx_conf_t *cf, void *post, void *data)
@@ -180,8 +189,8 @@ ngx_http_neon_mastermind_file_url(ngx_conf_t *cf, void *post, void *data)
         return NGX_CONF_ERROR;
     }
 
-    mastermind_file_url_str.data = name->data;
-    mastermind_file_url_str.len = ngx_strlen(mastermind_file_url_str.data);
+    ngx_http_neon_loc_conf.mastermind_file_url.data = name->data;
+    ngx_http_neon_loc_conf.mastermind_file_url.len = ngx_strlen(name->data);
 
     return NGX_CONF_OK;
 }
@@ -203,10 +212,8 @@ ngx_http_neon_mastermind_validated_filepath(ngx_conf_t *cf, void *post, void *da
         return NGX_CONF_ERROR;
     }
     
-    mastermind_validated_filepath.data = name->data;
-    mastermind_validated_filepath.len = ngx_strlen(name->data);
-    
-    neon_log_error("Parsed mastermind fp %s", mastermind_validated_filepath.data);
+    ngx_http_neon_loc_conf.mastermind_validated_filepath.data = name->data;
+    ngx_http_neon_loc_conf.mastermind_validated_filepath.len = ngx_strlen(name->data);
     return NGX_CONF_OK;
 }
 
@@ -219,11 +226,29 @@ ngx_http_neon_updater_sleep_time(ngx_conf_t *cf, void *post, void *data){
         return NGX_CONF_ERROR;
     }    
     
-    updater_sleep_time = *name; 
-    neon_log_error("Parsed updater sleep time %d", updater_sleep_time);
+    ngx_http_neon_loc_conf.updater_sleep_time = *name; 
     return NGX_CONF_OK;
 }
 
+/*
+ * Check if a configuration path is set to be used for s3cmd 
+ *
+ * */
+
+static char *
+ngx_http_neon_fetch_s3cmd_config_filepath(ngx_conf_t *cf, void *post, void *data)
+{
+    ngx_str_t  *name = data; // i.e., first field of var
+   
+    if (name == NULL || ngx_strcmp(name->data, "") == 0){
+        ngx_http_neon_loc_conf.neon_fetch_s3cmd_config_filepath.data = NULL;
+        ngx_http_neon_loc_conf.neon_fetch_s3cmd_config_filepath.len = 0;
+    }else{
+        ngx_http_neon_loc_conf.neon_fetch_s3cmd_config_filepath.data = name->data;
+        ngx_http_neon_loc_conf.neon_fetch_s3cmd_config_filepath.len = ngx_strlen(name->data);
+    }
+    return NGX_CONF_OK;
+}
 
 /* Module Context
  *
@@ -279,10 +304,11 @@ ngx_module_t ngx_http_neon_module = {
   NGX_MODULE_V1_PADDING
 };
 
-
-
 ngx_int_t neon_init_process(ngx_cycle_t *cycle){
-    neon_updater_config_init(mastermind_file_url_str.data, mastermind_validated_filepath.data, updater_sleep_time); 
+    neon_updater_config_init(ngx_http_neon_loc_conf.mastermind_file_url.data, 
+                   ngx_http_neon_loc_conf.mastermind_validated_filepath.data, 
+                   ngx_http_neon_loc_conf.neon_fetch_s3cmd_config_filepath.data, 
+                   ngx_http_neon_loc_conf.updater_sleep_time); 
     neon_start_updater();
     return 0;
 }
@@ -388,23 +414,21 @@ static ngx_int_t ngx_http_neon_handler_healthcheck(ngx_http_request_t *r)
     int status = neon_mastermind_healthcheck();
     
     // no mastermind data available, no service
-    if(status == 0) {
-        r->headers_out.status = NGX_HTTP_SERVICE_UNAVAILABLE ;
+    if(status == 0){
+        r->headers_out.status = NGX_HTTP_SERVICE_UNAVAILABLE;
         body = pageOutOfService;
     }
-    
     // mastermind data available
     else {
         
         r->headers_out.status = NGX_HTTP_OK;
        
-           //TODO: status to be 400 for others
-        
         // expired but otherwise serviceable
         if(status == 1)
             body = pageInServiceExpired;
+
         // status 2, mastermind data is current
-        else
+        if(status == 2)
             body = pageInServiceCurrent;
     }
     

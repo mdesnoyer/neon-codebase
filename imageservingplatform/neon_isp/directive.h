@@ -9,8 +9,10 @@
 #define _NEON_DIRECTIVE__
 
 #include <vector>
-#include "rapidjson/document.h"
+
 #include "fraction.h"
+#include "neon_constants.h"
+#include "rapidjson/document.h"
 
 
 /*
@@ -43,8 +45,8 @@ public:
     
     const Fraction * GetFraction(unsigned char * hash_string, int hash_string_len) const;
     
-    static unsigned long neon_sdbm_hash(unsigned char *str, int s_len) ;
-    
+    Fraction * GetFraction(int index) {return fractions[index];};
+
 protected:
     
     std::string  accountId;
