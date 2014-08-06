@@ -41,6 +41,7 @@ import utils.http
 from utils.inputsanitizer import InputSanitizer
 import utils.neon
 import utils.ps
+import utils.sync
 
 import boto.exception
 from utils.s3 import S3Connection
@@ -180,8 +181,8 @@ class BaseTrackerDataV2(object):
 
         self.eventData = {}
 
-    @tornado.coroutine
-    def fill_thumbnail_ids(self):
+    @tornado.gen.coroutine
+    def fill_thumbnail_ids(self, request):
         '''Fills the thumbnail ids for the event.
 
         Must be implemented by subclasses if necessary, but defaults
@@ -201,12 +202,13 @@ class BaseTrackerDataV2(object):
             except tornado.web.MissingArgumentError:
                 # It's optional, so stop
                 return
-            tid = yield self._lookup_thumbnail_ids_from_isp(bn)
-            if tid is None:
+            tids = yield self._lookup_thumbnail_ids_from_isp([bn])
+            if tids[0] is None:
                 raise
-            self.eventData['thumbnailId'] = InputSanitizer.sanitize_null(tid)
+            self.eventData['thumbnailId'] = InputSanitizer.sanitize_null(
+                tids[0])
 
-    @tornado.coroutine
+    @tornado.gen.coroutine
     def _lookup_thumbnail_ids_from_isp(self, basenames):
         '''Uses the image serving platform to find the thumbnails ids.
 
@@ -244,32 +246,33 @@ class BaseTrackerDataV2(object):
         if len(to_req) > 0:
             headers = {"Cookie" : self.neonUserId} if self.neonUserId else None
             request = tornado.httpclient.HTTPRequest(
-                '%s:%s/getthumbnailid/%s?params=%s' % (options.isp_host,
-                                                       options.isp_port,
-                                                       self.trackerAccountId,
-                                                       ','.join(to_req)),
+                'http://%s:%s/getthumbnailid/%s?params=%s' % (
+                    options.isp_host,
+                    options.isp_port,
+                    self.trackerAccountId,
+                    ','.join(to_req)),
                 headers=headers)
-                response = tornado.gen.Task(utils.http.send_request, request)
-                if response.error:
+            response = yield tornado.gen.Task(utils.http.send_request, request)
+            if response.error:
                     
-                    statemon.stats.increment('isp_connection_error')
-                    _log.error('Error getting tids from the image serving '
-                               'platform.')
-                    raise tornado.web.HTTPError(500, str(response.error))
-
-                tid_response = response.body.split(',')
-                if len(tid_resp) != len(to_req):
-                    _log.error('Response from the Image Serving Platform is '
-                               'invalid. Request was %s. Response was %s' % 
-                               (request.url, response.body))
-                    raise tornado.web.HTTPError(500)
-                for i in range(len(to_req)):
-                    if tid_response[i] == 'null':
-                        statemon.state.increment('unknown_basename')
-                        _log.error('No thumbnail id known for video id %s' %
-                                   to_req[i])
-                    else:
-                        tids[i] = tid_response[i]
+                statemon.stats.increment('isp_connection_error')
+                _log.error('Error getting tids from the image serving '
+                           'platform.')
+                raise tornado.web.HTTPError(500, str(response.error))
+            
+            tid_response = response.body.split(',')
+            if len(tid_response) != len(to_req):
+                _log.error('Response from the Image Serving Platform is '
+                           'invalid. Request was %s. Response was %s' % 
+                           (request.url, response.body))
+                raise tornado.web.HTTPError(500)
+            for i in range(len(to_req)):
+                if tid_response[i] == 'null':
+                    statemon.state.increment('unknown_basename')
+                    _log.error('No thumbnail id known for video id %s' %
+                               to_req[i])
+                else:
+                    tids[i] = tid_response[i]
 
         raise tornado.gen.Return(tids)
 
@@ -321,9 +324,9 @@ class BaseTrackerDataV2(object):
                 'flume.avro.schema.url' : schema_url
                 }, body=encoded_str.getvalue())
 
-    @optional_sync
-    @tornado.coroutine
     @staticmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def generate(request_handler):
         '''A Factory generator to make the event.
 
@@ -336,12 +339,13 @@ class BaseTrackerDataV2(object):
             'ic' : ImageClicked,
             'vp' : VideoPlay,
             'vc' : VideoClick,
-            'ap' : AdPlay}
+            'ap' : AdPlay,
+            'vvp' : VideoViewPercentage}
 
         action = request_handler.get_argument('a')
         try:
             event = event_map[action](request_handler)
-            yield event.lookup_thumbnail_ids()
+            yield event.fill_thumbnail_ids(request_handler)
             raise tornado.gen.Return(event)
         except KeyError as e:
             _log.error('Invalid event: %s' % action)
@@ -355,14 +359,14 @@ class ImagesVisible(BaseTrackerDataV2):
         self.eventType = 'IMAGES_VISIBLE'
         self.eventData['thumbnailIds'] = []
 
-    @tornado.coroutine
-    def fill_thumbnail_ids(self):
+    @tornado.gen.coroutine
+    def fill_thumbnail_ids(self, request):
         try:
             tids = request.get_argument('tids').split(',')
         except tornado.web.MissingArgumentError:
             tids = yield self._lookup_thumbnail_ids_from_isp(
                 request.get_argument('bns').split(','))
-        self.eventData['thumbnailIds'] = [x for x in tids where x is not None]
+        self.eventData['thumbnailIds'] = [x for x in tids if x is not None]
 
 class ImagesLoaded(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
@@ -372,8 +376,8 @@ class ImagesLoaded(BaseTrackerDataV2):
         self.eventType = 'IMAGES_LOADED'
         self.eventData['images'] = [] 
 
-    @tornado.coroutine
-    def fill_thumbnail_ids(self):
+    @tornado.gen.coroutine
+    def fill_thumbnail_ids(self, request):
         tids = []
         vids = []
         widths = []
@@ -386,7 +390,7 @@ class ImagesLoaded(BaseTrackerDataV2):
         except tornado.web.MissingArgumentError:
             arg_list = request.get_argument('bns')
         if len(arg_list) > 0:
-            for tup in arg_list.split(',')
+            for tup in arg_list.split(','):
                 elems = tup.split(' ') # '+' delimiter converts to ' '
                 if has_tids:
                     tids.append(elems[0])
@@ -398,7 +402,7 @@ class ImagesLoaded(BaseTrackerDataV2):
             if not has_tids:
                 tids = yield self._lookup_thumbnail_ids_from_isp(vids)
 
-            for w, h, tid for zip(widths, heights, tids):
+            for w, h, tid in zip(widths, heights, tids):
                 if tid is not None:
                     images.append({'thumbnailId' : tid,
                                    'width' : w,
@@ -421,18 +425,22 @@ class ImageClicked(BaseTrackerDataV2):
             'x' : float(request.get_argument('wx', 0)),
             'y' : float(request.get_argument('wy', 0))
             }
+        self.eventData['imageCoords'] = {
+            'x' : float(request.get_argument('cx', 0)),
+            'y' : float(request.get_argument('cy', 0))
+            }
 
-    @tornado.coroutine
-    def fill_thumbnail_ids(self):
+    @tornado.gen.coroutine
+    def fill_thumbnail_ids(self, request):
         '''The thumbnail id is required, so we can't use the default.'''
         try:
             self.eventData['thumbnailId'] = request.get_argument('tid')
         except tornado.web.MissingArgumentError:
-            tid = yield self._lookup_thumbnail_ids_from_isp(
-                request.get_argument('bn'))
-            if tid is None:
+            tids = yield self._lookup_thumbnail_ids_from_isp(
+                [request.get_argument('bn')])
+            if tids[0] is None:
                 raise
-            self.eventData['thumbnailId'] = tid
+            self.eventData['thumbnailId'] = tids[0]
 
 class VideoClick(BaseTrackerDataV2):
     '''An event specifying that the image was clicked within the player'''
@@ -492,7 +500,7 @@ class VideoViewPercentage(BaseTrackerDataV2):
         super(VideoViewPercentage, self).__init__(request)
         self.eventData['isVideoViewPercentage'] = True
 
-        self.eventType = 'VIDEO_VIEW_PERCENTAGE',
+        self.eventType = 'VIDEO_VIEW_PERCENTAGE'
 
         # External video id
         self.eventData['videoId'] = request.get_argument('vid')
@@ -507,8 +515,8 @@ class VideoViewPercentage(BaseTrackerDataV2):
         except TypeError:
             raise tornado.web.MissingArgumentError('prcnt')
 
-    @tornado.coroutine
-    def fill_thumbnail_ids(self):
+    @tornado.gen.coroutine
+    def fill_thumbnail_ids(self, request):
         '''There is no thumbnail id for this event, so just return.'''
         return
 
@@ -519,7 +527,7 @@ class VideoViewPercentage(BaseTrackerDataV2):
 class TrackerDataHandler(tornado.web.RequestHandler):
     '''Common class to handle http requests to the tracker.'''
 
-    @tornado.coroutine
+    @tornado.gen.coroutine
     def parse_tracker_data(self, version):
         '''Parses the tracker data from a GET request.
 
@@ -529,7 +537,8 @@ class TrackerDataHandler(tornado.web.RequestHandler):
         if version == 1:
             raise tornado.gen.Return(self._parse_v1_tracker_data())
         elif version == 2:
-            yield BaseTrackerDataV2.generate(self, async=True)
+            event = yield BaseTrackerDataV2.generate(self, async=True)
+            raise tornado.gen.Return(event)
         else:
             _log.fatal('Invalid api version %s' % version)
             raise ValueError('Bad version %s' % version)
@@ -641,7 +650,7 @@ class LogLines(TrackerDataHandler):
             #statemon.state.increment('messages_handled')
             
             try:
-                tracker_data = self.parse_tracker_data(self.version)
+                tracker_data = yield self.parse_tracker_data(self.version)
             except tornado.web.MissingArgumentError as e:
                 _log.error('Invalid request: %s' % self.request.uri)
                 statemon.state.increment('invalid_messages')
@@ -653,7 +662,7 @@ class LogLines(TrackerDataHandler):
                 raise
             except Exception, err:
                 _log.exception("key=get_track request=%s msg=%s",
-                               (self.request.uri, err))
+                               self.request.uri, err)
                 statemon.state.increment('internal_server_error')
                 self.set_status(500)
                 self.finish()

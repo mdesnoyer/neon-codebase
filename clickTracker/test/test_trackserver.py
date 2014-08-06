@@ -34,6 +34,7 @@ import time
 import tornado.testing
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
 import urllib
+import urlparse
 import unittest
 import utils.neon
 from utils.options import options
@@ -77,7 +78,9 @@ class TestFileBackupHandler(unittest.TestCase):
                         'x' : '3467',
                         'y' : '123',
                         'wx' : '567',
-                        'wy' : '9678'}
+                        'wy' : '9678',
+                        'cx' : '49',
+                        'cy' : '65'}
         def mock_click_get_argument(field, default=[]):
             return click_fields[field]
         mock_click_request.get_argument.side_effect = mock_click_get_argument
@@ -241,6 +244,12 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
           lambda events, callback: self.io_loop.add_callback(callback,
                                                              Status.OK)
 
+        self.isp_patcher = patch(
+            'clickTracker.trackserver.utils.http.send_request')
+        self.bn_map = {}
+        self.isp_mock = self.isp_patcher.start()
+        self.isp_mock.side_effect = self.mock_isp_response
+
         self.thrift_transport_patcher = patch('clickTracker.trackserver.TTornado.TTornadoStreamTransport')
         self.thrift_transport_mock = self.thrift_transport_patcher.start()
         self.thrift_transport_mock().open.side_effect = \
@@ -256,13 +265,12 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
 
         random.seed(168984)
 
-        
-
     def tearDown(self):
         options._set('clickTracker.trackserver.flume_flush_interval',
                      self.old_flush_interval)
         self.thrift_patcher.stop()
         self.thrift_transport_patcher.stop()
+        self.isp_patcher.stop()
         
         super(TestFullServer, self).tearDown()
         clickTracker.trackserver.os = os
@@ -270,6 +278,25 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
 
     def get_app(self):
         return self.server_obj.application
+
+    
+    def mock_isp_response(self, request, retries=1, callback=None):
+        if request.url.endswith('.avsc'):
+            retval = tornado.httpclient.HTTPResponse(
+                request, 200)
+        else:
+            bns = urlparse.parse_qs(urlparse.urlparse(request.url).query
+                                    )['params'][0].split(',')
+            retval = tornado.httpclient.HTTPResponse(
+                request,
+                200,
+                buffer=StringIO(','.join([self.bn_map.get(x, None) 
+                                          for x in bns])))
+
+        if callback:
+            callback(retval)
+        else:
+            return retval
 
     def check_message_sent(self, url_params, ebody, neon_id=None,
                            path='/v2'):
@@ -400,7 +427,9 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'x' : '56',
               'y' : '23',
               'wx' : '78',
-              'wy' : '34'},
+              'wy' : '34',
+              'cx' : '6',
+              'cy' : '8'},
             { 'eventType' : 'IMAGE_CLICK',
               'pageId' : 'pageid123',
               'trackerAccountId' : 'tai123',
@@ -418,7 +447,11 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
                   'windowCoords' : {
                       'x' : 78,
                       'y' : 34
-                      }
+                      },
+                  'imageCoords' : {
+                      'x' : 6,
+                      'y' : 8
+                      },
                   },
               'neonUserId' : 'neon_id1'},
               'neon_id1'
@@ -522,6 +555,36 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'neonUserId' : 'neon_id1'},
               'neon_id1'
             )
+
+        # Video view percentage
+        self.check_message_sent(
+            { 'a' : 'vvp',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'vid' : 'vid1',
+              'pcount' : '1',
+              'prcnt' : '23'
+              },
+            { 'eventType' : 'VIDEO_VIEW_PERCENTAGE',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'videoId' : 'vid1',
+                  'playCount': 1,
+                  'percent': 23.0,
+                  'isVideoViewPercentage' : True
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
     def test_v2_secondary_endpoint(self):
         self.check_message_sent(
             { 'a' : 'iv',
@@ -577,50 +640,211 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'neonUserId' : 'neon_id1'},
               'neon_id1'
             )
-    def test_v1_valid_messages(self):
-        # A load message
+
+    def test_no_tids_but_basename(self):
+        self.bn_map = {
+            'acct1_vid2' : 'acct1_vid2_tid1',
+            'acct1_vid3' : 'acct1_vid3_tid0'
+            }
+
+        # Image Visible Message
         self.check_message_sent(
-            { 'a' : 'load',
-              'id' : 'pageid123',
+            { 'a' : 'iv',
+              'pageid' : 'pageid123',
               'tai' : 'tai123',
-              'ttype' : 'html5',
+              'ttype' : 'brightcove',
               'page' : 'http://go.com',
-              'ts' : '2345623',
-              'cvid' : 'vid1',
-              'imgs' : '["http://img1.jpg", "img2.jpg"]'},
-            { 'a' : 'load',
-              'id' : 'pageid123',
-              'tai' : 'tai123',
-              'ttype' : 'html5',
-              'page' : 'http://go.com',
-              'ts' : '2345623',
-              'cvid' : 'vid1',
-              'imgs' : ["http://img1.jpg", "img2.jpg"],
-              'cip': '127.0.0.1'},
-              path='/track'
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'bns' : 'neonvid_acct1_vid2,neontn_acct1_vid3_tid2.jpg'},
+            { 'eventType' : 'IMAGES_VISIBLE',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData': { 
+                  'isImagesVisible' : True,
+                  'thumbnailIds' : ['acct1_vid2_tid1', 'acct1_vid3_tid2']
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
             )
 
-        # An image click message
+        # Image loaded message
         self.check_message_sent(
-            { 'a' : 'click',
-              'id' : 'pageid123',
+            { 'a' : 'il',
+              'pageid' : 'pageid123',
               'tai' : 'tai123',
-              'ttype' : 'html5',
+              'ttype' : 'brightcove',
               'page' : 'http://go.com',
-              'ts' : '2345623',
-              'img' : 'http://img1.jpg',
-              'xy' : '23,45'},
-            { 'a' : 'click',
-              'id' : 'pageid123',
-              'tai' : 'tai123',
-              'ttype' : 'html5',
-              'page' : 'http://go.com',
-              'ts' : '2345623',
-              'img' : "http://img1.jpg",
-              'xy' : '23,45',
-              'cip': '127.0.0.1'},
-              path='/track'
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'bns' : ('neonvid_acct1_vid2 56 67,'
+                       'neontn_acct1_vid3_tid2.jpg 89 123')}, #tornado converts + to " "
+            { 'eventType' : 'IMAGES_LOADED',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData': {
+                  'isImagesLoaded' : True,
+                  'images' : [
+                  {'thumbnailId': 'acct1_vid2_tid1',
+                   'height' : 67,
+                   'width' :56 },
+                  {'thumbnailId': 'acct1_vid3_tid2',
+                   'height' : 123,
+                   'width' : 89}]},
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
             )
+
+        # Image clicked message
+        self.check_message_sent(
+            { 'a' : 'ic',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'bn' : 'neonvid_acct1_vid3',
+              'x' : '56',
+              'y' : '23',
+              'wx' : '78',
+              'wy' : '34',
+              'cx' : '6',
+              'cy' : '8'},
+            { 'eventType' : 'IMAGE_CLICK',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'isImageClick' : True,
+                  'thumbnailId' : 'acct1_vid3_tid0',
+                  'pageCoords' : {
+                      'x' : 56,
+                      'y' : 23,
+                      },
+                  'windowCoords' : {
+                      'x' : 78,
+                      'y' : 34
+                      },
+                  'imageCoords' : {
+                      'x' : 6,
+                      'y' : 8
+                      },
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
+        
+        #Video clicked message
+        self.check_message_sent(
+            { 'a' : 'vc',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'vid' : 'vid1',
+              'bn' : 'neontn_acct1_vid2_tid1.png',
+              'playerid' : 'brightcoveP123',
+              },
+            { 'eventType' : 'VIDEO_CLICK',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'videoId' : 'vid1',
+                  'thumbnailId' : 'acct1_vid2_tid1',
+                  'playerId' : 'brightcoveP123',
+                  'isVideoClick' : True
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
+
+        # Video play message
+        self.check_message_sent(
+            { 'a' : 'vp',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'bn' : 'neonvid_acct1_vid3',
+              'vid' : 'vid1',
+              'adplay': 'False',
+              'adelta': 'null',
+              'pcount': '1',
+              'playerid' : 'brightcoveP123'},
+            { 'eventType' : 'VIDEO_PLAY',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'thumbnailId' : 'acct1_vid3_tid0',
+                  'videoId' : 'vid1',
+                  'didAdPlay': False,
+                  'autoplayDelta': None,
+                  'playCount': 1,
+                  'playerId' : 'brightcoveP123',
+                  'isVideoPlay' : True
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
+
+        # Ad play message
+        self.check_message_sent(
+            { 'a' : 'ap',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'bn' : 'neonvid_acct1_vid3',
+              'vid' : 'vid1',
+              'adelta': '214',
+              'pcount' : '1',
+              'playerid' : 'brightcoveP123',
+              },
+            { 'eventType' : 'AD_PLAY',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'thumbnailId' : 'acct1_vid3_tid0',
+                  'videoId' : 'vid1',
+                  'autoplayDelta': 214,
+                  'playCount': 1,
+                  'playerId' : 'brightcoveP123',
+                  'isAdPlay' : True
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
+
 
     def test_error_connecting_to_flume(self):
         # Simulate a connection error

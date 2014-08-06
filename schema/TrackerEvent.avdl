@@ -51,6 +51,7 @@ record ImageClick {
   string thumbnailId;
   Coords pageCoords; // Coordinates of the click relative to the page
   Coords windowCoords; // Coordinates of the click relative to the visible window
+  Coords imageCoords; // Coordinates of the click relative to the image
 }
 
 
