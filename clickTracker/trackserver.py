@@ -84,8 +84,6 @@ statemon.define('not_interesting_message', int)
 
 class NotInterestingData(Exception): pass
 
-# TODO(mdesnoyer): Remove version 1 code once it is phased out
-
 #############################################
 #### DATA FORMAT ###
 #############################################
