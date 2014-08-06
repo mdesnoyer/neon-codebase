@@ -1,6 +1,6 @@
 {
   "type" : "record",
-  "name" : "ImageClickHive",
+  "name" : "VideoViewPercentageHive",
   "namespace" : "com.neon.Tracker",
   "fields" : [ {
     "name" : "pageId",
@@ -68,35 +68,14 @@
     "name" : "ipGeoData_lon",
     "type" : [ "null", "float" ]
   }, {
-    "name" : "thumbnail_id",
-    "type" : [ "null", "string" ]
+    "name" : "videoId",
+    "type" : "string"
   }, {
-    "name" : "video_id",
-    "type" : [ "null", "string" ]
+    "name" : "playCount",
+    "type" : "int"
   }, {
-    "name" : "pageCoords_x",
-    "type" : [ "null", "float" ]
-  }, {
-    "name" : "pageCoords_y",
-    "type" : [ "null", "float" ]
-  }, {
-    "name" : "windowCoords_x",
-    "type" : [ "null", "float" ]
-  }, {
-    "name" : "windowCoords_y",
-    "type" : [ "null", "float" ]
-  }, {
-    "name" : "imageCoords_x",
-    "type" : [ "null", "float" ]
-  }, {
-    "name" : "imageCoords_y",
-    "type" : [ "null", "float" ]
-  }, {
-    "name" : "isClickInPlayer",
-    "type" : "boolean"
-  }, {
-    "name" : "isRightClick",
-    "type" : "boolean"
+    "name" : "percent",
+    "type" : "float"
   }, {
     "name" : "sequenceId",
     "type" : "long"
