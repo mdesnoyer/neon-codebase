@@ -154,7 +154,7 @@ class BaseTrackerDataV2(object):
         # tracker_type (brightcove, ooyala, bcgallery, ign as of April 2014)
         try:
             self.trackerType = \
-              BaseTrackerDataV2.tracker_type_map[request.get_argument('ttype')]
+              BaseTrackerDataV2.tracker_type_map[request.get_argument('ttype').lower()]
         except KeyError:
             raise tornado.web.HTTPError(
                 400, "Invalid ttype %s" % request.get_argument('ttype'))

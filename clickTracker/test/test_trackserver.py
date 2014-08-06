@@ -994,6 +994,18 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'tids' : 'acct1_vid2_tid1'}))
         self.assertEqual(response.code, 400)
 
+    def test_caseinsentive_tracker_type(self):
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'iv',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'BRIGHTCOVE',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'tids' : 'acct1_vid2_tid1'}))
+        self.assertEqual(response.code, 200)
+
     def test_invalid_tracker_type(self):
         response = self.fetch('/v2?%s' % urllib.urlencode(
             {'a' : 'il',
