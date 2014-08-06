@@ -676,7 +676,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'neon_id1'
             )
         bnrequest = self.isp_mock.call_args[0][0]
-        self.assertEqual(bnrequest.url, 'http://127.0.0.1:8089/getthumbnailid/tai123?params=acct1_vid2,acct1_vid5')
+        self.assertEqual(bnrequest.url, 'http://127.0.0.1:8089/v1/getthumbnailid/tai123?params=acct1_vid2,acct1_vid5')
         self.assertDictContainsSubset({'Cookie' : 'neonglobaluserid=neon_id1'},
                                       bnrequest.headers)
 

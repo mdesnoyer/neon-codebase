@@ -214,7 +214,7 @@ class BaseTrackerDataV2(object):
             headers = ({"Cookie" : 'neonglobaluserid=%s' % self.neonUserId} 
                        if self.neonUserId else None)
             request = tornado.httpclient.HTTPRequest(
-                'http://%s:%s/getthumbnailid/%s?params=%s' % (
+                'http://%s:%s/v1/getthumbnailid/%s?params=%s' % (
                     options.isp_host,
                     options.isp_port,
                     self.trackerAccountId,
