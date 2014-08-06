@@ -644,7 +644,8 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
     def test_no_tids_but_basename(self):
         self.bn_map = {
             'acct1_vid2' : 'acct1_vid2_tid1',
-            'acct1_vid3' : 'acct1_vid3_tid0'
+            'acct1_vid3' : 'acct1_vid3_tid0',
+            'acct1_vid5' : 'acct1_vid5_tid5'
             }
 
         # Image Visible Message
@@ -656,7 +657,8 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'bns' : 'neonvid_acct1_vid2,neontn_acct1_vid3_tid2.jpg'},
+              'bns' : ('neonvid_acct1_vid2,neonvid_acct1_vid5,'
+                       'neontn_acct1_vid3_tid2.jpg')},
             { 'eventType' : 'IMAGES_VISIBLE',
               'pageId' : 'pageid123',
               'trackerAccountId' : 'tai123',
@@ -666,11 +668,17 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'clientTime' : 2345623,
               'eventData': { 
                   'isImagesVisible' : True,
-                  'thumbnailIds' : ['acct1_vid2_tid1', 'acct1_vid3_tid2']
+                  'thumbnailIds' : ['acct1_vid2_tid1',
+                                    'acct1_vid5_tid5',
+                                    'acct1_vid3_tid2']
                   },
               'neonUserId' : 'neon_id1'},
               'neon_id1'
             )
+        bnrequest = self.isp_mock.call_args[0][0]
+        self.assertEqual(bnrequest.url, 'http://127.0.0.1:8089/getthumbnailid/tai123?params=acct1_vid2,acct1_vid5')
+        self.assertDictContainsSubset({'Cookie' : 'neonglobaluserid=neon_id1'},
+                                      bnrequest.headers)
 
         # Image loaded message
         self.check_message_sent(

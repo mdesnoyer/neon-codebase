@@ -247,7 +247,8 @@ class BaseTrackerDataV2(object):
         # Send a request to the image serving platform for all the video ids
         to_req =  [x for x in vids if x is not None]
         if len(to_req) > 0:
-            headers = {"Cookie" : self.neonUserId} if self.neonUserId else None
+            headers = ({"Cookie" : 'neonglobaluserid=%s' % self.neonUserId} 
+                       if self.neonUserId else None)
             request = tornado.httpclient.HTTPRequest(
                 'http://%s:%s/getthumbnailid/%s?params=%s' % (
                     options.isp_host,
