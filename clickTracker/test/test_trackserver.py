@@ -290,7 +290,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
             retval = tornado.httpclient.HTTPResponse(
                 request,
                 200,
-                buffer=StringIO(','.join([self.bn_map.get(x, None) 
+                buffer=StringIO(','.join([self.bn_map.get(x, "null") 
                                           for x in bns])))
 
         if callback:
@@ -845,6 +845,252 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'neon_id1'
             )
 
+    def test_unknown_basename(self):
+        # If the basename is unknown, we should return 200 because it
+        # could be a video we don't care about. However, if there's
+        # nothing we care about, the data shouldn't be sent on.
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'iv',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bns' : 'neonvid_acct1_vid2'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
+
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'il',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bns' : 'some_video.jpg 56 84'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
+
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'ic',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bn' : 'some_video.jpg'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
+
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'vp',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bn' : 'some_video.jpg',
+             'vid' : 'some_video',
+             'adelta' : '520',
+             'pcount' : '2'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
+
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'ap',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bn' : 'some_video.jpg',
+             'vid' : 'some_video',
+             'adelta' : '520',
+             'pcount' : '2'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
+
+    def test_some_valid_basenames(self):
+        # In this case, we will return a 200, and a subset of the data
+        # is sent on.
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'iv',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bns' : 'acct1_vid2,neontn_acct1_vid3_tid.jpg'}))
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 1)
+        request_saw = self.thrift_mock.appendBatch.call_args[0][0][0]
+        msgbuf = StringIO(request_saw.body)
+        body = self.avro_reader.read(avro.io.BinaryDecoder(msgbuf))
+        self.assertEqual(body['eventData']['thumbnailIds'], ['acct1_vid3_tid'])
+
+        self.thrift_mock.appendBatch.reset_mock()
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'il',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bns' : 'acct1_vid2 32 45,neontn_acct1_vid3_tid.jpg 78 94'}))
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 1)
+        request_saw = self.thrift_mock.appendBatch.call_args[0][0][0]
+        msgbuf = StringIO(request_saw.body)
+        body = self.avro_reader.read(avro.io.BinaryDecoder(msgbuf))
+        self.assertEqual(body['eventData']['images'],
+                         [{'thumbnailId' : 'acct1_vid3_tid',
+                           'height' : 94,
+                           'width' : 78}])
+
+    def test_bad_connection_to_isp(self):
+        def _mock_isp(request, retries=1, callback=None):
+            if request.url.endswith('.avsc'):
+                retval = tornado.httpclient.HTTPResponse(
+                    request, 200)
+            else:
+                retval = tornado.httpclient.HTTPResponse(
+                    request, 404, error=tornado.httpclient.HTTPError(404))
+
+            if callback:
+                callback(retval)
+            else:
+                return retval
+        
+        self.isp_mock.side_effect = _mock_isp
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'iv',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bns' : 'neonvid_acct1_vid2'}))
+        self.assertEqual(response.code, 500)
+
+    def test_invalid_event_type(self):
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'abc',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'tids' : 'acct1_vid2_tid1'}))
+        self.assertEqual(response.code, 400)
+
+    def test_invalid_tracker_type(self):
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'il',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'monkeyland',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'tids' : 'acct1_vid2_tid1'}))
+        self.assertEqual(response.code, 400)
+
+    def test_heartbeat(self):
+        response = self.fetch('/healthcheck')
+        self.assertEqual(response.code, 200)
+
+    def test_test_endpoint(self):
+        response = self.fetch('/v2/test?%s' % urllib.urlencode(
+            { 'a' : 'iv',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'tids' : 'tid1,tid2'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
+
+    def test_optional_tid(self):
+        # Video Play
+        self.check_message_sent(
+            { 'a' : 'vp',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'vid' : 'vid1',
+              'adplay': 'False',
+              'adelta': 'null',
+              'pcount': '1',
+              'playerid' : 'brightcoveP123'},
+            { 'eventType' : 'VIDEO_PLAY',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'thumbnailId' : None,
+                  'videoId' : 'vid1',
+                  'didAdPlay': False,
+                  'autoplayDelta': None,
+                  'playCount': 1,
+                  'playerId' : 'brightcoveP123',
+                  'isVideoPlay' : True
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
+
+        # Ad play message
+        self.check_message_sent(
+            { 'a' : 'ap',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'vid' : 'vid1',
+              'adelta': '214',
+              'pcount' : '1',
+              'playerid' : 'brightcoveP123',
+              },
+            { 'eventType' : 'AD_PLAY',
+              'pageId' : 'pageid123',
+              'trackerAccountId' : 'tai123',
+              'trackerType' : 'BRIGHTCOVE',
+              'pageURL' : 'http://go.com',
+              'refURL' : 'http://ref.com',
+              'clientTime' : 2345623,
+              'eventData' : {
+                  'thumbnailId' : None,
+                  'videoId' : 'vid1',
+                  'autoplayDelta': 214,
+                  'playCount': 1,
+                  'playerId' : 'brightcoveP123',
+                  'isAdPlay' : True
+                  },
+              'neonUserId' : 'neon_id1'},
+              'neon_id1'
+            )
+        
 
     def test_error_connecting_to_flume(self):
         # Simulate a connection error
@@ -872,6 +1118,22 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         # Now check the quere for writing to disk to make sure that
         # the data is there.
         self.assertEqual(self.backup_q.qsize(), 1)
+
+    def test_bad_percent_viewed_format(self):
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            { 'a' : 'vvp',
+              'pageid' : 'pageid123',
+              'tai' : 'tai123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'vid' : 'vid1',
+              'pcount' : '1',
+              'prcnt' : 'fifty'
+              }))
+
+        self.assertEqual(response.code, 400)
 
     def test_utf8_header(self):
         # TODO(mdesnoyer): Make this test cleaner

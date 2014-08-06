@@ -80,6 +80,9 @@ statemon.define('invalid_messages', int)
 statemon.define('internal_server_error', int)
 statemon.define('unknown_basename', int)
 statemon.define('isp_connection_error', int)
+statemon.define('not_interesting_message', int)
+
+class NotInterestingData(Exception): pass
 
 # TODO(mdesnoyer): Remove version 1 code once it is phased out
 
@@ -204,7 +207,7 @@ class BaseTrackerDataV2(object):
                 return
             tids = yield self._lookup_thumbnail_ids_from_isp([bn])
             if tids[0] is None:
-                raise
+                raise NotInterestingData()
             self.eventData['thumbnailId'] = InputSanitizer.sanitize_null(
                 tids[0])
 
@@ -255,7 +258,7 @@ class BaseTrackerDataV2(object):
             response = yield tornado.gen.Task(utils.http.send_request, request)
             if response.error:
                     
-                statemon.stats.increment('isp_connection_error')
+                statemon.state.increment('isp_connection_error')
                 _log.error('Error getting tids from the image serving '
                            'platform.')
                 raise tornado.web.HTTPError(500, str(response.error))
@@ -367,6 +370,8 @@ class ImagesVisible(BaseTrackerDataV2):
             tids = yield self._lookup_thumbnail_ids_from_isp(
                 request.get_argument('bns').split(','))
         self.eventData['thumbnailIds'] = [x for x in tids if x is not None]
+        if len(self.eventData['thumbnailIds']) == 0:
+            raise NotInterestingData()
 
 class ImagesLoaded(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
@@ -408,6 +413,8 @@ class ImagesLoaded(BaseTrackerDataV2):
                                    'width' : w,
                                    'height' : h})
         self.eventData['images'] = images
+        if len(self.eventData['images']) == 0:
+            raise NotInterestingData()
             
 
 class ImageClicked(BaseTrackerDataV2):
@@ -439,7 +446,7 @@ class ImageClicked(BaseTrackerDataV2):
             tids = yield self._lookup_thumbnail_ids_from_isp(
                 [request.get_argument('bn')])
             if tids[0] is None:
-                raise
+                raise NotInterestingData()
             self.eventData['thumbnailId'] = tids[0]
 
 class VideoClick(BaseTrackerDataV2):
@@ -512,7 +519,7 @@ class VideoViewPercentage(BaseTrackerDataV2):
         try:
             self.eventData['percent'] = round(
                 float(request.get_argument('prcnt')))
-        except TypeError:
+        except ValueError:
             raise tornado.web.MissingArgumentError('prcnt')
 
     @tornado.gen.coroutine
@@ -660,6 +667,14 @@ class LogLines(TrackerDataHandler):
                     self.request.uri, e))
                 statemon.state.increment('internal_server_error')
                 raise
+            except NotInterestingData as e:
+                # The data wasn't interesting to us even though it was
+                # valid, so just record that and don't send the data
+                # on.
+                statemon.state.increment('not_interesting_message')
+                self.set_status(200)
+                self.finish()
+                return
             except Exception, err:
                 _log.exception("key=get_track request=%s msg=%s",
                                self.request.uri, err)
@@ -691,19 +706,22 @@ class TestTracker(TrackerDataHandler):
         self.version = version
     
     @tornado.web.asynchronous
+    @tornado.gen.coroutine
     def get(self, *args, **kwargs):
         '''Handle a test tracking request.'''
         try:
-            tracker_data = self.parse_tracker_data(self.version)
-            cb = self.get_argument("callback")
+            tracker_data = yield self.parse_tracker_data(self.version)
+        except tornado.web.HTTPError as e:
+            raise
+        except NotInterestingData as e:
+            pass
         except Exception as err:
             _log.exception("key=test_track msg=%s", err) 
+            self.set_status(500)
             self.finish()
             return
         
-        data = tracker_data.to_flume_event()
-        self.set_header("Content-Type", "application/json")
-        self.write(cb + "("+ data + ")") #wrap json data in callback
+        self.set_status(200)
         self.finish()
 
 ###########################################
