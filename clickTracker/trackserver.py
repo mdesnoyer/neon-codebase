@@ -518,24 +518,8 @@ class FlumeBuffer:
     def __init__(self, port, backup_q):
         self.port = port
         self.backup_q = backup_q
-        self.client = None
         self.buffer = []
         self.flush_interval = options.flume_flush_interval
-
-    @tornado.gen.coroutine
-    def _open(self):
-        '''Opens a connection to flume.'''
-
-        try:
-            transport = TTornado.TTornadoStreamTransport('localhost',
-                                                         self.port)
-            pfactory = TCompactProtocol.TCompactProtocolFactory()
-            self.client = ThriftSourceProtocol.Client(transport, pfactory)
-            yield tornado.gen.Task(transport.open)
-            self.is_open = True
-        except TTransport.TTransportException as e:
-            _log.error('Error opening connection to Flume: %s' % e)
-            raise
         
     @tornado.gen.coroutine
     def send(self, event):
@@ -561,24 +545,37 @@ class FlumeBuffer:
         local_buf = self.buffer
         self.buffer = []
 
+        # Open the connection to flume
+        transport = TTornado.TTornadoStreamTransport('localhost', self.port)
+        pfactory = TCompactProtocol.TCompactProtocolFactory()
+        client = ThriftSourceProtocol.Client(transport, pfactory)
         try:
-            yield self._open()
-            
-            status = yield tornado.gen.Task(self.client.appendBatch, local_buf)
+            yield tornado.gen.Task(transport.open)
+        except TTransport.TTransportException as e:
+            _log.error('Error opening connection to Flume: %s' % e)
+            self._register_flume_error(local_buf)
+
+        # Send the data to flume
+        try:            
+            status = yield tornado.gen.Task(client.appendBatch, local_buf)
             if status != Status.OK:
                 raise Thrift.TException('Flume returned error: %s' % status)
         except Thrift.TException as e:
             _log.error('Error writing to Flume: %s' % e)
-            statemon.state.increment('flume_errors')
-            for event in local_buf:
-                self.backup_q.put(event)
+            self._register_flume_error(local_buf)
             
         except IOError as e:
             _log.error('Error writing to Flume stream: %s' % e)
-            statemon.state.increment('flume_errors')
-            for event in local_buf:
-                self.backup_q.put(event)
-        
+            self._register_flume_error(local_buf)
+
+        finally:
+            # Make sure we close the connection to avoid open sockets
+            transport.close()
+
+    def _register_flume_error(self, event_buf=[]):
+        statemon.state.increment('flume_errors')
+        for event in event_buf:
+            self.backup_q.put(event)
 
 class LogLines(TrackerDataHandler):
     '''Handler for real tracking data that should be logged.'''

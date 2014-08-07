@@ -1112,8 +1112,8 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
             )
         
 
-    def test_error_connecting_to_flume(self):
-        # Simulate a connection error
+    def test_flume_error_code(self):
+        # Simulate an error code from the flume server
         self.thrift_mock.appendBatch.side_effect = \
           lambda events, callback: self.io_loop.add_callback(
               callback,
@@ -1138,6 +1138,49 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
         # Now check the quere for writing to disk to make sure that
         # the data is there.
         self.assertEqual(self.backup_q.qsize(), 1)
+
+    def test_flume_connection_error(self):
+        self.thrift_mock.appendBatch.side_effect = [
+            tornado.iostream.StreamClosedError()]
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'iv',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'tids' : 'tid1,tid2'}))
+
+        # If flume is down, we still want to respond with a 200 if it
+        # is stored on disk
+        self.assertEqual(response.code, 200)
+
+        # Now check the quere for writing to disk to make sure that
+        # the data is there.
+        self.assertEqual(self.backup_q.qsize(), 1)
+
+    @patch('clickTracker.trackserver.TTornado.TTornadoStreamTransport')
+    def test_error_opening_flume_connection(self, transport_mock):
+        transport_mock().open.side_effect = [TTransport.TTransportException()]
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'iv',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'tids' : 'tid1,tid2'}))
+
+        # If flume is down, we still want to respond with a 200 if it
+        # is stored on disk
+        self.assertEqual(response.code, 200)
+
+        # Now check the quere for writing to disk to make sure that
+        # the data is there.
+        self.assertEqual(self.backup_q.qsize(), 1)
+        
 
     def test_bad_percent_viewed_format(self):
         response = self.fetch('/v2?%s' % urllib.urlencode(
