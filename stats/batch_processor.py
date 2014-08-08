@@ -478,7 +478,8 @@ def main():
 
     threads = [] 
     for event in ['ImageLoad', 'ImageVisible',
-                  'ImageClick', 'AdPlay', 'VideoPlay', 'EventSequence']:
+                  'ImageClick', 'AdPlay', 'VideoPlay', 'VideoViewPercentage',
+                  'EventSequence']:
         thread = ImpalaTableBuilder(cleaned_output_path, cluster_info, event)
         thread.start()
         threads.append(thread)
