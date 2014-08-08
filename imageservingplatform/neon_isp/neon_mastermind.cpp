@@ -187,8 +187,10 @@ neon_mastermind_tid_lookup(const char * accountId,
         return NEON_MASTERMIND_TID_LOOKUP_FAIL;
 
     
-    (*tid) = mastermind->GetThumbnailID(accountId, videoId, bucketId->data, 
-                                        bucketId->len, *size); 
+    (*tid) = mastermind->GetThumbnailID(accountId, videoId, 
+                                        bucketId->data, 
+                                        bucketId->len, 
+                                        *size); 
 
     
     if(*tid == 0)

@@ -5,7 +5,7 @@ error_log  /tmp/error.log;  events {     worker_connections  1024; }\
 http {     default_type  application/octet-stream; \
     sendfile        on;     keepalive_timeout  65;      \
     mastermind_file_url %s; \
-    s3cmd_config_filepath %s; \
+    s3port %s; \
     mastermind_validated_filepath /tmp/mastermind.apitest.validated; \
     updater_sleep_interval 60;      \
         server {  listen       %s; \

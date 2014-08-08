@@ -535,7 +535,17 @@ class VideoProcessor(object):
             if not vmdata:
                 _log.error("save_video_metadata failed to save")
                 statemon.state.increment('save_vmdata_error')
-                #TODO: Send error
+                #if can't save vmdata, probably a DB error, requeue the request
+                api_request = neondata.NeonApiRequest.get(api_key, job_id)
+                if self.requeue_job():
+                    api_request.state = neondata.RequestState.REQUEUED
+                    api_request.save()
+                    return
+                else:
+                    #Requeue failed
+                    api_request.state = neondata.RequestState.INT_ERROR
+                    api_request.save()
+
 
             #host top MAX_T images on s3
             thumbnails, s3_urls = host_images_s3(vmdata, api_key, img_score_list, 

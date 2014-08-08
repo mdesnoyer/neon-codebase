@@ -11,13 +11,15 @@
 #include "neonException.h"
 #include "mastermind.h"
 #include "neon_mastermind.h"
-
+#include "neon_stats.h"
 
 const std::string Mastermind::typeKey            = "type";
 const std::string Mastermind::typeDirective      = "dir";
 const std::string Mastermind::typePublisher      = "pub";
 
 char Mastermind::lineBuffer[MaxLineBufferSize];
+
+const char * cloudinary_image_format = "http://res.cloudinary.com/neon-labs/image/upload/w_%d,h_%d/neontn%s_w%d_h%d.jpg";
 
 
 Mastermind::Mastermind()
@@ -342,9 +344,12 @@ Mastermind::GetImageUrl(const char * account_id,
     const Directive * directive = 0;
     directive = directiveTable.Find(accountId, videoId);
     
-    if(directive == 0)
+    // Invalid VideoId or VideoId not found
+    if(directive == 0){
+        neon_stats[NEON_INVALID_VIDEO_ID] ++;
         return 0;
-   
+    }
+
     const Fraction * fraction = directive->GetFraction(bucketId, bucketIdLen);
     
     if (fraction == 0){
@@ -352,14 +357,21 @@ Mastermind::GetImageUrl(const char * account_id,
         return 0;
     }
    
-    // If height or width doesn't match serve the default image URL
-    if (height == -1 || width == -1)
+    // If height or width are both empty, then serve the default image URL
+    if (height == -1 && width == -1)
         return fraction->GetDefaultURL();
 
     const ScaledImage * image = fraction->GetScaledImage(height, width);
-    
-    if (image == 0)
-        return 0;
+
+    // Didn't get a "pre-sized" image so send a cloudinary URL
+    if (image == 0){
+        char buffer[1024]; // sufficiently large buffer for the URL
+        const char * tid = fraction->GetThumbnailID();
+        sprintf(buffer, cloudinary_image_format, width, height, tid, width, height);
+        const char * url = strdup(buffer);
+        size = strlen(url);
+        return url;
+    }
 
     return image->GetUrl(size);
 }
@@ -380,8 +392,10 @@ Mastermind::GetThumbnailID(const char * c_accountId,
     const Directive * directive = 0;
     directive = directiveTable.Find(accountId, videoId);
     
-    if(directive == 0)
+    if(directive == 0){
+        neon_stats[NEON_INVALID_VIDEO_ID] ++;
         return 0;
+    }
     
     const Fraction * fraction = directive->GetFraction(bucketId, bucketIdLen);
 

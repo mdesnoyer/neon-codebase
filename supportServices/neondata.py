@@ -985,13 +985,14 @@ class ExperimentStrategy(NamespacedStoredObject):
 class AbstractPlatform(object):
     ''' Abstract Platform/ Integration class '''
 
-    def __init__(self, abtest=False):
+    def __init__(self, abtest=False, enabled=True):
         self.key = None 
         self.neon_api_key = ''
         self.videos = {} # External video id (Original Platform VID) => Job ID
         self.abtest = abtest # Boolean on wether AB tests can run
         self.integration_id = None # Unique platform ID to 
-    
+        self.enabled = enabled # Account enabled for processing videos 
+
     def generate_key(self, i_id):
         ''' generate db key '''
         return '_'.join([self.__class__.__name__.lower(),
