@@ -75,22 +75,28 @@
     "type" : [ "null", "string" ]
   }, {
     "name" : "pageCoords_x",
-    "type" : [ "null", "float" ]
+    "type" : [ "null", "float" ],
+    "default" : null
   }, {
     "name" : "pageCoords_y",
-    "type" : [ "null", "float" ]
+    "type" : [ "null", "float" ],
+    "default" : null
   }, {
     "name" : "windowCoords_x",
-    "type" : [ "null", "float" ]
+    "type" : [ "null", "float" ],
+    "default" : null
   }, {
     "name" : "windowCoords_y",
-    "type" : [ "null", "float" ]
+    "type" : [ "null", "float" ],
+    "default" : null
   }, {
     "name" : "imageCoords_x",
-    "type" : [ "null", "float" ]
+    "type" : [ "null", "float" ],
+    "default" : null
   }, {
     "name" : "imageCoords_y",
-    "type" : [ "null", "float" ]
+    "type" : [ "null", "float" ],
+    "default" : null
   }, {
     "name" : "isClickInPlayer",
     "type" : "boolean"

@@ -161,6 +161,14 @@ public class RawTrackerMR extends Configured implements Tool {
           }
           break;
 
+        case VIDEO_VIEW_PERCENTAGE:
+          VideoViewPercentage videoVPData =
+              (VideoViewPercentage) key.datum().getEventData();
+          videoId = videoVPData.getVideoId().toString();
+          context.write(new Text(mapKey + videoId),
+              new AvroValue<TrackerEvent>(key.datum()));
+          break;
+
         default:
           context.getCounter("MappingError", "InvalidEvent").increment(1);
         }
@@ -239,24 +247,20 @@ public class RawTrackerMR extends Configured implements Tool {
         TrackerEvent curEvent = baseI.next();
         long curSequenceId = InitializeSequenceId(curEvent, context);
 
-        // Skip this event if it is a duplicate
+        // If the event is a duplicate, remove the older event
         ListIterator<Pair<TrackerEvent, Long>> revIter =
             seqEvents.listIterator(seqEvents.size());
         TrackerEvent oldEvent;
-        boolean foundDup = false;
         while (revIter.hasPrevious()) {
           oldEvent = revIter.previous().getLeft();
           if (IsDuplicateTrackerEvent(oldEvent, curEvent)) {
-            foundDup = true;
+            revIter.remove();
+            context.getCounter("EventStats", "DuplicatesFound").increment(1);
             break;
           } else if ((curEvent.getClientTime() - oldEvent.getClientTime()) > MAX_SEQUENCE_TIME) {
             // Stop looking for duplicates that are too old
             break;
           }
-        }
-        if (foundDup) {
-          context.getCounter("EventStats", "DuplicatesFound").increment(1);
-          continue;
         }
 
         if (!curEvent.getClientIP().equals(UNKNOWN_IP)) {
@@ -350,12 +354,19 @@ public class RawTrackerMR extends Configured implements Tool {
             ((VideoPlay) event.getEventData()).getPlayCount()
                 ^ ((VideoPlay) event.getEventData()).getVideoId().hashCode();
         break;
+      case VIDEO_VIEW_PERCENTAGE:
+        videoPlayHash =
+            ((VideoViewPercentage) event.getEventData()).getPlayCount()
+                ^ ((VideoViewPercentage) event.getEventData()).getVideoId()
+                    .hashCode();
+        break;
       default:
         context.getCounter("ReduceError", "InvalidEventType").increment(1);
       }
 
-      long retval = (((long) event.getPageId().hashCode()) << 32) | 
-          (((long)videoPlayHash) & 0xFFFFFFFFl);
+      long retval =
+          (((long) event.getPageId().hashCode()) << 32)
+              | (((long) videoPlayHash) & 0xFFFFFFFFl);
       return retval;
     }
 
@@ -365,8 +376,9 @@ public class RawTrackerMR extends Configured implements Tool {
       Pair<TrackerEvent, Long> eventPair;
       if (curEvent.getEventType() == EventType.AD_PLAY
           || curEvent.getEventType() == EventType.VIDEO_PLAY) {
-        boolean fromOtherPage = curEvent.getRefURL() != null &&
-            curEvent.getRefURL().length() > 0 && IsFirstAutoplay(curEvent);
+        boolean fromOtherPage =
+            curEvent.getRefURL() != null && curEvent.getRefURL().length() > 0
+                && IsFirstAutoplay(curEvent);
         boolean isAutoplay = IsAutoplay(curEvent);
 
         boolean foundClick = false;
@@ -481,6 +493,16 @@ public class RawTrackerMR extends Configured implements Tool {
       case IMAGE_LOAD:
       case IMAGE_VISIBLE:
         return a.getPageId().equals(b.getPageId());
+
+      case VIDEO_VIEW_PERCENTAGE:
+        // For the video view percentage, they are the same if it's for the same
+        // video id and play count since we only care about the max view
+        // percentage.
+        return a.getPageId().equals(b.getPageId()) &&
+            ((VideoViewPercentage)a.getEventData()).getVideoId().equals(
+                ((VideoViewPercentage)b.getEventData()).getVideoId()) &&
+            ((VideoViewPercentage)a.getEventData()).getPlayCount().equals(
+                ((VideoViewPercentage)b.getEventData()).getPlayCount());
 
       case IMAGE_CLICK:
       case VIDEO_CLICK:
@@ -654,6 +676,10 @@ public class RawTrackerMR extends Configured implements Tool {
                     ((ImageClick) orig.getEventData()).getWindowCoords().getX())
                 .setWindowCoordsY(
                     ((ImageClick) orig.getEventData()).getWindowCoords().getY())
+                .setImageCoordsX(
+                    ((ImageClick) orig.getEventData()).getImageCoords().getX())
+                .setImageCoordsY(
+                    ((ImageClick) orig.getEventData()).getImageCoords().getY())
                 .setIsClickInPlayer(false)
                 .setIsRightClick(
                     clickCoords.getX() <= 0 && clickCoords.getY() <= 0).build();
@@ -692,7 +718,8 @@ public class RawTrackerMR extends Configured implements Tool {
                     ((VideoClick) orig.getEventData()).getThumbnailId())
                 .setVideoId(((VideoClick) orig.getEventData()).getVideoId())
                 .setPageCoordsX(-1f).setPageCoordsY(-1f).setWindowCoordsX(-1f)
-                .setWindowCoordsY(-1f).setIsClickInPlayer(true)
+                .setWindowCoordsY(-1f).setImageCoordsX(-1f)
+                .setImageCoordsY(-1f).setIsClickInPlayer(true)
                 .setIsRightClick(false).build();
         out.write("ImageClickHive", new AvroKey<ImageClickHive>(
             (ImageClickHive) hiveEvent), NullWritable.get(), "ImageClickHive"
@@ -777,6 +804,45 @@ public class RawTrackerMR extends Configured implements Tool {
             + partitionPath + "VideoPlayHive");
         break;
 
+      case VIDEO_VIEW_PERCENTAGE:
+        hiveEvent =
+            VideoViewPercentageHive
+                .newBuilder()
+                .setAgentInfoBrowserName(browserName)
+                .setAgentInfoBrowserVersion(browserVersion)
+                .setAgentInfoOsName(osName)
+                .setAgentInfoOsVersion(osVersion)
+                .setClientIP(orig.getClientIP())
+                .setClientTime(orig.getClientTime() / 1000.)
+                .setIpGeoDataCity(orig.getIpGeoData().getCity())
+                .setIpGeoDataCountry(orig.getIpGeoData().getCountry())
+                .setIpGeoDataRegion(orig.getIpGeoData().getRegion())
+                .setIpGeoDataZip(orig.getIpGeoData().getZip())
+                .setIpGeoDataLat(orig.getIpGeoData().getLat())
+                .setIpGeoDataLon(orig.getIpGeoData().getLon())
+                .setNeonUserId(orig.getNeonUserId())
+                .setPageId(orig.getPageId())
+                .setPageURL(orig.getPageURL())
+                .setRefURL(orig.getRefURL())
+                .setServerTime(orig.getServerTime() / 1000.)
+                .setTrackerAccountId(orig.getTrackerAccountId())
+                .setTrackerType(orig.getTrackerType())
+                .setUserAgent(orig.getUserAgent())
+                .setSequenceId(sequenceId)
+                .setVideoId(
+                    ((VideoViewPercentage) orig.getEventData()).getVideoId())
+                .setPlayCount(
+                    ((VideoViewPercentage) orig.getEventData()).getPlayCount())
+                .setPercent(
+                    ((VideoViewPercentage) orig.getEventData()).getPercent())
+                .build();
+        out.write("VideoViewPercentageHive",
+            new AvroKey<VideoViewPercentageHive>(
+                (VideoViewPercentageHive) hiveEvent), NullWritable.get(),
+            "VideoViewPercentageHive" + partitionPath
+                + "VideoViewPercentageHive");
+        break;
+
       default:
         context.getCounter("ReduceError", "InvalidEventType").increment(1);
       }
@@ -808,6 +874,7 @@ public class RawTrackerMR extends Configured implements Tool {
       TrackerEvent adPlay = null;
       TrackerEvent videoClick = null;
       TrackerEvent videoPlay = null;
+      TrackerEvent videoViewPercentage = null;
       Long curSequenceId = null;
       for (Pair<TrackerEvent, Long> pair : events) {
         if (curSequenceId == null) {
@@ -815,13 +882,14 @@ public class RawTrackerMR extends Configured implements Tool {
         } else if (!curSequenceId.equals(pair.getRight())) {
           // It's the start of a new sequence, so output the last sequence
           OutputSequence(curSequenceId, imLoad, imVis, imClick, adPlay,
-              videoClick, videoPlay);
+              videoClick, videoPlay, videoViewPercentage);
           imLoad = null;
           imVis = null;
           imClick = null;
           adPlay = null;
           videoClick = null;
           videoPlay = null;
+          videoViewPercentage = null;
           curSequenceId = pair.getRight();
         }
 
@@ -845,18 +913,22 @@ public class RawTrackerMR extends Configured implements Tool {
         case VIDEO_PLAY:
           videoPlay = pair.getLeft();
           break;
+        case VIDEO_VIEW_PERCENTAGE:
+          videoViewPercentage = pair.getLeft();
+          break;
         }
       }
 
       if (curSequenceId != null) {
         OutputSequence(curSequenceId, imLoad, imVis, imClick, adPlay,
-            videoClick, videoPlay);
+            videoClick, videoPlay, videoViewPercentage);
       }
     }
 
     private void OutputSequence(Long sequenceId, TrackerEvent imLoad,
         TrackerEvent imVis, TrackerEvent imClick, TrackerEvent adPlay,
-        TrackerEvent videoClick, TrackerEvent videoPlay) throws IOException,
+        TrackerEvent videoClick, TrackerEvent videoPlay,
+        TrackerEvent videoViewPercentage) throws IOException,
         InterruptedException {
       long lastServerTime = 0;
       CharSequence trackerAccountId = "";
@@ -909,6 +981,10 @@ public class RawTrackerMR extends Configured implements Tool {
                 ((ImageClick) imClick.getEventData()).getWindowCoords().getX())
             .setWindowCoordsY(
                 ((ImageClick) imClick.getEventData()).getWindowCoords().getY())
+            .setImageCoordsX(
+                ((ImageClick) imClick.getEventData()).getImageCoords().getX())
+            .setImageCoordsY(
+                ((ImageClick) imClick.getEventData()).getImageCoords().getY())
             .setIsRightClick(clickCoords.getX() <= 0 && clickCoords.getY() <= 0)
             .setIsClickInPlayer(false)
             .setImClickClientTime(imClick.getClientTime() / 1000.)
@@ -971,6 +1047,23 @@ public class RawTrackerMR extends Configured implements Tool {
             .setVideoPlayServerTime(videoPlay.getServerTime() / 1000.)
             .setVideoPageURL(videoPlay.getPageURL())
             .setVideoPlayPageId(videoPlay.getPageId());
+      }
+
+      if (videoViewPercentage != null) {
+        lastServerTime = videoViewPercentage.getServerTime();
+        trackerAccountId = videoViewPercentage.getTrackerAccountId();
+        firstRefURL =
+            firstRefURL == null ? videoViewPercentage.getRefURL() : firstRefURL;
+        BuildCommonSequenceFields(builder, videoViewPercentage)
+            .setVideoId(
+                ((VideoViewPercentage) videoViewPercentage.getEventData())
+                    .getVideoId())
+            .setPlayCount(
+                ((VideoViewPercentage) videoViewPercentage.getEventData())
+                    .getPlayCount())
+            .setVideoViewPercent(
+                ((VideoViewPercentage) videoViewPercentage.getEventData())
+                    .getPercent());
       }
 
       builder.setRefURL(firstRefURL).setThumbnailId(thumbnailId)
