@@ -105,27 +105,33 @@ class AccountHandler(tornado.web.RequestHandler):
     def prepare(self):
         ''' Called before every request is processed '''
        
-        ctype = self.request.headers.get("Content-Type")
-        if ctype is None:
-            data = '{"error": "missing content type header use json or\
-            urlencoded"}'
-            self.send_json_response(data, 400)
-            return
+        # If POST or PUT, then decode the json arguments
+        if not self.request.method == "GET":
+            ctype = self.request.headers.get("Content-Type")
+            if ctype is None:
+                data = '{"error": "missing content type header use json or\
+                urlencoded"}'
+                self.send_json_response(data, 400)
+                return
 
-        ## Convert any json input in to argument dictionary
-        if self.request.body and "application/json" in ctype:
-            try:
-                json_data = json.loads(self.request.body)
-                for k, v in json_data.items():
-                    # Tornado expects values in the argument dict to be lists.
-                    # in tornado.web.RequestHandler._get_argument the last
-                    # argument is returned.
-                    json_data[k] = [v]
-                #clear the request body arguments from dict
-                #self.request.arguments.pop(self.request.body)
-                self.request.arguments.update(json_data)
-            except ValueError, e:
-                self.send_json_response('{"error": "invalid json request"}', 400)
+            ## Convert any json input in to argument dictionary
+            if self.request.body and "application/json" in ctype:
+                try:
+                    json_data = json.loads(self.request.body)
+                    for k, v in json_data.items():
+                        # Tornado expects values in the argument dict to be lists.
+                        # in tornado.web.RequestHandler._get_argument the last
+                        # argument is returned.
+
+                        # The value has to be unicode, so convert it
+                        if not isinstance(v, basestring):
+                            v = json.dumps(v)
+                        json_data[k] = [v]
+                    #clear the request body arguments from dict
+                    #self.request.arguments.pop(self.request.body)
+                    self.request.arguments.update(json_data)
+                except ValueError, e:
+                    self.send_json_response('{"error": "invalid json request"}', 400)
 
         self.api_key = self.request.headers.get('X-Neon-API-Key') 
         if self.api_key == None:
@@ -190,6 +196,30 @@ class AccountHandler(tornado.web.RequestHandler):
         ''' unsupported method response'''
         data = '{"error":"api method not supported or REST URI is incorrect"}'
         self.send_json_response(data, 400)
+
+    @tornado.gen.engine
+    def get_platform_account(self, i_type, i_id, callback=None):
+        
+        #Get account/integration
+        
+        platform_account = None
+
+        # Loose comparison
+        if "brightcove" in i_type:
+            platform_account = yield tornado.gen.Task(
+                                        neondata.BrightcovePlatform.get_account,
+                                        self.api_key, i_id)
+        elif i_type == "ooyala":
+            platform_account = yield tornado.gen.Task(
+                                        neondata.OoyalaPlatform.get_account,
+                                        self.api_key, i_id)
+        elif i_type == "neon": 
+            platform_account = yield tornado.gen.Task(
+                                        neondata.NeonPlatform.get_account,
+                                        self.api_key)
+
+        callback(platform_account)
+
 
     @tornado.web.asynchronous
     @tornado.gen.engine
@@ -373,12 +403,11 @@ class AccountHandler(tornado.web.RequestHandler):
                     return
 
                 i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
-                
                 try:
                     new_tid = self.get_argument('current_thumbnail', None)
                     if new_tid is None:
                         # custom thumbnail upload
-                        thumbs = self.get_argument('thumbnails')
+                        thumbs = json.loads(self.get_argument('thumbnails'))
                         self.upload_video_custom_thumbnail(itype, i_id, i_vid,
                                                             thumbs)
                 except Exception, e:
@@ -642,18 +671,7 @@ class AccountHandler(tornado.web.RequestHandler):
                     neondata.RequestState.FAILED]
         
         #1 Get job ids for the videos from account, get the request status
-        if i_type == "brightcove":
-            platform_account = yield tornado.gen.Task(
-                                        neondata.BrightcovePlatform.get_account,
-                                        self.api_key, i_id)
-        elif i_type == "ooyala":
-            platform_account = yield tornado.gen.Task(
-                                        neondata.OoyalaPlatform.get_account,
-                                        self.api_key, i_id)
-        elif i_type == "neon": 
-            platform_account = yield tornado.gen.Task(
-                                        neondata.NeonPlatform.get_account,
-                                        self.api_key)
+        platform_account = yield tornado.gen.Task(self.get_platform_account, i_type, i_id)
 
         if not platform_account:
             _log.error("key=get_video_status_%s msg=account not found" %i_type)
@@ -961,7 +979,6 @@ class AccountHandler(tornado.web.RequestHandler):
         --> verify tokens in brightcove -->
         send top 5 videos requests or appropriate error to client
         '''
-       
 
         try:
             a_id = self.request.uri.split('/')[-2]
@@ -1643,47 +1660,28 @@ class AccountHandler(tornado.web.RequestHandler):
 
 
     @tornado.gen.engine
-    def get_platform_account(self, i_type, i_id):
-        
-        #Get account/integration
-        
-        platform_account = None
-
-        if i_type == "brightcove":
-            platform_account = yield tornado.gen.Task(
-                                        neondata.BrightcovePlatform.get_account,
-                                        self.api_key, i_id)
-        elif i_type == "ooyala":
-            platform_account = yield tornado.gen.Task(
-                                        neondata.OoyalaPlatform.get_account,
-                                        self.api_key, i_id)
-        elif i_type == "neon": 
-            platform_account = yield tornado.gen.Task(
-                                        neondata.NeonPlatform.get_account,
-                                        self.api_key)
-
-        return platform_account
-
-    @tornado.gen.engine
     def upload_video_custom_thumbnail(self, itype, i_id, i_vid, thumbs):
 
         p_vid = neondata.InternalVideoID.to_external(i_vid)
-
-        platform_account = get_platform_account(itype, i_id)
-
-        if not platform_account:
-            _log.error("key=upload_video_custom_thumbnail msg=%s account not found" % i_type)
-            self.send_json_response("%s account not found" % i_type, 400)
-            return
-
-        result = yield tornado.gen.Task(add_custom_thumbnail, i_vid, thumb_url)
+        platform_account = yield tornado.gen.Task(self.get_platform_account, itype, i_id)
         
+        if not platform_account:
+            _log.error("key=upload_video_custom_thumbnail msg=%s account not found" % itype)
+            self.send_json_response("%s account not found" % itype, 400)
+            return
+     
+        #TODO: handle multiple thumb uploads
+        t_url = thumbs[0]["urls"][0]
+        vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
+       
+        result = vmdata.add_custom_thumbnail(t_url)
+
         if result:
             _log.info("key=update_video_brightcove" 
                         " msg=thumbnail updated for video=%s tid=%s"\
-                        %(p_vid, new_tid))
+                        %(p_vid, result))
             data = ''
-            self.send_json_response(data, 200)
+            self.send_json_response(data, 202)
         else:
             data = '{"error": "internal error"}'
             self.send_json_response(data, 500)

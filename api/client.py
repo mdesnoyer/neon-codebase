@@ -629,9 +629,9 @@ class VideoProcessor(object):
         i_vid = neondata.InternalVideoID.generate(api_key, video_id)
 
         score = 0 #no score for previous thumbnails
-        s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
-        s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
-        s3bucket = s3conn.get_bucket(s3bucket_name)
+        #s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
+        #s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
+        #s3bucket = s3conn.get_bucket(s3bucket_name)
         s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
         if api_request.request_type == "brightcove":
             keyname =  self.base_filename + "/brightcove.jpeg" 

@@ -26,9 +26,10 @@ import utils.neon
 import time
 import datetime
 from StringIO import StringIO
-from mock import patch 
+from mock import MagicMock, patch 
 from supportServices import services, neondata
 from api import brightcove_api
+import test_utils.mock_boto_s3 as boto_mock
 import tornado.testing
 import tornado.httpclient
 from utils.imageutils import PILImageUtils
@@ -1179,6 +1180,50 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(res['state'], "complete") 
         self.assertEqual(res['data'], expected_data['data'])
 
+
+    @patch('api.cdnhosting.urllib2')
+    @patch('api.cdnhosting.S3Connection')
+    def test_upload_video_custom_thumbnail(self, mock_conntype, mock_urllib2):
+        '''
+        Test uploading a custom thumbnail for a video
+        PUT
+        /api/v1/accounts/{account_id}/{integration_type}/{integration_id}/videos/{video_id}
+
+        {"thumbnails":[
+        {
+            created_time: 12345,
+            type: custom_upload,
+            urls: [
+                http://example.com/images/1.jpg
+            ]
+        }
+        ]}
+        '''
+        
+        #s3mocks to mock host_thumbnails_to_s3
+        conn = boto_mock.MockConnection()
+        conn.create_bucket('host-thumbnails')
+        conn.create_bucket('neon-image-cdn')
+        mock_conntype.return_value = conn
+        
+        #cloudinary mock
+        mresponse = MagicMock()
+        mresponse.read.return_value = '{"url": "http://cloudinary.jpg"}' 
+        mock_urllib2.urlopen.return_value = mresponse 
+        
+        self._setup_initial_brightcove_state()
+        vid = self._get_videos()[0]
+        url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
+                    "/%s/videos/%s" %(self.a_id, self.b_id, vid))
+        data = {
+                "created_time": time.time(),
+                "type": "custom_upload",
+                "urls": ["http://custom_thumbnail.jpg"]
+                }
+
+        vals = {'thumbnails' : [data]}
+        response = self.put_request(url, vals, self.api_key, jsonheader=True)
+        self.assertEqual(response.code, 202) 
 
 ##### OOYALA PLATFORM TEST ######
 

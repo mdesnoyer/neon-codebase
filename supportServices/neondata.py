@@ -2366,7 +2366,6 @@ class VideoMetadata(StoredObject):
 
         @return thumbnail metadata object
         '''
-
         i_vid = self.key #internal video id
 
         fmt = 'jpeg'
@@ -2410,7 +2409,7 @@ class VideoMetadata(StoredObject):
         return tdata
 
     def download_and_add_thumbnail(self, image_url, keyname,
-                                    s3url, ttype, rank=1):
+                                    s3url, ttype, rank=1, callback=None):
         '''
         Download the image and save its metadata. Used to save thumbnail
         of custom type or previous thumbnail given in the Neon API
@@ -2419,8 +2418,8 @@ class VideoMetadata(StoredObject):
         to be speicified to this function.
 
         '''
-        
-        score = 0 # no score assigned currently
+
+        score = 0 # no score assigned currently to uploaded thumbnails
         http_client = tornado.httpclient.HTTPClient()
         req = tornado.httpclient.HTTPRequest(url=image_url,
                                              method="GET",
@@ -2436,6 +2435,13 @@ class VideoMetadata(StoredObject):
             return tdata
         else:
             _log.error("failed to download the image")
+
+    def add_custom_thumbnail(self, image_url):
+        fname = "custom%s.jpeg" % int(time.time())
+        keyname = "%s/%s/%s" % (self.get_account_id(), self.job_id, fname)  
+        s3url = "https://%s.s3.amazonaws.com/%s" % ("host-thumbnails", keyname) 
+        ttype = ThumbnailType.CUSTOMUPLOAD
+        return self.download_and_add_thumbnail(image_url, keyname, s3url, ttype)
 
     @classmethod
     def get_video_request(cls, internal_video_id, callback=None):
