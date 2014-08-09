@@ -2337,7 +2337,7 @@ class VideoMetadata(StoredObject):
                     if len(winner_tmd) != 1:
                         _log.error("Error in the logic to determine winner tid")
                     else:
-                        tid = winnder_tmd[0].key
+                        tid = winner_tmd[0].key
 
                     return tid
 
