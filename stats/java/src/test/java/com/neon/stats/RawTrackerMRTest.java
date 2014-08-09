@@ -122,6 +122,8 @@ public class RawTrackerMRTest {
           ((AdPlayHive) expectedEvent).setSequenceId(sequenceId);
         } else if (expectedEvent instanceof VideoPlayHive) {
           ((VideoPlayHive) expectedEvent).setSequenceId(sequenceId);
+        } else if (expectedEvent instanceof VideoViewPercentageHive) {
+          ((VideoViewPercentageHive) expectedEvent).setSequenceId(sequenceId);
         } else if (expectedEvent instanceof EventSequenceHive) {
           ((EventSequenceHive) expectedEvent).setSequenceId(sequenceId);
         }
@@ -129,6 +131,8 @@ public class RawTrackerMRTest {
         // See if the event was captured
         if (!eventsSeen.contains(expectedEvent)) {
           eventMissing = true;
+
+          missingInfo = "For event type " + expectedEvent.getClass().getName();
 
           // Try to find the event that it might have been
           for (SpecificRecordBase eventSeen : eventsSeen) {
@@ -142,11 +146,9 @@ public class RawTrackerMRTest {
                 Object foundValue = eventSeen.get(field.pos());
                 if (expectedValue == null ? foundValue != null : !expectedValue
                     .equals(foundValue)) {
-                  missingInfo =
-                      "For event type " + expectedEvent.getClass().getName()
-                          + " Field " + field.name()
-                          + " is different. Expected: " + expectedValue
-                          + " Actual: " + foundValue;
+                  missingInfo +=
+                      " Field " + field.name() + " is different. Expected: "
+                          + expectedValue + " Actual: " + foundValue;
                 }
               }
             }
@@ -209,6 +211,12 @@ public class RawTrackerMRTest {
       } else if (curEvent.datum() instanceof VideoPlayHive) {
         sequenceId = ((VideoPlayHive) curEvent.datum()).getSequenceId();
         assertEquals(outputPaths.get(i), "VideoPlayHive/VideoPlayHive");
+
+      } else if (curEvent.datum() instanceof VideoViewPercentageHive) {
+        sequenceId =
+            ((VideoViewPercentageHive) curEvent.datum()).getSequenceId();
+        assertEquals(outputPaths.get(i),
+            "VideoViewPercentageHive/VideoViewPercentageHive");
 
       } else if (curEvent.datum() instanceof EventSequenceHive) {
         sequenceId = ((EventSequenceHive) curEvent.datum()).getSequenceId();
@@ -282,7 +290,7 @@ public class RawTrackerMRTest {
     return MakeBasicTrackerEvent().setEventType(EventType.IMAGE_CLICK)
         .setEventData(
             new ImageClick(true, "acct1_vid1_tid1", new Coords(100f, 200f),
-                new Coords(150f, 250f)));
+                new Coords(150f, 250f), new Coords(3f, 4f)));
   }
 
   protected ImageClickHive.Builder MakeBasicImageClickHive() {
@@ -298,8 +306,8 @@ public class RawTrackerMRTest {
         .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
         .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
         .setPageCoordsX(100f).setPageCoordsY(200f).setWindowCoordsX(150f)
-        .setWindowCoordsY(250f).setIsClickInPlayer(false)
-        .setIsRightClick(false).setSequenceId(0);
+        .setWindowCoordsY(250f).setImageCoordsX(3f).setImageCoordsY(4f)
+        .setIsClickInPlayer(false).setIsRightClick(false).setSequenceId(0);
   }
 
   protected TrackerEvent.Builder MakeBasicAdPlay() {
@@ -343,8 +351,8 @@ public class RawTrackerMRTest {
         .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
         .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
         .setPageCoordsX(-1f).setPageCoordsY(-1f).setWindowCoordsX(-1f)
-        .setWindowCoordsY(-1f).setIsClickInPlayer(true).setIsRightClick(false)
-        .setSequenceId(0);
+        .setWindowCoordsY(-1f).setImageCoordsX(-1f).setImageCoordsY(-1f)
+        .setIsClickInPlayer(true).setIsRightClick(false).setSequenceId(0);
   }
 
   protected TrackerEvent.Builder MakeBasicVideoPlay() {
@@ -368,6 +376,26 @@ public class RawTrackerMRTest {
         .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
         .setPlayerId("player2").setAutoplayDelta(null).setPlayCount(1)
         .setDidAdPlay(true).setSequenceId(0);
+  }
+
+  protected TrackerEvent.Builder MakeBasicVideoViewPercentage() {
+    return MakeBasicTrackerEvent()
+        .setEventType(EventType.VIDEO_VIEW_PERCENTAGE).setEventData(
+            new VideoViewPercentage(true, "vid1", 1, 34.6f));
+  }
+
+  protected VideoViewPercentageHive.Builder MakeBasicVideoViewPercentageHive() {
+    return VideoViewPercentageHive.newBuilder().setAgentInfoBrowserName(null)
+        .setAgentInfoBrowserVersion(null).setAgentInfoOsName(null)
+        .setAgentInfoOsVersion(null).setClientIP("56.45.41.124")
+        .setClientTime(1400000000.).setIpGeoDataCity(null)
+        .setIpGeoDataCountry("USA").setIpGeoDataRegion("CA")
+        .setIpGeoDataZip(null).setIpGeoDataLat(34.556f)
+        .setIpGeoDataLon(120.45f).setNeonUserId("").setPageId("pageid1")
+        .setPageURL("http://go.com").setRefURL("http://ref.com")
+        .setTrackerAccountId("tai1").setServerTime(1400697546.)
+        .setTrackerType(TrackerType.BRIGHTCOVE).setUserAgent("agent1")
+        .setVideoId("vid1").setPlayCount(1).setPercent(34.6f).setSequenceId(0);
   }
 
   protected EventSequenceHive.Builder MakeBasicEventSequenceHive() {
@@ -449,7 +477,7 @@ public class RawTrackerMRTest {
             "56.45.41.124", "", "agent1", null, new GeoData("USA", "San Fran",
                 "CA", "94132", 34.556f, 120.45f), EventType.IMAGE_CLICK,
             new ImageClick(true, "acct1_vid2_tid3", new Coords(56f, 78.3f),
-                new Coords(78f, 69f)));
+                new Coords(78f, 69f), new Coords(9f, 12f)));
 
     mapDriver.withInput(new AvroKey<TrackerEvent>(inputEvent),
         NullWritable.get());
@@ -545,6 +573,22 @@ public class RawTrackerMRTest {
   }
 
   @Test
+  public void testVideoViewPercentageMapping() throws IOException {
+    TrackerEvent inputEvent =
+        MakeBasicTrackerEvent().setEventType(EventType.VIDEO_VIEW_PERCENTAGE)
+            .setEventData(new VideoViewPercentage(true, "vid2", 3, 94.1f))
+            .build();
+
+    mapDriver.withInput(new AvroKey<TrackerEvent>(inputEvent),
+        NullWritable.get());
+
+    mapDriver.withOutput(new Text("tai156.45.41.124vid2"),
+        new AvroValue<TrackerEvent>(inputEvent));
+
+    mapDriver.runTest();
+  }
+
+  @Test
   public void testReductionClickOnDifferentPageThanVideo() throws IOException,
       InterruptedException {
     List<AvroValue<TrackerEvent>> values =
@@ -565,6 +609,9 @@ public class RawTrackerMRTest {
     values.add(new AvroValue<TrackerEvent>(MakeBasicVideoPlay()
         .setClientTime(1400000000700l).setPageId("vidpage")
         .setRefURL("http://go.com").build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicVideoViewPercentage()
+        .setClientTime(1400000000800l).setPageId("vidpage")
+        .setRefURL("http://go.com").build()));
 
     // We have to look at the outputs in the mock because MRUnit doesn't handle
     // MultipleOutputs
@@ -580,6 +627,8 @@ public class RawTrackerMRTest {
             .setRefURL("http://go.com").build(),
         MakeBasicVideoPlayHive().setClientTime(1400000000.7)
             .setPageId("vidpage").setRefURL("http://go.com").build(),
+        MakeBasicVideoViewPercentageHive().setClientTime(1400000000.8)
+            .setPageId("vidpage").setRefURL("http://go.com").build(),
         MakeBasicEventSequenceHive().setImVisClientTime(1400000000.1)
             .setImClickClientTime(1400000000.2)
             .setAdPlayClientTime(1400000000.5)
@@ -593,11 +642,11 @@ public class RawTrackerMRTest {
             .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
             .setPlayerId("player2").setAutoplayDelta(null).setPlayCount(1)
             .setPageCoordsX(100f).setPageCoordsY(200f).setWindowCoordsX(150f)
-            .setWindowCoordsY(250f).setIsClickInPlayer(false)
-            .setIsRightClick(false).setHeight(480).setWidth(640)
-            .setImLoadPageId("pageid1").setImVisPageId("pageid1")
+            .setWindowCoordsY(250f).setImageCoordsX(3f).setImageCoordsY(4f)
+            .setIsClickInPlayer(false).setIsRightClick(false).setHeight(480)
+            .setWidth(640).setImLoadPageId("pageid1").setImVisPageId("pageid1")
             .setImClickPageId("pageid1").setAdPlayPageId("vidpage")
-            .setVideoPlayPageId("vidpage").build()));
+            .setVideoPlayPageId("vidpage").setVideoViewPercent(34.6f).build()));
   }
 
   @Test
@@ -617,6 +666,8 @@ public class RawTrackerMRTest {
         .setEventData(
             new VideoPlay(true, "vid1", "player2", "acct1_vid1_tid1", true,
                 200, 1)).build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicVideoViewPercentage()
+        .setClientTime(1400000000800l).build()));
 
     // We have to look at the outputs in the mock because MRUnit doesn't handle
     // MultipleOutputs
@@ -630,6 +681,7 @@ public class RawTrackerMRTest {
         MakeBasicVideoClickHive().setClientTime(1400000000.6).build(),
         MakeBasicVideoPlayHive().setClientTime(1400000000.7)
             .setAutoplayDelta(200).build(),
+        MakeBasicVideoViewPercentageHive().setClientTime(1400000000.8).build(),
         MakeBasicEventSequenceHive().setImLoadClientTime(1400000000.)
             .setImVisClientTime(1400000000.1)
             .setImClickClientTime(1400000000.6)
@@ -643,7 +695,50 @@ public class RawTrackerMRTest {
             .setPlayerId("player2").setAutoplayDelta(200).setPlayCount(1)
             .setIsClickInPlayer(true).setIsRightClick(false).setHeight(480)
             .setWidth(640).setImLoadPageId("pageid1").setImVisPageId("pageid1")
-            .setImClickPageId("pageid1").setVideoPlayPageId("pageid1").build()));
+            .setImClickPageId("pageid1").setVideoPlayPageId("pageid1")
+            .setVideoViewPercent(34.6f).build()));
+  }
+
+  @Test
+  public void testMultipleVideoViewPercentage() throws IOException,
+      InterruptedException {
+    // This is a case where a video plays and we have multiple view percentage
+    // events arrive. We only want to keep track of the maximum one.
+    List<AvroValue<TrackerEvent>> values =
+        new ArrayList<AvroValue<TrackerEvent>>();
+    values.add(new AvroValue<TrackerEvent>(MakeBasicVideoPlay().setClientTime(
+        1400000000700l).build()));
+    values
+        .add(new AvroValue<TrackerEvent>(MakeBasicVideoViewPercentage()
+            .setClientTime(1400000000900l)
+            .setEventData(new VideoViewPercentage(true, "vid1", 1, 56.4f))
+            .build()));
+    values
+        .add(new AvroValue<TrackerEvent>(MakeBasicVideoViewPercentage()
+            .setClientTime(1400000000800l)
+            .setEventData(new VideoViewPercentage(true, "vid1", 1, 23.1f))
+            .build()));
+
+    // We have to look at the outputs in the mock because MRUnit doesn't handle
+    // MultipleOutputs
+    reduceDriver.withInput(new Text("tai156.45.41.124vid1"), values).run();
+
+    CaptureEvents();
+
+    // Make sure that only one video view percentage hive entry is output
+    assertEquals(capturedSequences.size(), 1);
+    assertEquals(capturedSequences.values().iterator().next().size(), 3);
+
+    VerifySequence(Arrays.asList(
+        MakeBasicVideoPlayHive().setClientTime(1400000000.7).build(),
+        MakeBasicVideoViewPercentageHive().setClientTime(1400000000.9)
+            .setPercent(56.4f).build(),
+        MakeBasicEventSequenceHive().setVideoPlayClientTime(1400000000.7)
+            .setVideoPlayServerTime(1400697546.).setServerTime(1400697546.)
+            .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
+            .setVideoPageURL("http://go.com").setPlayerId("player2")
+            .setAutoplayDelta(null).setPlayCount(1)
+            .setVideoPlayPageId("pageid1").setVideoViewPercent(56.4f).build()));
   }
 
   @Test

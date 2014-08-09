@@ -56,16 +56,16 @@ record ImageClickHive {
   union { null, string } video_id; // The video id of the video play that the click resulted in
  
   // Coordinates of the click relative to the page
-  union {null, float} pageCoords_x;
-  union {null, float} pageCoords_y;
+  union {null, float} pageCoords_x = null;
+  union {null, float} pageCoords_y = null;
 
   // Coordinates of the click relative to the visible window
-  union {null, float} windowCoords_x;
-  union {null, float} windowCoords_y;
+  union {null, float} windowCoords_x = null;
+  union {null, float} windowCoords_y = null;
 
   // Coordinates of the click relative to the image
-  union {null, float} imageCoords_x;
-  union {null, float} imageCoords_y;
+  union {null, float} imageCoords_x = null;
+  union {null, float} imageCoords_y = null;
 
   boolean isClickInPlayer; // Is the click in a video player
 
