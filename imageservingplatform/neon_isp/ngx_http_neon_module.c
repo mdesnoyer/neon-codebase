@@ -33,13 +33,13 @@ static char *ngx_http_neon_stats_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *
 static char *ngx_http_neon_mastermind_file_url(ngx_conf_t *cf, void *post, void *data);
 static char *ngx_http_neon_mastermind_validated_filepath(ngx_conf_t *cf, void *post, void *data);
 static char *ngx_http_neon_updater_sleep_time(ngx_conf_t *cf, void *post, void *data);
-static char *ngx_http_neon_fetch_s3cmd_config_filepath(ngx_conf_t *cf, void *post, void *data);
+static char *ngx_http_neon_fetch_s3port(ngx_conf_t *cf, void *post, void *data);
 
 // config handlers
 static ngx_conf_post_handler_pt ngx_http_neon_mastermind_file_url_p = ngx_http_neon_mastermind_file_url;
 static ngx_conf_post_handler_pt ngx_http_neon_mastermind_validated_filepath_p = ngx_http_neon_mastermind_validated_filepath;
 static ngx_conf_post_handler_pt ngx_http_neon_updater_sleep_time_p = ngx_http_neon_updater_sleep_time;
-static ngx_conf_post_handler_pt ngx_http_neon_fetch_s3cmd_config_filepath_p = ngx_http_neon_fetch_s3cmd_config_filepath;
+static ngx_conf_post_handler_pt ngx_http_neon_fetch_s3port_p = ngx_http_neon_fetch_s3port;
 
 // Module Hook Methods
 ngx_int_t neon_init_process(ngx_cycle_t *cycle);
@@ -57,7 +57,7 @@ typedef struct {
     time_t updater_fetch_timeout;
     ngx_str_t mastermind_filepath;
     ngx_str_t mastermind_validated_filepath;
-    ngx_str_t neon_fetch_s3cmd_config_filepath;
+    ngx_str_t neon_fetch_s3port;
 } ngx_http_neon_loc_conf_t;
 
 static ngx_http_neon_loc_conf_t ngx_http_neon_loc_conf;
@@ -124,12 +124,12 @@ static ngx_command_t  ngx_http_neon_commands[] = {
         offsetof(ngx_http_neon_loc_conf_t, updater_sleep_time),
         &ngx_http_neon_updater_sleep_time_p},
     
-    { ngx_string("s3cmd_config_filepath"),
+    { ngx_string("s3port"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1|NGX_CONF_NOARGS,
         ngx_conf_set_str_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_neon_loc_conf_t, neon_fetch_s3cmd_config_filepath),
-        &ngx_http_neon_fetch_s3cmd_config_filepath_p},
+        offsetof(ngx_http_neon_loc_conf_t, neon_fetch_s3port),
+        &ngx_http_neon_fetch_s3port_p},
     
     ngx_null_command
 };
@@ -236,16 +236,16 @@ ngx_http_neon_updater_sleep_time(ngx_conf_t *cf, void *post, void *data){
  * */
 
 static char *
-ngx_http_neon_fetch_s3cmd_config_filepath(ngx_conf_t *cf, void *post, void *data)
+ngx_http_neon_fetch_s3port(ngx_conf_t *cf, void *post, void *data)
 {
     ngx_str_t  *name = data; // i.e., first field of var
    
     if (name == NULL || ngx_strcmp(name->data, "") == 0){
-        ngx_http_neon_loc_conf.neon_fetch_s3cmd_config_filepath.data = NULL;
-        ngx_http_neon_loc_conf.neon_fetch_s3cmd_config_filepath.len = 0;
+        ngx_http_neon_loc_conf.neon_fetch_s3port.data = NULL;
+        ngx_http_neon_loc_conf.neon_fetch_s3port.len = 0;
     }else{
-        ngx_http_neon_loc_conf.neon_fetch_s3cmd_config_filepath.data = name->data;
-        ngx_http_neon_loc_conf.neon_fetch_s3cmd_config_filepath.len = ngx_strlen(name->data);
+        ngx_http_neon_loc_conf.neon_fetch_s3port.data = name->data;
+        ngx_http_neon_loc_conf.neon_fetch_s3port.len = ngx_strlen(name->data);
     }
     return NGX_CONF_OK;
 }
@@ -307,7 +307,7 @@ ngx_module_t ngx_http_neon_module = {
 ngx_int_t neon_init_process(ngx_cycle_t *cycle){
     neon_updater_config_init(ngx_http_neon_loc_conf.mastermind_file_url.data, 
                    ngx_http_neon_loc_conf.mastermind_validated_filepath.data, 
-                   ngx_http_neon_loc_conf.neon_fetch_s3cmd_config_filepath.data, 
+                   ngx_http_neon_loc_conf.neon_fetch_s3port.data, 
                    ngx_http_neon_loc_conf.updater_sleep_time); 
     neon_start_updater();
     return 0;

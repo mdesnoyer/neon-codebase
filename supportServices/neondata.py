@@ -24,12 +24,12 @@ import binascii
 import concurrent.futures
 import contextlib
 import copy
+import datetime
 import hashlib
 import json
 import random
 import redis as blockingRedis
 import string
-from StringIO import StringIO
 import supportServices.url2thumbnail
 import tornado.ioloop
 import tornado.gen
@@ -38,10 +38,15 @@ import threading
 import time
 import api.brightcove_api #coz of cyclic import 
 import api.youtube_api
-from api import ooyala_api
 
+from api.cdnhosting import CDNHosting
+from api.cdnhosting import upload_to_s3_host_thumbnails 
+from api import ooyala_api
+from PIL import Image
+from StringIO import StringIO
 from utils.options import define, options
 import utils.sync
+import utils.s3
 import urllib
 
 import logging
@@ -980,13 +985,14 @@ class ExperimentStrategy(NamespacedStoredObject):
 class AbstractPlatform(object):
     ''' Abstract Platform/ Integration class '''
 
-    def __init__(self, abtest=False):
+    def __init__(self, abtest=False, enabled=True):
         self.key = None 
         self.neon_api_key = ''
         self.videos = {} # External video id (Original Platform VID) => Job ID
         self.abtest = abtest # Boolean on wether AB tests can run
         self.integration_id = None # Unique platform ID to 
-    
+        self.enabled = enabled # Account enabled for processing videos 
+
     def generate_key(self, i_id):
         ''' generate db key '''
         return '_'.join([self.__class__.__name__.lower(),
@@ -2104,7 +2110,8 @@ class ThumbnailMetadata(StoredObject):
         self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
         self.phash = phash # Perceptual hash of the image. None if unknown
         # Fraction of traffic currently being served by this thumbnail.
-        self.seving_frac = serving_frac 
+        # =None indicates that Mastermind doesn't know of the fraction yet
+        self.serving_frac = serving_frac 
 
     def update_phash(self, image):
         '''Update the phash from a PIL image.'''
@@ -2242,6 +2249,18 @@ class ThumbnailMetadata(StoredObject):
                         video_metadata.thumbnail_ids):
                     yield thumb
 
+    def add_custom_thumbnail(cls, i_vid, img_url, callback=None):
+        '''
+        Adds a custom thumbnail to the video specified 
+        
+        To add a thumbnail successfully these need to be added
+        ThumbnailMetadata
+        update videometadata
+        serving urls
+
+        '''
+        pass
+
 class VideoMetadata(StoredObject):
     '''
     Schema for metadata associated with video which gets stored
@@ -2287,6 +2306,142 @@ class VideoMetadata(StoredObject):
         ''' framesize of the video '''
         if self.__dict__.has_key('frame_size'):
             return self.frame_size
+
+    def get_winner_tid(self):
+        '''
+        Get the TID that won the A/B test
+        '''
+        def almost_equal(a, b, threshold=0.001):
+            return abs(a -b) <= threshold
+
+        tmds = ThumbnailMetadata.get_many(self.thumbnail_ids)
+        tid = None
+
+        if self.experiment_state == ExperimentState.COMPLETE:
+            #1. If serving fraction = 1.0 its the winner
+            for tmd in tmds:
+                if tmd.serving_frac == 1.0:
+                    tid = tmd.key
+                    return tid
+
+            #2. Check the experiment strategy 
+            es = ExperimentStrategy.get(self.get_account_id())
+            if es.override_when_done == False:
+
+                #Check if the experiment is in holdback state or exp state
+                if almost_equal(es.exp_frac, es.holdback_frac): 
+                    # we are in experimental state now, find the thumb with the
+                    # experimental fraction
+                    winner_tmd = filter(lambda t: almost_equal(t.serving_frac,
+                                         es.exp_frac), tmds)
+                    if len(winner_tmd) != 1:
+                        _log.error("Error in the logic to determine winner tid")
+                    else:
+                        tid = winner_tmd[0].key
+
+                    return tid
+
+                else:
+                    # Holdback state, return majoriy fraction
+                    pass
+
+            #Pick the max serving fraction
+            max_tmd = max(tmds, key=lambda t: t.serving_frac)
+            tid = max_tmd.key
+
+        return tid
+
+    def save_thumbnail_to_s3_and_store_metadata(self, image, score, keyname,
+                                        s3fname, ttype, rank=0, model_version=0):
+
+        '''
+        Save a thumbnail to s3 and its metadata in the DB
+        @image: Image object
+        @score: model score of the image
+        @keyname: the basename or filename of the image
+
+        @s3fname: s3 URI
+        @ttype: Thumbnail type
+        @rank: rank (int) of the thumbnail
+
+        @return thumbnail metadata object
+        '''
+        i_vid = self.key #internal video id
+
+        fmt = 'jpeg'
+        filestream = StringIO()
+        image.save(filestream, fmt, quality=90) 
+        filestream.seek(0)
+        imgdata = filestream.read()
+        
+        #upload to the host-thumbnail s3 bucket
+        upload_to_s3_host_thumbnails(keyname, imgdata) 
+
+        urls = []
+        tid = ThumbnailID.generate(imgdata, i_vid)
+
+        #If tid already exists, then skip saving metadata
+        if ThumbnailMetadata.get(tid) is not None:
+            _log.warn('Already have thumbnail id: %s' % tid)
+            return
+
+        urls.append(s3fname)
+        created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        width   = image.size[0]
+        height  = image.size[1] 
+
+        #populate thumbnails
+        tdata = ThumbnailMetadata(tid, i_vid, urls, created, width, height,
+                                  ttype, score, model_version, rank=rank)
+        tdata.update_phash(image)
+
+        #Add tid to video thumbnail list
+        self.thumbnail_ids.append(tid)
+
+        #Host this image on the Neon Image CDN in diff sizes
+        hoster = CDNHosting.create(None)
+        hoster.upload(image, tid)
+        
+        #Host this image on Cloudinary for dynamic resizing
+        cloudinary_hoster = CDNHosting.create('cloudinary')
+        cloudinary_hoster.upload(s3fname, tid)
+
+        return tdata
+
+    def download_and_add_thumbnail(self, image_url, keyname,
+                                    s3url, ttype, rank=1, callback=None):
+        '''
+        Download the image and save its metadata. Used to save thumbnail
+        of custom type or previous thumbnail given in the Neon API
+
+        Note: s3bucket to upload to and the filename(keyname) of the thumbnail
+        to be speicified to this function.
+
+        '''
+
+        score = 0 # no score assigned currently to uploaded thumbnails
+        http_client = tornado.httpclient.HTTPClient()
+        req = tornado.httpclient.HTTPRequest(url=image_url,
+                                             method="GET",
+                                             request_timeout=60.0,
+                                             connect_timeout=10.0)
+
+        response = http_client.fetch(req)
+        if not response.error:
+            imgdata = response.body
+            image = Image.open(StringIO(imgdata))
+            tdata = self.save_thumbnail_to_s3_and_store_metadata(image, score,
+                                                keyname, s3url, ttype, rank)
+            return tdata
+        else:
+            _log.error("failed to download the image")
+
+    def add_custom_thumbnail(self, image_url):
+        fname = "custom%s.jpeg" % int(time.time())
+        keyname = "%s/%s/%s" % (self.get_account_id(), self.job_id, fname)  
+        s3url = "https://%s.s3.amazonaws.com/%s" % ("host-thumbnails", keyname) 
+        ttype = ThumbnailType.CUSTOMUPLOAD
+        return self.download_and_add_thumbnail(image_url, keyname, s3url, ttype)
 
     @classmethod
     def get_video_request(cls, internal_video_id, callback=None):

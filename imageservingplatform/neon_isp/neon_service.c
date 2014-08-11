@@ -363,7 +363,8 @@ int neon_service_parse_api_args(ngx_http_request_t *request,
                                 unsigned char **publisher_id, 
                                 ngx_str_t * ipAddress, 
                                 int *width, 
-                                int *height){
+                                int *height,
+                                int cleanup_video){
 
     static const ngx_str_t height_key = ngx_string("height");
     static const ngx_str_t width_key = ngx_string("width");
@@ -373,7 +374,13 @@ int neon_service_parse_api_args(ngx_http_request_t *request,
 
     // get video id
     *video_id = neon_service_get_uri_token(request, base_url, 1);
-    
+  
+    // Clean up the video id from the neonvid_ parameter
+    // neonvid_ is a prefix used to identify a Neon video in beacon api
+    // Used only for the client API call
+    if (cleanup_video == 1)
+        neon_service_cleanup_video_id(video_id);
+
     // get height and width
     ngx_str_t value = ngx_string("");
     *height = 0;
@@ -386,7 +393,7 @@ int neon_service_parse_api_args(ngx_http_request_t *request,
     ngx_http_arg(request, width_key.data, width_key.len, &w_value);
     *width = neon_service_parse_number(&w_value);
   
-    // If height or width == -1, i.e if weren't specified then serve
+    // If height && width == -1, i.e if weren't specified then serve
     // default url
 
     ngx_str_t cip_key = ngx_string("cip");
@@ -530,10 +537,19 @@ neon_service_server_api(ngx_http_request_t *request,
 
     int ret = neon_service_parse_api_args(request, &base_url, &account_id, 
                                            &account_id_size, &video_id, &pub_id, 
-                                           &ipAddress, &width, &height);
+                                           &ipAddress, &width, &height, 0);
 
-    if(ret !=0 ){
+    if(ret !=0){
         neon_stats[NEON_SERVER_API_ACCOUNT_ID_NOT_FOUND] ++;    
+        neon_service_server_api_not_found(request, chain);
+        return NEON_SERVER_API_FAIL;
+    }
+    
+    // Send no content if account id is not found or
+    // width or height is missing
+    // The API spec needs both width & height to be sent  
+    if ((width == -1 && height != -1) || (height == -1 && width != -1)){
+        //neon_stats[NEON_SERVER_API_INVALID_ARGS] ++;
         neon_service_server_api_not_found(request, chain);
         return NEON_SERVER_API_FAIL;
     }
@@ -569,11 +585,9 @@ neon_service_server_api(ngx_http_request_t *request,
 /////////// CLIENT API METHODS ////////////
 
 static void
-neon_service_client_api_not_found(ngx_http_request_t *request,
+neon_service_no_content(ngx_http_request_t *request,
                                   ngx_chain_t  * chain){
 
-    static ngx_str_t error_response_body = ngx_string("image not found");
-    
     ngx_buf_t * b;
     b = (ngx_buf_t *) ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
     if(b == NULL){
@@ -588,9 +602,9 @@ neon_service_client_api_not_found(ngx_http_request_t *request,
     request->headers_out.status = NGX_HTTP_NO_CONTENT;  // 204
     request->headers_out.content_type.len = sizeof("text/plain") - 1;
     request->headers_out.content_type.data = (u_char *) "text/plain";
-    request->headers_out.content_length_n = error_response_body.len;
-    b->pos = error_response_body.data;
-    b->last = error_response_body.data + error_response_body.len;
+    request->headers_out.content_length_n = 0; 
+    b->pos = 0;
+    b->last = 0;
     b->memory = 1;
     b->last_buf = 1;
 }
@@ -678,14 +692,23 @@ neon_service_client_api(ngx_http_request_t *request,
 
     int ret = neon_service_parse_api_args(request, &base_url, &account_id, 
                                            &account_id_size, &video_id, &pub_id,
-                                           &ipAddress, &width, &height);
-        
-    if (ret !=0){ 
+                                           &ipAddress, &width, &height, 1);
+       
+    if (ret !=0){
         neon_stats[NEON_CLIENT_API_ACCOUNT_ID_NOT_FOUND] ++;
-        neon_service_client_api_not_found(request, chain);
+        neon_service_no_content(request, chain);
         return NEON_CLIENT_API_FAIL;
     }
-   
+    
+    // Send no content if account id is not found or
+    // width or height is missing
+    // The API spec needs both width & height to be sent  
+    if ((width == -1 && height != -1) || (height == -1 && width != -1)){
+        //neon_stats[NEON_CLIENT_API_INVALID_ARGS] ++;
+        neon_service_no_content(request, chain);
+        return NEON_CLIENT_API_FAIL;
+    }
+
     ngx_str_t vid = ngx_uchar_to_string(video_id);
     ngx_str_t pid = ngx_uchar_to_string(pub_id);
     
@@ -717,7 +740,7 @@ neon_service_client_api(ngx_http_request_t *request,
 
     if(error_url != NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK) {
         neon_stats[NEON_CLIENT_API_URL_NOT_FOUND] ++;
-        neon_service_client_api_not_found(request, chain);
+        neon_service_no_content(request, chain);
         return NEON_CLIENT_API_FAIL;
     }
 
@@ -774,7 +797,8 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
     
     if(error_account_id != NEON_MASTERMIND_ACCOUNT_ID_LOOKUP_OK){
         neon_stats[NEON_CLIENT_API_ACCOUNT_ID_NOT_FOUND] ++;
-        neon_service_client_api_not_found(request, chain);
+        // Same response as client api not found
+        neon_service_no_content(request, chain);
         return NEON_GETTHUMB_API_FAIL;
     }
 

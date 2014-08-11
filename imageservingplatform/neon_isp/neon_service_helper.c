@@ -97,3 +97,25 @@ static long neon_service_parse_number(ngx_str_t * value){
     return val;
 }
 
+/*
+ * Clean up the Video ID of neonvid_ prefix
+ *
+ * @enforce flag 
+ *
+ * */
+
+static void 
+neon_service_cleanup_video_id(unsigned char ** vid){
+
+    const char * prefix = "neonvid_";
+    const int prefix_size = 8;
+
+    if (ngx_strncmp(*vid, prefix, prefix_size) == 0){
+        // found neon vid, then strdup a new video id with cleaned prefix
+        *vid = (unsigned char *)strdup((char *)(*vid + prefix_size));
+    }else{
+        *vid = (unsigned char *)strdup("invalid");
+    }
+
+    return;
+}

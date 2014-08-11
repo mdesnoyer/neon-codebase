@@ -48,6 +48,9 @@ typedef enum {
     NEON_CLIENT_API_REQUESTS,
     NEON_GETTHUMBNAIL_API_REQUESTS,
 
+    // Others
+    NEON_INVALID_VIDEO_ID,
+
     // Out of memory counter ?
     NGINX_OUT_OF_MEMORY,
 

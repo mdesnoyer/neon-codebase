@@ -190,7 +190,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         FakeS3CreateBucket(bucket_name, cls.s3cfg.name)
         cls.s3_mfile_url = "%s/mastermind.api.test" % bucket_name # mastermind s3 file url
         FakeS3Upload(mfile_path, cls.s3cfg.name, cls.s3_mfile_url)
-        cls.isp = ISP(cls.s3_mfile_url, cls.s3cfg.name)
+        cls.isp = ISP(cls.s3_mfile_url, s3port) 
         cls.isp.start()
         time.sleep(1) # allow mastermind file to be parsed
 
@@ -318,8 +318,9 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         location header
         presence of a valid Set-Cookie header
         '''
-
-        response = self.client_api_request(self.pub_id, self.vid, 600, 500, "12.2.2.4")
+       
+        prefix = "neonvid_"
+        response = self.client_api_request(self.pub_id, prefix + self.vid, 600, 500, "12.2.2.4")
         redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
         headers = redirect_response.headers
         self.assertIsNotNone(redirect_response)
@@ -361,8 +362,9 @@ class TestImageServingPlatformAPI(unittest.TestCase):
        
         # use an old timestamp for the neonglobaluseridcookie
         h = {"Cookie" : "neonglobaluserid=dummyuid1406003475"}
-        response = self.client_api_request(self.pub_id, self.vid, 600, 500,
-                "12.2.2.4", headers=h)
+        prefix = "neonvid_"
+        response = self.client_api_request(self.pub_id, prefix + self.vid, 600, 500,
+                                            "12.2.2.4", headers=h)
         redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
         headers = redirect_response.headers
         self.assertIsNotNone(redirect_response)
@@ -399,8 +401,9 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         '''
         ts = int(time.time())
         h = {"Cookie" : "neonglobaluserid=dummyuid%s" % ts}
-        response = self.client_api_request(self.pub_id, self.vid, 600, 500,
-                "12.2.2.4", headers=h)
+        prefix = "neonvid_"
+        response = self.client_api_request(self.pub_id, prefix + self.vid, 600, 500,
+                                            "12.2.2.4", headers=h)
         redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
         headers = redirect_response.headers
         self.assertIsNotNone(redirect_response)
@@ -415,6 +418,15 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
         self.assertIsNotNone(im_url)
         self.assertIsNone(cookie)
+
+    def test_client_api_request_with_invalid_video(self):
+
+        '''
+        '''
+        ts = int(time.time())
+        response = self.client_api_request(self.pub_id, self.vid, 600, 500,
+                                            "12.2.2.4", headers={})
+        self.assertEquals(response.code, 204)
 
     ################### Server API tests #####################
 
@@ -456,10 +468,17 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         self.assertEqual(im_url, "")
 
     def test_server_api_with_non_standard_size(self):
-        response = self.server_api_request(self.pub_id, self.vid, 1, 1)
-        self.assertIsNone(response)
-        #im_url = json.loads(response.read())["data"]
-        #self.assertEqual(im_url, "")
+        '''
+        Returns a cloudinary URL
+        '''
+        h = 1; w =1
+        tid = 'thumb1' 
+        response = self.server_api_request(self.pub_id, self.vid, w, h)
+        self.assertIsNotNone(response)
+        im_url = json.loads(response.read())["data"]
+        cloudinary_url =\
+                "http://res.cloudinary.com/neon-labs/image/upload/w_%s,h_%s/neontn%s_w%s_h%s.jpg";
+        self.assertEqual(im_url, cloudinary_url % (w, h, tid, w, h))
     
     def test_server_api_with_invalid_pubid(self):
         response = self.server_api_request("invalid_pub", self.vid, 1, 1)

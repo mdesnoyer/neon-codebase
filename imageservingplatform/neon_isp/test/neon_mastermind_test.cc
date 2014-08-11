@@ -116,12 +116,21 @@ TEST_F(NeonMastermindTest, test_neon_mastermind_image_url_lookup){
     EXPECT_EQ(err, NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK);
     EXPECT_STRNE(url, NULL);
     
-    //EXPECT_STREQ(url, ?); // which thumb? can this be fixed?
+    EXPECT_STREQ(url, "http://neon/thumb1_500_600.jpg"); // majority thumbnail 
+    
+    // no width & height 
+    h = -1; w = -1;
+    err = neon_mastermind_image_url_lookup(aid, vid, &bucketId, h, w, &url, &size);
+    EXPECT_EQ(err, NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK);
+    EXPECT_STREQ(url, "http://default_image_url.jpg"); // default URL
+
 }
 
 /*
  * Lookup failure test cases
+ *
  * */
+
 TEST_F(NeonMastermindTest, test_neon_mastermind_image_url_lookup_invalids){
 
     char *pid = "pub1";
@@ -146,19 +155,6 @@ TEST_F(NeonMastermindTest, test_neon_mastermind_image_url_lookup_invalids){
     err = neon_mastermind_image_url_lookup(aid, vid, &bucketId, h, w, &url, &size);
     EXPECT_EQ(err, NEON_MASTERMIND_IMAGE_URL_LOOKUP_NOT_FOUND);
     vid[0] = 'v';
-
-    // invalid height
-    h = 1000;	
-    err = neon_mastermind_image_url_lookup(aid, vid, &bucketId, h, w, &url, &size);
-    EXPECT_EQ(err, NEON_MASTERMIND_IMAGE_URL_LOOKUP_NOT_FOUND);
-    h = 500;
-
-    // invalid width
-    w = 1000;
-    err = neon_mastermind_image_url_lookup(aid, vid, &bucketId, h, w, &url, &size);
-    EXPECT_EQ(err, NEON_MASTERMIND_IMAGE_URL_LOOKUP_NOT_FOUND);
-    w = 600;	
-
 }
 
 

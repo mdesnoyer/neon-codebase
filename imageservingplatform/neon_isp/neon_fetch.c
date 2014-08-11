@@ -10,30 +10,30 @@
 
 const char * neon_fetch_error = 0;
 
-
 NEON_FETCH_ERROR
 neon_fetch(const char * const mastermind_url,
            const char * const mastermind_filepath,
-           const char * const s3cmd_config_filepath,
+           const char * const s3port,
            time_t timeout)
 {
     static char command[1024];
     int ret = 0;
     
-    static const char * format = "s3cmd get --force --check-md5 %s %s";
-    if(s3cmd_config_filepath != NULL){
-        format = "s3cmd --force --config=%s get --check-md5 %s %s 2>/tmp/s3cmd.out";
-        if(sprintf(command, format, s3cmd_config_filepath, mastermind_url, mastermind_filepath) <= 0){
+    static const char * format = "/usr/local/bin/isp_s3downloader -u %s -d %s";
+    if(s3port != NULL){
+        format = "/usr/local/bin/isp_s3downloader -u %s -d %s -s localhost -p %s";
+        if (sprintf(command, format, mastermind_url, mastermind_filepath, s3port) <= 0){
             neon_log_error("sprintf failed to print the command");
             return NEON_FETCH_FAIL;
         }
+        
     }else{
         sprintf(command, format, mastermind_url, mastermind_filepath); 
     }
     
     errno = 0;
        
-    neon_log_error("s3 download cmd %s", command);
+    //neon_log_error("s3 download cmd %s", command);
     ret = system(command);
     
     if(ret == 0)
