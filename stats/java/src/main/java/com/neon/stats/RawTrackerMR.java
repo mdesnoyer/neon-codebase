@@ -554,6 +554,7 @@ public class RawTrackerMR extends Configured implements Tool {
         Context context) throws IOException, InterruptedException {
       SpecificRecordBase hiveEvent;
       Coords clickCoords;
+      Coords imageCoords;
 
       String partitionPath =
           GeneratePartitionPath(orig.getServerTime(),
@@ -642,6 +643,7 @@ public class RawTrackerMR extends Configured implements Tool {
       case IMAGE_CLICK:
         // We know if it is a right click only if the click coordinates are 0.
         clickCoords = ((ImageClick) orig.getEventData()).getPageCoords();
+        imageCoords = ((ImageClick) orig.getEventData()).getImageCoords();
         CharSequence thumbnailId =
             ((ImageClick) orig.getEventData()).getThumbnailId();
         hiveEvent =
@@ -676,10 +678,8 @@ public class RawTrackerMR extends Configured implements Tool {
                     ((ImageClick) orig.getEventData()).getWindowCoords().getX())
                 .setWindowCoordsY(
                     ((ImageClick) orig.getEventData()).getWindowCoords().getY())
-                .setImageCoordsX(
-                    ((ImageClick) orig.getEventData()).getImageCoords().getX())
-                .setImageCoordsY(
-                    ((ImageClick) orig.getEventData()).getImageCoords().getY())
+                .setImageCoordsX(imageCoords == null ? null : imageCoords.getX())
+                .setImageCoordsY(imageCoords == null ? null : imageCoords.getY())
                 .setIsClickInPlayer(false)
                 .setIsRightClick(
                     clickCoords.getX() <= 0 && clickCoords.getY() <= 0).build();
@@ -974,6 +974,8 @@ public class RawTrackerMR extends Configured implements Tool {
                 .getThumbnailId() : thumbnailId;
         Coords clickCoords =
             ((ImageClick) imClick.getEventData()).getPageCoords();
+        Coords imageCoords =
+            ((ImageClick) imClick.getEventData()).getImageCoords();
         BuildCommonSequenceFields(builder, imClick)
             .setPageCoordsX(clickCoords.getX())
             .setPageCoordsY(clickCoords.getY())
@@ -981,10 +983,8 @@ public class RawTrackerMR extends Configured implements Tool {
                 ((ImageClick) imClick.getEventData()).getWindowCoords().getX())
             .setWindowCoordsY(
                 ((ImageClick) imClick.getEventData()).getWindowCoords().getY())
-            .setImageCoordsX(
-                ((ImageClick) imClick.getEventData()).getImageCoords().getX())
-            .setImageCoordsY(
-                ((ImageClick) imClick.getEventData()).getImageCoords().getY())
+            .setImageCoordsX(imageCoords == null ? null : imageCoords.getX())
+            .setImageCoordsY(imageCoords == null ? null : imageCoords.getY())
             .setIsRightClick(clickCoords.getX() <= 0 && clickCoords.getY() <= 0)
             .setIsClickInPlayer(false)
             .setImClickClientTime(imClick.getClientTime() / 1000.)

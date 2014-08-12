@@ -930,6 +930,30 @@ public class RawTrackerMRTest {
   }
 
   @Test
+  public void testImageCoordsNull() throws IOException, InterruptedException {
+    List<AvroValue<TrackerEvent>> values =
+        new ArrayList<AvroValue<TrackerEvent>>();
+    values.add(new AvroValue<TrackerEvent>(MakeBasicImageClick().setEventData(
+        new ImageClick(true, "acct1_vid1_tid1", new Coords(100f, 200f),
+            new Coords(150f, 250f), null)).build()));
+
+    reduceDriver.withInput(new Text("tai156.45.41.124vid1"), values).run();
+    CaptureEvents();
+
+    VerifySequence(Arrays.asList(
+        MakeBasicImageClickHive().setImageCoordsX(null).setImageCoordsY(null)
+            .build(),
+        MakeBasicEventSequenceHive().setImClickPageURL("http://go.com")
+            .setImClickClientTime(1400000000.)
+            .setImClickServerTime(1400697546.).setServerTime(1400697546.)
+            .setThumbnailId("acct1_vid1_tid1").setPageCoordsX(100f)
+            .setPageCoordsY(200f).setWindowCoordsX(150f).setWindowCoordsY(250f)
+            .setImageCoordsX(null).setImageCoordsY(null)
+            .setIsClickInPlayer(false).setIsRightClick(false)
+            .setImClickPageId("pageid1").build()));
+  }
+
+  @Test
   public void testSequenceCollision() throws IOException, InterruptedException {
     // We can get sequence id collisions if they the lower bits are not merged
     // properly. This test checks that case.

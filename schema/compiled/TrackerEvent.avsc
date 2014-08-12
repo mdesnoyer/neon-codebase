@@ -170,7 +170,8 @@
         "type" : "Coords"
       }, {
         "name" : "imageCoords",
-        "type" : "Coords"
+        "type" : [ "null", "Coords" ],
+        "default" : null
       } ]
     }, {
       "type" : "record",
