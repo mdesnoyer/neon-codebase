@@ -2352,7 +2352,8 @@ class VideoMetadata(StoredObject):
         return tid
 
     def save_thumbnail_to_s3_and_store_metadata(self, image, score, keyname,
-                                        s3fname, ttype, rank=0, model_version=0):
+                                        s3fname, ttype, rank=0, model_version=0,
+                                        callback=None):
 
         '''
         Save a thumbnail to s3 and its metadata in the DB
@@ -2436,7 +2437,7 @@ class VideoMetadata(StoredObject):
         else:
             _log.error("failed to download the image")
 
-    def add_custom_thumbnail(self, image_url):
+    def add_custom_thumbnail(self, image_url, callback=None):
         fname = "custom%s.jpeg" % int(time.time())
         keyname = "%s/%s/%s" % (self.get_account_id(), self.job_id, fname)  
         s3url = "https://%s.s3.amazonaws.com/%s" % ("host-thumbnails", keyname) 

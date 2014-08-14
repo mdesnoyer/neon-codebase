@@ -32,12 +32,14 @@ static ngx_int_t ngx_http_neon_handler_healthcheck(ngx_http_request_t *r);
 static char *ngx_http_neon_stats_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_neon_mastermind_file_url(ngx_conf_t *cf, void *post, void *data);
 static char *ngx_http_neon_mastermind_validated_filepath(ngx_conf_t *cf, void *post, void *data);
+static char *ngx_http_neon_mastermind_download_filepath(ngx_conf_t *cf, void *post, void *data);
 static char *ngx_http_neon_updater_sleep_time(ngx_conf_t *cf, void *post, void *data);
 static char *ngx_http_neon_fetch_s3port(ngx_conf_t *cf, void *post, void *data);
 
 // config handlers
 static ngx_conf_post_handler_pt ngx_http_neon_mastermind_file_url_p = ngx_http_neon_mastermind_file_url;
 static ngx_conf_post_handler_pt ngx_http_neon_mastermind_validated_filepath_p = ngx_http_neon_mastermind_validated_filepath;
+static ngx_conf_post_handler_pt ngx_http_neon_mastermind_download_filepath_p = ngx_http_neon_mastermind_download_filepath;
 static ngx_conf_post_handler_pt ngx_http_neon_updater_sleep_time_p = ngx_http_neon_updater_sleep_time;
 static ngx_conf_post_handler_pt ngx_http_neon_fetch_s3port_p = ngx_http_neon_fetch_s3port;
 
@@ -57,6 +59,7 @@ typedef struct {
     time_t updater_fetch_timeout;
     ngx_str_t mastermind_filepath;
     ngx_str_t mastermind_validated_filepath;
+    ngx_str_t mastermind_download_filepath;
     ngx_str_t neon_fetch_s3port;
 } ngx_http_neon_loc_conf_t;
 
@@ -116,6 +119,13 @@ static ngx_command_t  ngx_http_neon_commands[] = {
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_neon_loc_conf_t, mastermind_validated_filepath),
         &ngx_http_neon_mastermind_validated_filepath_p },
+    
+    { ngx_string("mastermind_download_filepath"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_str_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_neon_loc_conf_t, mastermind_download_filepath),
+        &ngx_http_neon_mastermind_download_filepath_p },
     
     { ngx_string("updater_sleep_interval"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
@@ -196,7 +206,28 @@ ngx_http_neon_mastermind_file_url(ngx_conf_t *cf, void *post, void *data)
 }
 
 /*
- * Read the Mastermind valided filepath file path
+ * Read the Mastermind download filepath 
+ * */
+static char *
+ngx_http_neon_mastermind_download_filepath(ngx_conf_t *cf, void *post, void *data)
+{
+    ngx_str_t  *name = data; // i.e., first field of var
+   
+       if(name == NULL){
+        return NGX_CONF_ERROR;
+    }    
+    
+    if (ngx_strcmp(name->data, "") == 0) {
+        return NGX_CONF_ERROR;
+    }
+    
+    ngx_http_neon_loc_conf.mastermind_download_filepath.data = name->data;
+    ngx_http_neon_loc_conf.mastermind_download_filepath.len = ngx_strlen(name->data);
+    return NGX_CONF_OK;
+}
+
+/*
+ * Read the Mastermind valided filepath
  * This filepath is used to store the validated file
  * */
 static char *
@@ -307,6 +338,7 @@ ngx_module_t ngx_http_neon_module = {
 ngx_int_t neon_init_process(ngx_cycle_t *cycle){
     neon_updater_config_init(ngx_http_neon_loc_conf.mastermind_file_url.data, 
                    ngx_http_neon_loc_conf.mastermind_validated_filepath.data, 
+                   ngx_http_neon_loc_conf.mastermind_download_filepath.data, 
                    ngx_http_neon_loc_conf.neon_fetch_s3port.data, 
                    ngx_http_neon_loc_conf.updater_sleep_time); 
     neon_start_updater();

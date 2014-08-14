@@ -35,7 +35,7 @@ static time_t sleep_time = 10;
 static time_t fetch_timeout = 30;
 static const char * mastermind_url = 0; // HTTP REST URL to marstermind file 
 // TODO: Need to lock the download path if >1 worker process will be spun
-static const char * mastermind_filepath             = "/tmp/mastermind"; // download the file here
+static const char * mastermind_filepath             = 0; // download the file here
 static const char * validated_mastermind_filepath   = 0; 
 static const char * s3cmd_config_filepath = 0;
 static const int test_config = 1;
@@ -46,6 +46,7 @@ static const int test_config = 1;
  * */
 void neon_updater_config_init(unsigned char *m_url, 
                                 unsigned char *m_valid_path, 
+                                unsigned char *m_download_path, 
                                 unsigned char * s3cmd_conf_fpath, 
                                 time_t s_time){
     
@@ -60,6 +61,12 @@ void neon_updater_config_init(unsigned char *m_url,
         validated_mastermind_filepath = strdup((const char *) m_valid_path);
     else
         free((void*) validated_mastermind_filepath);
+    
+    // Mastermind download file path
+    if (mastermind_filepath == 0)
+        mastermind_filepath = strdup((const char *) m_download_path);
+    else
+        free((void*) mastermind_filepath);
 
     // Updater Sleep time in seconds
     srand(time(NULL));
@@ -225,9 +232,4 @@ neon_terminate_updater(){
     
     return 0;
 }
-
-
-
-
-
 

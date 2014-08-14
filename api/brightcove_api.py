@@ -23,13 +23,14 @@ import tornado.httputil
 import tornado.ioloop
 import tornado.escape
 import urllib
-
-from utils.http import RequestPool
 import utils.http
-from utils.imageutils import PILImageUtils
 import utils.logs
 import utils.neon
-_log = utils.logs.FileLogger("brighcove_api")
+from utils.http import RequestPool
+from utils.imageutils import PILImageUtils
+
+import logging
+_log = logging.getLogger(__name__)
 
 from utils.options import define, options
 #define("local", default=1, help="create neon requests locally", type=int)
