@@ -87,6 +87,14 @@
     "type" : [ "null", "float" ],
     "default" : null
   }, {
+    "name" : "imageCoords_x",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
+    "name" : "imageCoords_y",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
     "name" : "isClickInPlayer",
     "type" : [ "null", "boolean" ],
     "default" : null
@@ -111,6 +119,10 @@
     "type" : [ "null", "int" ],
     "default" : null
   }, {
+    "name" : "videoViewPercent",
+    "type" : [ "null", "float" ],
+    "default" : null
+  }, {
     "name" : "videoPageURL",
     "type" : [ "null", "string" ],
     "default" : null
@@ -124,47 +136,47 @@
     "default" : null
   }, {
     "name" : "imLoadServerTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "imVisServerTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "imClickServerTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "adPlayServerTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "videoPlayServerTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "imLoadClientTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "imVisClientTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "imClickClientTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "adPlayClientTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "videoPlayClientTime",
-    "type" : [ "null", "float" ],
+    "type" : [ "null", "double" ],
     "default" : null
   }, {
     "name" : "serverTime",
-    "type" : "float"
+    "type" : "double"
   }, {
     "name" : "imLoadPageId",
     "type" : [ "null", "string" ],

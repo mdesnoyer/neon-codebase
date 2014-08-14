@@ -7,7 +7,7 @@ import os.path
 import sys
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+    sys.path.insert(0, base_path)
 
 import datetime
 from poster.encode import multipart_encode
@@ -23,13 +23,14 @@ import tornado.httputil
 import tornado.ioloop
 import tornado.escape
 import urllib
-
-from utils.http import RequestPool
 import utils.http
-from utils.imageutils import PILImageUtils
 import utils.logs
 import utils.neon
-_log = utils.logs.FileLogger("brighcove_api")
+from utils.http import RequestPool
+from utils.imageutils import PILImageUtils
+
+import logging
+_log = logging.getLogger(__name__)
 
 from utils.options import define, options
 #define("local", default=1, help="create neon requests locally", type=int)
@@ -384,7 +385,7 @@ class BrightcoveApi(object):
                                image_suffix=image_suffix,
                                callback=add_image_callback)
             else:
-                _log.error('key=async_update_thumbnail' 
+                _log.error('key=async_update_thumbnail ' 
                         'msg=failed to download image for %s' %thumbnail_id)
                 callback(None)
 

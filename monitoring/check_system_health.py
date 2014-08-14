@@ -6,17 +6,26 @@ Check system vitals and send metrics to carbon agent /monitoring server
 Run this script to send data to carbon server
 '''
 
+import os
+import os.path
 import sys
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] <> base_path:
+    sys.path.insert(0, base_path)
+
 import time
 import os
 import platform 
 import psutil
 import resource
+import signal
 import socket
 import subprocess
+import utils.neon
+from utils.options import options, define
 
-CARBON_SERVER = '54.225.235.97' #10.171.5.3
-CARBON_PORT = 8090
+define('carbon_server', default='54.225.235.97', help='carbon ip address')
+define('carbon_port', default=8090, type=int, help='carbon port')
 
 def get_proc_memory():
     rusage_denom = 1024.
@@ -47,8 +56,9 @@ def get_system_memory():
     return psutil.virtual_memory()[2]
 
 def get_cpu_usage():
-    #normalize by num
-    return psutil.cpu_times()[0] /psutil.NUM_CPUS
+    # sum(user, system), normalize by num
+    #return (psutil.cpu_times()[0] + psutil.cpu_times()[2]) /psutil.NUM_CPUS
+    return psutil.cpu_percent(interval=0.1)
 
 def get_loadavg():
     # For more details, "man proc" and "man uptime"  
@@ -72,7 +82,7 @@ def send_data(name, value):
     message = 'system.%s.%s %s %d\n' % (node, name, value, timestamp)
     sock = socket.socket()
     try:
-        sock.connect((CARBON_SERVER, CARBON_PORT))
+        sock.connect((options.carbon_server, options.carbon_port))
         sock.sendall(message)
         sock.close()
     except Exception, e:
@@ -80,7 +90,13 @@ def send_data(name, value):
 
 def main():
     delay = 60
-    #get_loadavg()
+    utils.neon.InitNeon()
+    
+    def sighandler(sig, frame):
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, sighandler)
+    signal.signal(signal.SIGTERM, sighandler)
     
     while True:
         

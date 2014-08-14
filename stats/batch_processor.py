@@ -478,10 +478,12 @@ def main():
 
     threads = [] 
     for event in ['ImageLoad', 'ImageVisible',
-                  'ImageClick', 'AdPlay', 'VideoPlay', 'EventSequence']:
+                  'ImageClick', 'AdPlay', 'VideoPlay', 'VideoViewPercentage',
+                  'EventSequence']:
         thread = ImpalaTableBuilder(cleaned_output_path, cluster_info, event)
         thread.start()
         threads.append(thread)
+        time.sleep(1)
 
     # Wait for all of the tables to be built
     for thread in threads:
@@ -496,4 +498,8 @@ def main():
 
 if __name__ == "__main__":
     utils.neon.InitNeon()
-    exit(main())
+    try:
+        exit(main())
+    finally:
+        # Explicitly send the statemon data at the end of the process
+        utils.monitor.send_statemon_data()

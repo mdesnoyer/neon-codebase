@@ -26,9 +26,10 @@ import utils.neon
 import time
 import datetime
 from StringIO import StringIO
-from mock import patch 
+from mock import MagicMock, patch 
 from supportServices import services, neondata
 from api import brightcove_api
+import test_utils.mock_boto_s3 as boto_mock
 import tornado.testing
 import tornado.httpclient
 from utils.imageutils import PILImageUtils
@@ -169,12 +170,18 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
     #def get_new_ioloop(self):
     #    return tornado.ioloop.IOLoop.instance()
 
-    def post_request(self, url, vals, apikey):
+    def post_request(self, url, vals, apikey, jsonheader=False):
         ''' post request to the app '''
 
         headers = {'X-Neon-API-Key' : apikey, 
                 'Content-Type':'application/x-www-form-urlencoded'}
         body = urllib.urlencode(vals)
+        
+        if jsonheader: 
+            headers = {'X-Neon-API-Key' : apikey, 
+                    'Content-Type':'application/json'}
+            body = json.dumps(vals)
+
         self.http_client.fetch(url,
                                callback=self.stop,
                                method="POST",
@@ -183,12 +190,18 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         response = self.wait()
         return response
 
-    def put_request(self, url, vals, apikey):
+    def put_request(self, url, vals, apikey, jsonheader=False):
         ''' put request to the app '''
 
         headers = {'X-Neon-API-Key' : apikey, 
                 'Content-Type':'application/x-www-form-urlencoded' }
         body = urllib.urlencode(vals)
+        
+        if jsonheader: 
+            headers = {'X-Neon-API-Key' : apikey, 
+                    'Content-Type':'application/json'}
+            body = json.dumps(vals)
+        
         self.http_client.fetch(url, self.stop,method="PUT", body=body,
                                headers=headers)
         response = self.wait(timeout=10)
@@ -333,7 +346,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
 
         url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
                     "/%s/videos/%s" %(self.a_id, self.b_id, vid))
-        vals = {'thumbnail_id' : tid }
+        vals = {'current_thumbnail' : tid }
         return self.put_request(url, vals, self.api_key)
    
     def _success_http_side_effect(self, *args, **kwargs):
@@ -479,7 +492,12 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         
         #verify account id added to Neon user account
         nuser = neondata.NeonUserAccount.get_account(self.api_key)
-        self.assertTrue(self.b_id in nuser.integrations.keys()) 
+        self.assertTrue(self.b_id in nuser.integrations.keys())
+
+        #Verifty that there is an experiment strategy for the account
+        strategy = neondata.ExperimentStrategy.get(self.api_key)
+        self.assertIsNotNone(strategy)
+        self.assertTrue(strategy.only_exp_if_chosen)
         
         reqs = self._create_neon_api_requests()
         self._process_neon_api_requests(reqs)
@@ -538,6 +556,11 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.api_key = self.create_neon_account()
         self.assertEqual(self.api_key, 
                 neondata.NeonApiKey.get_api_key(self.a_id))
+        
+        #Verify that there is an experiment strategy for the account
+        strategy = neondata.ExperimentStrategy.get(self.api_key)
+        self.assertIsNotNone(strategy)
+        self.assertFalse(strategy.only_exp_if_chosen)
 
         #Setup Side effect for the http clients
         #self.bapi_mock_client().fetch.side_effect = \
@@ -577,7 +600,8 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertFalse(platform.auto_update)
         self.assertEqual(platform.write_token, self.wtoken)
 
-    def _test_autopublish_brightcove_account(self):
+    @unittest.skip('TODO(sunil): explain why this is turned off')
+    def test_autopublish_brightcove_account(self):
         with options._set_bounded('supportServices.neondata.dbPort',
                                   self.redis.port):
 
@@ -1085,9 +1109,123 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         resp = self.get_request(url, self.api_key)
         self.assertEqual(resp.code, 400)
     
+    
+    def test_get_abtest_state(self):
+        '''
+        A/B test state response
+        '''
+
+        self.api_key = self.create_neon_account()
+        
+        ext_vid = 'vid1'
+        vid = neondata.InternalVideoID.generate(self.api_key, ext_vid) 
+        
+        #Set experiment strategy
+        es = neondata.ExperimentStrategy(self.api_key)
+        es.chosen_thumb_overrides = True
+        es.save()
+       
+        TMD = neondata.ThumbnailMetadata
+
+        #Save thumbnails 
+        thumbs = [
+            TMD('%s_t1' % vid, vid, ['t1.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.8),
+            TMD('%s_t2' % vid, vid, ['t2.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.15),
+            TMD('%s_t3' % vid, vid, ['t3.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.01),
+            TMD('%s_t4' % vid, vid, ['t4.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.04),
+            ]
+        TMD.save_all(thumbs)
+        
+        #Save VideoMetadata
+        tids = [thumb.key for thumb in thumbs]
+        v0 = neondata.VideoMetadata(vid, tids, 'reqid0', 'v0.mp4', 0, 0, None, 0, None,
+                            True, neondata.ExperimentState.RUNNING)
+        v0.save()
+       
+        #Set up Serving URLs 
+        for thumb in thumbs:
+            inp = neondata.ThumbnailServingURLs('%s' % thumb.key)
+            inp.add_serving_url('http://servingurl_800_600.jpg', 800, 600) 
+            inp.add_serving_url('http://servingurl_120_90.jpg', 120, 90) 
+            inp.save()
+        
+        url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                            '%s/abteststate/%s' %(self.a_id, "0", ext_vid))  
+        resp = self.get_request(url, self.api_key)
+        res = json.loads(resp.body)
+        
+        # AB test running
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(res['state'], "running") 
+        self.assertEqual(res['data'], []) 
+        
+        v0.experiment_state = neondata.ExperimentState.COMPLETE
+        v0.save()
+        
+        # AB test complete 
+        expected_data = json.loads('{"state": "complete", "data": [{"url":\
+        "http://servingurl_800_600.jpg", "width": 800, "height": 600}, {"url":\
+        "http://servingurl_120_90.jpg", "width": 120, "height": 90}]}')
+        
+        url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                            '%s/abteststate/%s' %(self.a_id, "0", ext_vid))  
+        resp = self.get_request(url, self.api_key)
+       
+        res = json.loads(resp.body)
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(res['state'], "complete") 
+        self.assertEqual(res['data'], expected_data['data'])
 
 
-    ##### OOYALA PLATFORM TEST ######
+    @patch('api.cdnhosting.urllib2')
+    @patch('api.cdnhosting.S3Connection')
+    def test_upload_video_custom_thumbnail(self, mock_conntype, mock_urllib2):
+        '''
+        Test uploading a custom thumbnail for a video
+        PUT
+        /api/v1/accounts/{account_id}/{integration_type}/{integration_id}/videos/{video_id}
+
+        {"thumbnails":[
+        {
+            created_time: 12345,
+            type: custom_upload,
+            urls: [
+                http://example.com/images/1.jpg
+            ]
+        }
+        ]}
+        '''
+        
+        #s3mocks to mock host_thumbnails_to_s3
+        conn = boto_mock.MockConnection()
+        conn.create_bucket('host-thumbnails')
+        conn.create_bucket('neon-image-cdn')
+        mock_conntype.return_value = conn
+        
+        #cloudinary mock
+        mresponse = MagicMock()
+        mresponse.read.return_value = '{"url": "http://cloudinary.jpg"}' 
+        mock_urllib2.urlopen.return_value = mresponse 
+        
+        self._setup_initial_brightcove_state()
+        vid = self._get_videos()[0]
+        url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
+                    "/%s/videos/%s" %(self.a_id, self.b_id, vid))
+        data = {
+                "created_time": time.time(),
+                "type": "custom_upload",
+                "urls": ["http://custom_thumbnail.jpg"]
+                }
+
+        vals = {'thumbnails' : [data]}
+        response = self.put_request(url, vals, self.api_key, jsonheader=True)
+        self.assertEqual(response.code, 202) 
+
+##### OOYALA PLATFORM TEST ######
 
 class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
     ''' Ooyala services Test '''
@@ -1159,12 +1297,18 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         response = self.wait()
         return response
     
-    def put_request(self, url, vals, apikey):
+    def put_request(self, url, vals, apikey, jsonheader=False):
         ''' put request to the app '''
 
         headers = {'X-Neon-API-Key' : apikey, 
-                'Content-Type':'application/x-www-form-urlencoded' }
+                'Content-Type':'application/x-www-form-urlencoded'}
         body = urllib.urlencode(vals)
+        
+        if jsonheader: 
+            headers = {'X-Neon-API-Key' : apikey, 
+                    'Content-Type':'application/json'}
+            body = json.dumps(vals)
+        
         self.http_client.fetch(url, self.stop, method="PUT", body=body,
                                headers=headers)
         response = self.wait()
@@ -1330,9 +1474,14 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         process_neon_api_requests(api_requests, self.api_key,
                                   self.i_id, "ooyala")
 
-    def _test_create_ooyala_requests(self):
+    def test_create_ooyala_requests(self):
 
         self._create_request_from_feed()
+
+        #Verify that there is an experiment strategy for the account
+        strategy = neondata.ExperimentStrategy.get(self.api_key)
+        self.assertIsNotNone(strategy)
+        self.assertTrue(strategy.only_exp_if_chosen)
 
         #Assert the job ids in the ooyala account
         oo_account = neondata.OoyalaPlatform.get_account(self.api_key, self.i_id)
@@ -1372,7 +1521,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         '''
         url = self.get_url("/api/v1/accounts/%s/ooyala_integrations"
                     "/%s/videos/%s" %(self.a_id, self.i_id, vid))
-        vals = {'thumbnail_id' : tid}
+        vals = {'current_thumbnail' : tid}
         return self.put_request(url, vals, self.api_key)
     
     def test_update_thumbnail(self):
@@ -1406,8 +1555,8 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         url = self.get_url('/api/v1/accounts/%s/ooyala_integrations/%s' \
                             %(self.a_id, self.i_id))
         vals = {'oo_secret_key' : 'sec', 'oo_api_key': 'okey', 
-                'auto_update': False, 'partner_code': 'part'}
-        response = self.put_request(url, vals, self.api_key)
+                'auto_update': 'false', 'partner_code': 'part'}
+        response = self.put_request(url, vals, self.api_key, jsonheader=True)
         self.assertEqual(response.code, 200)
 
         oo_account = neondata.OoyalaPlatform.get_account(self.api_key,
@@ -1417,7 +1566,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         #Test Missing an argument
         vals = {'oo_secret_key' : 'sec', 'oo_api_key': 'okey', 
                 'auto_update': False}
-        response = self.put_request(url, vals, self.api_key)
+        response = self.put_request(url, vals, self.api_key, jsonheader=True)
         self.assertEqual(response.code, 400)
 
 if __name__ == '__main__':

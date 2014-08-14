@@ -25,7 +25,7 @@ class TestCase(unittest.TestCase):
           _log.info('Hi')
 
         or as a decorator. e.g.:
-        @assertLogs(logging.INFO, 'hi')
+        @assertLogExists(logging.INFO, 'hi')
         def test_did_log(self):
           _log.info('Hi')
           
@@ -40,16 +40,53 @@ class TestCase(unittest.TestCase):
 
         finally:
             logger.removeHandler(handler)
-            reg = re.compile(regexp)
+            
+        reg = re.compile(regexp)
+        matching_logs = handler.get_matching_logs(reg, level)
 
-            matching_logs = handler.get_matching_logs(reg, level)
+        if len(matching_logs) == 0:
+            self.fail(
+                'Msg: %s was not logged. The log was: %s' % 
+                (regexp,
+                 '\n'.join(['%s: %s' % (x.levelname, x.getMessage())
+                            for x in handler.logs])))
 
-            if len(matching_logs) == 0:
-                self.fail(
-                    'Msg: %s was not logged. The log was: %s' % 
-                    (regexp,
-                     '\n'.join(['%s: %s' % (x.levelname, x.getMessage())
-                                for x in handler.logs])))
+    @contextmanager
+    def assertLogNotExists(self, level, regexp):
+        '''Asserts that a log message was not written at a given level.
+
+        This can be used either in a with statement e.g:
+        with self.assertLogNotExists(logging.INFO, 'Hi'):
+          do_stuff()
+          _log.info('Hi')
+
+        or as a decorator. e.g.:
+        @assertLogNotExists(logging.INFO, 'hi')
+        def test_did_log(self):
+          _log.error('Hi')
+          
+        '''
+        handler = LogCaptureHandler()
+        logger = logging.getLogger()
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+
+        try:
+            yield
+
+        finally:
+            logger.removeHandler(handler)
+
+        reg = re.compile(regexp)
+        matching_logs = handler.get_matching_logs(reg, level)
+
+        if len(matching_logs) > 0:
+            self.fail(
+                'Msg: %s was logged and it should not have. '
+                'The log was: %s' % 
+                (regexp,
+                '\n'.join(['%s: %s' % (x.levelname, x.getMessage())
+                            for x in handler.logs])))
 
 class LogCaptureHandler(logging.Handler):
     '''A class that just collects all the logs.'''

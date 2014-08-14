@@ -26,9 +26,9 @@ record ImageVisibleHive {
 
   union { null, string } refURL;  // The referral URL
 
-  float serverTime;    // The server's time in s since epoch
+  double serverTime;    // The server's time in s since epoch
 
-  float clientTime;    // The client's time in s since epoch
+  double clientTime;    // The client's time in s since epoch
 
   string clientIP;    // The client's ip address
 

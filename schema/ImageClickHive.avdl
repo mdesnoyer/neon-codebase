@@ -26,9 +26,9 @@ record ImageClickHive {
 
   union { null, string } refURL;  // The referral URL
 
-  float serverTime;    // The server's time in s since epoch
+  double serverTime;    // The server's time in s since epoch
 
-  float clientTime;    // The client's time in s since epoch
+  double clientTime;    // The client's time in s since epoch
 
   string clientIP;    // The client's ip address
 
@@ -56,12 +56,16 @@ record ImageClickHive {
   union { null, string } video_id; // The video id of the video play that the click resulted in
  
   // Coordinates of the click relative to the page
-  union {null, float} pageCoords_x;
-  union {null, float} pageCoords_y;
+  union {null, float} pageCoords_x = null;
+  union {null, float} pageCoords_y = null;
 
   // Coordinates of the click relative to the visible window
-  union {null, float} windowCoords_x;
-  union {null, float} windowCoords_y;
+  union {null, float} windowCoords_x = null;
+  union {null, float} windowCoords_y = null;
+
+  // Coordinates of the click relative to the image
+  union {null, float} imageCoords_x = null;
+  union {null, float} imageCoords_y = null;
 
   boolean isClickInPlayer; // Is the click in a video player
 

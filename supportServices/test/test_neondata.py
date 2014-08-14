@@ -31,7 +31,8 @@ from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         YoutubePlatform, NeonUserAccount, DBConnection, NeonApiKey, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
         ThumbnailMetadata, InternalVideoID, OoyalaPlatform, \
-        TrackerAccountIDMapper
+        TrackerAccountIDMapper, ThumbnailServingURLs, ExperimentStrategy, \
+        ExperimentState
 
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
@@ -41,16 +42,11 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         super(TestNeondata, self).setUp()
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
+        self.maxDiff = 5000
 
     def tearDown(self):
         self.redis.stop()
         super(TestNeondata, self).tearDown()
-
-    # TODO: It should be possible to run this with an IOLoop for each
-    # test, but it's not running. Need to figure out why.
-    def get_new_ioloop(self):
-        ''' new ioloop '''
-        return tornado.ioloop.IOLoop.instance()
 
     def test_neon_api_key(self):
         ''' test api key generation '''
@@ -307,6 +303,37 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                            ThumbnailMetadata.iterate_all_thumbnails()]
         self.assertItemsEqual(found_thumb_ids, [x.key for x in thumbs])
 
+    def test_ThumbnailServingURLs(self):
+        input1 = ThumbnailServingURLs('acct1_vid1_tid1')
+        input1.add_serving_url('http://that_800_600.jpg', 800, 600) 
+        
+        input1.save()
+        output1 = ThumbnailServingURLs.get('acct1_vid1_tid1')
+        self.assertEqual(output1.get_thumbnail_id(), input1.get_thumbnail_id())
+        self.assertEqual(output1.get_serving_url(800, 600),
+                         'http://that_800_600.jpg')
+        with self.assertRaises(KeyError):
+            _log.info('Output1 %s' % output1)
+            output1.get_serving_url(640, 480)
+
+        input1.add_serving_url('http://that_640_480.jpg', 640, 480) 
+        input2 = ThumbnailServingURLs('tid2', {(640, 480) : 'http://this.jpg'})
+        ThumbnailServingURLs.save_all([input1, input2])
+        output1, output2 = ThumbnailServingURLs.get_many(['acct1_vid1_tid1',
+                                                          'tid2'])
+        self.assertEqual(output1.get_thumbnail_id(),
+                         input1.get_thumbnail_id())
+        self.assertEqual(output2.get_thumbnail_id(),
+                         input2.get_thumbnail_id())
+        self.assertEqual(output1.get_serving_url(640, 480),
+                         'http://that_640_480.jpg')
+        self.assertEqual(output1.get_serving_url(800, 600),
+                         'http://that_800_600.jpg')
+        self.assertEqual(output2.get_serving_url(640, 480),
+                         'http://this.jpg')
+        
+        
+
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()
@@ -324,9 +351,9 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
         options._set('supportServices.neondata.baseRedisRetryWait', 0.01)
 
     def tearDown(self):
+        self.connection_patcher.stop()
         options._set('supportServices.neondata.baseRedisRetryWait',
                      self.old_delay)
-        self.connection_patcher.stop()
         super(TestDbConnectionHandling, self).tearDown()
 
     def _mocked_get_func(self, key, callback=None):
@@ -412,6 +439,9 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
         with self.assertRaises(redis.ConnectionError):
             TrackerAccountIDMapper.get("tai1")
 
+    # TODO(mdesnoyer): Add test for the modify if there is a failure
+    # on one of the underlying commands.
+
 class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
     '''
     Thumbnail ID Mapper and other thumbnail helper class tests 
@@ -482,6 +512,41 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         self.assertEqual(thumb.rank, 6)
         self.assertItemsEqual(thumb.urls,
                               ['one.jpg', 'two.jpg', 'url3.jpg'])
+
+    def test_atomic_modify_many(self):
+        vid1 = InternalVideoID.generate('api1', 'vid1')
+        tid1 = ThumbnailID.generate(self.image, vid1)
+        tdata1 = ThumbnailMetadata(tid1, vid1, ['one.jpg', 'two.jpg'],
+                                   None, self.image.size[1],
+                                   self.image.size[0],
+                                   'brightcove', 1.0, '1.2')
+        vid2 = InternalVideoID.generate('api1', 'vid2')
+        tid2 = ThumbnailID.generate(self.image, vid2)
+        tdata2 = ThumbnailMetadata(tid2, vid2, ['1.jpg', '2.jpg'],
+                                   None, self.image.size[1],
+                                   self.image.size[0],
+                                   'brightcove', 1.0, '1.2')
+        self.assertFalse(tdata2.chosen)
+        self.assertFalse(tdata1.chosen)
+        self.assertTrue(tdata2.enabled)
+        self.assertTrue(tdata1.enabled)
+
+        ThumbnailMetadata.save_all([tdata1, tdata2])
+
+        def _change_thumb_data(d):
+            d[tid1].chosen = True
+            d[tid2].enabled = False
+
+        updated = ThumbnailMetadata.modify_many([tid1, tid2],
+                                                _change_thumb_data)
+        self.assertTrue(updated[tid1].chosen)
+        self.assertFalse(updated[tid2].chosen)
+        self.assertTrue(updated[tid1].enabled)
+        self.assertFalse(updated[tid2].enabled)
+        self.assertTrue(ThumbnailMetadata.get(tid1).chosen)
+        self.assertFalse(ThumbnailMetadata.get(tid2).chosen)
+        self.assertTrue(ThumbnailMetadata.get(tid1).enabled)
+        self.assertFalse(ThumbnailMetadata.get(tid2).enabled)
         
 
     def test_read_thumbnail_old_format(self):
@@ -529,6 +594,67 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         result = [InternalVideoID.to_external(i_vid) for i_vid in i_vids]
 
         self.assertEqual(result, external_vids)
+
+    def test_get_winner_tid(self):
+        '''
+        Test the get_winner_tid logic for a given video id
+
+        '''
+        acc_id = 'acct1'
+        na = NeonUserAccount(acc_id)
+        na.save()
+        vid = InternalVideoID.generate(na.neon_api_key, 'vid1')
+        
+        #Set experiment strategy
+        es = ExperimentStrategy(na.neon_api_key)
+        es.chosen_thumb_overrides = True
+        es.override_when_done = True
+        es.save()
+        
+        #Save thumbnails 
+        thumbs = [
+            ThumbnailMetadata('t1', vid, ['t1.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.8),
+            ThumbnailMetadata('t2', vid, ['t2.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.15),
+            ThumbnailMetadata('t3', vid, ['t3.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.01),
+            ThumbnailMetadata('t4', vid, ['t4.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.04),
+            ThumbnailMetadata('t5', vid, ['t5.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.0)
+            ]
+        ThumbnailMetadata.save_all(thumbs)
+        
+        #Save VideoMetadata
+        tids = [thumb.key for thumb in thumbs]
+        v0 = VideoMetadata(vid, tids, 'reqid0', 'v0.mp4', 0, 0, None, 0, None,
+                            True, ExperimentState.COMPLETE)
+        v0.save()
+        
+        #Set up Serving URLs (2 per tid)
+        for thumb in thumbs:
+            inp = ThumbnailServingURLs('%s_%s' % (vid, thumb.key))
+            inp.add_serving_url('http://servingurl_800_600.jpg', 800, 600) 
+            inp.add_serving_url('http://servingurl_120_90.jpg', 120, 90) 
+            inp.save()
+
+        winner_tid = v0.get_winner_tid()     
+        self.assertEqual(winner_tid, 't1')
+
+        # Case 2: chosen_thumb_overrides is False (holdback state)
+        es.chosen_thumb_overrides = False
+        es.override_when_done = False
+        es.exp_frac = 0.2
+        es.save()
+        winner_tid = v0.get_winner_tid()     
+        self.assertEqual(winner_tid, 't1')
+    
+        # Case 3: Experiement is in experimental state
+        es.exp_frac = es.holdback_frac = 0.8
+        es.save()
+        winner_tid = v0.get_winner_tid()     
+        self.assertEqual(winner_tid, 't1')
 
 
 if __name__ == '__main__':

@@ -67,6 +67,8 @@ def main(options):
                     i = i+1
                     d[i] = float(d[i])
                 
+                #If the flag is set, then consider the video only if the data
+                #is signficant
                 if options.significant:
                     if not significance_calculator(d[1], d[2], d[3], d[4]):
                         continue
