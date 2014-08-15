@@ -35,6 +35,11 @@ define("batch_period", default=86400, type=float,
 
 from utils import statemon
 statemon.define('batch_job_failures', int)
+statemon.define('cluster_is_alive', int)
+statemon.define('cluster_deaths', int)
+statemon.define('cluster_resize_failures', int)
+statemon.define('successful_batch_runs', int)
+statemon.define('last_batch_success', int)
 
 class BatchProcessManager(threading.Thread):
     '''Thread that will manage the batch process runs.'''
@@ -61,24 +66,70 @@ class BatchProcessManager(threading.Thread):
                 cleaned_output_path = "%s/%s" % (
                     options.cleaned_output_path,
                     time.strftime("%Y-%m-%d-%H-%M"))
+
+                self.cluster.change_instance_group_size('TASK',
+                                                        new_size=4)
                 stats.batch_processor.run_batch_cleaning_job(
                     self.cluster, options.input_path,
                     cleaned_output_path)
                 stats.batch_processor.build_impala_tables(
                     cleaned_output_path,
                     self.cluster)
+                self.last_output_path = cleaned_output_path
+                statemon.state.increment('successful_batch_runs')
+                statemon.state.last_batch_success = 1
             except Exception as e:
                 _log.error('Error running the batch pipeline: %s' % e)
                 statemon.state.increment('batch_job_failures')
+                statemon.state.last_batch_success = 0
+
+            finally:
+                try:
+                   self.cluster.change_instance_group_size('TASK',
+                                                           new_size=0) 
+                except Exception as e:
+                    _log.exception('Error shrinking task instance group %s'
+                                   % s)
+                    statemon.state.increment('cluster_resize_failures')
 
             if self._ready_to_run.is_set():
                 _log.warn('The batch process took a very long time to run. '
-                          'We need more resources in the cluster.')
+                          'Adding a machine to the cluster.')
+                try:
+                    self.cluster.increment_core_size()
+                except Exception as e:
+                    _log.exception('Error incrementing core instance size %s'
+                                   % e)
+                    statemon.state.increment('cluster_resize_failures')
             
                 
 
 def main():
-    
+    cluster = stats.cluster.Cluster(options.cluster_name, 8)
+    cluster.connect()
+
+    batch_processor = BatchProcessManager(cluster)
+    batch_processor.start()
+
+    while True:
+        is_alive = self.cluster.is_alive()
+        statemon.state.cluster_is_alive = 1 if is_alive else 0
+        if not is_alive:
+            _log.error(
+                'Cluster died. Restarting it and building Impala Tables')
+            statemon.state.increment('cluster_deaths')
+            cluster.connect()
+            if batch_processor.last_output_path is None:
+                _log.error('We could not figure out when the last sucessful '
+                           'batch job was, so we cannot rebuild the Impala '
+                           'tables')
+            else:
+                stats.batch_processor.build_impala_tables(
+                    batch_processor.last_output_path,
+                    cluster)
+
+        time.sleep(60)
+            
 
 if __name__ == "__main__":
     utils.neon.InitNeon()

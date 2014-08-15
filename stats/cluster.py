@@ -40,6 +40,20 @@ class ClusterConnectionError(ClusterException): pass
 class ClusterCreationError(ClusterException): pass
 
 class Cluster():
+    # The possible instance and their multiplier of processing
+    # power relative to the r3.xlarge. Bigger machines are
+    # slightly better than an integer multiplier because of
+    # network reduction.
+    #
+    # This table is (type, multiplier, on demand price)
+    instance_info = {
+        'r3.xlarge' : (1., 0.35),
+        'r3.2xlarge' : (2.1, 0.70),
+        'r3.4xlarge' : (4.4, 1.40),
+        'r3.8xlarge' : (9.6, 2.80),
+        'hi1.4xlarge' : (2.5, 3.10),
+        'm2.4xlarge' : (2.3, 0.98)}
+    
     '''Class representing the cluster'''
     def __init__(self, cluster_name, n_core_instances):
         '''
@@ -62,7 +76,7 @@ class Cluster():
         If it's up, connect to it, otherwise create it
         '''
         with self._lock():
-            if self.is_alive():
+            if not self.is_alive():
                 _log.warn("Could not find cluster %s. "
                           "Starting a new one instead"
                           % self.cluster_name)
@@ -71,6 +85,7 @@ class Cluster():
                 _log.info("Found cluster name %s with id %s" %
                           (self.cluster_name, self.cluster_id))
                 self._find_master_info()
+                self._set_requested_core_instances()
 
     def run_map_reduce_job(self, jar, main_class, input_path,
                            output_path):
@@ -115,7 +130,7 @@ class Cluster():
                   (job_id, url_parse.group(0)))
 
         # Sleep so that the job tracker has time to come up
-        time.sleep(30)
+        time.sleep(60)
 
         # Now poll the job status until it is done
         error_count = 0
@@ -165,11 +180,67 @@ class Cluster():
 
     def is_alive(self):
         '''Returns true if the cluster is up and running.'''
+        return self._check_cluster_state() in ['WAITING', 'RUNNING',
+                                               'STARTING',
+                                               'BOOTSTRAPPING']
+
+    def increment_core_size(self, amount=1):
+        '''Increments the size of the core instance group.'''
+        group = self.change_instance_group_size('CORE', incr_amount=amount)
+        self.n_core_instances = group.requestedinstancecount * \
+          Cluster.instance_info[group.instancetype][0]
+
+    def change_instance_group_size(self, group_type, incr_amount=None,
+                                   new_size=None):
+        '''Change a instance group size.
+
+        Only one of incr_amount or new_size can be set
+
+        Inputs:
+        group_type - Type of group: 'MASTER', 'CORE' or 'TASK'
+        incr_amount - Size to increate the group by. 
+                      Can be negative for TASK group
+        new_size - New size of the group.
+
+        Outputs:
+        InstanceGroup - Instance group status
+        '''
+        if group_type != 'TASK' and amount < 1:
+            raise ValueError('Cannot shrink an instance group of type %s' %
+                             group_type)
+
+        if ((incr_amount is not None and new_size is not None) or 
+            (new_size is None and incr_amount is None)):
+            raise ValueError('Exactly one of incr_amount or new_size must'
+                             ' be set')
+
         with self._lock():
-            return self._check_cluster_state() in ['WAITING', 'RUNNING',
-                                                   'STARTING',
-                                                   'BOOTSTRAPPING']
-    
+            self.connect()
+            
+            # First find the instance group
+            conn = EmrConnection()
+            found_group = None
+            for group in conn.list_instance_groups(self.cluster_id).instancegroups:
+                if group.instancegrouptype == group_type:
+                    found_group = group
+                    break
+
+            if found_group is None:
+                raise ClusterInfoError('Could not find the %s instance group'
+                                       ' for cluster %s' 
+                                       % (group_type, self.cluster_id))
+
+            # Now increment the number of machines
+            new_count = (new_size or 
+                         found_group.requestedinstancecount + amount)
+            _log.info('Changing the %s instance group size to %i' %
+                      (group_type, new_count))
+            conn.modify_instance_group([found_group.id],
+                                       [new_count])
+
+        found_group.requestedinstancecount = new_count
+        return found_group
+        
 
     def _check_cluster_state(self):
         '''Returns the state of the cluster.
@@ -199,7 +270,7 @@ class Cluster():
 
         return conn.describe_cluster(self.cluster_id).status.state
 
-    def _find_master_info(self)
+    def _find_master_info(self):
         '''Find the ip address and id of the master node.'''
         conn = EmrConnection()
         
@@ -213,6 +284,19 @@ class Cluster():
         if self.master_ip is None:
             raise ClusterInfoError("Could not find the master ip")
         _log.info("Found master ip address %s" % self.master_ip)
+
+    def _set_requested_core_instances(self):
+        '''Sets self.n_core_instances to what is currently requested.'''
+        conn = EmrConnection()
+        found_group = None
+        for group in conn.list_instance_groups(self.cluster_id).instancegroups:
+            if group.instancegrouptype == 'CORE':
+                found_group = group
+                break
+
+        if found_group is not None:
+            self.n_core_instances = found_group.requestedinstancecount * \
+              Cluster.instance_info[found_group.instancetype][0]
 
     def _create(self):
         '''Creates a new cluster.
@@ -260,7 +344,9 @@ class Cluster():
         instance_groups = [
             InstanceGroup(1, 'MASTER', 'm1.large', 'SPOT',
                           'Master Instance Group', 0.50),
-            self._get_core_instance_group()
+            self._get_core_instance_group(),
+            InstanceGroup(0, 'TASK', 'c3.2xlarge', 'SPOT',
+                          'Task Instance Group', 0.46)
             ]
         
         conn = EmrConnection()
@@ -297,32 +383,22 @@ class Cluster():
             cur_state = conn.describe_jobflow(self.cluster_id)
         self._find_master_info()                   
 
-    def _get_core_instance_group(self):
-        # The possible instance and their multiplier of processing
-        # power relative to the r3.xlarge. Bigger machines are
-        # slightly better than an integer multiplier because of
-        # network reduction.
-        instance_types = [
-            ('r3.xlarge', 1., 0.35),
-            ('r3.2xlarge', 2.1, 0.70),
-            ('r3.4xlarge', 4.4, 1.40),
-            ('r3.8xlarge', 9.6, 2.80),
-            ('hi1.4xlarge', 2.5, 3.10),
-            ('m2.4xlarge', 2.3, 0.98)
-            ]
-
+    def _get_core_instance_group(self):        
         # Calculate the expect costs for each of the instance type options
-        data = [(itype, math.ceil(self.n_core_instances / mul), price,
-                 self.get_avg_spot_price(itype))
-                 for itype, mul, price in instance_types]
-        data = sorted(data, key=lambda x: (x[3] / x[1], -x[1]))
-        chosen_type, count, on_demand_price, avg_spot_price = data[0]
+        data = [(itype, math.ceil(self.n_core_instances / x[0]), x[1],
+                 cur_price, avg_price)
+                 for cur_price, avg_price in self.get_spot_prices(itype)
+                 for itype, x in Cluster.instance_info.items()]
+        data = sorted(data, key=lambda x: (x[4] / x[1], -x[1]))
+        chosen_type, count, on_demand_price, cur_spot_price, avg_spot_price = \
+          data[0]
 
         _log.info('Choosing core instance type %s because its avg price was %f'
                   % (chosen_type, avg_spot_price))
 
         # If the best price is more than the on demand cost, just use on demand
-        if avg_spot_price > 0.80 * on_demand_price:
+        if (avg_spot_price > 0.80 * on_demand_price or 
+            cur_spot_price > on_demand_price):
             _log.info('Spot pricing is too high, chosing on demand instance')
             market_type = 'ON_DEMAND'
         else:
@@ -336,9 +412,10 @@ class Cluster():
                              1.03 * on_demand_price)
                              
 
-    def _get_avg_spot_price(self, instance_type, 
-                            tdiff=datetime.timedelta(days=7)):
-        '''Get the avg spot price for an instance over the last week.'''
+    def _get_spot_prices(self, instance_type, 
+                         tdiff=datetime.timedelta(days=7)):
+        '''Returns the (current, avg for the tdiff) for a given
+        instance type.'''
         conn = EC2Connection()
         data = [(datetime.datetime.strptime(x.timestamp,
                                             '%Y-%m-%dT%H:%M:%S.%fZ'),
@@ -355,9 +432,11 @@ class Cluster():
             [(x-timestamps[0]).total_seconds() for x in timestamps])
         prices = np.array(prices)
 
-        total_cost = np.multiply((timestamps[1:] - timestamps[0:-1]),
+        total_cost = np.multiply((timestamps[1:] - timestamps[0:-1]) / 3600.,
                                  prices[0:-1])
-        return total_cost / (timestamps[-1] - timestamps[0])
+        avg_price = total_cost / (timestamps[-1] - timestamps[0]) * 3600.0
+        cur_price = prices[-1]
+        return cur_price, avg_price
             
 
 class ClusterSSHConnection:
