@@ -105,6 +105,7 @@ class BatchProcessManager(threading.Thread):
                 
 
 def main():
+    _log.info('Looking up cluster %s' % options.cluster_name)
     cluster = stats.cluster.Cluster(options.cluster_name, 8)
     cluster.connect()
 
