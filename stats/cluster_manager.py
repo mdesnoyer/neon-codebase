@@ -24,7 +24,7 @@ import logging
 _log = logging.getLogger(__name__)
 
 from utils.options import define, options
-define("cluster_name", default="Event Stats Server",
+define("cluster_type", default="video_click_stats",
        help="Name of the EMR cluster to use")
 define("input_path", default="s3://neon-tracker-logs-v2/v2.2/*/*/*/*",
        help="Path for the raw input data")
@@ -105,9 +105,9 @@ class BatchProcessManager(threading.Thread):
                 
 
 def main():
-    _log.info('Looking up cluster %s' % options.cluster_name)
+    _log.info('Looking up cluster %s' % options.cluster_type)
     try:
-        cluster = stats.cluster.Cluster(options.cluster_name, 8)
+        cluster = stats.cluster.Cluster(options.cluster_type, 8)
         cluster.connect()
 
         batch_processor = BatchProcessManager(cluster)
@@ -118,7 +118,7 @@ def main():
 
     while True:
         try:
-            self.cluster.set_cluster_name(options.cluster_name)
+            self.cluster.set_cluster_type(options.cluster_type)
             is_alive = self.cluster.is_alive()
             statemon.state.cluster_is_alive = 1 if is_alive else 0
             if not is_alive:

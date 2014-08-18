@@ -26,6 +26,8 @@ import logging
 _log = logging.getLogger(__name__)
 
 from utils.options import define, options
+define("cluster_name", default="Neon Cluster",
+       help="Name of any cluster that is created")
 define("ssh_key", default="s3://neon-keys/emr-runner.pem",
        help="ssh key used to execute jobs on the master node")
 define("resource_manager_port", default=9022,
@@ -53,16 +55,22 @@ class Cluster():
         'r3.8xlarge' : (9.6, 2.80),
         'hi1.4xlarge' : (2.5, 3.10),
         'm2.4xlarge' : (2.3, 0.98)}
+
+
+    # Possible cluster roles
+    ROLE_PRIMARY = 'primary'
+    ROLE_BOOTING = 'booting'
+    ROLE_TESTING = 'testing'
     
     '''Class representing the cluster'''
-    def __init__(self, cluster_name, n_core_instances):
+    def __init__(self, cluster_type, n_core_instances):
         '''
-        cluster_name - Name of the cluster.
+        cluster_type - Cluster type to connect to. Uses the cluster-type tag.
         n_core_instances - Number of r3.xlarge core instances. 
                            We will use the cheapest type of r3 instances 
                            that are equivalent to this number of r3.xlarge.
         '''
-        self.cluster_name = cluster_name
+        self.cluster_type = cluster_type
         self.n_core_instances = n_core_instances
         self.cluster_id = None
         self.master_ip = None
@@ -70,10 +78,10 @@ class Cluster():
 
         self._lock = threading.RLock()
 
-    def set_cluster_name(self, new_name):
-        '''Sets the cluster name safely and reconnects as necessary.'''
+    def set_cluster_type(self, new_type):
+        '''Sets the cluster type safely and reconnects as necessary.'''
         with self._lock:
-            if self.cluster_name != new_name:
+            if self.cluster_type != new_type:
                 self.cluster_id = None
                 self.connect()           
 
@@ -86,11 +94,11 @@ class Cluster():
             if not self.is_alive():
                 _log.warn("Could not find cluster %s. "
                           "Starting a new one instead"
-                          % self.cluster_name)
+                          % self.cluster_type)
                 self._create()
             else:
-                _log.info("Found cluster name %s with id %s" %
-                          (self.cluster_name, self.cluster_id))
+                _log.info("Found cluster type %s with id %s" %
+                          (self.cluster_type, self.cluster_id))
                 self._find_master_info()
                 self._set_requested_core_instances()
 
@@ -264,7 +272,10 @@ class Cluster():
                 create_time = datetime.datetime.strptime(
                     cluster.creationdatetime,
                     '%Y-%m-%dT%H:%M:%S.%fZ')
-                if (cluster.name == self.cluster_name and
+                if (self._get_cluster_tag(cluster, 'cluster-type', '') == 
+                    self.cluster_type and
+                    self._get_cluster_tag(cluster, 'cluster-role', '') ==
+                    Cluster.ROLE_PRIMARY and
                     create_time > most_recent):
                     self.cluster_id = cluster.id
                     most_recent = create_time
@@ -272,10 +283,26 @@ class Cluster():
             if self.cluster_id is None:
                 raise ClusterInfoError(
                     "Could not get information about cluster %s " % 
-                    self.cluster_name)
+                    self.cluster_type)
             return state
 
         return conn.describe_cluster(self.cluster_id).status.state
+
+    def _get_cluster_tag(self, cluster_info, tag_name, default=None):
+        '''Returns the cluster type from a Cluster response object.'''
+        if cluster_info is None:
+            _log.error('Cluster info is None')
+            return ValueError('Cluster Info is None')
+        
+        for tag in cluster_info.tags:
+            if tag.key == tag_name:
+                return tag.value
+
+        _log.warn('Could not determine tag %s for cluster named %s' %
+                  (tag_name, cluster_info.name))
+        if default is not None:
+            return default
+        raise KeyError('No tag %s' % tag_name)
 
     def _find_master_info(self):
         '''Find the ip address and id of the master node.'''
@@ -357,9 +384,9 @@ class Cluster():
             ]
         
         conn = EmrConnection()
-        _log.info('Creating cluster %s' % self.cluster_name)
+        _log.info('Creating cluster %s' % options.cluster_name)
         self.cluster_id = conn.run_jobflow(
-            self.cluster_name,
+            options.cluster_name,
             log_uri='s3n://neon-cluster-logs/',
             ec2_keyname='emr-runner',
             ami_version='3.1.0',
@@ -374,6 +401,9 @@ class Cluster():
             api_params = {'Instances.Ec2SubnetId' : 
                           'subnet-74c10003'})
 
+        conn.add_tags(self.cluster_id,
+                      {'cluster-type' : self.cluster_type,
+                       'cluster-role' : cluster.ROLE_BOOTING})
 
         _log.info('Waiting until cluster %s is ready')
         cur_state = conn.describe_jobflow(self.cluster_id)
@@ -388,6 +418,16 @@ class Cluster():
             _log.info('Cluster is booting. State: %s' % cur_state.state)
             time.sleep(30.0)
             cur_state = conn.describe_jobflow(self.cluster_id)
+
+        _log.info('Making the new cluster primary')
+        for cluster in conn.list_clusters():
+            try:
+                self._get_cluster_tag(cluster, 'cluster-role')
+                conn.remove_tags(cluster.id, ['cluster-role'])
+            except KeyError:
+                pass
+        conn.add_tags(self.cluster_id, {
+            'cluster-role' : Cluster.ROLE_PRIMARY})
         self._find_master_info()                   
 
     def _get_core_instance_group(self):        
