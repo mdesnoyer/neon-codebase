@@ -70,6 +70,13 @@ class Cluster():
 
         self._lock = threading.RLock()
 
+    def set_cluster_name(self, new_name):
+        '''Sets the cluster name safely and reconnects as necessary.'''
+        with self._lock():
+            if self.cluster_name != new_name:
+                self.cluster_id = None
+                self.connect()           
+
     def connect(self):
         '''Connects to the cluster.
 

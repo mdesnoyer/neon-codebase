@@ -112,6 +112,7 @@ def main():
     batch_processor.start()
 
     while True:
+        self.cluster.set_cluster_name(options.cluster_name)
         is_alive = self.cluster.is_alive()
         statemon.state.cluster_is_alive = 1 if is_alive else 0
         if not is_alive:

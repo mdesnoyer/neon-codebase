@@ -51,8 +51,6 @@ define("mr_jar", default=None, type=str, help="Mapreduce jar")
 define("compiled_schema_path",
        default=os.path.join(__base_path__, 'schema', 'compiled'),
        help='Path to the bucket of compiled avro schema')
-define("master_host_key_file", default=None, type=str,
-       help='File to output the master host key to')
 
 from utils import statemon
 statemon.define("stats_cleaning_job_failures", int)
