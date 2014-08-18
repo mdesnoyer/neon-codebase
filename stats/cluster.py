@@ -72,7 +72,7 @@ class Cluster():
 
     def set_cluster_name(self, new_name):
         '''Sets the cluster name safely and reconnects as necessary.'''
-        with self._lock():
+        with self._lock:
             if self.cluster_name != new_name:
                 self.cluster_id = None
                 self.connect()           
@@ -82,7 +82,7 @@ class Cluster():
 
         If it's up, connect to it, otherwise create it
         '''
-        with self._lock():
+        with self._lock:
             if not self.is_alive():
                 _log.warn("Could not find cluster %s. "
                           "Starting a new one instead"
@@ -221,7 +221,7 @@ class Cluster():
             raise ValueError('Exactly one of incr_amount or new_size must'
                              ' be set')
 
-        with self._lock():
+        with self._lock:
             self.connect()
             
             # First find the instance group
