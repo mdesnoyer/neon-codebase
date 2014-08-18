@@ -106,29 +106,36 @@ class BatchProcessManager(threading.Thread):
 
 def main():
     _log.info('Looking up cluster %s' % options.cluster_name)
-    cluster = stats.cluster.Cluster(options.cluster_name, 8)
-    cluster.connect()
+    try:
+        cluster = stats.cluster.Cluster(options.cluster_name, 8)
+        cluster.connect()
 
-    batch_processor = BatchProcessManager(cluster)
-    batch_processor.start()
+        batch_processor = BatchProcessManager(cluster)
+        batch_processor.start()
+    except Exception as e:
+        _log.exception('Unexpected error on startup: %s' % e)
+        raise
 
     while True:
-        self.cluster.set_cluster_name(options.cluster_name)
-        is_alive = self.cluster.is_alive()
-        statemon.state.cluster_is_alive = 1 if is_alive else 0
-        if not is_alive:
-            _log.error(
-                'Cluster died. Restarting it and building Impala Tables')
-            statemon.state.increment('cluster_deaths')
-            cluster.connect()
-            if batch_processor.last_output_path is None:
-                _log.error('We could not figure out when the last sucessful '
-                           'batch job was, so we cannot rebuild the Impala '
-                           'tables')
-            else:
-                stats.batch_processor.build_impala_tables(
-                    batch_processor.last_output_path,
-                    cluster)
+        try:
+            self.cluster.set_cluster_name(options.cluster_name)
+            is_alive = self.cluster.is_alive()
+            statemon.state.cluster_is_alive = 1 if is_alive else 0
+            if not is_alive:
+                _log.error(
+                    'Cluster died. Restarting it and building Impala Tables')
+                statemon.state.increment('cluster_deaths')
+                cluster.connect()
+                if batch_processor.last_output_path is None:
+                    _log.error('We could not figure out when the last sucessful '
+                               'batch job was, so we cannot rebuild the Impala '
+                               'tables')
+                else:
+                    stats.batch_processor.build_impala_tables(
+                        batch_processor.last_output_path,
+                        cluster)
+        except Exception as e:
+            _log.exception('Unexpected Error: %s' % e)
 
         time.sleep(60)
             
