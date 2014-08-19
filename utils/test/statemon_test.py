@@ -42,6 +42,46 @@ class TestStatemonObj(unittest.TestCase):
         self.state.decrement('an_int')
         self.assertEqual(self.state.an_int, 1)
 
+    def test_ref_increment(self):
+        self.state.define('an_int', int)
+        self.assertEqual(self.state.an_int, 0)
+        ref = self.state.get_ref('an_int')
+        self.state.increment(ref=ref, diff=2)
+        self.assertEqual(self.state.an_int, 2)
+
+        self.state.decrement(ref=ref)
+        self.assertEqual(self.state.an_int, 1)
+
+    def test_unsafe_increment(self):
+
+        # Makes sure that the code path is tested, but won't actually
+        # trigger the thread collision. That's way too hard to do
+        # reliably :-)
+        self.state.define('an_int', int)
+        self.assertEqual(self.state.an_int, 0)
+        ref = self.state.get_ref('an_int')
+        self.state.increment(ref=ref, diff=2, safe=False)
+        self.assertEqual(self.state.an_int, 2)
+
+        self.state.decrement(ref=ref, safe=False)
+        self.assertEqual(self.state.an_int, 1)
+
+    def test_bad_increment_invokation(self):
+        self.state.define('an_int', int)
+        ref = self.state.get_ref('an_int')
+        
+        with self.assertRaises(TypeError):
+            self.state.increment()
+
+        with self.assertRaises(TypeError):
+            self.state.decrement()
+
+        with self.assertRaises(TypeError):
+            self.state.increment(name='an_int', ref=ref)
+
+        with self.assertRaises(TypeError):
+            self.state.decrement(name='an_int', ref=ref)
+
     def test_unknown_variable(self):
         with self.assertRaises(AttributeError):
             self.state.an_int
@@ -97,7 +137,6 @@ class TestStatemonObj(unittest.TestCase):
         finally:
             kill_proc.set()
             proc.join()
-
         
 
 if __name__ == '__main__':

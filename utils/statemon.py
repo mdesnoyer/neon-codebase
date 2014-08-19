@@ -97,7 +97,7 @@ class State(object):
         
         frame = inspect.currentframe()
         for i in range(stack_depth):
-                frame = frame.f_back
+            frame = frame.f_back
         mod = inspect.getmodule(frame)
 
         apath = os.path.abspath(mod.__file__)
@@ -132,23 +132,50 @@ class State(object):
 
         self._vars[global_name] = multiprocessing.Value(typech)
 
-    def increment(self, name, diff=1):
-        '''Increments the state variable safely.'''
-        global_name = self._local2global(name)
+    def increment(self, name=None, diff=1, ref=None, safe=True,
+                  stack_depth=1):
+        '''Increments the state variable
 
-        with self._vars[global_name].get_lock():
-            self._vars[global_name].value += diff
+        Inputs:
+        name - Name of the variable (Either this or ref must be set)
+        diff - Amount to increment
+        ref - Reference to the variable so that the lookup is skipped. Use get_ref() to get it.
+        safe - If True, the increment is done with a thread lock.
+               If it's ok to miss some increments in order to speed up the
+               increment, this can be set to false.
+        stack_depth - Stack depth to your module
+        '''
+        if not ((name is None) ^ (ref is None)):
+            raise TypeError('Exactly one of name or ref must be given.')
 
-    def decrement(self, name, diff=1):
-        '''Decrements the state variable safely.'''
-        global_name = self._local2global(name)
+        if ref is None:
+            ref = self.get_ref(name, stack_depth+1)
 
-        with self._vars[global_name].get_lock():
-            self._vars[global_name].value -= diff
+        if safe:
+            with ref.get_lock():
+                ref.value += diff
+        else:
+            ref.value += diff
+
+    def decrement(self, name=None, diff=1, ref=None, safe=True,
+                  stack_depth=1):
+        '''Decrements the state variable.'''
+        self.increment(name, -diff, ref, safe, stack_depth+1)
     
     def get_all_variables(self):
         ''' return dict of all variables being monitored '''
         return self._vars
+
+    def get_ref(self, name, stack_depth=1):
+        ''' Returns a reference of the variable.
+
+        This is useful because the lookup requires inspection, which
+        is slow if it happens a lot. So, if the variable is in a tight
+        loop, you can keep this reference around.
+        '''
+        global_name = self._local2global(name, stack_depth+1)
+
+        return self._vars[global_name]
 
 state = State()
 '''Global state variable object'''
