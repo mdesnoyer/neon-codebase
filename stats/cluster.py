@@ -63,14 +63,17 @@ class Cluster():
     ROLE_TESTING = 'testing'
     
     '''Class representing the cluster'''
-    def __init__(self, cluster_type, n_core_instances):
+    def __init__(self, cluster_type, n_core_instances,
+                 public_ip=None):
         '''
         cluster_type - Cluster type to connect to. Uses the cluster-type tag.
         n_core_instances - Number of r3.xlarge core instances. 
                            We will use the cheapest type of r3 instances 
                            that are equivalent to this number of r3.xlarge.
+        public_ip - The public ip to assign to the cluster
         '''
         self.cluster_type = cluster_type
+        self.public_ip = public_ip
         self.n_core_instances = n_core_instances
         self.cluster_id = None
         self.master_ip = None
@@ -83,7 +86,29 @@ class Cluster():
         with self._lock:
             if self.cluster_type != new_type:
                 self.cluster_id = None
-                self.connect()           
+                self.connect()
+
+    def set_public_ip(self, new_ip):
+        if new_ip is None or self.public_ip == new_ip:
+            return
+
+        if self.master_id is None:
+            _log.error("Master id hasn't been set. Try connecting first")
+            raise ValueError("No Master id set")
+        
+        with self._lock:
+            _log.info('Grabbing elastic ip %s and assigning it to cluster %s' 
+                      % (new_ip, self.cluster_id))
+            conn = EC2Connection()
+
+            success = conn.associate_address(instance_id=self.master_id,
+                                             public_ip=new_ip,
+                                             allow_reassociation=True)
+            if not success:
+                raise ClusterCreationError("Could not assign the elastic ip"
+                                           "%s to instance %s" %
+                                           (new_ip, self.master_id))
+            self.public_ip = new_ip
 
     def connect(self):
         '''Connects to the cluster.
@@ -428,7 +453,10 @@ class Cluster():
                 pass
         conn.add_tags(self.cluster_id, {
             'cluster-role' : Cluster.ROLE_PRIMARY})
-        self._find_master_info()                   
+        self._find_master_info()
+        cluster_ip = self.public_ip
+        self.public_ip = None
+        self.set_public_ip(cluster_ip)
 
     def _get_core_instance_group(self):        
         # Calculate the expect costs for each of the instance type options

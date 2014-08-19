@@ -32,6 +32,8 @@ define("cleaned_output_path", default="s3://neon-tracker-logs-v2/cleaned/",
        help="Base path where the cleaned logs will be output")
 define("batch_period", default=86400, type=float,
        help='Minimum period in seconds between runs of the batch process.')
+define("cluster_ip", default=None, type=str,
+       help='Elastic ip to assign to the primary cluster')
 
 from utils import statemon
 statemon.define('batch_job_failures', int)
@@ -107,7 +109,8 @@ class BatchProcessManager(threading.Thread):
 def main():
     _log.info('Looking up cluster %s' % options.cluster_type)
     try:
-        cluster = stats.cluster.Cluster(options.cluster_type, 8)
+        cluster = stats.cluster.Cluster(options.cluster_type, 8,
+                                        options.cluster_ip)
         cluster.connect()
 
         batch_processor = BatchProcessManager(cluster)
@@ -134,6 +137,7 @@ def main():
                     stats.batch_processor.build_impala_tables(
                         batch_processor.last_output_path,
                         cluster)
+            self.cluster.set_public_ip(options.cluster_ip)
         except Exception as e:
             _log.exception('Unexpected Error: %s' % e)
 
