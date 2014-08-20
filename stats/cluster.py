@@ -29,6 +29,7 @@ import tempfile
 import threading
 import urllib2
 import urlparse
+import utils.monitor
 
 import logging
 _log = logging.getLogger(__name__)
