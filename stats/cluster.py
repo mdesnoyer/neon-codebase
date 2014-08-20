@@ -152,6 +152,21 @@ class Cluster():
         Returns:
         Returns once the job is done. If the job fails, an exception will be thrown.
         '''
+        # If the cluster's core has larger instances, the memory usage
+        # in the reduce can get very large. However, s3 files have to
+        # be less than 5GB, so we need to make sure that the output
+        # data fits. One way to do that is to make sure that the
+        # reducer uses at most 5GB of memory.
+        extra_ops = ''
+        core_group = self._get_instance_group_info('CORE')
+        if core_group is None:
+            raise ClusterInfoError('Could not find the CORE instance group')
+        if core_group.instance_type in ['r3.2xlarge', 'r3.4xlarge',
+                                        'r3.8xlarge', 'i2.8xlarge',
+                                        'i2.4xlarge', 'cr1.8xlarge']:
+            extra_ops += ('-D mapreduce.reduce.memory.mb 5000 '
+                          '-D mapreduce.reduce.java.opts -Xmx4800m')
+        
         self.connect()
         ssh_conn = ClusterSSHConnection(self)
         ssh_conn.copy_file(jar, '/home/hadoop/%s' % os.path.basename(jar))
@@ -162,8 +177,9 @@ class Cluster():
         stdout = ssh_conn.execute_remote_command(
             ('hadoop jar /home/hadoop/%s %s '
              '-D mapreduce.output.fileoutputformat.compress=true '
-             '-D avro.output.codec=snappy %s %s') % 
-             (os.path.basename(jar), main_class, input_path, output_path))
+             '-D avro.output.codec=snappy %s %s %s') % 
+             (os.path.basename(jar), main_class, extra_ops, input_path,
+              output_path))
         url_parse = trackURLRe.search(stdout)
         if not url_parse:
             raise MapReduceError(
@@ -386,15 +402,21 @@ class Cluster():
     def _set_requested_core_instances(self):
         '''Sets self.n_core_instances to what is currently requested.'''
         conn = EmrConnection()
-        found_group = None
-        for group in conn.list_instance_groups(self.cluster_id).instancegroups:
-            if group.instancegrouptype == 'CORE':
-                found_group = group
-                break
+        found_group = self._get_instance_group_info('CORE')
 
         if found_group is not None:
             self.n_core_instances = int(found_group.requestedinstancecount) * \
               Cluster.instance_info[found_group.instancetype][0]
+
+    def _get_instance_group_info(self, group_type):
+        conn = EmrConnection()
+        found_group = None
+        for group in conn.list_instance_groups(self.cluster_id).instancegroups:
+            if group.instancegrouptype == group_type:
+                found_group = group
+                break
+
+        return found_group
 
     def _create(self):
         '''Creates a new cluster.
