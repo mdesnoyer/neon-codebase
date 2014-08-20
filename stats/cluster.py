@@ -17,10 +17,18 @@ from boto.emr.instance_group import InstanceGroup
 import boto.emr.step
 from boto.s3.connection import S3Connection
 import datetime
+import dateutil.parser
+import json
 import math
 import numpy as np
 import paramiko
+import re
+import socket
+import time
+import tempfile
 import threading
+import urllib2
+import urlparse
 
 import logging
 _log = logging.getLogger(__name__)
@@ -35,6 +43,8 @@ define("resource_manager_port", default=9022,
 
 from utils import statemon
 statemon.define("master_connection_error", int)
+
+s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
 
 class ClusterException(Exception): pass
 class ClusterInfoError(ClusterException): pass
@@ -220,14 +230,24 @@ class Cluster():
 
     def is_alive(self):
         '''Returns true if the cluster is up and running.'''
-        return self._check_cluster_state() in ['WAITING', 'RUNNING',
-                                               'STARTING',
-                                               'BOOTSTRAPPING']
+        try:
+            return self._check_cluster_state() in ['WAITING', 'RUNNING',
+                                                   'STARTING',
+                                                   'BOOTSTRAPPING']
+        except ClusterInfoError:
+            # If we couldn't get info about the cluster it doesn't exist
+            # and so it is not alive
+            return False
 
     def increment_core_size(self, amount=1):
         '''Increments the size of the core instance group.'''
         group = self.change_instance_group_size('CORE', incr_amount=amount)
-        self.n_core_instances = group.requestedinstancecount * \
+        try:
+            instance_count = group.requestedinstancecount
+        except AttributeError:
+            instance_count = group.num_instances
+            
+        self.n_core_instances = instance_count * \
           Cluster.instance_info[group.instancetype][0]
 
     def change_instance_group_size(self, group_type, incr_amount=None,
@@ -266,17 +286,29 @@ class Cluster():
                     break
 
             if found_group is None:
-                raise ClusterInfoError('Could not find the %s instance group'
-                                       ' for cluster %s' 
-                                       % (group_type, self.cluster_id))
+                if group_type == 'TASK' and new_size is not None:
+                    _log.info('Could not find the instance group to change, '
+                              'creating it')
+                    group = InstanceGroup(new_size, 'TASK', 'c3.2xlarge', 
+                                          'SPOT', 'Task Instance Group', 0.46)
+                    conn.add_instance_groups(self.cluster_id, [group])
+                    return group
+                        
+                else:
+                    raise ClusterInfoError('Could not find the %s instance '
+                                           'group for cluster %s' 
+                                           % (group_type, self.cluster_id))
 
             # Now increment the number of machines
-            new_count = (new_size or 
-                         found_group.requestedinstancecount + amount)
-            _log.info('Changing the %s instance group size to %i' %
-                      (group_type, new_count))
-            conn.modify_instance_group([found_group.id],
-                                       [new_count])
+            new_count = new_size
+            if new_count is None:
+                new_count = int(found_group.requestedinstancecount) + \
+                  incr_amount
+            if new_count != int(found_group.requestedinstancecount):
+                _log.info('Changing the %s instance group size to %i' %
+                          (group_type, new_count))
+                conn.modify_instance_groups([found_group.id],
+                                            [new_count])
 
         found_group.requestedinstancecount = new_count
         return found_group
@@ -291,20 +323,24 @@ class Cluster():
         '''
         conn = EmrConnection()
         if self.cluster_id is None:
-            most_recent = datetime.datetime.fromtimestamp(0)
+            most_recent = None
             state = None
             for cluster in conn.list_clusters().clusters:
-                create_time = datetime.datetime.strptime(
-                    cluster.creationdatetime,
-                    '%Y-%m-%dT%H:%M:%S.%fZ')
-                if (self._get_cluster_tag(cluster, 'cluster-type', '') == 
+                if cluster.name != options.cluster_name:
+                    # The cluster has to have the right name to be possible
+                    continue
+                cluster_info = conn.describe_cluster(cluster.id)
+                create_time = dateutil.parser.parse(
+                    cluster_info.status.timeline.creationdatetime)
+                if (self._get_cluster_tag(cluster_info, 'cluster-type', '') == 
                     self.cluster_type and
-                    self._get_cluster_tag(cluster, 'cluster-role', '') ==
-                    Cluster.ROLE_PRIMARY and
-                    create_time > most_recent):
+                    self._get_cluster_tag(cluster_info, 'cluster-role', '') ==
+                    Cluster.ROLE_PRIMARY and (
+                        most_recent is None or create_time > most_recent)):
                     self.cluster_id = cluster.id
                     most_recent = create_time
-                    state = cluster.status.state
+                    state = cluster_info.status.state
+                time.sleep(1) # Avoid AWS throttling
             if self.cluster_id is None:
                 raise ClusterInfoError(
                     "Could not get information about cluster %s " % 
@@ -318,10 +354,11 @@ class Cluster():
         if cluster_info is None:
             _log.error('Cluster info is None')
             return ValueError('Cluster Info is None')
-        
-        for tag in cluster_info.tags:
-            if tag.key == tag_name:
-                return tag.value
+
+        if cluster_info.tags is not None:
+            for tag in cluster_info.tags:
+                if tag.key == tag_name:
+                    return tag.value
 
         _log.warn('Could not determine tag %s for cluster named %s' %
                   (tag_name, cluster_info.name))
@@ -337,7 +374,8 @@ class Cluster():
         self.master_id = \
           conn.describe_jobflow(self.cluster_id).masterinstanceid
         for instance in conn.list_instances(self.cluster_id).instances:
-            if instance.ec2instanceid == master_id:
+            if (instance.status.state == 'RUNNING' and 
+                instance.ec2instanceid == self.master_id):
                 self.master_ip = instance.privateipaddress
 
         if self.master_ip is None:
@@ -354,7 +392,7 @@ class Cluster():
                 break
 
         if found_group is not None:
-            self.n_core_instances = found_group.requestedinstancecount * \
+            self.n_core_instances = int(found_group.requestedinstancecount) * \
               Cluster.instance_info[found_group.instancetype][0]
 
     def _create(self):
@@ -397,25 +435,24 @@ class Cluster():
                 'Start HBase',
                 '/home/hadoop/lib/hbase.jar',
                 None,
+                'TERMINATE_JOB_FLOW',
                 ['emr.hbase.backup.Main', '--start-master'])]
 
             
         instance_groups = [
             InstanceGroup(1, 'MASTER', 'm1.large', 'SPOT',
                           'Master Instance Group', 0.50),
-            self._get_core_instance_group(),
-            InstanceGroup(0, 'TASK', 'c3.2xlarge', 'SPOT',
-                          'Task Instance Group', 0.46)
+            self._get_core_instance_group()
             ]
         
         conn = EmrConnection()
         _log.info('Creating cluster %s' % options.cluster_name)
         self.cluster_id = conn.run_jobflow(
             options.cluster_name,
-            log_uri='s3n://neon-cluster-logs/',
+            log_uri='s3://neon-cluster-logs/',
             ec2_keyname='emr-runner',
             ami_version='3.1.0',
-            jobflow_role='EMR_EC2_DefaultRole',
+            job_flow_role='EMR_EC2_DefaultRole',
             service_role='EMR_DefaultRole',
             keep_alive=True,
             enable_debugging=True,
@@ -428,9 +465,9 @@ class Cluster():
 
         conn.add_tags(self.cluster_id,
                       {'cluster-type' : self.cluster_type,
-                       'cluster-role' : cluster.ROLE_BOOTING})
+                       'cluster-role' : Cluster.ROLE_BOOTING})
 
-        _log.info('Waiting until cluster %s is ready')
+        _log.info('Waiting until cluster %s is ready' % self.cluster_id)
         cur_state = conn.describe_jobflow(self.cluster_id)
         while cur_state.state != 'WAITING':
             if cur_state.state in ['TERMINATING', 'TERMINATED',
@@ -445,7 +482,7 @@ class Cluster():
             cur_state = conn.describe_jobflow(self.cluster_id)
 
         _log.info('Making the new cluster primary')
-        for cluster in conn.list_clusters():
+        for cluster in conn.list_clusters().clusters:
             try:
                 self._get_cluster_tag(cluster, 'cluster-role')
                 conn.remove_tags(cluster.id, ['cluster-role'])
@@ -458,15 +495,17 @@ class Cluster():
         self.public_ip = None
         self.set_public_ip(cluster_ip)
 
-    def _get_core_instance_group(self):        
-        # Calculate the expect costs for each of the instance type options
-        data = [(itype, math.ceil(self.n_core_instances / x[0]), x[1],
-                 cur_price, avg_price)
-                 for cur_price, avg_price in self.get_spot_prices(itype)
-                 for itype, x in Cluster.instance_info.items()]
-        data = sorted(data, key=lambda x: (x[4] / x[1], -x[1]))
-        chosen_type, count, on_demand_price, cur_spot_price, avg_spot_price = \
-          data[0]
+    def _get_core_instance_group(self):   
+             
+        # Calculate the expected costs for each of the instance type options
+        data = [(itype, math.ceil(self.n_core_instances / x[0]), 
+                 x[0] * math.ceil(self.n_core_instances / x[0]), 
+                 x[1], cur_price, avg_price)
+                 for itype, x in Cluster.instance_info.items()
+                 for cur_price, avg_price in [self._get_spot_prices(itype)]]
+        data = sorted(data, key=lambda x: (-x[2] / (x[5] * x[1]), -x[1]))
+        chosen_type, count, cpu_units,on_demand_price, cur_spot_price, \
+          avg_spot_price = data[0]
 
         _log.info('Choosing core instance type %s because its avg price was %f'
                   % (chosen_type, avg_spot_price))
@@ -479,7 +518,7 @@ class Cluster():
         else:
             market_type = 'SPOT'
 
-        return InstanceGroup(count,
+        return InstanceGroup(int(count),
                              'CORE',
                              chosen_type,
                              market_type,
@@ -492,12 +531,10 @@ class Cluster():
         '''Returns the (current, avg for the tdiff) for a given
         instance type.'''
         conn = EC2Connection()
-        data = [(datetime.datetime.strptime(x.timestamp,
-                                            '%Y-%m-%dT%H:%M:%S.%fZ'),
-                x.price) for x in 
+        data = [(dateutil.parser.parse(x.timestamp), x.price) for x in 
                 conn.get_spot_price_history(
-                    start_time=(datetime.utcnow() - tdiff).isoformat(),
-                    end_time=datetime.utcnow().isoformat(),
+                    start_time=(datetime.datetime.utcnow()-tdiff).isoformat(),
+                    end_time=datetime.datetime.utcnow().isoformat(),
                     instance_type=instance_type,
                     product_description='Linux/UNIX (Amazon VPC)',
                     availability_zone='us-east-1c')]
@@ -507,8 +544,8 @@ class Cluster():
             [(x-timestamps[0]).total_seconds() for x in timestamps])
         prices = np.array(prices)
 
-        total_cost = np.multiply((timestamps[1:] - timestamps[0:-1]) / 3600.,
-                                 prices[0:-1])
+        total_cost = np.dot((timestamps[1:] - timestamps[0:-1]) / 3600.,
+                            prices[0:-1])
         avg_price = total_cost / (timestamps[-1] - timestamps[0]) * 3600.0
         cur_price = prices[-1]
         return cur_price, avg_price
@@ -530,7 +567,7 @@ class ClusterSSHConnection:
 
         self.client = paramiko.SSHClient()
         self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        self.client.load_system_host_keys(options.master_host_key_file)
+        self.client.load_system_host_keys()
 
     def _connect(self):
         try:
@@ -539,7 +576,10 @@ class ClusterSSHConnection:
                                 key_filename = self.key_file.name)
         except socket.error as e:
             raise ClusterConnectionError("Error connecting to %s: %s" %
-                                         (self.cluster_info.master_ip, e))     
+                                         (self.cluster_info.master_ip, e))
+        except paramiko.SSHException as e:
+            raise ClusterConnectionError("Error connecting to %s: %s" %
+                                         (self.cluster_info.master_ip, e))
 
     def copy_file(self, local_path, remote_path):
         '''Copies a file from the local path to the cluster.

@@ -19,6 +19,7 @@ import stats.cluster
 import time
 import threading
 import utils.neon
+import utils.monitor
 
 import logging
 _log = logging.getLogger(__name__)
@@ -47,23 +48,25 @@ class BatchProcessManager(threading.Thread):
     '''Thread that will manage the batch process runs.'''
 
     def __init__(self, cluster):
-
+        super(BatchProcessManager, self).__init__()
+        
         self.cluster = cluster
         self.last_output_path = None
 
         self._ready_to_run = threading.Event()
+        self._stopped = threading.Event()
         self.daemon = True
 
     def run(self):
         self._ready_to_run.set()
-        while True:
-            self._ready_to_run.wait()
+        while not self._stopped.is_set():
             self._ready_to_run.clear()
 
             # Schedule the next run
             threading.Timer(options.batch_period, self._ready_to_run.set)
 
             # Run the job
+            _log.info('Running batch process.')
             try:
                 cleaned_output_path = "%s/%s" % (
                     options.cleaned_output_path,
@@ -81,17 +84,18 @@ class BatchProcessManager(threading.Thread):
                 statemon.state.increment('successful_batch_runs')
                 statemon.state.last_batch_success = 1
             except Exception as e:
-                _log.error('Error running the batch pipeline: %s' % e)
+                _log.exception('Error running the batch pipeline: %s' % e)
                 statemon.state.increment('batch_job_failures')
                 statemon.state.last_batch_success = 0
 
             finally:
                 try:
                    self.cluster.change_instance_group_size('TASK',
-                                                           new_size=0) 
+                                                           new_size=0)
+                   utils.monitor.send_statemon_data()
                 except Exception as e:
-                    _log.exception('Error shrinking task instance group %s'
-                                   % s)
+                    _log.exception('Error shrinking task instance group: %s'
+                                   % e)
                     statemon.state.increment('cluster_resize_failures')
 
             if self._ready_to_run.is_set():
@@ -103,6 +107,12 @@ class BatchProcessManager(threading.Thread):
                     _log.exception('Error incrementing core instance size %s'
                                    % e)
                     statemon.state.increment('cluster_resize_failures')
+
+            self._ready_to_run.wait()
+
+    def stop(self):
+        self._stopped.set()
+        self._ready_to_run.set()
             
                 
 
@@ -114,6 +124,7 @@ def main():
         cluster.connect()
 
         batch_processor = BatchProcessManager(cluster)
+        atexit.register(batch_processor.stop)
         batch_processor.start()
     except Exception as e:
         _log.exception('Unexpected error on startup: %s' % e)
@@ -121,8 +132,8 @@ def main():
 
     while True:
         try:
-            self.cluster.set_cluster_type(options.cluster_type)
-            is_alive = self.cluster.is_alive()
+            cluster.set_cluster_type(options.cluster_type)
+            is_alive = cluster.is_alive()
             statemon.state.cluster_is_alive = 1 if is_alive else 0
             if not is_alive:
                 _log.error(
@@ -130,14 +141,14 @@ def main():
                 statemon.state.increment('cluster_deaths')
                 cluster.connect()
                 if batch_processor.last_output_path is None:
-                    _log.error('We could not figure out when the last sucessful '
-                               'batch job was, so we cannot rebuild the Impala '
-                               'tables')
+                    _log.error('We could not figure out when the last '
+                               'sucessful batch job was, so we cannot '
+                               'rebuild the Impala tables')
                 else:
                     stats.batch_processor.build_impala_tables(
                         batch_processor.last_output_path,
                         cluster)
-            self.cluster.set_public_ip(options.cluster_ip)
+            cluster.set_public_ip(options.cluster_ip)
         except Exception as e:
             _log.exception('Unexpected Error: %s' % e)
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 ''''
 Script that runs one cycle of the hadoop stats batch processing.
 
@@ -14,28 +13,18 @@ if sys.path[0] != __base_path__:
 sys.path.append(os.path.join(os.path.dirname(__file__), 'gen-py'))
 
 import avro.schema
+from boto.s3.connection import S3Connection
 import boto.s3.key
-import contextlib
 from hive_service import ThriftHive
 from hive_service.ttypes import HiveServerException
 import impala.dbapi
 import impala.error
-import json
-import paramiko
-import re
-import socket
-import subprocess
-import tempfile
 import threading
 from thrift import Thrift
 from thrift.transport import TSocket
 from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol
 import time
-import urllib2
-import urlparse
-import utils.neon
-import utils.monitor
 
 #logging
 import logging
@@ -55,8 +44,6 @@ define("compiled_schema_path",
 from utils import statemon
 statemon.define("stats_cleaning_job_failures", int)
 statemon.define("impala_table_creation_failure", int)
-
-s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
 
 class NeonDataPipelineException(Exception): pass
 class ExecutionError(NeonDataPipelineException): pass
@@ -282,52 +269,3 @@ def run_batch_cleaning_job(cluster, input_path, output_path):
         raise
     
     _log.info("Batch event cleaning job done")
-    
-            
-def main():
-    cluster = ClusterInfo()
-
-    ssh_conn = ClusterSSHConnection(cluster)
-
-    cleaned_output_path = "%s/%s" % (options.cleaned_output_path,
-                                     time.strftime("%Y-%m-%d-%H-%M"))
-
-    try:
-        RunMapReduceJob(cluster, ssh_conn,
-                        options.mr_jar, 'com.neon.stats.RawTrackerMR',
-                        options.input_path, cleaned_output_path)
-    except Exception as e:
-        _log.exception("Error running stats cleaning job %s" % e)
-        statemon.state.increment('stats_cleaning_job_failures')
-        raise
-
-    _log.info("Batch Processing done, start job that transfers data to the "
-              "parquet table")
-
-    threads = [] 
-    for event in ['ImageLoad', 'ImageVisible',
-                  'ImageClick', 'AdPlay', 'VideoPlay', 'VideoViewPercentage',
-                  'EventSequence']:
-        thread = ImpalaTableBuilder(cleaned_output_path, cluster, event)
-        thread.start()
-        threads.append(thread)
-        time.sleep(1)
-
-    # Wait for all of the tables to be built
-    for thread in threads:
-        thread.join()
-        if thread.status != 'SUCCESS':
-            _log.error("Error building impala table %s. See logs."
-                       % thread.event)
-            return 1
-
-    _log.info("Sucess!")
-    return 0
-
-if __name__ == "__main__":
-    utils.neon.InitNeon()
-    try:
-        exit(main())
-    finally:
-        # Explicitly send the statemon data at the end of the process
-        utils.monitor.send_statemon_data()
