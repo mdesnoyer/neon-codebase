@@ -51,6 +51,8 @@ class ClusterException(Exception): pass
 class ClusterInfoError(ClusterException): pass
 class ClusterConnectionError(ClusterException): pass
 class ClusterCreationError(ClusterException): pass
+class ExecutionError(ClusterException):pass
+class MapReduceError(ExecutionError): pass
 
 class Cluster():
     # The possible instance and their multiplier of processing

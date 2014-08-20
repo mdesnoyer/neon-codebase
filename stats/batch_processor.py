@@ -47,7 +47,6 @@ statemon.define("impala_table_creation_failure", int)
 
 class NeonDataPipelineException(Exception): pass
 class ExecutionError(NeonDataPipelineException): pass
-class MapReduceError(ExecutionError): pass
 class ImpalaError(ExecutionError): pass
 class IncompatibleSchema(NeonDataPipelineException): pass
 
