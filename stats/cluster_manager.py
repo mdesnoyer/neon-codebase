@@ -62,6 +62,12 @@ class BatchProcessManager(threading.Thread):
         while not self._stopped.is_set():
             self._ready_to_run.clear()
 
+            try:
+                stats.batch_processor.wait_for_running_batch_job(self.cluster)
+            except Exception as e:
+                _log.exception('Error finding the running batch job: %s' % e)
+                continue
+
             # Schedule the next run
             threading.Timer(options.batch_period, self._ready_to_run.set).start()
 

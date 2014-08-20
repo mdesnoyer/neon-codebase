@@ -39,7 +39,7 @@ define("cluster_name", default="Neon Cluster",
        help="Name of any cluster that is created")
 define("ssh_key", default="s3://neon-keys/emr-runner.pem",
        help="ssh key used to execute jobs on the master node")
-define("resource_manager_port", default=9022,
+define("resource_manager_port", default=9026,
        help="Port to query the resource manager on")
 
 from utils import statemon
@@ -338,7 +338,34 @@ class Cluster():
 
         found_group.requestedinstancecount = new_count
         return found_group
+
+    def query_resource_manager(self, query, tries=5):
+        '''Query the resource manager for information from Hadoop.
+
+        Inputs:
+        query - The query to send. This will be a relative REST API endpoint
+
+        Returns:
+        A dictionary of the parsed json response
+        '''
+        query_url = 'http://{ip}:{port}{query}'.format(
+            ip = self.master_ip,
+            port = options.resource_manager_port,
+            query = query)
         
+        cur_try = 0
+        while cur_try < tries:
+            cur_try += 1
+
+            try:
+                response = urllib2.urlopen(query_url)
+                return json.loads(response)
+            except Exception as e:
+                _log.error('Error querying resource manager (attempt %i): %s'
+                           % (cur_try, e))
+                if cur_try == tries:
+                    raise
+            time.sleep(30)
 
     def _check_cluster_state(self):
         '''Returns the state of the cluster.

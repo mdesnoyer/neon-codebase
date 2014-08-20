@@ -269,3 +269,31 @@ def run_batch_cleaning_job(cluster, input_path, output_path):
         raise
     
     _log.info("Batch event cleaning job done")
+
+def wait_for_running_batch_job(cluster, sample_period=30):
+    '''Blocks until a currently running batch cleaning job is done.
+
+    If there is no currently running job, this returns quickly
+    '''
+    cluster.connect()
+
+    while True:
+        response = \
+          cluster.query_resource_manager('/ws/v1/cluster/apps?states=RUNNING,NEW,SUBMITTED,ACCEPTED')
+
+        if response['apps'] is None:
+            # There are no apps running
+            return
+
+        found_batch_job = False
+        for app in response['apps']['app']:
+            if app['name'] == 'Raw Tracker Data Cleaning':
+                _log.info('The batch job with id %s is in state %s with '
+                          'progress of %i%%' % 
+                          (app['id'], app['state'], app['progress']))
+                found_batch_job = True
+
+        if not found_batch_job:
+            return
+
+        time.sleep(sample_period)
