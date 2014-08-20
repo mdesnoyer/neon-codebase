@@ -359,7 +359,7 @@ class Cluster():
 
             try:
                 response = urllib2.urlopen(query_url)
-                return json.loads(response)
+                return json.load(response)
             except Exception as e:
                 _log.error('Error querying resource manager (attempt %i): %s'
                            % (cur_try, e))
