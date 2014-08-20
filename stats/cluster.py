@@ -167,8 +167,8 @@ class Cluster():
             core_group.instancetype in ['r3.2xlarge', 'r3.4xlarge',
                                         'r3.8xlarge', 'i2.8xlarge',
                                         'i2.4xlarge', 'cr1.8xlarge']):
-            extra_ops += ('-D mapreduce.reduce.memory.mb 5000 '
-                          '-D mapreduce.reduce.java.opts -Xmx4800m')
+            extra_ops += ('-D mapreduce.reduce.memory.mb=5000 '
+                          '-D mapreduce.reduce.java.opts=-Xmx4800m')
         
         self.connect()
         ssh_conn = ClusterSSHConnection(self)
