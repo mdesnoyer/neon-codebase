@@ -63,7 +63,7 @@ class BatchProcessManager(threading.Thread):
             self._ready_to_run.clear()
 
             # Schedule the next run
-            threading.Timer(options.batch_period, self._ready_to_run.set)
+            threading.Timer(options.batch_period, self._ready_to_run.set).start()
 
             # Run the job
             _log.info('Running batch process.')

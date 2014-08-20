@@ -237,13 +237,21 @@ class Cluster():
 
                 time.sleep(60)
             except urllib2.URLError as e:
-                _log.exception("Error getting job information: %s" % e)
+                _log.error("Error getting job information: %s" % e)
                 statemon.state.increment('master_connection_error')
                 error_count = error_count + 1
                 if error_count > 5:
                     _log.error("Tried 5 times and couldn't get there so stop")
                     raise
-                time.sleep(5)
+                time.sleep(30)
+            except socket.error as e:
+                _log.error("Error getting job information: %s" % e)
+                statemon.state.increment('master_connection_error')
+                error_count = error_count + 1
+                if error_count > 5:
+                    _log.error("Tried 5 times and couldn't get there so stop")
+                    raise
+                time.sleep(30)
 
     def is_alive(self):
         '''Returns true if the cluster is up and running.'''
@@ -450,7 +458,13 @@ class Cluster():
                  '--mapred-key-value',
                  'mapreduce.reduce.merge.inmem.threshold=10000',
                  '--mapred-key-value',
-                 'mapreduce.map.output.compress.codec=org.apache.hadoop.io.compress.SnappyCodec'])]
+                 'mapreduce.map.output.compress.codec=org.apache.hadoop.io.compress.SnappyCodec',
+                 '--mapred-key-value',
+                 'mapreduce.reduce.shuffle.parallelcopies=50',
+                 '--mapred-key-value',
+                 'mapreduce.task.io.sort.mb=512',
+                 '--mapred-key-value',
+                 'mapreduce.task.io.sort.factor=100'])]
             
         steps = [
             boto.emr.step.InstallHiveStep('0.11.0.2'),
