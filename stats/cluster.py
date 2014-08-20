@@ -162,9 +162,9 @@ class Cluster():
         if core_group is None:
             raise ClusterInfoError('Could not find the CORE instance group')
         if (output_path.startswith("s3") and 
-            core_group.instance_type in ['r3.2xlarge', 'r3.4xlarge',
-                                         'r3.8xlarge', 'i2.8xlarge',
-                                         'i2.4xlarge', 'cr1.8xlarge']):
+            core_group.instancetype in ['r3.2xlarge', 'r3.4xlarge',
+                                        'r3.8xlarge', 'i2.8xlarge',
+                                        'i2.4xlarge', 'cr1.8xlarge']):
             extra_ops += ('-D mapreduce.reduce.memory.mb 5000 '
                           '-D mapreduce.reduce.java.opts -Xmx4800m')
         
