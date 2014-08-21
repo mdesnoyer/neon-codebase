@@ -164,7 +164,7 @@ class Cluster():
         if s3AddrMatch:
 
             # First figure out the size of the data
-            bucket_name, key_name = s3AddressRe.match(options.ssh_key)
+            bucket_name, key_name = s3AddrMatch.groups()
             s3conn = S3Connection()
             prefix = re.compile('([^\*]*)\*').match(key_name).group(1)
             for key in s3conn.get_bucket('bucket_name').list(prefix):
