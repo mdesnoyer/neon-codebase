@@ -198,7 +198,7 @@ class Cluster():
             r"Tracking URL: https?://(\S+)/proxy/(\S+)/")
         jobidRe = re.compile(r"Job ID: (\S+)")
         stdout = ssh_conn.execute_remote_command(
-            ('hadoop jar /home/hadoop/{jar} {main_class} {extra_ops} {input}'
+            ('hadoop jar /home/hadoop/{jar} {main_class} {extra_ops} {input} '
              '{output}').format(
                  jar=os.path.basename(jar),
                  main_class=main_class,
