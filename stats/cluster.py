@@ -163,7 +163,8 @@ class Cluster():
         # Define extra options for the job
         extra_ops = {
             'mapreduce.output.fileoutputformat.compress' : 'true',
-            'avro.output.codec' : 'snappy'
+            'avro.output.codec' : 'snappy',
+            'mapreduce.job.reduce.slowstart.completedmaps' : '0.99'
         }
 
         # If the requested map memory is different, set it
