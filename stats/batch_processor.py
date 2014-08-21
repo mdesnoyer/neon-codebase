@@ -19,6 +19,7 @@ from hive_service import ThriftHive
 from hive_service.ttypes import HiveServerException
 import impala.dbapi
 import impala.error
+import re
 import threading
 from thrift import Thrift
 from thrift.transport import TSocket
@@ -49,6 +50,7 @@ class NeonDataPipelineException(Exception): pass
 class ExecutionError(NeonDataPipelineException): pass
 class ImpalaError(ExecutionError): pass
 class IncompatibleSchema(NeonDataPipelineException): pass
+class UnexpectedInfo(NeonDataPipelineException): pass
 
 class ImpalaTableBuilder(threading.Thread):
     '''Thread that will dispatch and monitor the job to build the impala table.'''
@@ -274,26 +276,73 @@ def wait_for_running_batch_job(cluster, sample_period=30):
     '''Blocks until a currently running batch cleaning job is done.
 
     If there is no currently running job, this returns quickly
+
+    Returns: True if the job was running at some point.
     '''
+    found_job = False
     cluster.connect()
 
     while True:
         response = \
           cluster.query_resource_manager('/ws/v1/cluster/apps?states=RUNNING,NEW,SUBMITTED,ACCEPTED')
 
-        if response['apps'] is None:
-            # There are no apps running
-            return
-
-        found_batch_job = False
-        for app in response['apps']['app']:
-            if app['name'] == 'Raw Tracker Data Cleaning':
-                _log.info('The batch job with id %s is in state %s with '
-                          'progress of %i%%' % 
-                          (app['id'], app['state'], app['progress']))
-                found_batch_job = True
-
-        if not found_batch_job:
-            return
+        app = _get_last_batch_app(response)
+        if app is None:
+            return found_job
+        found_job = True
 
         time.sleep(sample_period)
+
+def _get_last_batch_app(rm_response):
+    '''Finds the last batch application from the resource manager response.'''
+
+    if rm_response['apps'] is None:
+        # There are no apps running
+        return None
+
+    last_app = None
+    last_started_time = None
+    for app in rm_response['apps']['app']:
+        if (app['name'] == 'Raw Tracker Data Cleaning' and 
+            (last_app is None or last_started_time > app['startedTime'])):
+            last_app = app
+            last_started_time = app['startedTime']            
+            
+    if last_app is None:
+        return None
+
+    _log.info('The batch job with id %s is in state %s with '
+              'progress of %i%%' % 
+              (last_app['id'], last_app['state'], last_app['progress']))
+    return last_app
+
+def get_last_sucessful_batch_output(cluster):
+    '''Determines the last sucessful batch output path.
+
+    Returns: The s3 patch of the last sucessful job, or None if there wasn't one
+    '''
+    cluster.connect()
+
+    response = cluster.query_resource_manager(
+        '/ws/v1/cluster/apps?finalStatus=SUCCEEDED')
+    app = _get_last_batch_app(response)
+
+    if app is None:
+        return None
+
+    # Check the config on the history server to get the path
+    query = ('/ws/v1/history/mapreduce/jobs/job_%s/conf' % 
+             re.compile(r'application_(\S+)').search(app['id']).group(1))
+    conf = self.cluster.query_history_manager(query)
+
+    if not 'conf' in conf:
+        raise UnexpectedInfo('Unexpected response from the history server: %s'
+                             % conf)
+    for prop in conf['conf']['property']:
+        if prop['name'] == 'mapreduce.output.fileoutputformat.outputdir':
+            _log.info('Found the last sucessful output directory as %s' %
+                      prop['value'])
+            return prop['value']
+
+    return None
+    

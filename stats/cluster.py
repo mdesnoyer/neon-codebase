@@ -41,6 +41,8 @@ define("ssh_key", default="s3://neon-keys/emr-runner.pem",
        help="ssh key used to execute jobs on the master node")
 define("resource_manager_port", default=9026,
        help="Port to query the resource manager on")
+define("history_server_port", default=19888,
+       help='Port to query the history server on')
 
 from utils import statemon
 statemon.define("master_connection_error", int)
@@ -247,9 +249,10 @@ class Cluster():
                 if url != response.geturl():
                     # The job is probably done, so we need to look at the
                     # job history server
-                    history_url = ("http://%s/ws/v1/history/mapreduce/jobs/%s" %
-                                   (urlparse.urlparse(response.geturl()).netloc,
-                                    job_id))
+                    history_url = (
+                        "http://%s/ws/v1/history/mapreduce/jobs/%s" %
+                        (urlparse.urlparse(response.geturl()).netloc,
+                         job_id))
                     response = urllib2.urlopen(history_url)
 
                 data = json.load(response)['job']
@@ -388,7 +391,26 @@ class Cluster():
             ip = self.master_ip,
             port = options.resource_manager_port,
             query = query)
-        
+
+        return _query_hadoop_rest(query_url, tries)
+
+    def query_history_manager(self, query, tries=5):
+        '''Query the history manager for information from Hadoop.
+
+        Inputs:
+        query - The query to send. This will be a relative REST API endpoint
+
+        Returns:
+        A dictionary of the parsed json response
+        '''
+        query_url = 'http://{ip}:{port}{query}'.format(
+            ip = self.master_ip,
+            port = options.history_server_port,
+            query = query)
+
+        return _query_hadoop_rest(query_url, tries)
+
+    def _query_hadoop_rest(self, query_url, tries=5):
         cur_try = 0
         while cur_try < tries:
             cur_try += 1
@@ -397,8 +419,8 @@ class Cluster():
                 response = urllib2.urlopen(query_url)
                 return json.load(response)
             except Exception as e:
-                _log.error('Error querying resource manager (attempt %i): %s'
-                           % (cur_try, e))
+                _log.error('Error querying %s manager (attempt %i): %s'
+                           % (query_url, cur_try, e))
                 if cur_try == tries:
                     raise
             time.sleep(30)

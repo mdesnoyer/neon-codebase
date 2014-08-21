@@ -51,7 +51,8 @@ class BatchProcessManager(threading.Thread):
         super(BatchProcessManager, self).__init__()
         
         self.cluster = cluster
-        self.last_output_path = None
+        self.last_output_path = \
+          stats.batch_processor.get_last_sucessful_batch_output(self.cluster)
 
         self._ready_to_run = threading.Event()
         self._stopped = threading.Event()
@@ -62,8 +63,16 @@ class BatchProcessManager(threading.Thread):
         while not self._stopped.is_set():
             self._ready_to_run.clear()
 
+            # Do initialization to get the internal state of the
+            # object to be consistent with the state of the data
+            # pipeline.
             try:
-                stats.batch_processor.wait_for_running_batch_job(self.cluster)
+                was_running = stats.batch_processor.wait_for_running_batch_job(
+                    self.cluster)
+                if not was_running and self.last_output_path is not None:
+                    stats.batch_processor.build_impala_tables(
+                        self.last_output_path,
+                        self.cluster)
             except Exception as e:
                 _log.exception('Error finding the running batch job: %s' % e)
                 continue
@@ -119,6 +128,9 @@ class BatchProcessManager(threading.Thread):
     def stop(self):
         self._stopped.set()
         self._ready_to_run.set()
+
+    def schedule_run(self):
+        self._ready_to_run.set()
             
                 
 
@@ -154,6 +166,7 @@ def main():
                     stats.batch_processor.build_impala_tables(
                         batch_processor.last_output_path,
                         cluster)
+                    batch_processor.schedule_run()
             cluster.set_public_ip(options.cluster_ip)
         except Exception as e:
             _log.exception('Unexpected Error: %s' % e)
