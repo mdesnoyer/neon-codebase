@@ -155,7 +155,10 @@ class Cluster():
         Returns once the job is done. If the job fails, an exception will be thrown.
         '''
         # Define extra options for the job
-        extra_ops = ''
+        extra_ops = {
+            'mapreduce.output.fileoutputformat.compress' : 'true',
+            'avro.output.codec' : 'snappy'
+        }
         
         # Figure out the number of reducers to use by aiming for files
         # that are 1GB on average.
@@ -171,7 +174,7 @@ class Cluster():
                 input_data_size += key.size
 
             n_reducers = math.ceil(input_data_size / 1073741824.)
-            extra_ops += '-D mapreduce.job.reduces %i' % n_reducers
+            extra_ops['mapreduce.job.reduces'] = n_reducers
         
         # If the cluster's core has larger instances, the memory
         # allocated in the reduce can get very large. However, we max
@@ -184,8 +187,8 @@ class Cluster():
             core_group.instancetype in ['r3.2xlarge', 'r3.4xlarge',
                                         'r3.8xlarge', 'i2.8xlarge',
                                         'i2.4xlarge', 'cr1.8xlarge']):
-            extra_ops += ('-D mapreduce.reduce.memory.mb=5000 '
-                          '-D mapreduce.reduce.java.opts=-Xmx4800m')
+            extra_ops['mapreduce.reduce.memory.mb'] = 5000
+            extra_ops['mapreduce.reduce.java.opts'] = '-Xmx4800m'
         
         self.connect()
         ssh_conn = ClusterSSHConnection(self)
@@ -195,11 +198,14 @@ class Cluster():
             r"Tracking URL: https?://(\S+)/proxy/(\S+)/")
         jobidRe = re.compile(r"Job ID: (\S+)")
         stdout = ssh_conn.execute_remote_command(
-            ('hadoop jar /home/hadoop/%s %s '
-             '-D mapreduce.output.fileoutputformat.compress=true '
-             '-D avro.output.codec=snappy %s %s %s') % 
-             (os.path.basename(jar), main_class, extra_ops, input_path,
-              output_path))
+            ('hadoop jar /home/hadoop/{jar} {main_class} {extra_ops} {input}'
+             '{output}').format(
+                 jar=os.path.basename(jar),
+                 main_class=main_class,
+                 extra_ops=' '.join(('-D %s=%s' % x 
+                                     for x in extra_ops.iteritems())),
+                 input=input_path,
+                 output=output_path))
         url_parse = trackURLRe.search(stdout)
         if not url_parse:
             raise MapReduceError(
