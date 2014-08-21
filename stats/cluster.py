@@ -154,12 +154,29 @@ class Cluster():
         Returns:
         Returns once the job is done. If the job fails, an exception will be thrown.
         '''
-        # If the cluster's core has larger instances, the memory usage
-        # in the reduce can get very large. However, s3 files have to
-        # be less than 5GB, so we need to make sure that the output
-        # data fits. One way to do that is to make sure that the
-        # reducer uses at most 5GB of memory.
+        # Define extra options for the job
         extra_ops = ''
+        
+        # Figure out the number of reducers to use by aiming for files
+        # that are 1GB on average.
+        input_data_size = 0
+        s3AddrMatch = s3AddressRe.match(options.ssh_key)
+        if s3AddrMatch:
+
+            # First figure out the size of the data
+            bucket_name, key_name = s3AddressRe.match(options.ssh_key)
+            s3conn = S3Connection()
+            prefix = re.compile('([^\*]*)\*').match(key_name).group(1)
+            for key in s3conn.get_bucket('bucket_name').list(prefix):
+                input_data_size += key.size
+
+            n_reducers = math.ceil(input_data_size / 1073741824.)
+            extra_ops += '-D mapreduce.job.reduces %i' % n_reducers
+        
+        # If the cluster's core has larger instances, the memory
+        # allocated in the reduce can get very large. However, we max
+        # out the reduce to 1GB, so limit the reducer to use at most
+        # 5GB of memory.
         core_group = self._get_instance_group_info('CORE')
         if core_group is None:
             raise ClusterInfoError('Could not find the CORE instance group')
