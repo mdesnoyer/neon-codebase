@@ -160,7 +160,7 @@ class Cluster():
         # Figure out the number of reducers to use by aiming for files
         # that are 1GB on average.
         input_data_size = 0
-        s3AddrMatch = s3AddressRe.match(options.ssh_key)
+        s3AddrMatch = s3AddressRe.match(input_path)
         if s3AddrMatch:
 
             # First figure out the size of the data
