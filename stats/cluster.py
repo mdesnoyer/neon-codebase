@@ -528,7 +528,13 @@ class Cluster():
                  '--mapred-key-value',
                  'mapreduce.task.io.sort.mb=512',
                  '--mapred-key-value',
-                 'mapreduce.task.io.sort.factor=100'])]
+                 'mapreduce.task.io.sort.factor=100',
+                 '--yarn-key-value',
+                 'yarn.nm.liveness-monitor.expiry-interval-ms=120000',
+                 '--yarn-key-value',
+                 'yarn.am.liveness-monitor.expiry-interval-ms=120000',
+                 '--yarn-key-value',
+                 'yarn.resourcemanager.container.liveness-monitor.interval-ms=120000'])]
             
         steps = [
             boto.emr.step.InstallHiveStep('0.11.0.2'),
