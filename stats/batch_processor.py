@@ -261,7 +261,8 @@ def run_batch_cleaning_job(cluster, input_path, output_path):
         cluster.run_map_reduce_job(options.mr_jar,
                                    'com.neon.stats.RawTrackerMR',
                                    input_path,
-                                   output_path)
+                                   output_path,
+                                   map_memory_mb=2048)
     except Exception as e:
         _log.error('Error running the batch cleaning job: %s' % e)
         statemon.state.increment('stats_cleaning_job_failures')

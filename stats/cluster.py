@@ -141,7 +141,7 @@ class Cluster():
                 self._set_requested_core_instances()
 
     def run_map_reduce_job(self, jar, main_class, input_path,
-                           output_path):
+                           output_path, map_memory_mb=None):
         '''Runs a mapreduce job.
 
         Inputs:
@@ -150,6 +150,10 @@ class Cluster():
         main_class - Name of the main class in the jar of the job to run
         input_path - The input path of the data
         output_path - The output location for the data
+        map_memory_mb - The memory needed for each map job. If the map is 
+                        simple and doesn't have a lookup, this can be low,
+                        which increases the number of maps each machine can
+                        run.
 
         Returns:
         Returns once the job is done. If the job fails, an exception will be thrown.
@@ -159,6 +163,13 @@ class Cluster():
             'mapreduce.output.fileoutputformat.compress' : 'true',
             'avro.output.codec' : 'snappy'
         }
+
+        # If the requested map memory is different, set it
+        if map_memory_mb is not None:
+            extra_ops['mapreduce.map.memory.mb'] = map_memory_mb
+            extra_ops['mapreduce.map.java.opts'] = (
+                '-Xmx%im' % int(map_memory_mb * 0.8))
+            
         
         # Figure out the number of reducers to use by aiming for files
         # that are 1GB on average.
@@ -188,7 +199,7 @@ class Cluster():
                                         'r3.8xlarge', 'i2.8xlarge',
                                         'i2.4xlarge', 'cr1.8xlarge']):
             extra_ops['mapreduce.reduce.memory.mb'] = 5000
-            extra_ops['mapreduce.reduce.java.opts'] = '-Xmx4800m'
+            extra_ops['mapreduce.reduce.java.opts'] = '-Xmx4000m'
         
         self.connect()
         ssh_conn = ClusterSSHConnection(self)
