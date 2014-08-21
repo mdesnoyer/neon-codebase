@@ -393,7 +393,7 @@ class Cluster():
             port = options.resource_manager_port,
             query = query)
 
-        return _query_hadoop_rest(query_url, tries)
+        return self._query_hadoop_rest(query_url, tries)
 
     def query_history_manager(self, query, tries=5):
         '''Query the history manager for information from Hadoop.
@@ -409,7 +409,7 @@ class Cluster():
             port = options.history_server_port,
             query = query)
 
-        return _query_hadoop_rest(query_url, tries)
+        return self._query_hadoop_rest(query_url, tries)
 
     def _query_hadoop_rest(self, query_url, tries=5):
         cur_try = 0
