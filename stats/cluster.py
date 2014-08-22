@@ -116,9 +116,28 @@ class Cluster():
                       % (new_ip, self.cluster_id))
             conn = EC2Connection()
 
-            success = conn.associate_address(instance_id=self.master_id,
-                                             public_ip=new_ip,
-                                             allow_reassociation=True)
+            elastic_addr = None
+            for addr in conn.get_all_addresses():
+                if addr.public_ip == new_ip:
+                    elastic_addr = addr
+                    break
+            if elastic_addr is None:
+                raise ClusterCreationError(
+                    "Could not assign the elastic ip because the elastic"
+                    " ip %s was not found" % new_ip)
+
+            if elastic_addr.allocation_id is None:
+                # It's a public ip
+                success = conn.associate_address(instance_id=self.master_id,
+                                                 public_ip=new_ip,
+                                                 allow_reassociation=True)
+            else:
+                # It's a VPC ip
+                success = conn.associate_address(
+                    instance_id=self.master_id,
+                    allocation_id=elastic_addr.allocation_id,
+                    allow_reassociation=True)
+
             if not success:
                 raise ClusterCreationError("Could not assign the elastic ip"
                                            "%s to instance %s" %
