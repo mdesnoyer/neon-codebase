@@ -333,7 +333,7 @@ def get_last_sucessful_batch_output(cluster):
     # Check the config on the history server to get the path
     query = ('/ws/v1/history/mapreduce/jobs/job_%s/conf' % 
              re.compile(r'application_(\S+)').search(app['id']).group(1))
-    conf = self.cluster.query_history_manager(query)
+    conf = cluster.query_history_manager(query)
 
     if not 'conf' in conf:
         raise UnexpectedInfo('Unexpected response from the history server: %s'
