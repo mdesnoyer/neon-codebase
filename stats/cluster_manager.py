@@ -72,10 +72,12 @@ class BatchProcessManager(threading.Thread):
             try:
                 was_running = stats.batch_processor.wait_for_running_batch_job(
                     self.cluster)
-                if not was_running and self.last_output_path is not None:
-                    stats.batch_processor.build_impala_tables(
-                        self.last_output_path,
-                        self.cluster)
+                if was_running:
+                    self.last_output_path = stats.batch_processor.get_last_sucessful_batch_output(self.cluster)
+                    if self.last_output_path is not None:
+                        stats.batch_processor.build_impala_tables(
+                            self.last_output_path,
+                            self.cluster)
             except Exception as e:
                 _log.exception('Error finding the running batch job: %s' % e)
                 continue
