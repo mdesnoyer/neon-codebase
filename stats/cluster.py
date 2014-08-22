@@ -331,7 +331,7 @@ class Cluster():
         Outputs:
         InstanceGroup - Instance group status
         '''
-        if group_type != 'TASK' and amount < 1:
+        if group_type != 'TASK' and incr_amount < 1:
             raise ValueError('Cannot shrink an instance group of type %s' %
                              group_type)
 

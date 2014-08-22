@@ -56,6 +56,9 @@ class BatchProcessManager(threading.Thread):
 
         self._ready_to_run = threading.Event()
         self._stopped = threading.Event()
+
+        # Number of extra task instances to spin up for the batch process.
+        self.n_task_instances = 8 
         self.daemon = True
 
     def run(self):
@@ -87,8 +90,8 @@ class BatchProcessManager(threading.Thread):
                     options.cleaned_output_path,
                     time.strftime("%Y-%m-%d-%H-%M"))
 
-                self.cluster.change_instance_group_size('TASK',
-                                                        new_size=4)
+                self.cluster.change_instance_group_size(
+                    'TASK', new_size=self.n_task_instances)
                 stats.batch_processor.run_batch_cleaning_job(
                     self.cluster, options.input_path,
                     cleaned_output_path)
@@ -105,8 +108,9 @@ class BatchProcessManager(threading.Thread):
 
             finally:
                 try:
-                   self.cluster.change_instance_group_size('TASK',
-                                                           new_size=0)
+                   if not self._ready_to_run.is_set():
+                       self.cluster.change_instance_group_size('TASK',
+                                                               new_size=0)
                    utils.monitor.send_statemon_data()
                 except Exception as e:
                     _log.exception('Error shrinking task instance group: %s'
@@ -118,6 +122,7 @@ class BatchProcessManager(threading.Thread):
                           'Adding a machine to the cluster.')
                 try:
                     self.cluster.increment_core_size()
+                    self.n_task_instances += 4
                 except Exception as e:
                     _log.exception('Error incrementing core instance size %s'
                                    % e)
