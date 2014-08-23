@@ -73,8 +73,10 @@ class BatchProcessManager(threading.Thread):
                 was_running = stats.batch_processor.wait_for_running_batch_job(
                     self.cluster)
                 if was_running:
-                    self.last_output_path = stats.batch_processor.get_last_sucessful_batch_output(self.cluster)
-                    if self.last_output_path is not None:
+                    last_path = stats.batch_processor.get_last_sucessful_batch_output(self.cluster)
+                    if (last_path != self.last_output_path and 
+                        last_path is not None):
+                        self.last_output_path = last_path
                         stats.batch_processor.build_impala_tables(
                             self.last_output_path,
                             self.cluster)
