@@ -588,13 +588,18 @@ class LogLines(TrackerDataHandler):
         self.avro_writer = avro_writer
         self.schema_url = schema_url
         self.flume_buffer = flume_buffer
+
+        # We grab a ref to this message counter because it is used a
+        # lot and the inspection can take a while. So do the
+        # inspection now.
+        self.message_counter = statemon.state.get_ref('messages_handled')
     
     @tornado.web.asynchronous
     @tornado.gen.coroutine
     def get(self, *args, **kwargs):
         '''Handle a tracking request.'''
         with self.watcher.activate():
-            #statemon.state.increment('messages_handled')
+            statemon.state.increment(ref=self.message_counter, safe=False)
             
             try:
                 tracker_data = yield self.parse_tracker_data(self.version)

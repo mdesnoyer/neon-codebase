@@ -424,6 +424,13 @@ class AccountHandler(tornado.web.RequestHandler):
                     return
                 
                 elif "ooyala_integrations" == itype:
+                    #Temp support for both arguments
+                    if new_tid is None:
+                        self.get_argument('current_thumbnail', None)
+                        if new_tid is None:
+                            data = '{"error": "missing thumbnail_id argument"}'
+                            self.send_json_response(data, 400)
+                            return
                     self.update_video_ooyala(i_id, i_vid, new_tid)
                     return
             else:
