@@ -252,6 +252,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertTrue(None not in results)
 
     def test_iterate_all_thumbnails(self):
+        #NOTE: doesn't work on MAC
 
         # Build up a database structure
         na = NeonUserAccount('acct1')
@@ -301,6 +302,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         # Now make sure that the iteration goes through all the thumbnails
         found_thumb_ids = [x.key for x in  
                            ThumbnailMetadata.iterate_all_thumbnails()]
+        print found_thumb_ids
         self.assertItemsEqual(found_thumb_ids, [x.key for x in thumbs])
 
     def test_ThumbnailServingURLs(self):

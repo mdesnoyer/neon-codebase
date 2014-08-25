@@ -37,6 +37,7 @@ import utils.sync
 from utils.options import define, options
 define("port", default=8083, help="run on the given port", type=int)
 define("local", default=0, help="call local service", type=int)
+define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
 
 import logging
 _log = logging.getLogger(__name__)
@@ -465,7 +466,8 @@ class AccountHandler(tornado.web.RequestHandler):
                 video_url.split('//')[-1] if video_title is None else video_title 
         request_body["video_url"] = video_url
         #client_url = 'http://thumbnails.neon-lab.com/api/v1/submitvideo/topn'
-        client_url = 'http://50.19.216.114:8081/api/v1/submitvideo/topn' #use EIP
+        client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
+                        % options.video_server 
         if options.local == 1:
             client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
             request_body["callback_url"] = callback_url 
@@ -573,7 +575,8 @@ class AccountHandler(tornado.web.RequestHandler):
                 video_url.split('//')[-1] if title is None else title 
         request_body["video_url"]   = video_url
         #client_url = 'http://thumbnails.neon-lab.com/api/v1/submitvideo/topn'
-        client_url = 'http://50.19.216.114:8081/api/v1/submitvideo/topn' #use EIP
+        client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
+                        % options.video_server 
         if options.local == 1:
             client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
             request_body["callback_url"] = "http://localhost:8081/testcallback"
@@ -1673,18 +1676,20 @@ class AccountHandler(tornado.web.RequestHandler):
         #TODO: handle multiple thumb uploads
         t_url = thumbs[0]["urls"][0]
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
-       
+        
         result = vmdata.add_custom_thumbnail(t_url)
-
+        
         if result:
             _log.info("key=update_video_brightcove" 
                         " msg=thumbnail updated for video=%s tid=%s"\
                         %(p_vid, result))
             data = ''
             self.send_json_response(data, 202)
+            return
         else:
             data = '{"error": "internal error"}'
             self.send_json_response(data, 500)
+            return
 
 
     ### AB Test State #####

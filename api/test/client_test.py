@@ -82,9 +82,14 @@ class TestVideoClient(unittest.TestCase):
         #setup process video object
         self.api_request = None
         
+        #patch for download_and_add_thumb
+        self.utils_patch = patch('supportServices.neondata.utils.http.send_request')
+        self.uc = self.utils_patch.start() 
+        
     def tearDown(self):
         self.redis.stop()
         super(TestVideoClient, self).tearDown()
+        self.utils_patch.stop()
         
     def setup_video_processor(self, request_type):
         '''
@@ -126,6 +131,10 @@ class TestVideoClient(unittest.TestCase):
         
         self.api_request.save()
         vprocessor = api.client.VideoProcessor(job, self.model, self.model_version)
+
+        #Add a mock to the get_center_frame
+        vprocessor.get_center_frame = mock.Mock(return_value=
+                PILImageUtils.create_random_image(360, 480)) 
         return vprocessor 
 
     @patch('api.cdnhosting.urllib2')
@@ -311,6 +320,13 @@ class TestVideoClient(unittest.TestCase):
         result_data = [15, 30, 60, 45, 105] #hardcoded for now, perhaps extract this from model data  
         self.assertEqual(callback_result["data"], result_data)
         self.assertEqual(len(callback_result["thumbnails"]), len(result_data))
+            
+        #verify the number of thumbs in self.thumbnails  
+        self.assertEqual(len(vprocessor.thumbnails), len(callback_result["thumbnails"]) + 1)
+
+        #verify the center frame thumbnail
+        self.assertEqual(vprocessor.thumbnails[-1].type,
+                            neondata.ThumbnailType.CENTERFRAME)
     
     @patch('utils.http')
     def test_finalize_request_error(self, mock_client):
@@ -369,12 +385,11 @@ class TestVideoClient(unittest.TestCase):
         api_request = neondata.NeonApiRequest.get(api_key, job_id)
         self.assertEqual(api_request.state, neondata.RequestState.FINISHED)
         
-
     @patch('api.cdnhosting.urllib2')
     @patch('api.client.tornado.httpclient.HTTPClient')
     @patch('api.cdnhosting.S3Connection')
     def test_save_previous_thumbnail(self, mock_conntype,
-                                      mock_client, mock_urllib2):
+            mock_client, mock_urllib2):
         '''
         Test saving previous thumbnail for 
         Neon/ bcove/ ooyala requests
@@ -390,8 +405,12 @@ class TestVideoClient(unittest.TestCase):
                             buffer=StringIO(data))
         mclient = MagicMock()
         mclient.fetch.return_value = response
-        mock_client.return_value = mclient 
-        
+        mock_client.return_value = mclient
+
+        self.uc.side_effect = lambda x, callback:\
+            tornado.ioloop.IOLoop.current().add_callback(callback,
+                response)
+    
         mresponse = MagicMock()
         mresponse.read.return_value = '{"url": "http://cloudinary.jpg"}' 
         mock_urllib2.urlopen.return_value = mresponse 

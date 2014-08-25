@@ -66,7 +66,7 @@ if __name__ == "__main__":
 
         try:
             # Get all Brightcove accounts
-            host = "10.249.34.227"
+            host = options.supportServices.accountDB 
             port = 6379
             rclient = blockingRedis.StrictRedis(host, port)
             accounts = rclient.keys('brightcoveplatform*')

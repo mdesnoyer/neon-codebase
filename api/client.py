@@ -49,6 +49,7 @@ import time
 import urllib
 import urllib2
 import utils.neon
+import utils.pycvutils
 import utils.http
 from utils import statemon
 
@@ -159,6 +160,9 @@ def host_images_s3(vmdata, api_key, img_and_scores, base_filename,
     s3bucket = s3conn.get_bucket(s3bucket_name)
     
     fname_prefix = 'neon'
+    if ttype == neondata.ThumbnailType.CENTERFRAME:
+        fname_prefix = 'centerframe'
+
     fmt = 'jpeg'
     s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
     s3_urls = []
@@ -170,6 +174,12 @@ def host_images_s3(vmdata, api_key, img_and_scores, base_filename,
     for image, score in img_and_scores:
         keyname = base_filename + "/" + fname_prefix + str(rank) + "." + fmt
         s3fname = s3_url_prefix + "/%s/%s%s.jpeg" % (base_filename, fname_prefix, rank)
+        #for center frame skip rank
+        if ttype == neondata.ThumbnailType.CENTERFRAME:
+            keyname = base_filename + "/" + fname_prefix + "." + fmt
+            s3fname = s3_url_prefix + "/%s/%s.jpeg" % (base_filename,
+                                                        fname_prefix)
+
         tdata = vmdata.save_thumbnail_to_s3_and_store_metadata(image, score, 
                                                                 keyname,
                                                                 s3fname,
@@ -180,7 +190,6 @@ def host_images_s3(vmdata, api_key, img_and_scores, base_filename,
         rank = rank+1
         s3_urls.append(s3fname)
 
-    vmdata.save()
     return (thumbnails, s3_urls)
 
 ###########################################################################
@@ -238,6 +247,7 @@ class VideoProcessor(object):
         self.valence_scores = [[], []] #x,y 
         self.timecodes = {}
         self.thumbnails = [] 
+        self.center_frame = None
         self.sec_to_extract = 1 
         self.sec_to_extract_offset = 1
 
@@ -298,7 +308,7 @@ class VideoProcessor(object):
         if self.job_params.has_key(properties.TOP_THUMBNAILS):
             n_thumbs = 2*int(self.job_params[properties.TOP_THUMBNAILS])
         self.process_video(self.tempfile.name, n_thumbs=n_thumbs)
-
+        
         #gather stats
         end_time = time.time()
         total_request_time = \
@@ -384,18 +394,23 @@ class VideoProcessor(object):
         end_process = time.time()
         _log.info("key=process_video msg=debug " 
                     "time_processing=%s" %(end_process - start_process))
+
+        # Get the center frame of the video
+        self.center_frame = self.get_center_frame(video_file)
         return True
 
-    def get_center_frame(self, video_file):
+    def get_center_frame(self, video_file, nframes=None):
         '''approximation of brightcove logic 
          #Note: Its unclear the exact nature of brighcove thumbnailing,
          the images are close but this is not the exact frame
         '''
+        
         try:
             mov = cv2.VideoCapture(video_file)
-            duration = mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
-            mov.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, int(duration / 2))
-            read_sucess, image = mov.read()
+            if nframes is None:
+                nframes = mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
+            read_sucess, image = utils.pycvutils.seek_video(mov, int(nframes /
+                2))
             if read_sucess:
                 return image[:,:,::-1]
             else:
@@ -403,7 +418,7 @@ class VideoProcessor(object):
                            'msg=Error reading middle frame of video %s'
                            % video_file)
         except Exception,e:
-            _log.debug("key=get_center_frame msg=%s"%e)
+            _log.debug("key=get_center_frame msg=%s" % e)
 
     def valence_score(self, image):
         ''' valence of pil.image '''
@@ -552,6 +567,18 @@ class VideoProcessor(object):
                                             self.base_filename, model_version=0, 
                                             ttype=neondata.ThumbnailType.NEON)
             self.thumbnails.extend(thumbnails)
+            
+            #host Center Frame on s3
+            cthumbnail, s3_url = host_images_s3(vmdata, api_key, [(self.center_frame, None)], 
+                                            self.base_filename, model_version=0, 
+                                            ttype=neondata.ThumbnailType.CENTERFRAME)
+            self.thumbnails.extend(cthumbnail)
+
+            #Save videometadata 
+            if not vmdata.save():
+                _log.error("failed to save vmdata for %s" % vmdata.key)
+                statemon.state.increment('save_vmdata_error')
+
             cr_request = callback_response_builder(job_id, video_id, data, 
                                                    s3_urls[:topn], callback_url, 
                                                    error=self.error)

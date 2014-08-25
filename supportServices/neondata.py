@@ -38,6 +38,10 @@ import threading
 import time
 import api.brightcove_api #coz of cyclic import 
 import api.youtube_api
+import utils.http
+import utils.sync
+import utils.s3
+import urllib
 
 from api.cdnhosting import CDNHosting
 from api.cdnhosting import upload_to_s3_host_thumbnails 
@@ -45,12 +49,12 @@ from api import ooyala_api
 from PIL import Image
 from StringIO import StringIO
 from utils.options import define, options
-import utils.sync
-import utils.s3
-import urllib
 
 import logging
 _log = logging.getLogger(__name__)
+
+define("thumbnailBucket", default="host-thumbnails", type=str,
+        help="S3 bucket to Host thumbnails ")
 
 define("accountDB", default="127.0.0.1", type=str, help="")
 define("videoDB", default="127.0.0.1", type=str, help="")
@@ -2249,18 +2253,6 @@ class ThumbnailMetadata(StoredObject):
                         video_metadata.thumbnail_ids):
                     yield thumb
 
-    def add_custom_thumbnail(cls, i_vid, img_url, callback=None):
-        '''
-        Adds a custom thumbnail to the video specified 
-        
-        To add a thumbnail successfully these need to be added
-        ThumbnailMetadata
-        update videometadata
-        serving urls
-
-        '''
-        pass
-
 class VideoMetadata(StoredObject):
     '''
     Schema for metadata associated with video which gets stored
@@ -2409,8 +2401,10 @@ class VideoMetadata(StoredObject):
 
         return tdata
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def download_and_add_thumbnail(self, image_url, keyname,
-                                    s3url, ttype, rank=1, callback=None):
+                                   s3url, ttype, rank=1):
         '''
         Download the image and save its metadata. Used to save thumbnail
         of custom type or previous thumbnail given in the Neon API
@@ -2419,30 +2413,31 @@ class VideoMetadata(StoredObject):
         to be speicified to this function.
 
         '''
-
-        score = 0 # no score assigned currently to uploaded thumbnails
+        score = None # no score assigned currently to uploaded thumbnails
         http_client = tornado.httpclient.HTTPClient()
         req = tornado.httpclient.HTTPRequest(url=image_url,
                                              method="GET",
                                              request_timeout=60.0,
                                              connect_timeout=10.0)
 
-        response = http_client.fetch(req)
+        response = yield tornado.gen.Task(utils.http.send_request, req)
         if not response.error:
             imgdata = response.body
             image = Image.open(StringIO(imgdata))
             tdata = self.save_thumbnail_to_s3_and_store_metadata(image, score,
                                                 keyname, s3url, ttype, rank)
-            return tdata
+            raise tornado.gen.Return(tdata)
         else:
             _log.error("failed to download the image")
+        raise tornado.gen.Return(None)
 
     def add_custom_thumbnail(self, image_url, callback=None):
         fname = "custom%s.jpeg" % int(time.time())
         keyname = "%s/%s/%s" % (self.get_account_id(), self.job_id, fname)  
-        s3url = "https://%s.s3.amazonaws.com/%s" % ("host-thumbnails", keyname) 
+        s3url = "https://%s.s3.amazonaws.com/%s" % (options.thumbnailBucket, keyname) 
         ttype = ThumbnailType.CUSTOMUPLOAD
-        return self.download_and_add_thumbnail(image_url, keyname, s3url, ttype)
+        return self.download_and_add_thumbnail(image_url,
+                                 keyname, s3url, ttype)
 
     @classmethod
     def get_video_request(cls, internal_video_id, callback=None):
