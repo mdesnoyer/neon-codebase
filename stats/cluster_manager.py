@@ -125,7 +125,7 @@ class BatchProcessManager(threading.Thread):
                 _log.warn('The batch process took a very long time to run. '
                           'Adding a machine to the cluster.')
                 try:
-                    self.cluster.increment_core_size()
+                    #self.cluster.increment_core_size()
                     self.n_task_instances += 4
                 except Exception as e:
                     _log.exception('Error incrementing core instance size %s'
