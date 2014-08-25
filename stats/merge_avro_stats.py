@@ -162,7 +162,7 @@ def merge_all_subdirectories(root_dir, backup_dir, temp_dir):
     _sub_procs.append(proc)
         
     # Merge the subdirectories
-    for subdir, rel_path in root_dir.subdirs():
+    for subdir, rel_path in [x for x in root_dir.subdirs()]:
         new_backup_dir = copy.copy(backup_dir)
         new_backup_dir.dir_name += rel_path
         merge_all_subdirectories(subdir, new_backup_dir, temp_dir)
