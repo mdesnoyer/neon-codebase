@@ -44,45 +44,61 @@ __MAX_MEM_FILESIZE__ = 67108864
 
 class S3Dir:
     def __init__(self, path):
-        self.s3conn = S3Connection()
+        s3conn = S3Connection()
         bucket_name, self.dir_name = s3AddressRe.match(path).groups()
-        self.bucket = self.s3conn.get_bucket(bucket_name)
+        self.bucket = s3conn.get_bucket(bucket_name)
+
+        self._lock = multiprocessing.RLock()
 
         if not self.dir_name.endswith('/'):
             self.dir_name += '/'
 
     def get_key(self, filename, validate=True):
         '''Returns the boto Key object for the file in this directory.'''
-        return self.bucket.get_key('%s%s' % (self.dir_name, filename),
-                                   validate=validate)
+        with self._lock:
+            return self.bucket.get_key('%s%s' % (self.dir_name, filename),
+                                       validate=validate)
 
     def subdirs(self):
-        '''Get an iterator for all the (subdirectories, relative_path).
+        '''Get a list of all the (subdirectories, relative_path).
 
         The subdirectories are S3Dir objects and the relative path is a string
         '''
-        for key in self.bucket.list(self.dir_name, '/'):
-            if key.name.endswith('/'):
-                cur_dir = copy.copy(self)
-                cur_dir.dir_name = key.name
-                yield (cur_dir, key.name[len(self.dir_name):])
+        with self._lock:
+            retval = []
+            for key in self.bucket.list(self.dir_name, '/'):
+                if key.name.endswith('/'):
+                    relpath = key.name[len(self.dir_name):]
+                    retval.append((self.build_subdir(relpath), relpath))
+            return retval
+
+    def build_subdir(self, subname):
+        '''Builds a S3Dir object for the subdirectory of dirname.'''
+        return S3Dir('s3://%s/%s%s' % (self.bucket.name,
+                                       self.dir_name,
+                                       subname))
 
     def files(self):
-        '''Get an iterator for all the files in the directory.
+        '''Get a list of all the files in the directory.
 
         The files are boto Key objects
         '''
-        for key in self.bucket.list(self.dir_name, '/'):
-            if not key.name.endswith('/'):
-                yield key
+        retval = []
+        with self._lock:
+            for key in self.bucket.list(self.dir_name, '/'):
+                if not key.name.endswith('/'):
+                    retval.append(key)
+        return retval
 
     def name(self):
         return 's3://%s/%s' % (self.bucket.name, self.dir_name)
 
-    def copy_key_into(self, key):
+    def copy_key_into(self, key, new_name=None):
         '''Copies a key into this directory'''
-        bn = os.path.basename(key.name)
-        key.copy(self.bucket, '%s%s' % (self.dir_name, bn))
+        with self._lock:
+            if new_name is None:
+                new_name = os.path.basename(key.name)
+            key.copy(self.bucket, '%s%s' % (self.dir_name, new_name))
 
 _cpu_guard = multiprocessing.Semaphore(multiprocessing.cpu_count())
 def merge_files_in_directory(root_dir, backup_dir, temp_dir):
@@ -108,6 +124,8 @@ def _merge_files_in_directory_impl(root_dir, backup_dir, temp_dir):
                     cur_file, avro.io.DatumReader())) as reader:
                 schema = avro.schema.parse(reader.get_meta('avro.schema'))
 
+        merged_name = 'merged.%s' % os.path.basename(to_merge[0].name)
+
         # Open a temporary file to write to
         with tempfile.NamedTemporaryFile() as local_file:
             # Make a writer to append to the file
@@ -128,8 +146,7 @@ def _merge_files_in_directory_impl(root_dir, backup_dir, temp_dir):
                             writer.append(entry)
 
             # Now upload the merged file to a temporary location
-            merged_key = temp_dir.get_key('merged.%s' % 
-                                          os.path.basename(to_merge[0].name),
+            merged_key = temp_dir.get_key(os.path.basename(local_file.name),
                                           validate=False)
             local_file.seek(0, 0)
             _log.info('Uploading merged file to %s' % merged_key.name)
@@ -144,7 +161,7 @@ def _merge_files_in_directory_impl(root_dir, backup_dir, temp_dir):
         # Move the merged file to the directory
         _log.info('Moving the merged file from %s to %s' % (merged_key.name,
                                                             root_dir.name()))
-        root_dir.copy_key_into(merged_key)
+        root_dir.copy_key_into(merged_key, new_name=merged_name)
         merged_key.delete() 
 
 _sub_procs = []
@@ -162,9 +179,8 @@ def merge_all_subdirectories(root_dir, backup_dir, temp_dir):
     _sub_procs.append(proc)
         
     # Merge the subdirectories
-    for subdir, rel_path in [x for x in root_dir.subdirs()]:
-        new_backup_dir = copy.copy(backup_dir)
-        new_backup_dir.dir_name += rel_path
+    for subdir, rel_path in root_dir.subdirs():
+        new_backup_dir = backup_dir.build_subdir(rel_path)
         merge_all_subdirectories(subdir, new_backup_dir, temp_dir)
 
 def main():
