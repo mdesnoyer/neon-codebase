@@ -7,6 +7,7 @@ http {     default_type  application/octet-stream; \
     mastermind_file_url %s; \
     s3port %s; \
     mastermind_validated_filepath /tmp/mastermind.apitest.validated; \
+    mastermind_download_filepath /tmp/mastermind.apitest;\
     updater_sleep_interval 60;      \
         server {  listen       %s; \
                 server_name localhost; \

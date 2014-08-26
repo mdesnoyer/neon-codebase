@@ -457,15 +457,17 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         url = self.base_url % ("server", self.pub_id, self.vid)
         url += "?height=500"
         response = self.make_api_request(url, {})
-        im_url = json.loads(response.read())["data"]
-        self.assertEqual(im_url, "")
+        self.assertIsNone(response)
+        #im_url = json.loads(response.read())["data"]
+        #self.assertEqual(im_url, "")
 
     def test_server_api_without_height(self):
         url = self.base_url % ("server", self.pub_id, self.vid)
         url += "?width=600"
         response = self.make_api_request(url, {})
-        im_url = json.loads(response.read())["data"]
-        self.assertEqual(im_url, "")
+        self.assertIsNone(response)
+        #im_url = json.loads(response.read())["data"]
+        #self.assertEqual(im_url, "")
 
     def test_server_api_with_non_standard_size(self):
         '''

@@ -105,3 +105,42 @@ TEST_F(DirectiveHashtableTest, test_invalid_acc_key){
         
 }
 
+// Test BucketId Logic
+TEST_F(DirectiveHashtableTest, test_bucketid_logic){
+
+        std::string acct = "acc1";
+        std::string vid = "vid1";
+        
+        const Directive * r1 = table.Find(acct, vid);
+       
+        unsigned char * bId = (unsigned char *) "10";
+        int bIdLen = 2;
+
+        // Case: get majority fraction
+        const Fraction * f = r1->GetFraction(bId, bIdLen);
+        EXPECT_DOUBLE_EQ(f->GetPct(), 0.9);
+       
+        bId = (unsigned char *) "80";
+        f = r1->GetFraction(bId, bIdLen);
+        EXPECT_DOUBLE_EQ(f->GetPct(), 0.9);
+        
+        // Case: get minority fraction 
+        bId = (unsigned char *) "90";
+        f = r1->GetFraction(bId, bIdLen);
+        EXPECT_DOUBLE_EQ(f->GetPct(), 0.1);
+        
+        bId = (unsigned char *) "99";
+        f = r1->GetFraction(bId, bIdLen);
+        EXPECT_DOUBLE_EQ(f->GetPct(), 0.1);
+
+        // Case: bucketId len = 0 
+        f = r1->GetFraction(bId, 0);
+        EXPECT_DOUBLE_EQ(f->GetPct(), 0.9);
+        
+        // Case: Garbage bucketId
+        bId = (unsigned char *) "xags"; 
+        bIdLen = 4;
+        f = r1->GetFraction(bId, bIdLen);
+        EXPECT_DOUBLE_EQ(f->GetPct(), 0.9);
+}
+
