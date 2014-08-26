@@ -25,6 +25,7 @@ import mock
 import multiprocessing
 import os
 import pickle
+import PIL
 import random
 import request_template
 import signal
@@ -514,6 +515,20 @@ class TestVideoClient(unittest.TestCase):
         #Exceed requeue count
         vprocessor.job_params["requeue_count"] = 4
         self.assertFalse(vprocessor.requeue_job())
+
+    def test_get_center_frame(self):
+        '''
+        Test center frame extraction
+        '''
+        
+        jparams = request_template.neon_api_request %(
+                    "j_id", "vid", "api_key", "neon", "api_key", "j_id")
+        job = json.loads(jparams)
+        vprocessor = api.client.VideoProcessor(job, self.model,
+                self.model_version)
+        img = vprocessor.get_center_frame(self.test_video_file)
+        self.assertIsNotNone(img)
+        self.assertTrue(isinstance(img, PIL.Image.Image))
 
 if __name__ == '__main__':
     unittest.main()

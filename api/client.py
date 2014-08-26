@@ -412,11 +412,13 @@ class VideoProcessor(object):
             read_sucess, image = utils.pycvutils.seek_video(mov, int(nframes /
                 2))
             if read_sucess:
-                return image[:,:,::-1]
-            else:
-                _log.error('key=get_center_frame '
-                           'msg=Error reading middle frame of video %s'
-                           % video_file)
+                #Now grab the frame
+                read_sucess, image = mov.read()
+                if read_sucess:
+                    return utils.pycvutils.to_pil(image[:,:,::-1])
+            _log.error('key=get_center_frame '
+                        'msg=Error reading middle frame of video %s'
+                        % video_file)
         except Exception,e:
             _log.debug("key=get_center_frame msg=%s" % e)
 
@@ -569,10 +571,13 @@ class VideoProcessor(object):
             self.thumbnails.extend(thumbnails)
             
             #host Center Frame on s3
-            cthumbnail, s3_url = host_images_s3(vmdata, api_key, [(self.center_frame, None)], 
+            if self.center_frame is not None:
+                cthumbnail, s3_url = host_images_s3(vmdata, api_key, [(self.center_frame, None)], 
                                             self.base_filename, model_version=0, 
                                             ttype=neondata.ThumbnailType.CENTERFRAME)
-            self.thumbnails.extend(cthumbnail)
+                self.thumbnails.extend(cthumbnail)
+            else:
+                _log.error("centerframe was None for %s" % video_id)
 
             #Save videometadata 
             if not vmdata.save():
