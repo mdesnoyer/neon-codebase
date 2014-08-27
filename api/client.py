@@ -84,6 +84,7 @@ define('debug', default=0, type=int, help='If true, runs in debug mode')
 define('profile', default=0, type=int, help='If true, runs in debug mode')
 define('sync', default=0, type=int,
        help='If true, runs http client in async mode')
+define('video_server', default="http://localhost:8081", type=str, "video server")
 
 # ======== API String constants  =======================#
 INTERNAL_PROCESSING_ERROR = "internal error"
@@ -226,7 +227,7 @@ class VideoProcessor(object):
                 self.job_params[properties.REQUEST_UUID_KEY]  
         
         self.error = None # Error message is filled as str in this variable
-        self.requeue_url = properties.BASE_SERVER_URL + "/requeue"
+        self.requeue_url = options.video_server + "/requeue"
 
         self.video_metadata = {} 
         self.video_metadata['codec_name'] = None
@@ -846,8 +847,8 @@ class VideoClient(object):
         self.model_file = model_file
         self.SLEEP_INTERVAL = 10
         self.kill_received = False
-        self.dequeue_url = properties.BASE_SERVER_URL + "/dequeue"
-        self.requeue_url = properties.BASE_SERVER_URL + "/requeue"
+        self.dequeue_url = options.video_server + "/dequeue"
+        self.requeue_url = options.video_server + "/requeue"
         self.state = "start"
         self.model_version = -1
         self.model = None
@@ -939,7 +940,7 @@ def main():
     
     if options.local:
         _log.info("Running locally")
-        properties.BASE_SERVER_URL = properties.LOCALHOST_URL
+        options.video_server = properties.LOCALHOST_URL
 
     vc = VideoClient(options.model_file,
                      options.debug, options.sync)

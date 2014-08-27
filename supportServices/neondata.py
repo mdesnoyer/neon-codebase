@@ -108,7 +108,7 @@ class DBConnection(object):
         ''' fetch keys that match a prefix '''
 
         if callback:
-            self.conn.keys(key_prefix,callback)
+            self.conn.keys(key_prefix, callback)
         else:
             keys = self.blocking_conn.keys(key_prefix)
             return keys
@@ -2404,7 +2404,7 @@ class VideoMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def download_and_add_thumbnail(self, image_url, keyname,
-                                   s3url, ttype, rank=1):
+                                    s3url, ttype, rank=1):
         '''
         Download the image and save its metadata. Used to save thumbnail
         of custom type or previous thumbnail given in the Neon API
@@ -2436,8 +2436,7 @@ class VideoMetadata(StoredObject):
         keyname = "%s/%s/%s" % (self.get_account_id(), self.job_id, fname)  
         s3url = "https://%s.s3.amazonaws.com/%s" % (options.thumbnailBucket, keyname) 
         ttype = ThumbnailType.CUSTOMUPLOAD
-        return self.download_and_add_thumbnail(image_url,
-                                 keyname, s3url, ttype)
+        return self.download_and_add_thumbnail(image_url, keyname, s3url, ttype)
 
     @classmethod
     def get_video_request(cls, internal_video_id, callback=None):

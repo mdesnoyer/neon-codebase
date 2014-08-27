@@ -1680,10 +1680,13 @@ class AccountHandler(tornado.web.RequestHandler):
             self.send_json_response("%s account not found" % itype, 400)
             return
      
-        #TODO: handle multiple thumb uploads
+        # TODO: handle multiple thumb uploads
         t_url = thumbs[0]["urls"][0]
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
         
+        # TODO: make async; currently test fails with async error on using
+        # optional sync
+
         result = vmdata.add_custom_thumbnail(t_url)
         
         if result:
