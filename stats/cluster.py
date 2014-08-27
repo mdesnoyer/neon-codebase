@@ -576,7 +576,9 @@ class Cluster():
                  '--yarn-key-value',
                  'yarn.am.liveness-monitor.expiry-interval-ms=120000',
                  '--yarn-key-value',
-                 'yarn.resourcemanager.container.liveness-monitor.interval-ms=120000'])]
+                 'yarn.resourcemanager.container.liveness-monitor.interval-ms=120000',
+                 '--yarn-key-value',
+                 'yarn.log-aggregation-enable=true'])]
             
         steps = [
             boto.emr.step.InstallHiveStep('0.11.0.2'),
