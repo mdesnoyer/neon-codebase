@@ -17,7 +17,6 @@
 #include "neon_utils.h"
 #include "neon_stats.h"
 #include "neon_log.h"
-#include "neon_publisher_hashtable.h"
 
 
 // updater thread
@@ -37,7 +36,8 @@ static const char * mastermind_url = 0; // HTTP REST URL to marstermind file
 // TODO: Need to lock the download path if >1 worker process will be spun
 static const char * mastermind_filepath             = 0; // download the file here
 static const char * validated_mastermind_filepath   = 0; 
-static const char * s3cmd_config_filepath = 0;
+static const char * s3port = 0;
+static const char * s3downloader = 0;
 static const int test_config = 1;
 
 /*
@@ -47,7 +47,8 @@ static const int test_config = 1;
 void neon_updater_config_init(unsigned char *m_url, 
                                 unsigned char *m_valid_path, 
                                 unsigned char *m_download_path, 
-                                unsigned char * s3cmd_conf_fpath, 
+                                unsigned char * s3downloader_fpath, 
+                                unsigned char * s3_port, 
                                 time_t s_time){
     
     // Mastermind REST URI
@@ -73,12 +74,18 @@ void neon_updater_config_init(unsigned char *m_url,
     int r = rand() % 100;
     sleep_time += s_time + r;
     //neon_log_error("NEON Config sleep time %d", sleep_time);
+    
+    // s3downloader filepath
+	if (s3downloader == 0 && s3downloader_fpath != NULL)
+		s3downloader = strdup((const char *) s3downloader_fpath);
+	else
+		free((void *) s3downloader);
 
     // s3cmd config filepath
-	if (s3cmd_config_filepath == 0 && s3cmd_conf_fpath != NULL)
-		s3cmd_config_filepath = strdup((const char *) s3cmd_conf_fpath);
+	if (s3port == 0 && s3_port != NULL)
+		s3port = strdup((const char *) s3_port);
 	else
-		free((void *) s3cmd_config_filepath);
+		free((void *) s3port);
 }	
 
 void *
@@ -129,7 +136,7 @@ neon_runloop(void * arg){
             /*
              *  fetch new mastermind file from S3
              */
-            if(neon_fetch(mastermind_url, mastermind_filepath, s3cmd_config_filepath, fetch_timeout) == NEON_FETCH_FAIL) {
+            if(neon_fetch(mastermind_url, mastermind_filepath, s3downloader, s3port, fetch_timeout) == NEON_FETCH_FAIL) {
                 
                 // log
                 neon_log_error("failed to fetch mastermind file, error: %s",

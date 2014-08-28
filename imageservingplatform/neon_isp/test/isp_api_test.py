@@ -102,14 +102,14 @@ class ISP:
     in setUpClass & tearDownClass respectively
     '''
 
-    def __init__(self, mastermind_s3file_url, s3cfg, port=None):
+    def __init__(self, mastermind_s3file_url, s3downloader, s3cfg, port=None):
         self.port = port
         if self.port is None:
             self.port = net.find_free_port()
         
         self.config_file = tempfile.NamedTemporaryFile()
         self.config_file.write(nginx_isp_test_conf.conf % \
-                                (mastermind_s3file_url, s3cfg, self.port))
+                                (mastermind_s3file_url, s3downloader, s3cfg, self.port))
         self.config_file.flush()
 
         self.nginx_path = base_path + "/imageservingplatform/nginx-1.4.7/objs/nginx" #get build path
@@ -181,7 +181,6 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         cls.s3cfg = tempfile.NamedTemporaryFile()
         cls.s3cfg.write(s3cmd_fakes3cfg.conf % (s3port, '%', s3port))
         cls.s3cfg.flush()
-        os.chmod(cls.s3cfg.name, 644) #required as s3cmd runs as user nobody
   
         mfile_path = base_path + \
                         "/imageservingplatform/neon_isp/test/mastermind.api.test"
@@ -190,7 +189,11 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         FakeS3CreateBucket(bucket_name, cls.s3cfg.name)
         cls.s3_mfile_url = "%s/mastermind.api.test" % bucket_name # mastermind s3 file url
         FakeS3Upload(mfile_path, cls.s3cfg.name, cls.s3_mfile_url)
-        cls.isp = ISP(cls.s3_mfile_url, s3port) 
+
+        s3downloader = base_path +\
+                    "/imageservingplatform/neon_isp/isp_s3downloader.py"
+
+        cls.isp = ISP(cls.s3_mfile_url, s3downloader, s3port) 
         cls.isp.start()
         time.sleep(1) # allow mastermind file to be parsed
 

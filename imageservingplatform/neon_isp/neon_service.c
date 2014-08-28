@@ -99,16 +99,13 @@ neon_service_get_uri_token(ngx_http_request_t *req,
 //////////////////// Cookie Helper methods ////////////////////////////
 
 /*
- * TODO: Complete this logic
- * Get bucket id; dummy function now
- *
- * BucketID -> TID Mapping to be defined
+ * Given UUID, VideoId, generate the bucketId  
+ * 
  * */
 
-
 static void 
-neon_service_get_bucket_id(ngx_str_t *neon_uuid, 
-                            ngx_str_t *video_id, 
+neon_service_get_bucket_id(const ngx_str_t * neon_uuid, 
+                           const ngx_str_t * video_id, 
                             ngx_str_t * bucket_id){
 
     unsigned char hashstring[256]; // max size = 18 + sizeof(vid)

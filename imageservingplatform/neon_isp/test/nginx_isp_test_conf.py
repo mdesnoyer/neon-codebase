@@ -1,10 +1,11 @@
 # NGINX configuration file template
 
 conf=" daemon off; \
-error_log  /tmp/error.log;  events {     worker_connections  1024; }\
+error_log  /tmp/nginx-error.log;  events {     worker_connections  1024; }\
 http {     default_type  application/octet-stream; \
     sendfile        on;     keepalive_timeout  65;      \
     mastermind_file_url %s; \
+    s3downloader  %s; \
     s3port %s; \
     mastermind_validated_filepath /tmp/mastermind.apitest.validated; \
     mastermind_download_filepath /tmp/mastermind.apitest;\

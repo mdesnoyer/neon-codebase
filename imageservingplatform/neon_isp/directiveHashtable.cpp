@@ -7,28 +7,24 @@
  *   Directive Table
  */
 
-DirectiveHashtable::DirectiveHashtable()
-{
+DirectiveHashtable::DirectiveHashtable(){
     table = 0;
 }
 
 
-DirectiveHashtable::~DirectiveHashtable()
-{
-        table = 0;
+DirectiveHashtable::~DirectiveHashtable(){
+    table = 0;
 }
 
 
 void
-DirectiveHashtable::Init(unsigned numOfBuckets)
-{
+DirectiveHashtable::Init(unsigned numOfBuckets){
     table = new DirectiveTable(numOfBuckets);
 }
 
 
 void
-DirectiveHashtable::Shutdown()
-{
+DirectiveHashtable::Shutdown(){
     if(table == 0)
         return;
     
@@ -44,15 +40,14 @@ DirectiveHashtable::Shutdown()
 
 
 unsigned
-DirectiveHashtable::GetSize()
-{
+DirectiveHashtable::GetSize(){
     return table->size();
 }
 
 
 void
-DirectiveHashtable::AddDirective(rapidjson::Document & directive)
-{
+DirectiveHashtable::AddDirective(rapidjson::Document & directive){
+    
     Directive * d = new Directive();
     
     d->Init(directive);
@@ -62,13 +57,12 @@ DirectiveHashtable::AddDirective(rapidjson::Document & directive)
 
 
 const Directive *
-DirectiveHashtable::Find(std::string & accountId, std::string & videoId) const
-{
+DirectiveHashtable::Find(std::string & accountId, std::string & videoId) const {
+
     std::string key;
-    key.append(accountId);
-    key.append(videoId);
-    
-    Directive * directive = 0;
+   
+    DirectiveHashtable::ConstructKey(accountId, videoId, &key);
+    Directive * directive = NULL;
     directive = (*table)[key];
 
     return directive;
@@ -76,16 +70,18 @@ DirectiveHashtable::Find(std::string & accountId, std::string & videoId) const
 
 
 size_t
-DirectiveHashtable::hash_directive::operator()(const std::string key)  const
-{
+DirectiveHashtable::hash_directive::operator()(const std::string & key)  const {
     uint32_t result = 0;
     
     result = NeonHash::Hash(key.c_str(), 1);
     
     return result;
-};
+}
 
+void 
+DirectiveHashtable::ConstructKey(std::string & accountId, std::string & videoId, std::string *key){
+    
+    (*key).append(accountId);
+    (*key).append(videoId);
 
-
-
-
+}
