@@ -423,6 +423,7 @@ class DirectivePublisher(threading.Thread):
             .isoformat())
         with self.lock:
             self._write_directives(directive_file)
+        directive_file.write('\nend')
 
         filename = '%s.%s' % (curtime.strftime('%Y%m%d%H%M%S'),
                               options.directive_filename)

@@ -498,10 +498,14 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         # Split the data lines into tracker id maps and directives
         tracker_ids = {}
         directives = {}
+        found_end = False
         for line in lines[1:]:
             if len(line.strip()) == 0:
                 # It's an empty line
                 continue
+            if line == 'end':
+                found_end = True
+                break
             data = json.loads(line)
             if data['type'] == 'pub':
                 tracker_ids[data['pid']] = data['aid']
@@ -509,6 +513,8 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
                 directives[(data['aid'], data['vid'])] = data
             else:
                 self.fail('Invalid data type: %s' % data['type'])
+
+        self.assertTrue(found_end)
 
         return expiry, tracker_ids, directives
 
@@ -864,7 +870,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
         # See if there is anything in S3 (which there should be)
         bucket = self.s3conn.get_bucket('neon-image-serving-directives')
         lines = bucket.get_key('mastermind').get_contents_as_string().split('\n')
-        self.assertEqual(len(lines), 3)
+        self.assertEqual(len(lines), 4)
         
 if __name__ == '__main__':
     utils.neon.InitNeonTest()
