@@ -30,7 +30,6 @@ add_library(NeonISP STATIC
  fraction.cpp 
  scaledImage.cpp 
  neonException.cpp 
- neonLog.cpp
  neon_error_codes.c
  neon_stats.c
  neon_service_helper.c
@@ -55,7 +54,3 @@ target_link_libraries( NeonISPTest
 
 ### python tests ###
 enable_python()
-
-#add_test(neon_isp_integration_test
-#    ${imageservingplatform_SOURCE_DIR}/test/isp_api_test.py 
-#      )

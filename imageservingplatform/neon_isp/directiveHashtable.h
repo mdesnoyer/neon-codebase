@@ -14,27 +14,20 @@ public:
     DirectiveHashtable();
     ~DirectiveHashtable();
     
-    
-    /*
-     *
-     */
     void Init(unsigned numOfBuckets);
     
-    /*
-     *
-     */
     void Shutdown();
     
     unsigned GetSize();
     
     /*
-     *
+     * Add a directive to the hash table
      */
     void AddDirective(rapidjson::Document & directive);
 
     
     /*
-     *
+     * Directive hash table Enums 
      */
     enum EFindError {
         Found,
@@ -44,34 +37,12 @@ public:
     
     const Directive * Find(std::string & accountId, std::string & videoId) const;
     
+    static void ConstructKey(std::string & accountId, std::string & videoId, std::string *key);
     
 protected:
 
-    /*
-     *
-     */
-    /*
-       struct eq_directive
-       {
-       bool operator()(const unsigned long long int s1, const unsigned long long int s2) const
-       {
-       return true ? s1==s2: false;
-       }
-       };
-       */
-
-    /*
-       struct hash_directive {
-       size_t operator()(const std::string key)  const {
-    // unsigned long long ret = (in >> 32L) ^ (in & 0xFFFFFFFF);
-    //return (size_t) ret;
-    return (size_t) NeonHash::hash(key.c_str(), key.size);
-    }
-    };
-    */
-    
     struct hash_directive {
-        size_t operator()(const std::string key)  const;
+        size_t operator()(const std::string & key)  const;
 	};
 
 

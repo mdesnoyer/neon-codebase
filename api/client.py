@@ -84,7 +84,7 @@ define('debug', default=0, type=int, help='If true, runs in debug mode')
 define('profile', default=0, type=int, help='If true, runs in debug mode')
 define('sync', default=0, type=int,
        help='If true, runs http client in async mode')
-define('video_server', default="http://localhost:8081", type=str, "video server")
+define('video_server', default="http://localhost:8081", type=str, help="video server")
 
 # ======== API String constants  =======================#
 INTERNAL_PROCESSING_ERROR = "internal error"

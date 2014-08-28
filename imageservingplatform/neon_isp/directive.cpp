@@ -25,7 +25,7 @@ Directive::~Directive()
 
 
 void
-Directive::Init(rapidjson::Document & document)
+Directive::Init(const rapidjson::Document & document)
 {
     /*
      *  account id
@@ -187,8 +187,8 @@ Directive::operator==(const Directive &other) const {
 };
 
 std::string
-Directive::GetKey() const
-{
+Directive::GetKey() const{
+    
     std::string composite;
     composite.append(accountId);
     composite.append(videoId);
