@@ -172,7 +172,7 @@ def merge_all_subdirectories(root_dir, backup_dir, temp_dir):
     _log.info('Entering %s' % root_dir.name())
     
     # First merge any files in this directory
-    merge_files_in_directory(root_dir, backup_dir, temp_dir)
+    #merge_files_in_directory(root_dir, backup_dir, temp_dir)
     proc = multiprocessing.Process(
         target=merge_files_in_directory,
         args=(root_dir, backup_dir, temp_dir))
