@@ -1850,11 +1850,22 @@ class BcoveHandler(tornado.web.RequestHandler):
             self.set_status(502)
         self.finish()
 
+class HealthCheckHandler(tornado.web.RequestHandler):
+    '''Handler for health check ''' 
+    
+    @tornado.web.asynchronous
+    def get(self, *args, **kwargs):
+        '''Handle a test tracking request.'''
+
+        self.write("<html> Server OK </html>")
+        self.finish()
+
 ################################################################
 ### MAIN
 ################################################################
 
 application = tornado.web.Application([
+        (r"/healthcheck", HealthCheckHandler),
         (r'/api/v1/accounts(.*)', AccountHandler),
         (r'/api/v1/brightcovecontroller(.*)', BcoveHandler)],
         gzip=True)

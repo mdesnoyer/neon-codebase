@@ -1033,6 +1033,20 @@ class AbstractPlatform(object):
         for vid in self.videos.keys(): 
             i_vids.append(InternalVideoID.generate(self.neon_api_key, vid))
         return i_vids
+    
+    def get_processed_internal_video_ids(self):
+        ''' return list of i_vids for an account which have been processed '''
+
+        i_vids = []
+        processed_state = [RequestState.FINISHED, RequestState.ACTIVE]
+        api_requests = NeonApiRequest.get_requests(self.videos.values())
+        
+        for api_request in api_requests:
+            if api_request and api_request.state in processed_state:
+                i_vids.append(InternalVideoID.generate(self.neon_api_key, 
+                                                        api_request.video_id)) 
+                
+        return i_vids
 
     @classmethod
     def get_ovp(cls):
@@ -1767,7 +1781,7 @@ class NeonApiRequest(object):
         self.key = generate_request_key(api_key, job_id) 
         self.job_id = job_id
         self.api_key = api_key 
-        self.video_id = vid
+        self.video_id = vid #external video_id
         self.video_title = title
         self.video_url = url
         self.request_type = request_type
