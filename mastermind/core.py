@@ -560,7 +560,10 @@ class Mastermind(object):
     def _get_prior_conversions(self, thumb_info):
         '''Get the number of conversions we would expect based on the model 
         score.'''
+        
         score = thumb_info.metadata.model_score
+        if score is not None:
+            score = float(score)
         if score is None or score < 1e-4:
             if thumb_info.metadata.chosen:
                 # An editor chose this thumb, so give it a 5% lift
