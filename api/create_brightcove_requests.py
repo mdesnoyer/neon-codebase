@@ -66,20 +66,15 @@ if __name__ == "__main__":
 
         try:
             # Get all Brightcove accounts
-            host = options.supportServices.accountDB 
-            port = 6379
-            rclient = blockingRedis.StrictRedis(host, port)
-            accounts = rclient.keys('brightcoveplatform*')
+            accounts = BrightcovePlatform.get_all_instances()
             for accnt in accounts:
-                if accnt in skip_accounts:
+                if accnt.neon_api_key in skip_accounts:
                     continue
-                api_key = accnt.split('_')[-2]
-                i_id = accnt.split('_')[-1]
-                _log.info("key=brightcove_request msg= internal account %s i_id %s" %(api_key,i_id))
+                api_key = accnt.neon_api_key
+                i_id = accnt.integration_id 
+                _log.info("key=brightcove_request msg= internal account %s i_id %s" %(api_key, i_id))
                 #retrieve the blob and create the object
-                jdata = rclient.get(accnt) 
-                bc = BrightcovePlatform.create(jdata)
-                bc.check_feed_and_create_api_requests()
+                accnt.check_feed_and_create_api_requests()
 
         except Exception as e:
             _log.exception('key=create_brightcove_requests msg=Unhandled exception %s'

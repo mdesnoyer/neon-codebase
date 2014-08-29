@@ -1143,7 +1143,7 @@ class NeonPlatform(AbstractPlatform):
     
     @classmethod
     def get_all_instances(cls, callback=None):
-        ''' get all brightcove instances'''
+        ''' get all neonplatform instances'''
         return cls._get_all_instances_impl()
 
 class BrightcovePlatform(AbstractPlatform):
