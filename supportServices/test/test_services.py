@@ -1017,6 +1017,24 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         response = json.loads(response.body)
         self.assertIsNotNone(response["video_id"])  
         self.assertEqual(response["status"], neondata.RequestState.PROCESSING)
+    
+    def test_create_neon_video_request_via_api(self):
+        ''' verify that video request creation via services  ''' 
+        
+        api_key = self.create_neon_account()
+        vals = { 'video_url' : "http://test.mp4", "video_title": "test_title", 
+                 'video_id'  : "vid1", "callback_url" : "http://callback"
+                }
+        uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/create_api_video_request'%(self.a_id, "0"))
+
+        self.cp_mock_async_client().fetch.side_effect = \
+          self._success_http_side_effect
+
+        response = self.post_request(uri, vals, api_key)
+        self.assertTrue(response.code, 201)
+        jresponse = json.loads(response.body)
+        self.assertIsNotNone(jresponse['job_id'])
 
     def test_create_neon_video_request_invalid_url(self):
         ''' invalid url test '''

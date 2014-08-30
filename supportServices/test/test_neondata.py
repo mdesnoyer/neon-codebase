@@ -32,7 +32,7 @@ from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
         ThumbnailMetadata, InternalVideoID, OoyalaPlatform, \
         TrackerAccountIDMapper, ThumbnailServingURLs, ExperimentStrategy, \
-        ExperimentState
+        ExperimentState, NeonApiRequest
 
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
@@ -333,8 +333,24 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                          'http://that_800_600.jpg')
         self.assertEqual(output2.get_serving_url(640, 480),
                          'http://this.jpg')
+    
+    def test_processed_internal_video_ids(self):
+        na = NeonUserAccount('accttest')
+        na.save()
+        bp = BrightcovePlatform('aid', 'iid', na.neon_api_key)
         
-        
+        vids = bp.get_processed_internal_video_ids()
+        self.assertEqual(len(vids), 0)
+
+        for i in range(10):
+            bp.add_video('vid%s' % i, 'job%s' % i)
+            r = NeonApiRequest('job%s' % i, na.neon_api_key, 'vid%s' % i, 't', 't', 'r', 'h')
+            r.state = "active"
+            r.save()
+        bp.save()
+
+        vids = bp.get_processed_internal_video_ids()
+        self.assertEqual(len(vids), 10)
 
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):

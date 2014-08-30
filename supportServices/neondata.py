@@ -1039,8 +1039,9 @@ class AbstractPlatform(object):
 
         i_vids = []
         processed_state = [RequestState.FINISHED, RequestState.ACTIVE]
-        api_requests = NeonApiRequest.get_requests(self.videos.values())
-        
+        request_keys = [generate_request_key(self.neon_api_key, v) for v in
+                        self.videos.values()]
+        api_requests = NeonApiRequest.get_requests(request_keys)
         for api_request in api_requests:
             if api_request and api_request.state in processed_state:
                 i_vids.append(InternalVideoID.generate(self.neon_api_key, 
@@ -1859,6 +1860,13 @@ class NeonApiRequest(object):
     @classmethod
     def get_requests(cls, keys, callback=None):
         ''' mget results '''
+        #MGET raises an exception for wrong number of args if keys = []
+        if len(keys) == 0:
+            if callback:
+                callback([])
+            else:
+                return []
+
         db_connection = DBConnection(cls)
         def create(jdata):
             if not jdata:
