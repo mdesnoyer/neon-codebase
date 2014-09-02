@@ -78,6 +78,14 @@ class DBConnection(object):
     _singleton_instance = {} 
 
     def __init__(self, *args, **kwargs):
+        # NOTE: This is required so that the DBConnection object
+        # doesn't get intitialized again and creates a new redis client obj
+        try:
+            if(self.__init == True):
+                return
+        except:
+            self.__init = True
+
         otype = args[0]
         cname = None
         if otype:
@@ -101,7 +109,6 @@ class DBConnection(object):
             elif cname in ["ThumbnailMetadata", "ThumbnailURLMapper"]:
                 host = options.thumbnailDB 
                 port = options.dbPort 
-        
         self.conn, self.blocking_conn = RedisClient.get_client(host, port)
 
     def fetch_keys_from_db(self, key_prefix, callback=None):
@@ -121,7 +128,7 @@ class DBConnection(object):
         self.blocking_conn.flushdb()
 
     @classmethod
-    def update_instance(cls,cname):
+    def update_instance(cls, cname):
         ''' Method to update the connection object in case of 
         db config update '''
         if cls._singleton_instance.has_key(cname):
@@ -147,6 +154,15 @@ class DBConnection(object):
                     cls._singleton_instance[cname] = \
                             object.__new__(cls, *args, **kwargs)
         return cls._singleton_instance[cname]
+
+    @classmethod
+    def clear_singleton_instance(cls):
+        '''
+        Clear the singleton instance for each of the classes
+
+        NOTE: To be only used by the test code
+        '''
+        cls._singleton_instance = {}
 
 class RedisRetryWrapper(object):
     '''Wraps a redis client so that it retries with exponential backoff.

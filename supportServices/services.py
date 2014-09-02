@@ -358,7 +358,7 @@ class AccountHandler(tornado.web.RequestHandler):
             else:
                 self.method_not_supported()
 
-        elif method == "create_api_video_request":
+        elif method == "create_thumbnail_api_request":
             self.create_neon_video_request_via_api()
         else:
             self.method_not_supported()
@@ -909,6 +909,7 @@ class AccountHandler(tornado.web.RequestHandler):
                                                 i_id,
                                                 get_account_callback)
         
+    @tornado.web.asynchronous
     @tornado.gen.engine
     def update_video_brightcove(self, i_id, i_vid, new_tid):
         ''' update thumbnail for a brightcove video '''

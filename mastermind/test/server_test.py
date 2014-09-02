@@ -850,7 +850,9 @@ class SmokeTesting(test_utils.neontest.TestCase):
         # it's all hooked together.
 
         # Create a video with a couple of thumbs in the database
-        vid = neondata.VideoMetadata('key1_vid1',
+        job = neondata.NeonApiRequest('job1', 'key1', 0, 't', 't', 'r', 'h')
+        job.save()
+        vid = neondata.VideoMetadata('key1_vid1', request_id='job1',
                                      tids=['key1_vid1_t1', 'key1_vid1_t2'])
         vid.save()
         platform = neondata.BrightcovePlatform('acct1', 'i1', 'key1',

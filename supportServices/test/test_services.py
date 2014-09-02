@@ -1026,7 +1026,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
                  'video_id'  : "vid1", "callback_url" : "http://callback"
                 }
         uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
-                '%s/create_api_video_request'%(self.a_id, "0"))
+                '%s/create_thumbnail_api_request'%(self.a_id, "0"))
 
         self.cp_mock_async_client().fetch.side_effect = \
           self._success_http_side_effect
