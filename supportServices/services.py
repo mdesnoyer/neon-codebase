@@ -358,6 +358,12 @@ class AccountHandler(tornado.web.RequestHandler):
             else:
                 self.method_not_supported()
 
+        elif method == "create_thumbnail_api_request":
+            self.create_neon_video_request_via_api()
+        else:
+            self.method_not_supported()
+
+
     @tornado.web.asynchronous
     def put(self, *args, **kwargs):
         '''
@@ -465,6 +471,10 @@ class AccountHandler(tornado.web.RequestHandler):
     def submit_neon_video_request(self, api_key, video_id, video_url, 
                     video_title, topn, callback_url, default_thumbnail):
 
+        '''
+        Create the call in to the Video Server
+        '''
+
         request_body = {}
         request_body["topn"] = topn 
         request_body["api_key"] = api_key 
@@ -472,13 +482,13 @@ class AccountHandler(tornado.web.RequestHandler):
         request_body["video_title"] = \
                 video_url.split('//')[-1] if video_title is None else video_title 
         request_body["video_url"] = video_url
-        #client_url = 'http://thumbnails.neon-lab.com/api/v1/submitvideo/topn'
         client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
                         % options.video_server 
         if options.local == 1:
             client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
             request_body["callback_url"] = callback_url 
         body = tornado.escape.json_encode(request_body)
+        http_client = tornado.httpclient.AsyncHTTPClient()
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
         req = tornado.httpclient.HTTPRequest(url=client_url,
                                              method="POST",
@@ -501,7 +511,7 @@ class AccountHandler(tornado.web.RequestHandler):
             return
 
         #Success
-        self.send_json_response(result.body, 200)
+        self.send_json_response(result.body, 201)
     
     @tornado.gen.engine
     def create_neon_video_request_via_api(self):
@@ -512,25 +522,24 @@ class AccountHandler(tornado.web.RequestHandler):
         video_url = self.get_argument('video_url', "")
         video_url = video_url.replace("www.dropbox.com", 
                                 "dl.dropboxusercontent.com")
-        title = self.get_argument('video_title', None)
-        neon_api_key = self.get_argument('api_key', None)
+        video_title = self.get_argument('video_title', None)
         topn = self.get_argument('topn', 1)
         callback_url = self.get_argument('callback_url', None)
         default_thumbnail = self.get_argument('default_thumbnail', None)
         
-        if video_id is None or video_url == "" or neon_api_key is None:
+        if video_id is None or video_url == "": 
             _log.error("key=create_neon_video_request_via_api "
                     "msg=malformed request or missing arguments")
             self.send_json_response('{"error":"missing video_url"}', 400)
             return
         
         #Create Neon API Request
-        self.submit_neon_video_request(neon_api_key, video_id, video_url,
+        self.submit_neon_video_request(self.api_key, video_id, video_url,
                             video_title, topn, callback_url, default_thumbnail)
 
     @tornado.gen.engine
     def create_neon_video_request(self, i_id):
-        ''' neon platform request '''
+        ''' neon platform request via the Neon/ Demo account in the UI '''
 
         title = None
         try:
@@ -900,6 +909,7 @@ class AccountHandler(tornado.web.RequestHandler):
                                                 i_id,
                                                 get_account_callback)
         
+    @tornado.web.asynchronous
     @tornado.gen.engine
     def update_video_brightcove(self, i_id, i_vid, new_tid):
         ''' update thumbnail for a brightcove video '''
@@ -1850,11 +1860,22 @@ class BcoveHandler(tornado.web.RequestHandler):
             self.set_status(502)
         self.finish()
 
+class HealthCheckHandler(tornado.web.RequestHandler):
+    '''Handler for health check ''' 
+    
+    @tornado.web.asynchronous
+    def get(self, *args, **kwargs):
+        '''Handle a test tracking request.'''
+
+        self.write("<html> Server OK </html>")
+        self.finish()
+
 ################################################################
 ### MAIN
 ################################################################
 
 application = tornado.web.Application([
+        (r"/healthcheck", HealthCheckHandler),
         (r'/api/v1/accounts(.*)', AccountHandler),
         (r'/api/v1/brightcovecontroller(.*)', BcoveHandler)],
         gzip=True)

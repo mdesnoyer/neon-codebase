@@ -60,18 +60,36 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
                                                  abtest=False)
         bcPlatform.add_video(0, 'job11')
+        job11 = neondata.NeonApiRequest('job11', api_key, 0, 't', 't', 'r', 'h')
+
         bcPlatform.add_video(10, 'job12')
+        job12 = neondata.NeonApiRequest('job12', api_key, 10, 't', 't', 'r', 'h')
+        bcPlatform.get_processed_internal_video_ids = MagicMock()
+        bcPlatform.get_processed_internal_video_ids.return_value = [api_key +
+                '_0', api_key + '_10'] 
 
         testPlatform = neondata.BrightcovePlatform('a2', 'i2', api_key, 
                                                    abtest=True)
         testPlatform.add_video(1, 'job21')
+        job21 = neondata.NeonApiRequest('job21', api_key, 1, 't', 't', 'r', 'h')
+
         testPlatform.add_video(2, 'job22')
+        job22 = neondata.NeonApiRequest('job22', api_key, 2, 't', 't', 'r', 'h')
+        testPlatform.get_processed_internal_video_ids = MagicMock()
+        testPlatform.get_processed_internal_video_ids.return_value = [api_key
+        + '_1', api_key + '_2'] 
 
         apiPlatform = neondata.NeonPlatform('a3', api_key, abtest=True)
         apiPlatform.add_video(4, 'job31')
+        job31 = neondata.NeonApiRequest('job31', api_key, 4, 't', 't', 'r', 'h')
+        apiPlatform.get_processed_internal_video_ids = MagicMock()
+        apiPlatform.get_processed_internal_video_ids.return_value = [api_key +
+                '_4'] 
 
         noVidPlatform = neondata.BrightcovePlatform('a4', 'i4', api_key, 
                                                     abtest=True)
+        noVidPlatform.get_processed_internal_video_ids = MagicMock()
+        noVidPlatform.get_processed_internal_video_ids.return_value = [] 
         
         datamock.AbstractPlatform.get_all_instances.return_value = \
           [bcPlatform, testPlatform, apiPlatform, noVidPlatform]
@@ -190,6 +208,11 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                 abtest=True)
         bcPlatform.add_video('0', 'job11')
         bcPlatform.add_video('10', 'job12')
+        job11 = neondata.NeonApiRequest('job11', api_key, 0, 't', 't', 'r', 'h')
+        job12 = neondata.NeonApiRequest('job12', api_key, 10, 't', 't', 'r', 'h')
+        bcPlatform.get_processed_internal_video_ids = MagicMock()
+        bcPlatform.get_processed_internal_video_ids.return_value = [api_key +
+                '_0', api_key + '_10'] 
         
         datamock.AbstractPlatform.get_all_instances.return_value = \
           [bcPlatform]
@@ -211,6 +234,12 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                 abtest=True)
         bcPlatform.add_video('0', 'job11')
         bcPlatform.add_video('1', 'job12')
+        job11 = neondata.NeonApiRequest('job11', api_key, 0, 't', 't', 'r', 'h')
+        job12 = neondata.NeonApiRequest('job12', api_key, 1, 't', 't', 'r', 'h')
+        
+        bcPlatform.get_processed_internal_video_ids = MagicMock()
+        bcPlatform.get_processed_internal_video_ids.return_value = [api_key +
+                '_0', api_key + '_1'] 
         
         datamock.AbstractPlatform.get_all_instances.return_value = \
           [bcPlatform]
@@ -821,7 +850,9 @@ class SmokeTesting(test_utils.neontest.TestCase):
         # it's all hooked together.
 
         # Create a video with a couple of thumbs in the database
-        vid = neondata.VideoMetadata('key1_vid1',
+        job = neondata.NeonApiRequest('job1', 'key1', 0, 't', 't', 'r', 'h')
+        job.save()
+        vid = neondata.VideoMetadata('key1_vid1', request_id='job1',
                                      tids=['key1_vid1_t1', 'key1_vid1_t2'])
         vid.save()
         platform = neondata.BrightcovePlatform('acct1', 'i1', 'key1',

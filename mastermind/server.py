@@ -129,7 +129,8 @@ class VideoDBWatcher(threading.Thread):
                 platform.neon_api_key,
                 neondata.ExperimentStrategy.get(platform.neon_api_key))
             
-            video_ids = platform.get_internal_video_ids()
+            #video_ids = platform.get_internal_video_ids()
+            video_ids = platform.get_processed_internal_video_ids()
             all_video_metadata = neondata.VideoMetadata.get_many(video_ids)
             for video_id, video_metadata in zip(video_ids, all_video_metadata):
                 if video_metadata is None:

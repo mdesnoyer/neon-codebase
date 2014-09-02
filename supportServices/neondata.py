@@ -78,6 +78,14 @@ class DBConnection(object):
     _singleton_instance = {} 
 
     def __init__(self, *args, **kwargs):
+        # NOTE: This is required so that the DBConnection object
+        # doesn't get intitialized again and creates a new redis client obj
+        try:
+            if(self.__init == True):
+                return
+        except:
+            self.__init = True
+
         otype = args[0]
         cname = None
         if otype:
@@ -101,7 +109,6 @@ class DBConnection(object):
             elif cname in ["ThumbnailMetadata", "ThumbnailURLMapper"]:
                 host = options.thumbnailDB 
                 port = options.dbPort 
-        
         self.conn, self.blocking_conn = RedisClient.get_client(host, port)
 
     def fetch_keys_from_db(self, key_prefix, callback=None):
@@ -121,7 +128,7 @@ class DBConnection(object):
         self.blocking_conn.flushdb()
 
     @classmethod
-    def update_instance(cls,cname):
+    def update_instance(cls, cname):
         ''' Method to update the connection object in case of 
         db config update '''
         if cls._singleton_instance.has_key(cname):
@@ -147,6 +154,15 @@ class DBConnection(object):
                     cls._singleton_instance[cname] = \
                             object.__new__(cls, *args, **kwargs)
         return cls._singleton_instance[cname]
+
+    @classmethod
+    def clear_singleton_instance(cls):
+        '''
+        Clear the singleton instance for each of the classes
+
+        NOTE: To be only used by the test code
+        '''
+        cls._singleton_instance = {}
 
 class RedisRetryWrapper(object):
     '''Wraps a redis client so that it retries with exponential backoff.
@@ -1033,6 +1049,21 @@ class AbstractPlatform(object):
         for vid in self.videos.keys(): 
             i_vids.append(InternalVideoID.generate(self.neon_api_key, vid))
         return i_vids
+    
+    def get_processed_internal_video_ids(self):
+        ''' return list of i_vids for an account which have been processed '''
+
+        i_vids = []
+        processed_state = [RequestState.FINISHED, RequestState.ACTIVE]
+        request_keys = [generate_request_key(self.neon_api_key, v) for v in
+                        self.videos.values()]
+        api_requests = NeonApiRequest.get_requests(request_keys)
+        for api_request in api_requests:
+            if api_request and api_request.state in processed_state:
+                i_vids.append(InternalVideoID.generate(self.neon_api_key, 
+                                                        api_request.video_id)) 
+                
+        return i_vids
 
     @classmethod
     def get_ovp(cls):
@@ -1143,7 +1174,7 @@ class NeonPlatform(AbstractPlatform):
     
     @classmethod
     def get_all_instances(cls, callback=None):
-        ''' get all brightcove instances'''
+        ''' get all neonplatform instances'''
         return cls._get_all_instances_impl()
 
 class BrightcovePlatform(AbstractPlatform):
@@ -1767,7 +1798,7 @@ class NeonApiRequest(object):
         self.key = generate_request_key(api_key, job_id) 
         self.job_id = job_id
         self.api_key = api_key 
-        self.video_id = vid
+        self.video_id = vid #external video_id
         self.video_title = title
         self.video_url = url
         self.request_type = request_type
@@ -1845,6 +1876,13 @@ class NeonApiRequest(object):
     @classmethod
     def get_requests(cls, keys, callback=None):
         ''' mget results '''
+        #MGET raises an exception for wrong number of args if keys = []
+        if len(keys) == 0:
+            if callback:
+                callback([])
+            else:
+                return []
+
         db_connection = DBConnection(cls)
         def create(jdata):
             if not jdata:
@@ -2108,7 +2146,7 @@ class ThumbnailMetadata(StoredObject):
         self.height = height
         self.type = ttype #neon1../ brightcove / youtube
         self.rank = 0 if not rank else rank  #int 
-        self.model_score = model_score #float
+        self.model_score = model_score #string
         self.model_version = model_version #string
         #TODO: remove refid. It's not necessary
         self.refid = refid #If referenceID exists *in case of a brightcove thumbnail

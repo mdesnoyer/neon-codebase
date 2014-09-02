@@ -108,8 +108,17 @@ class ISP:
             self.port = net.find_free_port()
         
         self.config_file = tempfile.NamedTemporaryFile()
-        self.config_file.write(nginx_isp_test_conf.conf % \
-                                (mastermind_s3file_url, s3downloader, s3cfg, self.port))
+        error_log = tempfile.NamedTemporaryFile()
+        mastermind_download_file = tempfile.NamedTemporaryFile()
+        mastermind_validated_file = tempfile.NamedTemporaryFile()
+        config_contents = nginx_isp_test_conf.conf % \
+                                (error_log.name, mastermind_s3file_url, 
+                                    s3downloader, s3cfg, 
+                                    mastermind_validated_file.name, 
+                                    mastermind_download_file.name,
+                                    self.port)
+
+        self.config_file.write(config_contents)
         self.config_file.flush()
 
         self.nginx_path = base_path + "/imageservingplatform/nginx-1.4.7/objs/nginx" #get build path

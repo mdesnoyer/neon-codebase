@@ -90,7 +90,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                 [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                                ttype='neon', model_score=5.8)),
                  build_thumb(ThumbnailMetadata('n2', 'vid1',
-                                               ttype='neon', model_score=3.5)),
+                                               ttype='neon',
+                                               model_score='3.5')),
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                                ttype='centerframe')),
                  build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
@@ -115,7 +116,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                            ttype='neon', model_score=5.8)),
              build_thumb(ThumbnailMetadata('n2', 'vid1',
-                                           ttype='neon', model_score=3.5))])
+                                           ttype='neon',
+                                           model_score=u'3.5'))])
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertAlmostEqual(sum(directive.values()), 1.0)
