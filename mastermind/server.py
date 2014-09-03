@@ -50,7 +50,7 @@ define('video_db_polling_delay', default=261, type=float,
        help='Number of seconds between polls of the video db')
 
 # Publishing options
-define('s3_bucket', default='neon-image-serving-directives',
+define('s3_bucket', default='neon-image-serving-directives-unittest',
        help='Bucket to publish the serving directives to')
 define('directive_filename', default='mastermind',
        help='Filename in the S3 bucket that will hold the directive.')
