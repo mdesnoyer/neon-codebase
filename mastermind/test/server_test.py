@@ -312,7 +312,12 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         self.sqllite_mock.side_effect = \
           lambda host=None, port=None: self.ramdb 
 
+        # Patch the cluster lookup
+        self.cluster_patcher = patch('mastermind.server.stats.cluster.Cluster')
+        self.cluster_patcher.start()
+
     def tearDown(self):
+        self.cluster_patcher.stop()
         self.sqlite_connect_patcher.stop()
         try:
             cursor = self.ramdb.cursor()
@@ -502,7 +507,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.s3_patcher = patch('mastermind.server.S3Connection')
         self.s3conn = test_utils.mock_boto_s3.MockConnection()
         self.s3_patcher.start().return_value = self.s3conn
-        self.s3conn.create_bucket('neon-image-serving-directives')
+        self.s3conn.create_bucket('neon-image-serving-directives-test')
 
         # Insert a fake filesystem
         self.filesystem = fake_filesystem.FakeFilesystem()
@@ -556,7 +561,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             self.publisher._publish_directives()
 
     def test_s3_bucket_missing(self):
-        self.s3conn.delete_bucket('neon-image-serving-directives')
+        self.s3conn.delete_bucket('neon-image-serving-directives-test')
 
         with self.assertLogExists(logging.ERROR, 'Could not get bucket'):
             self.publisher._publish_directives()
@@ -603,7 +608,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
 
         # Make sure that there are two directive files, one is the
         # REST endpoint and the second is a timestamped one.
-        bucket = self.s3conn.get_bucket('neon-image-serving-directives')
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
         keys = [x for x in bucket.get_all_keys()]
         key_names = [x.name for x in keys]
         self.assertEquals(len(key_names), 2)
@@ -706,7 +711,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
 
         self.publisher._publish_directives()
 
-        bucket = self.s3conn.get_bucket('neon-image-serving-directives')
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
         expiry, tracker_ids, directives = self._parse_directive_file(
             bucket.get_key('mastermind').get_contents_as_string())
 
@@ -745,7 +750,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
                                           ' video: acct1_vid2')):
                 self.publisher._publish_directives()
 
-        bucket = self.s3conn.get_bucket('neon-image-serving-directives')
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
         expiry, tracker_ids, directives = self._parse_directive_file(
             bucket.get_key('mastermind').get_contents_as_string())
 
@@ -776,7 +781,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.s3_patcher = patch('mastermind.server.S3Connection')
         self.s3conn = test_utils.mock_boto_s3.MockConnection()
         self.s3_patcher.start().return_value = self.s3conn
-        self.s3conn.create_bucket('neon-image-serving-directives')
+        self.s3conn.create_bucket('neon-image-serving-directives-test')
 
         # Insert a fake filesystem
         self.filesystem = fake_filesystem.FakeFilesystem()
@@ -813,6 +818,10 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.sqllite_mock = self.sqlite_connect_patcher.start()
         self.sqllite_mock.side_effect = connect2db
 
+        # Patch the cluster lookup
+        self.cluster_patcher = patch('mastermind.server.stats.cluster.Cluster')
+        self.cluster_patcher.start()
+
         self.activity_watcher = utils.ps.ActivityWatcher()
         self.mastermind = mastermind.core.Mastermind()
         self.directive_publisher = mastermind.server.DirectivePublisher(
@@ -826,6 +835,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
 
     def tearDown(self):
         mastermind.server.tempfile = self.real_tempfile
+        self.cluster_patcher.stop()
         self.s3_patcher.stop()
         self.sqlite_connect_patcher.stop()
         self.redis.stop()
@@ -899,7 +909,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.activity_watcher.wait_for_idle()
 
         # See if there is anything in S3 (which there should be)
-        bucket = self.s3conn.get_bucket('neon-image-serving-directives')
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
         lines = bucket.get_key('mastermind').get_contents_as_string().split('\n')
         self.assertEqual(len(lines), 4)
         

@@ -78,7 +78,7 @@ class Cluster():
     ROLE_TESTING = 'testing'
     
     '''Class representing the cluster'''
-    def __init__(self, cluster_type, n_core_instances,
+    def __init__(self, cluster_type, n_core_instances=None,
                  public_ip=None):
         '''
         cluster_type - Cluster type to connect to. Uses the cluster-type tag.
@@ -158,7 +158,6 @@ class Cluster():
             else:
                 _log.info("Found cluster type %s with id %s" %
                           (self.cluster_type, self.cluster_id))
-                self._find_master_info()
                 self._set_requested_core_instances()
 
     def run_map_reduce_job(self, jar, main_class, input_path,
@@ -454,31 +453,44 @@ class Cluster():
         '''
         conn = EmrConnection()
         if self.cluster_id is None:
-            most_recent = None
-            state = None
-            for cluster in conn.list_clusters().clusters:
-                if cluster.name != options.cluster_name:
-                    # The cluster has to have the right name to be possible
-                    continue
-                cluster_info = conn.describe_cluster(cluster.id)
-                create_time = dateutil.parser.parse(
-                    cluster_info.status.timeline.creationdatetime)
-                if (self._get_cluster_tag(cluster_info, 'cluster-type', '') == 
-                    self.cluster_type and
-                    self._get_cluster_tag(cluster_info, 'cluster-role', '') ==
-                    Cluster.ROLE_PRIMARY and (
-                        most_recent is None or create_time > most_recent)):
-                    self.cluster_id = cluster.id
-                    most_recent = create_time
-                    state = cluster_info.status.state
-                time.sleep(1) # Avoid AWS throttling
-            if self.cluster_id is None:
-                raise ClusterInfoError(
-                    "Could not get information about cluster %s " % 
-                    self.cluster_type)
-            return state
+            cluster_info = self.find_cluster()
+            return cluster_info.status.state
 
         return conn.describe_cluster(self.cluster_id).status.state
+
+    def find_cluster(self):
+        '''Finds the cluster if it exists and fills the
+        self.cluster_id, self.master_id and self.master_ip
+
+        Returns the ClusterInfo object if the cluster was found.
+        '''
+        most_recent = None
+        cluster_found = None
+        for cluster in conn.list_clusters().clusters:
+            if cluster.name != options.cluster_name:
+                # The cluster has to have the right name to be a possible match
+                continue
+            cluster_info = conn.describe_cluster(cluster.id)
+            create_time = dateutil.parser.parse(
+                cluster_info.status.timeline.creationdatetime)
+            if (self._get_cluster_tag(cluster_info, 'cluster-type', '') == 
+                self.cluster_type and
+                self._get_cluster_tag(cluster_info, 'cluster-role', '') ==
+                Cluster.ROLE_PRIMARY and (
+                    most_recent is None or create_time > most_recent)):
+                self.cluster_id = cluster.id
+                most_recent = create_time
+                cluster_found = cluster_info
+            time.sleep(1) # Avoid AWS throttling
+        
+        if cluster_found is None:
+            raise ClusterInfoError('Could not find a cluster of type %s'
+                                   ' with name %s'
+                                   % (self.cluster_type,
+                                      options.cluster_name))
+        self._find_master_info()
+        
+        return cluster_found
 
     def _get_cluster_tag(self, cluster_info, tag_name, default=None):
         '''Returns the cluster type from a Cluster response object.'''

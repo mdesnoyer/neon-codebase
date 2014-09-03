@@ -14,6 +14,7 @@ if sys.path[0] != __base_path__:
 import atexit
 
 from boto.s3.connection import S3Connection
+from boto.emr.connection import EmrConnection
 import boto
 import datetime
 import impala.dbapi
@@ -23,7 +24,7 @@ import logging
 from mastermind.core import VideoInfo, ThumbnailInfo, Mastermind
 import signal
 import socket
-import stats.db
+import stats.cluster
 from supportServices import neondata
 import tempfile
 import time
@@ -34,12 +35,9 @@ from utils.options import define, options
 import utils.ps
 from utils import statemon
 
-# This server's options
-define('port', default=8080, help='Port to listen on', type=int)
-
 # Stats database options. It is an Impala database
-define('stats_host', default='54.197.233.118',
-       help='Host of the stats database')
+define('stats_cluster_type', default='video_click_stats',
+       help='cluster-type tag on the stats cluster to use')
 define('stats_port', type=int, default=21050,
        help='Port to the stats database')
 define('stats_db_polling_delay', default=247, type=float,
@@ -50,7 +48,7 @@ define('video_db_polling_delay', default=261, type=float,
        help='Number of seconds between polls of the video db')
 
 # Publishing options
-define('s3_bucket', default='neon-image-serving-directives',
+define('s3_bucket', default='neon-image-serving-directives-test',
        help='Bucket to publish the serving directives to')
 define('directive_filename', default='mastermind',
        help='Filename in the S3 bucket that will hold the directive.')
@@ -184,8 +182,6 @@ class StatsDBWatcher(threading.Thread):
         self._stopped.set()
 
     def run(self):
-        _log.info('Statistics database is at host=%s port=%i' %
-                  (options.stats_host, options.stats_port))
         while not self._stopped.is_set():
             try:
                 with self.activity_watcher.activate():
@@ -199,8 +195,11 @@ class StatsDBWatcher(threading.Thread):
             self._stopped.wait(options.stats_db_polling_delay)
 
     def _process_db_data(self):
+        stats_host = self._find_cluster_ip()
+        _log.info('Statistics database is at host=%s port=%i' %
+                  (stats_host, options.stats_port))
         try:
-            conn = impala.dbapi.connect(host=options.stats_host,
+            conn = impala.dbapi.connect(host=stats_host,
                                         port=options.stats_port)
         except Exception as e:
             _log.exception('Error connecting to stats db: %s' % e)
@@ -287,6 +286,18 @@ class StatsDBWatcher(threading.Thread):
                     
         self.last_update = cur_update
         self.is_loaded.set()
+
+    def _find_cluster_ip(self):
+        '''Finds the private ip of the stats cluster.'''
+        _log.info('Looking for cluster of type: %s' % 
+                  options.stats_cluster_type)
+        cluster = stats.cluster.Cluster(options.stats_cluster_type)
+        try:
+            cluster.find_cluster()
+        except stats.cluster.ClusterInfoError as e:
+            _log.error('Could not connect to the cluster.')
+            statemon.state.increment('statsdb_error')
+        return cluster.master_ip
 
     def _find_video_id(self, thumb_id):
         '''Finds the video id for a thumbnail id.'''
