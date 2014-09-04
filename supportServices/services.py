@@ -486,7 +486,7 @@ class AccountHandler(tornado.web.RequestHandler):
                         % options.video_server 
         if options.local == 1:
             client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
-            request_body["callback_url"] = callback_url 
+        request_body["callback_url"] = callback_url 
         body = tornado.escape.json_encode(request_body)
         http_client = tornado.httpclient.AsyncHTTPClient()
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})

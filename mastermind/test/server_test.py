@@ -503,7 +503,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.s3_patcher = patch('mastermind.server.S3Connection')
         self.s3conn = test_utils.mock_boto_s3.MockConnection()
         self.s3_patcher.start().return_value = self.s3conn
-        self.s3conn.create_bucket('neon-image-serving-directives')
+        self.s3conn.create_bucket('neon-image-serving-directives-unittest')
 
         # Insert a fake filesystem
         self.filesystem = fake_filesystem.FakeFilesystem()
@@ -558,7 +558,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             self.publisher._publish_directives()
 
     def test_s3_bucket_missing(self):
-        self.s3conn.delete_bucket('neon-image-serving-directives')
+        self.s3conn.delete_bucket('neon-image-serving-directives-unittest')
 
         with self.assertLogExists(logging.ERROR, 'Could not get bucket'):
             self.publisher._publish_directives()
@@ -605,7 +605,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
 
         # Make sure that there are two directive files, one is the
         # REST endpoint and the second is a timestamped one.
-        bucket = self.s3conn.get_bucket('neon-image-serving-directives')
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-unittest')
         keys = [x for x in bucket.get_all_keys()]
         key_names = [x.name for x in keys]
         self.assertEquals(len(key_names), 2)
@@ -708,7 +708,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
 
         self.publisher._publish_directives()
 
-        bucket = self.s3conn.get_bucket('neon-image-serving-directives')
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-unittest')
         expiry, tracker_ids, directives = self._parse_directive_file(
             bucket.get_key('mastermind').get_contents_as_string())
 
@@ -747,7 +747,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
                                           ' video: acct1_vid2')):
                 self.publisher._publish_directives()
 
-        bucket = self.s3conn.get_bucket('neon-image-serving-directives')
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-unittest')
         expiry, tracker_ids, directives = self._parse_directive_file(
             bucket.get_key('mastermind').get_contents_as_string())
 
