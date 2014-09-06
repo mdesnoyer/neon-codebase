@@ -798,7 +798,7 @@ class TrackerAccountIDMapper(NamespacedStoredObject):
             data = db_connection.blocking_conn.get(key)
             return format_tuple(data)
 
-class NeonUserAccount(NamespacedStoredObject):
+class NeonUserAccount(object):
     ''' NeonUserAccount
 
     Every user in the system has a neon account and all other integrations are 
@@ -809,10 +809,10 @@ class NeonUserAccount(NamespacedStoredObject):
 
     '''
     def __init__(self, a_id, api_key=None, default_size=(160,90)):
+        self.account_id = a_id
         self.neon_api_key = NeonApiKey.generate(a_id) if api_key is None \
                             else api_key
-        super(NeonUserAccount, self).__init__(self.neon_api_key)
-        self.account_id = a_id
+        self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
         self.staging_tracker_account_id = \
                 TrackerAccountID.generate(self.neon_api_key + "staging") 
@@ -869,9 +869,20 @@ class NeonUserAccount(NamespacedStoredObject):
     
     def add_video(self, vid, job_id):
         ''' vid,job_id in to videos'''
-        _log.warn('DEPRECATED. store the video information in the platform '
-                  'instead')
+        
         self.videos[str(vid)] = job_id
+    
+    def to_json(self):
+        ''' to json '''
+        return json.dumps(self, default=lambda o: o.__dict__)
+    
+    def save(self, callback=None):
+        ''' save instance'''
+        db_connection = DBConnection(self)
+        if callback:
+            db_connection.conn.set(self.key, self.to_json(), callback)
+        else:
+            return db_connection.blocking_conn.set(self.key, self.to_json())
     
     def save_platform(self, new_integration, callback=None):
         '''
@@ -879,8 +890,6 @@ class NeonUserAccount(NamespacedStoredObject):
         '''
         
         #temp: changing this to a blocking pipeline call   
-        # TODO(sunil): Create mechanism to save different types of objects
-        # atomically like the modify, modify_many functions
         db_connection = DBConnection(self)
         pipe = db_connection.blocking_conn.pipeline()
         pipe.set(self.key, self.to_json())
@@ -890,14 +899,48 @@ class NeonUserAccount(NamespacedStoredObject):
     @classmethod
     def get_account(cls, api_key, callback=None):
         ''' return neon useraccount instance'''
-        _log.warn('DEPRECATED. Use get() instead')
-        return cls.get(api_key, callback=callback)
+        db_connection = DBConnection(cls)
+        key = "neonuseraccount_%s" %api_key
+        if callback:
+            db_connection.conn.get(key, lambda x: callback(cls.create(x))) 
+        else:
+            return cls.create(db_connection.blocking_conn.get(key))
+    
+    @classmethod
+    def create(cls, json_data):
+        ''' create obj from json data'''
+        if not json_data:
+            return None
+        params = json.loads(json_data)
+        a_id = params['account_id']
+        api_key = params['neon_api_key']
+        na = cls(a_id, api_key)
+       
+        for key in params:
+            na.__dict__[key] = params[key]
+        
+        return na
    
     @classmethod 
-    def get_all_accounts(cls, callback=None):
+    def get_all_accounts(cls):
         ''' Get all NeonUserAccount instances '''
-        _log.warn('DEPRECATED. Use get_all() instead.')
-        return cls.get_all(callback=callback)
+        nuser_accounts = []
+        db_connection = DBConnection(cls)
+        accounts = db_connection.blocking_conn.keys(cls.__name__.lower() + "*")
+        for accnt in accounts:
+            api_key = accnt.split('_')[-1]
+            nu = NeonUserAccount.get_account(api_key)
+            nuser_accounts.append(nu)
+        return nuser_accounts
+    
+    @classmethod
+    def get_neon_publisher_id(cls, api_key):
+        '''
+        Get Neon publisher ID; This is also the Tracker Account ID
+        '''
+        na = cls.get_account(api_key)
+        if nc:
+            return na.tracker_account_id  
 
 
 class ExperimentStrategy(NamespacedStoredObject):
@@ -959,13 +1002,10 @@ class ExperimentStrategy(NamespacedStoredObject):
         self.conversion_type = conversion_type
          
 
-class AbstractPlatform(NamespacedStoredObject):
+class AbstractPlatform(object):
     ''' Abstract Platform/ Integration class '''
 
-    def __init__(self, neon_api_key, integration_id, abtest=False,
-                 enabled=True):
-        super(AbstractPlatform, self).__init__(
-            '_'.join(neon_api_key, integration_id))
+    def __init__(self, abtest=False, enabled=True):
         self.key = None 
         self.neon_api_key = ''
         self.videos = {} # External video id (Original Platform VID) => Job ID
@@ -977,10 +1017,6 @@ class AbstractPlatform(NamespacedStoredObject):
         ''' generate db key '''
         return '_'.join([self.__class__.__name__.lower(),
                          self.neon_api_key, i_id])
-
-    @classmethod
-    def generate_key(cls, neon_api_key, integration_id):
-        return '_'.join(neon_api_key, integration_id)
     
     def to_json(self):
         ''' to json '''
