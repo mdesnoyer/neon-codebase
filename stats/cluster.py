@@ -451,7 +451,6 @@ class Cluster():
         STARTING | BOOTSTRAPPING | RUNNING | WAITING | 
         TERMINATING | TERMINATED | TERMINATED_WITH_ERRORS
         '''
-        conn = EmrConnection()
         if self.cluster_id is None:
             cluster_info = self.find_cluster()
             return cluster_info.status.state
@@ -464,6 +463,7 @@ class Cluster():
 
         Returns the ClusterInfo object if the cluster was found.
         '''
+        conn = EmrConnection()
         most_recent = None
         cluster_found = None
         for cluster in conn.list_clusters().clusters:
