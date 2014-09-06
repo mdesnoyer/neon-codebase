@@ -89,3 +89,8 @@ TEST_F(FractionsTest, test_parsing_single_fraction){
 TEST_F(FractionsTest, test_scaled_image){
 
 }
+
+// Test Fraction size
+//
+// Test Rescaled fraction
+

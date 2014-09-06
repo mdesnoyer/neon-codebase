@@ -100,7 +100,7 @@ class GetVideoStatusResponse(object):
 # Account Handler
 ################################################################################
 
-class AccountHandler(tornado.web.RequestHandler):
+class CMSAPIHandler(tornado.web.RequestHandler):
     ''' /api/v1/accounts handler '''
     
     def prepare(self):
@@ -232,7 +232,6 @@ class AccountHandler(tornado.web.RequestHandler):
         '''
         
         _log.info("Request %r" %self.request)
-
         uri_parts = self.request.uri.split('/')
 
         #NOTE: compare string in parts[-1] since get args aren't cleaned up
@@ -274,15 +273,12 @@ class AccountHandler(tornado.web.RequestHandler):
                     video_state = uri_parts[-1].split('?')[0] 
 
                 if itype  == "neon_integrations":
-                    #self.get_video_status_neon(video_ids, video_state)
                     self.get_video_status("neon", i_id, video_ids, video_state)
             
                 elif itype  == "brightcove_integrations":
-                    #self.get_video_status_brightcove(i_id, video_ids, video_state)
                     self.get_video_status("brightcove", i_id, video_ids, video_state)
 
                 elif itype == "ooyala_integrations":
-                    #self.get_video_status_ooyala(i_id, video_ids, video_state)
                     self.get_video_status("ooyala", i_id, video_ids, video_state)
                 
                 elif itype == "youtube_integrations":
@@ -292,6 +288,15 @@ class AccountHandler(tornado.web.RequestHandler):
                               'msg=Invalid method in request %s method %s') 
                               % (self.request.uri, method))
                 self.send_json_response("API not supported", 400)
+
+        elif "jobs" in self.request.uri:
+            try:
+                job_id = uri_parts[4].split("?")[0]
+                self.get_job_status(job_id)
+                return
+            except:
+                self.send_json_response("invalid api call", 400)
+                return
 
         else:
             _log.warning(('key=account_handler '
@@ -465,7 +470,23 @@ class AccountHandler(tornado.web.RequestHandler):
     def get_neon_videos(self):
         ''' Get Videos which were called from the Neon API '''
         self.send_json_response('{"msg":"not yet implemented"}', 200)
-   
+
+    @tornado.gen.engine
+    @tornado.web.asynchronous
+    def get_job_status(self, job_id):
+        '''
+        Return the status of the job
+        '''
+        
+        req = yield tornado.gen.Task(neondata.NeonApiRequest.get_request,
+                                    self.api_key, job_id)
+        if req:
+            self.send_json_response(json.loads(req))
+            return
+
+        self.send_json_response('{"error":"job not found"}', 400)
+
+
     ## Submit a video request to Neon Video Server
     @tornado.gen.engine
     def submit_neon_video_request(self, api_key, video_id, video_url, 
@@ -647,6 +668,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
     ##### Generic get_video_status #####
 
+    @tornado.web.asynchronous
     @tornado.gen.engine
     def get_video_status(self, i_type, i_id, vids, video_state=None):
         '''
@@ -1099,6 +1121,7 @@ class AccountHandler(tornado.web.RequestHandler):
             _log.error("key=create brightcove account " 
                         "msg= account not found %s" %self.api_key)
 
+    @tornado.web.asynchronous
     @tornado.gen.engine
     def update_brightcove_integration(self, i_id):
         ''' Update Brightcove account details '''
@@ -1694,7 +1717,7 @@ class AccountHandler(tornado.web.RequestHandler):
         t_url = thumbs[0]["urls"][0]
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
         
-        # TODO: make async; currently test fails with async error on using
+        # TODO(Sunil): make async; currently test fails with async error on using
         # optional sync
 
         result = vmdata.add_custom_thumbnail(t_url)
@@ -1714,6 +1737,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
     ### AB Test State #####
     
+    @tornado.web.asynchronous
     @tornado.gen.engine
     def get_abteststate(self, vid):
 
@@ -1876,7 +1900,8 @@ class HealthCheckHandler(tornado.web.RequestHandler):
 
 application = tornado.web.Application([
         (r"/healthcheck", HealthCheckHandler),
-        (r'/api/v1/accounts(.*)', AccountHandler),
+        (r'/api/v1/accounts(.*)', CMSAPIHandler),
+        (r'/api/v1/jobs(.*)', CMSAPIHandler),
         (r'/api/v1/brightcovecontroller(.*)', BcoveHandler)],
         gzip=True)
 
