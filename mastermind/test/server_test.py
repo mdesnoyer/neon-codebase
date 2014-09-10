@@ -277,32 +277,63 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         # Make sure that the processing gets flagged as done
         self.assertTrue(self.watcher.is_loaded.is_set())
 
+class SQLWrapper(object):
+    def __init__(self, test_case):
+        self.conn = sqlite3.connect('file::memory:?cache=shared')
+        self.test_case = test_case
+
+    def cursor(self):
+        return SQLWrapper.CursorWrapper(self.conn, self.test_case)
+
+    def __getattr__(self, attr):
+            return getattr(self.conn, attr)
+
+    class CursorWrapper(object):
+        def __init__(self, conn, test_case):
+            self.cursor = conn.cursor()
+            self.test_case = test_case
+
+        def execute(self, *args, **kwargs):
+            self.test_case.assertNotIn('\n', args[0])
+            return self.cursor.execute(*args, **kwargs)
+
+        def executemany(self, *args, **kwargs):
+            self.test_case.assertNotIn('\n', args[0])
+            return self.cursor.executemany(*args, **kwargs)
+
+        def __getattr__(self, attr):
+            return getattr(self.cursor, attr)
+
+        def __iter__(self):
+            return self.cursor.__iter__()
+                
+
 @patch('mastermind.server.neondata')
-class TestStatsDBWatcher(test_utils.neontest.TestCase):
+class TestStatsDBWatcher(test_utils.neontest.TestCase):    
     def setUp(self):
         self.mastermind = MagicMock()
         self.watcher = mastermind.server.StatsDBWatcher(self.mastermind)
 
         def connect2db(*args, **kwargs):
-            return sqlite3.connect('file::memory:?cache=shared')
+            return SQLWrapper(self)
         self.ramdb = connect2db()
 
         cursor = self.ramdb.cursor()
         # Create the necessary tables (these are subsets of the real tables)
-        cursor.execute('''CREATE TABLE IF NOT EXISTS videoplays (
-                       serverTime DOUBLE,
-                       mnth INT,
-                       yr INT)''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS EventSequences (
-                       thumbnail_id varchar(128),
-                       imloadclienttime DOUBLE,
-                       imvisclienttime DOUBLE,
-                       imclickclienttime DOUBLE,
-                       adplayclienttime DOUBLE,
-                       videoplayclienttime DOUBLE,
-                       mnth INT,
-                       yr INT,
-                       tai varchar(64))''')
+        cursor.execute('CREATE TABLE IF NOT EXISTS videoplays ('
+                       'serverTime DOUBLE, '
+                       'mnth INT, '
+                       'yr INT)')
+        cursor.execute('CREATE TABLE IF NOT EXISTS EventSequences ('
+                       'thumbnail_id varchar(128),'
+                       'imloadclienttime DOUBLE,'
+                       'imvisclienttime DOUBLE,'
+                       'imclickclienttime DOUBLE,'
+                       'adplayclienttime DOUBLE,'
+                       'videoplayclienttime DOUBLE,'
+                       'mnth INT,'
+                       'yr INT,'
+                       'tai varchar(64))')
         self.ramdb.commit()
 
         #patch impala connect
@@ -357,11 +388,11 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
 
         # Add entries to the database
         cursor = self.ramdb.cursor()
-        cursor.execute('''REPLACE INTO VideoPlays
-        (serverTime, mnth, yr) values (1405372146.32, 6, 2033)''')
-        cursor.executemany('''REPLACE INTO EventSequences
-        (thumbnail_id, imvisclienttime, imclickclienttime, mnth, yr, tai)
-        VALUES (?,?,?,?,?,?)''', [
+        cursor.execute('REPLACE INTO VideoPlays '
+        '(serverTime, mnth, yr) values (1405372146.32, 6, 2033)')
+        cursor.executemany('REPLACE INTO EventSequences '
+        '(thumbnail_id, imvisclienttime, imclickclienttime, mnth, yr, tai) '
+        'VALUES (?,?,?,?,?,?)', [
             ('tid11', 1405372146, None, 6, 2033, 'tai2'),
             ('tid11', 1405372146, None, 6, 2033, 'tai2'),
             ('tid11', 1405372146, None, 6, 2033, 'tai2'),
@@ -401,9 +432,9 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
 
     def test_stats_db_no_videoplay_data(self, datamock):
         cursor = self.ramdb.cursor()
-        cursor.executemany('''REPLACE INTO EventSequences
-        (thumbnail_id, imvisclienttime, imclickclienttime, mnth, yr, tai)
-        VALUES (?,?,?,?,?,?)''', [
+        cursor.executemany('REPLACE INTO EventSequences '
+        '(thumbnail_id, imvisclienttime, imclickclienttime, mnth, yr, tai) '
+        'VALUES (?,?,?,?,?,?)', [
             ('tid11', 1405372146, None, 6, 2033, 'tai2'),
             ('tid11', 1405372146, None, 6, 2033, 'tai2'),
             ('tid11', 1405372146, None, 6, 2033, 'tai2'),
@@ -431,8 +462,8 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         datamock.ExperimentStrategy.get.side_effect = [None]
 
         cursor = self.ramdb.cursor()
-        cursor.execute('''REPLACE INTO VideoPlays
-        (serverTime, mnth, yr) values (1405372146.32, 6, 2033)''')
+        cursor.execute('REPLACE INTO VideoPlays '
+        '(serverTime, mnth, yr) values (1405372146.32, 6, 2033)')
         self.ramdb.commit()
 
         with self.assertLogExists(logging.ERROR, 
@@ -461,12 +492,12 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
 
         # Add entries to the database
         cursor = self.ramdb.cursor()
-        cursor.execute('''REPLACE INTO VideoPlays
-        (serverTime, mnth, yr) values (1405372146.32, 6, 2033)''')
-        cursor.executemany('''REPLACE INTO EventSequences
-        (thumbnail_id, imloadclienttime, imclickclienttime, adplayclienttime,
-        videoplayclienttime, mnth, yr, tai)
-        VALUES (?,?,?,?,?,?,?,?)''', [
+        cursor.execute('REPLACE INTO VideoPlays '
+        '(serverTime, mnth, yr) values (1405372146.32, 6, 2033)')
+        cursor.executemany('REPLACE INTO EventSequences '
+        '(thumbnail_id, imloadclienttime, imclickclienttime, adplayclienttime, '
+        'videoplayclienttime, mnth, yr, tai) '
+        'VALUES (?,?,?,?,?,?,?,?)', [
             ('tid11', 1405372146, None, None, None, 1, 2033, 'tai2'),
             ('tid11', 1405372146, 1405372146, None, None, 1, 2033, 'tai2'),
             ('tid11', 1405372146, 1405372146, 1405372146, None, 1, 2033,

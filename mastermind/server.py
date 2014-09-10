@@ -213,8 +213,8 @@ class StatsDBWatcher(threading.Thread):
         # See if there are any new entries
         curtime = datetime.datetime.utcnow()
         cursor.execute(
-            '''SELECT max(serverTime) FROM videoplays WHERE 
-            yr >= {yr:d} or (yr == {yr:d} and mnth >= {mnth:d})'''.format(
+            ('SELECT max(serverTime) FROM videoplays WHERE '
+             'yr >= {yr:d} or (yr == {yr:d} and mnth >= {mnth:d})').format(
             mnth=curtime.month, yr=curtime.year))
         result = cursor.fetchall()
         if len(result) == 0 or result[0][0] is None:
@@ -251,27 +251,27 @@ class StatsDBWatcher(threading.Thread):
                     continue
                 if strategy.conversion_type == neondata.MetricType.PLAYS:
                     query = (
-                        """select thumbnail_id, count({imp_type}), 
-                        sum(cast(imclickclienttime is not null and 
-                        (adplayclienttime is not null or 
-                        videoplayclienttime is not null) as int))
-                        from EventSequences where tai='{tai}' and 
-                        {imp_type} is not null 
-                        and (yr >= {yr:d} or 
-                        (yr = {yr:d} and mnth >= {mnth:d}))
-                        group by thumbnail_id""".format(
+                        ("select thumbnail_id, count({imp_type}), "
+                         "sum(cast(imclickclienttime is not null and " 
+                         "(adplayclienttime is not null or "
+                         "videoplayclienttime is not null) as int)) "
+                         "from EventSequences where tai='{tai}' and "
+                         "{imp_type} is not null "
+                         "and (yr >= {yr:d} or "
+                         "(yr = {yr:d} and mnth >= {mnth:d})) "
+                         "group by thumbnail_id").format(
                             imp_type=col_map[strategy.impression_type],
                             tai=tai_info.get_tai(),
                             yr=last_month.year,
                             mnth=last_month.month))
                 else:
                     query = (
-                        """select thumbnail_id, count({imp_type}), 
-                        count({conv_type})
-                        from EventSequences where tai='{tai}' and 
-                        {imp_type} is not null 
-                        and yr >= {yr:d} and mnth >= {mnth:d}
-                        group by thumbnail_id""".format(
+                        ("select thumbnail_id, count({imp_type}), "
+                         "count({conv_type}) "
+                         "from EventSequences where tai='{tai}' and "
+                         "{imp_type} is not null "
+                         "and yr >= {yr:d} and mnth >= {mnth:d} "
+                         "group by thumbnail_id").format(
                             imp_type=col_map[strategy.impression_type],
                             conv_type=col_map[strategy.conversion_type],
                             tai=tai_info.get_tai(),
