@@ -370,6 +370,7 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
 
     def tearDown(self):
         self.connection_patcher.stop()
+        DBConnection.clear_singleton_instance()
         options._set('supportServices.neondata.baseRedisRetryWait',
                      self.old_delay)
         super(TestDbConnectionHandling, self).tearDown()

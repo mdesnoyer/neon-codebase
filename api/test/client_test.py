@@ -96,9 +96,12 @@ class TestVideoClient(unittest.TestCase):
         '''
         Setup the api request for the video processor
         '''
+        
+        self.na = neondata.NeonUserAccount('acc1')
+        self.na.save()
 
         j_id = "j123"
-        api_key = "apikey123"
+        api_key = self.na.neon_api_key 
         vid = "video1"
         i_id = 0
 
@@ -321,6 +324,11 @@ class TestVideoClient(unittest.TestCase):
         result_data = [15, 30, 60, 45, 105] #hardcoded for now, perhaps extract this from model data  
         self.assertEqual(callback_result["data"], result_data)
         self.assertEqual(len(callback_result["thumbnails"]), len(result_data))
+        self.assertEqual(callback_result["video_id"], 'video1')
+        self.assertEqual(callback_result["error"], None)
+        self.assertEqual(callback_result["serving_url"][len("http://i1"):],
+            ".neon-images.com/v1/client/%s/neonvid_video1" %
+             self.na.tracker_account_id)
             
         #verify the number of thumbs in self.thumbnails  
         self.assertEqual(len(vprocessor.thumbnails), len(callback_result["thumbnails"]) + 1)

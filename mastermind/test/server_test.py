@@ -349,6 +349,7 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
 
     def tearDown(self):
         self.cluster_patcher.stop()
+        neondata.DBConnection.clear_singleton_instance()
         self.sqlite_connect_patcher.stop()
         try:
             cursor = self.ramdb.cursor()
@@ -547,6 +548,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             self.filesystem)
 
     def tearDown(self):
+        neondata.DBConnection.clear_singleton_instance()
         mastermind.server.tempfile = self.real_tempfile
         self.s3_patcher.stop()
         super(TestDirectivePublisher, self).tearDown()
@@ -802,6 +804,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             directives[('acct1', 'acct1_vid2')])
 
 class SmokeTesting(test_utils.neontest.TestCase):
+
     def setUp(self):
         super(SmokeTesting, self).setUp()
         # Open up a temoprary redis server
@@ -865,6 +868,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
             self.mastermind, self.activity_watcher)
 
     def tearDown(self):
+        neondata.DBConnection.clear_singleton_instance()
         mastermind.server.tempfile = self.real_tempfile
         self.cluster_patcher.stop()
         self.s3_patcher.stop()
@@ -890,9 +894,12 @@ class SmokeTesting(test_utils.neontest.TestCase):
         # This is purely a smoke test to see if anything breaks when
         # it's all hooked together.
 
-        # Create a video with a couple of thumbs in the database
-        job = neondata.NeonApiRequest('job1', 'key1', 0, 't', 't', 'r', 'h')
+        # Setup api request and update the state to processed
+        job = neondata.NeonApiRequest('job1', 'key1', 'vid1', 't', 't', 'r', 'h')
+        job.state = neondata.RequestState.FINISHED 
         job.save()
+        
+        # Create a video with a couple of thumbs in the database
         vid = neondata.VideoMetadata('key1_vid1', request_id='job1',
                                      tids=['key1_vid1_t1', 'key1_vid1_t2'])
         vid.save()
@@ -947,5 +954,3 @@ class SmokeTesting(test_utils.neontest.TestCase):
 if __name__ == '__main__':
     utils.neon.InitNeonTest()
     unittest.main()
-        
-        

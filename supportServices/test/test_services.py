@@ -1243,6 +1243,23 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         response = self.put_request(url, vals, self.api_key, jsonheader=True)
         self.assertEqual(response.code, 202) 
 
+    def test_job_status(self):
+        '''
+        Get Job Status 
+        '''
+
+        self._setup_initial_brightcove_state()
+        vid = self._get_videos()[0]
+        job_id = self.job_ids[0]
+        url = self.get_url("/api/v1/jobs/%s/" % job_id)
+        response = self.get_request(url, self.api_key)
+        self.assertEqual(response.code, 200)
+        jresponse = json.loads(response.body)
+        self.assertEqual(jresponse["job_id"], job_id)
+        self.assertEqual(jresponse["video_id"], vid)
+
+
+
 ##### OOYALA PLATFORM TEST ######
 
 class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
