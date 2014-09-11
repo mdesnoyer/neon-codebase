@@ -10,8 +10,8 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-from boto.ec2.connection import EC2Connection
-from boto.emr.connection import EmrConnection
+from boto.ec2
+from boto.emr
 from boto.emr.bootstrap_action import BootstrapAction
 from boto.emr.instance_group import InstanceGroup
 import boto.emr.step
@@ -37,6 +37,8 @@ _log = logging.getLogger(__name__)
 from utils.options import define, options
 define("cluster_name", default="Neon Cluster",
        help="Name of any cluster that is created")
+define("cluster_region", default='us-east-1',
+       help='Amazon region where the cluster resides')
 define("ssh_key", default="s3://neon-keys/emr-runner.pem",
        help="ssh key used to execute jobs on the master node")
 define("resource_manager_port", default=9026,
@@ -96,6 +98,12 @@ def emr_iterator(conn, obj_type, cluster_id=None, **kwargs):
 
         for item in cur_page.__dict__[obj_map[obj_type]]:
             yield item
+
+def EmrConnection(**kwargs):
+    return boto.emr.connect_to_region(options.cluster_region, **kwargs)
+
+def EC2Connection(**kwargs):
+    return boto.ec2.connect_to_region(options.cluster_region, **kwargs)
 
 class Cluster():
     # The possible instance and their multiplier of processing
