@@ -304,7 +304,7 @@ def _get_last_batch_app(rm_response):
     last_started_time = None
     for app in rm_response['apps']['app']:
         if (app['name'] == 'Raw Tracker Data Cleaning' and 
-            (last_app is None or last_started_time > app['startedTime'])):
+            (last_app is None or last_started_time < app['startedTime'])):
             last_app = app
             last_started_time = app['startedTime']            
             
