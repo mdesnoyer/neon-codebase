@@ -51,7 +51,8 @@ record AdPlayHive {
   union { null, float } ipGeoData_lat; // Latitude
   union { null, float } ipGeoData_lon; // Longitude
 
-  string videoId;
+  // video id can be null, if VideoClick event doesn't fire before adPlay
+  union{null, string} videoId; 
   union{null, string} playerId;
   union{null, string} thumbnailId;
 
