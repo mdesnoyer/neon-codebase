@@ -557,7 +557,7 @@ class Cluster():
         self.master_ip = None
         self.master_id = \
           conn.describe_jobflow(self.cluster_id).masterinstanceid
-        for instance in emr_iterator(conn, 'instances', 'self.cluster_id'):
+        for instance in emr_iterator(conn, 'instances', self.cluster_id):
             if (instance.status.state == 'RUNNING' and 
                 instance.ec2instanceid == self.master_id):
                 self.master_ip = instance.privateipaddress
