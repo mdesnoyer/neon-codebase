@@ -10,8 +10,8 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-from boto.ec2
-from boto.emr
+import boto.ec2
+import boto.emr
 from boto.emr.bootstrap_action import BootstrapAction
 from boto.emr.instance_group import InstanceGroup
 import boto.emr.step
