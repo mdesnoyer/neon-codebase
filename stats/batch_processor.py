@@ -26,6 +26,7 @@ from thrift.transport import TSocket
 from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol
 import time
+import urllib2
 
 #logging
 import logging
@@ -333,7 +334,12 @@ def get_last_sucessful_batch_output(cluster):
     # Check the config on the history server to get the path
     query = ('/ws/v1/history/mapreduce/jobs/job_%s/conf' % 
              re.compile(r'application_(\S+)').search(app['id']).group(1))
-    conf = cluster.query_history_manager(query)
+    try:
+        conf = cluster.query_history_manager(query)
+    except urllib2.HTTPError as e:
+        _log.warn('Could not get the job history for job %s. HTTP Code %s' %
+                  (app['id'], e.code))
+        return None
 
     if not 'conf' in conf:
         raise UnexpectedInfo('Unexpected response from the history server: %s'
