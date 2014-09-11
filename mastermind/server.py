@@ -295,8 +295,9 @@ class StatsDBWatcher(threading.Thread):
         try:
             cluster.find_cluster()
         except stats.cluster.ClusterInfoError as e:
-            _log.error('Could not connect to the cluster.')
+            _log.error('Could not find the cluster.')
             statemon.state.increment('statsdb_error')
+            raise
         return cluster.master_ip
 
     def _find_video_id(self, thumb_id):

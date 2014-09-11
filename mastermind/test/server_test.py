@@ -345,7 +345,7 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
 
         # Patch the cluster lookup
         self.cluster_patcher = patch('mastermind.server.stats.cluster.Cluster')
-        self.cluster_patcher.start()
+        self.cluster_mock = self.cluster_patcher.start()
 
     def tearDown(self):
         self.cluster_patcher.stop()
@@ -527,6 +527,16 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
                                ('vid12', 'tid12', 1, 1),
                                ('vid21', 'tid21', 3, 0)])
         self.assertTrue(self.watcher.is_loaded)
+
+    def test_cannot_find_cluster(self, datamock):
+        self.cluster_mock().find_cluster.side_effect = [
+            stats.cluster.ClusterInfoError()
+            ]
+
+        with self.assertRaises(stats.cluster.ClusterInfoError):
+            with self.assertLogExists(logging.ERROR,
+                                      'Could not find the cluster'):
+                self.watcher._process_db_data()
 
 class TestDirectivePublisher(test_utils.neontest.TestCase):
     def setUp(self):

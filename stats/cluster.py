@@ -56,6 +56,47 @@ class ClusterCreationError(ClusterException): pass
 class ExecutionError(ClusterException):pass
 class MapReduceError(ExecutionError): pass
 
+def emr_iterator(conn, obj_type, cluster_id=None, **kwargs):
+    '''Function that iterates through the responses to list_* functions
+       including handing the paginatioin
+
+    Inputs:
+    conn - Connection object
+    obj_type - String of the end of the list_<obj_type> function
+               (e.g. 'clusters')
+    cluster_id - The cluster id for any list function that's not list_clusters
+    kwargs - Any specific keyworkd args for the list_* function
+
+    Returns:
+    The iterator through the objects
+    '''
+    obj_map = {
+        'bootstrap_actions' : 'actions',
+        'clusters' : 'clusters',
+        'instance_groups': 'instancegroups',
+        'instances' : 'instances',
+        'steps': 'steps'}
+    if not obj_type in obj_map:
+        raise ValueError('Invalid object type: %s' % obj_type)
+
+    list_func = getattr(conn, 'list_%s' % obj_type)
+    if obj_type == 'clusters':
+        get_page = lambda marker: list_func(marker=marker, **kwargs)
+    else:
+        get_page = lambda marker: list_func(cluster_id, marker=marker,
+                                            **kwargs)
+
+    cur_page = None
+    while cur_page is None or 'marker' in cur_page.__dict__:
+        if cur_page is None:
+            # Get the first page of results
+            cur_page = get_page(None)
+        else:
+            cur_page = get_page(cur_page.marker)
+
+        for item in cur_page.__dict__[obj_map[obj_type]]:
+            yield item
+
 class Cluster():
     # The possible instance and their multiplier of processing
     # power relative to the r3.xlarge. Bigger machines are
@@ -364,7 +405,7 @@ class Cluster():
             # First find the instance group
             conn = EmrConnection()
             found_group = None
-            for group in conn.list_instance_groups(self.cluster_id).instancegroups:
+            for group in emr_iterator(conn,'instance_groups',self.cluster_id):
                 if group.instancegrouptype == group_type:
                     found_group = group
                     break
@@ -466,7 +507,7 @@ class Cluster():
         conn = EmrConnection()
         most_recent = None
         cluster_found = None
-        for cluster in conn.list_clusters().clusters:
+        for cluster in emr_iterator(conn, 'clusters'):
             if cluster.name != options.cluster_name:
                 # The cluster has to have the right name to be a possible match
                 continue
@@ -516,7 +557,7 @@ class Cluster():
         self.master_ip = None
         self.master_id = \
           conn.describe_jobflow(self.cluster_id).masterinstanceid
-        for instance in conn.list_instances(self.cluster_id).instances:
+        for instance in emr_iterator(conn, 'instances', 'self.cluster_id'):
             if (instance.status.state == 'RUNNING' and 
                 instance.ec2instanceid == self.master_id):
                 self.master_ip = instance.privateipaddress
@@ -537,7 +578,7 @@ class Cluster():
     def _get_instance_group_info(self, group_type):
         conn = EmrConnection()
         found_group = None
-        for group in conn.list_instance_groups(self.cluster_id).instancegroups:
+        for group in emr_iterator(conn, 'instance_groups', self.cluster_id):
             if group.instancegrouptype == group_type:
                 found_group = group
                 break
@@ -645,7 +686,7 @@ class Cluster():
             cur_state = conn.describe_jobflow(self.cluster_id)
 
         _log.info('Making the new cluster primary')
-        for cluster in conn.list_clusters().clusters:
+        for cluster in emr_iterator(conn, 'clusters'):
             try:
                 self._get_cluster_tag(cluster, 'cluster-role')
                 conn.remove_tags(cluster.id, ['cluster-role'])
