@@ -734,7 +734,7 @@ class Cluster():
                              chosen_type,
                              market_type,
                              'Core instance group',
-                             '%.3f' % 1.03 * on_demand_price)
+                             '%.3f' % (1.03 * on_demand_price))
                              
 
     def _get_spot_prices(self, instance_type, 
