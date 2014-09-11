@@ -496,6 +496,7 @@ class Cluster():
             cluster_info = self.find_cluster()
             return cluster_info.status.state
 
+        conn = EmrConnection()
         return conn.describe_cluster(self.cluster_id).status.state
 
     def find_cluster(self):
@@ -568,7 +569,6 @@ class Cluster():
 
     def _set_requested_core_instances(self):
         '''Sets self.n_core_instances to what is currently requested.'''
-        conn = EmrConnection()
         found_group = self._get_instance_group_info('CORE')
 
         if found_group is not None:
