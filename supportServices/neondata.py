@@ -510,10 +510,11 @@ class StoredObject(object):
                 func(val)
 
         if callback:
-            return cls.modify_many([key], _process_one,
-                                   callback=lambda d: callback(d[key]))
+            return StoredObject.modify_many(
+                [key], _process_one,
+                callback=lambda d: callback(d[key]))
         else:
-            updated_d = cls.modify_many([key], _process_one)
+            updated_d = StoredObject.modify_many([key], _process_one)
             return updated_d[key]
 
     @classmethod
@@ -667,7 +668,7 @@ class NamespacedStoredObject(StoredObject):
 
     @classmethod
     def modify_many(cls, keys, func, callback=None):
-        super(NamespacedStoredObject, cls).modify(
+        super(NamespacedStoredObject, cls).modify_many(
             [cls.format_key(x) for x in keys],
             func,
             callback=callback)
@@ -1187,14 +1188,6 @@ class BrightcovePlatform(AbstractPlatform):
     def get_ovp(cls):
         ''' return ovp name'''
         return "brightcove"
-
-    def get(self, callback=None):
-        ''' get json'''
-        db_connection = DBConnection(self)
-        if callback:
-            db_connection.conn.get(self.key, callback)
-        else:
-            return db_connection.blocking_conn.get(self.key)
 
     def get_api(self):
         '''Return the Brightcove API object for this platform integration.'''
@@ -1859,6 +1852,12 @@ class NeonApiRequest(object):
     @classmethod
     def get_requests(cls, keys, callback=None):
         ''' mget results '''
+        if len(keys) == 0:
+            if callback:
+                callback([])
+            else:
+                return []
+        
         db_connection = DBConnection(cls)
         def create(jdata):
             if not jdata:
@@ -2107,7 +2106,7 @@ class ThumbnailMetadata(StoredObject):
 
     Keyed by thumbnail id
     '''
-    def __init__(self, tid, internal_vid, urls=None, created=None,
+    def __init__(self, tid, internal_vid=None, urls=None, created=None,
                  width=None, height=None, ttype=None,
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None,
