@@ -113,7 +113,6 @@ class Cluster():
     #
     # This table is (type, multiplier, on demand price)
     instance_info = {
-        'r3.xlarge' : (1., 0.35),
         'r3.2xlarge' : (2.1, 0.70),
         'r3.4xlarge' : (4.4, 1.40),
         'r3.8xlarge' : (9.6, 2.80),
@@ -716,7 +715,7 @@ class Cluster():
                  for itype, x in Cluster.instance_info.items()
                  for cur_price, avg_price in [self._get_spot_prices(itype)]]
         data = sorted(data, key=lambda x: (-x[2] / (x[5] * x[1]), -x[1]))
-        chosen_type, count, cpu_units,on_demand_price, cur_spot_price, \
+        chosen_type, count, cpu_units, on_demand_price, cur_spot_price, \
           avg_spot_price = data[0]
 
         _log.info('Choosing core instance type %s because its avg price was %f'
@@ -735,7 +734,7 @@ class Cluster():
                              chosen_type,
                              market_type,
                              'Core instance group',
-                             1.03 * on_demand_price)
+                             '%.3f' % 1.03 * on_demand_price)
                              
 
     def _get_spot_prices(self, instance_type, 
