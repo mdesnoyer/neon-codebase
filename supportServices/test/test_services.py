@@ -1017,6 +1017,24 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         response = json.loads(response.body)
         self.assertIsNotNone(response["video_id"])  
         self.assertEqual(response["status"], neondata.RequestState.PROCESSING)
+    
+    def test_create_neon_video_request_via_api(self):
+        ''' verify that video request creation via services  ''' 
+        
+        api_key = self.create_neon_account()
+        vals = { 'video_url' : "http://test.mp4", "video_title": "test_title", 
+                 'video_id'  : "vid1", "callback_url" : "http://callback"
+                }
+        uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/create_thumbnail_api_request'%(self.a_id, "0"))
+
+        self.cp_mock_async_client().fetch.side_effect = \
+          self._success_http_side_effect
+
+        response = self.post_request(uri, vals, api_key)
+        self.assertTrue(response.code, 201)
+        jresponse = json.loads(response.body)
+        self.assertIsNotNone(jresponse['job_id'])
 
     def test_create_neon_video_request_invalid_url(self):
         ''' invalid url test '''
@@ -1224,6 +1242,23 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         vals = {'thumbnails' : [data]}
         response = self.put_request(url, vals, self.api_key, jsonheader=True)
         self.assertEqual(response.code, 202) 
+
+    def test_job_status(self):
+        '''
+        Get Job Status 
+        '''
+
+        self._setup_initial_brightcove_state()
+        vid = self._get_videos()[0]
+        job_id = self.job_ids[0]
+        url = self.get_url("/api/v1/jobs/%s/" % job_id)
+        response = self.get_request(url, self.api_key)
+        self.assertEqual(response.code, 200)
+        jresponse = json.loads(response.body)
+        self.assertEqual(jresponse["job_id"], job_id)
+        self.assertEqual(jresponse["video_id"], vid)
+
+
 
 ##### OOYALA PLATFORM TEST ######
 

@@ -55,8 +55,6 @@ from utils import statemon
 
 from boto.exception import S3ResponseError
 from boto.s3.connection import S3Connection
-from boto.s3.key import Key
-from boto.s3.bucket import Bucket
 from utils.imageutils import PILImageUtils
 from StringIO import StringIO
 from supportServices import neondata
@@ -67,6 +65,7 @@ import utils.s3
 import logging
 _log = logging.getLogger(__name__)
 
+random.seed(232315)
 
 #Monitoring
 statemon.define('processed_video', int)
@@ -85,6 +84,8 @@ define('profile', default=0, type=int, help='If true, runs in debug mode')
 define('sync', default=0, type=int,
        help='If true, runs http client in async mode')
 define('video_server', default="http://localhost:8081", type=str, help="video server")
+define('serving_url_format',
+        default="http://i%s.neon-images.com/v1/client/%s/neonvid_%s", type=str)
 
 # ======== API String constants  =======================#
 INTERNAL_PROCESSING_ERROR = "internal error"
@@ -94,7 +95,8 @@ INTERNAL_PROCESSING_ERROR = "internal error"
 ###########################################################################
 
 def callback_response_builder(job_id, vid, data, 
-                            thumbnails, client_url, error=None):
+                              thumbnails, client_url,
+                              serving_url=None, error=None):
         '''
         build callback response that will be sent to the callback url
         which was specified when the request was created
@@ -110,6 +112,7 @@ def callback_response_builder(job_id, vid, data,
         response_body["data"] = data
         response_body["thumbnails"] = thumbnails
         response_body["timestamp"] = str(time.time())
+        response_body["serving_url"] = serving_url 
         response_body["error"] = error 
 
         #CREATE POST REQUEST
@@ -253,6 +256,11 @@ class VideoProcessor(object):
         self.sec_to_extract_offset = 1
 
     def download_video_file_urllib2(self):
+        '''
+        Download file using urllib2
+        Tornado throws errors in bizzare cases
+        '''
+
         req = urllib2.Request(self.video_url, headers=self.headers)
         res = urllib2.urlopen(req)
         data = res.read()
@@ -299,9 +307,9 @@ class VideoProcessor(object):
 
         self.download_video_file()
        
-        #Error downloading the file
+        # Error downloading the file
         if self.error:
-            self.finalize_request()
+            self.finalize_request(immediate=True)
             return
 
         #Process the video
@@ -489,9 +497,11 @@ class VideoProcessor(object):
                     
             return spread_result
 
-    def finalize_request(self):
+    def finalize_request(self, immediate=False):
         '''
         Finalize request after video has been processed
+
+        if immediate=True, then don't requeue on error
         '''
         
         api_key = self.job_params[properties.API_KEY]  
@@ -507,10 +517,18 @@ class VideoProcessor(object):
             #Send response to client that job failed due to the last reason
             #And Log the response we send to the client
             statemon.state.increment('processing_error')
+            if immediate:
+                #update error state
+                api_request = neondata.NeonApiRequest.get(api_key, job_id)
+                api_request.state = neondata.RequestState.INT_ERROR
+                api_request.save()
+                return
+
             if not self.requeue_job():
                 cb_request = callback_response_builder(job_id, video_id, [], 
                             [], callback_url, error=self.error)
                 self.send_client_callback_response(cb_request)
+                
                 #update error state
                 api_request = neondata.NeonApiRequest.get(api_key, job_id)
                 api_request.state = neondata.RequestState.INT_ERROR
@@ -580,13 +598,24 @@ class VideoProcessor(object):
             else:
                 _log.error("centerframe was None for %s" % video_id)
 
-            #Save videometadata 
+            # Save videometadata 
             if not vmdata.save():
                 _log.error("failed to save vmdata for %s" % vmdata.key)
                 statemon.state.increment('save_vmdata_error')
 
+            # Generate the Serving URL
+            # TODO(Sunil): Pass TAI as part of the request?
+            serving_url = None
+            subdomain_index = random.randint(1, 4)
+            na = neondata.NeonUserAccount.get_account(api_key)
+            if na:
+                neon_publisher_id = na.tracker_account_id  
+                serving_url = options.serving_url_format % (subdomain_index,
+                               neon_publisher_id, video_id)
+
             cr_request = callback_response_builder(job_id, video_id, data, 
-                                                   s3_urls[:topn], callback_url, 
+                                                   s3_urls[:topn], callback_url,
+                                                   serving_url,
                                                    error=self.error)
             self.send_client_callback_response(cr_request)
             utils.http.send_request(cr_request)
@@ -646,7 +675,9 @@ class VideoProcessor(object):
             #    _log.error("save_video_metadata failed to save")
             #    statemon.state.increment('save_vmdata_error')
         else:
-            _log.error("key=finalize_api_request msg=failed to save request")
+            # Need to reprocess the request
+            _log.error("key=finalize_api_request msg=failed to save request %s"
+                    % api_request.key)
     
     def save_previous_thumbnail(self, api_request):
         '''
@@ -812,6 +843,7 @@ class VideoProcessor(object):
         '''
         response = utils.http.send_request(request)
         if response.error:
+            _log.error("Callback response not sent to %r " % request.url)
             return False
         return True
 
@@ -837,6 +869,8 @@ class VideoProcessor(object):
                                     thumbs)
         request = notification_response_builder(ba.account_id, i_id, vr.to_json()) 
         response = utils.http.send_request(request)
+        if response.error:
+            _log.error("Notification response not sent to %r " % request)
 
 class VideoClient(object):
    

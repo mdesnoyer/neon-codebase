@@ -208,7 +208,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                 abtest=True)
         bcPlatform.add_video('0', 'job11')
         bcPlatform.add_video('10', 'job12')
-        job12 = neondata.NeonApiRequest('job11', api_key, 0, 't', 't', 'r', 'h')
+        job11 = neondata.NeonApiRequest('job11', api_key, 0, 't', 't', 'r', 'h')
         job12 = neondata.NeonApiRequest('job12', api_key, 10, 't', 't', 'r', 'h')
         bcPlatform.get_processed_internal_video_ids = MagicMock()
         bcPlatform.get_processed_internal_video_ids.return_value = [api_key +
@@ -313,6 +313,7 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
           lambda host=None, port=None: self.ramdb 
 
     def tearDown(self):
+        neondata.DBConnection.clear_singleton_instance()
         self.sqlite_connect_patcher.stop()
         try:
             cursor = self.ramdb.cursor()
@@ -502,7 +503,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.s3_patcher = patch('mastermind.server.S3Connection')
         self.s3conn = test_utils.mock_boto_s3.MockConnection()
         self.s3_patcher.start().return_value = self.s3conn
-        self.s3conn.create_bucket('neon-image-serving-directives')
+        self.s3conn.create_bucket('neon-image-serving-directives-unittest')
 
         # Insert a fake filesystem
         self.filesystem = fake_filesystem.FakeFilesystem()
@@ -511,6 +512,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             self.filesystem)
 
     def tearDown(self):
+        neondata.DBConnection.clear_singleton_instance()
         mastermind.server.tempfile = self.real_tempfile
         self.s3_patcher.stop()
         super(TestDirectivePublisher, self).tearDown()
@@ -556,7 +558,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             self.publisher._publish_directives()
 
     def test_s3_bucket_missing(self):
-        self.s3conn.delete_bucket('neon-image-serving-directives')
+        self.s3conn.delete_bucket('neon-image-serving-directives-unittest')
 
         with self.assertLogExists(logging.ERROR, 'Could not get bucket'):
             self.publisher._publish_directives()
@@ -603,7 +605,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
 
         # Make sure that there are two directive files, one is the
         # REST endpoint and the second is a timestamped one.
-        bucket = self.s3conn.get_bucket('neon-image-serving-directives')
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-unittest')
         keys = [x for x in bucket.get_all_keys()]
         key_names = [x.name for x in keys]
         self.assertEquals(len(key_names), 2)
@@ -706,7 +708,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
 
         self.publisher._publish_directives()
 
-        bucket = self.s3conn.get_bucket('neon-image-serving-directives')
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-unittest')
         expiry, tracker_ids, directives = self._parse_directive_file(
             bucket.get_key('mastermind').get_contents_as_string())
 
@@ -745,7 +747,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
                                           ' video: acct1_vid2')):
                 self.publisher._publish_directives()
 
-        bucket = self.s3conn.get_bucket('neon-image-serving-directives')
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-unittest')
         expiry, tracker_ids, directives = self._parse_directive_file(
             bucket.get_key('mastermind').get_contents_as_string())
 
@@ -766,6 +768,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             directives[('acct1', 'acct1_vid2')])
 
 class SmokeTesting(test_utils.neontest.TestCase):
+
     def setUp(self):
         super(SmokeTesting, self).setUp()
         # Open up a temoprary redis server
@@ -776,7 +779,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.s3_patcher = patch('mastermind.server.S3Connection')
         self.s3conn = test_utils.mock_boto_s3.MockConnection()
         self.s3_patcher.start().return_value = self.s3conn
-        self.s3conn.create_bucket('neon-image-serving-directives')
+        self.s3conn.create_bucket('neon-image-serving-directives-unittest')
 
         # Insert a fake filesystem
         self.filesystem = fake_filesystem.FakeFilesystem()
@@ -825,6 +828,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
             self.mastermind, self.activity_watcher)
 
     def tearDown(self):
+        neondata.DBConnection.clear_singleton_instance()
         mastermind.server.tempfile = self.real_tempfile
         self.s3_patcher.stop()
         self.sqlite_connect_patcher.stop()
@@ -849,8 +853,13 @@ class SmokeTesting(test_utils.neontest.TestCase):
         # This is purely a smoke test to see if anything breaks when
         # it's all hooked together.
 
+        # Setup api request and update the state to processed
+        job = neondata.NeonApiRequest('job1', 'key1', 'vid1', 't', 't', 'r', 'h')
+        job.state = neondata.RequestState.FINISHED 
+        job.save()
+        
         # Create a video with a couple of thumbs in the database
-        vid = neondata.VideoMetadata('key1_vid1',
+        vid = neondata.VideoMetadata('key1_vid1', request_id='job1',
                                      tids=['key1_vid1_t1', 'key1_vid1_t2'])
         vid.save()
         platform = neondata.BrightcovePlatform('acct1', 'i1', 'key1',
@@ -897,12 +906,10 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.activity_watcher.wait_for_idle()
 
         # See if there is anything in S3 (which there should be)
-        bucket = self.s3conn.get_bucket('neon-image-serving-directives')
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-unittest')
         lines = bucket.get_key('mastermind').get_contents_as_string().split('\n')
         self.assertEqual(len(lines), 4)
         
 if __name__ == '__main__':
     utils.neon.InitNeonTest()
     unittest.main()
-        
-        

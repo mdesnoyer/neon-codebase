@@ -33,7 +33,7 @@ from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
         ThumbnailMetadata, InternalVideoID, OoyalaPlatform, \
         TrackerAccountIDMapper, ThumbnailServingURLs, ExperimentStrategy, \
-        ExperimentState
+        ExperimentState, NeonApiRequest
 
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
@@ -396,8 +396,24 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         end_fd_count = len(os.listdir("/proc/%s/fd" % os.getpid()))
         self.assertEqual(start_fd_count, end_fd_count)
+    
+    def test_processed_internal_video_ids(self):
+        na = NeonUserAccount('accttest')
+        na.save()
+        bp = BrightcovePlatform('aid', 'iid', na.neon_api_key)
         
-        
+        vids = bp.get_processed_internal_video_ids()
+        self.assertEqual(len(vids), 0)
+
+        for i in range(10):
+            bp.add_video('vid%s' % i, 'job%s' % i)
+            r = NeonApiRequest('job%s' % i, na.neon_api_key, 'vid%s' % i, 't', 't', 'r', 'h')
+            r.state = "active"
+            r.save()
+        bp.save()
+
+        vids = bp.get_processed_internal_video_ids()
+        self.assertEqual(len(vids), 10)
 
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
@@ -417,6 +433,7 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
 
     def tearDown(self):
         self.connection_patcher.stop()
+        DBConnection.clear_singleton_instance()
         options._set('supportServices.neondata.baseRedisRetryWait',
                      self.old_delay)
         super(TestDbConnectionHandling, self).tearDown()

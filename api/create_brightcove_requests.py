@@ -27,7 +27,8 @@ import logging
 _log = logging.getLogger(__name__)
 
 skip_accounts = ["brightcoveplatform_4b33788e970266fefb74153dcac00f94_31", "brightcoveplatform_8bda0ee38d1036b46d07aec4040af69c_26"
-            "brightcoveplatform_5329143981226ef6593f3762b636bd44_23"
+            "brightcoveplatform_5329143981226ef6593f3762b636bd44_23",
+            "brightcoveplatform_gmlrsi27487ocd0wwbr9y66z_38"
         ]
 
 statemon.define('cron_finished', int)

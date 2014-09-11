@@ -10,6 +10,7 @@ sys.path.insert(0,os.path.abspath(
 
 import logging
 import Queue
+import socket
 import threading
 import time
 import tornado.escape
@@ -38,6 +39,13 @@ def send_request(request, ntries=5, callback=None, cur_try=0):
                this call blocks and returns the HTTPResponse.
 
     '''
+
+    # Convert to HTTPRequest object if a URL is given
+    # This is enabled to ensure compatibility with http fetch method
+    # which can take a URL or a HTTPRequest object
+    if isinstance(request, basestring):
+        request = tornado.httpclient.HTTPRequest(request)
+
     def finish_request(response):
         if callback is not None:
             callback(response)
@@ -65,7 +73,7 @@ def send_request(request, ntries=5, callback=None, cur_try=0):
                 # The JSON doens't have an error field, so
                 # call the callback
                 return finish_request(response)
-
+            
         else:
             _log.warning(('key=http_connection_error '
                            'msg=Error connecting to %s: %s') %
@@ -103,6 +111,14 @@ def send_request(request, ntries=5, callback=None, cur_try=0):
                 response = tornado.httpclient.HTTPResponse(request,
                                                            e.code,
                                                            error=e)
+        except socket.gaierror as e:
+            # Address resolution error
+            _log.error('msg=address resolution error for %r' % request)
+            error = tornado.httpclient.HTTPError(
+                502, 'error resolving address')
+            response = tornado.httpclient.HTTPResponse(request,
+                                                        502,
+                                                        error=error)
         return handle_response(response, cur_try)
     else:
         http_client = tornado.httpclient.AsyncHTTPClient()

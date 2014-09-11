@@ -76,6 +76,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'supportServices.neondata.blockingRedis.StrictRedis')
         redis_patcher.start()
         self.addCleanup(redis_patcher.stop)
+        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1'))
@@ -830,6 +831,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
             'supportServices.neondata.blockingRedis.StrictRedis')
         self.redis_mock = redis_patcher.start()
         self.addCleanup(redis_patcher.stop)
+        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1'))
@@ -972,6 +974,7 @@ class TestStatUpdating(test_utils.neontest.TestCase):
             'supportServices.neondata.blockingRedis.StrictRedis')
         self.redis_mock = redis_patcher.start()
         self.addCleanup(redis_patcher.stop)
+        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1'))
@@ -1038,6 +1041,7 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
         redis = test_utils.redis.RedisServer()
         redis.start()
         self.addCleanup(redis.stop)
+        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
         
         numpy.random.seed(1984934)
         self.mastermind = Mastermind()
