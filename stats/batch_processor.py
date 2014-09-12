@@ -133,10 +133,10 @@ class ImpalaTableBuilder(threading.Thread):
 
             # Building parquet tables takes a lot of memory, so make
             # sure we give the job enough.
-            hive.execute("SET mapreduce.reduce.memory.mb 5000")
-            hive.execute("SET mapreduce.reduce.java.opts -Xmx4000m")
-            hive.execute("SET mapreduce.map.memory.mb 5000")
-            hive.execute("SET mapreduce.map.java.opts -Xmx4000m")
+            hive.execute("SET mapreduce.reduce.memory.mb=5000")
+            hive.execute("SET mapreduce.reduce.java.opts=-Xmx4000m")
+            hive.execute("SET mapreduce.map.memory.mb=5000")
+            hive.execute("SET mapreduce.map.java.opts=-Xmx4000m")
             hive.execute("""
             insert overwrite table %s
             partition(tai, yr, mnth)
