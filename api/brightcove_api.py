@@ -66,6 +66,7 @@ class BrightcoveApi(object):
         if self.local:
             self.neon_uri = "http://localhost:8081/api/v1/submitvideo/"
         else:
+            #TODO(Sunil): refactor this code & cleanup
             #self.neon_uri = "http://thumbnails.neon-lab.com/api/v1/submitvideo/" 
             self.neon_uri = "http://50.19.216.114:8081/api/v1/submitvideo/" 
         

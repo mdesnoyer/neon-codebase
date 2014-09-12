@@ -18,8 +18,6 @@
 
 /// String Constants used by Neon Service 
 static ngx_str_t neon_cookie_name = ngx_string("neonglobaluserid");
-//static ngx_str_t cookie_root_domain = ngx_string("; Domain=.neon-lab.com; Path=/;"); 
-//static ngx_str_t cookie_neon_domain_prefix = ngx_string("; Domain=.neon-lab.com; Path=");
 static ngx_str_t cookie_root_domain = ngx_string("; Domain=.neon-images.com; Path=/;"); 
 static ngx_str_t cookie_neon_domain_prefix = ngx_string("; Domain=.neon-images.com; Path=");
 static ngx_str_t cookie_max_expiry = ngx_string( "; expires=Thu, 31-Dec-37 23:59:59 GMT"); //expires 2038
@@ -35,7 +33,7 @@ static ngx_str_t cookie_fwd_slash = ngx_string("/");
  * */
 
 static unsigned char *
-neon_service_get_uri_token(ngx_http_request_t *req, 
+neon_service_get_uri_token(const ngx_http_request_t *req, 
                             ngx_str_t * base_url, 
                             int token_index){
     
@@ -106,7 +104,7 @@ neon_service_get_uri_token(ngx_http_request_t *req,
 static void 
 neon_service_get_bucket_id(const ngx_str_t * neon_uuid, 
                            const ngx_str_t * video_id, 
-                            ngx_str_t * bucket_id){
+                           ngx_str_t * bucket_id){
 
     unsigned char hashstring[256]; // max size = 18 + sizeof(vid)
     int offset = 0;
@@ -132,9 +130,9 @@ neon_service_get_bucket_id(const ngx_str_t * neon_uuid,
  * */
 
 static NEON_BOOLEAN 
-neon_service_isset_cookie(ngx_http_request_t *request, 
-                            ngx_str_t *key, 
-                            ngx_str_t *value){
+neon_service_isset_cookie(ngx_http_request_t * request, 
+                          ngx_str_t * key, 
+                          ngx_str_t *value){
 
     if (ngx_http_parse_multi_header_lines(&request->headers_in.cookies,
                 key, value) == NGX_DECLINED) {
@@ -287,15 +285,15 @@ neon_service_userid_abtest_ready(ngx_http_request_t *request, ngx_str_t *uuid){
 
 static NEON_BOOLEAN
 neon_service_set_abtest_bucket_cookie(ngx_http_request_t *request, 
-                                        ngx_str_t *video_id, 
-                                        ngx_str_t *pub_id,
-                                        ngx_str_t *bucket_id){ 
+                                      ngx_str_t *video_id, 
+                                      ngx_str_t *pub_id,
+                                      ngx_str_t *bucket_id){ 
 
     ngx_str_t c_prefix = ngx_string("neonimg_");
     ngx_str_t underscore = ngx_string("_");
     ngx_str_t expires, domain;
     u_char *p = 0, *dp = 0, *cp = 0;
-    time_t add_expiry = 10 *60; //10 mins
+    time_t add_expiry = 10 * 60; //10 mins
    
     // Format the cookie name for bucket id : neonimg_{pub}_{vid}
     ngx_str_t cookie_name;
@@ -536,17 +534,9 @@ neon_service_server_api(ngx_http_request_t *request,
                                            &account_id_size, &video_id, &pub_id, 
                                            &ipAddress, &width, &height, 0);
 
+    // Send no content if account id is not found 
     if(ret !=0){
         neon_stats[NEON_SERVER_API_ACCOUNT_ID_NOT_FOUND] ++;    
-        neon_service_server_api_not_found(request, chain);
-        return NEON_SERVER_API_FAIL;
-    }
-    
-    // Send no content if account id is not found or
-    // width or height is missing
-    // The API spec needs both width & height to be sent  
-    if ((width == -1 && height != -1) || (height == -1 && width != -1)){
-        //neon_stats[NEON_SERVER_API_INVALID_ARGS] ++;
         neon_service_server_api_not_found(request, chain);
         return NEON_SERVER_API_FAIL;
     }

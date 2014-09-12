@@ -262,7 +262,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
             elif method == "abteststate":
                 video_id = uri_parts[-1].split('?')[0]
-                self.get_abteststate(video_id)
+                self.get_abtest_state(video_id)
 
             elif method == "videos" or "videos" in method:
                 video_state = None
@@ -416,8 +416,17 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
                 i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
                 try:
+                    # Get video property to be updated
+                    # (change current_thumbnail, upload custom thumb, abtest)
                     new_tid = self.get_argument('current_thumbnail', None)
-                    if new_tid is None:
+                    abtest = self.get_argument('abtest', None)
+                    
+                    if abtest is not None:
+                        state = InputSanitizer.to_bool(abtest)
+                        self.update_video_abtest_state(i_vid, state)
+                        return
+
+                    elif new_tid is None and abtest is None:
                         # custom thumbnail upload
                         thumbs = json.loads(self.get_argument('thumbnails'))
                         self.upload_video_custom_thumbnail(itype, i_id, i_vid,
@@ -503,6 +512,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         request_body["video_title"] = \
                 video_url.split('//')[-1] if video_title is None else video_title 
         request_body["video_url"] = video_url
+        request_body["previous_thumbnail"] = default_thumbnail 
         client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
                         % options.video_server 
         if options.local == 1:
@@ -839,9 +849,22 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 keys)
             tids = []
             for vresult in video_results:
+                
                 if vresult:
+                    # extend list of tids
                     tids.extend(vresult.thumbnail_ids)
-        
+            
+                    # Update A/B Test state for the videos
+                    vid = neondata.InternalVideoID.to_external(vresult.key)
+                    result[vid].abtest = vresult.testing_enabled
+
+                    # If there is a winner, populate the winner thumbnail
+                    if vresult.experiment_state == \
+                        neondata.ExperimentState.COMPLETE:
+                            winner_tid = yield tornado.gen.Task(vresult.get_winner_tid)
+                            if winner_tid:
+                                result[vid].winner_thumbnail = winner_tid
+                
             #Get all the thumbnail data for videos that are done
             thumbnails = yield tornado.gen.Task(
                         neondata.ThumbnailMetadata.get_many, tids)
@@ -854,7 +877,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                 " msg=video deleted %s"%(i_type, vid))
                     else:
                         result[vid].thumbnails.append(tdata)
-
+            
         #4. Set the default thumbnail for each of the video
         tid_key = "thumbnail_id"
         for res in result:
@@ -871,7 +894,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
             if vres.status == "finished" and vres.current_thumbnail == 0:
                 vres.current_thumbnail = platform_thumb_id
- 
+
+        #TODO
+        #5. Set Winner thumbnail
+        #6. Set ab test state
         
         #convert to dict and count total counts for each state
         vresult = []
@@ -1704,6 +1730,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
     @tornado.gen.engine
     def upload_video_custom_thumbnail(self, itype, i_id, i_vid, thumbs):
+        '''
+        Update a custom thumbnail for a video
+        '''
 
         p_vid = neondata.InternalVideoID.to_external(i_vid)
         platform_account = yield tornado.gen.Task(self.get_platform_account, itype, i_id)
@@ -1713,7 +1742,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             self.send_json_response("%s account not found" % itype, 400)
             return
      
-        # TODO: handle multiple thumb uploads
+        # TODO: should we handle multiple thumb uploads ?
         t_url = thumbs[0]["urls"][0]
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
         
@@ -1734,12 +1763,35 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             self.send_json_response(data, 500)
             return
 
+    @tornado.gen.engine
+    def update_video_abtest_state(self, i_vid, state):
+        '''
+        For a given video update the ABTest state
+        '''
+
+        vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
+        if not vmdata:
+            self.send_json_response('{"error": "vid not found"}', 400)
+            return
+        
+        if not isinstance(state, bool):
+            self.send_json_response('{"error": "invalid data type or not boolean"}', 400)
+            return
+
+        vmdata.testing_enabled = state
+        result = yield tornado.gen.Task(vmdata.save)
+        
+        if not result:
+            self.send_json_response('{"error": "internal db error"}', 500)
+            return
+
+        self.send_json_response('', 202)
 
     ### AB Test State #####
     
     @tornado.web.asynchronous
     @tornado.gen.engine
-    def get_abteststate(self, vid):
+    def get_abtest_state(self, vid):
 
         '''
         Return the A/B Test state of the video
@@ -1776,7 +1828,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             # If override == true, then pick highest
             # else filter all > exp_frac ; then max frac
 
-            winner_tid = vmdata.get_winner_tid()
+            winner_tid = yield tornado.gen.Task(vmdata.get_winner_tid)
             if winner_tid:
                 s_urls = neondata.ThumbnailServingURLs.get(winner_tid)
                 for size_tup, url in s_urls.size_map.iteritems():
@@ -1787,6 +1839,15 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     s_url['height'] = size_tup[1]
                     rdata.append(s_url)
                 response['data'] = rdata
+                
+                #Get original sized thumbnail
+                o_url = s_urls.get_serving_url(vmdata.frame_size[0],
+                        vmdata.frame_size[1])
+                response['original_thumbnail'] = o_url
+                
+                if o_url is None:
+                    _log.error("orignal_thumbnail is None for video id %s" %
+                            i_vid)
             else:
                 response['state'] = "unknown" #should we define error state? 
                 _log.error("winner tid not found for video id %s" % i_vid)

@@ -7,6 +7,7 @@
 extern "C" {
     #include "neon_utils.h"
 }
+const double EXPECTED_PCT = 1.0; 
 
 /*
  *   Directive
@@ -95,6 +96,16 @@ Directive::Init(const rapidjson::Document & document)
         // this is the floor value of the next one
         pctFloor = f->GetThreshold();
     }
+
+    // Check total fraction adds up to 1. Else normalize pcts 
+    //
+    if (pctFloor != EXPECTED_PCT){
+        for(unsigned int i=0; i<fractions.size(); i++){
+            double pcnt = fractions[i]->GetPct();
+            pcnt = pcnt / pctFloor;
+            fractions[i]->SetPct(pcnt);
+        } 
+    }
 }
 
 
@@ -150,28 +161,29 @@ Directive::GetFraction(unsigned char * bucketId, int bucketIdLen) const
         return 0;
 
     unsigned int i = 0, index = 0;    
-    std::vector<double> cumulative_fractions; 
-    std::vector<double> individual_fractions; 
+    std::vector<double> cumulative_pcts; 
+    std::vector<double> individual_pcts; 
     double total_pcnt = 0;
     for(i=0; i<fractions.size(); i++){
         double pcnt = fractions[i]->GetPct();
         total_pcnt += pcnt;    
-        individual_fractions.push_back(pcnt);
-        cumulative_fractions.push_back(total_pcnt);
+        individual_pcts.push_back(pcnt);
+        cumulative_pcts.push_back(total_pcnt);
     }
     
     
     if(bucketId == 0 or bucketIdLen <= 0){
         // If bucketId is empty, the user isnt' part of AB test yet 
         // Pick the fraction with max pcnt
-        index = std::distance(individual_fractions.begin(), 
-                                std::max_element(individual_fractions.begin(), 
-                                individual_fractions.end())); 
+        index = std::distance(individual_pcts.begin(), 
+                                std::max_element(individual_pcts.begin(), 
+                                individual_pcts.end()));
+
     }else{
         // Pick the AB test bucket
         double bId = (double) atoi((const char *)bucketId); // BucketId is int
-        for(i=0 ; i< cumulative_fractions.size(); i++){
-            if (bId < (cumulative_fractions[i] * N_ABTEST_BUCKETS))
+        for(i=0 ; i< cumulative_pcts.size(); i++){
+            if (bId < (cumulative_pcts[i] * N_ABTEST_BUCKETS))
                 break;    
         }
         index = i;

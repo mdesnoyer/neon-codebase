@@ -2337,6 +2337,8 @@ class VideoMetadata(StoredObject):
         if self.__dict__.has_key('frame_size'):
             return self.frame_size
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def get_winner_tid(self):
         '''
         Get the TID that won the A/B test
@@ -2344,7 +2346,8 @@ class VideoMetadata(StoredObject):
         def almost_equal(a, b, threshold=0.001):
             return abs(a -b) <= threshold
 
-        tmds = ThumbnailMetadata.get_many(self.thumbnail_ids)
+        #tmds = ThumbnailMetadata.get_many(self.thumbnail_ids)
+        tmds = yield tornado.gen.Task(ThumbnailMetadata.get_many, self.thumbnail_ids)
         tid = None
 
         if self.experiment_state == ExperimentState.COMPLETE:
@@ -2352,7 +2355,7 @@ class VideoMetadata(StoredObject):
             for tmd in tmds:
                 if tmd.serving_frac == 1.0:
                     tid = tmd.key
-                    return tid
+                    raise tornado.gen.Return(tid)
 
             #2. Check the experiment strategy 
             es = ExperimentStrategy.get(self.get_account_id())
@@ -2369,7 +2372,7 @@ class VideoMetadata(StoredObject):
                     else:
                         tid = winner_tmd[0].key
 
-                    return tid
+                    raise tornado.gen.Return(tid)
 
                 else:
                     # Holdback state, return majoriy fraction
@@ -2379,7 +2382,7 @@ class VideoMetadata(StoredObject):
             max_tmd = max(tmds, key=lambda t: t.serving_frac)
             tid = max_tmd.key
 
-        return tid
+        raise tornado.gen.Return(tid)
 
     def save_thumbnail_to_s3_and_store_metadata(self, image, score, keyname,
                                         s3fname, ttype, rank=0, model_version=0,
@@ -2551,7 +2554,7 @@ class InMemoryCache(object):
 class VideoResponse(object):
     ''' VideoResponse object that contains list of thumbs for a video '''
     def __init__(self, vid, status, i_type, i_id, title, duration,
-            pub_date, cur_tid, thumbs):
+            pub_date, cur_tid, thumbs, abtest=True, winner_thumbnail=None):
         self.video_id = vid
         self.status = status
         self.integration_type = i_type
@@ -2561,7 +2564,9 @@ class VideoResponse(object):
         self.publish_date = pub_date
         self.current_thumbnail = cur_tid
         #list of ThumbnailMetdata dicts 
-        self.thumbnails = thumbs if thumbs else []  
+        self.thumbnails = thumbs if thumbs else [] 
+        self.abtest = abtest
+        self.winner_thumbnail = winner_thumbnail
     
     def to_dict(self):
         return self.__dict__
