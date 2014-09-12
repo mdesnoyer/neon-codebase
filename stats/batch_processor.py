@@ -96,6 +96,7 @@ class ImpalaTableBuilder(threading.Thread):
             # Set some parameters
             hive.execute('SET hive.exec.compress.output=true')
             hive.execute('SET avro.output.codec=snappy')
+            hive.execute('SET parquet.compression=SNAPPY')
             hive.execute('SET hive.exec.dynamic.partition.mode=nonstrict')
         
             self.status = 'RUNNING'
@@ -129,7 +130,13 @@ class ImpalaTableBuilder(threading.Thread):
             STORED AS INPUTFORMAT 'parquet.hive.DeprecatedParquetInputFormat' 
             OUTPUTFORMAT 'parquet.hive.DeprecatedParquetOutputFormat'
             """ % (parq_table, self._generate_table_definition()))
-            
+
+            # Building parquet tables takes a lot of memory, so make
+            # sure we give the job enough.
+            hive.execute("SET mapreduce.reduce.memory.mb 5000")
+            hive.execute("SET mapreduce.reduce.java.opts -Xmx4000m")
+            hive.execute("SET mapreduce.map.memory.mb 5000")
+            hive.execute("SET mapreduce.map.java.opts -Xmx4000m")
             hive.execute("""
             insert overwrite table %s
             partition(tai, yr, mnth)
@@ -149,6 +156,8 @@ class ImpalaTableBuilder(threading.Thread):
             else:
                 # It's not there, so we need to refresh all the metadata
                 impala_cursor.execute('invalidate metadata')
+
+            hive.execute('reset')
 
             self.status = 'SUCCESS'
             

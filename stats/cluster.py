@@ -117,7 +117,7 @@ class Cluster():
         'r3.4xlarge' : (4.4, 1.40),
         'r3.8xlarge' : (9.6, 2.80),
         'hi1.4xlarge' : (2.5, 3.10),
-        'm2.4xlarge' : (2.3, 0.98)}
+        'm2.4xlarge' : (2.2, 0.98)}
 
 
     # Possible cluster roles
