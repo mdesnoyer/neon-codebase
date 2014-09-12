@@ -76,6 +76,9 @@ double min(const cv::Mat& image);
 double max(const cv::Mat& image);
 double sum(const cv::Mat& image, int channel=0);
 
+// Do scalar conversions
+cv::Scalar bgr2lab(const cv::Scalar& bgr);
+
 }
 
 #endif // __CV_UTILS_H__

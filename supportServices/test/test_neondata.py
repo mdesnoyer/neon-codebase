@@ -12,6 +12,7 @@ import logging
 _log = logging.getLogger(__name__)
 import multiprocessing
 from mock import patch, MagicMock
+import os
 import redis
 import random
 import socket
@@ -149,6 +150,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertItemsEqual([x.__dict__ for x in platforms],
                               [x.__dict__ for x in [bp, np, yp]])
 
+    @unittest.skip('TODO(Sunil): add this test')
     def test_add_platform_with_bad_account_id(self):
         pass
     
@@ -333,6 +335,47 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                          'http://that_800_600.jpg')
         self.assertEqual(output2.get_serving_url(640, 480),
                          'http://this.jpg')
+
+    def test_too_many_open_connections_sync(self):
+        # When making calls on various objects, there should only be
+        # one connection per object type to the redis server. We're
+        # just going to make sure that that is the case
+
+        get_func = lambda x: x.get('key')
+        
+        obj_types = [
+            (VideoMetadata('key'), get_func),
+            (ThumbnailMetadata('key'), get_func),
+            (TrackerAccountIDMapper('key'), get_func),
+            (ThumbnailServingURLs('key'), get_func),
+            (ExperimentStrategy('key'), get_func),
+            (NeonUserAccount('key', 'api'),
+             lambda x: x.get_account('api')),
+            (NeonPlatform('key', 'api'),
+             lambda x: x.get_account('api')),
+            (BrightcovePlatform('a', 'i', 'api'),
+             lambda x: x.get_account('api', 'i')),
+            (OoyalaPlatform('a', 'i', 'api', 'b', 'c', 'd', 'e'),
+             lambda x: x.get_account('api', 'i')),
+            (YoutubePlatform('a', 'i', 'api'),
+             lambda x: x.get_account('api', 'i')),]
+
+        for obj, read_func in obj_types:
+            # Start by saving the object
+            obj.save()
+
+            # Now find the number of open file descriptors
+            start_fd_count = len(os.listdir("/proc/%s/fd" % os.getpid()))
+
+            def nop(x): pass
+
+            # Run the func a bunch of times
+            for i in range(10):
+                read_func(obj)
+
+            # Check the file descriptors
+            end_fd_count = len(os.listdir("/proc/%s/fd" % os.getpid()))
+            self.assertEqual(start_fd_count, end_fd_count)
     
     def test_processed_internal_video_ids(self):
         na = NeonUserAccount('accttest')

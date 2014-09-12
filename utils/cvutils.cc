@@ -31,7 +31,7 @@ void WriteNormalizedImage(const string filename, const Mat& image) {
 }
 
 void DisplayNormalizedImage(const cv::Mat& image, const char* windowName) {
-  Mat outImage = image;
+  Mat outImage = image.clone();
   if (image.channels() == 1) {
     normalize(image, outImage, 0, 255, NORM_MINMAX,
               CV_MAKETYPE(CV_8U, image.channels()));
@@ -77,6 +77,31 @@ double max(const Mat& image) {
 
 double sum(const Mat& image, int channel) {
   return cv::sum(image)[channel];
+}
+
+inline double labfunc(double val) {
+  if (val > 0.008856) {
+    return std::pow(val, 1/3.);
+  } else {
+    return 7.787 * val + 16./116;
+  }
+}
+
+Scalar bgr2lab(const Scalar& bgr) {
+  Matx<double, 3, 4> A(0.357580, 0.180423, 0.412453, 0.0,
+                       0.715160, 0.072169, 0.212671, 0.0, 
+                       0.119193, 0.950227, 0.019334, 0.0);
+
+  Vec<double, 3> xyz = A * bgr;
+  xyz[0] /= 0.950456;
+  xyz[2] /= 1.088754;
+    
+  double ylabval = labfunc(xyz[1]);
+  Scalar lab(116 * ylabval - 16,
+             500 * (labfunc(xyz[0]) - ylabval),
+             200 * (labfunc(xyz[2]) - ylabval),
+             0.0);
+  return lab;
 }
 
 }
