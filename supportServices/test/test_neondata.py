@@ -376,26 +376,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             # Check the file descriptors
             end_fd_count = len(os.listdir("/proc/%s/fd" % os.getpid()))
             self.assertEqual(start_fd_count, end_fd_count)
-
-    def test_file_descriptors_on_send_error(self):
-        ThumbnailMetadata('key').save()
-
-        # Now find the number of open file descriptors
-        start_fd_count = len(os.listdir("/proc/%s/fd" % os.getpid()))
-
-        dbconn = DBConnection(ThumbnailMetadata)
-        mock_conn = MagicMock()
-        send_command = dbconn.blocking_conn.connection.send_command
-        dbconn.blocking_conn.connection.send_command = mock_conn
-        mock_conn.side_effect([redis.exceptions.ConnectionError,
-                               redis.exceptions.ConnectionError,
-                               redis.exceptions.ConnectionError,
-                               send_command])
-
-        ThumbnailMetadata.get('key')
-
-        end_fd_count = len(os.listdir("/proc/%s/fd" % os.getpid()))
-        self.assertEqual(start_fd_count, end_fd_count)
     
     def test_processed_internal_video_ids(self):
         na = NeonUserAccount('accttest')

@@ -1206,6 +1206,14 @@ class BrightcovePlatform(AbstractPlatform):
         ''' return ovp name'''
         return "brightcove"
 
+    def get(self, callback=None):
+        ''' get json'''
+        db_connection = DBConnection(self)
+        if callback:
+            db_connection.conn.get(self.key, callback)
+        else:
+            return db_connection.blocking_conn.get(self.key)
+
     def get_api(self):
         '''Return the Brightcove API object for this platform integration.'''
         return api.brightcove_api.BrightcoveApi(
