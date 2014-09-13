@@ -523,9 +523,20 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         # Now try asynchronously
         def setphash(thumb): thumb.phash = 'hash'
         def setrank(thumb): thumb.rank = 6
-        ThumbnailMetadata.modify(tid, setphash, callback=self.stop)
-        ThumbnailMetadata.modify(tid, setrank, callback=self.stop)
+
+        counters = [1, 2]
+        def wrapped_callback(param):
+            self.stop()
+
+        ThumbnailMetadata.modify(tid, setphash, callback=wrapped_callback)
+        ThumbnailMetadata.modify(tid, setrank, callback=wrapped_callback)
         self.wait() #wait() runs the IOLoop until self.stop() is called
+        
+        # if len(counters) is not 0, call self.wait() to service the other
+        # callback  
+        if len(counters) > 0:
+            self.wait()
+
         thumb = ThumbnailMetadata.get(tid)
         self.assertEqual(thumb.phash, 'hash')
         self.assertEqual(thumb.rank, 6)

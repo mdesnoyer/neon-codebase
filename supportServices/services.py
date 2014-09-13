@@ -357,14 +357,14 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             elif "youtube_integrations" == itype:
                 self.create_youtube_video_request(i_id)
             elif "neon_integrations" == itype:
-                self.create_neon_video_request(i_id)
+                self.create_neon_video_request_from_ui(i_id)
             #elif "ooyala_integrations" == itype:
             #    self.create_ooyala_video_request(i_id)
             else:
                 self.method_not_supported()
 
         elif method == "create_thumbnail_api_request":
-            self.create_neon_video_request_via_api()
+            self.create_neon_thumbnail_api_request()
         else:
             self.method_not_supported()
 
@@ -431,6 +431,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                         thumbs = json.loads(self.get_argument('thumbnails'))
                         self.upload_video_custom_thumbnail(itype, i_id, i_vid,
                                                             thumbs)
+                        return
                 except Exception, e:
                     data = '{"error": "missing thumbnail_id or thumbnails argument"}'
                     self.send_json_response(data, 400)
@@ -438,6 +439,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
                 if "brightcove_integrations" == itype:
                     self.update_video_brightcove(i_id, i_vid, new_tid)
+                    return
 
                 elif "youtube_integrations" == itype:
                     self.update_youtube_video(i_id, i_vid)
@@ -455,6 +457,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     return
             else:
                 self.method_not_supported()
+                return
         else:
             _log.error("Method not supported")
             self.set_status(400)
@@ -535,7 +538,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             self.send_json_response(data, 409)
             return
         if result.error:
-            _log.error("key=create_neon_video_request_via_api "
+            _log.error("key=create_neon_thumbnail_api_request "
                     "msg=thumbnail api error %s" %result.error)
             data = '{"error":"neon thumbnail api error"}'
             self.send_json_response(data, 502)
@@ -545,7 +548,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         self.send_json_response(result.body, 201)
     
     @tornado.gen.engine
-    def create_neon_video_request_via_api(self):
+    def create_neon_thumbnail_api_request(self):
         '''
         Endpoint for API calls to submit a video request
         '''
@@ -559,7 +562,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         default_thumbnail = self.get_argument('default_thumbnail', None)
         
         if video_id is None or video_url == "": 
-            _log.error("key=create_neon_video_request_via_api "
+            _log.error("key=create_neon_thumbnail_api_request "
                     "msg=malformed request or missing arguments")
             self.send_json_response('{"error":"missing video_url"}', 400)
             return
@@ -569,8 +572,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                             video_title, topn, callback_url, default_thumbnail)
 
     @tornado.gen.engine
-    def create_neon_video_request(self, i_id):
-        ''' neon platform request via the Neon/ Demo account in the UI '''
+    def create_neon_video_request_from_ui(self, i_id):
+        ''' neon platform request via the Neon/ Demo account in the UI 
+            this call is required for customers that put a demo link in to the
+            system and don't have a video id per se
+        '''
 
         title = None
         try:
@@ -580,7 +586,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             video_url = video_url.replace("www.dropbox.com", 
                                 "dl.dropboxusercontent.com")
         except:
-            _log.error("key=create_neon_video_request "
+            _log.error("key=create_neon_video_request_from_ui "
                     "msg=malformed request or missing arguments")
             self.send_json_response('{"error":"missing video_url"}', 400)
             return
@@ -621,15 +627,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         request_body["video_title"] = \
                 video_url.split('//')[-1] if title is None else title 
         request_body["video_url"]   = video_url
-        #client_url = 'http://thumbnails.neon-lab.com/api/v1/submitvideo/topn'
+        request_body["callback_url"] = None 
         client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
                         % options.video_server 
         if options.local == 1:
             client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
-            request_body["callback_url"] = "http://localhost:8081/testcallback"
-        else:
-            request_body["callback_url"] = \
-                    "http://thumbnails.neon-lab.com/testcallback"
         body = tornado.escape.json_encode(request_body)
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
         req = tornado.httpclient.HTTPRequest(url=client_url,
@@ -647,7 +649,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             return
         
         if result.error:
-            _log.error("key=create_neon_video_request "
+            _log.error("key=create_neon_video_request_from_ui "
                     "msg=thumbnail api error %s" %result.error)
             data = '{"error":"neon thumbnail api error"}'
             self.send_json_response(data, 502)
@@ -984,13 +986,16 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                         %(p_vid, new_tid))
             data = ''
             self.send_json_response(data, 200)
+            return
         else:
             if result is None:
                 data = '{"error": "internal error"}'
                 self.send_json_response(data, 500)
+                return
             else:
                 data = '{"error": "brightcove api failure"}'
                 self.send_json_response(data, 502)
+                return
 
     @tornado.gen.engine
     def create_account_and_neon_integration(self, a_id):

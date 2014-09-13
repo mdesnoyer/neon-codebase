@@ -42,6 +42,7 @@ define('max_retries', default=5, type=int,
        help='Maximum number of retries when sending a Brightcove error')
 
 class BrightcoveApi(object): 
+
     ''' Brighcove API Interface class
     All video ids used in the class refer to the Brightcove platform VIDEO ID
     '''
@@ -53,7 +54,7 @@ class BrightcoveApi(object):
     
     def __init__(self, neon_api_key, publisher_id=0, read_token=None,
                  write_token=None, autosync=False, publish_date=None,
-                 local=True, account_created=None):
+                 neon_video_server=None, account_created=None):
         self.publisher_id = publisher_id
         self.neon_api_key = neon_api_key
         self.read_token = read_token
@@ -62,14 +63,10 @@ class BrightcoveApi(object):
         self.write_url = "http://api.brightcove.com/services/post"
         self.autosync = autosync
         self.last_publish_date = publish_date if publish_date else time.time()
-        self.local = local 
-        if self.local:
-            self.neon_uri = "http://localhost:8081/api/v1/submitvideo/"
-        else:
-            #TODO(Sunil): refactor this code & cleanup
-            #self.neon_uri = "http://thumbnails.neon-lab.com/api/v1/submitvideo/" 
-            self.neon_uri = "http://50.19.216.114:8081/api/v1/submitvideo/" 
-        
+        self.neon_uri = "http://localhost:8081/api/v1/submitvideo/"  
+        if neon_video_server is not None:
+            self.neon_uri = "http://%s:8081/api/v1/submitvideo/" % neon_video_server
+
         self.THUMB_SIZE = 120, 90
         self.STILL_SIZE = 480, 360
         self.account_created = account_created
@@ -427,7 +424,8 @@ class BrightcoveApi(object):
                                 key=lambda x:abs(x-frame_width))
             return video_urls[closest_f_width]
         else:
-            return d_url
+            #return the max width rendition
+            return video_urls[max(video_urls.keys())]
 
     def get_publisher_feed(self, command='find_all_videos', output='json',
                            page_no=0, page_size=100, callback=None):
@@ -569,11 +567,7 @@ class BrightcoveApi(object):
         request_body["video_id"] = str(id)
         request_body["video_title"] = str(id) if title is None else title 
         request_body["video_url"] = video_download_url
-        if self.local:
-            request_body["callback_url"] = "http://localhost:8081/testcallback"
-        else:
-            #request_body["callback_url"] = "http://thumbnails.neon-lab.com/testcallback"
-            request_body["callback_url"] = "http://50.19.216.114:8081/testcallback"
+        request_body["callback_url"] = None #no callback required 
         request_body["autosync"] = self.autosync
         request_body["topn"] = 1
         request_body["integration_id"] = i_id 

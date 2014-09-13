@@ -565,6 +565,15 @@ neon_service_server_api(ngx_http_request_t *request,
         return NEON_SERVER_API_FAIL;
     }
 
+    // Temp solution, figure out a way to use the nginx logger
+    // beyond this file & not in the context of a request
+    // Log if it is a cloudinary URL 
+    if (strstr(url,"cloudinary") != NULL){
+        ngx_log_error(NGX_LOG_ERR, request->connection->log, 0, 
+                        "Cloudinary URL generated for video %s h %d w %d", 
+                        video_id, height, width);
+    }
+
     neon_service_server_api_img_url_found(request, chain, (char *)url, url_size); 
     return NEON_SERVER_API_OK;
 }
@@ -729,6 +738,15 @@ neon_service_client_api(ngx_http_request_t *request,
         neon_stats[NEON_CLIENT_API_URL_NOT_FOUND] ++;
         neon_service_no_content(request, chain);
         return NEON_CLIENT_API_FAIL;
+    }
+
+    // Temp solution, figure out a way to use the nginx logger
+    // beyond this file & not in the context of a request
+    // Log if it is a cloudinary URL 
+    if (strstr(url,"cloudinary") != NULL){
+        ngx_log_error(NGX_LOG_ERR, request->connection->log, 0, 
+                        "Cloudinary URL generated for video %s h %d w %d", 
+                        video_id, height, width);
     }
 
     // set up the response with a redirect

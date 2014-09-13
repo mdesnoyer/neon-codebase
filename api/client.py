@@ -106,6 +106,10 @@ def callback_response_builder(job_id, vid, data,
         @client_url: the callback url to send the data to
 
         '''
+        # Dont' create a request object if the client_url is None   
+        if client_url is None:
+            return
+
         response_body = {}
         response_body["job_id"] = job_id 
         response_body["video_id"] = vid 
@@ -841,6 +845,11 @@ class VideoProcessor(object):
         '''
         Send client response
         '''
+        # Check if request object is empty, if so just return True
+
+        if request is None:
+            return True
+        
         response = utils.http.send_request(request)
         if response.error:
             _log.error("Callback response not sent to %r " % request.url)

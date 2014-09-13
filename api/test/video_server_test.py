@@ -183,5 +183,13 @@ class TestVideoServer(AsyncHTTPTestCase):
         resp = self.wait()
         self.assertEqual(resp.code, 400)
 
+    def test_request_without_callback_url(self):
+        vals = {"api_key": self.api_key, 
+                    "video_url": "http://testurl/video.mp4", 
+                    "video_id": "vid1" , "topn":2, 
+                    "video_title": "test_title"}
+        resp = self.make_api_request(vals)
+        self.assertEqual(resp.code, 201)
+        
 if __name__ == '__main__':
     unittest.main()
