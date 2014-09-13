@@ -714,7 +714,8 @@ class Cluster():
                  x[1], cur_price, avg_price)
                  for itype, x in Cluster.instance_info.items()
                  for cur_price, avg_price in [self._get_spot_prices(itype)]]
-        data = sorted(data, key=lambda x: (-x[2] / (x[5] * x[1]), -x[1]))
+        data = sorted(data, key=lambda x: (-x[2] / (np.mean(x[4:6]) * x[1]),
+                                           -x[1]))
         chosen_type, count, cpu_units, on_demand_price, cur_spot_price, \
           avg_spot_price = data[0]
 
@@ -738,7 +739,7 @@ class Cluster():
                              
 
     def _get_spot_prices(self, instance_type, 
-                         tdiff=datetime.timedelta(days=7)):
+                         tdiff=datetime.timedelta(days=1)):
         '''Returns the (current, avg for the tdiff) for a given
         instance type.'''
         conn = EC2Connection()
