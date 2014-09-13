@@ -204,6 +204,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
         cls.isp = ISP(cls.s3_mfile_url, s3downloader, s3port) 
         cls.isp.start()
+        
         time.sleep(1) # allow mastermind file to be parsed
 
     def setUp(self):
@@ -219,7 +220,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
                         "http://neon-image-cdn.s3.amazonaws.com/pixel.jpg"
         self.neon_cookie_name = "neonglobaluserid"
         self.cookie_domain = ".neon-images.com"
-
+        self.default_url = "http://default_image_url.jpg"
 
     def tearDown(self):
         pass
@@ -266,7 +267,8 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
         except urllib2.HTTPError, e:
             print e
-            pass
+            return None, e.code
+
         except urllib2.URLError, e:
             pass
 
@@ -452,6 +454,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         self.assertTrue(response.code, 200)
         headers = response.info().headers
         im_url = json.loads(response.read())["data"]
+        self.assertEqual(headers[2], 'Content-Type: application/json\r\n')
         self.assertIsNotNone(im_url)
         self.assertIsNotNone(TestImageServingPlatformAPI.get_header_value(headers,
                                 "application/json"))
@@ -464,22 +467,26 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         response = self.server_api_request(self.pub_id, self.vid, 600, 500)
         self.assertIsNotNone(response)
         self.assertTrue(response.code, 200)
+        im_url = json.loads(response.read())["data"]
+        self.assertEqual(im_url, self.expected_img_url)
 
     def test_server_api_without_width(self):
         url = self.base_url % ("server", self.pub_id, self.vid)
         url += "?height=500"
         response = self.make_api_request(url, {})
-        self.assertIsNone(response)
-        #im_url = json.loads(response.read())["data"]
-        #self.assertEqual(im_url, "")
+        im_url = json.loads(response.read())["data"]
+        self.assertEqual(im_url, self.default_url)
 
     def test_server_api_without_height(self):
+        '''
+        Returns default Image URL
+        '''
+
         url = self.base_url % ("server", self.pub_id, self.vid)
         url += "?width=600"
         response = self.make_api_request(url, {})
-        self.assertIsNone(response)
-        #im_url = json.loads(response.read())["data"]
-        #self.assertEqual(im_url, "")
+        im_url = json.loads(response.read())["data"]
+        self.assertEqual(im_url, self.default_url)
 
     def test_server_api_with_non_standard_size(self):
         '''
@@ -495,12 +502,14 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         self.assertEqual(im_url, cloudinary_url % (w, h, tid, w, h))
     
     def test_server_api_with_invalid_pubid(self):
-        response = self.server_api_request("invalid_pub", self.vid, 1, 1)
+        response, code = self.server_api_request("invalid_pub", self.vid, 1, 1)
         self.assertIsNone(response)
+        self.assertEqual(code, 400)
     
     def test_server_api_with_invalid_video_id(self):
-        response = self.server_api_request(self.pub_id, "invalid_vid", 600, 500)
+        response, code = self.server_api_request(self.pub_id, "invalid_vid", 600, 500)
         self.assertIsNone(response)
+        self.assertEqual(code, 400)
     
     def test_server_api_with_cip_argument(self):
         '''

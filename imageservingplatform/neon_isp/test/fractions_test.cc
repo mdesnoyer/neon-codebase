@@ -14,62 +14,62 @@
 #include "directive.h"
 #include "fraction.h"
 
-using namespace std;                                                                 
+using namespace std; 
 
 class FractionsTest: public :: testing::Test, public Directive{
 
-public:
+    public:
         FractionsTest(){}
-protected:
+    protected:
         virtual void SetUp(){
             char dir[] =
-                "{                                                                      "
-                "    \"twpe\":\"dir\",                                                  "
-                "    \"aid\":\"acc1\",                                                  "
-                "    \"vid\":\"vid1\",                                                  "
-                "    \"sla\":\"2014-03-27T23:23:02Z\",                                  "
-                "    \"fractions\":                                                     "
-                "    [                                                                  "
-                "         {                                                             "
-                "             \"pct\": 0.9,                                             "
-                "             \"default_url\":\"http://vid1\",                          "
-                "             \"tid\":\"tid1\",                                         "
-                "             \"imgs\":                                                 "
-                "             [                                                         "
-                "                  {                                                    "
-                "                       \"h\":500,                                      "
-                "                       \"w\":600,                                      "
-                "                       \"url\":\"http://neon/thumb1_500_600.jpg\"      "
-                "                  },                                                   "
-                "                  {                                                    "
-                "                       \"h\":700,                                      "
-                "                       \"w\":800,                                      "
-                "                       \"url\":\"http://neon/thumb2_700_800.jpg\"      "
-                "                  }                                                    "
-                "             ]                                                         "
-                "         },                                                            "
-                "         {                                                             "
-                "             \"pct\": 0.1,                                             "
-                "             \"default_url\":\"http://vid1\",                          "
-                "             \"tid\":\"tid2\",                                         "
-                "             \"imgs\":                                                 "
-                "             [                                                         "
-                "                  {                                                    "
-                "                       \"h\":500,                                      "
-                "                       \"w\":600,                                      "
-                "                       \"url\":\"http://neon/thumb1_100_200.jpg\"      "
-                "                  },                                                   "
-                "                  {                                                    "
-                "                       \"h\":700,                                      "
-                "                       \"w\":800,                                      "
-                "                       \"url\":\"http://neon/thumb2_300_400.jpg\"      "
-                "                  }                                                    "
-                "             ]                                                         "
-                "         }                                                             "
-                "     ]                                                                 "
-                "}                                                                      "
+                "{  "
+                "\"type\":\"dir\",  "
+                "\"aid\":\"acc1\",  "
+                "\"vid\":\"vid1\",  "
+                "\"sla\":\"2014-03-27T23:23:02Z\",  "
+                "\"fractions\": "
+                "[  "
+                " { "
+                " \"pct\": 0.9, "
+                " \"default_url\":\"http://vid1\",  "
+                " \"tid\":\"tid1\", "
+                " \"imgs\": "
+                " [ "
+                "  {"
+                "   \"h\":500,  "
+                "   \"w\":600,  "
+                "   \"url\":\"http://neon/thumb1_500_600.jpg\"  "
+                "  },   "
+                "  {"
+                "   \"h\":700,  "
+                "   \"w\":800,  "
+                "   \"url\":\"http://neon/thumb2_700_800.jpg\"  "
+                "  }"
+                " ] "
+                " },"
+                " { "
+                " \"pct\": 0.1, "
+                " \"default_url\":\"http://vid1\",  "
+                " \"tid\":\"tid2\", "
+                " \"imgs\": "
+                " [ "
+                "  {"
+                "   \"h\":500,  "
+                "   \"w\":600,  "
+                "   \"url\":\"http://neon/thumb1_100_200.jpg\"  "
+                "  },   "
+                "  {"
+                "   \"h\":700,  "
+                "   \"w\":800,  "
+                "   \"url\":\"http://neon/thumb2_300_400.jpg\"  "
+                "  }"
+                " ] "
+                " } "
+                " ] "
+                "}  "
                 ;
-            
+
             document.Parse<0>(dir);
 
         }
@@ -82,15 +82,45 @@ TEST_F(FractionsTest, test_parsing_single_fraction){
 
     directive.Init(document);
     Fraction *f = directive.GetFraction(0);
-    EXPECT_EQ(0.9, f->GetPct());
-    //EXPECT_EQ(,f->GetThreshold());
+    EXPECT_DOUBLE_EQ(0.9, f->GetPct());
 }
 
-TEST_F(FractionsTest, test_scaled_image){
+// Test Rescaled fractions
+// Modify document to have un balanced fractions & ensure that they
+// get renormalized accurately
+
+TEST_F(FractionsTest, test_fractions_greater_than_one){
+   
+    // Modify document such that sum(pcts) > 1.0
+    rapidjson::Value& fractions = document["fractions"];
+    rapidjson::SizeType i = 1;
+    fractions[i]["pct"] = 0.3;
+
+    directive.Init(document);
+    Fraction *f = directive.GetFraction(0);
+    
+    // Check rebalanced values
+    EXPECT_DOUBLE_EQ(0.75, f->GetPct());
+    f = directive.GetFraction(1);
+    EXPECT_DOUBLE_EQ(0.25, f->GetPct());
 
 }
 
-// Test Fraction size
-//
-// Test Rescaled fraction
+TEST_F(FractionsTest, test_fractions_less_than_one){
+   
+    // Modify document such that sum(pcts) < 1.0
+    rapidjson::Value& fractions = document["fractions"];
+    rapidjson::SizeType i = 0;
+    fractions[i]["pct"] = 0.8;
+    i = 1;
+    fractions[i]["pct"] = 0.1;
 
+    directive.Init(document);
+    Fraction *f = directive.GetFraction(0);
+    
+    // Check rebalanced values
+    EXPECT_DOUBLE_EQ(0.8888888888888889, f->GetPct());
+    f = directive.GetFraction(1);
+    EXPECT_DOUBLE_EQ(0.1111111111111111, f->GetPct());
+
+}

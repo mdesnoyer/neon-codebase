@@ -351,7 +351,6 @@ class TestVideoClient(unittest.TestCase):
         vprocessor.error = "error message" 
         vprocessor.finalize_request() 
 
-
         #verify request state 
         api_key = vprocessor.job_params['api_key']
         job_id  = vprocessor.job_params['job_id']
