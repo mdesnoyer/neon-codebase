@@ -209,7 +209,8 @@ class Cluster():
                 self._set_requested_core_instances()
 
     def run_map_reduce_job(self, jar, main_class, input_path,
-                           output_path, map_memory_mb=None):
+                           output_path, map_memory_mb=None,
+                           timeout=None):
         '''Runs a mapreduce job.
 
         Inputs:
@@ -226,6 +227,10 @@ class Cluster():
         Returns:
         Returns once the job is done. If the job fails, an exception will be thrown.
         '''
+        if timeout is not None:
+            budget_time = datetime.datetime.now() + \
+              datetime.timedelta(seconds=timeout)
+        
         # Define extra options for the job
         extra_ops = {
             'mapreduce.output.fileoutputformat.compress' : 'true',
@@ -308,6 +313,9 @@ class Cluster():
         # Now poll the job status until it is done
         error_count = 0
         while True:
+            if timeout is not None and budget_time < datetime.datetime.now():
+                raise MapReduceError("Map Reduce Job timed out.")
+                
             try:
                 url = ("http://%s/proxy/%s/ws/v1/mapreduce/jobs/%s" % 
                        (host, application_id, job_id))

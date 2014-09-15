@@ -13,6 +13,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import atexit
+import code
 import signal
 import stats.batch_processor
 import stats.cluster
@@ -81,7 +82,8 @@ class BatchProcessManager(threading.Thread):
                         self.last_output_path = last_path
                         stats.batch_processor.build_impala_tables(
                             self.last_output_path,
-                            self.cluster)
+                            self.cluster,
+                            timeout = (options.batch_period * 10))
             except Exception as e:
                 _log.exception('Error finding the running batch job: %s' % e)
                 continue
@@ -100,10 +102,12 @@ class BatchProcessManager(threading.Thread):
                     'TASK', new_size=self.n_task_instances)
                 stats.batch_processor.run_batch_cleaning_job(
                     self.cluster, options.input_path,
-                    cleaned_output_path)
+                    cleaned_output_path,
+                    timeout = (options.batch_period * 10))
                 stats.batch_processor.build_impala_tables(
                     cleaned_output_path,
-                    self.cluster)
+                    self.cluster,
+                    timeout = (options.batch_period * 10))
                 self.last_output_path = cleaned_output_path
                 statemon.state.increment('successful_batch_runs')
                 statemon.state.last_batch_success = 1
@@ -183,7 +187,8 @@ def main():
                 else:
                     stats.batch_processor.build_impala_tables(
                         batch_processor.last_output_path,
-                        cluster)
+                        cluster,
+                        timeout = (options.batch_period * 10))
                     batch_processor.schedule_run()
             cluster.set_public_ip(options.cluster_ip)
         except Exception as e:

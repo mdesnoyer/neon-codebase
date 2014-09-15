@@ -15,6 +15,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'gen-py'))
 import avro.schema
 from boto.s3.connection import S3Connection
 import boto.s3.key
+import datetime
 from hive_service import ThriftHive
 from hive_service.ttypes import HiveServerException
 import impala.dbapi
@@ -51,6 +52,7 @@ class NeonDataPipelineException(Exception): pass
 class ExecutionError(NeonDataPipelineException): pass
 class ImpalaError(ExecutionError): pass
 class IncompatibleSchema(NeonDataPipelineException): pass
+class TimeoutException(NeonDataPipelineException): pass
 class UnexpectedInfo(NeonDataPipelineException): pass
 
 class ImpalaTableBuilder(threading.Thread):
@@ -223,7 +225,7 @@ class ImpalaTableBuilder(threading.Thread):
                     (field.name, field_type))
         return ','.join(cols)
 
-def build_impala_tables(input_path, cluster):
+def build_impala_tables(input_path, cluster, timeout=None):
     '''Builds the impala tables.
 
     Blocks until the tables are built.
@@ -232,11 +234,16 @@ def build_impala_tables(input_path, cluster):
     input_path - The input path, which should be the output of the
                  RawTrackerMR job.
     cluster - A Cluster object for working with the cluster
+    timeout - If specified, it will timeout after this number of seconds
 
     Returns:
     true on sucess
     '''
     _log.info("Building the impala tables")
+
+    if timeout is not None:
+        budget_time = datetime.datetime.now() + \
+          datetime.timedelta(seconds=timeout)
 
     threads = [] 
     for event in ['ImageLoad', 'ImageVisible',
@@ -249,7 +256,14 @@ def build_impala_tables(input_path, cluster):
 
     # Wait for all of the tables to be built
     for thread in threads:
-        thread.join()
+        time_left = None
+        if timeout is not None:
+            time_left = (budget_time - datetime.datetime.now()).total_seconds()
+            if time_left < 0:
+                raise TimeoutException()
+        thread.join(time_left)
+        if thread.is_alive():
+            raise TimeoutException()
         if thread.status != 'SUCCESS':
             _log.error("Error building impala table %s. See logs."
                        % thread.event)
@@ -258,7 +272,7 @@ def build_impala_tables(input_path, cluster):
     _log.info('Finished building Impala tables')
     return True
 
-def run_batch_cleaning_job(cluster, input_path, output_path):
+def run_batch_cleaning_job(cluster, input_path, output_path, timeout=None):
     '''Runs the mapreduce job that cleans the raw events.
 
     The events are output in a format that can be read by hive as an
@@ -266,7 +280,8 @@ def run_batch_cleaning_job(cluster, input_path, output_path):
 
     Inputs:
     input_path - The s3 path for the raw data
-    output_path - The output path for the raw data    
+    output_path - The output path for the raw data
+    timeout - Time in seconds    
     '''
     _log.info("Starting batch event cleaning job done")
     try:
@@ -274,7 +289,8 @@ def run_batch_cleaning_job(cluster, input_path, output_path):
                                    'com.neon.stats.RawTrackerMR',
                                    input_path,
                                    output_path,
-                                   map_memory_mb=2048)
+                                   map_memory_mb=2048,
+                                   timeout=timeout)
     except Exception as e:
         _log.error('Error running the batch cleaning job: %s' % e)
         statemon.state.increment('stats_cleaning_job_failures')
