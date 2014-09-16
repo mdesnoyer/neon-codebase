@@ -391,6 +391,12 @@ class DirectivePublisher(threading.Thread):
         self.lock = threading.RLock()
         self._stopped = threading.Event()
 
+        # For some reason, when testing on some machines, the patch
+        # for the S3Connection doesn't work in a separate thread. So,
+        # we grab the reference to the S3Connection on initialization
+        # instead of relying on the import statement.
+        self.S3Connection = S3Connection
+
     def run(self):
         self._stopped.clear()
         while not self._stopped.is_set():
@@ -444,7 +450,7 @@ class DirectivePublisher(threading.Thread):
                   (options.s3_bucket, filename))
 
         # Create the connection to S3
-        s3conn = S3Connection()
+        s3conn = self.S3Connection()
         try:
             bucket = s3conn.get_bucket(options.s3_bucket)
         except boto.exception.BotoServerError as e:

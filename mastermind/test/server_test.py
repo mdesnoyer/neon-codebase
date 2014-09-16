@@ -33,6 +33,7 @@ from supportServices import neondata
 import test_utils.mock_boto_s3
 import test_utils.neontest
 import test_utils.redis
+import time
 import tornado.web
 import unittest
 import utils.neon
@@ -541,10 +542,6 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
 class TestDirectivePublisher(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestDirectivePublisher, self).setUp()
-        self.mastermind = mastermind.core.Mastermind()
-        self.publisher = mastermind.server.DirectivePublisher(
-            self.mastermind)
-
         # Mock out the connection to S3
         self.s3_patcher = patch('mastermind.server.S3Connection')
         self.s3conn = test_utils.mock_boto_s3.MockConnection()
@@ -556,6 +553,10 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.real_tempfile = mastermind.server.tempfile
         mastermind.server.tempfile = fake_tempfile.FakeTempfileModule(
             self.filesystem)
+
+        self.mastermind = mastermind.core.Mastermind()
+        self.publisher = mastermind.server.DirectivePublisher(
+            self.mastermind)
 
     def tearDown(self):
         neondata.DBConnection.clear_singleton_instance()
@@ -954,6 +955,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.stats_watcher.wait_until_loaded()
         self.directive_publisher.start()
 
+        time.sleep(1) # Make sure that the directive publisher gets busy
         self.activity_watcher.wait_for_idle()
 
         # See if there is anything in S3 (which there should be)
