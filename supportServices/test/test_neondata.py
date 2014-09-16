@@ -33,7 +33,8 @@ from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
         ThumbnailMetadata, InternalVideoID, OoyalaPlatform, \
         TrackerAccountIDMapper, ThumbnailServingURLs, ExperimentStrategy, \
-        ExperimentState, NeonApiRequest
+        ExperimentState, NeonApiRequest, CDNHostingMetadata,\
+        S3CDNHostingMetadata
 
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
@@ -394,6 +395,25 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         vids = bp.get_processed_internal_video_ids()
         self.assertEqual(len(vids), 10)
+
+    def test_hosting_metadata(self):
+        '''
+        Test saving and retrieving CDNHostingMetadata object
+        '''
+        na = NeonUserAccount('acct1')
+        na.save()
+        np = NeonPlatform('acct1', na.neon_api_key)
+        np.save()
+        s3mdata = S3CDNHostingMetadata("a", "s", "b", ["p1", "p2"], "")
+        ret = CDNHostingMetadata.save_metadata(na.neon_api_key, "0",
+                s3mdata.to_json())
+        self.assertTrue(ret)
+
+        accnt = NeonPlatform.get_account(na.neon_api_key)
+        self.assertTrue(isinstance(accnt.cdn_metadata, CDNHostingMetadata))
+        for key in s3mdata.__dict__.keys():
+            self.assertEqual(s3mdata.__dict__[key],
+                    accnt.cdn_metadata.__dict__[key])
 
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
