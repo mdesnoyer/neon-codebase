@@ -99,6 +99,8 @@ class AWSHosting(CDNHosting):
     neon_fname_fmt = "neontn%s_w%s_h%s.jpg" 
 
     def __init__(self, cdn_metadata=None):
+        self.neon_bucket = True 
+
         if cdn_metadata is None:
             # Neon's default CDN S3 bucket
             self.s3conn = S3Connection(properties.S3_ACCESS_KEY, 
@@ -106,12 +108,15 @@ class AWSHosting(CDNHosting):
             self.s3bucket_name = properties.S3_IMAGE_CDN_BUCKET_NAME
             self.s3bucket = self.s3conn.get_bucket(self.s3bucket_name)
             self.cdn_prefixes = [properties.CDN_URL_PREFIX]
+            self.folder_prefix = ""
         else:
+            self.neon_bucket = False 
             self.s3conn = S3Connection(cdn_metadata.access_key,
                                         cdn_metadata.secret_key)
             self.s3bucket_name = cdn_metadata.bucket_name 
             self.s3bucket = self.s3conn.get_bucket(self.s3bucket_name)
             self.cdn_prefixes = cdn_metadata.cdn_prefixes
+            self.folder_prefix = cdn_metadata.folder_prefix 
 
     def resize_and_upload_to_s3(self, image, size, tid):
         '''
@@ -121,8 +126,9 @@ class AWSHosting(CDNHosting):
         cv_im = pycvutils.from_pil(image)
         cv_im_r = pycvutils.resize_and_crop(cv_im, size[1], size[0])
         im = pycvutils.to_pil(cv_im_r)
-        fname = AWSHosting.neon_fname_fmt % (tid, size[0], size[1])
         cdn_prefix = random.choice(self.cdn_prefixes)
+        # Note that folder prefix should contain /
+        fname = "%s" % self.folder_prefix + AWSHosting.neon_fname_fmt % (tid, size[0], size[1])
         cdn_url = "http://%s/%s" % (cdn_prefix, fname)
         fmt = 'jpeg'
         filestream = StringIO()
@@ -132,7 +138,12 @@ class AWSHosting(CDNHosting):
         k = self.s3bucket.new_key(fname)
         utils.s3.set_contents_from_string(k, imgdata,
                             {"Content-Type":"image/jpeg"})
-        self.s3bucket.set_acl('public-read', fname)
+        
+        # You may not have permission to do this for
+        # customer bucket, so check if neon bucket 
+        if self.neon_bucket:
+            self.s3bucket.set_acl('public-read', fname)
+
         return cdn_url
 
     def upload(self, image, tid):

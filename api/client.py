@@ -72,6 +72,7 @@ statemon.define('processing_error', int)
 statemon.define('dequeue_error', int)
 statemon.define('save_tmdata_error', int)
 statemon.define('save_vmdata_error', int)
+statemon.define('customer_callback_error', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -603,7 +604,10 @@ class VideoProcessor(object):
                                             ttype=neondata.ThumbnailType.NEON,
                                             cdn_metadata=cdn_metadata)
             self.thumbnails.extend(thumbnails)
-            
+            #TODO(Sunil): Extract at least a single frame if every image is
+            #filtered
+
+
             #host Center Frame on s3
             if self.center_frame is not None:
                 cthumbnail, s3_url = host_images_s3(vmdata, api_key, [(self.center_frame, None)], 
@@ -857,11 +861,18 @@ class VideoProcessor(object):
         '''
         # Check if url in request object is empty, if so just return True
 
-        if request.url is None:
+        if request.url is None or request.url == "null":
+            statemon.state.increment('customer_callback_error')
             return True
-        
-        response = utils.http.send_request(request)
+        try:
+            response = utils.http.send_request(request)
+        except Exception, e:
+            statemon.state.increment('customer_callback_error')
+            _log.error("Callback HTTP unhandled error %s" % e)
+            return False
+
         if response.error:
+            statemon.state.increment('customer_callback_error')
             _log.error("Callback response not sent to %r " % request.url)
             return False
         return True

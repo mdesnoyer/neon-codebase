@@ -404,7 +404,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         na.save()
         np = NeonPlatform('acct1', na.neon_api_key)
         np.save()
-        s3mdata = S3CDNHostingMetadata("a", "s", "b", ["p1", "p2"])
+        s3mdata = S3CDNHostingMetadata("a", "s", "b", ["p1", "p2"], "")
         ret = CDNHostingMetadata.save_metadata(na.neon_api_key, "0",
                 s3mdata.to_json())
         self.assertTrue(ret)

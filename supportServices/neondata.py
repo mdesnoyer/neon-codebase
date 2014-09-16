@@ -1038,14 +1038,16 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
     If the images are to be uploaded to S3 bucket use this formatter  
 
     '''
-    def __init__(self, access_key, secret_key, bucket_name, prefixes):
+    def __init__(self, access_key, secret_key, bucket_name, cdn_prefixes,
+                    folder_prefix):
         '''
-        @prefixes : list : list of cdn prefixes that the customer uses
+        @cdn_prefixes : list : list of cdn prefixes that the customer uses
         '''
         self.access_key = access_key
         self.secret_key = secret_key
         self.bucket_name = bucket_name
-        CDNHostingMetadata.__init__(self, "s3", prefixes)
+        self.folder_prefix = folder_prefix
+        CDNHostingMetadata.__init__(self, "s3", cdn_prefixes)
 
 class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     '''

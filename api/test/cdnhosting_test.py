@@ -78,7 +78,8 @@ class TestCDNHosting(unittest.TestCase):
     def test_customer_s3_hosting(self, mock_conntype):
         
         bucket = 'customer-bucket'
-        s3mdata = neondata.S3CDNHostingMetadata('a', 's', bucket, ['p1', 'p1'])
+        s3mdata = neondata.S3CDNHostingMetadata('a', 's', bucket, ['p1', 'p1'],
+                'folder/')
         conn = boto_mock.MockConnection()
         conn.create_bucket(bucket)
         mock_conntype.return_value = conn
@@ -91,13 +92,13 @@ class TestCDNHosting(unittest.TestCase):
         sizes = api.properties.CDN_IMAGE_SIZES   
         s3_keys = [x for x in imbucket.get_all_keys()]
         self.assertEqual(len(s3_keys), len(sizes))
+        self.assertTrue('folder/' in s3_keys[0].name) 
         serving_urls = neondata.ThumbnailServingURLs.get(tid)
         for w, h in sizes:
             url = serving_urls.get_serving_url(w, h)
             fname = "neontntest_tid_w%s_h%s.jpg" % (w, h)
-            exp_url = "http://%s/%s" % ("p1", fname)
+            exp_url = "http://%s/%s%s" % ("p1", "folder/", fname)
             self.assertEqual(exp_url, url)
-
 
 if __name__ == '__main__':
     unittest.main()
