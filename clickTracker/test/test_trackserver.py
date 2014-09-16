@@ -1023,7 +1023,30 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'tids' : 'acct1_vid2_tid1'}))
+             'tids' : 'acct1_vid2_tid1 56.3 48'}))
+        self.assertEqual(response.code, 400)
+
+    def test_invalid_tid_tuples(self):
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'il',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'monkeyland',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'tids' : 'acct1_vid2_tid1 45'}))
+        self.assertEqual(response.code, 400)
+
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'il',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'monkeyland',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'tids' : 'acct1_vid2_tid1 width 98'}))
         self.assertEqual(response.code, 400)
 
     def test_heartbeat(self):
