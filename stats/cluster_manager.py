@@ -135,7 +135,7 @@ class BatchProcessManager(threading.Thread):
                     # increment the core size. That should probably be
                     # based on the data volume
                     #self.cluster.increment_core_size()
-                    if self.n_task_instances < options.max_task_instances:
+                    if self.n_task_instances < (options.max_task_instances-4):
                         self.n_task_instances += 4
                 except Exception as e:
                     _log.exception('Error incrementing core instance size %s'
