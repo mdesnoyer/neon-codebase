@@ -589,16 +589,18 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
 
         counters = [1, 2]
         def wrapped_callback(param):
+            counters.pop()
             self.stop()
 
         ThumbnailMetadata.modify(tid, setphash, callback=wrapped_callback)
         ThumbnailMetadata.modify(tid, setrank, callback=wrapped_callback)
         self.wait() #wait() runs the IOLoop until self.stop() is called
         
-        # if len(counters) is not 0, call self.wait() to service the other
+        # if counter is not 0, call self.wait() to service the other
         # callback  
-        if len(counters) > 0:
+        while len(counters) > 0:
             self.wait()
+            counters.pop()
 
         thumb = ThumbnailMetadata.get(tid)
         self.assertEqual(thumb.phash, 'hash')

@@ -862,8 +862,8 @@ class VideoProcessor(object):
         # Check if url in request object is empty, if so just return True
 
         if request.url is None or request.url == "null":
-            statemon.state.increment('customer_callback_error')
             return True
+
         try:
             response = utils.http.send_request(request)
         except Exception, e:
