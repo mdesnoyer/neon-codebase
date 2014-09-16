@@ -21,7 +21,7 @@ scipy==0.9.0
 shortuuid==0.3
 simplejson==2.3.2
 svmlight==0.4
-tornado==3.1.1
+tornado==3.2.2
 coverage==3.7
 BeautifulSoup4==4.3.2
 pycurl==7.19
