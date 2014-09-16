@@ -591,7 +591,7 @@ class VideoProcessor(object):
             # CDN Metadata
             cdn_metadata = None
             if api_request.request_type == "neon":
-                np = NeonPlatformAccount.get_account(api_key)
+                np = neondata.NeonPlatform.get_account(api_key)
                 cdn_metadata = np.cdn_metadata
             else:
                 #TODO(Sunil): Implement for other platforms as we move forward

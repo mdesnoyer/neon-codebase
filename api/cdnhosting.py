@@ -107,11 +107,11 @@ class AWSHosting(CDNHosting):
             self.s3bucket = self.s3conn.get_bucket(self.s3bucket_name)
             self.cdn_prefixes = [properties.CDN_URL_PREFIX]
         else:
-            self.s3conn = S3Connection(cdn_metdata.access_key,
+            self.s3conn = S3Connection(cdn_metadata.access_key,
                                         cdn_metadata.secret_key)
             self.s3bucket_name = cdn_metadata.bucket_name 
             self.s3bucket = self.s3conn.get_bucket(self.s3bucket_name)
-            self.cdn_prefixes = cdn.metadata.cdn_prefixes
+            self.cdn_prefixes = cdn_metadata.cdn_prefixes
 
     def resize_and_upload_to_s3(self, image, size, tid):
         '''
