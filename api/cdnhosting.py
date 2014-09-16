@@ -11,6 +11,7 @@ if sys.path[0] <> base_path:
 import base64
 import json
 import hashlib
+import random
 import properties
 import socket
 import supportServices.neondata
@@ -28,6 +29,8 @@ from utils import pycvutils
 
 import logging
 _log = logging.getLogger(__name__)
+
+random.seed(125135)
 
 def upload_to_s3_host_thumbnails(keyname, data, s3conn=None):
     '''
@@ -73,47 +76,74 @@ class CDNHosting(object):
         raise NotImplementedError()
 
     @staticmethod
-    def create(db_entry):
-        '''Creates the appropriate connection based on a database entry.
-
-        TODO(sunil): Set this up in the database
+    def create(cdn_metadata):
         '''
+        Creates the appropriate connection based on a database entry.
+        '''
+        
+        if cdn_metadata is None:
+            # Default Neon CDN Hosting
+            return AWSHosting(None)
 
-        if db_entry == 'cloudinary':
+        elif cdn_metadata.host_type == 'cloudinary':
             return CloudinaryHosting()
+        
+        elif cdn_metadata.host_type == 's3':
+            return AWSHosting(cdn_metadata)
 
-        # For now, as default we just use AWS
-        return AWSHosting()
+        else:
+            raise Exception("CDNHosting type not supported yet, please implmnt")
 
 class AWSHosting(CDNHosting):
-    
+
+    neon_fname_fmt = "neontn%s_w%s_h%s.jpg" 
+
+    def __init__(self, cdn_metadata=None):
+        if cdn_metadata is None:
+            # Neon's default CDN S3 bucket
+            self.s3conn = S3Connection(properties.S3_ACCESS_KEY, 
+                                        properties.S3_SECRET_KEY)
+            self.s3bucket_name = properties.S3_IMAGE_CDN_BUCKET_NAME
+            self.s3bucket = self.s3conn.get_bucket(self.s3bucket_name)
+            self.cdn_prefixes = [properties.CDN_URL_PREFIX]
+        else:
+            self.s3conn = S3Connection(cdn_metdata.access_key,
+                                        cdn_metadata.secret_key)
+            self.s3bucket_name = cdn_metadata.bucket_name 
+            self.s3bucket = self.s3conn.get_bucket(self.s3bucket_name)
+            self.cdn_prefixes = cdn.metadata.cdn_prefixes
+
+    def resize_and_upload_to_s3(self, image, size, tid):
+        '''
+        Upload individual file to s3 after resizing
+        '''
+
+        cv_im = pycvutils.from_pil(image)
+        cv_im_r = pycvutils.resize_and_crop(cv_im, size[1], size[0])
+        im = pycvutils.to_pil(cv_im_r)
+        fname = AWSHosting.neon_fname_fmt % (tid, size[0], size[1])
+        cdn_prefix = random.choice(self.cdn_prefixes)
+        cdn_url = "http://%s/%s" % (cdn_prefix, fname)
+        fmt = 'jpeg'
+        filestream = StringIO()
+        im.save(filestream, fmt, quality=90) 
+        filestream.seek(0)
+        imgdata = filestream.read()
+        k = self.s3bucket.new_key(fname)
+        utils.s3.set_contents_from_string(k, imgdata,
+                            {"Content-Type":"image/jpeg"})
+        self.s3bucket.set_acl('public-read', fname)
+        return cdn_url
+
     def upload(self, image, tid):
-        s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
-        s3bucket_name = properties.S3_IMAGE_CDN_BUCKET_NAME
-        s3bucket = s3conn.get_bucket(s3bucket_name)
+        
         sizes = properties.CDN_IMAGE_SIZES
-        s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
-        fname_fmt = "neontn%s_w%s_h%s.jpg" 
         serving_urls = supportServices.neondata.ThumbnailServingURLs(tid)
 
         for sz in sizes:
-            #im = PILImageUtils.resize(image, im_w=sz[0], im_h=sz[1])
-            cv_im = pycvutils.from_pil(image)
-            cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
-            im = pycvutils.to_pil(cv_im_r)
-            fname = fname_fmt % (tid, sz[0], sz[1])
-            cdn_url = "http://%s/%s" % (properties.CDN_URL_PREFIX, fname)
-            fmt = 'jpeg'
-            filestream = StringIO()
-            im.save(filestream, fmt, quality=90) 
-            filestream.seek(0)
-            imgdata = filestream.read()
-            k = s3bucket.new_key(fname)
-            utils.s3.set_contents_from_string(k, imgdata,
-                                              {"Content-Type":"image/jpeg"})
-            s3bucket.set_acl('public-read', fname)
+            cdn_url = self.resize_and_upload_to_s3(image, sz, tid) 
             serving_urls.add_serving_url(cdn_url, sz[0], sz[1])
-        
+
         serving_urls.save()
 
 class CloudinaryHosting(CDNHosting):
@@ -149,6 +179,7 @@ class CloudinaryHosting(CDNHosting):
 
         #not to be used for signing the request 
         if not isinstance(image, basestring): 
+            #TODO(Sunil): support this later when you have tim
             #filestream = StringIO()
             #image.save(filestream, 'jpeg', quality=90) 
             #filestream.seek(0)

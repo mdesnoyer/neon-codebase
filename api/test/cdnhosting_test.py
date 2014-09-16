@@ -31,11 +31,9 @@ class TestCDNHosting(unittest.TestCase):
     def tearDown(self):
         self.redis.stop()
         super(TestCDNHosting, self).tearDown()
-
         
     @patch('api.cdnhosting.S3Connection')
     def test_neon_hosting(self, mock_conntype):
-        hosting = api.cdnhosting.AWSHosting()
         
         #s3mocks to mock host_thumbnails_to_s3
         conn = boto_mock.MockConnection()
@@ -45,6 +43,7 @@ class TestCDNHosting(unittest.TestCase):
         image = PILImageUtils.create_random_image(360, 480) 
         keyname = "test_key"
         tid = "test_tid"
+        hosting = api.cdnhosting.AWSHosting()
         hosting.upload(image, tid)
         sizes = api.properties.CDN_IMAGE_SIZES   
         s3_keys = [x for x in imbucket.get_all_keys()]

@@ -1002,7 +1002,58 @@ class ExperimentStrategy(NamespacedStoredObject):
         # The types of measurements that mean an impression or a conversion for this account
         self.impression_type = impression_type
         self.conversion_type = conversion_type
-         
+
+
+class CDNHostingMetadata(object):
+    '''
+    Class to format the information to be stored in the platform.cdn_metadata
+    member.
+
+    Currently on S3 hosting to customer bucket is well defined
+    '''
+    def __init__(self, host_type, cdn_prefixes):
+        self.host_type = host_type
+        self.cdn_prefixes = cdn_prefixes
+    
+    def to_json(self):
+        ''' to json '''
+        return json.dumps(self, default=lambda o: o.__dict__) 
+    
+    @classmethod
+    def save_metadata(cls, api_key, i_id, hosting_directive):
+        '''
+        Save the hosting directive in the platform account
+
+        @hosting_directive - json of the hosting directive object
+        '''
+        if i_id == "0":
+            accnt = NeonPlatform.get_account(api_key)
+        else:
+            raise Exception("To be implemented")
+        accnt.cdn_metadata = hosting_directive
+        return accnt.save()
+
+class S3CDNHostingMetadata(CDNHostingMetadata):
+    '''
+    If the images are to be uploaded to S3 bucket use this formatter  
+
+    '''
+    def __init__(self, access_key, secret_key, bucket_name, prefixes):
+        '''
+        @prefixes : list : list of cdn prefixes that the customer uses
+        '''
+        self.access_key = access_key
+        self.secret_key = secret_key
+        self.bucket_name = bucket_name
+        CDNHostingMetadata.__init__(self, "s3", prefixes)
+
+class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
+    '''
+    Cloudinary images
+    '''
+
+    def __init__(self):
+        CDNHostingMetadata.__init__(self, "cloudinary", [])
 
 class AbstractPlatform(object):
     ''' Abstract Platform/ Integration class '''
@@ -1014,6 +1065,9 @@ class AbstractPlatform(object):
         self.abtest = abtest # Boolean on wether AB tests can run
         self.integration_id = None # Unique platform ID to 
         self.enabled = enabled # Account enabled for auto processing of videos 
+        self.cdn_metadata = None # Indicates whose CDN the images are hosted on
+        # None = Neon hosts the images on its CDN
+        # else contains a json of CDNHostingDirective  
 
     def generate_key(self, i_id):
         ''' generate db key '''
@@ -1167,12 +1221,19 @@ class NeonPlatform(AbstractPlatform):
         data_dict = json.loads(json_data)
         obj = NeonPlatform("dummy", "dummy")
 
-        #populate the object dictionary
+        # populate the object dictionary
         for key in data_dict.keys():
             obj.__dict__[key] = data_dict[key]
         
-        return obj
+        # create the cdnhostingmetadata object
+        if obj.cdn_metadata is not None:
+            cdn_dict = json.loads(obj.cdn_metadata)
+            cdn_obj = CDNHostingMetadata("", "")
+            for key in cdn_dict.keys():
+                cdn_obj.__dict__[key] = cdn_dict[key]
+            obj.cdn_metadata = cdn_obj
 
+        return obj
     
     @classmethod
     def get_all_instances(cls, callback=None):
@@ -2392,7 +2453,7 @@ class VideoMetadata(StoredObject):
 
     def save_thumbnail_to_s3_and_store_metadata(self, image, score, keyname,
                                         s3fname, ttype, rank=0, model_version=0,
-                                        callback=None):
+                                        cdn_metadata=None, callback=None):
 
         '''
         Save a thumbnail to s3 and its metadata in the DB
@@ -2439,11 +2500,11 @@ class VideoMetadata(StoredObject):
         self.thumbnail_ids.append(tid)
 
         #Host this image on the Neon Image CDN in diff sizes
-        hoster = CDNHosting.create(None)
+        hoster = CDNHosting.create(cdn_metadata)
         hoster.upload(image, tid)
         
         #Host this image on Cloudinary for dynamic resizing
-        cloudinary_hoster = CDNHosting.create('cloudinary')
+        cloudinary_hoster = CDNHosting.create(CloudinaryCDNHostingMetadata())
         cloudinary_hoster.upload(s3fname, tid)
 
         return tdata

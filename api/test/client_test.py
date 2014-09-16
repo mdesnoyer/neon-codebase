@@ -317,7 +317,7 @@ class TestVideoClient(unittest.TestCase):
         #verify callback response
         url_call = mock_client.send_request.call_args[0][0].url
         self.assertEqual(url_call, "http://localhost:8081/testcallback")
-        self.assertEqual(mock_client.send_request.call_count, 2)
+        self.assertEqual(mock_client.send_request.call_count, 1)
 
         #verify data in the callback response
         callback_result = json.loads(mock_client.send_request.call_args[0][0].body)

@@ -58,7 +58,6 @@ from boto.s3.connection import S3Connection
 from utils.imageutils import PILImageUtils
 from StringIO import StringIO
 from supportServices import neondata
-from cdnhosting import CDNHosting
 
 import utils.s3
 
@@ -149,11 +148,14 @@ def notification_response_builder(a_id, i_id, video_json,
         return nt_response_request
     
 def host_images_s3(vmdata, api_key, img_and_scores, base_filename, 
-                   model_version=0, ttype=neondata.ThumbnailType.NEON):
+                   model_version=0, ttype=neondata.ThumbnailType.NEON,
+                   cdn_metadata=None):
     ''' 
     Host images on s3 which is available publicly 
     @input
     img_and_scores: list of tuples (image objects, score)
+    
+    @cdn_metadata: CDNMetadata object with customer cdn access info
 
     @return
     (thumbnails, s3_urls) : tuple of list(thumbnail metadata), s3 urls
@@ -190,7 +192,8 @@ def host_images_s3(vmdata, api_key, img_and_scores, base_filename,
                                                                 s3fname,
                                                                 ttype, 
                                                                 rank, 
-                                                                model_version)
+                                                                model_version,
+                                                                cdn_metadata)
         thumbnails.append(tdata)
         rank = rank+1
         s3_urls.append(s3fname)
@@ -512,6 +515,9 @@ class VideoProcessor(object):
         request_type = self.job_params['request_type']
         api_method = self.job_params['api_method'] 
         api_param =  self.job_params['api_param']
+        
+        # get api request object
+        api_request = neondata.NeonApiRequest.get(api_key, job_id)
       
         if self.error:
             #If Internal error, requeue and dont send response to client yet
@@ -520,7 +526,6 @@ class VideoProcessor(object):
             statemon.state.increment('processing_error')
             if immediate:
                 #update error state
-                api_request = neondata.NeonApiRequest.get(api_key, job_id)
                 api_request.state = neondata.RequestState.INT_ERROR
                 api_request.save()
                 return
@@ -583,18 +588,28 @@ class VideoProcessor(object):
                     api_request.state = neondata.RequestState.INT_ERROR
                     api_request.save()
 
+            # CDN Metadata
+            cdn_metadata = None
+            if api_request.request_type == "neon":
+                np = NeonPlatformAccount.get_account(api_key)
+                cdn_metadata = np.cdn_metadata
+            else:
+                #TODO(Sunil): Implement for other platforms as we move forward
+                pass
 
             #host top MAX_T images on s3
             thumbnails, s3_urls = host_images_s3(vmdata, api_key, img_score_list, 
                                             self.base_filename, model_version=0, 
-                                            ttype=neondata.ThumbnailType.NEON)
+                                            ttype=neondata.ThumbnailType.NEON,
+                                            cdn_metadata=cdn_metadata)
             self.thumbnails.extend(thumbnails)
             
             #host Center Frame on s3
             if self.center_frame is not None:
                 cthumbnail, s3_url = host_images_s3(vmdata, api_key, [(self.center_frame, None)], 
                                             self.base_filename, model_version=0, 
-                                            ttype=neondata.ThumbnailType.CENTERFRAME)
+                                            ttype=neondata.ThumbnailType.CENTERFRAME,
+                                            cdn_metadata=cdn_metadata)
                 self.thumbnails.extend(cthumbnail)
             else:
                 _log.error("centerframe was None for %s" % video_id)
@@ -629,7 +644,6 @@ class VideoProcessor(object):
                 _log.error("request type not supported")
         else:
             _log.error("request param not supported")
-
     
     def finalize_api_request(self, result, request_type):
         '''
