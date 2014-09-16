@@ -119,33 +119,6 @@ class RequeueHandler(tornado.web.RequestHandler):
 ## ===================== API ===========================================#
 # External Handlers
 ## ===================== API ===========================================#
-'''
-class GetResultsHandler(tornado.web.RequestHandler):
-    """ Return results gzipped """
-    def get(self, *args, **kwargs):
-        try:
-            query = self.request.query
-            params = urlparse.parse_qs(query)
-            uri = self.request.uri
-            api_key = params[properties.API_KEY][0]
-            request_id = params[properties.REQUEST_UUID_KEY][0]
-            s3conn = S3Connection(properties.S3_ACCESS_KEY,properties.S3_SECRET_KEY)
-            s3bucket_name = properties.S3_BUCKET_NAME
-            s3bucket = Bucket(name = s3bucket_name, connection = s3conn)
-            k = Key(s3bucket)
-            try:
-                k.key = str(api_key) + "/" + str(request_id) + "/"+ 'result.tar.gz'
-                data = k.get_contents_as_string()
-                self.write(data)
-            except Exception,e:
-                _log.exception("key=getresultshandler msg=traceback")
-                raise tornado.web.HTTPError(400)
-            self.finish()
-
-        except:
-            _log.exception("key=getresultshandler msg=general traceback")
-'''
-
 class JobStatusHandler(tornado.web.RequestHandler):
     """ JOB Status Handler  """
     @tornado.web.asynchronous
@@ -248,19 +221,24 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             uri = self.request.uri
             self.parsed_params = {}
             api_request = None 
-
+            http_callback = None
+            
             #Verify essential parameters
             try:
                 api_key = params[properties.API_KEY]
                 vid = params[properties.VIDEO_ID]
                 title = params[properties.VIDEO_TITLE]
                 url = params[properties.VIDEO_DOWNLOAD_URL]
-                http_callback = params[properties.CALLBACK_URL]
             except KeyError, e:
                 raise Exception("params not set") #convert to custom exception
 
-            #TODO Verify API Key
-            
+           
+            # Treat http_callback as an optional parameter
+            try:
+                http_callback = params[properties.CALLBACK_URL]
+            except KeyError, e:
+                pass
+
             #compare with supported api methods
             if params.has_key(properties.TOP_THUMBNAILS):
                 api_method = "topn"

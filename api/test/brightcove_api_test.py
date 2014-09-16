@@ -18,9 +18,11 @@ if sys.path[0] != __base_path__:
 
 import api.brightcove_api
 import bcove_responses
+import json
 import logging
 from mock import patch, MagicMock
 from StringIO import StringIO
+from supportServices.test import bcove_responses
 from supportServices import neondata
 import test_utils.neontest
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
@@ -245,6 +247,51 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         #verify image name
         self.api.add_image("video_id1", image, reference_id="still-%s" %tid, tid=tid)
         verify()
+    
+    @patch('api.brightcove_api.BrightcoveApi.write_connection.send_request') 
+    def test_add_remote_image(self, write_conn_mock):
+
+        '''
+        Verify the multipart request construction to brightcove
+        '''
+        response = HTTPResponse(HTTPRequest("http://bcove"), 200,
+                buffer=StringIO('done'))
+        write_conn_mock.return_value = response
+        r_url = "http://i1.neon-images.com/video_id1?height=10&width=20"
+        response = self.api.add_image("video_id1", remote_url=r_url)
+        self.assertEqual(response.code, 200)
+        headers = write_conn_mock.call_args[0][0].headers
+        self.assertTrue('multipart/form-data' in headers['Content-Type'])
+        body = write_conn_mock.call_args[0][0].body
+        separator = body.split('\r\n')[0]
+        parts = body.split(separator)
+        j_imdata = parts[1].split('\r\n\r\n')[1].strip('\r\n')
+        imdata = json.loads(j_imdata)
+        self.assertTrue(imdata["params"]["image"]["remoteUrl"], r_url)
+
+    def test_select_rendition(self):
+        '''
+        Test the selection of the right rendition
         
+        Assert that url is returned irrespective of framewidth 
+        '''
+        vitems = json.loads(bcove_responses.find_all_videos_response)
+        bc = api.brightcove_api.BrightcoveApi(
+            "neon_api_key", "publisher_id",
+            "read_token", "write_token", False)
+       
+        frame_widths = [None, 640, 720, 420]
+        for item in vitems['items']:
+            for fwidth in frame_widths:
+                url = bc.get_video_url_to_download(item, fwidth)
+                self.assertIsNotNone(url)
+        
+        # Check max rendition returned of frame width 1280
+        item = vitems['items'][-1]
+        url = bc.get_video_url_to_download(item, None)
+        self.assertEqual(url,
+                        "http://brightcove.vo.llnwd.net/e1/uds/pd/2294876105001/2294876105001_2635148067001_PA220134.mp4")
+
+
 if __name__ == "__main__" :
     unittest.main()

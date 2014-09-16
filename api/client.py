@@ -106,6 +106,7 @@ def callback_response_builder(job_id, vid, data,
         @client_url: the callback url to send the data to
 
         '''
+
         response_body = {}
         response_body["job_id"] = job_id 
         response_body["video_id"] = vid 
@@ -618,7 +619,6 @@ class VideoProcessor(object):
                                                    serving_url,
                                                    error=self.error)
             self.send_client_callback_response(cr_request)
-            utils.http.send_request(cr_request)
             
             if request_type in ["neon", "brightcove", "ooyala"]:
                 self.finalize_api_request(cr_request.body, request_type)
@@ -841,6 +841,11 @@ class VideoProcessor(object):
         '''
         Send client response
         '''
+        # Check if url in request object is empty, if so just return True
+
+        if request.url is None:
+            return True
+        
         response = utils.http.send_request(request)
         if response.error:
             _log.error("Callback response not sent to %r " % request.url)

@@ -18,6 +18,7 @@ public:
     void Init(double floor, const rapidjson::Value& fa);
     void Shutdown();
     
+    void   SetPct(double);
     double GetPct() const;
     double GetThreshold() const;
     const char * GetDefaultURL() const;

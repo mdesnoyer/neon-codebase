@@ -8,7 +8,7 @@
 #include <iostream>
 #include "neonException.h"
 #include "fraction.h"
-
+#define SMALLEST_FRACTION 0.001
 
 Fraction::Fraction()
 {
@@ -37,11 +37,15 @@ Fraction::Init(double floor, const rapidjson::Value& frac)
     
     pct = frac["pct"].GetDouble();
     
+    // Check if pct is < the smallest decimal acceptable
+    if (pct < SMALLEST_FRACTION)
+        pct = 0.0;
+
     threshold = floor + pct;
 
     // Default URL
     if (frac.HasMember("default_url") == false) 
-        throw new NeonException("Fraction::Init: no default_url id key found");
+        throw new NeonException("Fraction::Init: no default_url key found");
     
     defaultURL = strdup(frac["default_url"].GetString()); 
 
@@ -110,6 +114,10 @@ Fraction::GetScaledImage(int height, int width) const
     return 0;
 }
 
+void
+Fraction::SetPct(double pct){ 
+    this->pct = pct;
+}
 
 double
 Fraction::GetThreshold() const
