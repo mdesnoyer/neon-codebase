@@ -214,7 +214,7 @@ class StatsDBWatcher(threading.Thread):
         curtime = datetime.datetime.utcnow()
         cursor.execute(
             ('SELECT max(serverTime) FROM videoplays WHERE '
-             'yr >= {yr:d} or (yr == {yr:d} and mnth >= {mnth:d})').format(
+             'yr >= {yr:d} or (yr = {yr:d} and mnth >= {mnth:d})').format(
             mnth=curtime.month, yr=curtime.year))
         result = cursor.fetchall()
         if len(result) == 0 or result[0][0] is None:
