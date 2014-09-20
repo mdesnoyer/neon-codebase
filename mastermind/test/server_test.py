@@ -499,6 +499,11 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.publisher = mastermind.server.DirectivePublisher(
             self.mastermind)
 
+        # Mock the SQS Mgr, just return true on the call here, its unit tested
+        # independently
+        self.publisher.sqsmgr = MagicMock()
+        self.publisher.sqsmgr.schedule_all_callbacks.return_value = True
+
         # Mock out the connection to S3
         self.s3_patcher = patch('mastermind.server.S3Connection')
         self.s3conn = test_utils.mock_boto_s3.MockConnection()

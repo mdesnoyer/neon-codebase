@@ -109,6 +109,14 @@ class Mastermind(object):
         with self.lock:
             self.pending_modifies += count
         statemon.state.pending_modifies = self.pending_modifies
+    
+    def get_video_ids(self):
+        '''
+        Returns video_ids that mastermind currently has 
+        '''
+        with self.lock:
+            video_ids = self.video_info.values()
+            return video_ids
 
     def get_directives(self, video_ids=None):
         '''Returns a generator for the serving directives for all the video ids

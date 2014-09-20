@@ -25,7 +25,6 @@ static ngx_str_t cookie_expiry_str = ngx_string("; expires=");
 static ngx_str_t cookie_client_api = ngx_string("/v1/client/");
 static ngx_str_t cookie_semi_colon = ngx_string(";");
 static ngx_str_t cookie_fwd_slash = ngx_string("/");
-//static char * cloudinary_formatter = "http://res.cloudinary.com/neon-labs/image/upload/w_%d,h_%d/%s.jpg"
 
 /* 
  * Get a particular URI token relative to the base url 
@@ -102,7 +101,7 @@ neon_service_get_uri_token(const ngx_http_request_t *req,
  * */
 
 static void 
-neon_service_get_bucket_id(const ngx_str_t * neon_uuid, 
+neon_service_set_bucket_id(const ngx_str_t * neon_uuid, 
                            const ngx_str_t * video_id, 
                            ngx_str_t * bucket_id){
 
@@ -118,7 +117,7 @@ neon_service_get_bucket_id(const ngx_str_t * neon_uuid,
     unsigned long bucket_hash = neon_sdbm_hash(hashstring, offset);
     bucket_hash %= N_ABTEST_BUCKETS;
     char bid[N_ABTEST_BUCKET_DIGITS] = {0}; 
-    sprintf(bid, "%ld", bucket_hash);
+    sprintf(bid, "%x", (unsigned int)bucket_hash);
     bucket_id->data = (unsigned char*) strdup(bid);
     bucket_id->len = strlen(bid);
 }
@@ -185,7 +184,8 @@ neon_service_set_custom_cookie(ngx_http_request_t *request,
     c_len = neon_cookie_name->len + value_len + expires->len + domain->len + equal_sign.len; 
     cookie = ngx_pnalloc(request->pool, c_len);
     if (cookie == NULL) {
-        //neon_log_error("Failed to allocate memory in the pool for cookie");
+        ngx_log_error(NGX_LOG_ERR, request->connection->log, 
+                       0, "Failed to allocate memory in the pool for cookie");
         neon_stats[NGINX_OUT_OF_MEMORY] ++;
         return NEON_FALSE;
     }
@@ -261,6 +261,8 @@ neon_service_userid_abtest_ready(ngx_http_request_t *request, ngx_str_t *uuid){
     if (neon_service_isset_cookie(request, &neon_cookie_name, uuid) == NEON_TRUE){
        
         char ts[NEON_UUID_TS_LEN];
+        // TODO: Protect against fake cookie timestamp, or invalid atoi
+        // conversion
         ngx_memcpy(ts, uuid->data + NEON_UUID_RAND_LEN, NEON_UUID_TS_LEN);
         unsigned int cookie_ts = atoi((const char*)ts);
         if (cur_timestamp >= cookie_ts + 120)
@@ -316,8 +318,7 @@ neon_service_set_abtest_bucket_cookie(ngx_http_request_t *request,
     }
 
     // Bucket ID
-    neon_service_get_bucket_id(&neonglobaluserid, video_id, bucket_id); 
-
+    neon_service_set_bucket_id(&neonglobaluserid, video_id, bucket_id); 
     
     // alloc memory, use cookie_max_expiry as a template
     expires.data = (u_char *) ngx_palloc(request->pool, cookie_max_expiry.len);
@@ -388,7 +389,7 @@ int neon_service_parse_api_args(ngx_http_request_t *request,
     ngx_http_arg(request, width_key.data, width_key.len, &w_value);
     *width = neon_service_parse_number(&w_value);
   
-    // If height && width == -1, i.e if weren't specified then serve
+    // If height or width == -1, i.e if weren't specified then serve
     // default url
 
     ngx_str_t cip_key = ngx_string("cip");
@@ -700,7 +701,6 @@ neon_service_client_api(ngx_http_request_t *request,
     // width or height is missing
     // The API spec needs both width & height to be sent  
     if ((width == -1 && height != -1) || (height == -1 && width != -1)){
-        //neon_stats[NEON_CLIENT_API_INVALID_ARGS] ++;
         neon_service_no_content(request, chain);
         return NEON_CLIENT_API_FAIL;
     }
@@ -825,7 +825,7 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
     ngx_chain_t * vchain;
     ngx_chain_t * prev = chain; 
    
-    //dummy 
+    // dummy to start the chain, figure out a way to elminate this 
     ngx_buf_t * colon_buf = ngx_calloc_buf(request->pool);
     colon_buf->pos = colon.data;
     colon_buf->last = colon.data + colon.len;
@@ -850,7 +850,7 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
 
         // Get the bucket id for a given video
         if(abtest_ready == NEON_TRUE){
-            neon_service_get_bucket_id(&neonglobaluserid, &vid_str, &bucket_id);
+            neon_service_set_bucket_id(&neonglobaluserid, &vid_str, &bucket_id);
         }
 
         NEON_MASTERMIND_TID_LOOKUP_ERROR err =

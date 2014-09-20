@@ -160,19 +160,27 @@ Directive::GetFraction(unsigned char * bucketId, int bucketIdLen) const
     if(fractions.size() == 0)
         return 0;
 
-    unsigned int i = 0, index = 0;    
+    unsigned int index = 0;    
     std::vector<double> cumulative_pcts; 
     std::vector<double> individual_pcts; 
     double total_pcnt = 0;
-    for(i=0; i<fractions.size(); i++){
+    for(unsigned int i=0; i<fractions.size(); i++){
         double pcnt = fractions[i]->GetPct();
         total_pcnt += pcnt;    
         individual_pcts.push_back(pcnt);
         cumulative_pcts.push_back(total_pcnt);
     }
-    
-    
-    if(bucketId == 0 or bucketIdLen <= 0){
+    char * endptr = NULL;
+    // BucketId is HEX 
+    double bId = (double) strtol((const char *)bucketId, &endptr, 16); 
+
+    // check if bId is actually 0 or just a junk string
+    if (bId == 0){
+       if (bucketId[0] != '0')
+           bId = -1;
+    }
+
+    if(bId < 0 or bucketIdLen <= 0){
         // If bucketId is empty, the user isnt' part of AB test yet 
         // Pick the fraction with max pcnt
         index = std::distance(individual_pcts.begin(), 
@@ -181,7 +189,7 @@ Directive::GetFraction(unsigned char * bucketId, int bucketIdLen) const
 
     }else{
         // Pick the AB test bucket
-        double bId = (double) atoi((const char *)bucketId); // BucketId is int
+        unsigned int i;
         for(i=0 ; i< cumulative_pcts.size(); i++){
             if (bId < (cumulative_pcts[i] * N_ABTEST_BUCKETS))
                 break;    
