@@ -16,6 +16,7 @@ import atexit
 from boto.s3.connection import S3Connection
 from boto.emr.connection import EmrConnection
 import boto
+from guppy import hpy
 import datetime
 import impala.dbapi
 import impala.error
@@ -58,11 +59,12 @@ define('expiry_buffer', type=int, default=30,
        help='Buffer in seconds for the expiry of the directives file')
 
 # Monitoring variables
-statemon.define('last_stats_update', float)
-statemon.define('last_publish_time', float)
+statemon.define('time_since_stats_update', float) # Time since the last update
+statemon.define('time_since_publish', float) # Time since the last publish
 statemon.define('statsdb_error', int)
 statemon.define('videodb_error', int)
 statemon.define('publish_error', int)
+statemon.define('serving_urls_missing', int)
 
 _log = logging.getLogger(__name__)
 
@@ -107,17 +109,17 @@ class VideoDBWatcher(threading.Thread):
 
         # Get an update for the serving urls
         self.directive_pusher.update_serving_urls(
-            dict(((x.get_thumbnail_id(), x.size_map) for x in
+            dict(((str(x.get_thumbnail_id()), x.size_map) for x in
                   neondata.ThumbnailServingURLs.get_all())))
 
         # Get an update for the tracker id map
         self.directive_pusher.update_tracker_id_map(
-            dict(((x.get_tai(), x.value) for x in
+            dict(((str(x.get_tai()), str(x.value)) for x in
                   neondata.TrackerAccountIDMapper.get_all())))
 
         # Get an update for the default widths
         self.directive_pusher.update_default_sizes(
-            dict(((x.neon_api_key, x.default_size) for x in
+            dict(((str(x.neon_api_key), x.default_size) for x in
                   neondata.NeonUserAccount.get_all_accounts())))
 
         # Update the video data
@@ -136,24 +138,30 @@ class VideoDBWatcher(threading.Thread):
                                video_id)
                     continue
 
-                thumbnails = []
-                data_missing = False
-                thumbs = neondata.ThumbnailMetadata.get_many(
-                    video_metadata.thumbnail_ids)
-                for thumb_id, meta in zip(video_metadata.thumbnail_ids, thumbs):
-                    if meta is None:
-                        _log.error('Could not find metadata for thumb %s' %
-                                   thumb_id)
-                        data_missing = True
-                    else:
-                        thumbnails.append(meta)
+                if (platform.serving_enabled and 
+                    video_metadata.serving_enabled):
 
-                if data_missing:
-                    continue
+                    thumbnails = []
+                    data_missing = False
+                    thumbs = neondata.ThumbnailMetadata.get_many(
+                        video_metadata.thumbnail_ids)
+                    for thumb_id, meta in zip(video_metadata.thumbnail_ids,
+                                              thumbs):
+                        if meta is None:
+                            _log.error('Could not find metadata for thumb %s' %
+                                       thumb_id)
+                            data_missing = True
+                        else:
+                            thumbnails.append(meta)
 
-                self.mastermind.update_video_info(video_metadata,
-                                                  thumbnails,
-                                                  platform.abtest)
+                    if data_missing:
+                        continue
+
+                    self.mastermind.update_video_info(video_metadata,
+                                                      thumbnails,
+                                                      platform.abtest)
+                else:                
+                    self.mastermind.remove_video_info(video_id)
         
         self.is_loaded.set()
 
@@ -185,7 +193,7 @@ class StatsDBWatcher(threading.Thread):
         while not self._stopped.is_set():
             try:
                 with self.activity_watcher.activate():
-                    self._process_db_data()            
+                    self._process_db_data()
 
             except Exception as e:
                 _log.exception('Uncaught stats DB Error: %s' % e)
@@ -223,7 +231,8 @@ class StatsDBWatcher(threading.Thread):
             self.is_loaded.set()
             return
         cur_update = datetime.datetime.utcfromtimestamp(result[0][0])
-        statemon.state.last_stats_update = result[0][0]
+        statemon.state.last_stats_update = (
+            datetime.datetime.now() - result[0][0]).total_seconds()
         if self.last_update is None or cur_update > self.last_update:
             _log.info('Found a newer entry in the stats database from %s. '
                       'Processing' % cur_update.isoformat())
@@ -388,6 +397,8 @@ class DirectivePublisher(threading.Thread):
         self.default_sizes = default_sizes
         self.activity_watcher = activity_watcher
 
+        self.last_publish_time = datetime.datetime.utcnow()
+
         self.lock = threading.RLock()
         self._stopped = threading.Event()
 
@@ -479,6 +490,8 @@ class DirectivePublisher(threading.Thread):
         key.copy(bucket.name, options.directive_filename, encrypt_key=True,
                  preserve_acl=True)
 
+        self.last_publish_time = curtime
+
         statemon.state.last_publish_time = (
             curtime - datetime.datetime(1970,1,1)).total_seconds()
 
@@ -490,6 +503,7 @@ class DirectivePublisher(threading.Thread):
                                             'aid': account_id}))
 
         # Now write the directives
+        serving_urls_missing = 0
         for key, directive in self.mastermind.get_directives():
             account_id, video_id = key
             fractions = []
@@ -517,6 +531,7 @@ class DirectivePublisher(threading.Thread):
                                    'video: %s. The directives will not '
                                    'be published.' % video_id)
                         missing_urls = True
+                        serving_urls_missing += 1
                         break
 
             if missing_urls:
@@ -530,6 +545,8 @@ class DirectivePublisher(threading.Thread):
                 'fractions': fractions
             }
             stream.write('\n' + json.dumps(data))
+
+        statemon.state.serving_urls_missing = serving_urls_missing
 
     def _get_default_url(self, account_id, thumb_id):
         '''Returns the default url for this thumbnail id.'''
@@ -556,6 +573,9 @@ class DirectivePublisher(threading.Thread):
             return serving_urls[closest_size]
         
 def main(activity_watcher = utils.ps.ActivityWatcher()):
+    statemon.state.last_stats_update = 0
+    statemon.state.last_publish_time = 0
+    
     with activity_watcher.activate():
         mastermind = Mastermind()
         publisher = DirectivePublisher(mastermind, 
@@ -574,9 +594,15 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
     atexit.register(tornado.ioloop.IOLoop.current().stop)
     atexit.register(publisher.stop)
     atexit.register(videoDbThread.stop)
-    atexit.register(publisher.stop)
+    atexit.register(statsDbThread.stop)
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
     signal.signal(signal.SIGINT, lambda sig, y: sys.exit(-sig))
+
+    def update_publish_time():
+        statemon.state.last_publish_time = (
+            datetime.datetime.utcnow() -
+            publisher.last_publish_time).total_seconds()
+    tornado.ioloop.PeriodicCallback(update_publish_time, 10000)
     tornado.ioloop.IOLoop.current().start()
     
 if __name__ == "__main__":

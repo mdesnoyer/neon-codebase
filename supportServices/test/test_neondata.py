@@ -108,6 +108,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         self.assertFalse(bp.abtest)
         self.assertFalse(bp.auto_update)
+        self.assertTrue(bp.serving_enabled)
         self.assertNotEqual(bp.neon_api_key, '')
         self.assertEqual(bp.key, 'brightcoveplatform_%s_iid' % bp.neon_api_key)
 

@@ -67,6 +67,8 @@ define("maxRedisRetries", default=5, type=int,
 define("baseRedisRetryWait", default=0.1, type=float,
        help="On the first retry of a redis command, how long to wait in seconds")
 define("video_server", default="127.0.0.1", type=str, help="Neon video server")
+define('async_pool_size', type=int, default=10,
+       help='Number of processes that can talk simultaneously to the db')
 
 #constants 
 BCOVE_STILL_WIDTH = 480
@@ -226,7 +228,8 @@ class RedisAsyncWrapper(object):
     you can get the callback attribue as well when call is made
     '''
 
-    _thread_pool = concurrent.futures.ThreadPoolExecutor(10)
+    _thread_pool = concurrent.futures.ThreadPoolExecutor(
+        options.async_pool_size)
     
     def __init__(self, host='127.0.0.1', port=6379):
         self.client = blockingRedis.StrictRedis(host, port, socket_timeout=10)
@@ -414,7 +417,7 @@ class StoredObject(object):
     TODO: Convert all the objects to use this consistent interface.
     '''
     def __init__(self, key):
-        self.key = key
+        self.key = str(key)
 
     def __str__(self):
         return str(self.__dict__)
@@ -551,7 +554,7 @@ class StoredObject(object):
         couldn't be modified
 
         Example usage:
-        SoredObject.modify(['thumb_a'], 
+        SoredObject.modify_many(['thumb_a'], 
           lambda d: thumb.update_phash() for thumb in d.iteritems())
         '''
         def _getandset(pipe):
@@ -612,7 +615,7 @@ class StoredObject(object):
 
             #populate the object dictionary
             for key, value in data_dict.iteritems():
-                obj.__dict__[key] = value
+                obj.__dict__[str(key)] = value
         
             return obj
 
@@ -1060,16 +1063,21 @@ class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
 class AbstractPlatform(object):
     ''' Abstract Platform/ Integration class '''
 
-    def __init__(self, abtest=False, enabled=True):
+    def __init__(self, abtest=False, enabled=True, serving_enabled=True):
         self.key = None 
         self.neon_api_key = ''
         self.videos = {} # External video id (Original Platform VID) => Job ID
         self.abtest = abtest # Boolean on wether AB tests can run
         self.integration_id = None # Unique platform ID to 
         self.enabled = enabled # Account enabled for auto processing of videos 
-        self.cdn_metadata = None # Indicates whose CDN the images are hosted on
+
+        # Indicates whose CDN the images are hosted on
         # None = Neon hosts the images on its CDN
-        # else contains a json of CDNHostingDirective  
+        # else contains a json of CDNHostingDirective
+        self.cdn_metadata = None   
+
+        # Will thumbnails be served by our system?
+        self.serving_enabled = serving_enabled 
 
     def generate_key(self, i_id):
         ''' generate db key '''
@@ -2107,7 +2115,7 @@ class ThumbnailServingURLs(NamespacedStoredObject):
 
         If there was a previous entry, it is overwritten.
         '''
-        self.size_map[(width, height)] = url
+        self.size_map[(width, height)] = str(url)
 
     def get_serving_url(self, width, height):
         '''Get the serving url for a given width and height.
@@ -2130,10 +2138,11 @@ class ThumbnailServingURLs(NamespacedStoredObject):
 
             #populate the object dictionary
             for key, value in data_dict.iteritems():
-                obj.__dict__[key] = value
+                obj.__dict__[str(key)] = value
 
             # Load in the size map as a dictionary
-            obj.size_map = dict([[tuple(x[0]), x[1]] for x in obj.size_map])
+            obj.size_map = dict([[tuple(x[0]), str(x[1])] for 
+                                 x in obj.size_map])
             return obj
         
 class ThumbnailURLMapper(object):
@@ -2221,9 +2230,11 @@ class ThumbnailMetadata(StoredObject):
         #TODO: remove refid. It's not necessary
         self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
         self.phash = phash # Perceptual hash of the image. None if unknown
+        
         # Fraction of traffic currently being served by this thumbnail.
         # =None indicates that Mastermind doesn't know of the fraction yet
         self.serving_frac = serving_frac 
+
 
     def update_phash(self, image):
         '''Update the phash from a PIL image.'''
@@ -2268,12 +2279,12 @@ class ThumbnailMetadata(StoredObject):
             if 'thumbnail_metadata' in data_dict:
                 for key, value in data_dict['thumbnail_metadata'].items():
                     if key != 'thumbnail_id':
-                        obj.__dict__[key] = value
+                        obj.__dict__[str(key)] = value
                 del data_dict['thumbnail_metadata']
 
             #populate the object dictionary
             for key, value in data_dict.iteritems():
-                obj.__dict__[key] = value
+                obj.__dict__[str(key)] = value
         
             return obj
 
@@ -2375,7 +2386,8 @@ class VideoMetadata(StoredObject):
                  duration=None, vid_valence=None, model_version=None,
                  i_id=None, frame_size=None, testing_enabled=True,
                  experiment_state=ExperimentState.UNKNOWN,
-                 experiment_value_remaining=None):
+                 experiment_value_remaining=None,
+                 serving_enabled=True):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids 
         self.url = video_url 
@@ -2393,6 +2405,9 @@ class VideoMetadata(StoredObject):
         # For the multi-armed bandit strategy, the value remaining
         # from the monte carlo analysis.
         self.experiment_value_remaining = experiment_value_remaining
+
+        # Will thumbnails for this video be served by our system?
+        self.serving_enabled = serving_enabled 
 
     def get_id(self):
         ''' get internal video id '''

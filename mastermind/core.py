@@ -13,16 +13,21 @@ if sys.path[0] != __base_path__:
 import copy
 import logging
 import math
+import multiprocessing.pool
 import numpy as np
 import scipy as sp
 import scipy.stats as spstats
 from supportServices import neondata
 import threading
 import utils.dists
+from utils.options import define, options
 from utils import statemon
 from utils import strutils
 
 _log = logging.getLogger(__name__)
+
+define('modify_pool_size', type=int, default=5,
+       help='Number of processes that can modify the db simultaneously')
 
 statemon.define('n_directives', int)
 statemon.define('directive_changes', int)
@@ -34,7 +39,7 @@ class UpdateError(MastermindError): pass
 class VideoInfo(object):
     '''Container to store information needed about each video.'''
     def __init__(self, account_id, testing_enabled, thumbnails=[]):
-        self.account_id = account_id
+        self.account_id = str(account_id)
         self.thumbnails = thumbnails # [ThumbnailInfo]
         self.testing_enabled = testing_enabled # Is A/B testing enabled?
 
@@ -51,8 +56,16 @@ class VideoInfo(object):
 class ThumbnailInfo(object):
     '''Container to store information about a thumbnail.'''
     def __init__(self, metadata, impressions=0, conversions=0):
-        self.metadata = metadata # neondata.ThumbnailMetadata
-        self.id = self.metadata.key # Thumbnail id
+        # These entries are from the neondata.ThumbnailMetadata
+        self.enabled = metadata.enabled
+        self.type = str(metadata.type)
+        self.chosen = metadata.chosen
+        self.rank = metadata.rank
+        self.phash = metadata.phash
+        self.model_score = metadata.model_score
+        self.id = str(metadata.key) # Thumbnail id
+
+        # These fields are from the statistics
         self.impressions = impressions # no. of impressions
         self.conversions = conversions # no. of conversions
 
@@ -99,16 +112,30 @@ class Mastermind(object):
         self.serving_directive = {} 
         
         # For thread safety
-        self.lock = threading.RLock()
+        self.lock = multiprocessing.RLock()
+        self.modify_waiter = multiprocessing.Condition()
 
         # Counter for the number of pending modify calls to the database
-        self.pending_modifies = 0
+        self.pending_modifies = multiprocessing.Value('i', 0)
+        statemon.state.pending_modifies = 0
+
+        # A thread pool to modify entries in the database
+        self.modify_pool = multiprocessing.pool.ThreadPool(
+            options.modify_pool_size)
 
     def _incr_pending_modify(self, count):
         '''Safely increment the number of pending modifies by count.'''
         with self.lock:
-            self.pending_modifies += count
-        statemon.state.pending_modifies = self.pending_modifies
+            self.pending_modifies.value += count
+
+        with self.modify_waiter:
+            self.modify_waiter.notify_all()
+        statemon.state.pending_modifies = self.pending_modifies.value
+
+    def wait_for_pending_modifies(self):
+        while self.pending_modifies.value > 0:
+            with self.modify_waiter:
+                self.modify_waiter.wait()
 
     def get_directives(self, video_ids=None):
         '''Returns a generator for the serving directives for all the video ids
@@ -151,7 +178,7 @@ class Mastermind(object):
         testing_enable - True if testing should be enabled for this video
         thumbnails - List of ThumbnailMetadata objects. Stats are ignored.
         '''
-        video_id = video_metadata.get_id()
+        video_id = str(video_metadata.get_id())
         testing_enabled = testing_enabled and video_metadata.testing_enabled
         thumbnail_infos = [ThumbnailInfo(x) for x in thumbnails]
         with self.lock:
@@ -182,6 +209,13 @@ class Mastermind(object):
                 self.video_info[video_id] = video_info
 
             self._calculate_new_serving_directive(video_id)
+
+    def remove_video_info(self, video_id):
+        with self.lock:
+            if video_id in self.video_info:
+                del self.video_info[video_id]
+            if video_id in self.serving_directive:
+                del self.serving_directive[video_id]
                 
 
     def update_stats_info(self, data):
@@ -265,32 +299,13 @@ class Mastermind(object):
             
         except KeyError:
             pass
+
+        self._modify_video_state(video_id, experiment_state, value_left,
+                                 new_directive)
         
-        # Update the serving percentages in the database
-        self._incr_pending_modify(1)
-        def _set_serving_fracs(d):
-            for thumb_id, new_frac in new_directive.iteritems():
-                obj = d[thumb_id]
-                if obj is not None:
-                    obj.serving_frac = new_frac
-        neondata.ThumbnailMetadata.modify_many(
-            new_directive.keys(),
-            _set_serving_fracs,
-            callback=lambda x: self._incr_pending_modify(-1))
-        
-        def _update_experiment_info(x):
-            x.experiment_state = experiment_state
-            if value_left is not None:
-                x.experiment_value_remaining = value_left
-        self._incr_pending_modify(1)
-        neondata.VideoMetadata.modify(
-            video_id, _update_experiment_info,
-            callback=lambda x: self._incr_pending_modify(-1))
-            
         self.serving_directive[video_id] = ((video_info.account_id,
                                              video_id),
                                              new_directive.items())
-
         statemon.state.n_directives = len(self.serving_directive)
         statemon.state.increment('directive_changes')
 
@@ -327,39 +342,39 @@ class Mastermind(object):
         run_frac = {} # thumb_id -> fraction
         for thumb in video_info.thumbnails:
             run_frac[thumb.id] = 0.0
-            if not thumb.metadata.enabled:
+            if not thumb.enabled:
                 continue
 
             # A neon thumbnail
-            if thumb.metadata.type in [neondata.ThumbnailType.NEON,
-                                       neondata.ThumbnailType.CUSTOMUPLOAD]:
+            if thumb.type in [neondata.ThumbnailType.NEON,
+                              neondata.ThumbnailType.CUSTOMUPLOAD]:
                 candidates.add(thumb)
 
             # A thumbnail that was explicitly chosen in the database
-            if thumb.metadata.chosen:
+            if thumb.chosen:
                 if chosen is not None:
                     _log.warn(('More than one chosen thumbnail for video %s '
                                '. Choosing the one of lowest rank' % video_id))
-                    if thumb.metadata.rank < chosen.metadata.rank:
+                    if thumb.rank < chosen.rank:
                         chosen = thumb
                 else:
                     chosen = thumb
 
             # This is identified as the baseline thumbnail
-            if thumb.metadata.type == strategy.baseline_type:
+            if thumb.type == strategy.baseline_type:
                 if (baseline is None or 
-                    thumb.metadata.rank < baseline.metadata.rank):
+                    thumb.rank < baseline.rank):
                     baseline = thumb
 
             # A default thumbnail that comes from a partner source or
             # is explicitly set in the API
-            if thumb.metadata.type not in [neondata.ThumbnailType.NEON,
+            if thumb.type not in [neondata.ThumbnailType.NEON,
                                            neondata.ThumbnailType.CENTERFRAME,
                                            neondata.ThumbnailType.RANDOM,
                                            neondata.ThumbnailType.FILTERED]:
                 if (default is None or 
-                    default.metadata.type == neondata.ThumbnailType.DEFAULT 
-                    or thumb.metadata.rank < default.metadata.rank):
+                    default.type == neondata.ThumbnailType.DEFAULT 
+                    or thumb.rank < default.rank):
                     default = thumb
 
         if strategy.chosen_thumb_overrides and chosen is not None:
@@ -379,7 +394,7 @@ class Mastermind(object):
                       video_id)
             if not video_info.testing_enabled:
                 _log.error('Testing was disabled and there was no baseline for'
-                           'video %s' % video_id)
+                           ' video %s' % video_id)
                 return None
 
         # Done finding all the thumbnail types, so start doing the allocations 
@@ -400,8 +415,8 @@ class Mastermind(object):
                 _log.warn("Could not find the default thumbnail to show for "
                           "video %s. Trying a Neon one instead." % video_id)
                 ranked_candidates = sorted(
-                    candidates, key=lambda x: (x.metadata.rank,
-                                               x.metadata.type != 
+                    candidates, key=lambda x: (x.rank,
+                                               x.type != 
                                                neondata.ThumbnailType.NEON))
                 run_frac[ranked_candidates[0].id] = 1.0
             experiment_state = neondata.ExperimentState.DISABLED
@@ -439,8 +454,8 @@ class Mastermind(object):
                 
         if (editor is not None and 
             baseline is not None and 
-            utils.dists.hamming_int(editor.metadata.phash,
-                                    baseline.metadata.phash) < 10):
+            utils.dists.hamming_int(editor.phash,
+                                    baseline.phash) < 10):
             # The editor thumbnail looks exactly like the baseline one
             # so ignore the editor one.
             editor = None
@@ -550,7 +565,7 @@ class Mastermind(object):
         # simulation.
         if non_exp_thumb is not None:
             win_frac = win_frac[:-1]
-            win_frac = win_frac / np.sum(win_frac)
+            win_frac = np.around(win_frac / np.sum(win_frac), 2)
         for thumb_id, frac in zip(bandit_ids, win_frac):
             run_frac[thumb_id] = frac * experiment_frac
 
@@ -561,11 +576,11 @@ class Mastermind(object):
         '''Get the number of conversions we would expect based on the model 
         score.'''
         
-        score = thumb_info.metadata.model_score
+        score = thumb_info.model_score
         if score is not None:
             score = float(score)
         if score is None or score < 1e-4:
-            if thumb_info.metadata.chosen:
+            if thumb_info.chosen:
                 # An editor chose this thumb, so give it a 5% lift
                 return (Mastermind.PRIOR_CTR * 
                         Mastermind.PRIOR_IMPRESSION_SIZE * 1.05)
@@ -639,3 +654,47 @@ class Mastermind(object):
         _log.warn('Could not find information for thumbnail %s in video %s' % 
                   (thumb_id, video_id))
         return None
+
+    def _modify_video_state(self, video_id, experiment_state, value_left,
+                            new_directive):
+        '''Modifies the database with the current state of the video.'''
+
+        # Update the serving percentages in the database
+        self._incr_pending_modify(1)
+        self.modify_pool.apply_async(
+            _modify_many_serving_fracs,
+            (new_directive,),
+            callback=lambda x: self._incr_pending_modify(-1))
+        
+        self._incr_pending_modify(1)
+        self.modify_pool.apply_async(
+            _modify_video_info,
+            (video_id, experiment_state, value_left),
+            callback=lambda x: self._incr_pending_modify(-1))
+
+
+def _modify_many_serving_fracs(new_directive):
+    neondata.ThumbnailMetadata.modify_many(
+        new_directive.keys(),
+        lambda x: _set_serving_fracs(new_directive, x))
+
+
+def _set_serving_fracs(new_directive, thumb_objs):
+    '''Function to be used by modify_many in order to set the serving
+    fractions for a set of thumbnails'''
+    for thumb_id, new_frac in new_directive.iteritems():
+        obj = thumb_objs[thumb_id]
+        if obj is not None:
+            obj.serving_frac = new_frac
+
+def _modify_video_info(video_id, experiment_state, value_left):
+    neondata.VideoMetadata.modify(
+        video_id,
+        lambda x: _update_experiment_info(experiment_state,
+                                          value_left, x))
+
+def _update_experiment_info(experiment_state, value_left, video_obj):
+    'Function to be used by modify in order to set the video state.'
+    video_obj.experiment_state = experiment_state
+    if value_left is not None:
+        video_obj.experiment_value_remaining = value_left

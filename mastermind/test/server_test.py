@@ -53,6 +53,9 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             self.mastermind,
             self.directive_publisher)
 
+    def tearDown(self):
+        del self.mastermind
+
     def test_good_db_data(self, datamock):
         # Define platforms in the database
 
@@ -277,6 +280,68 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
 
         # Make sure that the processing gets flagged as done
         self.assertTrue(self.watcher.is_loaded.is_set())
+
+    def test_serving_disabled(self, datamock):
+        api_key = "neonapikey"
+
+        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
+                                                 abtest=True)
+        bcPlatform.add_video(0, 'job11')
+        job11 = neondata.NeonApiRequest('job11', api_key, 0, 't', 't', 'r', 'h')
+        bcPlatform.get_processed_internal_video_ids = MagicMock()
+        bcPlatform.get_processed_internal_video_ids.return_value = [api_key +
+                '_0', api_key + '_1'] 
+
+        datamock.AbstractPlatform.get_all_instances.return_value = \
+          [bcPlatform]
+
+        vid_meta = {
+            api_key + '_0': neondata.VideoMetadata(api_key + '_0',
+                                                   ['t01', 't02']),
+            api_key + '_1': neondata.VideoMetadata(api_key + '_1', ['t11']),
+            }
+        datamock.VideoMetadata.get_many.side_effect = \
+                        lambda vids: [vid_meta[vid] for vid in vids]
+
+        TMD = neondata.ThumbnailMetadata
+        tid_meta = {
+            't01': TMD('t01',api_key+'_0',ttype='brightcove'),
+            't02': TMD('t02',api_key+'_0',ttype='neon', rank=0, chosen=True),
+            't11': TMD('t11',api_key+'_1',ttype='brightcove'),
+            }
+
+        datamock.ThumbnailMetadata.get_many.side_effect = \
+                lambda tids: [tid_meta[tid] for tid in tids]
+
+        self.watcher._process_db_data()
+
+        # Make sure that there is a directive for both videos
+        directives = dict((x[0], dict(x[1]))
+                          for x in self.mastermind.get_directives())
+        self.assertEquals(len(directives), 2)
+        self.assertEquals(directives[(api_key, api_key+'_0')],
+                          {'t01': 0.0, 't02':1.0})
+        self.assertEquals(directives[(api_key, api_key+'_1')],
+                          {'t11': 1.0})
+
+        # Now disable one of the videos
+        vid_meta[api_key+'_0'].serving_enabled = False
+        self.watcher._process_db_data()
+
+        # Make sure that only one directive is left
+        directives = dict((x[0], dict(x[1]))
+                          for x in self.mastermind.get_directives())
+        self.assertEquals(len(directives), 1)
+        self.assertEquals(directives[(api_key, api_key+'_1')],
+                          {'t11': 1.0})
+
+        # Finally, disable the account and make sure that there are no
+        # directives
+        bcPlatform.serving_enabled = False
+        self.watcher._process_db_data()
+        self.assertEquals(len([x for x in self.mastermind.get_directives()]),
+                          0)
+        
 
 class SQLWrapper(object):
     def __init__(self, test_case):
@@ -562,6 +627,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         neondata.DBConnection.clear_singleton_instance()
         mastermind.server.tempfile = self.real_tempfile
         self.s3_patcher.stop()
+        del self.mastermind
         super(TestDirectivePublisher, self).tearDown()
 
     def _parse_directive_file(self, file_data):
@@ -899,6 +965,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
         f = 'file::memory:?cache=shared'
         if os.path.exists(f):
             os.remove(f)
+        del self.mastermind
         super(SmokeTesting, self).tearDown()
 
     def test_integration(self):
