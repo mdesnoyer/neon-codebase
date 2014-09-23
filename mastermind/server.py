@@ -231,8 +231,8 @@ class StatsDBWatcher(threading.Thread):
             self.is_loaded.set()
             return
         cur_update = datetime.datetime.utcfromtimestamp(result[0][0])
-        statemon.state.last_stats_update = (
-            datetime.datetime.now() - result[0][0]).total_seconds()
+        statemon.state.time_since_stats_update = (
+            datetime.datetime.now() - cur_update).total_seconds()
         if self.last_update is None or cur_update > self.last_update:
             _log.info('Found a newer entry in the stats database from %s. '
                       'Processing' % cur_update.isoformat())
@@ -492,7 +492,7 @@ class DirectivePublisher(threading.Thread):
 
         self.last_publish_time = curtime
 
-        statemon.state.last_publish_time = (
+        statemon.state.time_since_publish = (
             curtime - datetime.datetime(1970,1,1)).total_seconds()
 
     def _write_directives(self, stream):
@@ -572,10 +572,7 @@ class DirectivePublisher(threading.Thread):
                          closest_size[0], closest_size[1]))
             return serving_urls[closest_size]
         
-def main(activity_watcher = utils.ps.ActivityWatcher()):
-    statemon.state.last_stats_update = 0
-    statemon.state.last_publish_time = 0
-    
+def main(activity_watcher = utils.ps.ActivityWatcher()):    
     with activity_watcher.activate():
         mastermind = Mastermind()
         publisher = DirectivePublisher(mastermind, 

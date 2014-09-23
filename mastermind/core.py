@@ -10,6 +10,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import concurrent.futures
 import copy
 import logging
 import math
@@ -120,11 +121,12 @@ class Mastermind(object):
         statemon.state.pending_modifies = 0
 
         # A thread pool to modify entries in the database
-        self.modify_pool = multiprocessing.pool.ThreadPool(
+        self.modify_pool = concurrent.futures.ThreadPoolExecutor(
             options.modify_pool_size)
 
     def _incr_pending_modify(self, count):
         '''Safely increment the number of pending modifies by count.'''
+                
         with self.lock:
             self.pending_modifies.value += count
 
@@ -133,8 +135,8 @@ class Mastermind(object):
         statemon.state.pending_modifies = self.pending_modifies.value
 
     def wait_for_pending_modifies(self):
-        while self.pending_modifies.value > 0:
-            with self.modify_waiter:
+        with self.modify_waiter:
+            while self.pending_modifies.value > 0:
                 self.modify_waiter.wait()
 
     def get_directives(self, video_ids=None):
@@ -564,8 +566,8 @@ class Mastermind(object):
         # fraction of time that each thumb won the Monte Carlo
         # simulation.
         if non_exp_thumb is not None:
-            win_frac = win_frac[:-1]
-            win_frac = np.around(win_frac / np.sum(win_frac), 2)
+            win_frac = np.around(win_frac[:-1], 2)
+            win_frac = win_frac / np.sum(win_frac)
         for thumb_id, frac in zip(bandit_ids, win_frac):
             run_frac[thumb_id] = frac * experiment_frac
 
@@ -661,22 +663,25 @@ class Mastermind(object):
 
         # Update the serving percentages in the database
         self._incr_pending_modify(1)
-        self.modify_pool.apply_async(
+        self.modify_pool.submit(
             _modify_many_serving_fracs,
-            (new_directive,),
-            callback=lambda x: self._incr_pending_modify(-1))
+            self, new_directive)
         
         self._incr_pending_modify(1)
-        self.modify_pool.apply_async(
+        self.modify_pool.submit(
             _modify_video_info,
-            (video_id, experiment_state, value_left),
-            callback=lambda x: self._incr_pending_modify(-1))
+            self, video_id, experiment_state, value_left)
 
 
-def _modify_many_serving_fracs(new_directive):
-    neondata.ThumbnailMetadata.modify_many(
-        new_directive.keys(),
-        lambda x: _set_serving_fracs(new_directive, x))
+def _modify_many_serving_fracs(mastermind, new_directive):
+    try:
+        neondata.ThumbnailMetadata.modify_many(
+            new_directive.keys(),
+            lambda x: _set_serving_fracs(new_directive, x))
+        mastermind._incr_pending_modify(-1)
+    except Exception as e:
+        _log.exception('Unhandled exception when updating thumbs %s' % e)
+        raise
 
 
 def _set_serving_fracs(new_directive, thumb_objs):
@@ -687,14 +692,22 @@ def _set_serving_fracs(new_directive, thumb_objs):
         if obj is not None:
             obj.serving_frac = new_frac
 
-def _modify_video_info(video_id, experiment_state, value_left):
-    neondata.VideoMetadata.modify(
-        video_id,
-        lambda x: _update_experiment_info(experiment_state,
-                                          value_left, x))
+def _modify_video_info(mastermind, video_id, experiment_state, value_left):
+
+    try:
+        neondata.VideoMetadata.modify(
+            video_id,
+            lambda x: _update_experiment_info(experiment_state,
+                                              value_left, x))
+        _log.info('Done setting vid info')
+        mastermind._incr_pending_modify(-1)
+    except Exception as e:
+        _log.exception('Unhandled exception when updating video %s' % e)
+        raise
 
 def _update_experiment_info(experiment_state, value_left, video_obj):
     'Function to be used by modify in order to set the video state.'
+    _log.info('Setting exp info')
     video_obj.experiment_state = experiment_state
     if value_left is not None:
         video_obj.experiment_value_remaining = value_left

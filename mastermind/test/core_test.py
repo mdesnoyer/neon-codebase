@@ -18,7 +18,7 @@ import decimal
 import fake_filesystem
 import fake_tempfile
 import logging
-from mock import patch
+from mock import patch, MagicMock
 import multiprocessing.pool
 import numpy.random
 from supportServices import neondata
@@ -70,20 +70,20 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestCurrentServingDirective, self).setUp()
         numpy.random.seed(1984934)
-        self.mastermind = Mastermind()
 
         # Mock out the redis connection so that it doesn't throw an error
-        redis_patcher = patch(
+        self.redis_patcher = patch(
             'supportServices.neondata.blockingRedis.StrictRedis')
-        redis_patcher.start()
-        self.addCleanup(redis_patcher.stop)
+        self.redis_patcher.start()
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
+        self.mastermind = Mastermind()
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1'))
 
     def tearDown(self):
-        del self.mastermind
+        self.mastermind.wait_for_pending_modifies()
+        self.redis_patcher.stop()
 
     def test_priors(self):
         self.mastermind.update_experiment_strategy(
@@ -828,17 +828,14 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestUpdatingFuncs, self).setUp()
         numpy.random.seed(1984934)
-        self.mastermind = Mastermind()
-        # Switch the pool to a thread pool so that we can check the mock calls
-        self.mastermind.modify_pool = multiprocessing.pool.ThreadPool(3)
 
         # Mock out the redis connection so that it doesn't throw an error
-        redis_patcher = patch(
+        self.redis_patcher = patch(
             'supportServices.neondata.blockingRedis.StrictRedis')
-        self.redis_mock = redis_patcher.start()
-        self.addCleanup(redis_patcher.stop)
+        self.redis_mock = self.redis_patcher.start()
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
+        self.mastermind = Mastermind()
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1'))
         self.mastermind.update_video_info(
@@ -847,7 +844,8 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
              ThumbnailMetadata('tid2', 'acct1_vid1', ttype='neon')], True)
 
     def tearDown(self):
-        del self.mastermind
+        self.mastermind.wait_for_pending_modifies()
+        self.redis_patcher.stop()
 
     def test_no_data_yet(self):
         self.assertItemsEqual(self.mastermind.get_directives(['acct2_vid1']),
@@ -977,14 +975,14 @@ class TestStatUpdating(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestStatUpdating, self).setUp()
         numpy.random.seed(1984934)
-        self.mastermind = Mastermind()
 
         # Mock out the redis connection so that it doesn't throw an error
-        redis_patcher = patch(
+        self.redis_patcher = patch(
             'supportServices.neondata.blockingRedis.StrictRedis')
-        self.redis_mock = redis_patcher.start()
-        self.addCleanup(redis_patcher.stop)
+        self.redis_mock = self.redis_patcher.start()
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
+
+        self.mastermind = Mastermind()
 
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1'))
@@ -999,7 +997,8 @@ class TestStatUpdating(test_utils.neontest.TestCase):
              ThumbnailMetadata('v2t3', 'acct1_vid2', ttype='neon', rank=3)])
 
     def tearDown(self):
-        del self.mastermind
+        self.mastermind.wait_for_pending_modifies()
+        self.redis_patcher.stop()
         
     def test_initial_stats_update(self):
         self.mastermind.update_stats_info([
@@ -1052,9 +1051,8 @@ class TestStatUpdating(test_utils.neontest.TestCase):
 class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestStatusUpdatesInDb, self).setUp()
-        redis = test_utils.redis.RedisServer()
-        redis.start()
-        self.addCleanup(redis.stop)
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
         
         numpy.random.seed(1984934)
@@ -1077,18 +1075,19 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
         
         ThumbnailMetadata.save_all(self.thumbnails)
         self.video_metadata = VideoMetadata(
-            'acct1_vid1',tids=[x.key for x in self.thumbnails])
+            'acct1_vid1', tids=[x.key for x in self.thumbnails])
         self.video_metadata.save()
         self.mastermind.update_video_info(self.video_metadata, self.thumbnails)
+        self._wait_for_db_updates()
 
     def tearDown(self):
-        del self.mastermind
+        self.mastermind.wait_for_pending_modifies()
+        self.redis.stop()
 
     def _wait_for_db_updates(self):
         self.mastermind.wait_for_pending_modifies()
 
     def test_db_when_experiment_running(self):
-        self._wait_for_db_updates()
         video = VideoMetadata.get('acct1_vid1')
         thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
         directive = dict([(x.key, x.serving_frac) for x in thumbs])
@@ -1108,8 +1107,8 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
                                           False)
         self._wait_for_db_updates()
 
+        thumbs = ThumbnailMetadata.get_many(self.video_metadata.thumbnail_ids)
         video = VideoMetadata.get('acct1_vid1')
-        thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
         directive = dict([(x.key, x.serving_frac) for x in thumbs])
         self.assertEqual(directive, {'bc':1.0, 'n1':0.0, 'n2':0.0,
                                      'ctr':0.0})

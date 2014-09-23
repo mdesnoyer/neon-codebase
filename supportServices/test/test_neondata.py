@@ -158,19 +158,19 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
     
     def test_dbconn_singleton(self):
         bp = BrightcovePlatform('2','3', 'test')
-        self.bp_conn = DBConnection(bp)
+        self.bp_conn = DBConnection.get(bp)
 
         bp2 = BrightcovePlatform('12','13','test')
-        self.bp_conn2 = DBConnection(bp2)
+        self.bp_conn2 = DBConnection.get(bp2)
 
 
         vm = VideoMetadata('test1', None, None, None,
                 None, None, None, None)
-        self.vm_conn = DBConnection(vm)
+        self.vm_conn = DBConnection.get(vm)
 
         vm2 = VideoMetadata('test2', None, None, None, 
                 None, None, None, None)
-        self.vm_conn2 = DBConnection(vm2)
+        self.vm_conn2 = DBConnection.get(vm2)
         
         self.assertEqual(self.bp_conn, self.bp_conn2)
         self.assertEqual(self.vm_conn, self.vm_conn2)
@@ -182,7 +182,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         ''' #Verify that database connection is re-established 
         after config change '''
         ap = AbstractPlatform()
-        db = DBConnection(ap)
+        db = DBConnection.get(ap)
         key = "fookey"
         val = "fooval"
         self.assertTrue(db.blocking_conn.set(key, val))
@@ -214,7 +214,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         DB Connection test
         '''
         ap = AbstractPlatform()
-        db = DBConnection(ap)
+        db = DBConnection.get(ap)
         key = "fookey"
         val = "fooval"
         self.assertTrue(db.blocking_conn.set(key, val))
@@ -230,7 +230,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             resultQ.put(db.blocking_conn.get(key))
 
         ap = AbstractPlatform()
-        db = DBConnection(ap)
+        db = DBConnection.get(ap)
         key = "fookey"
         val = "fooval"*1000
         nkeys = 100
