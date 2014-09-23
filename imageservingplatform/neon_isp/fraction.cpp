@@ -104,6 +104,7 @@ Fraction::Shutdown()
 ScaledImage*
 Fraction::GetScaledImage(int height, int width) const
 {
+    // TODO(Sunil): Get approx height, +- 2 px
     for(unsigned i=0; i < images.size(); i++) {
         
         if(images[i]->GetHeight() == height &&
