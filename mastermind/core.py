@@ -699,7 +699,6 @@ def _modify_video_info(mastermind, video_id, experiment_state, value_left):
             video_id,
             lambda x: _update_experiment_info(experiment_state,
                                               value_left, x))
-        _log.info('Done setting vid info')
         mastermind._incr_pending_modify(-1)
     except Exception as e:
         _log.exception('Unhandled exception when updating video %s' % e)
@@ -707,7 +706,6 @@ def _modify_video_info(mastermind, video_id, experiment_state, value_left):
 
 def _update_experiment_info(experiment_state, value_left, video_obj):
     'Function to be used by modify in order to set the video state.'
-    _log.info('Setting exp info')
     video_obj.experiment_state = experiment_state
     if value_left is not None:
         video_obj.experiment_value_remaining = value_left
