@@ -16,7 +16,6 @@ import atexit
 from boto.s3.connection import S3Connection
 from boto.emr.connection import EmrConnection
 import boto
-from guppy import hpy
 import datetime
 import impala.dbapi
 import impala.error
