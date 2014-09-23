@@ -166,9 +166,11 @@ class TornadoHTTPHandler(logging.Handler):
     '''
     A class that sends a tornado based http request
     '''
-    def __init__(self, url):
+    def __init__(self, url, emit_error_sampling_period=60):
         super(TornadoHTTPHandler, self).__init__()
         self.url = url
+        self.emit_error_sampling_period = emit_error_sampling_period
+        self.last_emit_error = None
 
     def get_verbose_dict(self, record):
         '''Returns a verbose dictionary of the record.'''
@@ -202,7 +204,12 @@ class TornadoHTTPHandler(logging.Handler):
             utils.http.send_request(self.generate_request(record),
                                     callback=handle_response)
         except:
-            self.handleError(record)
+            curtime = datetime.datetime.utcnow()
+            if (self.last_emit_error is None or 
+                (curtime - self.last_emit_error).total_seconds() > 
+                self.emit_error_sampling_period):
+                self.last_emit_error = curtime
+                self.handleError(record)
 
 class LogglyHandler(TornadoHTTPHandler):
     '''
