@@ -262,8 +262,9 @@ class Mastermind(object):
 
             self.experiment_strategy[account_id] = strategy
 
-            _log.info(('The experiment strategy has changed for account %s. '
-                      'Building new serving directives.') % account_id)
+            _log.info_n(('The experiment strategy has changed for account %s. '
+                         'Building new serving directives.') % account_id,
+                100)
 
             # Now update all the serving directives
             for video_id, video_info in self.video_info.items():
@@ -392,11 +393,12 @@ class Mastermind(object):
                 _log.error("No valid thumbnails for video %s" % video_id)
                 return None
             
-            _log.warn('Could not find a baseline for video id: %s' %
-                      video_id)
+            _log.warn_n('Could not find a baseline for video id: %s' %
+                        video_id)
             if not video_info.testing_enabled:
-                _log.error('Testing was disabled and there was no baseline for'
-                           ' video %s' % video_id)
+                _log.error_n(
+                    'Testing was disabled and there was no baseline for'
+                    ' video %s' % video_id, 5)
                 return None
 
         # Done finding all the thumbnail types, so start doing the allocations 

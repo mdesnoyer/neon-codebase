@@ -526,9 +526,9 @@ class DirectivePublisher(threading.Thread):
                     })
                 except KeyError:
                     if frac > 1e-7:
-                        _log.error('Could not find all serving URLs for '
-                                   'video: %s. The directives will not '
-                                   'be published.' % video_id)
+                        _log.error_n('Could not find all serving URLs for '
+                                     'video: %s. The directives will not '
+                                     'be published.' % video_id, 5)
                         missing_urls = True
                         serving_urls_missing += 1
                         break

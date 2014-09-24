@@ -52,6 +52,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.watcher = mastermind.server.VideoDBWatcher(
             self.mastermind,
             self.directive_publisher)
+        logging.getLogger('mastermind.server').reset_sample_counters()
 
     def tearDown(self):
         del self.mastermind

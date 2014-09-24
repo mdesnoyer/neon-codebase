@@ -80,6 +80,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.mastermind = Mastermind()
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1'))
+        logging.getLogger('mastermind.core').reset_sample_counters()
 
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
@@ -842,10 +843,12 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
             VideoMetadata('acct1_vid1'),
             [ThumbnailMetadata('tid1', 'acct1_vid1', ttype='centerframe'),
              ThumbnailMetadata('tid2', 'acct1_vid1', ttype='neon')], True)
+        logging.getLogger('mastermind.core').reset_sample_counters()
 
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
         self.redis_patcher.stop()
+        logging.getLogger('mastermind.core').reset_sample_counters()
 
     def test_no_data_yet(self):
         self.assertItemsEqual(self.mastermind.get_directives(['acct2_vid1']),
@@ -871,12 +874,14 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         orig_directive = self.mastermind.get_directives(['acct2_vid1']).next()
 
         # A strategy that isn't different is ignored
+        logging.getLogger('mastermind.core').reset_sample_counters()
         with self.assertLogNotExists(logging.INFO, 'strategy has changed'):
             self.mastermind.update_experiment_strategy(
                 'acct2', ExperimentStrategy('acct2'))
         self.assertEqual(orig_directive,
                          self.mastermind.get_directives(['acct2_vid1']).next())
 
+        logging.getLogger('mastermind.core').reset_sample_counters()
         with self.assertLogExists(logging.INFO, 'strategy has changed'):
             self.mastermind.update_experiment_strategy(
                 'acct2', ExperimentStrategy('acct2', exp_frac=0.5))

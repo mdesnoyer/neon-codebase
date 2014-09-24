@@ -281,6 +281,9 @@ class NeonLogger(logging.Logger):
         super(NeonLogger, self).__init__(*args, **kwargs)
         self.sample_counters = {} # (filename, lineno) -> counter
 
+    def reset_sample_counters(self):
+        self.sample_counters = {}
+
     def findCaller(self):
         '''Overwrite the function to find the caller because the one in the
         logging module only skips stack frames in its own file
@@ -312,6 +315,7 @@ class NeonLogger(logging.Logger):
     def warning_n(self, msg, n=10, *args, **kwargs):
         '''Log every nth message.'''
         self.log_n(logging.WARNING, msg, n, *args, **kwargs)
+    warn_n = warning_n
 
     def error_n(self, msg, n=10, *args, **kwargs):
         '''Log every nth message.'''
