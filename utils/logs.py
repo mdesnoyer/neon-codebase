@@ -62,6 +62,29 @@ define('loggly_base_url',
        default='https://logs-01.loggly.com/inputs/520b9697-b7f3-4970-a059-710c28a8188a',
        help='Base url for the loggly endpoint')
 
+# grabbed from logging.py
+#
+# _srcfile is used when walking the stack to check when we've got the first
+# caller stack frame.
+#
+if hasattr(sys, 'frozen'): #support for py2exe
+    _srcfile = "logging%s__init__%s" % (os.sep, __file__[-4:])
+elif __file__[-4:].lower() in ['.pyc', '.pyo']:
+    _srcfile = __file__[:-4] + '.py'
+else:
+    _srcfile = __file__
+_srcfile = os.path.normcase(_srcfile)
+
+def currentframe():
+    """Return the frame object for the caller's stack frame."""
+    try:
+        raise Exception
+    except:
+        return sys.exc_info()[2].tb_frame.f_back
+
+if hasattr(sys, '_getframe'): currentframe = lambda: sys._getframe(3)
+# done filching
+
 def AddConfiguredLogger():
     '''Adds a root logger defined by the config parameters.'''
     stdout_stream = None
@@ -251,6 +274,67 @@ class FlumeHandler(TornadoHTTPHandler):
             self.url, method='POST', 
             headers={'Content-type' : 'application/json' },
             body=data)
+
+class NeonLogger(logging.Logger):
+    '''A python logger with some extra functionality.'''
+    def __init__(self, *args, **kwargs):
+        super(NeonLogger, self).__init__(*args, **kwargs)
+        self.sample_counters = {} # (filename, lineno) -> counter
+
+    def findCaller(self):
+        '''Overwrite the function to find the caller because the one in the
+        logging module only skips stack frames in its own file
+        '''
+        f = currentframe()
+        #On some versions of IronPython, currentframe() returns None if
+        #IronPython isn't run with -X:Frames.
+        if f is not None:
+            f = f.f_back
+        rv = "(unknown file)", 0, "(unknown function)"
+        while hasattr(f, "f_code"):
+            co = f.f_code
+            filename = os.path.normcase(co.co_filename)
+            if filename in [_srcfile, logging._srcfile]:
+                f = f.f_back
+                continue
+            rv = (co.co_filename, f.f_lineno, co.co_name)
+            break
+        return rv
+
+    def debug_n(self, msg, n=10, *args, **kwargs):
+        '''Log every nth message.'''
+        self.log_n(logging.DEBUG, msg, n, *args, **kwargs)
+
+    def info_n(self, msg, n=10, *args, **kwargs):
+        '''Log every nth message.'''
+        self.log_n(logging.INFO, msg, n, *args, **kwargs)
+
+    def warning_n(self, msg, n=10, *args, **kwargs):
+        '''Log every nth message.'''
+        self.log_n(logging.WARNING, msg, n, *args, **kwargs)
+
+    def error_n(self, msg, n=10, *args, **kwargs):
+        '''Log every nth message.'''
+        self.log_n(logging.ERROR, msg, n, *args, **kwargs)
+
+    def exception_n(self, msg, n=10, *args, **kwargs):
+        '''Log every nth message.'''
+        self.error_n(msg, n, exc_info=1, *args, **kwargs)
+
+    def critical_n(self, msg, n=10, *args, **kwargs):
+        '''Log every nth message.'''
+        self.log_n(logging.CRITICAL, msg, n, *args, **kwargs)
+    fatal_n = critical_n
+
+    def log_n(self, level, msg, n=10, *args, **kwargs):
+        '''Log every nth message.'''
+        fn, lno, func = self.findCaller()
+        key = (fn, lno)
+        cur_val = self.sample_counters.get(key, 0)
+        self.sample_counters[key] = cur_val + 1
+        if cur_val % n == 0:
+            self.log(level, msg, *args, **kwargs)
+logging.setLoggerClass(NeonLogger)
 
 def str2level(s):
     '''Converts a string to a logging level.'''
