@@ -230,7 +230,8 @@ class TornadoHTTPHandler(logging.Handler):
 
         try:
             utils.http.send_request(self.generate_request(record),
-                                    callback=handle_response)
+                                    callback=handle_response,
+                                    do_logging=False)
         except:
             curtime = datetime.datetime.utcnow()
             if (self.last_emit_error is None or 

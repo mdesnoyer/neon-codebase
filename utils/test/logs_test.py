@@ -88,7 +88,7 @@ class TestLogglyHandler(test_utils.neontest.TestCase):
         self.url_mock = self.url_patcher.start()
 
         self.url_mock.side_effect = \
-          lambda x, callback: callback(HTTPResponse(x, 200))
+          lambda x, callback, do_logging: callback(HTTPResponse(x, 200))
 
         
         self.handler = utils.logs.LogglyHandler('mytag')
@@ -131,7 +131,7 @@ class TestFlumeHandler(test_utils.neontest.TestCase):
         self.url_mock = self.url_patcher.start()
 
         self.url_mock.side_effect = \
-          lambda x, callback: callback(HTTPResponse(x, 200))
+          lambda x, callback, do_logging: callback(HTTPResponse(x, 200))
 
         
         self.handler = utils.logs.FlumeHandler('http://localhost:6366')
@@ -162,7 +162,7 @@ class TestFlumeHandler(test_utils.neontest.TestCase):
     @patch('sys.stderr', new_callable=StringIO)
     def test_bad_connection(self, mock_stderr):
         self.url_mock.side_effect = \
-        lambda x, callback: callback(
+        lambda x, callback, do_logging: callback(
             HTTPResponse(x, 404, error=HTTPError(404)))
 
         with self.assertLogExists(logging.ERROR, 'I got a.* log'):
