@@ -50,6 +50,10 @@ Directive::Init(const rapidjson::Document & document)
 
     videoId = document["vid"].GetString();
 
+    // Convert to External(platform) video id, if _ not present return
+    // std::string::npos, which wraps around to 0, when +1 'ed :)
+    videoId = videoId.substr(videoId.find("_") + 1, videoId.length());
+
     /*
      *  SLA time
      */

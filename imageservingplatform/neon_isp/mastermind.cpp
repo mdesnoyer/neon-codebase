@@ -180,12 +180,6 @@ Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
     }
     
     /*
-     *  check trailer -- do we need to add one?
-     */
-    
-    
-    
-    /*
      *  check expiry
      */
     
@@ -294,6 +288,8 @@ Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
                                 "directives read from mastermind file");
         
     int ret = fclose(f);
+    
+    std::cout << "\nParsed "<< lineNumber << "lines" << endl;
     
     if(ret != 0)
         throw new NeonException("Mastermind::Init: cannot close mastermind file");

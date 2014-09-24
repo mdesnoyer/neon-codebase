@@ -322,7 +322,6 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
     def tearDown(self):
         neondata.DBConnection.clear_singleton_instance()
         self.sqlite_connect_patcher.stop()
-        self.sqs_patcher.stop()
 
         try:
             cursor = self.ramdb.cursor()
