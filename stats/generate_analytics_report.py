@@ -51,10 +51,14 @@ class MetricTypes:
     CLICKS = 'clicks'
     PLAYS = 'plays'
 
+def connect():
+    return impala.dbapi.connect(host=options.stats_host,
+                                port=options.stats_port,
+                                timeout=600)
+
 def get_thumbnail_ids():
     _log.info('Querying for thumbnail ids')
-    conn = impala.dbapi.connect(host=options.stats_host,
-                                port=options.stats_port)
+    conn = connect()
     cursor = conn.cursor()
     cursor.execute(
     """select distinct thumbnail_id from imageloads where 
@@ -83,8 +87,7 @@ def collect_stats(thumb_info,
         MetricTypes.VIEWS: 'imvisclienttime',
         MetricTypes.CLICKS: 'imclickclienttime'}
     
-    conn = impala.dbapi.connect(host=options.stats_host,
-                                port=options.stats_port)
+    conn = connect()
     cursor = conn.cursor()
 
     _log.info('Getting all the %s and %s counts' % (impression_metric,
@@ -208,7 +211,7 @@ def get_video_titles(video_ids):
     '''Returns the video titles for a list of video id'''
     retval = []
     video_datas = neondata.VideoMetadata.get_many(video_ids)
-    for video_data in video_datas:
+    for video_data, video_id in zip(video_datas, video_ids):
         if video_data is None:
             _log.error('Could not find title for video id %s' % video_id)
             retval.append('')
@@ -230,10 +233,11 @@ def main():
                            if x is not None])
 
     _log.info('Getting urls and video titles')
-    titles = get_video_titles([x.video_id for x in thumbnail_info.values()])
+    titles = get_video_titles([x.video_id for x in thumbnail_info.values() if
+	                       x.video_id is not None])
     urls = dict(
         [((x.video_id, x.type, x.rank if x.type =='neon' else 0),
-          [x.urls[0], title]) 
+          [x.urls[0] if x.urls is not None else x.url, title]) 
          for x, title in zip(thumbnail_info.values(), titles)])
     url_index = pandas.MultiIndex.from_tuples(
         urls.keys(), names=['video_id', 'type', 'rank'])
