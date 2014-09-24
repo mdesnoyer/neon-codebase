@@ -221,6 +221,7 @@ class TornadoHTTPHandler(logging.Handler):
                 try:
                     raise response.error
                 except:
+                    curtime = datetime.datetime.utcnow()
                     if (self.last_emit_error is None or 
                         (curtime - self.last_emit_error).total_seconds() >
                         self.emit_error_sampling_period):
