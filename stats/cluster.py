@@ -39,6 +39,8 @@ define("cluster_name", default="Neon Cluster",
        help="Name of any cluster that is created")
 define("cluster_region", default='us-east-1',
        help='Amazon region where the cluster resides')
+define("use_public_ip", default=0,
+       help="If set, uses the public ip to talk to the cluster.")
 define("ssh_key", default="s3://neon-keys/emr-runner.pem",
        help="ssh key used to execute jobs on the master node")
 define("resource_manager_port", default=9026,
@@ -576,7 +578,10 @@ class Cluster():
         for instance in emr_iterator(conn, 'instances', self.cluster_id):
             if (instance.status.state == 'RUNNING' and 
                 instance.ec2instanceid == self.master_id):
-                self.master_ip = instance.privateipaddress
+                if options.use_public_ip and instance.publicipaddress:
+                    self.master_ip = instance.publicipaddress
+                else:
+                    self.master_ip = instance.privateipaddress
 
         if self.master_ip is None:
             raise ClusterInfoError("Could not find the master ip")

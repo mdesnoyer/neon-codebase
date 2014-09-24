@@ -221,7 +221,11 @@ class TornadoHTTPHandler(logging.Handler):
                 try:
                     raise response.error
                 except:
-                    self.handleError(record)
+                    if (self.last_emit_error is None or 
+                        (curtime - self.last_emit_error).total_seconds() >
+                        self.emit_error_sampling_period):
+                        self.last_emit_error = curtime
+                        self.handleError(record)
 
         try:
             utils.http.send_request(self.generate_request(record),
