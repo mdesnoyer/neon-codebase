@@ -470,7 +470,7 @@ class DirectivePublisher(threading.Thread):
         directive_file.write(
             'expiry=%sZ' % 
             (curtime + datetime.timedelta(seconds=valid_length))
-            .isoformat())
+            .strftime('%Y-%m-%dT%H:%M:%SZ'))
         with self.lock:
             self._write_directives(directive_file)
         directive_file.write('\nend')
@@ -569,7 +569,7 @@ class DirectivePublisher(threading.Thread):
                 'type': 'dir',
                 'aid': account_id,
                 'vid': video_id,
-                'sla': datetime.datetime.utcnow().isoformat() + 'Z',
+                'sla': datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
                 'fractions': fractions
             }
             stream.write('\n' + json.dumps(data))
