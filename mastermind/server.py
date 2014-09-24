@@ -468,7 +468,7 @@ class DirectivePublisher(threading.Thread):
         directive_file = tempfile.TemporaryFile()
         valid_length = options.expiry_buffer + options.publishing_period
         directive_file.write(
-            'expiry=%sZ' % 
+            'expiry=%s' % 
             (curtime + datetime.timedelta(seconds=valid_length))
             .strftime('%Y-%m-%dT%H:%M:%SZ'))
         with self.lock:
