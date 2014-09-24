@@ -11,6 +11,9 @@ Account Types
 Api Request Types
 - Neon, Brightcove, youtube
 
+This module can also be called as a script, in which case you get an
+interactive console to talk to the database with.
+
 '''
 import os
 import os.path
@@ -21,6 +24,7 @@ if sys.path[0] <> base_path:
 
 import base64
 import binascii
+import code
 import concurrent.futures
 import contextlib
 import copy
@@ -39,6 +43,7 @@ import time
 import api.brightcove_api #coz of cyclic import 
 import api.youtube_api
 import utils.http
+import utils.neon
 import utils.sync
 import utils.s3
 import urllib
@@ -2656,3 +2661,9 @@ class VideoResponse(object):
 
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__)
+
+if __name__ == '__main__':
+    # If you call this module you will get a command line that talks
+    # to the server. nifty eh?
+    utils.neon.InitNeon()
+    code.interact(local=locals())
