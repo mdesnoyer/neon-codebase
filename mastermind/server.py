@@ -518,10 +518,9 @@ class DirectivePublisher(threading.Thread):
         _log.info('After directive copy,memory usage is (p:%s, s:%s)' %
                   (get_proc_memory(), get_system_memory()))
 
-        self.last_publish_time = curtime
-
         statemon.state.time_since_publish = (
-            curtime - datetime.datetime(1970,1,1)).total_seconds()
+            curtime - self.last_publish_time).total_seconds()
+        self.last_publish_time = curtime
 
     def _write_directives(self, stream):
         '''Write the current directives to the stream.'''
