@@ -108,23 +108,29 @@ class VideoDBWatcher(threading.Thread):
         _log.info('Polling the video database')
         _log.info('Before video db load, memory usage is (p:%s, s:%s)' %
                   (get_proc_memory(), get_system_memory()))
+        _log.info('During step 1 video db load, memory usage is (p:%s, s:%s)' %
+                  (get_proc_memory(), get_system_memory()))
 
         # Get an update for the serving urls
         self.directive_pusher.update_serving_urls(
             dict(((str(x.get_thumbnail_id()), x.size_map) for x in
                   neondata.ThumbnailServingURLs.get_all())))
+        _log.info('During step 2 video db load, memory usage is (p:%s, s:%s)' %
+                  (get_proc_memory(), get_system_memory()))
 
         # Get an update for the tracker id map
         self.directive_pusher.update_tracker_id_map(
             dict(((str(x.get_tai()), str(x.value)) for x in
                   neondata.TrackerAccountIDMapper.get_all())))
+        _log.info('During step 3 video db load, memory usage is (p:%s, s:%s)' %
+                  (get_proc_memory(), get_system_memory()))
 
         # Get an update for the default widths
         self.directive_pusher.update_default_sizes(
             dict(((str(x.neon_api_key), x.default_size) for x in
                   neondata.NeonUserAccount.get_all_accounts())))
 
-        _log.info('During video db load, memory usage is (p:%s, s:%s)' %
+        _log.info('During step 4 video db load, memory usage is (p:%s, s:%s)' %
                   (get_proc_memory(), get_system_memory()))
 
         # Update the video data
