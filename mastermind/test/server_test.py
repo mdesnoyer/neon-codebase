@@ -46,6 +46,11 @@ PROD = neondata.TrackerAccountIDMapper.PRODUCTION
 @patch('mastermind.server.neondata')
 class TestVideoDBWatcher(test_utils.neontest.TestCase):
     def setUp(self):
+        # Mock out the redis connection so that it doesn't throw an error
+        self.redis_patcher = patch(
+            'supportServices.neondata.blockingRedis.StrictRedis')
+        self.redis_patcher.start()
+        
         self.mastermind = mastermind.core.Mastermind()
         self.directive_publisher = mastermind.server.DirectivePublisher(
             self.mastermind)
@@ -55,7 +60,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         logging.getLogger('mastermind.server').reset_sample_counters()
 
     def tearDown(self):
-        del self.mastermind
+        self.mastermind.wait_for_pending_modifies()
+        self.redis_patcher.stop()
 
     def test_good_db_data(self, datamock):
         # Define platforms in the database
@@ -101,14 +107,18 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
 
         # Define the video meta data
         vid_meta = {
-            api_key + '_0': neondata.VideoMetadata(api_key + '_0',
-                                                   ['t01','t02','t03']),
+            api_key + '_0': neondata.VideoMetadata(
+                api_key + '_0',
+                [api_key+'_0_t01',api_key+'_0_t02',api_key+'_0_t03']),
             api_key + '_10': neondata.VideoMetadata(api_key + '_10', []),
-            api_key + '_1': neondata.VideoMetadata(api_key + '_1', ['t11']),
-            api_key + '_2': neondata.VideoMetadata(api_key + '_2',
-                                                   ['t21','t22']),
-            api_key + '_4': neondata.VideoMetadata(api_key + '_4',
-                                                   ['t41', 't42'])
+            api_key + '_1': neondata.VideoMetadata(api_key + '_1',
+                                                   [api_key+'_1_t11']),
+            api_key + '_2': neondata.VideoMetadata(
+                api_key + '_2',
+                [api_key+'_2_t21', api_key+'_2_t22']),
+            api_key + '_4': neondata.VideoMetadata(
+                api_key + '_4',
+                [api_key+'_4_t41', api_key+'_4_t42'])
             }
         datamock.VideoMetadata.get_many.side_effect = \
                         lambda vids: [vid_meta[vid] for vid in vids]
@@ -116,14 +126,22 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         # Define the thumbnail meta data
         TMD = neondata.ThumbnailMetadata
         tid_meta = {
-            't01': TMD('t01',api_key+'_0',ttype='brightcove'),
-            't02': TMD('t02',api_key+'_0',ttype='neon', rank=0, chosen=True),
-            't03': TMD('t03',api_key+'_0',ttype='neon', rank=1),
-            't11': TMD('t11',api_key+'_1',ttype='brightcove'),
-            't21': TMD('t21',api_key+'_2',ttype='centerframe'),
-            't22': TMD('t22',api_key+'_2',ttype='neon', chosen=True),
-            't41': TMD('t41',api_key+'_4',ttype='neon', rank=0),
-            't42': TMD('t42',api_key+'_4',ttype='neon', rank=1),
+            api_key+'_0_t01': TMD(api_key+'_0_t01',api_key+'_0',
+                                  ttype='brightcove'),
+            api_key+'_0_t02': TMD(api_key+'_0_t02',api_key+'_0',ttype='neon', 
+                                  rank=0, chosen=True),
+            api_key+'_0_t03': TMD(api_key+'_0_t03',api_key+'_0',ttype='neon', 
+                                  rank=1),
+            api_key+'_1_t11': TMD(api_key+'_1_t11',api_key+'_1',
+                                  ttype='brightcove'),
+            api_key+'_2_t21': TMD(api_key+'_2_t21',api_key+'_2',
+                                  ttype='centerframe'),
+            api_key+'_2_t22': TMD(api_key+'_2_t22',api_key+'_2',ttype='neon', 
+                                  chosen=True),
+            api_key+'_4_t41': TMD(api_key+'_4_t41',api_key+'_4',ttype='neon', 
+                                  rank=0),
+            api_key+'_4_t42': TMD(api_key+'_4_t42',api_key+'_4',ttype='neon', 
+                                  rank=1),
             }
         datamock.ThumbnailMetadata.get_many.side_effect = \
                 lambda tids: [tid_meta[tid] for tid in tids]
@@ -140,12 +158,16 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                           for x in self.mastermind.get_directives())
         self.assertEquals(len(directives), 4)
         self.assertEquals(directives[(api_key, api_key+'_0')],
-                          {'t01': 0.0, 't02': 1.0, 't03': 0.0})
-        self.assertEquals(directives[(api_key, api_key+'_1')], {'t11': 1.0})
+                          {api_key+'_0_t01': 0.0, api_key+'_0_t02': 1.0,
+                           api_key+'_0_t03': 0.0})
+        self.assertEquals(directives[(api_key, api_key+'_1')],
+                          {api_key+'_1_t11': 1.0})
         self.assertEquals(directives[(api_key, api_key+'_2')],
-                          {'t21': 0.01, 't22': 0.99})
-        self.assertGreater(directives[(api_key, api_key+'_4')]['t41'], 0.0)
-        self.assertGreater(directives[(api_key, api_key+'_4')]['t42'], 0.0)
+                          {api_key+'_2_t21': 0.01, api_key+'_2_t22': 0.99})
+        self.assertGreater(
+            directives[(api_key, api_key+'_4')][api_key+'_4_t41'], 0.0)
+        self.assertGreater(
+            directives[(api_key, api_key+'_4')][api_key+'_4_t42'], 0.0)
 
         self.assertTrue(self.watcher.is_loaded.is_set())
 
@@ -250,25 +272,27 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
           [bcPlatform]
 
         vid_meta = {
-            api_key + '_0': neondata.VideoMetadata(api_key + '_0',
-                                                   ['t01','t02','t03']),
-            api_key + '_1': neondata.VideoMetadata(api_key + '_1', ['t11']),
+            api_key + '_0': neondata.VideoMetadata(
+                api_key+ '_0',
+                [api_key+'_0_t01',api_key+'_0_t02',api_key+'_0_t03']),
+            api_key + '_1': neondata.VideoMetadata(api_key + '_1',
+                                                   [api_key+'_1_t11']),
             }
         datamock.VideoMetadata.get_many.side_effect = \
                         lambda vids: [vid_meta[vid] for vid in vids]
 
         TMD = neondata.ThumbnailMetadata
         tid_meta = {
-            't01': TMD('t01',api_key+'_0',ttype='brightcove'),
-            't02': TMD('t02',api_key+'_0',ttype='neon', rank=0, chosen=True),
-            't03': None,
-            't11': TMD('t11',api_key+'_1',ttype='brightcove'),
+            api_key+'_0_t01': TMD(api_key+'_0_t01',api_key+'_0',ttype='brightcove'),
+            api_key+'_0_t02': TMD(api_key+'_0_t02',api_key+'_0',ttype='neon', rank=0, chosen=True),
+            api_key+'_0_t03': None,
+            api_key+'_1_t11': TMD(api_key+'_1_t11',api_key+'_1',ttype='brightcove'),
             }
 
         datamock.ThumbnailMetadata.get_many.side_effect = \
                 lambda tids: [tid_meta[tid] for tid in tids]
         with self.assertLogExists(logging.ERROR,
-                                  'Could not find metadata for thumb t03'):
+                                  'Could not find metadata for thumb .+t03'):
             self.watcher._process_db_data()
 
         # Make sure that there is a directive about the other
@@ -276,7 +300,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         directives = dict((x[0], dict(x[1]))
                           for x in self.mastermind.get_directives())
         self.assertEquals(directives[(api_key, api_key+'_1')],
-                          {'t11': 1.0})
+                          {api_key+'_1_t11': 1.0})
         self.assertEquals(len(directives), 1)
 
         # Make sure that the processing gets flagged as done
@@ -288,7 +312,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
                                                  abtest=True)
         bcPlatform.add_video(0, 'job11')
-        job11 = neondata.NeonApiRequest('job11', api_key, 0, 't', 't', 'r', 'h')
+        job11 = neondata.NeonApiRequest('job11', api_key, 0, 
+                                        't', 't', 'r', 'h')
         bcPlatform.get_processed_internal_video_ids = MagicMock()
         bcPlatform.get_processed_internal_video_ids.return_value = [api_key +
                 '_0', api_key + '_1'] 
@@ -298,17 +323,22 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
 
         vid_meta = {
             api_key + '_0': neondata.VideoMetadata(api_key + '_0',
-                                                   ['t01', 't02']),
-            api_key + '_1': neondata.VideoMetadata(api_key + '_1', ['t11']),
+                                                   [api_key+'_0_t01',
+                                                    api_key+'_0_t02']),
+            api_key + '_1': neondata.VideoMetadata(api_key + '_1', 
+                                                   [api_key+'_1_t11']),
             }
         datamock.VideoMetadata.get_many.side_effect = \
                         lambda vids: [vid_meta[vid] for vid in vids]
 
         TMD = neondata.ThumbnailMetadata
         tid_meta = {
-            't01': TMD('t01',api_key+'_0',ttype='brightcove'),
-            't02': TMD('t02',api_key+'_0',ttype='neon', rank=0, chosen=True),
-            't11': TMD('t11',api_key+'_1',ttype='brightcove'),
+            api_key+'_0_t01': TMD(api_key+'_0_t01',api_key+'_0',
+                                  ttype='brightcove'),
+            api_key+'_0_t02': TMD(api_key+'_0_t02',api_key+'_0',ttype='neon', 
+                                  rank=0, chosen=True),
+            api_key+'_1_t11': TMD(api_key+'_1_t11',api_key+'_1',
+                                  ttype='brightcove'),
             }
 
         datamock.ThumbnailMetadata.get_many.side_effect = \
@@ -321,9 +351,9 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                           for x in self.mastermind.get_directives())
         self.assertEquals(len(directives), 2)
         self.assertEquals(directives[(api_key, api_key+'_0')],
-                          {'t01': 0.0, 't02':1.0})
+                          {api_key+'_0_t01': 0.0, api_key+'_0_t02':1.0})
         self.assertEquals(directives[(api_key, api_key+'_1')],
-                          {'t11': 1.0})
+                          {api_key+'_1_t11': 1.0})
 
         # Now disable one of the videos
         vid_meta[api_key+'_0'].serving_enabled = False
@@ -334,7 +364,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                           for x in self.mastermind.get_directives())
         self.assertEquals(len(directives), 1)
         self.assertEquals(directives[(api_key, api_key+'_1')],
-                          {'t11': 1.0})
+                          {api_key+'_1_t11': 1.0})
 
         # Finally, disable the account and make sure that there are no
         # directives
@@ -704,16 +734,16 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'tai1s' : 'acct1',
             'tai2p' : 'acct2'})
         self.publisher.update_serving_urls({
-            'tid11' : { (640, 480): 't11_640.jpg',
-                        (160, 90): 't11_160.jpg' },
-            'tid12' : { (800, 600): 't12_800.jpg',
-                        (160, 90): 't12_160.jpg'},
-            'tid13' : { (160, 90): 't13_160.jpg'},
-            'tid21' : { (1920, 720): 't21_1920.jpg',
-                        (160, 90): 't21_160.jpg'},
-            'tid22' : { (500, 500): 't22_500.jpg',
-                        (160, 90): 't22_160.jpg'},
-                        })
+            'acct1_vid1_tid11' : { (640, 480): 't11_640.jpg',
+                                   (160, 90): 't11_160.jpg' },
+            'acct1_vid1_tid12' : { (800, 600): 't12_800.jpg',
+                                   (160, 90): 't12_160.jpg'},
+            'acct1_vid1_tid13' : { (160, 90): 't13_160.jpg'},
+            'acct1_vid2_tid21' : { (1920, 720): 't21_1920.jpg',
+                                   (160, 90): 't21_160.jpg'},
+            'acct1_vid2_tid22' : { (500, 500): 't22_500.jpg',
+                                   (160, 90): 't22_160.jpg'},
+                                   })
 
         self.publisher._publish_directives()
 
@@ -748,21 +778,21 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'vid' : 'acct1_vid1',
             'fractions' : [
                 { 'pct' : 0.1,
-                  'tid' : 'tid11',
+                  'tid' : 'acct1_vid1_tid11',
                   'default_url' : 't11_160.jpg',
                   'imgs' : [
                       { 'h': 480, 'w': 640, 'url': 't11_640.jpg' },
                       { 'h': 90, 'w': 160, 'url': 't11_160.jpg' }]
                 },
                 { 'pct' : 0.2,
-                  'tid' : 'tid12',
+                  'tid' : 'acct1_vid1_tid12',
                   'default_url' : 't12_160.jpg',
                   'imgs' : [
                       { 'h': 600, 'w': 800, 'url': 't12_800.jpg' },
                       { 'h': 90, 'w': 160, 'url': 't12_160.jpg' }]
                 },
                 { 'pct' : 0.8,
-                  'tid' : 'tid13',
+                  'tid' : 'acct1_vid1_tid13',
                   'default_url' : 't13_160.jpg',
                   'imgs' : [
                       { 'h': 90, 'w': 160, 'url': 't13_160.jpg' }]
@@ -777,14 +807,14 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'vid' : 'acct1_vid2',
             'fractions' : [
                 { 'pct' : 0.0,
-                  'tid' : 'tid21',
+                  'tid' : 'acct1_vid2_tid21',
                   'default_url' : 't21_160.jpg',
                   'imgs' : [
                       { 'h': 720, 'w': 1920, 'url': 't21_1920.jpg' },
                       { 'h': 90, 'w': 160, 'url': 't21_160.jpg' }]
                 },
                 { 'pct' : 1.0,
-                  'tid' : 'tid22',
+                  'tid' : 'acct1_vid2_tid22',
                   'default_url' : 't22_160.jpg',
                   'imgs' : [
                       { 'h': 500, 'w': 500, 'url': 't22_500.jpg' },
@@ -812,13 +842,13 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'acct2' : None
             })
         self.publisher.update_serving_urls({
-            'tid11' : { (640, 480): 't11_640.jpg',
-                        (160, 90): 't11_160.jpg' },
-            'tid21' : { (800, 600): 't21_800.jpg',
-                        (160, 90): 't21_160.jpg'},
-            'tid22' : { (800, 600): 't22_800.jpg',
-                        (240, 180): 't22_240.jpg',
-                        (120, 68): 't22_120.jpg'}})
+            'acct1_vid1_tid11' : { (640, 480): 't11_640.jpg',
+                                   (160, 90): 't11_160.jpg' },
+            'acct2_vid2_tid21' : { (800, 600): 't21_800.jpg',
+                                   (160, 90): 't21_160.jpg'},
+            'acct2_vid2_tid22' : { (800, 600): 't22_800.jpg',
+                                   (240, 180): 't22_240.jpg',
+                                   (120, 68): 't22_120.jpg'}})
 
         self.publisher._publish_directives()
 
@@ -834,9 +864,9 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
 
         # Validate the sizes
         self.assertEqual(defaults,
-                         {'tid11': 't11_640.jpg', 
-                          'tid21': 't21_160.jpg',
-                          'tid22': 't22_120.jpg'})
+                         {'acct1_vid1_tid11': 't11_640.jpg', 
+                          'acct2_vid2_tid21': 't21_160.jpg',
+                          'acct2_vid2_tid22': 't22_120.jpg'})
 
     def test_serving_url_missing(self):
         self.mastermind.serving_directive = {
@@ -850,8 +880,8 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
                                               'tai2' : 'acct2'})
 
         self.publisher.update_serving_urls({
-            'tid21' : { (800, 600): 't21_800.jpg',
-                        (160, 90): 't21_160.jpg'}})
+            'acct1_vid2_tid21' : { (800, 600): 't21_800.jpg',
+                                   (160, 90): 't21_160.jpg'}})
 
         with self.assertLogExists(logging.ERROR, 
                                   ('Could not find all serving URLs for '
@@ -872,7 +902,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'vid' : 'acct1_vid2',
             'fractions' : [
                 { 'pct' : 1.0,
-                  'tid' : 'tid21',
+                  'tid' : 'acct1_vid2_tid21',
                   'default_url' : 't21_160.jpg',
                   'imgs' : [
                       { 'h': 600, 'w': 800, 'url': 't21_800.jpg' },

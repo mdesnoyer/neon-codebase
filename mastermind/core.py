@@ -64,7 +64,15 @@ class ThumbnailInfo(object):
         self.rank = metadata.rank
         self.phash = metadata.phash
         self.model_score = metadata.model_score
-        self.id = str(metadata.key) # Thumbnail id
+
+        # Last chunk of the thumbnail id
+        self.id = str(metadata.key).split('_')
+        if len(self.id) != 3:
+            _log.error('The thumbnail id %s does not seem to be valid for '
+                       'video %s' % (metadata.key, metadata.video_id))
+            self.id = str(metadata.key)
+        else:
+            self.id = self.id[2]
 
         # These fields are from the statistics
         self.impressions = impressions # no. of impressions
@@ -164,7 +172,10 @@ class Mastermind(object):
             try:
                 with self.lock:
                     directive = self.serving_directive[video_id]
-                yield directive
+                video_id = directive[0][1]
+                yield (directive[0],
+                       [('_'.join([video_id, thumb_id]), frac)
+                        for thumb_id, frac in directive[1]])
             except KeyError:
                 # Some other thread probably changed the data so we
                 # don't have information about this video id
@@ -640,16 +651,24 @@ class Mastermind(object):
 
         Inputs:
         video_id - The video id
-        thumb_id - The thumbnail id
+        thumb_id - The thumbnail id in its full form
 
         Outputs:
         The ThumbnailInfo object (that can be written to) or None if
         it's not there.
         
         '''
+        thumb_suffix = thumb_id.split('_')
+        if len(thumb_suffix) != 3:
+            thumb_suffix = thumb_id
+            _log.warn('Invalid thumbnail id %s for video id %s' %
+                      (thumb_id, video_id))
+        else:
+            thumb_suffix = thumb_suffix[2]
+            
         try:
             for thumb in self.video_info[video_id].thumbnails:
-                if thumb.id == thumb_id:
+                if thumb.id == thumb_suffix:
                     return thumb
         except KeyError:
             _log.warn('Could not find information for video %s' % video_id)

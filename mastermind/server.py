@@ -330,6 +330,15 @@ class StatsDBWatcher(threading.Thread):
             video_id = self.video_id_cache[thumb_id]
         except KeyError:
             video_id = neondata.ThumbnailMetadata.get_video_id(thumb_id)
+            if video_id is None:
+                _log.warn('Could not find video id for thumb %s.'
+                          'Trying to extract from the thumb' % thumb_id)
+                video_id = thumb_id.split('_')
+                if len(video_id) != 3:
+                    _log.error('Invalid thumbnail id %s' % thumb_id)
+                    video_id = None
+                else:
+                    video_id = video_id[2]
             self.video_id_cache[thumb_id] = video_id
         return video_id
 

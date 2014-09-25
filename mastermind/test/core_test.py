@@ -841,8 +841,10 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
             'acct1', ExperimentStrategy('acct1'))
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
-            [ThumbnailMetadata('tid1', 'acct1_vid1', ttype='centerframe'),
-             ThumbnailMetadata('tid2', 'acct1_vid1', ttype='neon')], True)
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1',
+                               ttype='neon')], True)
         logging.getLogger('mastermind.core').reset_sample_counters()
 
     def tearDown(self):
@@ -868,8 +870,10 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
 
         self.mastermind.update_video_info(
             VideoMetadata('acct2_vid1'),
-            [ThumbnailMetadata('tid1', 'acct2_vid1', ttype='centerframe'),
-             ThumbnailMetadata('tid2', 'acct2_vid1', ttype='neon')], True)
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct2_vid1',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct2_vid1',
+                               ttype='neon')], True)
 
         orig_directive = self.mastermind.get_directives(['acct2_vid1']).next()
 
@@ -894,38 +898,45 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         directives = [x for x in self.mastermind.get_directives()]
         self.assertEqual(len(directives), 1)
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
-        self.assertItemsEqual(directives[0][1], [('tid1', 0.99),
-                                                 ('tid2', 0.01)])
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
+                                                 ('acct1_vid1_tid2', 0.01)])
         self.assertGreater(self.redis_mock.call_count, 0)
         self.redis_mock.reset_mock()
 
         # Repeating the info doesn't produce a change
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
-            [ThumbnailMetadata('tid1', 'acct1_vid1', ttype='centerframe'),
-             ThumbnailMetadata('tid2', 'acct1_vid1', ttype='neon')], True)
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1',
+                               ttype='neon')], True)
         directives = [x for x in self.mastermind.get_directives()]
         self.assertEqual(len(directives), 1)
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
-        self.assertItemsEqual(directives[0][1], [('tid1', 0.99),
-                                                 ('tid2', 0.01)])
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
+                                                 ('acct1_vid1_tid2', 0.01)])
         self.assertEqual(self.redis_mock.call_count, 0)
 
     def test_add_new_thumbs(self):
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
-            [ThumbnailMetadata('tid1', 'acct1_vid1', ttype='centerframe'),
-             ThumbnailMetadata('tid2', 'acct1_vid1', ttype='neon', rank=1),
-             ThumbnailMetadata('tid3', 'acct1_vid1', ttype='neon', rank=2)],
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1',
+                               ttype='neon', rank=1),
+             ThumbnailMetadata('acct1_vid1_tid3', 'acct1_vid1',
+                               ttype='neon', rank=2)],
              True)
         directives = [x for x in self.mastermind.get_directives()]
         self.assertEqual(len(directives), 1)
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
         directive = dict(directives[0][1])
-        self.assertItemsEqual(directive.keys(), ['tid1', 'tid2', 'tid3'])
-        self.assertEqual(directive['tid1'], 0.99)
-        self.assertGreater(directive['tid2'], 0.0)
-        self.assertGreater(directive['tid3'], 0.0)
+        self.assertItemsEqual(directive.keys(),
+                              ['acct1_vid1_tid1', 'acct1_vid1_tid2',
+                               'acct1_vid1_tid3'])
+        self.assertEqual(directive['acct1_vid1_tid1'], 0.99)
+        self.assertGreater(directive['acct1_vid1_tid2'], 0.0)
+        self.assertGreater(directive['acct1_vid1_tid3'], 0.0)
 
     def test_remove_thumbs(self):
         self.mastermind.update_video_info(
@@ -935,46 +946,48 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         directives = [x for x in self.mastermind.get_directives()]
         self.assertEqual(len(directives), 1)
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
-        self.assertItemsEqual(directives[0][1], [('tid1', 1.0)])
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 1.0)])
 
     def test_disable_testing_as_param(self):
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
-            [ThumbnailMetadata('tid1', 'acct1_vid1', ttype='centerframe'),
-             ThumbnailMetadata('tid2', 'acct1_vid1', ttype='neon')],
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1', ttype='neon')],
              testing_enabled=False)
         directives = [x for x in self.mastermind.get_directives()]
         self.assertEqual(len(directives), 1)
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
-        self.assertItemsEqual(directives[0][1], [('tid1', 1.0),
-                                                 ('tid2', 0.0)])
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 1.0),
+                                                 ('acct1_vid1_tid2', 0.0)])
 
     def test_disable_testing_as_video_metadata(self):
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1', testing_enabled=False),
-            [ThumbnailMetadata('tid1', 'acct1_vid1', ttype='centerframe'),
-             ThumbnailMetadata('tid2', 'acct1_vid1', ttype='neon')],
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1', ttype='neon')],
              testing_enabled=True)
         directives = [x for x in self.mastermind.get_directives()]
         self.assertEqual(len(directives), 1)
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
-        self.assertItemsEqual(directives[0][1], [('tid1', 1.0),
-                                                 ('tid2', 0.0)])
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 1.0),
+                                                 ('acct1_vid1_tid2', 0.0)])
 
     def test_update_video_with_bad_data(self):
         # Keep the old serving fractions
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
-            [ThumbnailMetadata('tid1', 'acct1_vid1', ttype='centerframe',
-                               enabled=False),
-             ThumbnailMetadata('tid2', 'acct1_vid1', ttype='neon',
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='centerframe', enabled=False),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1', ttype='neon',
                                enabled=False)],
              testing_enabled=True)
         directives = [x for x in self.mastermind.get_directives()]
         self.assertEqual(len(directives), 1)
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
-        self.assertItemsEqual(directives[0][1], [('tid1', 0.99),
-                                                 ('tid2', 0.01)])
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
+                                                 ('acct1_vid1_tid2', 0.01)])
     
 class TestStatUpdating(test_utils.neontest.TestCase):
     def setUp(self):
@@ -993,13 +1006,17 @@ class TestStatUpdating(test_utils.neontest.TestCase):
             'acct1', ExperimentStrategy('acct1'))
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
-            [ThumbnailMetadata('v1t1', 'acct1_vid1', ttype='centerframe'),
-             ThumbnailMetadata('v1t2', 'acct1_vid1', ttype='neon')])
+            [ThumbnailMetadata('acct1_vid1_v1t1', 'acct1_vid1',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid1_v1t2', 'acct1_vid1', ttype='neon')])
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid2'),
-            [ThumbnailMetadata('v2t1', 'acct1_vid2', ttype='centerframe'),
-             ThumbnailMetadata('v2t2', 'acct1_vid2', ttype='neon', rank=0),
-             ThumbnailMetadata('v2t3', 'acct1_vid2', ttype='neon', rank=3)])
+            [ThumbnailMetadata('acct1_vid2_v2t1', 'acct1_vid2',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid2_v2t2', 'acct1_vid2',
+                               ttype='neon', rank=0),
+             ThumbnailMetadata('acct1_vid2_v2t3', 'acct1_vid2',
+                               ttype='neon', rank=3)])
 
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
@@ -1007,33 +1024,36 @@ class TestStatUpdating(test_utils.neontest.TestCase):
         
     def test_initial_stats_update(self):
         self.mastermind.update_stats_info([
-            ('acct1_vid1', 'v1t1', 1000, 5),
-            ('acct1_vid1', 'v1t2', 1000, 100),
-            ('acct1_vid2', 'v2t1', 10, 5),
-            ('acct1_vid2', 'v2t2', 1000, 100),
-            ('acct1_vid2', 'v2t3', 1000, 100)])
+            ('acct1_vid1', 'acct1_vid1_v1t1', 1000, 5),
+            ('acct1_vid1', 'acct1_vid1_v1t2', 1000, 100),
+            ('acct1_vid2', 'acct1_vid2_v2t1', 10, 5),
+            ('acct1_vid2', 'acct1_vid2_v2t2', 1000, 100),
+            ('acct1_vid2', 'acct1_vid2_v2t3', 1000, 100)])
 
         directives = dict([x for x in self.mastermind.get_directives()])
         self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
-                              [('v1t1', 0.01), ('v1t2', 0.99)])
+                              [('acct1_vid1_v1t1', 0.01),
+                               ('acct1_vid1_v1t2', 0.99)])
         for val in [x[1] for x in directives[('acct1', 'acct1_vid2')]]:
             self.assertGreater(val, 0.0)
 
     def test_decimal_from_db(self):
         self.mastermind.update_stats_info([
-            ('acct1_vid1', 'v1t1', decimal.Decimal(1000),
+            ('acct1_vid1', 'acct1_vid1_v1t1', decimal.Decimal(1000),
              decimal.Decimal(5)),
-            ('acct1_vid1', 'v1t2', decimal.Decimal(1000),
+            ('acct1_vid1', 'acct1_vid1_v1t2', decimal.Decimal(1000),
              decimal.Decimal(100)),
-            ('acct1_vid2', 'v2t1', decimal.Decimal(10),decimal.Decimal(5)),
-            ('acct1_vid2', 'v2t2', decimal.Decimal(1000),
+            ('acct1_vid2', 'acct1_vid2_v2t1', decimal.Decimal(10),
+             decimal.Decimal(5)),
+            ('acct1_vid2', 'acct1_vid2_v2t2', decimal.Decimal(1000),
              decimal.Decimal(100)),
-            ('acct1_vid2', 'v2t3', decimal.Decimal(1000),
+            ('acct1_vid2', 'acct1_vid2_v2t3', decimal.Decimal(1000),
              decimal.Decimal(100))])
 
         directives = dict([x for x in self.mastermind.get_directives()])
         self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
-                              [('v1t1', 0.01), ('v1t2', 0.99)])
+                              [('acct1_vid1_v1t1', 0.01),
+                               ('acct1_vid1_v1t2', 0.99)])
         for val in [x[1] for x in directives[('acct1', 'acct1_vid2')]]:
             self.assertGreater(val, 0.0)
 
