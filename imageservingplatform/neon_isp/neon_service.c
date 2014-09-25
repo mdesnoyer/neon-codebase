@@ -697,14 +697,6 @@ neon_service_client_api(ngx_http_request_t *request,
         return NEON_CLIENT_API_FAIL;
     }
     
-    // Send no content if account id is not found or
-    // width or height is missing
-    // The API spec needs both width & height to be sent  
-    if ((width == -1 && height != -1) || (height == -1 && width != -1)){
-        neon_service_no_content(request, chain);
-        return NEON_CLIENT_API_FAIL;
-    }
-
     ngx_str_t vid = ngx_uchar_to_string(video_id);
     ngx_str_t pid = ngx_uchar_to_string(pub_id);
     

@@ -34,7 +34,7 @@ Mastermind::Mastermind()
 
 Mastermind::~Mastermind()
 {
-    std::cout << "\nMastermind destruct" << endl;
+    //std::cout << "\nMastermind destruct" << endl;
 }
 
 
@@ -289,7 +289,7 @@ Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
         
     int ret = fclose(f);
     
-    std::cout << "\nParsed "<< lineNumber << "lines" << endl;
+    std::cout << "\nParsed "<< lineNumber << " lines" << endl;
     
     if(ret != 0)
         throw new NeonException("Mastermind::Init: cannot close mastermind file");
