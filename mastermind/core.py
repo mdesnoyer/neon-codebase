@@ -268,6 +268,10 @@ class Mastermind(object):
                 del self.video_info[video_id]
             if video_id in self.serving_directive:
                 del self.serving_directive[video_id]
+                self._incr_pending_modify(1)
+                self.modify_pool.submit(
+                    _modify_video_info,
+                    self, video_id, neondata.ExperimentState.DISABLED, None)
 
     def is_serving_video(self, video_id):
         '''Returns true if the video is being managed.'''

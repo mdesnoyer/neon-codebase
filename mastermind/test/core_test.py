@@ -1143,6 +1143,24 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
         self.assertEqual(video.experiment_state,
                          neondata.ExperimentState.DISABLED)
 
+    def test_db_remove_video(self):
+        # Remove a video that is there
+        self.assertTrue(self.mastermind.is_serving_video('acct1_vid1'))
+        self.mastermind.remove_video_info('acct1_vid1')
+        self._wait_for_db_updates()
+        self.assertFalse(self.mastermind.is_serving_video('acct1_vid1'))
+        self.assertItemsEqual(self.mastermind.get_directives(), [])
+
+        # Remove a video that wasn't there
+        self.assertFalse(self.mastermind.is_serving_video('acct1_vid123'))
+        self.mastermind.remove_video_info('acct1_vid123')
+        self.assertFalse(self.mastermind.is_serving_video('acct1_vid123'))
+        
+        # Check that the video's state is recorded
+        video = VideoMetadata.get('acct1_vid1')
+        self.assertEqual(video.experiment_state,
+                         neondata.ExperimentState.DISABLED)
+
     def test_db_experiment_finished(self):
         self.mastermind.update_stats_info([
             ('acct1_vid1', 'n2', 5000, 200)])
