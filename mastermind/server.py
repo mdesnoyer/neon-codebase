@@ -635,7 +635,7 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
 
         videoDbThread = VideoDBWatcher(mastermind, publisher,
                                        activity_watcher)
-        videoDbThread.run()
+        videoDbThread.start()
         videoDbThread.wait_until_loaded()
         statsDbThread = StatsDBWatcher(mastermind, activity_watcher)
         statsDbThread.start()
