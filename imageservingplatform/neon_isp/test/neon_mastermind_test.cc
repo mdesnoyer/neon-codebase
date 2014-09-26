@@ -114,8 +114,6 @@ TEST_F(NeonMastermindTest, test_neon_mastermind_image_url_lookup){
     bucketId = ngx_string("");
     err = neon_mastermind_image_url_lookup(aid, vid, &bucketId, h, w, &url, &size);
     EXPECT_EQ(err, NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK);
-    EXPECT_STRNE(url, NULL);
-    
     EXPECT_STREQ(url, "http://neon/thumb1_500_600.jpg"); // majority thumbnail 
     
     // no width & height 
@@ -123,6 +121,16 @@ TEST_F(NeonMastermindTest, test_neon_mastermind_image_url_lookup){
     err = neon_mastermind_image_url_lookup(aid, vid, &bucketId, h, w, &url, &size);
     EXPECT_EQ(err, NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK);
     EXPECT_STREQ(url, "http://default_image_url.jpg"); // default URL
+    w = 600;
+
+    // Approx height & width
+    int heights[4] = {498, 499, 501, 502};
+    for (int i=0; i < 4; i ++){
+        h = heights[i];
+        err = neon_mastermind_image_url_lookup(aid, vid, &bucketId, h, w, &url, &size);
+        EXPECT_EQ(err, NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK);
+        EXPECT_STREQ(url, "http://neon/thumb1_500_600.jpg"); // majority thumbnail 
+    }
 
 }
 

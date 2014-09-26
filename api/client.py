@@ -357,7 +357,8 @@ class VideoProcessor(object):
             self.video_metadata['frame_size'] = fmov.frame_size
             self.video_size = fmov.duration * fmov.bitrate / 8 # in bytes
         except Exception, e:
-            _log.error("key=process_video msg=FFVIDEO error")
+            _log.error("key=process_video msg=FFVIDEO error %s" % e)
+            self.error = "processing_error"
             return False
 
         #Try to open the video file using openCV
@@ -365,7 +366,8 @@ class VideoProcessor(object):
             mov = cv2.VideoCapture(video_file)
         except Exception, e:
             _log.error("key=process_video worker " 
-                        " msg=%s "  % (e.message))
+                        " msg=%s "  % e)
+            self.error = "processing_error"
             return False
 
         duration = self.video_metadata['duration']
