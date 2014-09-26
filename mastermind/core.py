@@ -56,6 +56,18 @@ class VideoInfo(object):
 
 class ThumbnailInfo(object):
     '''Container to store information about a thumbnail.'''
+    __slots__ = [
+        'enabled',
+        'type',
+        'chosen',
+        'rank',
+        'phash',
+        'model_score',
+        'id',
+        'imp',
+        'conv'
+        ]
+        
     def __init__(self, metadata, impressions=0, conversions=0):
         # These entries are from the neondata.ThumbnailMetadata
         self.enabled = metadata.enabled
@@ -75,17 +87,43 @@ class ThumbnailInfo(object):
             self.id = self.id[2]
 
         # These fields are from the statistics
-        self.impressions = impressions # no. of impressions
-        self.conversions = conversions # no. of conversions
+        self.imp = impressions # no. of impressions
+        self.conv = conversions # no. of conv
 
     def __str__(self):
-        return strutils.full_object_str(self)
+        return str({
+            'enabled': self.enabled,
+            'type': self.type,
+            'chosen' : self.chosen,
+            'rank' : self.rank,
+            'phash': self.phash,
+            'model_score' : self.model_score,
+            'id': self.id,
+            'imp': self.imp,
+            'conv': self.conv})
 
     def __repr__(self):
         return str(self)
 
     def __cmp__(self, other):
-        return cmp(self.__dict__, other.__dict__)
+        return cmp((self.enabled,
+                    self.type,
+                    self.chosen,
+                    self.rank,
+                    self.phash,
+                    self.model_score,
+                    self.id,
+                    self.imp,
+                    self.conv),
+                   (other.enabled,
+                    other.type,
+                    other.chosen,
+                    other.rank,
+                    other.phash,
+                    other.model_score,
+                    other.id,
+                    other.imp,
+                    other.conv))
 
     def update_stats(self, other_info):
         '''Updates the statistics from another ThumbnailInfo.'''
@@ -94,8 +132,8 @@ class ThumbnailInfo(object):
                        (self.id, other_info.id))
             return self
 
-        self.impressions = other_info.impressions
-        self.conversions = other_info.conversions
+        self.imp = other_info.imp
+        self.conv = other_info.conv
         return self
 
 class Mastermind(object):
@@ -236,17 +274,17 @@ class Mastermind(object):
 
         Inputs:
         data - generator that creates a stream of 
-               (video_id, thumb_id, impressions, conversions, plays)
+               (video_id, thumb_id, impressions, conv, plays)
         
         '''
-        for video_id, thumb_id, impressions, conversions in data:
+        for video_id, thumb_id, imp, conv in data:
             with self.lock:
                 # Load up all the data
                 thumb = self._find_thumb(video_id, thumb_id)
                 if thumb is None:
                     continue
-                thumb.impressions = float(impressions)
-                thumb.conversions = float(conversions)
+                thumb.imp = float(imp)
+                thumb.conv = float(conv)
 
                 self._calculate_new_serving_directive(video_id)
 
@@ -506,26 +544,26 @@ class Mastermind(object):
         # Now determine the serving percentages for each valid bandit
         # based on a prior of its model score and its measured ctr.
         bandit_ids = [x.id for x in valid_bandits]
-        conversions = dict([(x.id, self._get_prior_conversions(x) + x.conversions)
+        conv = dict([(x.id, self._get_prior_conversions(x) + x.conv)
                              for x in valid_bandits])
-        impressions = dict([(x.id, Mastermind.PRIOR_IMPRESSION_SIZE * 
+        imp = dict([(x.id, Mastermind.PRIOR_IMPRESSION_SIZE * 
                              (1 - Mastermind.PRIOR_CTR) + 
-                             x.impressions - x.conversions)
+                             x.imp - x.conv)
                              for x in valid_bandits])
 
         # Run the monte carlo series
         MC_SAMPLES = 10000.
-        mc_series = [spstats.beta.rvs(conversions[x],
-                                      impressions[x],
+        mc_series = [spstats.beta.rvs(conv[x],
+                                      imp[x],
                                       size=MC_SAMPLES)
                                       for x in bandit_ids]
         if non_exp_thumb is not None:
             mc_series.append(
                 spstats.beta.rvs(self._get_prior_conversions(non_exp_thumb) + 
-                                 non_exp_thumb.conversions,
+                                 non_exp_thumb.conv,
                                  Mastermind.PRIOR_IMPRESSION_SIZE * 
                                  (1 - Mastermind.PRIOR_CTR) + 
-                                 non_exp_thumb.impressions - non_exp_thumb.conversions,
+                                 non_exp_thumb.imp - non_exp_thumb.conv,
                                  size=MC_SAMPLES))
 
         win_frac = np.array(np.bincount(np.argmax(mc_series, axis=0)),
@@ -535,11 +573,11 @@ class Mastermind(object):
 
         winner_idx = np.argmax(win_frac)
 
-        winner_impressions = None
+        winner_imp = None
         if winner_idx == len(bandit_ids):
-            winner_impressions = non_exp_thumb.impressions
+            winner_imp = non_exp_thumb.imp
         else:
-            winner_impressions = valid_bandits[winner_idx].impressions
+            winner_imp = valid_bandits[winner_idx].imp
 
         # Determine the value remaining. This is equivalent to
         # determing that one of the other arms might beat the winner
@@ -549,8 +587,8 @@ class Mastermind(object):
         value_remaining = np.sort(lost_value)[0.95*MC_SAMPLES]
 
         if win_frac[winner_idx] >= 0.95:
-            # There is a winner. See if there were enough impressions to call it
-            if win_frac.shape[0] == 1 or winner_impressions >= 500:
+            # There is a winner. See if there were enough imp to call it
+            if win_frac.shape[0] == 1 or winner_imp >= 500:
                 # The experiment is done
                 experiment_state = neondata.ExperimentState.COMPLETE
                 try:
@@ -563,7 +601,7 @@ class Mastermind(object):
                         value_remaining)
 
             else:
-                # Only allow the winner to have 90% of the impressions
+                # Only allow the winner to have 90% of the imp
                 # because there aren't enough impressions to make a good
                 # decision.
                 win_frac[winner_idx] = 0.90
@@ -686,7 +724,7 @@ class Mastermind(object):
         self._incr_pending_modify(1)
         self.modify_pool.submit(
             _modify_many_serving_fracs,
-            self, new_directive)
+            self, video_id, new_directive)
         
         self._incr_pending_modify(1)
         self.modify_pool.submit(
@@ -694,21 +732,24 @@ class Mastermind(object):
             self, video_id, experiment_state, value_left)
 
 
-def _modify_many_serving_fracs(mastermind, new_directive):
+def _modify_many_serving_fracs(mastermind, video_id, new_directive):
     try:
+        thumb_ids, new_fracs = zip(
+            *[('_'.join([video_id, thumb_id]), frac)
+              for thumb_id, frac in new_directive.iteritems()])
         neondata.ThumbnailMetadata.modify_many(
-            new_directive.keys(),
-            lambda x: _set_serving_fracs(new_directive, x))
+            thumb_ids,
+            lambda x: _set_serving_fracs(thumb_ids, new_fracs, x))
         mastermind._incr_pending_modify(-1)
     except Exception as e:
         _log.exception('Unhandled exception when updating thumbs %s' % e)
         raise
 
 
-def _set_serving_fracs(new_directive, thumb_objs):
+def _set_serving_fracs(thumb_ids, new_fracs, thumb_objs):
     '''Function to be used by modify_many in order to set the serving
     fractions for a set of thumbnails'''
-    for thumb_id, new_frac in new_directive.iteritems():
+    for thumb_id, new_frac in zip(thumb_ids, new_fracs):
         obj = thumb_objs[thumb_id]
         if obj is not None:
             obj.serving_frac = new_frac

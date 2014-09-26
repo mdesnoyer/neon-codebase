@@ -16,6 +16,7 @@ import atexit
 from boto.s3.connection import S3Connection
 from boto.emr.connection import EmrConnection
 import boto
+import cPickle as pickle
 import datetime
 import impala.dbapi
 import impala.error
@@ -35,6 +36,7 @@ import utils.neon
 from utils.options import define, options
 import utils.ps
 from utils import statemon
+import zlib
 
 # Stats database options. It is an Impala database
 define('stats_cluster_type', default='video_click_stats',
@@ -67,6 +69,14 @@ statemon.define('publish_error', int)
 statemon.define('serving_urls_missing', int)
 
 _log = logging.getLogger(__name__)
+
+def pack_obj(x):
+    '''Package an object so that it is smaller in memory'''
+    return zlib.compress(pickle.dumps(x))
+
+def unpack_obj(x):
+    '''Unpack an object that was compressed by pack_obj'''
+    return pickle.loads(zlib.decompress(x))
 
 class VideoDBWatcher(threading.Thread):
     '''This thread polls the video database for changes.'''
@@ -470,7 +480,10 @@ class DirectivePublisher(threading.Thread):
 
     def update_serving_urls(self, new_map):
         with self.lock:
-            self.serving_urls = new_map
+            del self.serving_urls
+            self.serving_urls = {}
+            for k, v in new_map.iteritems():
+                self.serving_urls[k] = pack_obj(v)
 
     def update_default_sizes(self, new_map):
         with self.lock:
@@ -564,7 +577,7 @@ class DirectivePublisher(threading.Thread):
                                 'url': v
                             } 
                             for k, v in 
-                            self.serving_urls[thumb_id].iteritems()
+                            unpack_obj(self.serving_urls[thumb_id]).iteritems()
                             ]
                     })
                 except KeyError:
@@ -597,7 +610,7 @@ class DirectivePublisher(threading.Thread):
         if default_size is None:
             default_size = (160, 90)
         
-        serving_urls = self.serving_urls[thumb_id]
+        serving_urls = unpack_obj(self.serving_urls[thumb_id])
         try:
             return serving_urls[tuple(default_size)]
         except KeyError:
@@ -622,7 +635,7 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
 
         videoDbThread = VideoDBWatcher(mastermind, publisher,
                                        activity_watcher)
-        videoDbThread.start()
+        videoDbThread.run()
         videoDbThread.wait_until_loaded()
         statsDbThread = StatsDBWatcher(mastermind, activity_watcher)
         statsDbThread.start()

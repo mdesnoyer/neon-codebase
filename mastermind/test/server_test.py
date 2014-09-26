@@ -187,7 +187,9 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.watcher._process_db_data()
 
         # Make sure that the serving urls were sent to the directive pusher
-        self.assertEqual(serving_urls, self.directive_publisher.serving_urls)
+        self.assertEqual(dict([(k, mastermind.server.pack_obj(v)) 
+                               for k, v in serving_urls.iteritems()]),
+            self.directive_publisher.serving_urls)
 
     def test_tracker_id_update(self, datamock):
         datamock.TrackerAccountIDMapper.get_all.return_value = [
@@ -733,7 +735,8 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'tai1' : 'acct1',
             'tai1s' : 'acct1',
             'tai2p' : 'acct2'})
-        self.publisher.update_serving_urls({
+        self.publisher.update_serving_urls(
+            {
             'acct1_vid1_tid11' : { (640, 480): 't11_640.jpg',
                                    (160, 90): 't11_160.jpg' },
             'acct1_vid1_tid12' : { (800, 600): 't12_800.jpg',
@@ -841,7 +844,8 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'acct1' : (640, 480),
             'acct2' : None
             })
-        self.publisher.update_serving_urls({
+        self.publisher.update_serving_urls(
+            {
             'acct1_vid1_tid11' : { (640, 480): 't11_640.jpg',
                                    (160, 90): 't11_160.jpg' },
             'acct2_vid2_tid21' : { (800, 600): 't21_800.jpg',
@@ -880,8 +884,9 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
                                               'tai2' : 'acct2'})
 
         self.publisher.update_serving_urls({
-            'acct1_vid2_tid21' : { (800, 600): 't21_800.jpg',
-                                   (160, 90): 't21_160.jpg'}})
+            'acct1_vid2_tid21' : 
+                { (800, 600): 't21_800.jpg',
+                  (160, 90): 't21_160.jpg'}})
 
         with self.assertLogExists(logging.ERROR, 
                                   ('Could not find all serving URLs for '
