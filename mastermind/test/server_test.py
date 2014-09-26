@@ -172,12 +172,42 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertTrue(self.watcher.is_loaded.is_set())
 
     def test_serving_url_update(self, datamock):
-        serving_urls = {
-            't01' : { (640, 480): 't01_640.jpg',
-                      (120, 90): 't01_120.jpg'},
-            't02' : { (800, 600): 't02_800.jpg',
-                      (120, 90): 't02_120.jpg'}}
+        api_key = "neonapikey"
+
+        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
+                                                 abtest=True)
+        bcPlatform.add_video(0, 'job11')
+        job11 = neondata.NeonApiRequest('job11', api_key, 0, 
+                                        't', 't', 'r', 'h')
+        bcPlatform.get_processed_internal_video_ids = MagicMock()
+        bcPlatform.get_processed_internal_video_ids.return_value = [api_key +
+                '_0'] 
+
+        datamock.AbstractPlatform.get_all_instances.return_value = \
+          [bcPlatform]
+        vid_meta = {
+            api_key + '_0': neondata.VideoMetadata(api_key + '_0',
+                                                   [api_key+'_0_t01',
+                                                    api_key+'_0_t02']),
+            }
+        datamock.VideoMetadata.get_many.side_effect = \
+                        lambda vids: [vid_meta[vid] for vid in vids]
+        TMD = neondata.ThumbnailMetadata
+        tid_meta = {
+            api_key+'_0_t01': TMD(api_key+'_0_t01',api_key+'_0',
+                                  ttype='brightcove'),
+            api_key+'_0_t02': TMD(api_key+'_0_t02',api_key+'_0',ttype='neon', 
+                                  rank=0, chosen=True),
+            }
+
+        datamock.ThumbnailMetadata.get_many.side_effect = \
+                lambda tids: [tid_meta[tid] for tid in tids]
         
+        serving_urls = {
+            api_key+'_0_t01' : { (640, 480): 't01_640.jpg',
+                      (120, 90): 't01_120.jpg'},
+            api_key+'_0_t02' : { (800, 600): 't02_800.jpg',
+                      (120, 90): 't02_120.jpg'}}
         datamock.ThumbnailServingURLs.get_all.return_value = [
             neondata.ThumbnailServingURLs(k, v) for k, v in
             serving_urls.iteritems()
@@ -655,6 +685,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.mastermind = mastermind.core.Mastermind()
         self.publisher = mastermind.server.DirectivePublisher(
             self.mastermind)
+        logging.getLogger('mastermind.server').reset_sample_counters()
 
     def tearDown(self):
         neondata.DBConnection.clear_singleton_instance()
@@ -976,9 +1007,9 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.video_watcher = mastermind.server.VideoDBWatcher(
             self.mastermind,
             self.directive_publisher,
-            self.activity_watcher)
+            activity_watcher=self.activity_watcher)
         self.stats_watcher = mastermind.server.StatsDBWatcher(
-            self.mastermind, self.activity_watcher)
+            self.mastermind, activity_watcher=self.activity_watcher)
 
     def tearDown(self):
         neondata.DBConnection.clear_singleton_instance()

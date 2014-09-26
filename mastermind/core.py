@@ -262,11 +262,18 @@ class Mastermind(object):
             self._calculate_new_serving_directive(video_id)
 
     def remove_video_info(self, video_id):
+        '''Removes the video from being managed.'''
         with self.lock:
             if video_id in self.video_info:
                 del self.video_info[video_id]
             if video_id in self.serving_directive:
                 del self.serving_directive[video_id]
+
+    def is_serving_video(self, video_id):
+        '''Returns true if the video is being managed.'''
+        if video_id is None:
+            return False
+        return video_id in self.serving_directive
                 
 
     def update_stats_info(self, data):

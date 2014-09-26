@@ -2112,7 +2112,7 @@ class ThumbnailServingURLs(NamespacedStoredObject):
 
     def get_thumbnail_id(self):
         '''Return the thumbnail id for this mapping.'''
-        return self.key.partition('_')[2]
+        return str(self.key.partition('_')[2])
 
     def add_serving_url(self, url, width, height):
         '''Adds a url to serve for a given width and height.

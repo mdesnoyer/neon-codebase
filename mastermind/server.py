@@ -23,7 +23,6 @@ import impala.error
 import json
 import logging
 from mastermind.core import VideoInfo, ThumbnailInfo, Mastermind
-from monitoring.check_system_health import get_proc_memory, get_system_memory
 import signal
 import socket
 import stats.cluster
@@ -78,15 +77,46 @@ def unpack_obj(x):
     '''Unpack an object that was compressed by pack_obj'''
     return pickle.loads(zlib.decompress(x))
 
+class VideoIdCache(object):
+    '''Cache to figure out the video id from a thumbnail id.'''
+    def __init__(self):
+        self.cache = {} # thumb_id -> video_id
+        self._lock = threading.RLock()
+
+    def find_video_id(self, thumb_id):
+        '''Returns the internal video id for a given thumbnail id.'''
+        # First try to extract the video id because thumbnail ids are
+        # usually in the form <api_key>_<external_video_id>_<thumb_id>
+        split = thumb_id.split('_')
+        if len(split) == 3:
+            return '_'.join(split[0:2])
+        else:
+            _log.warn('Unexpected thumbnail id format %s. '
+                      'Looking it up in the database' % thumb_id)
+            try:
+                with self._lock:
+                    video_id = self.cache[thumb_id]
+            except KeyError:
+                video_id = neondata.ThumbnailMetadata.get_video_id(thumb_id)
+                if video_id is None:
+                    _log.error('Could not find video id for thumb %s' %
+                               thumb_id)
+                else:
+                    with self._lock:
+                        self.cache[thumb_id] = video_id
+            return video_id
+
 class VideoDBWatcher(threading.Thread):
     '''This thread polls the video database for changes.'''
     def __init__(self, mastermind, directive_pusher,
+                 video_id_cache=VideoIdCache(),
                  activity_watcher=utils.ps.ActivityWatcher()):
         super(VideoDBWatcher, self).__init__(name='VideoDBWatcher')
         self.mastermind = mastermind
         self.daemon = True
         self.activity_watcher = activity_watcher
         self.directive_pusher = directive_pusher
+        self.video_id_cache = video_id_cache
 
         # Is the initial data loaded
         self.is_loaded = threading.Event()
@@ -116,32 +146,16 @@ class VideoDBWatcher(threading.Thread):
 
     def _process_db_data(self):
         _log.info('Polling the video database')
-        _log.info('Before video db load, memory usage is (p:%s, s:%s)' %
-                  (get_proc_memory(), get_system_memory()))
-        _log.info('During step 1 video db load, memory usage is (p:%s, s:%s)' %
-                  (get_proc_memory(), get_system_memory()))
-
-        # Get an update for the serving urls
-        self.directive_pusher.update_serving_urls(
-            dict(((str(x.get_thumbnail_id()), x.size_map) for x in
-                  neondata.ThumbnailServingURLs.get_all())))
-        _log.info('During step 2 video db load, memory usage is (p:%s, s:%s)' %
-                  (get_proc_memory(), get_system_memory()))
 
         # Get an update for the tracker id map
         self.directive_pusher.update_tracker_id_map(
             dict(((str(x.get_tai()), str(x.value)) for x in
                   neondata.TrackerAccountIDMapper.get_all())))
-        _log.info('During step 3 video db load, memory usage is (p:%s, s:%s)' %
-                  (get_proc_memory(), get_system_memory()))
 
         # Get an update for the default widths
         self.directive_pusher.update_default_sizes(
             dict(((str(x.neon_api_key), x.default_size) for x in
                   neondata.NeonUserAccount.get_all_accounts())))
-
-        _log.info('During step 4 video db load, memory usage is (p:%s, s:%s)' %
-                  (get_proc_memory(), get_system_memory()))
 
         # Update the video data
         for platform in neondata.AbstractPlatform.get_all_instances():
@@ -184,17 +198,23 @@ class VideoDBWatcher(threading.Thread):
                 else:                
                     self.mastermind.remove_video_info(video_id)
 
-        _log.info('After video db load, memory usage is (p:%s, s:%s)' %
-                  (get_proc_memory(), get_system_memory()))
+        # Get an update for the serving urls
+        self.directive_pusher.update_serving_urls(
+            { thumb_id: size_map for thumb_id, size_map in
+              ((x.get_thumbnail_id(), x.size_map) for x in
+              neondata.ThumbnailServingURLs.get_all()) if
+              self.mastermind.is_serving_video(
+                  self.video_id_cache.find_video_id(thumb_id))})
+        
         self.is_loaded.set()
 
 class StatsDBWatcher(threading.Thread):
     '''This thread polls the stats database for changes.'''
-    def __init__(self, mastermind,
+    def __init__(self, mastermind, video_id_cache=VideoIdCache(),
                  activity_watcher=utils.ps.ActivityWatcher()):
         super(StatsDBWatcher, self).__init__(name='StatsDBWatcher')
         self.mastermind = mastermind
-        self.video_id_cache = {} # Thumb_id -> video_id
+        self.video_id_cache = video_id_cache
         self.last_update = None
         self.daemon = True
         self.activity_watcher = activity_watcher
@@ -214,8 +234,6 @@ class StatsDBWatcher(threading.Thread):
 
     def run(self):
         while not self._stopped.is_set():
-            _log.info('Before stats db load, memory usage is (p:%s, s:%s)' %
-                  (get_proc_memory(), get_system_memory()))
             try:
                 with self.activity_watcher.activate():
                     self._process_db_data()
@@ -223,9 +241,6 @@ class StatsDBWatcher(threading.Thread):
             except Exception as e:
                 _log.exception('Uncaught stats DB Error: %s' % e)
                 statemon.state.increment('statsdb_error')
-
-            _log.info('After stats db load, memory usage is (p:%s, s:%s)' %
-                  (get_proc_memory(), get_system_memory()))
 
             # Now we wait so that we don't hit the database too much.
             self._stopped.wait(options.stats_db_polling_delay)
@@ -316,11 +331,9 @@ class StatsDBWatcher(threading.Thread):
                             mnth=last_month.month))
                 cursor.execute(query)
 
-                data = [(self._find_video_id(x[0]), x[0], x[1], x[2])
+                data = [(self.video_id_cache.find_video_id(x[0]), x[0], x[1],
+                         x[2])
                         for x in cursor]
-
-                _log.info('Have stats db data, memory usage is (p:%s, s:%s)' %
-                  (get_proc_memory(), get_system_memory()))
                     
                 self.mastermind.update_stats_info(data)
                     
@@ -339,24 +352,6 @@ class StatsDBWatcher(threading.Thread):
             statemon.state.increment('statsdb_error')
             raise
         return cluster.master_ip
-
-    def _find_video_id(self, thumb_id):
-        '''Finds the video id for a thumbnail id.'''
-        try:
-            video_id = self.video_id_cache[thumb_id]
-        except KeyError:
-            video_id = neondata.ThumbnailMetadata.get_video_id(thumb_id)
-            if video_id is None:
-                _log.warn('Could not find video id for thumb %s.'
-                          'Trying to extract from the thumb' % thumb_id)
-                video_id = thumb_id.split('_')
-                if len(video_id) != 3:
-                    _log.error('Invalid thumbnail id %s' % thumb_id)
-                    video_id = None
-                else:
-                    video_id = video_id[2]
-            self.video_id_cache[thumb_id] = video_id
-        return video_id
 
 class DirectivePublisher(threading.Thread):
     '''Manages the publishing of the Masermind directive files.
@@ -452,8 +447,6 @@ class DirectivePublisher(threading.Thread):
         self._stopped.clear()
         while not self._stopped.is_set():
             last_woke_up = datetime.datetime.now()
-            _log.info('Before directive publish,memory usage is (p:%s, s:%s)' %
-                  (get_proc_memory(), get_system_memory()))
 
             try:
                 with self.activity_watcher.activate():
@@ -463,8 +456,6 @@ class DirectivePublisher(threading.Thread):
                                e)
                 statemon.state.increment('publish_error')
 
-            _log.info('After directive publish, memory usage is (p:%s, s:%s)' %
-                  (get_proc_memory(), get_system_memory()))
 
             self._stopped.wait(options.publishing_period -
                                (datetime.datetime.now() - 
@@ -503,8 +494,6 @@ class DirectivePublisher(threading.Thread):
             self._write_directives(directive_file)
         directive_file.write('\nend')
 
-        _log.info('After directive file written,memory usage is (p:%s, s:%s)' %
-                  (get_proc_memory(), get_system_memory()))
 
         filename = '%s.%s' % (curtime.strftime('%Y%m%d%H%M%S'),
                               options.directive_filename)
@@ -537,14 +526,9 @@ class DirectivePublisher(threading.Thread):
         key.set_contents_from_file(directive_file,
                                    encrypt_key=True)
 
-        _log.info('After directive file uploaded,memory usage is (p:%s, s:%s)' %
-                  (get_proc_memory(), get_system_memory()))
-
         # Copy the file to the REST endpoint
         key.copy(bucket.name, options.directive_filename, encrypt_key=True,
                  preserve_acl=True)
-        _log.info('After directive copy,memory usage is (p:%s, s:%s)' %
-                  (get_proc_memory(), get_system_memory()))
 
         statemon.state.time_since_publish = (
             curtime - self.last_publish_time).total_seconds()
@@ -583,7 +567,7 @@ class DirectivePublisher(threading.Thread):
                 except KeyError:
                     if frac > 1e-7:
                         _log.error_n('Could not find all serving URLs for '
-                                     'video: %s. The directives will not '
+                                     'video: %s . The directives will not '
                                      'be published.' % video_id, 5)
                         missing_urls = True
                         serving_urls_missing += 1
@@ -630,14 +614,16 @@ class DirectivePublisher(threading.Thread):
 def main(activity_watcher = utils.ps.ActivityWatcher()):    
     with activity_watcher.activate():
         mastermind = Mastermind()
+        video_id_cache = VideoIdCache()
         publisher = DirectivePublisher(mastermind, 
                                        activity_watcher=activity_watcher)
 
-        videoDbThread = VideoDBWatcher(mastermind, publisher,
+        videoDbThread = VideoDBWatcher(mastermind, publisher, video_id_cache,
                                        activity_watcher)
         videoDbThread.start()
         videoDbThread.wait_until_loaded()
-        statsDbThread = StatsDBWatcher(mastermind, activity_watcher)
+        statsDbThread = StatsDBWatcher(mastermind, video_id_cache,
+                                       activity_watcher)
         statsDbThread.start()
         statsDbThread.wait_until_loaded()
 
