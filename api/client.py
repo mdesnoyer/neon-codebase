@@ -51,6 +51,7 @@ import urllib2
 import utils.neon
 import utils.pycvutils
 import utils.http
+import utils.sqsmanager
 from utils import statemon
 
 from boto.exception import S3ResponseError
@@ -72,7 +73,7 @@ statemon.define('processing_error', int)
 statemon.define('dequeue_error', int)
 statemon.define('save_tmdata_error', int)
 statemon.define('save_vmdata_error', int)
-statemon.define('customer_callback_error', int)
+statemon.define('customer_callback_schedule_error', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -107,6 +108,7 @@ def callback_response_builder(job_id, vid, data,
 
         '''
 
+        #TODO: Create a class formatter
         response_body = {}
         response_body["job_id"] = job_id 
         response_body["video_id"] = vid 
@@ -355,7 +357,8 @@ class VideoProcessor(object):
             self.video_metadata['frame_size'] = fmov.frame_size
             self.video_size = fmov.duration * fmov.bitrate / 8 # in bytes
         except Exception, e:
-            _log.error("key=process_video msg=FFVIDEO error")
+            _log.error("key=process_video msg=FFVIDEO error %s" % e)
+            self.error = "processing_error"
             return False
 
         #Try to open the video file using openCV
@@ -363,7 +366,8 @@ class VideoProcessor(object):
             mov = cv2.VideoCapture(video_file)
         except Exception, e:
             _log.error("key=process_video worker " 
-                        " msg=%s "  % (e.message))
+                        " msg=%s "  % e)
+            self.error = "processing_error"
             return False
 
         duration = self.video_metadata['duration']
@@ -534,7 +538,7 @@ class VideoProcessor(object):
             if not self.requeue_job():
                 cb_request = callback_response_builder(job_id, video_id, [], 
                             [], callback_url, error=self.error)
-                self.send_client_callback_response(cb_request)
+                self.send_client_callback_response(video_id, cb_request)
                 
                 #update error state
                 api_request = neondata.NeonApiRequest.get(api_key, job_id)
@@ -637,7 +641,7 @@ class VideoProcessor(object):
                                                    s3_urls[:topn], callback_url,
                                                    serving_url,
                                                    error=self.error)
-            self.send_client_callback_response(cr_request)
+            self.send_client_callback_response(video_id, cr_request)
             
             if request_type in ["neon", "brightcove", "ooyala"]:
                 self.finalize_api_request(cr_request.body, request_type)
@@ -855,7 +859,7 @@ class VideoProcessor(object):
             return False
         return True
  
-    def send_client_callback_response(self, request):
+    def send_client_callback_response(self, video_id, request):
         '''
         Send client response
         '''
@@ -864,17 +868,14 @@ class VideoProcessor(object):
         if request.url is None or request.url == "null":
             return True
 
-        try:
-            response = utils.http.send_request(request)
-        except Exception, e:
-            statemon.state.increment('customer_callback_error')
-            _log.error("Callback HTTP unhandled error %s" % e)
+        # Schedule the callback in SQS
+        sqsmgr = utils.sqsmanager.CustomerCallbackManager()
+        r = sqsmgr.add_callback_response(video_id, request.url, request.body)
+        if not r:
+            statemon.state.increment('customer_callback_schedule_error')
+            _log.error("Callback schedule failed for video %s" % video_id)
             return False
 
-        if response.error:
-            statemon.state.increment('customer_callback_error')
-            _log.error("Callback response not sent to %r " % request.url)
-            return False
         return True
 
     def send_notifiction_response(self):
