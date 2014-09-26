@@ -69,7 +69,7 @@
     "type" : [ "null", "float" ]
   }, {
     "name" : "videoId",
-    "type" : "string"
+    "type" : [ "null", "string" ]
   }, {
     "name" : "playerId",
     "type" : [ "null", "string" ]

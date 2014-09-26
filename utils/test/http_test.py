@@ -37,6 +37,7 @@ class TestSyncSendRequest(test_utils.neontest.TestCase):
           patch('utils.http.tornado.httpclient.HTTPClient')
 
         self.mock_client = self.sync_patcher.start()
+        logging.getLogger('utils.http').reset_sample_counters()
 
     def tearDown(self):
         self.sync_patcher.stop()
@@ -184,6 +185,7 @@ class TestRequestPool(test_utils.neontest.TestCase):
         self.mock_client = self.patcher.start()
 
         self.response_q = Queue.Queue()
+        logging.getLogger('utils.http').reset_sample_counters()
         
     def tearDown(self):
         self.pool.stop()
@@ -270,7 +272,8 @@ class TestRequestPool(test_utils.neontest.TestCase):
 
         with self.assertLogExists(logging.WARNING,
                                   'key=http_connection_error msg=.*500'):
-            self.pool.send_request(request, lambda x: self.response_q.put(x))
+            self.pool.send_request(request,
+                                   lambda x: self.response_q.put(x))
             self.pool.join()
 
         self.assertEqual(self.response_q.get_nowait(), valid_response)

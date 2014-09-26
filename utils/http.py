@@ -16,6 +16,7 @@ import time
 import tornado.escape
 import tornado.httpclient
 import tornado.ioloop
+import utils.logs
 
 _log = logging.getLogger(__name__)
 
@@ -23,7 +24,8 @@ _log = logging.getLogger(__name__)
 # callback will have a stack that looks like the original request
 # being called.
 
-def send_request(request, ntries=5, callback=None, cur_try=0):
+def send_request(request, ntries=5, callback=None, cur_try=0,
+                 do_logging=True):
     '''Sends an HTTP request with retries
 
     If there was an error, either in the connection, or if the
@@ -58,9 +60,10 @@ def send_request(request, ntries=5, callback=None, cur_try=0):
             try:
                 data = tornado.escape.json_decode(response.body)
                 if isinstance(data, dict) and data['error']:
-                    _log.warning(('key=http_response_error '
-                                  'msg=Response err from %s: %s') %
-                                  (request.url, data['error']))
+                    if do_logging:
+                        _log.warning(('key=http_response_error '
+                                      'msg=Response err from %s: %s') %
+                                      (request.url, data['error']))
                 else:
                     return finish_request(response)
 
@@ -75,9 +78,11 @@ def send_request(request, ntries=5, callback=None, cur_try=0):
                 return finish_request(response)
             
         else:
-            _log.warning(('key=http_connection_error '
-                           'msg=Error connecting to %s: %s') %
-                           (request.url, response.error))
+            if do_logging:
+                _log.warn_n(('key=http_connection_error '
+                             'msg=Error connecting to %s: %s') %
+                             (request.url, response.error),
+                             5)
 
         # Handling the retries
         cur_try += 1
@@ -90,12 +95,13 @@ def send_request(request, ntries=5, callback=None, cur_try=0):
         delay = (1 << cur_try) * 0.1 # in seconds
         if callback is None:
             time.sleep(delay)
-            return send_request(request, ntries, cur_try=cur_try)
+            return send_request(request, ntries, cur_try=cur_try,
+                                do_logging=do_logging)
         else:
             ioloop = tornado.ioloop.IOLoop.current()
             ioloop.add_callback(ioloop.add_timeout, time.time()+delay,
                                 lambda: send_request(request, ntries, callback,
-                                                     cur_try))
+                                                     cur_try, do_logging))
 
         # TODO(mdesnoyer): Return a future
         return None
@@ -113,7 +119,8 @@ def send_request(request, ntries=5, callback=None, cur_try=0):
                                                            error=e)
         except socket.gaierror as e:
             # Address resolution error
-            _log.error('msg=address resolution error for %r' % request)
+            if do_logging:
+                _log.error('msg=address resolution error for %r' % request)
             error = tornado.httpclient.HTTPError(
                 502, 'error resolving address')
             response = tornado.httpclient.HTTPResponse(request,

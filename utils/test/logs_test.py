@@ -48,13 +48,47 @@ class TestLogMessageInSystem(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.FATAL, 'I got a.* log'):
             _log.fatal('I got a FATAL log')
 
+class TestSampledLogging(test_utils.neontest.TestCase):
+    def test_logdebug(self):
+        with self.assertLogExists(logging.DEBUG, 'I got a.* log. count 5'):
+            for i in range(8):
+                _log.debug_n('I got a DEBUG log. count %i' % i, 5)
+
+    def test_loginfo(self):
+        with self.assertLogExists(logging.INFO, 'I got a.* log. count 5'):
+            for i in range(8):
+                _log.info_n('I got a INFO log. count %i' % i, 5)
+
+    def test_logwarn(self):
+        with self.assertLogExists(logging.WARNING, 'I got a.* log. count 5'):
+            for i in range(8):
+                _log.warning_n('I got a WARNING log. count %i' % i, 5)
+
+    def test_logerror(self):
+        with self.assertLogExists(logging.ERROR, 'I got a.* log. count 5'):
+            for i in range(8):
+                _log.error_n('I got a ERROR log. count %i' % i, 5)
+
+    def test_logfatal(self):
+        with self.assertLogExists(logging.CRITICAL, 'I got a.* log. count 5'):
+            for i in range(8):
+                _log.fatal_n('I got a CRITICAL log. count %i' % i, 5)
+
+    def test_log_exception(self):
+        with self.assertLogExists(logging.ERROR, 'I got a.* log. count 5'):
+            for i in range(8):
+                try:
+                    raise Exception
+                except:
+                    _log.exception_n('I got an exception log. count %i' % i, 5)
+
 class TestLogglyHandler(test_utils.neontest.TestCase):
     def setUp(self):
         self.url_patcher = patch('utils.logs.utils.http.send_request')
         self.url_mock = self.url_patcher.start()
 
         self.url_mock.side_effect = \
-          lambda x, callback: callback(HTTPResponse(x, 200))
+          lambda x, callback, do_logging: callback(HTTPResponse(x, 200))
 
         
         self.handler = utils.logs.LogglyHandler('mytag')
@@ -97,7 +131,7 @@ class TestFlumeHandler(test_utils.neontest.TestCase):
         self.url_mock = self.url_patcher.start()
 
         self.url_mock.side_effect = \
-          lambda x, callback: callback(HTTPResponse(x, 200))
+          lambda x, callback, do_logging: callback(HTTPResponse(x, 200))
 
         
         self.handler = utils.logs.FlumeHandler('http://localhost:6366')
@@ -128,7 +162,7 @@ class TestFlumeHandler(test_utils.neontest.TestCase):
     @patch('sys.stderr', new_callable=StringIO)
     def test_bad_connection(self, mock_stderr):
         self.url_mock.side_effect = \
-        lambda x, callback: callback(
+        lambda x, callback, do_logging: callback(
             HTTPResponse(x, 404, error=HTTPError(404)))
 
         with self.assertLogExists(logging.ERROR, 'I got a.* log'):

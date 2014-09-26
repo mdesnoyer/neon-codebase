@@ -8,8 +8,10 @@
 
 NEON_ROOT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-echo "Creating the virtual environment"
-virtualenv ${NEON_ROOT_DIR}/.pyenv
+if [ ! -e ${NEON_ROOT_DIR}/.pyenv ] ; then
+   echo "Creating the virtual environment"
+   virtualenv ${NEON_ROOT_DIR}/.pyenv
+fi
 
 # Clean up the old python virtual environment
 rm -rf ${NEON_ROOT_DIR}/pyenv

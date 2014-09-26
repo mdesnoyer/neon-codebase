@@ -10,8 +10,8 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-from boto.ec2.connection import EC2Connection
-from boto.emr.connection import EmrConnection
+import boto.ec2
+import boto.emr
 from boto.emr.bootstrap_action import BootstrapAction
 from boto.emr.instance_group import InstanceGroup
 import boto.emr.step
@@ -37,6 +37,10 @@ _log = logging.getLogger(__name__)
 from utils.options import define, options
 define("cluster_name", default="Neon Cluster",
        help="Name of any cluster that is created")
+define("cluster_region", default='us-east-1',
+       help='Amazon region where the cluster resides')
+define("use_public_ip", default=0,
+       help="If set, uses the public ip to talk to the cluster.")
 define("ssh_key", default="s3://neon-keys/emr-runner.pem",
        help="ssh key used to execute jobs on the master node")
 define("resource_manager_port", default=9026,
@@ -56,6 +60,53 @@ class ClusterCreationError(ClusterException): pass
 class ExecutionError(ClusterException):pass
 class MapReduceError(ExecutionError): pass
 
+def emr_iterator(conn, obj_type, cluster_id=None, **kwargs):
+    '''Function that iterates through the responses to list_* functions
+       including handing the paginatioin
+
+    Inputs:
+    conn - Connection object
+    obj_type - String of the end of the list_<obj_type> function
+               (e.g. 'clusters')
+    cluster_id - The cluster id for any list function that's not list_clusters
+    kwargs - Any specific keyworkd args for the list_* function
+
+    Returns:
+    The iterator through the objects
+    '''
+    obj_map = {
+        'bootstrap_actions' : 'actions',
+        'clusters' : 'clusters',
+        'instance_groups': 'instancegroups',
+        'instances' : 'instances',
+        'steps': 'steps'}
+    if not obj_type in obj_map:
+        raise ValueError('Invalid object type: %s' % obj_type)
+
+    list_func = getattr(conn, 'list_%s' % obj_type)
+    if obj_type == 'clusters':
+        get_page = lambda marker: list_func(marker=marker, **kwargs)
+    else:
+        get_page = lambda marker: list_func(cluster_id, marker=marker,
+                                            **kwargs)
+
+    cur_page = None
+    while cur_page is None or 'marker' in cur_page.__dict__:
+        if cur_page is None:
+            # Get the first page of results
+            cur_page = get_page(None)
+        else:
+            cur_page = get_page(cur_page.marker)
+
+        for item in cur_page.__dict__[obj_map[obj_type]]:
+            yield item
+
+def EmrConnection(**kwargs):
+    return boto.emr.connect_to_region(options.cluster_region, **kwargs)
+
+def EC2Connection(**kwargs):
+    return boto.ec2.connect_to_region(options.cluster_region, **kwargs)
+
 class Cluster():
     # The possible instance and their multiplier of processing
     # power relative to the r3.xlarge. Bigger machines are
@@ -64,12 +115,11 @@ class Cluster():
     #
     # This table is (type, multiplier, on demand price)
     instance_info = {
-        'r3.xlarge' : (1., 0.35),
         'r3.2xlarge' : (2.1, 0.70),
         'r3.4xlarge' : (4.4, 1.40),
         'r3.8xlarge' : (9.6, 2.80),
         'hi1.4xlarge' : (2.5, 3.10),
-        'm2.4xlarge' : (2.3, 0.98)}
+        'm2.4xlarge' : (2.2, 0.98)}
 
 
     # Possible cluster roles
@@ -78,7 +128,7 @@ class Cluster():
     ROLE_TESTING = 'testing'
     
     '''Class representing the cluster'''
-    def __init__(self, cluster_type, n_core_instances,
+    def __init__(self, cluster_type, n_core_instances=None,
                  public_ip=None):
         '''
         cluster_type - Cluster type to connect to. Uses the cluster-type tag.
@@ -158,11 +208,11 @@ class Cluster():
             else:
                 _log.info("Found cluster type %s with id %s" %
                           (self.cluster_type, self.cluster_id))
-                self._find_master_info()
                 self._set_requested_core_instances()
 
     def run_map_reduce_job(self, jar, main_class, input_path,
-                           output_path, map_memory_mb=None):
+                           output_path, map_memory_mb=None,
+                           timeout=None):
         '''Runs a mapreduce job.
 
         Inputs:
@@ -179,6 +229,10 @@ class Cluster():
         Returns:
         Returns once the job is done. If the job fails, an exception will be thrown.
         '''
+        if timeout is not None:
+            budget_time = datetime.datetime.now() + \
+              datetime.timedelta(seconds=timeout)
+        
         # Define extra options for the job
         extra_ops = {
             'mapreduce.output.fileoutputformat.compress' : 'true',
@@ -261,6 +315,9 @@ class Cluster():
         # Now poll the job status until it is done
         error_count = 0
         while True:
+            if timeout is not None and budget_time < datetime.datetime.now():
+                raise MapReduceError("Map Reduce Job timed out.")
+                
             try:
                 url = ("http://%s/proxy/%s/ws/v1/mapreduce/jobs/%s" % 
                        (host, application_id, job_id))
@@ -365,7 +422,7 @@ class Cluster():
             # First find the instance group
             conn = EmrConnection()
             found_group = None
-            for group in conn.list_instance_groups(self.cluster_id).instancegroups:
+            for group in emr_iterator(conn,'instance_groups',self.cluster_id):
                 if group.instancegrouptype == group_type:
                     found_group = group
                     break
@@ -452,33 +509,47 @@ class Cluster():
         STARTING | BOOTSTRAPPING | RUNNING | WAITING | 
         TERMINATING | TERMINATED | TERMINATED_WITH_ERRORS
         '''
-        conn = EmrConnection()
         if self.cluster_id is None:
-            most_recent = None
-            state = None
-            for cluster in conn.list_clusters().clusters:
-                if cluster.name != options.cluster_name:
-                    # The cluster has to have the right name to be possible
-                    continue
-                cluster_info = conn.describe_cluster(cluster.id)
-                create_time = dateutil.parser.parse(
-                    cluster_info.status.timeline.creationdatetime)
-                if (self._get_cluster_tag(cluster_info, 'cluster-type', '') == 
-                    self.cluster_type and
-                    self._get_cluster_tag(cluster_info, 'cluster-role', '') ==
-                    Cluster.ROLE_PRIMARY and (
-                        most_recent is None or create_time > most_recent)):
-                    self.cluster_id = cluster.id
-                    most_recent = create_time
-                    state = cluster_info.status.state
-                time.sleep(1) # Avoid AWS throttling
-            if self.cluster_id is None:
-                raise ClusterInfoError(
-                    "Could not get information about cluster %s " % 
-                    self.cluster_type)
-            return state
+            cluster_info = self.find_cluster()
+            return cluster_info.status.state
 
+        conn = EmrConnection()
         return conn.describe_cluster(self.cluster_id).status.state
+
+    def find_cluster(self):
+        '''Finds the cluster if it exists and fills the
+        self.cluster_id, self.master_id and self.master_ip
+
+        Returns the ClusterInfo object if the cluster was found.
+        '''
+        conn = EmrConnection()
+        most_recent = None
+        cluster_found = None
+        for cluster in emr_iterator(conn, 'clusters'):
+            if cluster.name != options.cluster_name:
+                # The cluster has to have the right name to be a possible match
+                continue
+            cluster_info = conn.describe_cluster(cluster.id)
+            create_time = dateutil.parser.parse(
+                cluster_info.status.timeline.creationdatetime)
+            if (self._get_cluster_tag(cluster_info, 'cluster-type', '') == 
+                self.cluster_type and
+                self._get_cluster_tag(cluster_info, 'cluster-role', '') ==
+                Cluster.ROLE_PRIMARY and (
+                    most_recent is None or create_time > most_recent)):
+                self.cluster_id = cluster.id
+                most_recent = create_time
+                cluster_found = cluster_info
+            time.sleep(1) # Avoid AWS throttling
+        
+        if cluster_found is None:
+            raise ClusterInfoError('Could not find a cluster of type %s'
+                                   ' with name %s'
+                                   % (self.cluster_type,
+                                      options.cluster_name))
+        self._find_master_info()
+        
+        return cluster_found
 
     def _get_cluster_tag(self, cluster_info, tag_name, default=None):
         '''Returns the cluster type from a Cluster response object.'''
@@ -504,10 +575,13 @@ class Cluster():
         self.master_ip = None
         self.master_id = \
           conn.describe_jobflow(self.cluster_id).masterinstanceid
-        for instance in conn.list_instances(self.cluster_id).instances:
+        for instance in emr_iterator(conn, 'instances', self.cluster_id):
             if (instance.status.state == 'RUNNING' and 
                 instance.ec2instanceid == self.master_id):
-                self.master_ip = instance.privateipaddress
+                if options.use_public_ip and instance.publicipaddress:
+                    self.master_ip = instance.publicipaddress
+                else:
+                    self.master_ip = instance.privateipaddress
 
         if self.master_ip is None:
             raise ClusterInfoError("Could not find the master ip")
@@ -515,7 +589,6 @@ class Cluster():
 
     def _set_requested_core_instances(self):
         '''Sets self.n_core_instances to what is currently requested.'''
-        conn = EmrConnection()
         found_group = self._get_instance_group_info('CORE')
 
         if found_group is not None:
@@ -525,7 +598,7 @@ class Cluster():
     def _get_instance_group_info(self, group_type):
         conn = EmrConnection()
         found_group = None
-        for group in conn.list_instance_groups(self.cluster_id).instancegroups:
+        for group in emr_iterator(conn, 'instance_groups', self.cluster_id):
             if group.instancegrouptype == group_type:
                 found_group = group
                 break
@@ -633,7 +706,7 @@ class Cluster():
             cur_state = conn.describe_jobflow(self.cluster_id)
 
         _log.info('Making the new cluster primary')
-        for cluster in conn.list_clusters().clusters:
+        for cluster in emr_iterator(conn, 'clusters'):
             try:
                 self._get_cluster_tag(cluster, 'cluster-role')
                 conn.remove_tags(cluster.id, ['cluster-role'])
@@ -654,8 +727,9 @@ class Cluster():
                  x[1], cur_price, avg_price)
                  for itype, x in Cluster.instance_info.items()
                  for cur_price, avg_price in [self._get_spot_prices(itype)]]
-        data = sorted(data, key=lambda x: (-x[2] / (x[5] * x[1]), -x[1]))
-        chosen_type, count, cpu_units,on_demand_price, cur_spot_price, \
+        data = sorted(data, key=lambda x: (-x[2] / (np.mean(x[4:6]) * x[1]),
+                                           -x[1]))
+        chosen_type, count, cpu_units, on_demand_price, cur_spot_price, \
           avg_spot_price = data[0]
 
         _log.info('Choosing core instance type %s because its avg price was %f'
@@ -674,11 +748,11 @@ class Cluster():
                              chosen_type,
                              market_type,
                              'Core instance group',
-                             1.03 * on_demand_price)
+                             '%.3f' % (1.03 * on_demand_price))
                              
 
     def _get_spot_prices(self, instance_type, 
-                         tdiff=datetime.timedelta(days=7)):
+                         tdiff=datetime.timedelta(days=1)):
         '''Returns the (current, avg for the tdiff) for a given
         instance type.'''
         conn = EC2Connection()

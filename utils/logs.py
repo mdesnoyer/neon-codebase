@@ -62,6 +62,29 @@ define('loggly_base_url',
        default='https://logs-01.loggly.com/inputs/520b9697-b7f3-4970-a059-710c28a8188a',
        help='Base url for the loggly endpoint')
 
+# grabbed from logging.py
+#
+# _srcfile is used when walking the stack to check when we've got the first
+# caller stack frame.
+#
+if hasattr(sys, 'frozen'): #support for py2exe
+    _srcfile = "logging%s__init__%s" % (os.sep, __file__[-4:])
+elif __file__[-4:].lower() in ['.pyc', '.pyo']:
+    _srcfile = __file__[:-4] + '.py'
+else:
+    _srcfile = __file__
+_srcfile = os.path.normcase(_srcfile)
+
+def currentframe():
+    """Return the frame object for the caller's stack frame."""
+    try:
+        raise Exception
+    except:
+        return sys.exc_info()[2].tb_frame.f_back
+
+if hasattr(sys, '_getframe'): currentframe = lambda: sys._getframe(3)
+# done filching
+
 def AddConfiguredLogger():
     '''Adds a root logger defined by the config parameters.'''
     stdout_stream = None
@@ -166,9 +189,11 @@ class TornadoHTTPHandler(logging.Handler):
     '''
     A class that sends a tornado based http request
     '''
-    def __init__(self, url):
+    def __init__(self, url, emit_error_sampling_period=60):
         super(TornadoHTTPHandler, self).__init__()
         self.url = url
+        self.emit_error_sampling_period = emit_error_sampling_period
+        self.last_emit_error = None
 
     def get_verbose_dict(self, record):
         '''Returns a verbose dictionary of the record.'''
@@ -196,13 +221,24 @@ class TornadoHTTPHandler(logging.Handler):
                 try:
                     raise response.error
                 except:
-                    self.handleError(record)
+                    curtime = datetime.datetime.utcnow()
+                    if (self.last_emit_error is None or 
+                        (curtime - self.last_emit_error).total_seconds() >
+                        self.emit_error_sampling_period):
+                        self.last_emit_error = curtime
+                        self.handleError(record)
 
         try:
             utils.http.send_request(self.generate_request(record),
-                                    callback=handle_response)
+                                    callback=handle_response,
+                                    do_logging=False)
         except:
-            self.handleError(record)
+            curtime = datetime.datetime.utcnow()
+            if (self.last_emit_error is None or 
+                (curtime - self.last_emit_error).total_seconds() > 
+                self.emit_error_sampling_period):
+                self.last_emit_error = curtime
+                self.handleError(record)
 
 class LogglyHandler(TornadoHTTPHandler):
     '''
@@ -244,6 +280,71 @@ class FlumeHandler(TornadoHTTPHandler):
             self.url, method='POST', 
             headers={'Content-type' : 'application/json' },
             body=data)
+
+class NeonLogger(logging.Logger):
+    '''A python logger with some extra functionality.'''
+    def __init__(self, *args, **kwargs):
+        super(NeonLogger, self).__init__(*args, **kwargs)
+        self.sample_counters = {} # (filename, lineno) -> counter
+
+    def reset_sample_counters(self):
+        self.sample_counters = {}
+
+    def findCaller(self):
+        '''Overwrite the function to find the caller because the one in the
+        logging module only skips stack frames in its own file
+        '''
+        f = currentframe()
+        #On some versions of IronPython, currentframe() returns None if
+        #IronPython isn't run with -X:Frames.
+        if f is not None:
+            f = f.f_back
+        rv = "(unknown file)", 0, "(unknown function)"
+        while hasattr(f, "f_code"):
+            co = f.f_code
+            filename = os.path.normcase(co.co_filename)
+            if filename in [_srcfile, logging._srcfile]:
+                f = f.f_back
+                continue
+            rv = (co.co_filename, f.f_lineno, co.co_name)
+            break
+        return rv
+
+    def debug_n(self, msg, n=10, *args, **kwargs):
+        '''Log every nth message.'''
+        self.log_n(logging.DEBUG, msg, n, *args, **kwargs)
+
+    def info_n(self, msg, n=10, *args, **kwargs):
+        '''Log every nth message.'''
+        self.log_n(logging.INFO, msg, n, *args, **kwargs)
+
+    def warning_n(self, msg, n=10, *args, **kwargs):
+        '''Log every nth message.'''
+        self.log_n(logging.WARNING, msg, n, *args, **kwargs)
+    warn_n = warning_n
+
+    def error_n(self, msg, n=10, *args, **kwargs):
+        '''Log every nth message.'''
+        self.log_n(logging.ERROR, msg, n, *args, **kwargs)
+
+    def exception_n(self, msg, n=10, *args, **kwargs):
+        '''Log every nth message.'''
+        self.error_n(msg, n, exc_info=1, *args, **kwargs)
+
+    def critical_n(self, msg, n=10, *args, **kwargs):
+        '''Log every nth message.'''
+        self.log_n(logging.CRITICAL, msg, n, *args, **kwargs)
+    fatal_n = critical_n
+
+    def log_n(self, level, msg, n=10, *args, **kwargs):
+        '''Log every nth message.'''
+        fn, lno, func = self.findCaller()
+        key = (fn, lno)
+        cur_val = self.sample_counters.get(key, 0)
+        self.sample_counters[key] = cur_val + 1
+        if cur_val % n == 0:
+            self.log(level, msg, *args, **kwargs)
+logging.setLoggerClass(NeonLogger)
 
 def str2level(s):
     '''Converts a string to a logging level.'''

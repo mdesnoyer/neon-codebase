@@ -72,49 +72,44 @@ define("maxRedisRetries", default=5, type=int,
 define("baseRedisRetryWait", default=0.1, type=float,
        help="On the first retry of a redis command, how long to wait in seconds")
 define("video_server", default="127.0.0.1", type=str, help="Neon video server")
+define('async_pool_size', type=int, default=10,
+       help='Number of processes that can talk simultaneously to the db')
 
 #constants 
 BCOVE_STILL_WIDTH = 480
 
 class DBConnection(object):
-    '''Connection to the database.'''
+    '''Connection to the database.
+
+    There is one connection for each object type, so to get the
+    connection, please use the get() function and don't create it
+    directly.
+    '''
 
     #Note: Lock for each instance, currently locks for any instance creation
     __singleton_lock = threading.Lock() 
     _singleton_instance = {} 
 
-    def __init__(self, *args, **kwargs):
-        # NOTE: This is required so that the DBConnection object
-        # doesn't get intitialized again and creates a new redis client obj
-        try:
-            if(self.__init == True):
-                return
-        except:
-            self.__init = True
+    def __init__(self, class_name):
+        '''Init function.
 
-        otype = args[0]
-        cname = None
-        if otype:
-            if isinstance(otype, basestring):
-                cname = otype
-            else:
-                cname = otype.__class__.__name__ \
-                        if otype.__class__.__name__ != "type" else otype.__name__
-        
+        DO NOT CALL THIS DIRECTLY. Use the get() function instead
+        '''
         host = options.accountDB 
         port = options.dbPort 
-        
-        if cname:
-            if cname in ["AbstractPlatform", "BrightcovePlatform", "NeonApiKey"
+
+        if class_name:
+            if class_name in ["AbstractPlatform", "BrightcovePlatform", "NeonApiKey"
                     "YoutubePlatform", "NeonUserAccount", "OoyalaPlatform", "NeonApiRequest"]:
                 host = options.accountDB 
                 port = options.dbPort 
-            elif cname == "VideoMetadata":
+            elif class_name == "VideoMetadata":
                 host = options.videoDB
                 port = options.dbPort 
-            elif cname in ["ThumbnailMetadata", "ThumbnailURLMapper"]:
+            elif class_name in ["ThumbnailMetadata", "ThumbnailURLMapper"]:
                 host = options.thumbnailDB 
                 port = options.dbPort 
+
         self.conn, self.blocking_conn = RedisClient.get_client(host, port)
 
     def fetch_keys_from_db(self, key_prefix, callback=None):
@@ -142,9 +137,14 @@ class DBConnection(object):
                 if cls._singleton_instance.has_key(cname):
                     cls._singleton_instance[cname] = cls(cname)
 
-    def __new__(cls, *args, **kwargs):
-        ''' override new '''
-        otype = args[0] #Arg pass can either be class name or class instance
+    @classmethod
+    def get(cls, otype=None):
+        '''Gets a DB connection for a given object type.
+
+        otype - The object type to get the connection for.
+                Can be a class object, an instance object or the class name 
+                as a string.
+        '''
         cname = None
         if otype:
             if isinstance(otype, basestring):
@@ -152,13 +152,13 @@ class DBConnection(object):
             else:
                 #handle the case for classmethod
                 cname = otype.__class__.__name__ \
-                      if otype.__class__.__name__ != "type" else otype.__name__
+                      if otype.__class__.__name__ != "type" else otype.__name__ 
         
         if not cls._singleton_instance.has_key(cname):
             with cls.__singleton_lock:
                 if not cls._singleton_instance.has_key(cname):
                     cls._singleton_instance[cname] = \
-                            object.__new__(cls, *args, **kwargs)
+                      DBConnection(cname)
         return cls._singleton_instance[cname]
 
     @classmethod
@@ -207,6 +207,7 @@ class RedisRetryWrapper(object):
 
     def __getattr__(self, attr):
         '''Allows us to wrap all of the redis-py functions.'''
+        
         if hasattr(self.client, attr):
             if hasattr(getattr(self.client, attr), '__call__'):
                 return self._get_wrapped_retry_func(
@@ -231,7 +232,8 @@ class RedisAsyncWrapper(object):
     you can get the callback attribue as well when call is made
     '''
 
-    _thread_pool = concurrent.futures.ThreadPoolExecutor(10)
+    _thread_pool = concurrent.futures.ThreadPoolExecutor(
+        options.async_pool_size)
     
     def __init__(self, host='127.0.0.1', port=6379):
         self.client = blockingRedis.StrictRedis(host, port, socket_timeout=10)
@@ -419,7 +421,7 @@ class StoredObject(object):
     TODO: Convert all the objects to use this consistent interface.
     '''
     def __init__(self, key):
-        self.key = key
+        self.key = str(key)
 
     def __str__(self):
         return str(self.__dict__)
@@ -436,7 +438,7 @@ class StoredObject(object):
 
     def save(self, callback=None):
         '''Save the object to the database.'''
-        db_connection = DBConnection(self)
+        db_connection = DBConnection.get(self)
         value = self.to_json()
         if self.key is None:
             raise Exception("key not set")
@@ -451,7 +453,7 @@ class StoredObject(object):
 
         Returns the object or None if it couldn't be found
         '''
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
 
         def cb(result):
             if result:
@@ -488,7 +490,7 @@ class StoredObject(object):
             else:
                 return []
 
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
 
         def process(results):
             mappings = [] 
@@ -556,7 +558,7 @@ class StoredObject(object):
         couldn't be modified
 
         Example usage:
-        SoredObject.modify(['thumb_a'], 
+        SoredObject.modify_many(['thumb_a'], 
           lambda d: thumb.update_phash() for thumb in d.iteritems())
         '''
         def _getandset(pipe):
@@ -582,7 +584,7 @@ class StoredObject(object):
                     pipe.mset(to_set)
             return mappings
 
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         if callback:
             return db_connection.conn.transaction(_getandset, *keys,
                                                   callback=callback,
@@ -594,7 +596,7 @@ class StoredObject(object):
     @classmethod
     def save_all(cls, objects, callback=None):
         '''Save many objects simultaneously'''
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         data = {}
         for obj in objects:
             data[obj.key] = obj.to_json()
@@ -617,14 +619,14 @@ class StoredObject(object):
 
             #populate the object dictionary
             for key, value in data_dict.iteritems():
-                obj.__dict__[key] = value
+                obj.__dict__[str(key)] = value
         
             return obj
 
     @classmethod
     def _erase_all_data(cls):
         '''Clear the database that contains objects of this type '''
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         db_connection.clear_db()
 
 class NamespacedStoredObject(StoredObject):
@@ -663,7 +665,7 @@ class NamespacedStoredObject(StoredObject):
         A list of cls objects.
         '''
         retval = []
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
 
         def filtered_callback(data_list):
             callback([x for x in data_list if x is not None])
@@ -722,7 +724,7 @@ class NeonApiKey(object):
         api_key = NeonApiKey.id_generator()
         
         #save api key mapping
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         key = NeonApiKey.format_key(a_id)
         if db_connection.blocking_conn.set(key, api_key):
             return api_key
@@ -730,7 +732,7 @@ class NeonApiKey(object):
     @classmethod
     def get_api_key(cls, a_id, callback=None):
         ''' get api key from db '''
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         key = NeonApiKey.format_key(a_id)
         if callback:
             db_connection.conn.get(key, callback) 
@@ -797,7 +799,7 @@ class TrackerAccountIDMapper(NamespacedStoredObject):
                 return data['value'], data['itype']
 
         key = cls.format_key(tai)
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
        
         if callback:
             db_connection.conn.get(key, lambda x: callback(format_tuple(x)))
@@ -885,7 +887,7 @@ class NeonUserAccount(object):
     
     def save(self, callback=None):
         ''' save instance'''
-        db_connection = DBConnection(self)
+        db_connection = DBConnection.get(self)
         if callback:
             db_connection.conn.set(self.key, self.to_json(), callback)
         else:
@@ -897,7 +899,7 @@ class NeonUserAccount(object):
         '''
         
         #temp: changing this to a blocking pipeline call   
-        db_connection = DBConnection(self)
+        db_connection = DBConnection.get(self)
         pipe = db_connection.blocking_conn.pipeline()
         pipe.set(self.key, self.to_json())
         pipe.set(new_integration.key, new_integration.to_json()) 
@@ -906,7 +908,7 @@ class NeonUserAccount(object):
     @classmethod
     def get_account(cls, api_key, callback=None):
         ''' return neon useraccount instance'''
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         key = "neonuseraccount_%s" %api_key
         if callback:
             db_connection.conn.get(key, lambda x: callback(cls.create(x))) 
@@ -932,7 +934,7 @@ class NeonUserAccount(object):
     def get_all_accounts(cls):
         ''' Get all NeonUserAccount instances '''
         nuser_accounts = []
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         accounts = db_connection.blocking_conn.keys(cls.__name__.lower() + "*")
         for accnt in accounts:
             api_key = accnt.split('_')[-1]
@@ -1065,16 +1067,21 @@ class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
 class AbstractPlatform(object):
     ''' Abstract Platform/ Integration class '''
 
-    def __init__(self, abtest=False, enabled=True):
+    def __init__(self, abtest=False, enabled=True, serving_enabled=True):
         self.key = None 
         self.neon_api_key = ''
         self.videos = {} # External video id (Original Platform VID) => Job ID
         self.abtest = abtest # Boolean on wether AB tests can run
         self.integration_id = None # Unique platform ID to 
         self.enabled = enabled # Account enabled for auto processing of videos 
-        self.cdn_metadata = None # Indicates whose CDN the images are hosted on
+
+        # Indicates whose CDN the images are hosted on
         # None = Neon hosts the images on its CDN
-        # else contains a json of CDNHostingDirective  
+        # else contains a json of CDNHostingDirective
+        self.cdn_metadata = None   
+
+        # Will thumbnails be served by our system?
+        self.serving_enabled = serving_enabled 
 
     def generate_key(self, i_id):
         ''' generate db key '''
@@ -1087,7 +1094,7 @@ class AbstractPlatform(object):
 
     def save(self, callback=None):
         ''' save instance '''
-        db_connection = DBConnection(self)
+        db_connection = DBConnection.get(self)
         value = self.to_json()
         if not self.key:
             raise Exception("Key is empty")
@@ -1143,7 +1150,7 @@ class AbstractPlatform(object):
           callback - If None, done asynchronously
         '''
         key = cls.__name__.lower()  + '_%s_%s' %(api_key, i_id) 
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         if callback:
             db_connection.conn.get(key, lambda x: callback(cls.create(x))) 
         else:
@@ -1173,7 +1180,7 @@ class AbstractPlatform(object):
     @classmethod
     def get_all_platform_data(cls):
         ''' get all platform data '''
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         accounts = db_connection.blocking_conn.keys(cls.__name__.lower() + "*")
         platform_data = []
         for accnt in accounts:
@@ -1191,7 +1198,7 @@ class AbstractPlatform(object):
     @classmethod
     def _erase_all_data(cls):
         ''' erase all data ''' 
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         db_connection.clear_db()
 
 class NeonPlatform(AbstractPlatform):
@@ -1277,7 +1284,7 @@ class BrightcovePlatform(AbstractPlatform):
 
     def get(self, callback=None):
         ''' get json'''
-        db_connection = DBConnection(self)
+        db_connection = DBConnection.get(self)
         if callback:
             db_connection.conn.get(self.key, callback)
         else:
@@ -1910,7 +1917,7 @@ class NeonApiRequest(object):
 
     def save(self, callback=None):
         ''' save instance '''
-        db_connection = DBConnection(self)
+        db_connection = DBConnection.get(self)
         value = self.to_json()
         if self.key is None:
             raise Exception("key not set")
@@ -1922,7 +1929,7 @@ class NeonApiRequest(object):
     @classmethod
     def get(cls, api_key, job_id, callback=None):
         ''' get instance '''
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         def package(result):
             if result:
                 nar = NeonApiRequest.create(result)
@@ -1941,7 +1948,7 @@ class NeonApiRequest(object):
     @classmethod
     def get_request(cls, api_key, job_id, callback=None):
         ''' get request data '''
-        db_connection=DBConnection(cls)
+        db_connection=DBConnection.get(cls)
         key = generate_request_key(api_key, job_id)
         if callback:
             db_connection.conn.get(key,callback)
@@ -1958,7 +1965,7 @@ class NeonApiRequest(object):
             else:
                 return []
 
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         def create(jdata):
             if not jdata:
                 return 
@@ -2105,14 +2112,14 @@ class ThumbnailServingURLs(NamespacedStoredObject):
 
     def get_thumbnail_id(self):
         '''Return the thumbnail id for this mapping.'''
-        return self.key.partition('_')[2]
+        return str(self.key.partition('_')[2])
 
     def add_serving_url(self, url, width, height):
         '''Adds a url to serve for a given width and height.
 
         If there was a previous entry, it is overwritten.
         '''
-        self.size_map[(width, height)] = url
+        self.size_map[(width, height)] = str(url)
 
     def get_serving_url(self, width, height):
         '''Get the serving url for a given width and height.
@@ -2135,10 +2142,11 @@ class ThumbnailServingURLs(NamespacedStoredObject):
 
             #populate the object dictionary
             for key, value in data_dict.iteritems():
-                obj.__dict__[key] = value
+                obj.__dict__[str(key)] = value
 
             # Load in the size map as a dictionary
-            obj.size_map = dict([[tuple(x[0]), x[1]] for x in obj.size_map])
+            obj.size_map = dict([[tuple(x[0]), str(x[1])] for 
+                                 x in obj.size_map])
             return obj
         
 class ThumbnailURLMapper(object):
@@ -2163,7 +2171,7 @@ class ThumbnailURLMapper(object):
         ''' 
         save url mapping 
         ''' 
-        db_connection = DBConnection(self)
+        db_connection = DBConnection.get(self)
         if self.key is None:
             raise Exception("key not set")
         if callback:
@@ -2175,7 +2183,7 @@ class ThumbnailURLMapper(object):
     def save_all(cls, thumbnailMapperList, callback=None):
         ''' multi save '''
 
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         data = {}
         for t in thumbnailMapperList:
             data[t.key] = t.value 
@@ -2188,7 +2196,7 @@ class ThumbnailURLMapper(object):
     @classmethod
     def get_id(cls, key, callback=None):
         ''' get thumbnail id '''
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         if callback:
             db_connection.conn.get(key, callback)
         else:
@@ -2197,7 +2205,7 @@ class ThumbnailURLMapper(object):
     @classmethod
     def _erase_all_data(cls):
         ''' del all data'''
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         db_connection.clear_db()
 
 class ThumbnailMetadata(StoredObject):
@@ -2226,9 +2234,11 @@ class ThumbnailMetadata(StoredObject):
         #TODO: remove refid. It's not necessary
         self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
         self.phash = phash # Perceptual hash of the image. None if unknown
+        
         # Fraction of traffic currently being served by this thumbnail.
         # =None indicates that Mastermind doesn't know of the fraction yet
         self.serving_frac = serving_frac 
+
 
     def update_phash(self, image):
         '''Update the phash from a PIL image.'''
@@ -2273,12 +2283,12 @@ class ThumbnailMetadata(StoredObject):
             if 'thumbnail_metadata' in data_dict:
                 for key, value in data_dict['thumbnail_metadata'].items():
                     if key != 'thumbnail_id':
-                        obj.__dict__[key] = value
+                        obj.__dict__[str(key)] = value
                 del data_dict['thumbnail_metadata']
 
             #populate the object dictionary
             for key, value in data_dict.iteritems():
-                obj.__dict__[key] = value
+                obj.__dict__[str(key)] = value
         
             return obj
 
@@ -2326,7 +2336,7 @@ class ThumbnailMetadata(StoredObject):
 
         TODO(sunil): Explain what this is for
         '''
-        db_connection = DBConnection(cls)
+        db_connection = DBConnection.get(cls)
         if callback:
             pipe = db_connection.conn.pipeline()
         else:
@@ -2380,7 +2390,8 @@ class VideoMetadata(StoredObject):
                  duration=None, vid_valence=None, model_version=None,
                  i_id=None, frame_size=None, testing_enabled=True,
                  experiment_state=ExperimentState.UNKNOWN,
-                 experiment_value_remaining=None):
+                 experiment_value_remaining=None,
+                 serving_enabled=True):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids 
         self.url = video_url 
@@ -2398,6 +2409,9 @@ class VideoMetadata(StoredObject):
         # For the multi-armed bandit strategy, the value remaining
         # from the monte carlo analysis.
         self.experiment_value_remaining = experiment_value_remaining
+
+        # Will thumbnails for this video be served by our system?
+        self.serving_enabled = serving_enabled 
 
     def get_id(self):
         ''' get internal video id '''
@@ -2592,7 +2606,7 @@ class InMemoryCache(object):
         Add a key to the cache
         '''
         with self.rlock:
-            db_connection = DBConnection(self.classname)
+            db_connection = DBConnection.get(self.classname)
             value = db_connection.blocking_conn.get(key)
             cls = eval(self.classname)
             if cls:

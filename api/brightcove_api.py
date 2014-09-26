@@ -36,7 +36,7 @@ from utils.options import define, options
 #define("local", default=1, help="create neon requests locally", type=int)
 define('max_write_connections', default=1, type=int, 
        help='Maximum number of write connections to Brightcove')
-define('max_read_connections', default=50, type=int, 
+define('max_read_connections', default=20, type=int, 
        help='Maximum number of read connections to Brightcove')
 define('max_retries', default=5, type=int,
        help='Maximum number of retries when sending a Brightcove error')
