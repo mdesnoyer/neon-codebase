@@ -186,7 +186,7 @@ class BaseTrackerDataV2(object):
         list of thumbnail ids, or None if it is unknown
         '''
         vidRe = re.compile('neonvid_([0-9a-zA-Z]+_[0-9a-zA-Z]+)')
-        tidRe = re.compile('neontn_([0-9a-zA-Z]+_[0-9a-zA-Z]+_[0-9a-zA-Z]+)')
+        tidRe = re.compile('neontn([0-9a-zA-Z]+_[0-9a-zA-Z]+_[0-9a-zA-Z]+)')
 
         # Parse the basenames
         vids = []
@@ -362,12 +362,20 @@ class ImagesLoaded(BaseTrackerDataV2):
         if len(arg_list) > 0:
             for tup in arg_list.split(','):
                 elems = tup.split(' ') # '+' delimiter converts to ' '
+                if len(elems) != 3:
+                    raise tornado.web.MissingArgumentError(
+                        "a tuple of (tid,width,height) is needed but found: %s"
+                        % elems)
                 if has_tids:
                     tids.append(elems[0])
                 else:
                     vids.append(elems[0])
-                widths.append(int(elems[1]))
-                heights.append(int(elems[2]))
+                try:
+                    widths.append(int(float(elems[1])))
+                    heights.append(int(float(elems[2])))
+                except ValueError:
+                    raise tornado.web.MissingArgumentError(
+                        'Height and width must be ints. Saw: %s' % elems[1:])
 
             if not has_tids:
                 tids = yield self._lookup_thumbnail_ids_from_isp(vids)

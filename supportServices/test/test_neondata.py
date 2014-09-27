@@ -12,6 +12,7 @@ import logging
 _log = logging.getLogger(__name__)
 import multiprocessing
 from mock import patch, MagicMock
+import os
 import redis
 import random
 import socket
@@ -32,7 +33,8 @@ from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
         ThumbnailMetadata, InternalVideoID, OoyalaPlatform, \
         TrackerAccountIDMapper, ThumbnailServingURLs, ExperimentStrategy, \
-        ExperimentState
+        ExperimentState, NeonApiRequest, CDNHostingMetadata,\
+        S3CDNHostingMetadata
 
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
@@ -106,6 +108,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         self.assertFalse(bp.abtest)
         self.assertFalse(bp.auto_update)
+        self.assertTrue(bp.serving_enabled)
         self.assertNotEqual(bp.neon_api_key, '')
         self.assertEqual(bp.key, 'brightcoveplatform_%s_iid' % bp.neon_api_key)
 
@@ -149,24 +152,25 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertItemsEqual([x.__dict__ for x in platforms],
                               [x.__dict__ for x in [bp, np, yp]])
 
+    @unittest.skip('TODO(Sunil): add this test')
     def test_add_platform_with_bad_account_id(self):
         pass
     
     def test_dbconn_singleton(self):
         bp = BrightcovePlatform('2','3', 'test')
-        self.bp_conn = DBConnection(bp)
+        self.bp_conn = DBConnection.get(bp)
 
         bp2 = BrightcovePlatform('12','13','test')
-        self.bp_conn2 = DBConnection(bp2)
+        self.bp_conn2 = DBConnection.get(bp2)
 
 
         vm = VideoMetadata('test1', None, None, None,
                 None, None, None, None)
-        self.vm_conn = DBConnection(vm)
+        self.vm_conn = DBConnection.get(vm)
 
         vm2 = VideoMetadata('test2', None, None, None, 
                 None, None, None, None)
-        self.vm_conn2 = DBConnection(vm2)
+        self.vm_conn2 = DBConnection.get(vm2)
         
         self.assertEqual(self.bp_conn, self.bp_conn2)
         self.assertEqual(self.vm_conn, self.vm_conn2)
@@ -178,7 +182,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         ''' #Verify that database connection is re-established 
         after config change '''
         ap = AbstractPlatform()
-        db = DBConnection(ap)
+        db = DBConnection.get(ap)
         key = "fookey"
         val = "fooval"
         self.assertTrue(db.blocking_conn.set(key, val))
@@ -210,7 +214,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         DB Connection test
         '''
         ap = AbstractPlatform()
-        db = DBConnection(ap)
+        db = DBConnection.get(ap)
         key = "fookey"
         val = "fooval"
         self.assertTrue(db.blocking_conn.set(key, val))
@@ -226,7 +230,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             resultQ.put(db.blocking_conn.get(key))
 
         ap = AbstractPlatform()
-        db = DBConnection(ap)
+        db = DBConnection.get(ap)
         key = "fookey"
         val = "fooval"*1000
         nkeys = 100
@@ -252,6 +256,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertTrue(None not in results)
 
     def test_iterate_all_thumbnails(self):
+        #NOTE: doesn't work on MAC
 
         # Build up a database structure
         na = NeonUserAccount('acct1')
@@ -301,6 +306,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         # Now make sure that the iteration goes through all the thumbnails
         found_thumb_ids = [x.key for x in  
                            ThumbnailMetadata.iterate_all_thumbnails()]
+        print found_thumb_ids
         self.assertItemsEqual(found_thumb_ids, [x.key for x in thumbs])
 
     def test_ThumbnailServingURLs(self):
@@ -331,8 +337,84 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                          'http://that_800_600.jpg')
         self.assertEqual(output2.get_serving_url(640, 480),
                          'http://this.jpg')
+
+    def test_too_many_open_connections_sync(self):
+        # When making calls on various objects, there should only be
+        # one connection per object type to the redis server. We're
+        # just going to make sure that that is the case
+
+        get_func = lambda x: x.get('key')
         
+        obj_types = [
+            (VideoMetadata('key'), get_func),
+            (ThumbnailMetadata('key'), get_func),
+            (TrackerAccountIDMapper('key'), get_func),
+            (ThumbnailServingURLs('key'), get_func),
+            (ExperimentStrategy('key'), get_func),
+            (NeonUserAccount('key', 'api'),
+             lambda x: x.get_account('api')),
+            (NeonPlatform('key', 'api'),
+             lambda x: x.get_account('api')),
+            (BrightcovePlatform('a', 'i', 'api'),
+             lambda x: x.get_account('api', 'i')),
+            (OoyalaPlatform('a', 'i', 'api', 'b', 'c', 'd', 'e'),
+             lambda x: x.get_account('api', 'i')),
+            (YoutubePlatform('a', 'i', 'api'),
+             lambda x: x.get_account('api', 'i')),]
+
+        for obj, read_func in obj_types:
+            # Start by saving the object
+            obj.save()
+
+            # Now find the number of open file descriptors
+            start_fd_count = len(os.listdir("/proc/%s/fd" % os.getpid()))
+
+            def nop(x): pass
+
+            # Run the func a bunch of times
+            for i in range(10):
+                read_func(obj)
+
+            # Check the file descriptors
+            end_fd_count = len(os.listdir("/proc/%s/fd" % os.getpid()))
+            self.assertEqual(start_fd_count, end_fd_count)
+    
+    def test_processed_internal_video_ids(self):
+        na = NeonUserAccount('accttest')
+        na.save()
+        bp = BrightcovePlatform('aid', 'iid', na.neon_api_key)
         
+        vids = bp.get_processed_internal_video_ids()
+        self.assertEqual(len(vids), 0)
+
+        for i in range(10):
+            bp.add_video('vid%s' % i, 'job%s' % i)
+            r = NeonApiRequest('job%s' % i, na.neon_api_key, 'vid%s' % i, 't', 't', 'r', 'h')
+            r.state = "active"
+            r.save()
+        bp.save()
+
+        vids = bp.get_processed_internal_video_ids()
+        self.assertEqual(len(vids), 10)
+
+    def test_hosting_metadata(self):
+        '''
+        Test saving and retrieving CDNHostingMetadata object
+        '''
+        na = NeonUserAccount('acct1')
+        na.save()
+        np = NeonPlatform('acct1', na.neon_api_key)
+        np.save()
+        s3mdata = S3CDNHostingMetadata("a", "s", "b", ["p1", "p2"], "")
+        ret = CDNHostingMetadata.save_metadata(na.neon_api_key, "0",
+                s3mdata.to_json())
+        self.assertTrue(ret)
+
+        accnt = NeonPlatform.get_account(na.neon_api_key)
+        self.assertTrue(isinstance(accnt.cdn_metadata, CDNHostingMetadata))
+        for key in s3mdata.__dict__.keys():
+            self.assertEqual(s3mdata.__dict__[key],
+                    accnt.cdn_metadata.__dict__[key])
 
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
@@ -352,6 +434,7 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
 
     def tearDown(self):
         self.connection_patcher.stop()
+        DBConnection.clear_singleton_instance()
         options._set('supportServices.neondata.baseRedisRetryWait',
                      self.old_delay)
         super(TestDbConnectionHandling, self).tearDown()
@@ -504,9 +587,20 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         # Now try asynchronously
         def setphash(thumb): thumb.phash = 'hash'
         def setrank(thumb): thumb.rank = 6
-        ThumbnailMetadata.modify(tid, setphash, callback=self.stop)
-        ThumbnailMetadata.modify(tid, setrank, callback=self.stop)
-        self.wait() #wait() runs the IOLoop until self.stop() is called
+
+        counters = [1, 2]
+        def wrapped_callback(param):
+            counters.pop()
+            self.stop()
+
+        ThumbnailMetadata.modify(tid, setphash, callback=wrapped_callback)
+        ThumbnailMetadata.modify(tid, setrank, callback=wrapped_callback)
+        
+        # if len(counters) is not 0, call self.wait() to service the other
+        # callbacks  
+        while len(counters) > 0:
+            self.wait()
+
         thumb = ThumbnailMetadata.get(tid)
         self.assertEqual(thumb.phash, 'hash')
         self.assertEqual(thumb.rank, 6)

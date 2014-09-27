@@ -102,14 +102,23 @@ class ISP:
     in setUpClass & tearDownClass respectively
     '''
 
-    def __init__(self, mastermind_s3file_url, s3cfg, port=None):
+    def __init__(self, mastermind_s3file_url, s3downloader, s3cfg, port=None):
         self.port = port
         if self.port is None:
             self.port = net.find_free_port()
         
         self.config_file = tempfile.NamedTemporaryFile()
-        self.config_file.write(nginx_isp_test_conf.conf % \
-                                (mastermind_s3file_url, s3cfg, self.port))
+        error_log = tempfile.NamedTemporaryFile()
+        mastermind_download_file = tempfile.NamedTemporaryFile()
+        mastermind_validated_file = tempfile.NamedTemporaryFile()
+        config_contents = nginx_isp_test_conf.conf % \
+                                (error_log.name, mastermind_s3file_url, 
+                                    s3downloader, s3cfg, 
+                                    mastermind_validated_file.name, 
+                                    mastermind_download_file.name,
+                                    self.port)
+
+        self.config_file.write(config_contents)
         self.config_file.flush()
 
         self.nginx_path = base_path + "/imageservingplatform/nginx-1.4.7/objs/nginx" #get build path
@@ -181,7 +190,6 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         cls.s3cfg = tempfile.NamedTemporaryFile()
         cls.s3cfg.write(s3cmd_fakes3cfg.conf % (s3port, '%', s3port))
         cls.s3cfg.flush()
-        os.chmod(cls.s3cfg.name, 644) #required as s3cmd runs as user nobody
   
         mfile_path = base_path + \
                         "/imageservingplatform/neon_isp/test/mastermind.api.test"
@@ -190,8 +198,13 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         FakeS3CreateBucket(bucket_name, cls.s3cfg.name)
         cls.s3_mfile_url = "%s/mastermind.api.test" % bucket_name # mastermind s3 file url
         FakeS3Upload(mfile_path, cls.s3cfg.name, cls.s3_mfile_url)
-        cls.isp = ISP(cls.s3_mfile_url, s3port) 
+
+        s3downloader = base_path +\
+                    "/imageservingplatform/neon_isp/isp_s3downloader.py"
+
+        cls.isp = ISP(cls.s3_mfile_url, s3downloader, s3port) 
         cls.isp.start()
+        
         time.sleep(1) # allow mastermind file to be parsed
 
     def setUp(self):
@@ -203,11 +216,12 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         #default ids
         self.pub_id = "pub1"
         self.vid = "vid1"
+        # Also the max fraction URL
         self.expected_img_url =\
                         "http://neon-image-cdn.s3.amazonaws.com/pixel.jpg"
         self.neon_cookie_name = "neonglobaluserid"
         self.cookie_domain = ".neon-images.com"
-
+        self.default_url = "http://default_image_url.jpg"
 
     def tearDown(self):
         pass
@@ -254,7 +268,8 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
         except urllib2.HTTPError, e:
             print e
-            pass
+            return None, e.code
+
         except urllib2.URLError, e:
             pass
 
@@ -416,8 +431,12 @@ class TestImageServingPlatformAPI(unittest.TestCase):
             if "Set-Cookie" in header:
                 cookie = header.split("Set-Cookie: ")[-1]
 
-        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, self.expected_img_url + "\r\n")
         self.assertIsNone(cookie)
+
+    def test_client_api_with_bucket_id_cookie(self):
+        #TODO: finish test when we start using the bucketID
+        pass
 
     def test_client_api_request_with_invalid_video(self):
 
@@ -440,6 +459,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         self.assertTrue(response.code, 200)
         headers = response.info().headers
         im_url = json.loads(response.read())["data"]
+        self.assertEqual(headers[2], 'Content-Type: application/json\r\n')
         self.assertIsNotNone(im_url)
         self.assertIsNotNone(TestImageServingPlatformAPI.get_header_value(headers,
                                 "application/json"))
@@ -452,20 +472,26 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         response = self.server_api_request(self.pub_id, self.vid, 600, 500)
         self.assertIsNotNone(response)
         self.assertTrue(response.code, 200)
+        im_url = json.loads(response.read())["data"]
+        self.assertEqual(im_url, self.expected_img_url)
 
     def test_server_api_without_width(self):
         url = self.base_url % ("server", self.pub_id, self.vid)
         url += "?height=500"
         response = self.make_api_request(url, {})
         im_url = json.loads(response.read())["data"]
-        self.assertEqual(im_url, "")
+        self.assertEqual(im_url, self.default_url)
 
     def test_server_api_without_height(self):
+        '''
+        Returns default Image URL
+        '''
+
         url = self.base_url % ("server", self.pub_id, self.vid)
         url += "?width=600"
         response = self.make_api_request(url, {})
         im_url = json.loads(response.read())["data"]
-        self.assertEqual(im_url, "")
+        self.assertEqual(im_url, self.default_url)
 
     def test_server_api_with_non_standard_size(self):
         '''
@@ -481,12 +507,14 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         self.assertEqual(im_url, cloudinary_url % (w, h, tid, w, h))
     
     def test_server_api_with_invalid_pubid(self):
-        response = self.server_api_request("invalid_pub", self.vid, 1, 1)
+        response, code = self.server_api_request("invalid_pub", self.vid, 1, 1)
         self.assertIsNone(response)
+        self.assertEqual(code, 400)
     
     def test_server_api_with_invalid_video_id(self):
-        response = self.server_api_request(self.pub_id, "invalid_vid", 600, 500)
+        response, code = self.server_api_request(self.pub_id, "invalid_vid", 600, 500)
         self.assertIsNone(response)
+        self.assertEqual(code, 400)
     
     def test_server_api_with_cip_argument(self):
         '''
@@ -506,10 +534,47 @@ class TestImageServingPlatformAPI(unittest.TestCase):
     def test_ab_test_ratio(self):
         '''
         Test sending a bunch of requests
-
-        TODO: How do you verify this ?
         '''
-        pass
+        random.seed(135215) 
+        def client_api_call():
+            r = random.randrange(1000, 9999)
+            h = {"Cookie" : "neonglobaluserid=dummyuid130600%d" % r}
+            prefix = "neonvid_"
+            response = self.client_api_request(self.pub_id, prefix + self.vid, 600, 500,
+                                                "12.2.2.4", headers=h)
+            redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+            headers = redirect_response.headers
+            self.assertIsNotNone(redirect_response)
+            
+            #Assert location header and cookie
+            im_url = None
+            cookie = None
+            for header in headers:
+                if "Location" in header:
+                    im_url = header.split("Location: ")[-1].rstrip("\r\n")
+                if "Set-Cookie" in header:
+                    cookie = header.split("Set-Cookie: ")[-1]
+
+            return im_url
+
+        urls = {}
+        N = 300
+        for i in range(N):
+            url = client_api_call()
+            try:
+               urls[url] += 1
+            except KeyError:
+               urls[url] = 1
+
+        expected_count = {
+        'http://neont2/thumb1_500_600.jpg': 0.2 * N,
+        'http://neon-image-cdn.s3.amazonaws.com/pixel.jpg': 0.7 * N,
+        'http://neont3/thumb1_500_600.jpg': 0.1 * N}
+
+        # Expect close to 80% accuracy 
+        for url in urls:
+            self.assertTrue(expected_count[url] * 0.8 <= urls[url] <=
+                    expected_count[url] * 1.2)
 
     def test_get_thumbnailid(self):
         '''

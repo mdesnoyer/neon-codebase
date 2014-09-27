@@ -8,8 +8,11 @@ Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright 2013 Neon Labs
 '''
 
-import os
 import logging
+import os
+import rpdb2
+import signal
+import threading
 
 from . import logs
 import monitor
@@ -22,6 +25,7 @@ def InitNeon(usage='%prog [options]'):
     '''
     garb, args = options.parse_options(usage=usage)
     logs.AddConfiguredLogger()
+    EnableRunningDebugging()
 
     magent = monitor.MonitoringAgent()
     magent.start()
@@ -32,7 +36,7 @@ def InitNeonTest():
 
     In particular, this silences all the logs.
     '''
-    options.parse_options()
+    garb, args = options.parse_options()
 
     # Remove all the loggers that some sub libraries may have setup
     for mod, logger in logging.Logger.manager.loggerDict.iteritems():
@@ -44,10 +48,26 @@ def InitNeonTest():
 
     logging.captureWarnings(True)
 
+    EnableRunningDebugging()
+
+    return args
+
 def WritePid(pidfile):
     '''Write the pid of the current process to the pidfile
     '''
     pid = str(os.getpid())
     file(pidfile, 'w').write(pid)
+
+def EnableRunningDebugging():
+    '''This adds a signal handler on SIGUSR2 that can be used to enable
+    remote debugging on a running process.
+
+    The remote debugging is done using winpdb and will listen somewhere on
+    ports 51000 -> 51024.
+    '''
+    signal.signal(signal.SIGUSR2,
+                  lambda sig, frame: rpdb2.start_embedded_debugger(
+                      'neon',
+                      fAllowRemote = True))
 
 

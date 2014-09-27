@@ -18,7 +18,8 @@ import decimal
 import fake_filesystem
 import fake_tempfile
 import logging
-from mock import patch
+from mock import patch, MagicMock
+import multiprocessing.pool
 import numpy.random
 from supportServices import neondata
 from supportServices.neondata import ThumbnailMetadata, ExperimentStrategy, VideoMetadata
@@ -63,22 +64,27 @@ class TestObjects(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.ERROR,
                                   "Two thumbnail ids don't match"):
             self.assertEqual(thumb1.update_stats(thumb2), thumb1)
-        self.assertEqual(thumb1.impressions, 300)
+        self.assertEqual(thumb1.imp, 300)
     
 class TestCurrentServingDirective(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestCurrentServingDirective, self).setUp()
         numpy.random.seed(1984934)
-        self.mastermind = Mastermind()
 
         # Mock out the redis connection so that it doesn't throw an error
-        redis_patcher = patch(
+        self.redis_patcher = patch(
             'supportServices.neondata.blockingRedis.StrictRedis')
-        redis_patcher.start()
-        self.addCleanup(redis_patcher.stop)
+        self.redis_patcher.start()
+        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
+        self.mastermind = Mastermind()
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1'))
+        logging.getLogger('mastermind.core').reset_sample_counters()
+
+    def tearDown(self):
+        self.mastermind.wait_for_pending_modifies()
+        self.redis_patcher.stop()
 
     def test_priors(self):
         self.mastermind.update_experiment_strategy(
@@ -90,7 +96,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                 [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                                ttype='neon', model_score=5.8)),
                  build_thumb(ThumbnailMetadata('n2', 'vid1',
-                                               ttype='neon', model_score=3.5)),
+                                               ttype='neon',
+                                               model_score='3.5')),
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                                ttype='centerframe')),
                  build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
@@ -115,7 +122,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                            ttype='neon', model_score=5.8)),
              build_thumb(ThumbnailMetadata('n2', 'vid1',
-                                           ttype='neon', model_score=3.5))])
+                                           ttype='neon',
+                                           model_score=u'3.5'))])
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertAlmostEqual(sum(directive.values()), 1.0)
@@ -237,8 +245,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertEqual(directive, {'bc': 0.99, 'ctr': 0.0, 'n1': 0.01})
 
         # When the baseline wins, it should be shown for 100%
-        video_info.thumbnails[1].conversions = 5000
-        video_info.thumbnails[1].impressions = 5000
+        video_info.thumbnails[1].conv = 5000
+        video_info.thumbnails[1].imp = 5000
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'bc': 1.0, 'ctr': 0.0, 'n1': 0.0})
@@ -260,17 +268,17 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertEqual(directive, {'bc': 0.99, 'ctr': 0.0, 'n1': 0.01})
 
         # When the baseline wins, it should be shown for all 100%
-        video_info.thumbnails[2].conversions = 5000
-        video_info.thumbnails[2].impressions = 5000
+        video_info.thumbnails[2].conv = 5000
+        video_info.thumbnails[2].imp = 5000
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'bc': 0.0, 'ctr': 0.0, 'n1': 1.0})
 
         # If the default one wins, we show the baseline for the holdback
-        video_info.thumbnails[2].conversions = 0
-        video_info.thumbnails[2].impressions = 0
-        video_info.thumbnails[1].conversions = 5000
-        video_info.thumbnails[1].impressions = 5000
+        video_info.thumbnails[2].conv = 0
+        video_info.thumbnails[2].imp = 0
+        video_info.thumbnails[1].conv = 5000
+        video_info.thumbnails[1].imp = 5000
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'bc': 0.98, 'ctr': 0.0, 'n1': 0.02})
@@ -370,7 +378,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         # Finally, the editor selects the Neon thumb and it should be
         # shown all the time.
-        video_info.thumbnails[0].metadata.chosen = True
+        video_info.thumbnails[0].chosen = True
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'n1': 1.0, 'ctr':0.0, 'bc':0.0 })
@@ -454,15 +462,15 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             self.assertGreater(val, 0.0)
 
         # Choose the n2 thumbnail
-        video_info.thumbnails[1].metadata.chosen=True
+        video_info.thumbnails[1].chosen=True
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 1.0, 'ctr': 0.0,
                                      'bc': 0.0})
 
         # Choose the brightcove thumbnail
-        video_info.thumbnails[1].metadata.chosen=False
-        video_info.thumbnails[3].metadata.chosen=True
+        video_info.thumbnails[1].chosen=False
+        video_info.thumbnails[3].chosen=True
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.0, 'ctr': 0.0,
@@ -512,7 +520,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         # Choose the n2 thumbnail and now both the center frame and n1
         # will show in the experiment fraction
-        video_info.thumbnails[0].metadata.chosen=True
+        video_info.thumbnails[0].chosen=True
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertAlmostEqual(directive['n2'], 0.99)
@@ -546,7 +554,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
 
         # Disabled the Neon video
-        video_info.thumbnails[0].metadata.enabled = False
+        video_info.thumbnails[0].enabled = False
         with self.assertLogExists(logging.ERROR,
                                   'No valid thumbnails for video'):
             self.assertIsNone(
@@ -620,8 +628,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         def _set_winner(thumb_name):
             for thumb in video_info.thumbnails:
-                thumb.conversions = 5000 if thumb.id == thumb_name else 0
-                thumb.impressions = 5000 if thumb.id == thumb_name else 0
+                thumb.conv = 5000 if thumb.id == thumb_name else 0
+                thumb.imp = 5000 if thumb.id == thumb_name else 0
 
         _set_winner('n2')
 
@@ -684,8 +692,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         def _set_winner(thumb_name):
             for thumb in video_info.thumbnails:
-                thumb.conversions = 5000 if thumb.id == thumb_name else 0
-                thumb.impressions = 5000 if thumb.id == thumb_name else 0
+                thumb.conv = 5000 if thumb.id == thumb_name else 0
+                thumb.imp = 5000 if thumb.id == thumb_name else 0
 
         _set_winner('n2')
         # There is no editor choice, so show the winner for 100%
@@ -750,14 +758,14 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                          ['n2', 'ctr', 'bc', 'n1'])
 
         # Add some stats where n2 starts to bubble up but doesn't win
-        video_info.thumbnails[0].impressions = 1000
-        video_info.thumbnails[0].conversions = 10
-        video_info.thumbnails[1].impressions = 1000
-        video_info.thumbnails[1].conversions = 20
-        video_info.thumbnails[2].impressions = 1000
-        video_info.thumbnails[2].conversions = 10
-        video_info.thumbnails[3].impressions = 1000
-        video_info.thumbnails[3].conversions = 10
+        video_info.thumbnails[0].imp = 1000
+        video_info.thumbnails[0].conv = 10
+        video_info.thumbnails[1].imp = 1000
+        video_info.thumbnails[1].conv = 20
+        video_info.thumbnails[2].imp = 1000
+        video_info.thumbnails[2].conv = 10
+        video_info.thumbnails[3].imp = 1000
+        video_info.thumbnails[3].conv = 10
 
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
@@ -793,8 +801,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         # Now test with a large enough number that floating point
         # numbers go to zero
-        video_info.thumbnails[0].impressions=499
-        video_info.thumbnails[0].conversions=200
+        video_info.thumbnails[0].imp=499
+        video_info.thumbnails[0].conv=200
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertAlmostEqual(sum(directive.values()), 1.0)
@@ -821,20 +829,28 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestUpdatingFuncs, self).setUp()
         numpy.random.seed(1984934)
-        self.mastermind = Mastermind()
 
         # Mock out the redis connection so that it doesn't throw an error
-        redis_patcher = patch(
+        self.redis_patcher = patch(
             'supportServices.neondata.blockingRedis.StrictRedis')
-        self.redis_mock = redis_patcher.start()
-        self.addCleanup(redis_patcher.stop)
+        self.redis_mock = self.redis_patcher.start()
+        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
+        self.mastermind = Mastermind()
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1'))
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
-            [ThumbnailMetadata('tid1', 'acct1_vid1', ttype='centerframe'),
-             ThumbnailMetadata('tid2', 'acct1_vid1', ttype='neon')], True)
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1',
+                               ttype='neon')], True)
+        logging.getLogger('mastermind.core').reset_sample_counters()
+
+    def tearDown(self):
+        self.mastermind.wait_for_pending_modifies()
+        self.redis_patcher.stop()
+        logging.getLogger('mastermind.core').reset_sample_counters()
 
     def test_no_data_yet(self):
         self.assertItemsEqual(self.mastermind.get_directives(['acct2_vid1']),
@@ -854,18 +870,22 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
 
         self.mastermind.update_video_info(
             VideoMetadata('acct2_vid1'),
-            [ThumbnailMetadata('tid1', 'acct2_vid1', ttype='centerframe'),
-             ThumbnailMetadata('tid2', 'acct2_vid1', ttype='neon')], True)
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct2_vid1',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct2_vid1',
+                               ttype='neon')], True)
 
         orig_directive = self.mastermind.get_directives(['acct2_vid1']).next()
 
         # A strategy that isn't different is ignored
+        logging.getLogger('mastermind.core').reset_sample_counters()
         with self.assertLogNotExists(logging.INFO, 'strategy has changed'):
             self.mastermind.update_experiment_strategy(
                 'acct2', ExperimentStrategy('acct2'))
         self.assertEqual(orig_directive,
                          self.mastermind.get_directives(['acct2_vid1']).next())
 
+        logging.getLogger('mastermind.core').reset_sample_counters()
         with self.assertLogExists(logging.INFO, 'strategy has changed'):
             self.mastermind.update_experiment_strategy(
                 'acct2', ExperimentStrategy('acct2', exp_frac=0.5))
@@ -874,41 +894,49 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
             self.mastermind.get_directives(['acct2_vid1']).next())
 
     def test_add_first_video_info(self):
+        self.mastermind.wait_for_pending_modifies()
         directives = [x for x in self.mastermind.get_directives()]
         self.assertEqual(len(directives), 1)
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
-        self.assertItemsEqual(directives[0][1], [('tid1', 0.99),
-                                                 ('tid2', 0.01)])
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
+                                                 ('acct1_vid1_tid2', 0.01)])
         self.assertGreater(self.redis_mock.call_count, 0)
         self.redis_mock.reset_mock()
 
         # Repeating the info doesn't produce a change
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
-            [ThumbnailMetadata('tid1', 'acct1_vid1', ttype='centerframe'),
-             ThumbnailMetadata('tid2', 'acct1_vid1', ttype='neon')], True)
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1',
+                               ttype='neon')], True)
         directives = [x for x in self.mastermind.get_directives()]
         self.assertEqual(len(directives), 1)
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
-        self.assertItemsEqual(directives[0][1], [('tid1', 0.99),
-                                                 ('tid2', 0.01)])
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
+                                                 ('acct1_vid1_tid2', 0.01)])
         self.assertEqual(self.redis_mock.call_count, 0)
 
     def test_add_new_thumbs(self):
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
-            [ThumbnailMetadata('tid1', 'acct1_vid1', ttype='centerframe'),
-             ThumbnailMetadata('tid2', 'acct1_vid1', ttype='neon', rank=1),
-             ThumbnailMetadata('tid3', 'acct1_vid1', ttype='neon', rank=2)],
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1',
+                               ttype='neon', rank=1),
+             ThumbnailMetadata('acct1_vid1_tid3', 'acct1_vid1',
+                               ttype='neon', rank=2)],
              True)
         directives = [x for x in self.mastermind.get_directives()]
         self.assertEqual(len(directives), 1)
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
         directive = dict(directives[0][1])
-        self.assertItemsEqual(directive.keys(), ['tid1', 'tid2', 'tid3'])
-        self.assertEqual(directive['tid1'], 0.99)
-        self.assertGreater(directive['tid2'], 0.0)
-        self.assertGreater(directive['tid3'], 0.0)
+        self.assertItemsEqual(directive.keys(),
+                              ['acct1_vid1_tid1', 'acct1_vid1_tid2',
+                               'acct1_vid1_tid3'])
+        self.assertEqual(directive['acct1_vid1_tid1'], 0.99)
+        self.assertGreater(directive['acct1_vid1_tid2'], 0.0)
+        self.assertGreater(directive['acct1_vid1_tid3'], 0.0)
 
     def test_remove_thumbs(self):
         self.mastermind.update_video_info(
@@ -918,99 +946,114 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         directives = [x for x in self.mastermind.get_directives()]
         self.assertEqual(len(directives), 1)
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
-        self.assertItemsEqual(directives[0][1], [('tid1', 1.0)])
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 1.0)])
 
     def test_disable_testing_as_param(self):
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
-            [ThumbnailMetadata('tid1', 'acct1_vid1', ttype='centerframe'),
-             ThumbnailMetadata('tid2', 'acct1_vid1', ttype='neon')],
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1', ttype='neon')],
              testing_enabled=False)
         directives = [x for x in self.mastermind.get_directives()]
         self.assertEqual(len(directives), 1)
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
-        self.assertItemsEqual(directives[0][1], [('tid1', 1.0),
-                                                 ('tid2', 0.0)])
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 1.0),
+                                                 ('acct1_vid1_tid2', 0.0)])
 
     def test_disable_testing_as_video_metadata(self):
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1', testing_enabled=False),
-            [ThumbnailMetadata('tid1', 'acct1_vid1', ttype='centerframe'),
-             ThumbnailMetadata('tid2', 'acct1_vid1', ttype='neon')],
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1', ttype='neon')],
              testing_enabled=True)
         directives = [x for x in self.mastermind.get_directives()]
         self.assertEqual(len(directives), 1)
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
-        self.assertItemsEqual(directives[0][1], [('tid1', 1.0),
-                                                 ('tid2', 0.0)])
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 1.0),
+                                                 ('acct1_vid1_tid2', 0.0)])
 
     def test_update_video_with_bad_data(self):
         # Keep the old serving fractions
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
-            [ThumbnailMetadata('tid1', 'acct1_vid1', ttype='centerframe',
-                               enabled=False),
-             ThumbnailMetadata('tid2', 'acct1_vid1', ttype='neon',
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='centerframe', enabled=False),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1', ttype='neon',
                                enabled=False)],
              testing_enabled=True)
         directives = [x for x in self.mastermind.get_directives()]
         self.assertEqual(len(directives), 1)
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
-        self.assertItemsEqual(directives[0][1], [('tid1', 0.99),
-                                                 ('tid2', 0.01)])
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
+                                                 ('acct1_vid1_tid2', 0.01)])
     
 class TestStatUpdating(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestStatUpdating, self).setUp()
         numpy.random.seed(1984934)
-        self.mastermind = Mastermind()
 
         # Mock out the redis connection so that it doesn't throw an error
-        redis_patcher = patch(
+        self.redis_patcher = patch(
             'supportServices.neondata.blockingRedis.StrictRedis')
-        self.redis_mock = redis_patcher.start()
-        self.addCleanup(redis_patcher.stop)
+        self.redis_mock = self.redis_patcher.start()
+        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
+
+        self.mastermind = Mastermind()
 
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1'))
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
-            [ThumbnailMetadata('v1t1', 'acct1_vid1', ttype='centerframe'),
-             ThumbnailMetadata('v1t2', 'acct1_vid1', ttype='neon')])
+            [ThumbnailMetadata('acct1_vid1_v1t1', 'acct1_vid1',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid1_v1t2', 'acct1_vid1', ttype='neon')])
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid2'),
-            [ThumbnailMetadata('v2t1', 'acct1_vid2', ttype='centerframe'),
-             ThumbnailMetadata('v2t2', 'acct1_vid2', ttype='neon', rank=0),
-             ThumbnailMetadata('v2t3', 'acct1_vid2', ttype='neon', rank=3)])
+            [ThumbnailMetadata('acct1_vid2_v2t1', 'acct1_vid2',
+                               ttype='centerframe'),
+             ThumbnailMetadata('acct1_vid2_v2t2', 'acct1_vid2',
+                               ttype='neon', rank=0),
+             ThumbnailMetadata('acct1_vid2_v2t3', 'acct1_vid2',
+                               ttype='neon', rank=3)])
+
+    def tearDown(self):
+        self.mastermind.wait_for_pending_modifies()
+        self.redis_patcher.stop()
+        
     def test_initial_stats_update(self):
         self.mastermind.update_stats_info([
-            ('acct1_vid1', 'v1t1', 1000, 5),
-            ('acct1_vid1', 'v1t2', 1000, 100),
-            ('acct1_vid2', 'v2t1', 10, 5),
-            ('acct1_vid2', 'v2t2', 1000, 100),
-            ('acct1_vid2', 'v2t3', 1000, 100)])
+            ('acct1_vid1', 'acct1_vid1_v1t1', 1000, 5),
+            ('acct1_vid1', 'acct1_vid1_v1t2', 1000, 100),
+            ('acct1_vid2', 'acct1_vid2_v2t1', 10, 5),
+            ('acct1_vid2', 'acct1_vid2_v2t2', 1000, 100),
+            ('acct1_vid2', 'acct1_vid2_v2t3', 1000, 100)])
 
         directives = dict([x for x in self.mastermind.get_directives()])
         self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
-                              [('v1t1', 0.01), ('v1t2', 0.99)])
+                              [('acct1_vid1_v1t1', 0.01),
+                               ('acct1_vid1_v1t2', 0.99)])
         for val in [x[1] for x in directives[('acct1', 'acct1_vid2')]]:
             self.assertGreater(val, 0.0)
 
     def test_decimal_from_db(self):
         self.mastermind.update_stats_info([
-            ('acct1_vid1', 'v1t1', decimal.Decimal(1000),
+            ('acct1_vid1', 'acct1_vid1_v1t1', decimal.Decimal(1000),
              decimal.Decimal(5)),
-            ('acct1_vid1', 'v1t2', decimal.Decimal(1000),
+            ('acct1_vid1', 'acct1_vid1_v1t2', decimal.Decimal(1000),
              decimal.Decimal(100)),
-            ('acct1_vid2', 'v2t1', decimal.Decimal(10),decimal.Decimal(5)),
-            ('acct1_vid2', 'v2t2', decimal.Decimal(1000),
+            ('acct1_vid2', 'acct1_vid2_v2t1', decimal.Decimal(10),
+             decimal.Decimal(5)),
+            ('acct1_vid2', 'acct1_vid2_v2t2', decimal.Decimal(1000),
              decimal.Decimal(100)),
-            ('acct1_vid2', 'v2t3', decimal.Decimal(1000),
+            ('acct1_vid2', 'acct1_vid2_v2t3', decimal.Decimal(1000),
              decimal.Decimal(100))])
 
         directives = dict([x for x in self.mastermind.get_directives()])
         self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
-                              [('v1t1', 0.01), ('v1t2', 0.99)])
+                              [('acct1_vid1_v1t1', 0.01),
+                               ('acct1_vid1_v1t2', 0.99)])
         for val in [x[1] for x in directives[('acct1', 'acct1_vid2')]]:
             self.assertGreater(val, 0.0)
 
@@ -1033,9 +1076,9 @@ class TestStatUpdating(test_utils.neontest.TestCase):
 class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestStatusUpdatesInDb, self).setUp()
-        redis = test_utils.redis.RedisServer()
-        redis.start()
-        self.addCleanup(redis.stop)
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
         
         numpy.random.seed(1984934)
         self.mastermind = Mastermind()
@@ -1046,41 +1089,36 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
 
         # Add some initial data to the database
         self.thumbnails = [
-            ThumbnailMetadata('n1', 'acct1_vid1',
+            ThumbnailMetadata('acct1_vid1_n1', 'acct1_vid1',
                               ttype='neon', model_score=5.8),
-            ThumbnailMetadata('n2', 'acct1_vid1',
+            ThumbnailMetadata('acct1_vid1_n2', 'acct1_vid1',
                               ttype='neon', model_score=3.5),
-            ThumbnailMetadata('ctr', 'acct1_vid1',
+            ThumbnailMetadata('acct1_vid1_ctr', 'acct1_vid1',
                               ttype='centerframe'),
-            ThumbnailMetadata('bc', 'acct1_vid1', chosen=True,
+            ThumbnailMetadata('acct1_vid1_bc', 'acct1_vid1', chosen=True,
                               ttype='brightcove')]
         
         ThumbnailMetadata.save_all(self.thumbnails)
         self.video_metadata = VideoMetadata(
-            'acct1_vid1',tids=[x.key for x in self.thumbnails])
+            'acct1_vid1', tids=[x.key for x in self.thumbnails])
         self.video_metadata.save()
         self.mastermind.update_video_info(self.video_metadata, self.thumbnails)
+        self._wait_for_db_updates()
 
+    def tearDown(self):
+        self.mastermind.wait_for_pending_modifies()
+        self.redis.stop()
 
-    def _wait_for_db_updates(self, timeout=5, poll_interval=0.1):
-        cnt = 0
-        while 1:
-            try:
-                self.wait(timeout=0.1)
-            except self.failureException:
-                if self.mastermind.pending_modifies == 0:
-                    return
-                cnt += 1
-                if cnt > (timeout / poll_interval):
-                    raise
+    def _wait_for_db_updates(self):
+        self.mastermind.wait_for_pending_modifies()
 
     def test_db_when_experiment_running(self):
-        self._wait_for_db_updates()
         video = VideoMetadata.get('acct1_vid1')
         thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
         directive = dict([(x.key, x.serving_frac) for x in thumbs])
         self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
-                         ['n2', 'ctr', 'bc', 'n1'])
+                         ['acct1_vid1_n2', 'acct1_vid1_ctr', 'acct1_vid1_bc',
+                          'acct1_vid1_n1'])
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
             self.assertGreater(val, 0.0)
@@ -1095,11 +1133,31 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
                                           False)
         self._wait_for_db_updates()
 
+        thumbs = ThumbnailMetadata.get_many(self.video_metadata.thumbnail_ids)
         video = VideoMetadata.get('acct1_vid1')
-        thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
         directive = dict([(x.key, x.serving_frac) for x in thumbs])
-        self.assertEqual(directive, {'bc':1.0, 'n1':0.0, 'n2':0.0,
-                                     'ctr':0.0})
+        self.assertEqual(directive, {'acct1_vid1_bc':1.0,
+                                     'acct1_vid1_n1':0.0,
+                                     'acct1_vid1_n2':0.0,
+                                     'acct1_vid1_ctr':0.0})
+        self.assertEqual(video.experiment_state,
+                         neondata.ExperimentState.DISABLED)
+
+    def test_db_remove_video(self):
+        # Remove a video that is there
+        self.assertTrue(self.mastermind.is_serving_video('acct1_vid1'))
+        self.mastermind.remove_video_info('acct1_vid1')
+        self._wait_for_db_updates()
+        self.assertFalse(self.mastermind.is_serving_video('acct1_vid1'))
+        self.assertItemsEqual(self.mastermind.get_directives(), [])
+
+        # Remove a video that wasn't there
+        self.assertFalse(self.mastermind.is_serving_video('acct1_vid123'))
+        self.mastermind.remove_video_info('acct1_vid123')
+        self.assertFalse(self.mastermind.is_serving_video('acct1_vid123'))
+        
+        # Check that the video's state is recorded
+        video = VideoMetadata.get('acct1_vid1')
         self.assertEqual(video.experiment_state,
                          neondata.ExperimentState.DISABLED)
 
@@ -1111,8 +1169,10 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
         video = VideoMetadata.get('acct1_vid1')
         thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
         directive = dict([(x.key, x.serving_frac) for x in thumbs])
-        self.assertEqual(directive, {'bc':0.0, 'n1':0.0, 'n2':0.98,
-                                     'ctr':0.02})
+        self.assertEqual(directive, {'acct1_vid1_bc':0.0,
+                                     'acct1_vid1_n1':0.0,
+                                     'acct1_vid1_n2':0.98,
+                                     'acct1_vid1_ctr':0.02})
         self.assertEqual(video.experiment_state,
                          neondata.ExperimentState.COMPLETE)
         self.assertLess(video.experiment_value_remaining,
@@ -1128,8 +1188,9 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
         video = VideoMetadata.get('acct1_vid1')
         thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
         directive = dict([(x.key, x.serving_frac) for x in thumbs])
-        self.assertEqual(directive, {'bc':1.0, 'n1':0.0, 'n2':0.0,
-                                     'ctr':0.0})
+        self.assertEqual(directive, {'acct1_vid1_bc':1.0, 'acct1_vid1_n1':0.0,
+                                     'acct1_vid1_n2':0.0,
+                                     'acct1_vid1_ctr':0.0})
         self.assertEqual(video.experiment_state,
                          neondata.ExperimentState.OVERRIDE)    
 

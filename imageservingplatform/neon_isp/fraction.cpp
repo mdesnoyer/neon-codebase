@@ -8,7 +8,7 @@
 #include <iostream>
 #include "neonException.h"
 #include "fraction.h"
-
+#define SMALLEST_FRACTION 0.001
 
 Fraction::Fraction()
 {
@@ -37,11 +37,15 @@ Fraction::Init(double floor, const rapidjson::Value& frac)
     
     pct = frac["pct"].GetDouble();
     
+    // Check if pct is < the smallest decimal acceptable
+    if (pct < SMALLEST_FRACTION)
+        pct = 0.0;
+
     threshold = floor + pct;
 
     // Default URL
     if (frac.HasMember("default_url") == false) 
-        throw new NeonException("Fraction::Init: no default_url id key found");
+        throw new NeonException("Fraction::Init: no default_url key found");
     
     defaultURL = strdup(frac["default_url"].GetString()); 
 
@@ -96,20 +100,35 @@ Fraction::Shutdown()
    free((void *)tid); 
 }
 
+// check if a & b approx equal i.e in the range of the window size specified 
+bool
+Fraction::ApproxEqual(int a, int b, int window){
+    if (abs(a - b) <= window)
+        return true;
+    else
+        return false;
+}
+
+// Iterate throgugh the images to find the appropriate image for a given
+// height & width
 
 ScaledImage*
-Fraction::GetScaledImage(int height, int width) const
-{
-    for(unsigned i=0; i < images.size(); i++) {
+Fraction::GetScaledImage(int height, int width) const{
+
+    for(unsigned i=0; i < images.size(); i++){
         
-        if(images[i]->GetHeight() == height &&
-           images[i]->GetWidth() == width)
+        if(ApproxEqual(images[i]->GetHeight(), height, 2) &&
+           ApproxEqual(images[i]->GetWidth(), width, 2))
             return images[i];
     }
     
     return 0;
 }
 
+void
+Fraction::SetPct(double pct){ 
+    this->pct = pct;
+}
 
 double
 Fraction::GetThreshold() const

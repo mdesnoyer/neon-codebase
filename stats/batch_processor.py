@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 ''''
 Script that runs one cycle of the hadoop stats batch processing.
 
@@ -14,20 +13,14 @@ if sys.path[0] != __base_path__:
 sys.path.append(os.path.join(os.path.dirname(__file__), 'gen-py'))
 
 import avro.schema
-from boto.emr.connection import EmrConnection
 from boto.s3.connection import S3Connection
 import boto.s3.key
-import contextlib
+import datetime
 from hive_service import ThriftHive
 from hive_service.ttypes import HiveServerException
 import impala.dbapi
 import impala.error
-import json
-import paramiko
 import re
-import socket
-import subprocess
-import tempfile
 import threading
 from thrift import Thrift
 from thrift.transport import TSocket
@@ -35,276 +28,47 @@ from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol
 import time
 import urllib2
-import urlparse
-import utils.neon
-import utils.monitor
 
 #logging
 import logging
 _log = logging.getLogger(__name__)
 
 from utils.options import define, options
-define("emr_cluster", default="Event Stats Server",
-       help="Name of the EMR cluster to use")
 define("hive_port", default=10004, help="Port to talk to hive on")
 define("impala_port", default=21050, help="Port to talk to impala on")
-define("ssh_key", default="s3://neon-keys/emr-runner.pem",
-       help="ssh key used to execute jobs on the master node")
-define("resource_manager_port", default=9022,
-       help="Port to query the resource manager on")
 define("schema_bucket", default="neon-avro-schema",
        help=("Bucket that must contain the compiled schema to define the "
              "tables."))
-define("input_path", default="s3://neon-tracker-logs-v2/v2.2/*/*/*/*",
-       help="Path for the raw input data")
-define("cleaned_output_path", default="s3://neon-tracker-logs-v2/cleaned/",
-       help="Base path where the cleaned logs will be output")
 define("mr_jar", default=None, type=str, help="Mapreduce jar")
 define("compiled_schema_path",
        default=os.path.join(__base_path__, 'schema', 'compiled'),
        help='Path to the bucket of compiled avro schema')
-define("get_master_host_key", default=0,
-       help=("If 1, we will get the cluster's master node's ssh key, "
-             "register it, and stop"))
-define("master_host_key_file", default=None, type=str,
-       help='File to output the master host key to')
 
 from utils import statemon
 statemon.define("stats_cleaning_job_failures", int)
-statemon.define("master_connection_error", int)
 statemon.define("impala_table_creation_failure", int)
 
-s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
-
-class NeonException(Exception): pass
-class ClusterInfoError(NeonException): pass
-class ClusterConnectionError(NeonException): pass
-class ExecutionError(NeonException): pass
-class MapReduceError(NeonException): pass
-class IncompatibleSchema(NeonException): pass
-
-class ClusterInfo():
-    def __init__(self):
-        conn = EmrConnection()
-
-        # First find the right cluster
-        self.cluster_id = None
-        for cluster in conn.list_clusters().clusters:
-            if (cluster.status.state in ['WAITING', 'RUNNING'] and 
-                cluster.name == options.emr_cluster):
-                self.cluster_id = cluster.id
-                break
-
-        if self.cluster_id is None:
-            raise ClusterInfoError(
-                "Could not find cluster %s" % options.emr_cluster)
-        else:
-            _log.info("Found cluster name %s with id %s" %
-                      (options.emr_cluster, self.cluster_id))
-
-        # Now find the master node
-        self.master_ip = None
-        master_id = conn.describe_jobflow(self.cluster_id).masterinstanceid
-        for instance in conn.list_instances(self.cluster_id).instances:
-            if instance.ec2instanceid == master_id:
-                self.master_ip = instance.privateipaddress
-
-        if self.master_ip is None:
-            raise ClusterInfoError("Could not find the master ip")
-        _log.info("Found master ip address %s" % self.master_ip)
-    
-
-class ClusterSSHConnection:
-    '''Class that allows an ssh connection to the master cluster node.'''
-    def __init__(self, cluster_info):
-        self.cluster_info = cluster_info
-
-        # Grab the ssh key from s3
-        self.key_file = tempfile.NamedTemporaryFile('w')
-        conn = S3Connection()
-        bucket_name, key_name = s3AddressRe.match(options.ssh_key).groups()
-        bucket = conn.get_bucket(bucket_name)
-        key = bucket.get_key(key_name)
-        key.get_contents_to_file(self.key_file)
-        self.key_file.flush()
-
-        self.client = paramiko.SSHClient()
-        if (options.master_host_key_file is not None and 
-            os.path.exists(options.master_host_key_file)):
-            self.client.load_system_host_keys(options.master_host_key_file)
-        else:
-            self.client.load_system_host_keys()
-
-    def _connect(self):
-        try:
-            self.client.connect(self.cluster_info.master_ip,
-                                username="hadoop",
-                                key_filename = self.key_file.name)
-        except socket.error as e:
-            raise ClusterConnectionError("Error connecting to %s: %s" %
-                                         (self.cluster_info.master_ip, e))
-
-    def get_master_host_key(self):
-        _log.info("Retrieving the master host key")
-        self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        self._connect()
-        self.client.close()
-
-        if options.master_host_key_file is not None:
-            self.client.save_host_keys(options.master_host_key_file)        
-
-    def copy_file(self, local_path, remote_path):
-        '''Copies a file from the local path to the cluster.
-
-        '''
-        
-        _log.info("Copying %s to %s" % (local_path,
-                                        self.cluster_info.master_ip))
-        self._connect()
-        
-        try:
-            ftp_client = self.client.open_sftp()
-            ftp_client.put(local_path, remote_path)
-
-        finally:
-            self.client.close()
-
-    def execute_remote_command(self, cmd):
-        '''Executes a command on the master node.
-
-        Returns stdout of the process, or raises an Exception if the
-        process failed.
-        '''
-
-        _log.info("Executing %s on cluster master at %s" %
-                  (cmd, self.cluster_info.master_ip))
-        self._connect()
-            
-        stdout_msg = []
-        stderr_msg = []
-        retcode = None
-        try:
-            stdin, stdout, stderr = self.client.exec_command(cmd)
-            for line in stdout:
-                stdout_msg.append(line)
-            for line in stderr:
-                stderr_msg.append(line)
-            retcode = stdout.channel.recv_exit_status()
-            
-        finally:
-            self.client.close()
-
-        if retcode != 0:
-            raise ExecutionError(
-                "Error running command on the cluster: %s. Stderr was: \n%s" % 
-                (cmd, '\n'.join(stderr_msg)))
-
-        return '\n'.join(stdout_msg)
-
-def RunMapReduceJob(cluster_info, ssh_conn, jar, main_class, input_path,
-                    output_path):
-    '''Runs a mapreduce job.
-
-    Inputs:
-    cluster_info - A ClusterInfo object describing the cluster to run on
-    ssh_conn - a ClusterSSHConnection object to connect to the master node
-    jar - Path to the jar to run. It should be a jar that packs in all the
-          dependencies.
-    main_class - Name of the main class in the jar of the job to run
-    input_path - The input path of the data
-    output_path - The output location for the data
-
-    Returns:
-    Returns once the job is done. If the job fails, an exception will be thrown.
-    '''
-    ssh_conn.copy_file(jar, '/home/hadoop/%s' % os.path.basename(jar))
-
-    trackURLRe = re.compile(
-        r"Tracking URL: https?://(\S+)/proxy/(\S+)/")
-    jobidRe = re.compile(r"Job ID: (\S+)")
-    stdout = ssh_conn.execute_remote_command(
-        ('hadoop jar /home/hadoop/%s %s '
-         '-D mapreduce.output.fileoutputformat.compress=true '
-         '-D avro.output.codec=snappy %s %s') % 
-         (os.path.basename(jar), main_class, input_path, output_path))
-    url_parse = trackURLRe.search(stdout)
-    if not url_parse:
-        raise MapReduceError(
-            "Could not find the tracking url. Stdout was: \n%s" % stdout)
-    application_id = url_parse.group(2)
-    host = url_parse.group(1)
-
-    job_id_parse = jobidRe.search(stdout)
-    if not job_id_parse:
-        raise MapReduceError(
-            "Could not find the job id. Stdout was: \n%s" % stdout)
-    job_id = job_id_parse.group(1)
-
-    _log.info('Running batch cleaning job %s. Tracking URL is %s' %
-              (job_id, url_parse.group(0)))
-
-    # Sleep so that the job tracker has time to come up
-    time.sleep(30)
-
-    # Now poll the job status until it is done
-    error_count = 0
-    while True:
-        try:
-            url = ("http://%s/proxy/%s/ws/v1/mapreduce/jobs/%s" % 
-                   (host, application_id, job_id))
-            response = urllib2.urlopen(url)
-
-            if url != response.geturl():
-                # The job is probably done, so we need to look at the
-                # job history server
-                history_url = ("http://%s/ws/v1/history/mapreduce/jobs/%s" %
-                               (urlparse.urlparse(response.geturl()).netloc,
-                                job_id))
-                response = urllib2.urlopen(history_url)
-
-            data = json.load(response)['job']
-
-            # Send monitoring data
-            for key, value in data.iteritems():
-                utils.monitor.send_data('batch_processor.%s' % key, value)
-
-            if data['state'] == 'SUCCEEDED':
-                _log.info('Map reduce job %s complete. Results: %s' % 
-                          (main_class, 
-                           json.dumps(data, indent=4, sort_keys=True)))
-                return
-            elif data['state'] in ['FAILED', 'KILLED', 'ERROR', 'KILL_WAIT']:
-                msg = ('Map reduce job %s failed: %s' %
-                           (main_class,
-                            json.dumps(data, indent=4, sort_keys=True)))
-                _log.error(msg)
-                raise MapReduceError(msg)
-
-            error_count = 0
-
-            time.sleep(60)
-        except urllib2.URLError as e:
-            _log.exception("Error getting job information: %s" % e)
-            statemon.state.increment('master_connection_error')
-            error_count = error_count + 1
-            if error_count > 5:
-                _log.error("Tried 5 times and couldn't get there so stop")
-                raise
-            time.sleep(5)
+class NeonDataPipelineException(Exception): pass
+class ExecutionError(NeonDataPipelineException): pass
+class ImpalaError(ExecutionError): pass
+class IncompatibleSchema(NeonDataPipelineException): pass
+class TimeoutException(NeonDataPipelineException): pass
+class UnexpectedInfo(NeonDataPipelineException): pass
 
 class ImpalaTableBuilder(threading.Thread):
     '''Thread that will dispatch and monitor the job to build the impala table.'''
-    def __init__(self, base_input_path, cluster_info, event):
+    def __init__(self, base_input_path, cluster, event):
         super(ImpalaTableBuilder, self).__init__()
         self.event = event
         self.base_input_path = base_input_path
-        self.cluster_info = cluster_info
+        self.cluster = cluster
         self.status = 'INIT'
 
         self.avro_schema = avro.schema.parse(open(os.path.join(
             options.compiled_schema_path, "%sHive.avsc" % self.event)).read())
 
     def run(self):
+        self.cluster.connect()
         hive_event = '%sHive' % self.event
         
         # Upload the schema for this table to the s3 bucket
@@ -317,7 +81,7 @@ class ImpalaTableBuilder(threading.Thread):
                          replace=True)
         
         # Create the hive client
-        transport = TSocket.TSocket(self.cluster_info.master_ip,
+        transport = TSocket.TSocket(self.cluster.master_ip,
                                     options.hive_port)
         transport = TTransport.TBufferedTransport(transport)
         protocol = TBinaryProtocol.TBinaryProtocol(transport)
@@ -328,12 +92,13 @@ class ImpalaTableBuilder(threading.Thread):
 
             # Connect to Impala
             impala_conn = impala.dbapi.connect(
-                host=self.cluster_info.master_ip,
+                host=self.cluster.master_ip,
                 port=options.impala_port)
 
             # Set some parameters
             hive.execute('SET hive.exec.compress.output=true')
             hive.execute('SET avro.output.codec=snappy')
+            hive.execute('SET parquet.compression=SNAPPY')
             hive.execute('SET hive.exec.dynamic.partition.mode=nonstrict')
         
             self.status = 'RUNNING'
@@ -367,7 +132,13 @@ class ImpalaTableBuilder(threading.Thread):
             STORED AS INPUTFORMAT 'parquet.hive.DeprecatedParquetInputFormat' 
             OUTPUTFORMAT 'parquet.hive.DeprecatedParquetOutputFormat'
             """ % (parq_table, self._generate_table_definition()))
-            
+
+            # Building parquet tables takes a lot of memory, so make
+            # sure we give the job enough.
+            hive.execute("SET mapreduce.reduce.memory.mb=5000")
+            hive.execute("SET mapreduce.reduce.java.opts=-Xmx4000m")
+            hive.execute("SET mapreduce.map.memory.mb=5000")
+            hive.execute("SET mapreduce.map.java.opts=-Xmx4000m")
             hive.execute("""
             insert overwrite table %s
             partition(tai, yr, mnth)
@@ -387,6 +158,8 @@ class ImpalaTableBuilder(threading.Thread):
             else:
                 # It's not there, so we need to refresh all the metadata
                 impala_cursor.execute('invalidate metadata')
+
+            hive.execute('reset')
 
             self.status = 'SUCCESS'
             
@@ -451,55 +224,156 @@ class ImpalaTableBuilder(threading.Thread):
                     'Cannot use a field %s with avro type %s' %
                     (field.name, field_type))
         return ','.join(cols)
-            
-def main():
-    cluster_info = ClusterInfo()
 
-    ssh_conn = ClusterSSHConnection(cluster_info)
+def build_impala_tables(input_path, cluster, timeout=None):
+    '''Builds the impala tables.
 
-    if options.get_master_host_key:
-        ssh_conn.get_master_host_key()
-        exit(0)
+    Blocks until the tables are built.
 
-    cleaned_output_path = "%s/%s" % (options.cleaned_output_path,
-                                     time.strftime("%Y-%m-%d-%H-%M"))
+    Inputs:
+    input_path - The input path, which should be the output of the
+                 RawTrackerMR job.
+    cluster - A Cluster object for working with the cluster
+    timeout - If specified, it will timeout after this number of seconds
 
-    try:
-        RunMapReduceJob(cluster_info, ssh_conn,
-                        options.mr_jar, 'com.neon.stats.RawTrackerMR',
-                        options.input_path, cleaned_output_path)
-    except Exception as e:
-        _log.exception("Error running stats cleaning job %s" % e)
-        statemon.state.increment('stats_cleaning_job_failures')
-        raise
+    Returns:
+    true on sucess
+    '''
+    _log.info("Building the impala tables")
 
-    _log.info("Batch Processing done, start job that transfers data to the "
-              "parquet table")
+    if timeout is not None:
+        budget_time = datetime.datetime.now() + \
+          datetime.timedelta(seconds=timeout)
 
     threads = [] 
     for event in ['ImageLoad', 'ImageVisible',
                   'ImageClick', 'AdPlay', 'VideoPlay', 'VideoViewPercentage',
                   'EventSequence']:
-        thread = ImpalaTableBuilder(cleaned_output_path, cluster_info, event)
+        thread = ImpalaTableBuilder(input_path, cluster, event)
         thread.start()
         threads.append(thread)
         time.sleep(1)
 
     # Wait for all of the tables to be built
     for thread in threads:
-        thread.join()
+        time_left = None
+        if timeout is not None:
+            time_left = (budget_time - datetime.datetime.now()).total_seconds()
+            if time_left < 0:
+                raise TimeoutException()
+        thread.join(time_left)
+        if thread.is_alive():
+            raise TimeoutException()
         if thread.status != 'SUCCESS':
             _log.error("Error building impala table %s. See logs."
                        % thread.event)
-            return 1
+            raise ImpalaError("Error building impala table")
 
-    _log.info("Sucess!")
-    return 0
+    _log.info('Finished building Impala tables')
+    return True
 
-if __name__ == "__main__":
-    utils.neon.InitNeon()
+def run_batch_cleaning_job(cluster, input_path, output_path, timeout=None):
+    '''Runs the mapreduce job that cleans the raw events.
+
+    The events are output in a format that can be read by hive as an
+    external table.
+
+    Inputs:
+    input_path - The s3 path for the raw data
+    output_path - The output path for the raw data
+    timeout - Time in seconds    
+    '''
+    _log.info("Starting batch event cleaning job done")
     try:
-        exit(main())
-    finally:
-        # Explicitly send the statemon data at the end of the process
-        utils.monitor.send_statemon_data()
+        cluster.run_map_reduce_job(options.mr_jar,
+                                   'com.neon.stats.RawTrackerMR',
+                                   input_path,
+                                   output_path,
+                                   map_memory_mb=2048,
+                                   timeout=timeout)
+    except Exception as e:
+        _log.error('Error running the batch cleaning job: %s' % e)
+        statemon.state.increment('stats_cleaning_job_failures')
+        raise
+    
+    _log.info("Batch event cleaning job done")
+
+def wait_for_running_batch_job(cluster, sample_period=30):
+    '''Blocks until a currently running batch cleaning job is done.
+
+    If there is no currently running job, this returns quickly
+
+    Returns: True if the job was running at some point.
+    '''
+    found_job = False
+    cluster.connect()
+
+    while True:
+        response = \
+          cluster.query_resource_manager('/ws/v1/cluster/apps?states=RUNNING,NEW,SUBMITTED,ACCEPTED')
+
+        app = _get_last_batch_app(response)
+        if app is None:
+            return found_job
+        found_job = True
+
+        time.sleep(sample_period)
+
+def _get_last_batch_app(rm_response):
+    '''Finds the last batch application from the resource manager response.'''
+
+    if rm_response['apps'] is None:
+        # There are no apps running
+        return None
+
+    last_app = None
+    last_started_time = None
+    for app in rm_response['apps']['app']:
+        if (app['name'] == 'Raw Tracker Data Cleaning' and 
+            (last_app is None or last_started_time < app['startedTime'])):
+            last_app = app
+            last_started_time = app['startedTime']            
+            
+    if last_app is None:
+        return None
+
+    _log.info('The batch job with id %s is in state %s with '
+              'progress of %i%%' % 
+              (last_app['id'], last_app['state'], last_app['progress']))
+    return last_app
+
+def get_last_sucessful_batch_output(cluster):
+    '''Determines the last sucessful batch output path.
+
+    Returns: The s3 patch of the last sucessful job, or None if there wasn't one
+    '''
+    cluster.connect()
+
+    response = cluster.query_resource_manager(
+        '/ws/v1/cluster/apps?finalStatus=SUCCEEDED')
+    app = _get_last_batch_app(response)
+
+    if app is None:
+        return None
+
+    # Check the config on the history server to get the path
+    query = ('/ws/v1/history/mapreduce/jobs/job_%s/conf' % 
+             re.compile(r'application_(\S+)').search(app['id']).group(1))
+    try:
+        conf = cluster.query_history_manager(query)
+    except urllib2.HTTPError as e:
+        _log.warn('Could not get the job history for job %s. HTTP Code %s' %
+                  (app['id'], e.code))
+        return None
+
+    if not 'conf' in conf:
+        raise UnexpectedInfo('Unexpected response from the history server: %s'
+                             % conf)
+    for prop in conf['conf']['property']:
+        if prop['name'] == 'mapreduce.output.fileoutputformat.outputdir':
+            _log.info('Found the last sucessful output directory as %s' %
+                      prop['value'])
+            return prop['value']
+
+    return None
+    
