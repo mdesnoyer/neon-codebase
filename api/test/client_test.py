@@ -287,13 +287,14 @@ class TestVideoClient(unittest.TestCase):
         self.assertGreater(len(vprocessor.attr_map), 0)
         self.assertGreater(len(vprocessor.timecodes), 0)
         self.assertNotIn(float('-inf'), vprocessor.valence_scores[1])
-    
+   
+    @patch('utils.sqsmanager')
     @patch('api.cdnhosting.urllib2')
     @patch('api.cdnhosting.S3Connection')
     @patch('api.client.VideoProcessor.finalize_api_request')
     @patch('utils.http')
     def test_finalize_request(self, mock_client, mock_finalize_api,
-                               mock_conntype, mock_urllib2):
+                               mock_conntype, mock_urllib2, sqsmgr):
         request = tornado.httpclient.HTTPRequest("http://xyz")
         response = tornado.httpclient.HTTPResponse(request, 200,
                             buffer=StringIO(''))
@@ -338,8 +339,9 @@ class TestVideoClient(unittest.TestCase):
         self.assertEqual(vprocessor.thumbnails[-1].type,
                             neondata.ThumbnailType.CENTERFRAME)
     
+    @patch('utils.sqsmanager')
     @patch('utils.http')
-    def test_finalize_request_error(self, mock_client):
+    def test_finalize_request_error(self, mock_client, sqsmgr):
         '''
         Test finalize request flow when there has been 
         a download or a processing error
