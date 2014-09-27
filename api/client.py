@@ -49,23 +49,23 @@ import time
 import urllib
 import urllib2
 import utils.neon
+import utils.pycvutils
 import utils.http
+import utils.sqsmanager
 from utils import statemon
 
 from boto.exception import S3ResponseError
 from boto.s3.connection import S3Connection
-from boto.s3.key import Key
-from boto.s3.bucket import Bucket
 from utils.imageutils import PILImageUtils
 from StringIO import StringIO
 from supportServices import neondata
-from cdnhosting import CDNHosting
 
 import utils.s3
 
 import logging
 _log = logging.getLogger(__name__)
 
+random.seed(232315)
 
 #Monitoring
 statemon.define('processed_video', int)
@@ -73,6 +73,7 @@ statemon.define('processing_error', int)
 statemon.define('dequeue_error', int)
 statemon.define('save_tmdata_error', int)
 statemon.define('save_vmdata_error', int)
+statemon.define('customer_callback_schedule_error', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -83,6 +84,9 @@ define('debug', default=0, type=int, help='If true, runs in debug mode')
 define('profile', default=0, type=int, help='If true, runs in debug mode')
 define('sync', default=0, type=int,
        help='If true, runs http client in async mode')
+define('video_server', default="http://localhost:8081", type=str, help="video server")
+define('serving_url_format',
+        default="http://i%s.neon-images.com/v1/client/%s/neonvid_%s", type=str)
 
 # ======== API String constants  =======================#
 INTERNAL_PROCESSING_ERROR = "internal error"
@@ -92,7 +96,8 @@ INTERNAL_PROCESSING_ERROR = "internal error"
 ###########################################################################
 
 def callback_response_builder(job_id, vid, data, 
-                            thumbnails, client_url, error=None):
+                              thumbnails, client_url,
+                              serving_url=None, error=None):
         '''
         build callback response that will be sent to the callback url
         which was specified when the request was created
@@ -102,12 +107,15 @@ def callback_response_builder(job_id, vid, data,
         @client_url: the callback url to send the data to
 
         '''
+
+        #TODO: Create a class formatter
         response_body = {}
         response_body["job_id"] = job_id 
         response_body["video_id"] = vid 
         response_body["data"] = data
         response_body["thumbnails"] = thumbnails
         response_body["timestamp"] = str(time.time())
+        response_body["serving_url"] = serving_url 
         response_body["error"] = error 
 
         #CREATE POST REQUEST
@@ -143,11 +151,14 @@ def notification_response_builder(a_id, i_id, video_json,
         return nt_response_request
     
 def host_images_s3(vmdata, api_key, img_and_scores, base_filename, 
-                   model_version=0, ttype=neondata.ThumbnailType.NEON):
+                   model_version=0, ttype=neondata.ThumbnailType.NEON,
+                   cdn_metadata=None):
     ''' 
     Host images on s3 which is available publicly 
     @input
     img_and_scores: list of tuples (image objects, score)
+    
+    @cdn_metadata: CDNMetadata object with customer cdn access info
 
     @return
     (thumbnails, s3_urls) : tuple of list(thumbnail metadata), s3 urls
@@ -159,6 +170,9 @@ def host_images_s3(vmdata, api_key, img_and_scores, base_filename,
     s3bucket = s3conn.get_bucket(s3bucket_name)
     
     fname_prefix = 'neon'
+    if ttype == neondata.ThumbnailType.CENTERFRAME:
+        fname_prefix = 'centerframe'
+
     fmt = 'jpeg'
     s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
     s3_urls = []
@@ -170,17 +184,23 @@ def host_images_s3(vmdata, api_key, img_and_scores, base_filename,
     for image, score in img_and_scores:
         keyname = base_filename + "/" + fname_prefix + str(rank) + "." + fmt
         s3fname = s3_url_prefix + "/%s/%s%s.jpeg" % (base_filename, fname_prefix, rank)
+        #for center frame skip rank
+        if ttype == neondata.ThumbnailType.CENTERFRAME:
+            keyname = base_filename + "/" + fname_prefix + "." + fmt
+            s3fname = s3_url_prefix + "/%s/%s.jpeg" % (base_filename,
+                                                        fname_prefix)
+
         tdata = vmdata.save_thumbnail_to_s3_and_store_metadata(image, score, 
                                                                 keyname,
                                                                 s3fname,
                                                                 ttype, 
                                                                 rank, 
-                                                                model_version)
+                                                                model_version,
+                                                                cdn_metadata)
         thumbnails.append(tdata)
         rank = rank+1
         s3_urls.append(s3fname)
 
-    vmdata.save()
     return (thumbnails, s3_urls)
 
 ###########################################################################
@@ -217,7 +237,7 @@ class VideoProcessor(object):
                 self.job_params[properties.REQUEST_UUID_KEY]  
         
         self.error = None # Error message is filled as str in this variable
-        self.requeue_url = properties.BASE_SERVER_URL + "/requeue"
+        self.requeue_url = options.video_server + "/requeue"
 
         self.video_metadata = {} 
         self.video_metadata['codec_name'] = None
@@ -238,10 +258,16 @@ class VideoProcessor(object):
         self.valence_scores = [[], []] #x,y 
         self.timecodes = {}
         self.thumbnails = [] 
+        self.center_frame = None
         self.sec_to_extract = 1 
         self.sec_to_extract_offset = 1
 
     def download_video_file_urllib2(self):
+        '''
+        Download file using urllib2
+        Tornado throws errors in bizzare cases
+        '''
+
         req = urllib2.Request(self.video_url, headers=self.headers)
         res = urllib2.urlopen(req)
         data = res.read()
@@ -288,9 +314,9 @@ class VideoProcessor(object):
 
         self.download_video_file()
        
-        #Error downloading the file
+        # Error downloading the file
         if self.error:
-            self.finalize_request()
+            self.finalize_request(immediate=True)
             return
 
         #Process the video
@@ -298,7 +324,7 @@ class VideoProcessor(object):
         if self.job_params.has_key(properties.TOP_THUMBNAILS):
             n_thumbs = 2*int(self.job_params[properties.TOP_THUMBNAILS])
         self.process_video(self.tempfile.name, n_thumbs=n_thumbs)
-
+        
         #gather stats
         end_time = time.time()
         total_request_time = \
@@ -331,7 +357,8 @@ class VideoProcessor(object):
             self.video_metadata['frame_size'] = fmov.frame_size
             self.video_size = fmov.duration * fmov.bitrate / 8 # in bytes
         except Exception, e:
-            _log.error("key=process_video msg=FFVIDEO error")
+            _log.error("key=process_video msg=FFVIDEO error %s" % e)
+            self.error = "processing_error"
             return False
 
         #Try to open the video file using openCV
@@ -339,7 +366,8 @@ class VideoProcessor(object):
             mov = cv2.VideoCapture(video_file)
         except Exception, e:
             _log.error("key=process_video worker " 
-                        " msg=%s "  % (e.message))
+                        " msg=%s "  % e)
+            self.error = "processing_error"
             return False
 
         duration = self.video_metadata['duration']
@@ -384,26 +412,33 @@ class VideoProcessor(object):
         end_process = time.time()
         _log.info("key=process_video msg=debug " 
                     "time_processing=%s" %(end_process - start_process))
+
+        # Get the center frame of the video
+        self.center_frame = self.get_center_frame(video_file)
         return True
 
-    def get_center_frame(self, video_file):
+    def get_center_frame(self, video_file, nframes=None):
         '''approximation of brightcove logic 
          #Note: Its unclear the exact nature of brighcove thumbnailing,
          the images are close but this is not the exact frame
         '''
+        
         try:
             mov = cv2.VideoCapture(video_file)
-            duration = mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
-            mov.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, int(duration / 2))
-            read_sucess, image = mov.read()
+            if nframes is None:
+                nframes = mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
+            read_sucess, image = utils.pycvutils.seek_video(mov, int(nframes /
+                2))
             if read_sucess:
-                return image[:,:,::-1]
-            else:
-                _log.error('key=get_center_frame '
-                           'msg=Error reading middle frame of video %s'
-                           % video_file)
+                #Now grab the frame
+                read_sucess, image = mov.read()
+                if read_sucess:
+                    return utils.pycvutils.to_pil(image[:,:,::-1])
+            _log.error('key=get_center_frame '
+                        'msg=Error reading middle frame of video %s'
+                        % video_file)
         except Exception,e:
-            _log.debug("key=get_center_frame msg=%s"%e)
+            _log.debug("key=get_center_frame msg=%s" % e)
 
     def valence_score(self, image):
         ''' valence of pil.image '''
@@ -471,9 +506,11 @@ class VideoProcessor(object):
                     
             return spread_result
 
-    def finalize_request(self):
+    def finalize_request(self, immediate=False):
         '''
         Finalize request after video has been processed
+
+        if immediate=True, then don't requeue on error
         '''
         
         api_key = self.job_params[properties.API_KEY]  
@@ -483,16 +520,26 @@ class VideoProcessor(object):
         request_type = self.job_params['request_type']
         api_method = self.job_params['api_method'] 
         api_param =  self.job_params['api_param']
+        
+        # get api request object
+        api_request = neondata.NeonApiRequest.get(api_key, job_id)
       
         if self.error:
             #If Internal error, requeue and dont send response to client yet
             #Send response to client that job failed due to the last reason
             #And Log the response we send to the client
             statemon.state.increment('processing_error')
+            if immediate:
+                #update error state
+                api_request.state = neondata.RequestState.INT_ERROR
+                api_request.save()
+                return
+
             if not self.requeue_job():
                 cb_request = callback_response_builder(job_id, video_id, [], 
                             [], callback_url, error=self.error)
-                self.send_client_callback_response(cb_request)
+                self.send_client_callback_response(video_id, cb_request)
+                
                 #update error state
                 api_request = neondata.NeonApiRequest.get(api_key, job_id)
                 api_request.state = neondata.RequestState.INT_ERROR
@@ -546,17 +593,55 @@ class VideoProcessor(object):
                     api_request.state = neondata.RequestState.INT_ERROR
                     api_request.save()
 
+            # CDN Metadata
+            cdn_metadata = None
+            if api_request.request_type == "neon":
+                np = neondata.NeonPlatform.get_account(api_key)
+                cdn_metadata = np.cdn_metadata
+            else:
+                #TODO(Sunil): Implement for other platforms as we move forward
+                pass
 
             #host top MAX_T images on s3
             thumbnails, s3_urls = host_images_s3(vmdata, api_key, img_score_list, 
                                             self.base_filename, model_version=0, 
-                                            ttype=neondata.ThumbnailType.NEON)
+                                            ttype=neondata.ThumbnailType.NEON,
+                                            cdn_metadata=cdn_metadata)
             self.thumbnails.extend(thumbnails)
+            #TODO(Sunil): Extract at least a single frame if every image is
+            #filtered
+
+
+            #host Center Frame on s3
+            if self.center_frame is not None:
+                cthumbnail, s3_url = host_images_s3(vmdata, api_key, [(self.center_frame, None)], 
+                                            self.base_filename, model_version=0, 
+                                            ttype=neondata.ThumbnailType.CENTERFRAME,
+                                            cdn_metadata=cdn_metadata)
+                self.thumbnails.extend(cthumbnail)
+            else:
+                _log.error("centerframe was None for %s" % video_id)
+
+            # Save videometadata 
+            if not vmdata.save():
+                _log.error("failed to save vmdata for %s" % vmdata.key)
+                statemon.state.increment('save_vmdata_error')
+
+            # Generate the Serving URL
+            # TODO(Sunil): Pass TAI as part of the request?
+            serving_url = None
+            subdomain_index = random.randint(1, 4)
+            na = neondata.NeonUserAccount.get_account(api_key)
+            if na:
+                neon_publisher_id = na.tracker_account_id  
+                serving_url = options.serving_url_format % (subdomain_index,
+                               neon_publisher_id, video_id)
+
             cr_request = callback_response_builder(job_id, video_id, data, 
-                                                   s3_urls[:topn], callback_url, 
+                                                   s3_urls[:topn], callback_url,
+                                                   serving_url,
                                                    error=self.error)
-            self.send_client_callback_response(cr_request)
-            utils.http.send_request(cr_request)
+            self.send_client_callback_response(video_id, cr_request)
             
             if request_type in ["neon", "brightcove", "ooyala"]:
                 self.finalize_api_request(cr_request.body, request_type)
@@ -567,7 +652,6 @@ class VideoProcessor(object):
                 _log.error("request type not supported")
         else:
             _log.error("request param not supported")
-
     
     def finalize_api_request(self, result, request_type):
         '''
@@ -613,7 +697,9 @@ class VideoProcessor(object):
             #    _log.error("save_video_metadata failed to save")
             #    statemon.state.increment('save_vmdata_error')
         else:
-            _log.error("key=finalize_api_request msg=failed to save request")
+            # Need to reprocess the request
+            _log.error("key=finalize_api_request msg=failed to save request %s"
+                    % api_request.key)
     
     def save_previous_thumbnail(self, api_request):
         '''
@@ -773,13 +859,23 @@ class VideoProcessor(object):
             return False
         return True
  
-    def send_client_callback_response(self, request):
+    def send_client_callback_response(self, video_id, request):
         '''
         Send client response
         '''
-        response = utils.http.send_request(request)
-        if response.error:
+        # Check if url in request object is empty, if so just return True
+
+        if request.url is None or request.url == "null":
+            return True
+
+        # Schedule the callback in SQS
+        sqsmgr = utils.sqsmanager.CustomerCallbackManager()
+        r = sqsmgr.add_callback_response(video_id, request.url, request.body)
+        if not r:
+            statemon.state.increment('customer_callback_schedule_error')
+            _log.error("Callback schedule failed for video %s" % video_id)
             return False
+
         return True
 
     def send_notifiction_response(self):
@@ -804,6 +900,8 @@ class VideoProcessor(object):
                                     thumbs)
         request = notification_response_builder(ba.account_id, i_id, vr.to_json()) 
         response = utils.http.send_request(request)
+        if response.error:
+            _log.error("Notification response not sent to %r " % request)
 
 class VideoClient(object):
    
@@ -814,8 +912,8 @@ class VideoClient(object):
         self.model_file = model_file
         self.SLEEP_INTERVAL = 10
         self.kill_received = False
-        self.dequeue_url = properties.BASE_SERVER_URL + "/dequeue"
-        self.requeue_url = properties.BASE_SERVER_URL + "/requeue"
+        self.dequeue_url = options.video_server + "/dequeue"
+        self.requeue_url = options.video_server + "/requeue"
         self.state = "start"
         self.model_version = -1
         self.model = None
@@ -907,7 +1005,7 @@ def main():
     
     if options.local:
         _log.info("Running locally")
-        properties.BASE_SERVER_URL = properties.LOCALHOST_URL
+        options.video_server = properties.LOCALHOST_URL
 
     vc = VideoClient(options.model_file,
                      options.debug, options.sync)

@@ -37,6 +37,7 @@ import utils.sync
 from utils.options import define, options
 define("port", default=8083, help="run on the given port", type=int)
 define("local", default=0, help="call local service", type=int)
+define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
 
 import logging
 _log = logging.getLogger(__name__)
@@ -99,7 +100,7 @@ class GetVideoStatusResponse(object):
 # Account Handler
 ################################################################################
 
-class AccountHandler(tornado.web.RequestHandler):
+class CMSAPIHandler(tornado.web.RequestHandler):
     ''' /api/v1/accounts handler '''
     
     def prepare(self):
@@ -231,7 +232,6 @@ class AccountHandler(tornado.web.RequestHandler):
         '''
         
         _log.info("Request %r" %self.request)
-
         uri_parts = self.request.uri.split('/')
 
         #NOTE: compare string in parts[-1] since get args aren't cleaned up
@@ -262,7 +262,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
             elif method == "abteststate":
                 video_id = uri_parts[-1].split('?')[0]
-                self.get_abteststate(video_id)
+                self.get_abtest_state(video_id)
 
             elif method == "videos" or "videos" in method:
                 video_state = None
@@ -273,15 +273,12 @@ class AccountHandler(tornado.web.RequestHandler):
                     video_state = uri_parts[-1].split('?')[0] 
 
                 if itype  == "neon_integrations":
-                    #self.get_video_status_neon(video_ids, video_state)
                     self.get_video_status("neon", i_id, video_ids, video_state)
             
                 elif itype  == "brightcove_integrations":
-                    #self.get_video_status_brightcove(i_id, video_ids, video_state)
                     self.get_video_status("brightcove", i_id, video_ids, video_state)
 
                 elif itype == "ooyala_integrations":
-                    #self.get_video_status_ooyala(i_id, video_ids, video_state)
                     self.get_video_status("ooyala", i_id, video_ids, video_state)
                 
                 elif itype == "youtube_integrations":
@@ -291,6 +288,15 @@ class AccountHandler(tornado.web.RequestHandler):
                               'msg=Invalid method in request %s method %s') 
                               % (self.request.uri, method))
                 self.send_json_response("API not supported", 400)
+
+        elif "jobs" in self.request.uri:
+            try:
+                job_id = uri_parts[4].split("?")[0]
+                self.get_job_status(job_id)
+                return
+            except:
+                self.send_json_response("invalid api call", 400)
+                return
 
         else:
             _log.warning(('key=account_handler '
@@ -351,11 +357,17 @@ class AccountHandler(tornado.web.RequestHandler):
             elif "youtube_integrations" == itype:
                 self.create_youtube_video_request(i_id)
             elif "neon_integrations" == itype:
-                self.create_neon_video_request(i_id)
+                self.create_neon_video_request_from_ui(i_id)
             #elif "ooyala_integrations" == itype:
             #    self.create_ooyala_video_request(i_id)
             else:
                 self.method_not_supported()
+
+        elif method == "create_thumbnail_api_request":
+            self.create_neon_thumbnail_api_request()
+        else:
+            self.method_not_supported()
+
 
     @tornado.web.asynchronous
     def put(self, *args, **kwargs):
@@ -404,12 +416,22 @@ class AccountHandler(tornado.web.RequestHandler):
 
                 i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
                 try:
+                    # Get video property to be updated
+                    # (change current_thumbnail, upload custom thumb, abtest)
                     new_tid = self.get_argument('current_thumbnail', None)
-                    if new_tid is None:
+                    abtest = self.get_argument('abtest', None)
+                    
+                    if abtest is not None:
+                        state = InputSanitizer.to_bool(abtest)
+                        self.update_video_abtest_state(i_vid, state)
+                        return
+
+                    elif new_tid is None and abtest is None:
                         # custom thumbnail upload
                         thumbs = json.loads(self.get_argument('thumbnails'))
                         self.upload_video_custom_thumbnail(itype, i_id, i_vid,
                                                             thumbs)
+                        return
                 except Exception, e:
                     data = '{"error": "missing thumbnail_id or thumbnails argument"}'
                     self.send_json_response(data, 400)
@@ -417,6 +439,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
                 if "brightcove_integrations" == itype:
                     self.update_video_brightcove(i_id, i_vid, new_tid)
+                    return
 
                 elif "youtube_integrations" == itype:
                     self.update_youtube_video(i_id, i_vid)
@@ -434,6 +457,7 @@ class AccountHandler(tornado.web.RequestHandler):
                     return
             else:
                 self.method_not_supported()
+                return
         else:
             _log.error("Method not supported")
             self.set_status(400)
@@ -458,11 +482,31 @@ class AccountHandler(tornado.web.RequestHandler):
     def get_neon_videos(self):
         ''' Get Videos which were called from the Neon API '''
         self.send_json_response('{"msg":"not yet implemented"}', 200)
-   
+
+    @tornado.gen.engine
+    @tornado.web.asynchronous
+    def get_job_status(self, job_id):
+        '''
+        Return the status of the job
+        '''
+        
+        req = yield tornado.gen.Task(neondata.NeonApiRequest.get_request,
+                                    self.api_key, job_id)
+        if req:
+            self.send_json_response(json.loads(req))
+            return
+
+        self.send_json_response('{"error":"job not found"}', 400)
+
+
     ## Submit a video request to Neon Video Server
     @tornado.gen.engine
     def submit_neon_video_request(self, api_key, video_id, video_url, 
                     video_title, topn, callback_url, default_thumbnail):
+
+        '''
+        Create the call in to the Video Server
+        '''
 
         request_body = {}
         request_body["topn"] = topn 
@@ -471,12 +515,14 @@ class AccountHandler(tornado.web.RequestHandler):
         request_body["video_title"] = \
                 video_url.split('//')[-1] if video_title is None else video_title 
         request_body["video_url"] = video_url
-        #client_url = 'http://thumbnails.neon-lab.com/api/v1/submitvideo/topn'
-        client_url = 'http://50.19.216.114:8081/api/v1/submitvideo/topn' #use EIP
+        request_body["previous_thumbnail"] = default_thumbnail 
+        client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
+                        % options.video_server 
         if options.local == 1:
             client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
-            request_body["callback_url"] = callback_url 
+        request_body["callback_url"] = callback_url 
         body = tornado.escape.json_encode(request_body)
+        http_client = tornado.httpclient.AsyncHTTPClient()
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
         req = tornado.httpclient.HTTPRequest(url=client_url,
                                              method="POST",
@@ -492,17 +538,17 @@ class AccountHandler(tornado.web.RequestHandler):
             self.send_json_response(data, 409)
             return
         if result.error:
-            _log.error("key=create_neon_video_request_via_api "
+            _log.error("key=create_neon_thumbnail_api_request "
                     "msg=thumbnail api error %s" %result.error)
             data = '{"error":"neon thumbnail api error"}'
             self.send_json_response(data, 502)
             return
 
         #Success
-        self.send_json_response(result.body, 200)
+        self.send_json_response(result.body, 201)
     
     @tornado.gen.engine
-    def create_neon_video_request_via_api(self):
+    def create_neon_thumbnail_api_request(self):
         '''
         Endpoint for API calls to submit a video request
         '''
@@ -510,25 +556,27 @@ class AccountHandler(tornado.web.RequestHandler):
         video_url = self.get_argument('video_url', "")
         video_url = video_url.replace("www.dropbox.com", 
                                 "dl.dropboxusercontent.com")
-        title = self.get_argument('video_title', None)
-        neon_api_key = self.get_argument('api_key', None)
+        video_title = self.get_argument('video_title', None)
         topn = self.get_argument('topn', 1)
         callback_url = self.get_argument('callback_url', None)
         default_thumbnail = self.get_argument('default_thumbnail', None)
         
-        if video_id is None or video_url == "" or neon_api_key is None:
-            _log.error("key=create_neon_video_request_via_api "
+        if video_id is None or video_url == "": 
+            _log.error("key=create_neon_thumbnail_api_request "
                     "msg=malformed request or missing arguments")
             self.send_json_response('{"error":"missing video_url"}', 400)
             return
         
         #Create Neon API Request
-        self.submit_neon_video_request(neon_api_key, video_id, video_url,
+        self.submit_neon_video_request(self.api_key, video_id, video_url,
                             video_title, topn, callback_url, default_thumbnail)
 
     @tornado.gen.engine
-    def create_neon_video_request(self, i_id):
-        ''' neon platform request '''
+    def create_neon_video_request_from_ui(self, i_id):
+        ''' neon platform request via the Neon/ Demo account in the UI 
+            this call is required for customers that put a demo link in to the
+            system and don't have a video id per se
+        '''
 
         title = None
         try:
@@ -538,7 +586,7 @@ class AccountHandler(tornado.web.RequestHandler):
             video_url = video_url.replace("www.dropbox.com", 
                                 "dl.dropboxusercontent.com")
         except:
-            _log.error("key=create_neon_video_request "
+            _log.error("key=create_neon_video_request_from_ui "
                     "msg=malformed request or missing arguments")
             self.send_json_response('{"error":"missing video_url"}', 400)
             return
@@ -579,14 +627,11 @@ class AccountHandler(tornado.web.RequestHandler):
         request_body["video_title"] = \
                 video_url.split('//')[-1] if title is None else title 
         request_body["video_url"]   = video_url
-        #client_url = 'http://thumbnails.neon-lab.com/api/v1/submitvideo/topn'
-        client_url = 'http://50.19.216.114:8081/api/v1/submitvideo/topn' #use EIP
+        request_body["callback_url"] = None 
+        client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
+                        % options.video_server 
         if options.local == 1:
             client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
-            request_body["callback_url"] = "http://localhost:8081/testcallback"
-        else:
-            request_body["callback_url"] = \
-                    "http://thumbnails.neon-lab.com/testcallback"
         body = tornado.escape.json_encode(request_body)
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
         req = tornado.httpclient.HTTPRequest(url=client_url,
@@ -604,7 +649,7 @@ class AccountHandler(tornado.web.RequestHandler):
             return
         
         if result.error:
-            _log.error("key=create_neon_video_request "
+            _log.error("key=create_neon_video_request_from_ui "
                     "msg=thumbnail api error %s" %result.error)
             data = '{"error":"neon thumbnail api error"}'
             self.send_json_response(data, 502)
@@ -635,6 +680,7 @@ class AccountHandler(tornado.web.RequestHandler):
 
     ##### Generic get_video_status #####
 
+    @tornado.web.asynchronous
     @tornado.gen.engine
     def get_video_status(self, i_type, i_id, vids, video_state=None):
         '''
@@ -805,9 +851,22 @@ class AccountHandler(tornado.web.RequestHandler):
                 keys)
             tids = []
             for vresult in video_results:
+                
                 if vresult:
+                    # extend list of tids
                     tids.extend(vresult.thumbnail_ids)
-        
+            
+                    # Update A/B Test state for the videos
+                    vid = neondata.InternalVideoID.to_external(vresult.key)
+                    result[vid].abtest = vresult.testing_enabled
+
+                    # If there is a winner, populate the winner thumbnail
+                    if vresult.experiment_state == \
+                        neondata.ExperimentState.COMPLETE:
+                            winner_tid = yield tornado.gen.Task(vresult.get_winner_tid)
+                            if winner_tid:
+                                result[vid].winner_thumbnail = winner_tid
+                
             #Get all the thumbnail data for videos that are done
             thumbnails = yield tornado.gen.Task(
                         neondata.ThumbnailMetadata.get_many, tids)
@@ -820,7 +879,7 @@ class AccountHandler(tornado.web.RequestHandler):
                                 " msg=video deleted %s"%(i_type, vid))
                     else:
                         result[vid].thumbnails.append(tdata)
-
+            
         #4. Set the default thumbnail for each of the video
         tid_key = "thumbnail_id"
         for res in result:
@@ -837,7 +896,10 @@ class AccountHandler(tornado.web.RequestHandler):
 
             if vres.status == "finished" and vres.current_thumbnail == 0:
                 vres.current_thumbnail = platform_thumb_id
- 
+
+        #TODO
+        #5. Set Winner thumbnail
+        #6. Set ab test state
         
         #convert to dict and count total counts for each state
         vresult = []
@@ -897,6 +959,7 @@ class AccountHandler(tornado.web.RequestHandler):
                                                 i_id,
                                                 get_account_callback)
         
+    @tornado.web.asynchronous
     @tornado.gen.engine
     def update_video_brightcove(self, i_id, i_vid, new_tid):
         ''' update thumbnail for a brightcove video '''
@@ -923,13 +986,16 @@ class AccountHandler(tornado.web.RequestHandler):
                         %(p_vid, new_tid))
             data = ''
             self.send_json_response(data, 200)
+            return
         else:
             if result is None:
                 data = '{"error": "internal error"}'
                 self.send_json_response(data, 500)
+                return
             else:
                 data = '{"error": "brightcove api failure"}'
                 self.send_json_response(data, 502)
+                return
 
     @tornado.gen.engine
     def create_account_and_neon_integration(self, a_id):
@@ -1086,6 +1152,7 @@ class AccountHandler(tornado.web.RequestHandler):
             _log.error("key=create brightcove account " 
                         "msg= account not found %s" %self.api_key)
 
+    @tornado.web.asynchronous
     @tornado.gen.engine
     def update_brightcove_integration(self, i_id):
         ''' Update Brightcove account details '''
@@ -1668,6 +1735,9 @@ class AccountHandler(tornado.web.RequestHandler):
 
     @tornado.gen.engine
     def upload_video_custom_thumbnail(self, itype, i_id, i_vid, thumbs):
+        '''
+        Update a custom thumbnail for a video
+        '''
 
         p_vid = neondata.InternalVideoID.to_external(i_vid)
         platform_account = yield tornado.gen.Task(self.get_platform_account, itype, i_id)
@@ -1677,27 +1747,56 @@ class AccountHandler(tornado.web.RequestHandler):
             self.send_json_response("%s account not found" % itype, 400)
             return
      
-        #TODO: handle multiple thumb uploads
+        # TODO: should we handle multiple thumb uploads ?
         t_url = thumbs[0]["urls"][0]
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
-       
-        result = vmdata.add_custom_thumbnail(t_url)
+        
+        # TODO(Sunil): make async; currently test fails with async error on using
+        # optional sync
 
+        result = vmdata.add_custom_thumbnail(t_url)
+        
         if result:
             _log.info("key=update_video_brightcove" 
                         " msg=thumbnail updated for video=%s tid=%s"\
                         %(p_vid, result))
             data = ''
             self.send_json_response(data, 202)
+            return
         else:
             data = '{"error": "internal error"}'
             self.send_json_response(data, 500)
+            return
 
+    @tornado.gen.engine
+    def update_video_abtest_state(self, i_vid, state):
+        '''
+        For a given video update the ABTest state
+        '''
+
+        vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
+        if not vmdata:
+            self.send_json_response('{"error": "vid not found"}', 400)
+            return
+        
+        if not isinstance(state, bool):
+            self.send_json_response('{"error": "invalid data type or not boolean"}', 400)
+            return
+
+        vmdata.testing_enabled = state
+        result = yield tornado.gen.Task(vmdata.save)
+        
+        if not result:
+            self.send_json_response('{"error": "internal db error"}', 500)
+            return
+
+        self.send_json_response('', 202)
 
     ### AB Test State #####
     
+    @tornado.web.asynchronous
     @tornado.gen.engine
-    def get_abteststate(self, vid):
+    def get_abtest_state(self, vid):
 
         '''
         Return the A/B Test state of the video
@@ -1734,7 +1833,7 @@ class AccountHandler(tornado.web.RequestHandler):
             # If override == true, then pick highest
             # else filter all > exp_frac ; then max frac
 
-            winner_tid = vmdata.get_winner_tid()
+            winner_tid = yield tornado.gen.Task(vmdata.get_winner_tid)
             if winner_tid:
                 s_urls = neondata.ThumbnailServingURLs.get(winner_tid)
                 for size_tup, url in s_urls.size_map.iteritems():
@@ -1745,6 +1844,15 @@ class AccountHandler(tornado.web.RequestHandler):
                     s_url['height'] = size_tup[1]
                     rdata.append(s_url)
                 response['data'] = rdata
+                
+                #Get original sized thumbnail
+                o_url = s_urls.get_serving_url(vmdata.frame_size[0],
+                        vmdata.frame_size[1])
+                response['original_thumbnail'] = o_url
+                
+                if o_url is None:
+                    _log.error("orignal_thumbnail is None for video id %s" %
+                            i_vid)
             else:
                 response['state'] = "unknown" #should we define error state? 
                 _log.error("winner tid not found for video id %s" % i_vid)
@@ -1842,12 +1950,24 @@ class BcoveHandler(tornado.web.RequestHandler):
             self.set_status(502)
         self.finish()
 
+class HealthCheckHandler(tornado.web.RequestHandler):
+    '''Handler for health check ''' 
+    
+    @tornado.web.asynchronous
+    def get(self, *args, **kwargs):
+        '''Handle a test tracking request.'''
+
+        self.write("<html> Server OK </html>")
+        self.finish()
+
 ################################################################
 ### MAIN
 ################################################################
 
 application = tornado.web.Application([
-        (r'/api/v1/accounts(.*)', AccountHandler),
+        (r"/healthcheck", HealthCheckHandler),
+        (r'/api/v1/accounts(.*)', CMSAPIHandler),
+        (r'/api/v1/jobs(.*)', CMSAPIHandler),
         (r'/api/v1/brightcovecontroller(.*)', BcoveHandler)],
         gzip=True)
 

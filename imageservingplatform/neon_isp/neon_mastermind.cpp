@@ -13,7 +13,6 @@
 #include <string.h>
 #include <exception>
 #include "neon_stats.h"
-#include "neonLog.h"
 #include "neon_mastermind.h"
 #include "neonException.h"
 #include "mastermind.h"
@@ -72,13 +71,13 @@ neon_mastermind_load(const char * filepath){
         candidate = new Mastermind();
         
         candidate->Init(filepath, mastermind_current->GetExpiry());
-        NeonLog::Error("Neon mastermind load complete");
+        //NeonLog::Error("Neon mastermind load complete");
 
     }
     catch (NeonException * error)
     {
         // log
-        NeonLog::Error("neon_mastermind_load: %s", error->GetMessage());
+        //NeonLog::Error("neon_mastermind_load: %s", error->GetMessage());
         
         delete error;
         
@@ -91,7 +90,7 @@ neon_mastermind_load(const char * filepath){
     catch (std::bad_alloc e) {
         
         // log here
-        NeonLog::Error("neon_mastermind_load: bad_alloc, out of memory");
+        //NeonLog::Error("neon_mastermind_load: bad_alloc, out of memory");
         
         // erase candidate
         if(candidate)
@@ -102,7 +101,7 @@ neon_mastermind_load(const char * filepath){
     catch (...) {
         
         // log here
-        NeonLog::Error("neon_mastermind_load: unspecified exception");
+        //NeonLog::Error("neon_mastermind_load: unspecified exception");
         
         // erase candidate
         if(candidate)
@@ -236,7 +235,7 @@ neon_mastermind_healthcheck()
     
     // in service but expired mastermind information
     if(neon_mastermind_expired() == NEON_TRUE){
-        NeonLog::Error("mastermind expired: %d", mastermind_current->GetExpiry());
+        //NeonLog::Error("mastermind expired: %d", mastermind_current->GetExpiry());
         return 1;
     }
     

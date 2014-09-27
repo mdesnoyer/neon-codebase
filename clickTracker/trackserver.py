@@ -26,6 +26,7 @@ import os
 import Queue
 import re
 import shortuuid
+import socket
 from cStringIO import StringIO
 import threading
 from thrift import Thrift
@@ -186,7 +187,7 @@ class BaseTrackerDataV2(object):
         list of thumbnail ids, or None if it is unknown
         '''
         vidRe = re.compile('neonvid_([0-9a-zA-Z]+_[0-9a-zA-Z]+)')
-        tidRe = re.compile('neontn_([0-9a-zA-Z]+_[0-9a-zA-Z]+_[0-9a-zA-Z]+)')
+        tidRe = re.compile('neontn([0-9a-zA-Z]+_[0-9a-zA-Z]+_[0-9a-zA-Z]+)')
 
         # Parse the basenames
         vids = []
@@ -362,12 +363,20 @@ class ImagesLoaded(BaseTrackerDataV2):
         if len(arg_list) > 0:
             for tup in arg_list.split(','):
                 elems = tup.split(' ') # '+' delimiter converts to ' '
+                if len(elems) != 3:
+                    raise tornado.web.MissingArgumentError(
+                        "a tuple of (tid,width,height) is needed but found: %s"
+                        % elems)
                 if has_tids:
                     tids.append(elems[0])
                 else:
                     vids.append(elems[0])
-                widths.append(int(elems[1]))
-                heights.append(int(elems[2]))
+                try:
+                    widths.append(int(float(elems[1])))
+                    heights.append(int(float(elems[2])))
+                except ValueError:
+                    raise tornado.web.MissingArgumentError(
+                        'Height and width must be ints. Saw: %s' % elems[1:])
 
             if not has_tids:
                 tids = yield self._lookup_thumbnail_ids_from_isp(vids)
@@ -757,12 +766,27 @@ class FileBackupHandler(threading.Thread):
 
 class HealthCheckHandler(TrackerDataHandler):
     '''Handler for health check ''' 
+
+    def initialize(self, flume_port):
+        self.flume_port = flume_port
     
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
         '''Handle a test tracking request.'''
 
-        self.write("<html> Server OK </html>")
+        # see if we can connect to the flume port
+        try:
+            sock = socket.create_connection(('localhost', self.flume_port),
+                                            3)
+            sock.shutdown(socket.SHUT_RDWR)
+            sock.close()
+            self.write("<html> Server OK </html>")
+            self.set_status(200)
+        except socket.error:
+            _log.error('Could not open flume port')
+            self.write("<html> Flume connection missing </html>")
+            self.set_status(500)
+
         self.finish()
 
 ###########################################
@@ -822,7 +846,8 @@ class Server(threading.Thread):
                                           flume_buffer=self.flume_buffer
                                           )),
             (r"/v2/test", TestTracker, dict(version=2)),
-            (r"/healthcheck", HealthCheckHandler),
+            (r"/healthcheck", HealthCheckHandler,
+             dict(flume_port=options.flume_port)),
             ])
 
     def run(self):

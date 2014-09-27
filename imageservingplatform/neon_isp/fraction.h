@@ -14,16 +14,17 @@ public:
     Fraction();
     ~Fraction();
     
-    
     void Init(double floor, const rapidjson::Value& fa);
     void Shutdown();
     
+    void   SetPct(double);
     double GetPct() const;
     double GetThreshold() const;
     const char * GetDefaultURL() const;
     const char * GetThumbnailID() const;
 
     ScaledImage* GetScaledImage(int height, int width) const;
+    static bool ApproxEqual(int a, int b, int window);    
     
 protected:
     

@@ -31,11 +31,9 @@ class TestCDNHosting(unittest.TestCase):
     def tearDown(self):
         self.redis.stop()
         super(TestCDNHosting, self).tearDown()
-
         
     @patch('api.cdnhosting.S3Connection')
     def test_neon_hosting(self, mock_conntype):
-        hosting = api.cdnhosting.AWSHosting()
         
         #s3mocks to mock host_thumbnails_to_s3
         conn = boto_mock.MockConnection()
@@ -45,6 +43,7 @@ class TestCDNHosting(unittest.TestCase):
         image = PILImageUtils.create_random_image(360, 480) 
         keyname = "test_key"
         tid = "test_tid"
+        hosting = api.cdnhosting.AWSHosting()
         hosting.upload(image, tid)
         sizes = api.properties.CDN_IMAGE_SIZES   
         s3_keys = [x for x in imbucket.get_all_keys()]
@@ -74,7 +73,32 @@ class TestCDNHosting(unittest.TestCase):
         mock_http.urlopen.return_value = mresponse 
         uploaded_url = cd.upload(im, tid)
         self.assertEqual(uploaded_url, json.loads(mock_response)['url'])
-
+    
+    @patch('api.cdnhosting.S3Connection')
+    def test_customer_s3_hosting(self, mock_conntype):
+        
+        bucket = 'customer-bucket'
+        s3mdata = neondata.S3CDNHostingMetadata('a', 's', bucket, ['p1', 'p1'],
+                'folder/')
+        conn = boto_mock.MockConnection()
+        conn.create_bucket(bucket)
+        mock_conntype.return_value = conn
+        imbucket = conn.get_bucket(bucket)
+        image = PILImageUtils.create_random_image(360, 480) 
+        keyname = "test_key"
+        tid = "test_tid"
+        hosting = api.cdnhosting.AWSHosting(s3mdata)
+        hosting.upload(image, tid)
+        sizes = api.properties.CDN_IMAGE_SIZES   
+        s3_keys = [x for x in imbucket.get_all_keys()]
+        self.assertEqual(len(s3_keys), len(sizes))
+        self.assertTrue('folder/' in s3_keys[0].name) 
+        serving_urls = neondata.ThumbnailServingURLs.get(tid)
+        for w, h in sizes:
+            url = serving_urls.get_serving_url(w, h)
+            fname = "neontntest_tid_w%s_h%s.jpg" % (w, h)
+            exp_url = "http://%s/%s%s" % ("p1", "folder/", fname)
+            self.assertEqual(exp_url, url)
 
 if __name__ == '__main__':
     unittest.main()

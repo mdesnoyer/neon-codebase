@@ -27,7 +27,7 @@ public:
     Directive(const Directive &  p);
     ~Directive();
     
-    void Init(rapidjson::Document & document);
+    void Init(const rapidjson::Document & document);
     
     void Shutdown();
     
@@ -43,7 +43,7 @@ public:
     
     bool operator == (const Directive &other) const;
     
-    const Fraction * GetFraction(unsigned char * hash_string, int hash_string_len) const;
+    const Fraction * GetFraction(unsigned char * bucketId, int bucketIdLen) const;
     
     Fraction * GetFraction(int index) {return fractions[index];};
 

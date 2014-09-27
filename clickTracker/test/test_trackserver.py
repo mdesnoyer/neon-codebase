@@ -27,6 +27,7 @@ from mock import MagicMock
 import os
 import Queue
 import random
+import socket
 from thrift import Thrift
 from thrift.transport import TTransport
 from thrift.protocol import TCompactProtocol
@@ -658,7 +659,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'ref' : 'http://ref.com',
               'cts' : '2345623',
               'bns' : ('neonvid_acct1_vid2,neonvid_acct1_vid5,'
-                       'neontn_acct1_vid3_tid2.jpg')},
+                       'neontnacct1_vid3_tid2.jpg')},
             { 'eventType' : 'IMAGES_VISIBLE',
               'pageId' : 'pageid123',
               'trackerAccountId' : 'tai123',
@@ -690,7 +691,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'ref' : 'http://ref.com',
               'cts' : '2345623',
               'bns' : ('neonvid_acct1_vid2 56 67,'
-                       'neontn_acct1_vid3_tid2.jpg 89 123')}, #tornado converts + to " "
+                       'neontnacct1_vid3_tid2.jpg 89 123')}, #tornado converts + to " "
             { 'eventType' : 'IMAGES_LOADED',
               'pageId' : 'pageid123',
               'trackerAccountId' : 'tai123',
@@ -764,7 +765,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'ref' : 'http://ref.com',
               'cts' : '2345623',
               'vid' : 'vid1',
-              'bn' : 'neontn_acct1_vid2_tid1.png',
+              'bn' : 'neontnacct1_vid2_tid1.png',
               'playerid' : 'brightcoveP123',
               },
             { 'eventType' : 'VIDEO_CLICK',
@@ -934,7 +935,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'bns' : 'acct1_vid2,neontn_acct1_vid3_tid.jpg'}))
+             'bns' : 'acct1_vid2,neontnacct1_vid3_tid.jpg'}))
 
         self.assertEqual(response.code, 200)
         self.assertEqual(self.thrift_mock.appendBatch.call_count, 1)
@@ -952,7 +953,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'bns' : 'acct1_vid2 32 45,neontn_acct1_vid3_tid.jpg 78 94'}))
+             'bns' : 'acct1_vid2 32 45,neontnacct1_vid3_tid.jpg 78 94'}))
 
         self.assertEqual(response.code, 200)
         self.assertEqual(self.thrift_mock.appendBatch.call_count, 1)
@@ -1023,12 +1024,42 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'tids' : 'acct1_vid2_tid1'}))
+             'tids' : 'acct1_vid2_tid1 56.3 48'}))
         self.assertEqual(response.code, 400)
 
-    def test_heartbeat(self):
+    def test_invalid_tid_tuples(self):
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'il',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'monkeyland',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'tids' : 'acct1_vid2_tid1 45'}))
+        self.assertEqual(response.code, 400)
+
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'il',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'monkeyland',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'tids' : 'acct1_vid2_tid1 width 98'}))
+        self.assertEqual(response.code, 400)
+
+    @patch('clickTracker.trackserver.socket.create_connection')    
+    def test_heartbeat_good_flume_connection(self, sockmock):
         response = self.fetch('/healthcheck')
         self.assertEqual(response.code, 200)
+
+    @patch('clickTracker.trackserver.socket.create_connection')    
+    def test_heartbeat_bad_flume_connection(self, sockmock):
+        sockmock.side_effect = [socket.error()]
+        response = self.fetch('/healthcheck')
+        self.assertEqual(response.code, 500)
 
     def test_test_endpoint(self):
         response = self.fetch('/v2/test?%s' % urllib.urlencode(

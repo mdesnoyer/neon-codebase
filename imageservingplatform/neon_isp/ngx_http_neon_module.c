@@ -35,6 +35,7 @@ static char *ngx_http_neon_mastermind_validated_filepath(ngx_conf_t *cf, void *p
 static char *ngx_http_neon_mastermind_download_filepath(ngx_conf_t *cf, void *post, void *data);
 static char *ngx_http_neon_updater_sleep_time(ngx_conf_t *cf, void *post, void *data);
 static char *ngx_http_neon_fetch_s3port(ngx_conf_t *cf, void *post, void *data);
+static char *ngx_http_neon_fetch_s3downloader(ngx_conf_t *cf, void *post, void *data);
 
 // config handlers
 static ngx_conf_post_handler_pt ngx_http_neon_mastermind_file_url_p = ngx_http_neon_mastermind_file_url;
@@ -42,6 +43,7 @@ static ngx_conf_post_handler_pt ngx_http_neon_mastermind_validated_filepath_p = 
 static ngx_conf_post_handler_pt ngx_http_neon_mastermind_download_filepath_p = ngx_http_neon_mastermind_download_filepath;
 static ngx_conf_post_handler_pt ngx_http_neon_updater_sleep_time_p = ngx_http_neon_updater_sleep_time;
 static ngx_conf_post_handler_pt ngx_http_neon_fetch_s3port_p = ngx_http_neon_fetch_s3port;
+static ngx_conf_post_handler_pt ngx_http_neon_fetch_s3downloader_p = ngx_http_neon_fetch_s3downloader;
 
 // Module Hook Methods
 ngx_int_t neon_init_process(ngx_cycle_t *cycle);
@@ -61,6 +63,7 @@ typedef struct {
     ngx_str_t mastermind_validated_filepath;
     ngx_str_t mastermind_download_filepath;
     ngx_str_t neon_fetch_s3port;
+    ngx_str_t neon_fetch_s3downloader;
 } ngx_http_neon_loc_conf_t;
 
 static ngx_http_neon_loc_conf_t ngx_http_neon_loc_conf;
@@ -140,6 +143,13 @@ static ngx_command_t  ngx_http_neon_commands[] = {
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_neon_loc_conf_t, neon_fetch_s3port),
         &ngx_http_neon_fetch_s3port_p},
+    
+    { ngx_string("s3downloader"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1|NGX_CONF_NOARGS,
+        ngx_conf_set_str_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_neon_loc_conf_t, neon_fetch_s3downloader),
+        &ngx_http_neon_fetch_s3downloader_p},
     
     ngx_null_command
 };
@@ -281,6 +291,27 @@ ngx_http_neon_fetch_s3port(ngx_conf_t *cf, void *post, void *data)
     return NGX_CONF_OK;
 }
 
+/*
+ * Location of S3Downloader Script 
+ *
+ * */
+
+static char *
+ngx_http_neon_fetch_s3downloader(ngx_conf_t *cf, void *post, void *data)
+{
+    ngx_str_t  *name = data; // i.e., first field of var
+   
+    if (name == NULL || ngx_strcmp(name->data, "") == 0){
+        ngx_http_neon_loc_conf.neon_fetch_s3downloader.data = NULL;
+        ngx_http_neon_loc_conf.neon_fetch_s3downloader.len = 0;
+    }else{
+        ngx_http_neon_loc_conf.neon_fetch_s3downloader.data = name->data;
+        ngx_http_neon_loc_conf.neon_fetch_s3downloader.len = ngx_strlen(name->data);
+    }
+    return NGX_CONF_OK;
+}
+
+
 /* Module Context
  *
  * This is a static ngx_http_module_t struct, which just has a bunch of function
@@ -340,6 +371,7 @@ ngx_int_t neon_init_process(ngx_cycle_t *cycle){
                    ngx_http_neon_loc_conf.mastermind_validated_filepath.data, 
                    ngx_http_neon_loc_conf.mastermind_download_filepath.data, 
                    ngx_http_neon_loc_conf.neon_fetch_s3port.data, 
+                   ngx_http_neon_loc_conf.neon_fetch_s3downloader.data, 
                    ngx_http_neon_loc_conf.updater_sleep_time); 
     neon_start_updater();
     return 0;

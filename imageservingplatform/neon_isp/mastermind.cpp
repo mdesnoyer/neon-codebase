@@ -19,6 +19,7 @@ const std::string Mastermind::typePublisher      = "pub";
 
 char Mastermind::lineBuffer[MaxLineBufferSize];
 
+// Formatter for Cloudinary Image URLs
 const char * cloudinary_image_format = "http://res.cloudinary.com/neon-labs/image/upload/w_%d,h_%d/neontn%s_w%d_h%d.jpg";
 
 
@@ -33,7 +34,7 @@ Mastermind::Mastermind()
 
 Mastermind::~Mastermind()
 {
-    std::cout << "\nMastermind destruct" << endl;
+    //std::cout << "\nMastermind destruct" << endl;
 }
 
 
@@ -179,12 +180,6 @@ Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
     }
     
     /*
-     *  check trailer -- do we need to add one?
-     */
-    
-    
-    
-    /*
      *  check expiry
      */
     
@@ -294,6 +289,8 @@ Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
         
     int ret = fclose(f);
     
+    std::cout << "\nParsed "<< lineNumber << " lines" << endl;
+    
     if(ret != 0)
         throw new NeonException("Mastermind::Init: cannot close mastermind file");
 }
@@ -353,13 +350,15 @@ Mastermind::GetImageUrl(const char * account_id,
     const Fraction * fraction = directive->GetFraction(bucketId, bucketIdLen);
     
     if (fraction == 0){
-        //neon_log_error("Fraction for the directive is NULL");
         return 0;
     }
    
-    // If height or width are both empty, then serve the default image URL
-    if (height == -1 && width == -1)
-        return fraction->GetDefaultURL();
+    // If either or both height or width are empty, then serve the default image URL
+    if (height == -1 || width == -1){
+        const char * url = fraction->GetDefaultURL();
+        size = strlen(url);
+        return url;
+    }
 
     const ScaledImage * image = fraction->GetScaledImage(height, width);
 

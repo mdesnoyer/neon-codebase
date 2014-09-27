@@ -44,7 +44,7 @@ class OoyalaAPI(object):
                 base_url=DEFAULT_BASE_URL,
                 cache_base_url=DEFAULT_CACHE_BASE_URL,
                 expiration=DEFAULT_EXPIRATION_WINDOW,
-                local=True):
+                neon_video_server=None):
         """OoyalaAPI Constructor
         
         Type signature:
@@ -64,11 +64,9 @@ class OoyalaAPI(object):
         self._expiration_window = expiration
         self._response_headers = [()]
         self.http_request_pool = RequestPool(5, 3)
-        self.local = local 
-        if self.local:
-            self.neon_uri = "http://localhost:8081/api/v1/submitvideo/"
-        else:
-            self.neon_uri = "http://thumbnails.neon-lab.com/api/v1/submitvideo/" 
+        self.neon_uri = "http://localhost:8081/api/v1/submitvideo/"  
+        if neon_video_server is not None:
+            self.neon_uri = "http://%s:8081/api/v1/submitvideo/" % neon_video_server
 
     def send_request(self, http_method, relative_path, body=None, params={}, callback=None):
         """Send a request.
@@ -528,10 +526,7 @@ class OoyalaAPI(object):
         request_body["video_id"] = str(vid)
         request_body["video_title"] = str(vid) if title is None else title 
         request_body["video_url"] = video_download_url
-        if self.local:
-            request_body["callback_url"] = "http://localhost:8081/testcallback"
-        else:
-            request_body["callback_url"] = "http://thumbnails.neon-lab.com/testcallback"
+        request_body["callback_url"] = None 
         request_body["autosync"] = autosync
         request_body["topn"] = 1
         request_body["integration_id"] = i_id 

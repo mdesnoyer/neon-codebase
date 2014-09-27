@@ -1017,6 +1017,24 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         response = json.loads(response.body)
         self.assertIsNotNone(response["video_id"])  
         self.assertEqual(response["status"], neondata.RequestState.PROCESSING)
+    
+    def test_create_neon_video_request_via_api(self):
+        ''' verify that video request creation via services  ''' 
+        
+        api_key = self.create_neon_account()
+        vals = { 'video_url' : "http://test.mp4", "video_title": "test_title", 
+                 'video_id'  : "vid1", "callback_url" : "http://callback"
+                }
+        uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/create_thumbnail_api_request'%(self.a_id, "0"))
+
+        self.cp_mock_async_client().fetch.side_effect = \
+          self._success_http_side_effect
+
+        response = self.post_request(uri, vals, api_key)
+        self.assertTrue(response.code, 201)
+        jresponse = json.loads(response.body)
+        self.assertIsNotNone(jresponse['job_id'])
 
     def test_create_neon_video_request_invalid_url(self):
         ''' invalid url test '''
@@ -1061,7 +1079,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
             job_id = "job_id%s"%i 
             api_request = neondata.NeonApiRequest(job_id, self.api_key, vid,
                     title, video_download_url, "neon", "http://callback")
-            api_request.set_api_method("topn",5)
+            api_request.set_api_method("topn", 5)
             api_request.publish_time = str(time.time() *1000)
             api_request.submit_time = str(time.time())
             api_request.state = neondata.RequestState.SUBMIT
@@ -1108,8 +1126,58 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
                 %(self.a_id, "0", page_no, page_size))
         resp = self.get_request(url, self.api_key)
         self.assertEqual(resp.code, 400)
+   
+    def test_video_response_object(self):
+        pass
     
-    
+    def test_winner_thumbnail_in_video_response(self):
+        self.api_key = self.create_neon_account()
+        nplatform = neondata.NeonPlatform.get_account(self.api_key)
+        vid = "testvideo1"
+        title = "title"
+        video_download_url = "http://video.mp4" 
+        job_id = "j1" 
+        api_request = neondata.NeonApiRequest(job_id, self.api_key, vid,
+                    title, video_download_url, "neon", "http://callback")
+        api_request.set_api_method("topn", 5)
+        api_request.publish_time = str(time.time() *1000)
+        api_request.submit_time = str(time.time())
+        api_request.state = neondata.RequestState.SUBMIT
+        self.assertTrue(api_request.save())
+        nplatform.add_video(vid, job_id)
+
+        nplatform.save()
+        self._process_neon_api_requests([api_request])
+        
+        i_vid = neondata.InternalVideoID.generate(self.api_key, vid) 
+        TMD = neondata.ThumbnailMetadata
+        #Save thumbnails 
+        thumbs = [
+            TMD('%s_t1' % i_vid, i_vid, ['t1.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.8),
+            TMD('%s_t2' % i_vid, i_vid, ['t2.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.2),
+            ]
+        TMD.save_all(thumbs)
+        
+        #Save VideoMetadata
+        tids = [thumb.key for thumb in thumbs]
+        v = neondata.VideoMetadata(i_vid, tids, job_id, 'v0.mp4', 0, 0,
+                None, 0, (120, 90), True, neondata.ExperimentState.COMPLETE)
+        v.save()
+       
+        url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/videos?video_id=%s'
+                %(self.a_id, "0", vid))
+        resp = self.get_request(url, self.api_key)
+        vresponse = json.loads(resp.body)["items"][0]
+
+        expected_vresponse = neondata.VideoResponse(vid, "finished", "neon",
+                "0", title, None, None, None, thumbs, True, thumbs[0].key)
+
+        self.assertEqual(vresponse["winner_thumbnail"],
+                expected_vresponse.winner_thumbnail)
+
     def test_get_abtest_state(self):
         '''
         A/B test state response
@@ -1142,8 +1210,8 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         
         #Save VideoMetadata
         tids = [thumb.key for thumb in thumbs]
-        v0 = neondata.VideoMetadata(vid, tids, 'reqid0', 'v0.mp4', 0, 0, None, 0, None,
-                            True, neondata.ExperimentState.RUNNING)
+        v0 = neondata.VideoMetadata(vid, tids, 'reqid0', 'v0.mp4', 0, 0,
+                None, 0, (120, 90), True, neondata.ExperimentState.RUNNING)
         v0.save()
        
         #Set up Serving URLs 
@@ -1179,6 +1247,8 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(resp.code, 200)
         self.assertEqual(res['state'], "complete") 
         self.assertEqual(res['data'], expected_data['data'])
+        self.assertEqual(res['original_thumbnail'],
+                            "http://servingurl_120_90.jpg")
 
 
     @patch('api.cdnhosting.urllib2')
@@ -1224,6 +1294,41 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         vals = {'thumbnails' : [data]}
         response = self.put_request(url, vals, self.api_key, jsonheader=True)
         self.assertEqual(response.code, 202) 
+
+    def test_job_status(self):
+        '''
+        Get Job Status 
+        '''
+
+        self._setup_initial_brightcove_state()
+        vid = self._get_videos()[0]
+        job_id = self.job_ids[0]
+        url = self.get_url("/api/v1/jobs/%s/" % job_id)
+        response = self.get_request(url, self.api_key)
+        self.assertEqual(response.code, 200)
+        jresponse = json.loads(response.body)
+        self.assertEqual(jresponse["job_id"], job_id)
+        self.assertEqual(jresponse["video_id"], vid)
+
+    def test_update_video_abtest_state(self):
+        '''
+        Test udpating video abtest state
+        '''
+
+        self._setup_initial_brightcove_state()
+        vid = self._get_videos()[0]
+        url = self.get_url("/api/v1/accounts/%s/neon_integrations"
+                    "/%s/videos/%s" %(self.a_id, "0", vid))
+        vals = {"abtest" : False}
+        response = self.put_request(url, vals, self.api_key, jsonheader=True)
+        self.assertEqual(response.code, 202)
+
+        # not a boolean, invalid value
+        vals = {"abtest" : "abe"}
+        response = self.put_request(url, vals, self.api_key, jsonheader=True)
+        self.assertEqual(response.code, 400)
+        err_msg = '{"error": "invalid data type or not boolean"}'
+        self.assertEqual(response.body, err_msg)
 
 ##### OOYALA PLATFORM TEST ######
 

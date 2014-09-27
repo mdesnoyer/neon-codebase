@@ -91,3 +91,7 @@ class RedisServer:
         
         self.proc.wait()
         _log.info('Redis server on port %i stopped' % self.port)
+
+        # Clear the singleton instance
+        # This is required so that the next test can use a new connection(port) 
+        neondata.DBConnection.clear_singleton_instance()

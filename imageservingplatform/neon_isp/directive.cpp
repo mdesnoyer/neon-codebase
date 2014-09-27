@@ -7,6 +7,7 @@
 extern "C" {
     #include "neon_utils.h"
 }
+const double EXPECTED_PCT = 1.0; 
 
 /*
  *   Directive
@@ -25,7 +26,7 @@ Directive::~Directive()
 
 
 void
-Directive::Init(rapidjson::Document & document)
+Directive::Init(const rapidjson::Document & document)
 {
     /*
      *  account id
@@ -48,6 +49,10 @@ Directive::Init(rapidjson::Document & document)
         throw new NeonException("Directive::Init: video id value isnt a string");
 
     videoId = document["vid"].GetString();
+
+    // Convert to External(platform) video id, if _ not present return
+    // std::string::npos, which wraps around to 0, when +1 'ed :)
+    videoId = videoId.substr(videoId.find("_") + 1, videoId.length());
 
     /*
      *  SLA time
@@ -94,6 +99,16 @@ Directive::Init(rapidjson::Document & document)
 
         // this is the floor value of the next one
         pctFloor = f->GetThreshold();
+    }
+
+    // Check total fraction adds up to 1. Else normalize pcts 
+    //
+    if (pctFloor != EXPECTED_PCT){
+        for(unsigned int i=0; i<fractions.size(); i++){
+            double pcnt = fractions[i]->GetPct();
+            pcnt = pcnt / pctFloor;
+            fractions[i]->SetPct(pcnt);
+        } 
     }
 }
 
@@ -149,29 +164,38 @@ Directive::GetFraction(unsigned char * bucketId, int bucketIdLen) const
     if(fractions.size() == 0)
         return 0;
 
-    unsigned int i = 0, index = 0;    
-    std::vector<double> cumulative_fractions; 
-    std::vector<double> individual_fractions; 
+    unsigned int index = 0;    
+    std::vector<double> cumulative_pcts; 
+    std::vector<double> individual_pcts; 
     double total_pcnt = 0;
-    for(i=0; i<fractions.size(); i++){
+    for(unsigned int i=0; i<fractions.size(); i++){
         double pcnt = fractions[i]->GetPct();
         total_pcnt += pcnt;    
-        individual_fractions.push_back(pcnt);
-        cumulative_fractions.push_back(total_pcnt);
+        individual_pcts.push_back(pcnt);
+        cumulative_pcts.push_back(total_pcnt);
     }
-    
-    
-    if(bucketId == 0 or bucketIdLen <= 0){
+    char * endptr = NULL;
+    // BucketId is HEX 
+    double bId = (double) strtol((const char *)bucketId, &endptr, 16); 
+
+    // check if bId is actually 0 or just a junk string
+    if (bId == 0){
+       if (bucketId[0] != '0')
+           bId = -1;
+    }
+
+    if(bId < 0 or bucketIdLen <= 0){
         // If bucketId is empty, the user isnt' part of AB test yet 
         // Pick the fraction with max pcnt
-        index = std::distance(individual_fractions.begin(), 
-                                std::max_element(individual_fractions.begin(), 
-                                individual_fractions.end())); 
+        index = std::distance(individual_pcts.begin(), 
+                                std::max_element(individual_pcts.begin(), 
+                                individual_pcts.end()));
+
     }else{
         // Pick the AB test bucket
-        double bId = (double) atoi((const char *)bucketId); // BucketId is int
-        for(i=0 ; i< cumulative_fractions.size(); i++){
-            if (bId < (cumulative_fractions[i] * N_ABTEST_BUCKETS))
+        unsigned int i;
+        for(i=0 ; i< cumulative_pcts.size(); i++){
+            if (bId < (cumulative_pcts[i] * N_ABTEST_BUCKETS))
                 break;    
         }
         index = i;
@@ -187,8 +211,8 @@ Directive::operator==(const Directive &other) const {
 };
 
 std::string
-Directive::GetKey() const
-{
+Directive::GetKey() const{
+    
     std::string composite;
     composite.append(accountId);
     composite.append(videoId);

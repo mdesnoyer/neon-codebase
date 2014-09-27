@@ -26,7 +26,6 @@ NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_neon_module.c
                                 $ngx_addon_dir/directiveHashtable.cpp
                                 $ngx_addon_dir/fraction.cpp
                                 $ngx_addon_dir/neonException.cpp
-                                $ngx_addon_dir/neonLog.cpp
                                 $ngx_addon_dir/scaledImage.cpp
                                 "
                                 

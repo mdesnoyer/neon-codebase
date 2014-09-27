@@ -28,6 +28,9 @@ define('carbon_server', default='54.225.235.97', help='carbon ip address')
 define('carbon_port', default=8090, type=int, help='carbon port')
 
 def get_proc_memory():
+    '''
+    Returns memory in MB 
+    '''
     rusage_denom = 1024.
     if sys.platform == 'darwin':
         # ... it seems that in OSX the output is different units ...
@@ -36,13 +39,16 @@ def get_proc_memory():
     return mem
 
 def get_disk_usage():
+    '''
+    Return / & /mnt disk usage in %
+    '''
     #psutil.disk_partitions()
     v_root = psutil.disk_usage('/')
     v_mnt = psutil.disk_usage('/mnt')
     return v_root[3], v_mnt[3]
 
 def get_network_usage():
-    ''' return sent, recv'''
+    ''' return sent, recv (in bytes)'''
     vals = psutil.net_io_counters(pernic=True)
     if platform.system() == "Linux":
         vals = vals['eth0']
@@ -52,15 +58,25 @@ def get_network_usage():
         return (vals[0], vals[1])
 
 def get_system_memory():
+    '''
+    returns % of meomory currently used in the system  
+    '''
     #perfect used memory
     return psutil.virtual_memory()[2]
 
 def get_cpu_usage():
+    '''
+    return cpu usage in %
+    '''
     # sum(user, system), normalize by num
     #return (psutil.cpu_times()[0] + psutil.cpu_times()[2]) /psutil.NUM_CPUS
     return psutil.cpu_percent(interval=0.1)
 
 def get_loadavg():
+    '''
+    load average from uptime  
+    '''
+
     # For more details, "man proc" and "man uptime"  
     if platform.system() == "Linux":
         return open('/proc/loadavg').read().strip().split()[:3]
