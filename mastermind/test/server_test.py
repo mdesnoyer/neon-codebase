@@ -68,6 +68,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
         self.redis_patcher.stop()
+        self.sqs_patcher.stop()
 
     def test_good_db_data(self, datamock):
         # Define platforms in the database
@@ -710,6 +711,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         neondata.DBConnection.clear_singleton_instance()
         mastermind.server.tempfile = self.real_tempfile
         self.s3_patcher.stop()
+        self.sqs_patcher.stop()
         del self.mastermind
         super(TestDirectivePublisher, self).tearDown()
 
