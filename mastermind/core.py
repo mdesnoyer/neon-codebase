@@ -184,6 +184,14 @@ class Mastermind(object):
         with self.modify_waiter:
             while self.pending_modifies.value > 0:
                 self.modify_waiter.wait()
+    
+    def get_video_ids(self):
+        '''
+        Returns video_ids that mastermind currently has 
+        '''
+        with self.lock:
+            video_ids = self.video_info.values()
+            return video_ids
 
     def get_directives(self, video_ids=None):
         '''Returns a generator for the serving directives for all the video ids

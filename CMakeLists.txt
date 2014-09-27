@@ -25,7 +25,7 @@ externalproject_add(Nginx
     CONFIGURE_COMMAND
     ${PROJECT_SOURCE_DIR}/imageservingplatform/nginx-1.4.7/configure
     --add-module=../neon_isp/ --with-http_realip_module
-    --prefix=${CMAKE_BINARY_DIR}
+    --prefix=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     BUILD_COMMAND make
     BUILD_IN_SOURCE 1
 )

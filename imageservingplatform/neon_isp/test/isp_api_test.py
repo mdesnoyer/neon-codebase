@@ -216,6 +216,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         #default ids
         self.pub_id = "pub1"
         self.vid = "vid1"
+        # Also the max fraction URL
         self.expected_img_url =\
                         "http://neon-image-cdn.s3.amazonaws.com/pixel.jpg"
         self.neon_cookie_name = "neonglobaluserid"
@@ -430,8 +431,12 @@ class TestImageServingPlatformAPI(unittest.TestCase):
             if "Set-Cookie" in header:
                 cookie = header.split("Set-Cookie: ")[-1]
 
-        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, self.expected_img_url + "\r\n")
         self.assertIsNone(cookie)
+
+    def test_client_api_with_bucket_id_cookie(self):
+        #TODO: finish test when we start using the bucketID
+        pass
 
     def test_client_api_request_with_invalid_video(self):
 
@@ -529,10 +534,47 @@ class TestImageServingPlatformAPI(unittest.TestCase):
     def test_ab_test_ratio(self):
         '''
         Test sending a bunch of requests
-
-        TODO: How do you verify this ?
         '''
-        pass
+        random.seed(135215) 
+        def client_api_call():
+            r = random.randrange(1000, 9999)
+            h = {"Cookie" : "neonglobaluserid=dummyuid130600%d" % r}
+            prefix = "neonvid_"
+            response = self.client_api_request(self.pub_id, prefix + self.vid, 600, 500,
+                                                "12.2.2.4", headers=h)
+            redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+            headers = redirect_response.headers
+            self.assertIsNotNone(redirect_response)
+            
+            #Assert location header and cookie
+            im_url = None
+            cookie = None
+            for header in headers:
+                if "Location" in header:
+                    im_url = header.split("Location: ")[-1].rstrip("\r\n")
+                if "Set-Cookie" in header:
+                    cookie = header.split("Set-Cookie: ")[-1]
+
+            return im_url
+
+        urls = {}
+        N = 300
+        for i in range(N):
+            url = client_api_call()
+            try:
+               urls[url] += 1
+            except KeyError:
+               urls[url] = 1
+
+        expected_count = {
+        'http://neont2/thumb1_500_600.jpg': 0.2 * N,
+        'http://neon-image-cdn.s3.amazonaws.com/pixel.jpg': 0.7 * N,
+        'http://neont3/thumb1_500_600.jpg': 0.1 * N}
+
+        # Expect close to 80% accuracy 
+        for url in urls:
+            self.assertTrue(expected_count[url] * 0.8 <= urls[url] <=
+                    expected_count[url] * 1.2)
 
     def test_get_thumbnailid(self):
         '''

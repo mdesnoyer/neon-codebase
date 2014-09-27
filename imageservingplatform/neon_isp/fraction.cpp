@@ -100,14 +100,25 @@ Fraction::Shutdown()
    free((void *)tid); 
 }
 
+// check if a & b approx equal i.e in the range of the window size specified 
+bool
+Fraction::ApproxEqual(int a, int b, int window){
+    if (abs(a - b) <= window)
+        return true;
+    else
+        return false;
+}
+
+// Iterate throgugh the images to find the appropriate image for a given
+// height & width
 
 ScaledImage*
-Fraction::GetScaledImage(int height, int width) const
-{
-    for(unsigned i=0; i < images.size(); i++) {
+Fraction::GetScaledImage(int height, int width) const{
+
+    for(unsigned i=0; i < images.size(); i++){
         
-        if(images[i]->GetHeight() == height &&
-           images[i]->GetWidth() == width)
+        if(ApproxEqual(images[i]->GetHeight(), height, 2) &&
+           ApproxEqual(images[i]->GetWidth(), width, 2))
             return images[i];
     }
     

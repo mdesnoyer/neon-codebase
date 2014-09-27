@@ -50,6 +50,12 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.redis_patcher = patch(
             'supportServices.neondata.blockingRedis.StrictRedis')
         self.redis_patcher.start()
+        # Mock the SQS Mgr, just return true on the call here, its unit tested
+        # independently
+        self.sqs_patcher = patch('utils.sqsmanager.CustomerCallbackManager')
+        self.sqs_patcher.start().return_value = MagicMock()
+        #sqsmgr = MagicMock()
+        #sqsmgr.schedule_all_callbacks.return_value = True
         
         self.mastermind = mastermind.core.Mastermind()
         self.directive_publisher = mastermind.server.DirectivePublisher(
@@ -62,6 +68,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
         self.redis_patcher.stop()
+        self.sqs_patcher.stop()
 
     def test_good_db_data(self, datamock):
         # Define platforms in the database
@@ -480,6 +487,7 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         self.cluster_patcher.stop()
         neondata.DBConnection.clear_singleton_instance()
         self.sqlite_connect_patcher.stop()
+
         try:
             cursor = self.ramdb.cursor()
             cursor.execute('drop table videoplays')
@@ -670,6 +678,18 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
 class TestDirectivePublisher(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestDirectivePublisher, self).setUp()
+        
+        # Mock the SQS Mgr, just return true on the call here, its unit tested
+        # independently
+        self.sqs_patcher = patch('utils.sqsmanager.CustomerCallbackManager')
+        self.sqs_patcher.start().return_value = MagicMock()
+        #sqsmgr = MagicMock()
+        #sqsmgr.schedule_all_callbacks.return_value = True
+
+        self.mastermind = mastermind.core.Mastermind()
+        self.publisher = mastermind.server.DirectivePublisher(
+            self.mastermind)
+
         # Mock out the connection to S3
         self.s3_patcher = patch('mastermind.server.S3Connection')
         self.s3conn = test_utils.mock_boto_s3.MockConnection()
@@ -691,6 +711,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         neondata.DBConnection.clear_singleton_instance()
         mastermind.server.tempfile = self.real_tempfile
         self.s3_patcher.stop()
+        self.sqs_patcher.stop()
         del self.mastermind
         super(TestDirectivePublisher, self).tearDown()
 
@@ -1001,6 +1022,13 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.cluster_patcher.start()
 
         self.activity_watcher = utils.ps.ActivityWatcher()
+        # Mock the SQS Mgr, just return true on the call here, its unit tested
+        # independently
+        self.sqs_patcher = patch('utils.sqsmanager.CustomerCallbackManager')
+        self.sqs_patcher.start().return_value = MagicMock()
+        #sqsmgr = MagicMock()
+        #sqsmgr.schedule_all_callbacks.return_value = True
+
         self.mastermind = mastermind.core.Mastermind()
         self.directive_publisher = mastermind.server.DirectivePublisher(
             self.mastermind, activity_watcher=self.activity_watcher)
@@ -1016,6 +1044,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
         mastermind.server.tempfile = self.real_tempfile
         self.cluster_patcher.stop()
         self.s3_patcher.stop()
+        self.sqs_patcher.stop()
         self.sqlite_connect_patcher.stop()
         self.redis.stop()
         self.directive_publisher.stop()

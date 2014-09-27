@@ -34,6 +34,7 @@ import tornado.ioloop
 import utils.neon
 from utils.options import define, options
 import utils.ps
+import utils.sqsmanager
 from utils import statemon
 import zlib
 
@@ -164,7 +165,6 @@ class VideoDBWatcher(threading.Thread):
                 platform.neon_api_key,
                 neondata.ExperimentStrategy.get(platform.neon_api_key))
             
-            #video_ids = platform.get_internal_video_ids()
             video_ids = platform.get_processed_internal_video_ids()
             all_video_metadata = neondata.VideoMetadata.get_many(video_ids)
             for video_id, video_metadata in zip(video_ids, all_video_metadata):
@@ -428,6 +428,7 @@ class DirectivePublisher(threading.Thread):
         super(DirectivePublisher, self).__init__(name='DirectivePublisher')
         self.mastermind = mastermind
         self.tracker_id_map = tracker_id_map
+        self.video_ids = []
         self.serving_urls = serving_urls
         self.default_sizes = default_sizes
         self.activity_watcher = activity_watcher
@@ -436,6 +437,7 @@ class DirectivePublisher(threading.Thread):
 
         self.lock = threading.RLock()
         self._stopped = threading.Event()
+        self.sqsmgr = utils.sqsmanager.CustomerCallbackManager()
 
         # For some reason, when testing on some machines, the patch
         # for the S3Connection doesn't work in a separate thread. So,
@@ -534,6 +536,9 @@ class DirectivePublisher(threading.Thread):
             curtime - self.last_publish_time).total_seconds()
         self.last_publish_time = curtime
 
+        # Dispatch the callbacks to the customer
+        self.sqsmgr.schedule_all_callbacks(self.video_ids)
+
     def _write_directives(self, stream):
         '''Write the current directives to the stream.'''
         # First write out the tracker id maps
@@ -545,6 +550,8 @@ class DirectivePublisher(threading.Thread):
         serving_urls_missing = 0
         for key, directive in self.mastermind.get_directives():
             account_id, video_id = key
+            # keep track of video_ids in directive file
+            self.video_ids.append(video_id) 
             fractions = []
             missing_urls = False
             for thumb_id, frac in directive:
