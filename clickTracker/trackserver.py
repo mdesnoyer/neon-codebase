@@ -26,6 +26,7 @@ import os
 import Queue
 import re
 import shortuuid
+import socket
 from cStringIO import StringIO
 import threading
 from thrift import Thrift
@@ -765,12 +766,27 @@ class FileBackupHandler(threading.Thread):
 
 class HealthCheckHandler(TrackerDataHandler):
     '''Handler for health check ''' 
+
+    def initialize(self, flume_port):
+        self.flume_port = flume_port
     
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
         '''Handle a test tracking request.'''
 
-        self.write("<html> Server OK </html>")
+        # see if we can connect to the flume port
+        try:
+            sock = socket.create_connection(('localhost', self.flume_port),
+                                            3)
+            sock.shutdown(socket.SHUT_RDWR)
+            sock.close()
+            self.write("<html> Server OK </html>")
+            self.set_status(200)
+        except socket.error:
+            _log.error('Could not open flume port')
+            self.write("<html> Flume connection missing </html>")
+            self.set_status(500)
+
         self.finish()
 
 ###########################################
@@ -830,7 +846,8 @@ class Server(threading.Thread):
                                           flume_buffer=self.flume_buffer
                                           )),
             (r"/v2/test", TestTracker, dict(version=2)),
-            (r"/healthcheck", HealthCheckHandler),
+            (r"/healthcheck", HealthCheckHandler,
+             dict(flume_port=options.flume_port)),
             ])
 
     def run(self):
