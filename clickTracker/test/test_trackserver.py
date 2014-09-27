@@ -27,6 +27,7 @@ from mock import MagicMock
 import os
 import Queue
 import random
+import socket
 from thrift import Thrift
 from thrift.transport import TTransport
 from thrift.protocol import TCompactProtocol
@@ -1049,9 +1050,16 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'tids' : 'acct1_vid2_tid1 width 98'}))
         self.assertEqual(response.code, 400)
 
-    def test_heartbeat(self):
+    @patch('clickTracker.trackserver.socket.create_connection')    
+    def test_heartbeat_good_flume_connection(self, sockmock):
         response = self.fetch('/healthcheck')
         self.assertEqual(response.code, 200)
+
+    @patch('clickTracker.trackserver.socket.create_connection')    
+    def test_heartbeat_bad_flume_connection(self, sockmock):
+        sockmock.side_effect = [socket.error()]
+        response = self.fetch('/healthcheck')
+        self.assertEqual(response.code, 500)
 
     def test_test_endpoint(self):
         response = self.fetch('/v2/test?%s' % urllib.urlencode(
