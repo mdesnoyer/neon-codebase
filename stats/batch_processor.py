@@ -275,7 +275,7 @@ def build_impala_tables(input_path, cluster, timeout=None):
     cursor = impala_conn.cursor()
     cursor.execute('create table if not exists table_build_times '
                    '(done_time timestamp) stored as PARQUET')
-    cursor.execute('insert into table_build_times (done_time) values (%s)' %
+    cursor.execute("insert into table_build_times (done_time) values ('%s')" %
                    datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
 
     _log.info('Finished building Impala tables')
