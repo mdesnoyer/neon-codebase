@@ -431,7 +431,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
             if "Set-Cookie" in header:
                 cookie = header.split("Set-Cookie: ")[-1]
 
-        self.assertEqual(im_url, self.expected_img_url)
+        self.assertEqual(im_url, self.expected_img_url + "\r\n")
         self.assertIsNone(cookie)
 
     def test_client_api_with_bucket_id_cookie(self):
