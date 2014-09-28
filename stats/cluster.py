@@ -695,7 +695,7 @@ class Cluster():
         cur_state = conn.describe_jobflow(self.cluster_id)
         while cur_state.state != 'WAITING':
             if cur_state.state in ['TERMINATING', 'TERMINATED',
-                             'TERMINATED_WITH_ERRORS']:
+                             'TERMINATED_WITH_ERRORS', 'FAILED']:
                 msg = ('Cluster could not start because: %s',
                            cur_state.laststatechangereason)
                 _log.error(msg)
