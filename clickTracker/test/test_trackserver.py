@@ -644,9 +644,9 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
 
     def test_no_tids_but_basename(self):
         self.bn_map = {
-            'acct1_vid2' : 'acct1_vid2_tid1',
-            'acct1_vid3' : 'acct1_vid3_tid0',
-            'acct1_vid5' : 'acct1_vid5_tid5'
+            'vid2' : 'acct1_vid2_tid1',
+            'vid3' : 'acct1_vid3_tid0',
+            'vid5' : 'acct1_vid5_tid5'
             }
 
         # Image Visible Message
@@ -658,7 +658,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'bns' : ('neonvid_acct1_vid2,neonvid_acct1_vid5,'
+              'bns' : ('neonvid_vid2, neonvid_vid5,'
                        'neontnacct1_vid3_tid2.jpg')},
             { 'eventType' : 'IMAGES_VISIBLE',
               'pageId' : 'pageid123',
@@ -677,7 +677,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'neon_id1'
             )
         bnrequest = self.isp_mock.call_args[0][0]
-        self.assertEqual(bnrequest.url, 'http://127.0.0.1:8089/v1/getthumbnailid/tai123?params=acct1_vid2,acct1_vid5')
+        self.assertEqual(bnrequest.url, 'http://127.0.0.1:8089/v1/getthumbnailid/tai123?params=vid2,vid5')
         self.assertDictContainsSubset({'Cookie' : 'neonglobaluserid=neon_id1'},
                                       bnrequest.headers)
 
@@ -690,7 +690,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'bns' : ('neonvid_acct1_vid2 56 67,'
+              'bns' : ('neonvid_vid2 56 67,'
                        'neontnacct1_vid3_tid2.jpg 89 123')}, #tornado converts + to " "
             { 'eventType' : 'IMAGES_LOADED',
               'pageId' : 'pageid123',
@@ -721,7 +721,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'bn' : 'neonvid_acct1_vid3',
+              'bn' : 'neonvid_vid3',
               'x' : '56',
               'y' : '23',
               'wx' : '78',
@@ -794,7 +794,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'bn' : 'neonvid_acct1_vid3',
+              'bn' : 'neonvid_vid3',
               'vid' : 'vid1',
               'adplay': 'False',
               'adelta': 'null',
@@ -829,7 +829,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'bn' : 'neonvid_acct1_vid3',
+              'bn' : 'neonvid_vid3',
               'vid' : 'vid1',
               'adelta': '214',
               'pcount' : '1',
@@ -866,7 +866,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'bns' : 'neonvid_acct1_vid2'}))
+             'bns' : 'neonvid_vid2'}))
         self.assertEqual(response.code, 200)
         self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
 
@@ -988,7 +988,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'bns' : 'neonvid_acct1_vid2'}))
+             'bns' : 'neonvid_vid2'}))
         self.assertEqual(response.code, 500)
 
     def test_invalid_event_type(self):

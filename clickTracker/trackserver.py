@@ -186,7 +186,7 @@ class BaseTrackerDataV2(object):
         Returns:
         list of thumbnail ids, or None if it is unknown
         '''
-        vidRe = re.compile('neonvid_([0-9a-zA-Z]+_[0-9a-zA-Z]+)')
+        vidRe = re.compile('neonvid_([0-9a-zA-Z]+)')
         tidRe = re.compile('neontn([0-9a-zA-Z]+_[0-9a-zA-Z]+_[0-9a-zA-Z]+)')
 
         # Parse the basenames
