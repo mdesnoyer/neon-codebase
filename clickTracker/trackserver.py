@@ -80,6 +80,7 @@ statemon.define('messages_handled', int)
 statemon.define('invalid_messages', int)
 statemon.define('internal_server_error', int)
 statemon.define('unknown_basename', int)
+statemon.define('malformed_basename', int)
 statemon.define('isp_connection_error', int)
 statemon.define('not_interesting_message', int)
 
@@ -113,7 +114,10 @@ class BaseTrackerDataV2(object):
         }
         
     
-    def __init__(self, request):
+    def __init__(self, request, isp_host, isp_port):
+        self.isp_host = isp_host
+        self.isp_port = isp_port
+        
         self.pageId = request.get_argument('pageid') # page_id
         self.trackerAccountId = request.get_argument('tai') # tracker_account_id
         # tracker_type (brightcove, ooyala, bcgallery, ign as of April 2014)
@@ -203,11 +207,9 @@ class BaseTrackerDataV2(object):
                 if vidSearch:
                     vids.append(vidSearch.group(1))
                 else:
-                    # TODO(mdesnoyer): Log the unknown basenames but
-                    # limit the number of times each unknown one is
-                    # logged.                    
+                    _log.warn_n('Malformed basename %s' % bn, 100)
                     vids.append(None)
-                    statemon.state.increment('unknown_basename')
+                    statemon.state.increment('malformed_basename')
 
         # Send a request to the image serving platform for all the video ids
         to_req =  [x for x in vids if x is not None]
@@ -216,8 +218,8 @@ class BaseTrackerDataV2(object):
                        if self.neonUserId else None)
             request = tornado.httpclient.HTTPRequest(
                 'http://%s:%s/v1/getthumbnailid/%s?params=%s' % (
-                    options.isp_host,
-                    options.isp_port,
+                    self.isp_host,
+                    self.isp_port,
                     self.trackerAccountId,
                     ','.join(to_req)),
                 headers=headers)
@@ -238,8 +240,8 @@ class BaseTrackerDataV2(object):
             for i in range(len(to_req)):
                 if tid_response[i] == 'null':
                     statemon.state.increment('unknown_basename')
-                    _log.error('No thumbnail id known for video id %s' %
-                               to_req[i])
+                    _log.error_n('No thumbnail id known for video id %s' %
+                                 to_req[i], 10)
                 else:
                     tids[i] = tid_response[i]
 
@@ -296,7 +298,8 @@ class BaseTrackerDataV2(object):
     @staticmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def generate(request_handler):
+    def generate(request_handler, isp_host=options.isp_host,
+                 isp_port=options.isp_port):
         '''A Factory generator to make the event.
 
         Inputs:
@@ -313,7 +316,7 @@ class BaseTrackerDataV2(object):
 
         action = request_handler.get_argument('a')
         try:
-            event = event_map[action](request_handler)
+            event = event_map[action](request_handler, isp_host, isp_port)
             yield event.fill_thumbnail_ids(request_handler)
             raise tornado.gen.Return(event)
         except KeyError as e:
@@ -322,8 +325,8 @@ class BaseTrackerDataV2(object):
     
 class ImagesVisible(BaseTrackerDataV2):
     '''An event specifying that the image became visible.'''
-    def __init__(self, request):
-        super(ImagesVisible, self).__init__(request)
+    def __init__(self, request, isp_host, isp_port):
+        super(ImagesVisible, self).__init__(request, isp_host, isp_port)
         self.eventData['isImagesVisible'] = True
         self.eventType = 'IMAGES_VISIBLE'
         self.eventData['thumbnailIds'] = []
@@ -341,8 +344,8 @@ class ImagesVisible(BaseTrackerDataV2):
 
 class ImagesLoaded(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
-    def __init__(self, request):
-        super(ImagesLoaded, self).__init__(request)
+    def __init__(self, request, isp_host, isp_port):
+        super(ImagesLoaded, self).__init__(request, isp_host, isp_port)
         self.eventData['isImagesLoaded'] = True
         self.eventType = 'IMAGES_LOADED'
         self.eventData['images'] = [] 
@@ -393,8 +396,8 @@ class ImagesLoaded(BaseTrackerDataV2):
 
 class ImageClicked(BaseTrackerDataV2):
     '''An event specifying that the image was clicked.'''
-    def __init__(self, request):
-        super(ImageClicked, self).__init__(request)
+    def __init__(self, request, isp_host, isp_port):
+        super(ImageClicked, self).__init__(request, isp_host, isp_port)
         self.eventData['isImageClick'] = True
         self.eventType = 'IMAGE_CLICK'
         self.eventData['thumbnailId'] = None
@@ -425,8 +428,8 @@ class ImageClicked(BaseTrackerDataV2):
 
 class VideoClick(BaseTrackerDataV2):
     '''An event specifying that the image was clicked within the player'''
-    def __init__(self, request):
-        super(VideoClick, self).__init__(request)
+    def __init__(self, request, isp_host, isp_port):
+        super(VideoClick, self).__init__(request, isp_host, isp_port)
         self.eventData['isVideoClick'] = True
         self.eventData['thumbnailId'] = None
         self.eventType = 'VIDEO_CLICK'
@@ -435,8 +438,8 @@ class VideoClick(BaseTrackerDataV2):
 
 class VideoPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
-    def __init__(self, request):
-        super(VideoPlay, self).__init__(request)
+    def __init__(self, request, isp_host, isp_port):
+        super(VideoPlay, self).__init__(request, isp_host, isp_port)
         self.eventData['isVideoPlay'] = True
         
         self.eventType = 'VIDEO_PLAY'
@@ -458,8 +461,8 @@ class VideoPlay(BaseTrackerDataV2):
 
 class AdPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
-    def __init__(self, request):
-        super(AdPlay, self).__init__(request)
+    def __init__(self, request, isp_host, isp_port):
+        super(AdPlay, self).__init__(request, isp_host, isp_port)
         self.eventData['isAdPlay'] = True
         
         self.eventType = 'AD_PLAY'
@@ -477,8 +480,8 @@ class AdPlay(BaseTrackerDataV2):
 
 class VideoViewPercentage(BaseTrackerDataV2):
     '''An event specifying that a percentage of the video was viewed.'''
-    def __init__(self, request):
-        super(VideoViewPercentage, self).__init__(request)
+    def __init__(self, request, isp_host, isp_port):
+        super(VideoViewPercentage, self).__init__(request, isp_host, isp_port)
         self.eventData['isVideoViewPercentage'] = True
 
         self.eventType = 'VIDEO_VIEW_PERCENTAGE'
@@ -507,6 +510,9 @@ class VideoViewPercentage(BaseTrackerDataV2):
 
 class TrackerDataHandler(tornado.web.RequestHandler):
     '''Common class to handle http requests to the tracker.'''
+    def initialize(self):
+        self.isp_host = options.isp_host
+        self.isp_port = options.isp_port
 
     @tornado.gen.coroutine
     def parse_tracker_data(self, version):
@@ -516,7 +522,10 @@ class TrackerDataHandler(tornado.web.RequestHandler):
         TrackerData object
         '''
         if version == 2:
-            event = yield BaseTrackerDataV2.generate(self, async=True)
+            event = yield BaseTrackerDataV2.generate(self,
+                                                     isp_host=self.isp_host,
+                                                     isp_port=self.isp_port,
+                                                     async=True)
             raise tornado.gen.Return(event)
         else:
             _log.fatal('Invalid api version %s' % version)
@@ -592,6 +601,7 @@ class LogLines(TrackerDataHandler):
     def initialize(self, watcher, version, avro_writer, schema_url,
                    flume_buffer):
         '''Initialize the logger.'''
+        super(LogLines, self).initialize()
         self.watcher = watcher
         self.version = version
         self.avro_writer = avro_writer
@@ -657,6 +667,7 @@ class TestTracker(TrackerDataHandler):
 
     def initialize(self, version):
         '''Initialize the logger.'''
+        super(TestTracker, self).initialize()
         self.version = version
     
     @tornado.web.asynchronous
@@ -768,6 +779,7 @@ class HealthCheckHandler(TrackerDataHandler):
     '''Handler for health check ''' 
 
     def initialize(self, flume_port):
+        super(HealthCheckHandler, self).initialize()
         self.flume_port = flume_port
     
     @tornado.web.asynchronous
@@ -780,11 +792,22 @@ class HealthCheckHandler(TrackerDataHandler):
                                             3)
             sock.shutdown(socket.SHUT_RDWR)
             sock.close()
-            self.write("<html> Server OK </html>")
-            self.set_status(200)
+
+            # see if we can connect to the image serving platform
+            try:
+                sock = socket.create_connection(('localhost',
+                                                 self.isp_port),
+                                                 3)
+                sock.shutdown(socket.SHUT_RDWR)
+                sock.close()
+                self.write("<html> Server OK </html>")
+                self.set_status(200)
+            except socket.error:
+                _log.error('Could not open isp port')
+                self.set_status(500)
+                
         except socket.error:
             _log.error('Could not open flume port')
-            self.write("<html> Flume connection missing </html>")
             self.set_status(500)
 
         self.finish()

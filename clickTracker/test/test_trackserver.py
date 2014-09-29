@@ -28,12 +28,13 @@ import os
 import Queue
 import random
 import socket
+import test_utils.neontest
 from thrift import Thrift
 from thrift.transport import TTransport
 from thrift.protocol import TCompactProtocol
 import time
-import tornado.testing
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
+import tornado.iostream
 import urllib
 import urlparse
 import unittest
@@ -216,7 +217,7 @@ class TestFileBackupHandler(unittest.TestCase):
                         pass
         
 
-class TestFullServer(tornado.testing.AsyncHTTPTestCase):
+class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
     '''A set of tests that fire up the whole server and throws http requests at it.'''
 
     def setUp(self):
@@ -283,12 +284,11 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
     
     def mock_isp_response(self, request, retries=1, callback=None):
         if request.url.endswith('.avsc'):
-            retval = tornado.httpclient.HTTPResponse(
-                request, 200)
+            retval = HTTPResponse(request, 200)
         else:
             bns = urlparse.parse_qs(urlparse.urlparse(request.url).query
                                     )['params'][0].split(',')
-            retval = tornado.httpclient.HTTPResponse(
+            retval = HTTPResponse(
                 request,
                 200,
                 buffer=StringIO(','.join([self.bn_map.get(x, "null") 
@@ -968,10 +968,9 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
     def test_bad_connection_to_isp(self):
         def _mock_isp(request, retries=1, callback=None):
             if request.url.endswith('.avsc'):
-                retval = tornado.httpclient.HTTPResponse(
-                    request, 200)
+                retval = HTTPResponse(request, 200)
             else:
-                retval = tornado.httpclient.HTTPResponse(
+                retval = HTTPResponse(
                     request, 404, error=tornado.httpclient.HTTPError(404))
 
             if callback:
@@ -1057,8 +1056,24 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
 
     @patch('clickTracker.trackserver.socket.create_connection')    
     def test_heartbeat_bad_flume_connection(self, sockmock):
-        sockmock.side_effect = [socket.error()]
-        response = self.fetch('/healthcheck')
+        def mock_socket(dest, time):
+            if dest[1] == options.get('clickTracker.trackserver.flume_port'):
+                raise socket.error()
+            return MagicMock()
+        sockmock.side_effect = mock_socket
+        with self.assertLogExists(logging.ERROR, 'Could not open flume port'):
+            response = self.fetch('/healthcheck')
+        self.assertEqual(response.code, 500)
+
+    @patch('clickTracker.trackserver.socket.create_connection')    
+    def test_heartbeat_bad_isp_connection(self, sockmock):
+        def mock_socket(dest, time):
+            if dest[1] == options.get('clickTracker.trackserver.isp_port'):
+                raise socket.error()
+            return MagicMock()
+        sockmock.side_effect = mock_socket
+        with self.assertLogExists(logging.ERROR, 'Could not open isp port'):
+            response = self.fetch('/healthcheck')
         self.assertEqual(response.code, 500)
 
     def test_test_endpoint(self):

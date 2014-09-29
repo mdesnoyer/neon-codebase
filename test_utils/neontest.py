@@ -105,10 +105,21 @@ class LogCaptureHandler(logging.Handler):
 class AsyncTestCase(tornado.testing.AsyncTestCase, TestCase):
     '''A test case that has access to Neon functions and can do tornado async calls.'''
     def setUp(self):
-       tornado.testing.AsyncTestCase.setUp(self)
+        tornado.testing.AsyncTestCase.setUp(self)
 
     def tearDown(self):
         tornado.testing.AsyncTestCase.tearDown(self)
+
+class AsyncHTTPTestCase(tornado.testing.AsyncHTTPTestCase, TestCase):
+    '''A test case that has access to Neon functions and can 
+    test a tornado async http server calls.
+
+    '''
+    def setUp(self):
+        tornado.testing.AsyncHTTPTestCase.setUp(self)
+
+    def tearDown(self):
+        tornado.testing.AsyncHTTPTestCase.tearDown(self)
 
 def main():
     unittest.main()
