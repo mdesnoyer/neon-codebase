@@ -572,6 +572,7 @@ class FlumeBuffer:
         except TTransport.TTransportException as e:
             _log.error('Error opening connection to Flume: %s' % e)
             self._register_flume_error(local_buf)
+            return
 
         # Send the data to flume
         try:            
