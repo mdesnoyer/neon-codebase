@@ -322,7 +322,6 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
             '%s?%s' % (path, urllib.urlencode(url_params)),
             headers=headers)
 
-        #print url_params
         self.assertEqual(response.code, 200)
 
         # Check that a response was found
