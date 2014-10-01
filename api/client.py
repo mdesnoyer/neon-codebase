@@ -74,6 +74,7 @@ statemon.define('dequeue_error', int)
 statemon.define('save_tmdata_error', int)
 statemon.define('save_vmdata_error', int)
 statemon.define('customer_callback_schedule_error', int)
+statemon.define('no_thumbs', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -610,7 +611,9 @@ class VideoProcessor(object):
             self.thumbnails.extend(thumbnails)
             #TODO(Sunil): Extract at least a single frame if every image is
             #filtered
-
+            if len(self.thumbnails) < 1:
+                statemon.state.increment('no_thumbs')
+                _log.error("no thumbnails extracted for video %s" % vmdata.key)
 
             #host Center Frame on s3
             if self.center_frame is not None:
