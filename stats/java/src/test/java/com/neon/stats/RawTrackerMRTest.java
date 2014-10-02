@@ -489,6 +489,55 @@ public class RawTrackerMRTest {
   }
 
   @Test
+  public void testVideoClickPPGMappingRealThumbId() throws IOException {
+    TrackerEvent inputEvent =
+        TrackerEvent
+            .newBuilder()
+            .setEventType(EventType.VIDEO_CLICK)
+            .setIpGeoData(new GeoData(null, null, null, null, null, null))
+            .setPageId("lgFQCAy0PT5szYSr")
+            .setNeonUserId("")
+            .setTrackerAccountId("1483115066")
+            .setServerTime(1412111219989l)
+            .setClientTime(1412109680684l)
+            .setPageURL("http://www.post-gazette.com/")
+            .setRefURL("https://www.google.com/")
+            .setTrackerType(TrackerType.BRIGHTCOVE)
+            .setUserAgent(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.114 Safari/537.36")
+            .setClientIP("199.47.77.98")
+            .setAgentInfo(
+                AgentInfo.newBuilder()
+                    .setBrowser(new NmVers("Chrome", "35.0.1916.114"))
+                    .setOs(new NmVers("Linux", null)).build())
+            .setEventData(
+                new VideoClick(
+                    true,
+                    "3811926729001",
+                    "1395884386001",
+                    "6d3d519b15600c372a1f6735711d956e-3811926729001-7652d5c345f87dbfe517527c21045cc8"))
+            .build();
+    mapDriver.withInput(new AvroKey<TrackerEvent>(inputEvent),
+        NullWritable.get());
+
+    mapDriver
+        .withOutput(
+            new Text("1483115066199.47.77.983811926729001"),
+            new AvroValue<TrackerEvent>(
+                TrackerEvent
+                    .newBuilder(inputEvent)
+                    .setEventData(
+                        new VideoClick(
+                            true,
+                            "3811926729001",
+                            "1395884386001",
+                            "6d3d519b15600c372a1f6735711d956e_3811926729001_7652d5c345f87dbfe517527c21045cc8"))
+                    .build()));
+
+    mapDriver.runTest();
+  }
+
+  @Test
   public void testVideoClickMapping() throws IOException {
     TrackerEvent inputEvent =
         MakeBasicTrackerEvent().setEventType(EventType.VIDEO_CLICK)
@@ -661,6 +710,8 @@ public class RawTrackerMRTest {
         .setClientTime(1400000000100l).build()));
     values.add(new AvroValue<TrackerEvent>(MakeBasicVideoClick().setClientTime(
         1400000000600l).build()));
+    values.add(new AvroValue<TrackerEvent>(MakeBasicVideoClick().setClientTime(
+        1400000000650l).build()));
     values.add(new AvroValue<TrackerEvent>(MakeBasicVideoPlay()
         .setClientTime(1400000000700l)
         .setEventData(
@@ -678,13 +729,13 @@ public class RawTrackerMRTest {
     VerifySequence(Arrays.asList(
         MakeBasicImageLoadHive().build(),
         MakeBasicImageVisibleHive().setClientTime(1400000000.1).build(),
-        MakeBasicVideoClickHive().setClientTime(1400000000.6).build(),
+        MakeBasicVideoClickHive().setClientTime(1400000000.65).build(),
         MakeBasicVideoPlayHive().setClientTime(1400000000.7)
             .setAutoplayDelta(200).build(),
         MakeBasicVideoViewPercentageHive().setClientTime(1400000000.8).build(),
         MakeBasicEventSequenceHive().setImLoadClientTime(1400000000.)
             .setImVisClientTime(1400000000.1)
-            .setImClickClientTime(1400000000.6)
+            .setImClickClientTime(1400000000.65)
             .setVideoPlayClientTime(1400000000.7)
             .setVideoPageURL("http://go.com")
             .setImClickPageURL("http://go.com")
@@ -951,6 +1002,111 @@ public class RawTrackerMRTest {
             .setImageCoordsX(null).setImageCoordsY(null)
             .setIsClickInPlayer(false).setIsRightClick(false)
             .setImClickPageId("pageid1").build()));
+  }
+
+  @Test
+  public void testPPGVideoClick() throws IOException, InterruptedException {
+    TrackerEvent inputEvent =
+        TrackerEvent
+            .newBuilder()
+            .setEventType(EventType.VIDEO_CLICK)
+            .setIpGeoData(new GeoData(null, null, null, null, null, null))
+            .setPageId("lgFQCAy0PT5szYSr")
+            .setNeonUserId("")
+            .setTrackerAccountId("1483115066")
+            .setServerTime(1412111219989l)
+            .setClientTime(1412109680684l)
+            .setPageURL("http://www.post-gazette.com/")
+            .setRefURL("https://www.google.com/")
+            .setTrackerType(TrackerType.BRIGHTCOVE)
+            .setUserAgent(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.114 Safari/537.36")
+            .setClientIP("199.47.77.98")
+            .setAgentInfo(
+                AgentInfo.newBuilder()
+                    .setBrowser(new NmVers("Chrome", "35.0.1916.114"))
+                    .setOs(new NmVers("Linux", null)).build())
+            .setEventData(
+                new VideoClick(
+                    true,
+                    "3811926729001",
+                    "1395884386001",
+                    "6d3d519b15600c372a1f6735711d956e_3811926729001_7652d5c345f87dbfe517527c21045cc8"))
+            .build();
+    List<AvroValue<TrackerEvent>> values =
+        new ArrayList<AvroValue<TrackerEvent>>();
+    values.add(new AvroValue<TrackerEvent>(inputEvent));
+
+    reduceDriver.withInput(new Text("1483115066199.47.77.983811926729001"),
+        values).run();
+    CaptureEvents();
+
+    VerifySequence(Arrays
+        .asList(
+            ImageClickHive
+                .newBuilder()
+                .setSequenceId(1)
+                .setIpGeoDataCity(null)
+                .setIpGeoDataCountry(null)
+                .setIpGeoDataRegion(null)
+                .setIpGeoDataZip(null)
+                .setIpGeoDataLat(null)
+                .setIpGeoDataLon(null)
+                .setImageCoordsX(-1.0f)
+                .setImageCoordsY(-1.0f)
+                .setPageCoordsX(-1.0f)
+                .setPageCoordsY(-1.0f)
+                .setWindowCoordsX(-1.0f)
+                .setWindowCoordsY(-1.0f)
+                .setPageId("lgFQCAy0PT5szYSr")
+                .setNeonUserId("")
+                .setTrackerAccountId("1483115066")
+                .setServerTime(1412111219.989)
+                .setClientTime(1412109680.684)
+                .setPageURL("http://www.post-gazette.com/")
+                .setRefURL("https://www.google.com/")
+                .setTrackerType(TrackerType.BRIGHTCOVE)
+                .setUserAgent(
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.114 Safari/537.36")
+                .setClientIP("199.47.77.98")
+                .setAgentInfoBrowserName("Chrome")
+                .setAgentInfoBrowserVersion("35.0.1916.114")
+                .setAgentInfoOsName("Linux")
+                .setAgentInfoOsVersion(null)
+                .setIsClickInPlayer(true)
+                .setThumbnailId(
+                    "6d3d519b15600c372a1f6735711d956e_3811926729001_7652d5c345f87dbfe517527c21045cc8")
+                .setVideoId("3811926729001").setIsRightClick(false).build(),
+            EventSequenceHive
+                .newBuilder()
+                .setSequenceId(1)
+                .setIpGeoDataCity(null)
+                .setIpGeoDataCountry(null)
+                .setIpGeoDataRegion(null)
+                .setIpGeoDataZip(null)
+                .setIpGeoDataLat(null)
+                .setIpGeoDataLon(null)
+                .setPlayerId("1395884386001")
+                .setImClickPageId("lgFQCAy0PT5szYSr")
+                .setNeonUserId("")
+                .setTrackerAccountId("1483115066")
+                .setServerTime(1412111219.989)
+                .setImClickServerTime(1412111219.989)
+                .setImClickClientTime(1412109680.684)
+                .setImClickPageURL("http://www.post-gazette.com/")
+                .setRefURL("https://www.google.com/")
+                .setTrackerType(TrackerType.BRIGHTCOVE)
+                .setUserAgent(
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.114 Safari/537.36")
+                .setClientIP("199.47.77.98")
+                .setAgentInfoBrowserName("Chrome")
+                .setAgentInfoBrowserVersion("35.0.1916.114")
+                .setAgentInfoOsName("Linux")
+                .setAgentInfoOsVersion(null)
+                .setIsClickInPlayer(true)
+                .setThumbnailId(
+                    "6d3d519b15600c372a1f6735711d956e_3811926729001_7652d5c345f87dbfe517527c21045cc8")
+                .setVideoId("3811926729001").setIsRightClick(false).build()));
   }
 
   @Test
