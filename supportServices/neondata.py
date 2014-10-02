@@ -1861,6 +1861,7 @@ class RequestState(object):
     FINISHED   = "finished"
     INT_ERROR  = "internal_error"
     ACTIVE     = "active" #thumbnail live 
+    REPROCESS  = "reprocess" #new state added to support clean reprocessing
 
 class NeonApiRequest(object):
     '''
@@ -2238,7 +2239,9 @@ class ThumbnailMetadata(StoredObject):
         # Fraction of traffic currently being served by this thumbnail.
         # =None indicates that Mastermind doesn't know of the fraction yet
         self.serving_frac = serving_frac 
-
+        
+        # NOTE: If you add more fields here, modify the merge code in
+        # api/client, Add unit test to check this
 
     def update_phash(self, image):
         '''Update the phash from a PIL image.'''
@@ -2503,9 +2506,9 @@ class VideoMetadata(StoredObject):
         tid = ThumbnailID.generate(imgdata, i_vid)
 
         #If tid already exists, then skip saving metadata
-        if ThumbnailMetadata.get(tid) is not None:
-            _log.warn('Already have thumbnail id: %s' % tid)
-            return
+        #if ThumbnailMetadata.get(tid) is not None:
+        #    _log.warn('Already have thumbnail id: %s' % tid)
+        #    return
 
         urls.append(s3fname)
         created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2561,6 +2564,10 @@ class VideoMetadata(StoredObject):
         raise tornado.gen.Return(None)
 
     def add_custom_thumbnail(self, image_url, callback=None):
+        '''
+        Add a custom thumbnail for the video
+        '''
+
         fname = "custom%s.jpeg" % int(time.time())
         keyname = "%s/%s/%s" % (self.get_account_id(), self.job_id, fname)  
         s3url = "https://%s.s3.amazonaws.com/%s" % (options.thumbnailBucket, keyname) 

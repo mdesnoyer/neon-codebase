@@ -718,7 +718,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         result = {}
         incomplete_states = [
             neondata.RequestState.SUBMIT, neondata.RequestState.PROCESSING,
-            neondata.RequestState.REQUEUED]
+            neondata.RequestState.REQUEUED, neondata.RequestState.REPROCESS]
         
         failed_states = [neondata.RequestState.INT_ERROR, 
                     neondata.RequestState.FAILED]

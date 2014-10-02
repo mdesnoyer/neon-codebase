@@ -34,6 +34,7 @@ import numpy as np
 import ooyala_api 
 import properties
 from PIL import Image
+import psutil
 import Queue
 import random
 import signal
@@ -109,7 +110,6 @@ def callback_response_builder(job_id, vid, data,
 
         '''
 
-        #TODO: Create a class formatter
         response_body = {}
         response_body["job_id"] = job_id 
         response_body["video_id"] = vid 
@@ -317,7 +317,7 @@ class VideoProcessor(object):
        
         # Error downloading the file
         if self.error:
-            self.finalize_request(immediate=True)
+            self.finalize_request()
             return
 
         #Process the video
@@ -507,11 +507,9 @@ class VideoProcessor(object):
                     
             return spread_result
 
-    def finalize_request(self, immediate=False):
+    def finalize_request(self):
         '''
         Finalize request after video has been processed
-
-        if immediate=True, then don't requeue on error
         '''
         
         api_key = self.job_params[properties.API_KEY]  
@@ -530,26 +528,12 @@ class VideoProcessor(object):
             #Send response to client that job failed due to the last reason
             #And Log the response we send to the client
             statemon.state.increment('processing_error')
-            if immediate:
-                #update error state
-                api_request.state = neondata.RequestState.INT_ERROR
-                api_request.save()
-                return
+            
+            #TODO(Sunil): Re-enable Requeuing, its not been helpful so far
+            # Cron Requeue is more helpful
 
-            if not self.requeue_job():
-                cb_request = callback_response_builder(job_id, video_id, [], 
-                            [], callback_url, error=self.error)
-                self.send_client_callback_response(video_id, cb_request)
-                
-                #update error state
-                api_request = neondata.NeonApiRequest.get(api_key, job_id)
-                api_request.state = neondata.RequestState.INT_ERROR
-                api_request.save()
-                return
-           
-            #requeued
             api_request = neondata.NeonApiRequest.get(api_key, job_id)
-            api_request.state = neondata.RequestState.REQUEUED
+            api_request.state = neondata.RequestState.INT_ERROR
             api_request.save()
             return
 
@@ -558,7 +542,10 @@ class VideoProcessor(object):
 
         # API Specific client response
         MAX_T = 6
-        
+        reprocess = False 
+        if api_request.state == neondata.RequestState.REPROCESS:
+            reprocess = True 
+
         ''' Neon API section 
         '''
         if  api_method == properties.TOP_THUMBNAILS:
@@ -578,21 +565,15 @@ class VideoProcessor(object):
             ranked_frames = [x[0] for x in res]
             data = ranked_frames[:topn]
            
-            #Create the video metadata object
-            vmdata = self.save_video_metadata()
+            # Create the video metadata object
+            vmdata = self.save_video_metadata(reprocess)
             if not vmdata:
                 _log.error("save_video_metadata failed to save")
                 statemon.state.increment('save_vmdata_error')
-                #if can't save vmdata, probably a DB error, requeue the request
-                api_request = neondata.NeonApiRequest.get(api_key, job_id)
-                if self.requeue_job():
-                    api_request.state = neondata.RequestState.REQUEUED
-                    api_request.save()
-                    return
-                else:
-                    #Requeue failed
-                    api_request.state = neondata.RequestState.INT_ERROR
-                    api_request.save()
+                # if can't save vmdata, probably a DB error
+                api_request.state = neondata.RequestState.INT_ERROR
+                api_request.save()
+                return
 
             # CDN Metadata
             cdn_metadata = None
@@ -626,9 +607,11 @@ class VideoProcessor(object):
                 _log.error("centerframe was None for %s" % video_id)
 
             # Save videometadata 
-            if not vmdata.save():
-                _log.error("failed to save vmdata for %s" % vmdata.key)
-                statemon.state.increment('save_vmdata_error')
+            if reprocess == False:
+                if not vmdata.save():
+                    _log.error("failed to save vmdata for %s" % vmdata.key)
+                    statemon.state.increment('save_vmdata_error')
+                    # What do we do if we have a DB Failure ?
 
             # Generate the Serving URL
             # TODO(Sunil): Pass TAI as part of the request?
@@ -644,10 +627,26 @@ class VideoProcessor(object):
                                                    s3_urls[:topn], callback_url,
                                                    serving_url,
                                                    error=self.error)
-            self.send_client_callback_response(video_id, cr_request)
+
+            # TODO(Sunil): Do we need to send the callback again? 
+            # On reprocess, the serving URL doesn't change
+            if reprocess == False:
+                self.send_client_callback_response(video_id, cr_request)
             
             if request_type in ["neon", "brightcove", "ooyala"]:
-                self.finalize_api_request(cr_request.body, request_type)
+                self.finalize_api_request(cr_request.body, request_type,
+                        reprocess)
+
+                # SAVE VMDATA atomically
+                def _modify_vmdata_atomically(video_obj):
+                    video_obj.frame_size = vmdata.frame_size
+                    video_obj.thumbnail_ids = vmdata.thumbnail_ids
+                    video_obj.video_valence = vmdata.video_valence
+                    video_obj.model_version = vmdata.model_version
+            
+                if reprocess:
+                    neondata.VideoMetadata.modify(vmdata.key, _modify_vmdata_atomically)
+
                 ## Notification enabled for brightcove only 
                 if request_type == "brightcove":
                     self.send_notifiction_response()
@@ -656,7 +655,7 @@ class VideoProcessor(object):
         else:
             _log.error("request param not supported")
     
-    def finalize_api_request(self, result, request_type):
+    def finalize_api_request(self, result, request_type, reprocess=False):
         '''
         - host neon thumbs and also save bcove previous thumbnail in s3
         - Get Account settings and replace default thumbnail if enabled 
@@ -675,7 +674,8 @@ class VideoProcessor(object):
         api_request.response = tornado.escape.json_decode(result)
         api_request.publish_date = time.time() *1000.0 #ms
 
-        #previous thumbnail
+        # previous thumbnail, ignore saving if its being reprocessed
+        # May be add this later, if there is an use case
         if hasattr(api_request, "previous_thumbnail"):
             self.save_previous_thumbnail(api_request)
         else:
@@ -690,16 +690,15 @@ class VideoProcessor(object):
                 self.autosync(api_request, img)
 
         api_request.state = neondata.RequestState.FINISHED 
+        
         if api_request.save():
+            
             # Save the Thumbnail URL and ID to Mapper DB
-            if not self.save_thumbnail_metadata(request_type, i_id):
+            if not self.save_thumbnail_metadata(request_type, i_id, reprocess):
                 _log.error("save_thumbnail_metadata failed")
                 statemon.state.increment('save_tmdata_error')
-
-            #if not self.save_video_metadata():
-            #    _log.error("save_video_metadata failed to save")
-            #    statemon.state.increment('save_vmdata_error')
         else:
+            
             # Need to reprocess the request
             _log.error("key=finalize_api_request msg=failed to save request %s"
                     % api_request.key)
@@ -789,7 +788,7 @@ class VideoProcessor(object):
             else:
                 _log.error("autosync failed for ooyala video %s" % video_id)
 
-    def save_thumbnail_metadata(self, platform, i_id):
+    def save_thumbnail_metadata(self, platform, i_id, reprocess=False):
         '''Save the Thumbnail URL and ID to Mapper DB '''
 
         api_key = self.job_params[properties.API_KEY] 
@@ -798,6 +797,8 @@ class VideoProcessor(object):
         i_vid = neondata.InternalVideoID.generate(api_key, vid)
 
         thumbnail_url_mapper_list = []
+        tids = [thumb.key for thumb in self.thumbnails]
+
         if len(self.thumbnails) > 0:
             for thumb in self.thumbnails:
                 tid = thumb.key
@@ -805,12 +806,27 @@ class VideoProcessor(object):
                     uitem = neondata.ThumbnailURLMapper(t_url, tid)
                     thumbnail_url_mapper_list.append(uitem)
 
-            retid = neondata.ThumbnailMetadata.save_all(self.thumbnails)
+            # Merge specific fields if its being reprocesed
+            def _atomically_merge_tmdata(t_objs):
+                for thumb in self.thumbnails:
+                    t_obj = t_objs[thumb.key]
+                    if t_obj is not None:
+                        thumb.chosen = t_obj.chosen
+                        thumb.enabled = t_obj.enabled
+                        thumb.serving_frac = t_obj.serving_frac
+                    t_objs[thumb.key] = thumb
+
+            if reprocess:
+                retid = neondata.ThumbnailMetadata.modify_many(tids,
+                    _atomically_merge_tmdata)
+            else:
+                retid = neondata.ThumbnailMetadata.save_all(self.thumbnails)
+            
             returl = neondata.ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
             
             return (retid and returl)
     
-    def save_video_metadata(self):
+    def save_video_metadata(self, reprocess=False):
         '''
         Method to save video metadata in to the videoDB
         contains list of thumbnail ids 
@@ -822,15 +838,20 @@ class VideoProcessor(object):
         i_id = self.job_params[properties.INTEGRATION_ID] if self.job_params.has_key(properties.INTEGRATION_ID) else 0 
         job_id = self.job_params[properties.REQUEST_UUID_KEY]
         duration = self.video_metadata["duration"]
-        video_valence = "%.4f" %float(np.mean(self.valence_scores[1])) 
+        video_valence = "%.4f" % float(np.mean(self.valence_scores[1])) 
         url = self.job_params[properties.VIDEO_DOWNLOAD_URL]
         model_version = self.model_version 
         frame_size = self.video_metadata['frame_size']
 
         tids = [x.key for x in self.thumbnails]
-
         vmdata = neondata.VideoMetadata(i_vid, tids, job_id, url, duration,
                     video_valence, model_version, i_id, frame_size)
+        
+        # If reprocess mode, return the unsaved video metadata obj, We'll
+        # atomically save this at the end
+        if reprocess:   
+            return vmdata 
+
         if vmdata.save():
             return vmdata
 
@@ -980,6 +1001,11 @@ class VideoClient(object):
         ''' run/start method '''
         _log.info("starting worker [%s] " %(self.pid))
         while not self.kill_received:
+            # Check if memory has been exceeded & exit
+            cur_mem_usage = psutil.virtual_memory()[2] # in %
+            if cur_mem_usage > 85:
+                sys.exit(0)
+
             self.do_work()
 
     def do_work(self):   
