@@ -969,7 +969,8 @@ class ExperimentStrategy(NamespacedStoredObject):
                  override_when_done=True,
                  experiment_type=MULTIARMED_BANDIT,
                  impression_type=MetricType.VIEWS,
-                 conversion_type=MetricType.CLICKS):
+                 conversion_type=MetricType.CLICKS,
+                 max_neon_thumbs=None):
         super(ExperimentStrategy, self).__init__(account_id)
         # Fraction of traffic to experiment on.
         self.exp_frac = exp_frac
@@ -1006,9 +1007,14 @@ class ExperimentStrategy(NamespacedStoredObject):
         # The strategy used to run the experiment phase
         self.experiment_type = experiment_type
 
-        # The types of measurements that mean an impression or a conversion for this account
+        # The types of measurements that mean an impression or a
+        # conversion for this account
         self.impression_type = impression_type
         self.conversion_type = conversion_type
+
+        # The maximum number of Neon thumbs to run in the
+        # experiment. If None, all of them are used.
+        self.max_neon_thumbs = max_neon_thumbs
 
 
 class CDNHostingMetadata(object):
