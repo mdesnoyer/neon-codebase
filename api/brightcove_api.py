@@ -484,10 +484,8 @@ class BrightcoveApi(object):
                 d_url  = item['FLVURL']
                 length = item['length']
 
-                #if frame width is set, select the resolution to process
-                if bc.rendition_frame_width:
-                    d_url = self.get_video_url_to_download(item, 
-                                    bc.rendition_frame_width)
+                d_url = self.get_video_url_to_download(item, 
+                                bc.rendition_frame_width)
 
                 if still is None:
                     still = thumb
