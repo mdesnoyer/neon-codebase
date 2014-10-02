@@ -825,6 +825,40 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertGreater(directive['n2'], 0.0)
         self.assertGreater(directive['n1'], directive['n2'])
 
+    def test_limit_num_neon_thumbs(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', max_neon_thumbs=2,
+                                        exp_frac=1.0))
+
+        directive = self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon', model_score=5.8)),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=1,
+                                               ttype='neon', enabled=False,
+                                               model_score='3.5')),
+                 build_thumb(ThumbnailMetadata('n3', 'vid1', rank=2,
+                                               ttype='neon',
+                                               model_score='3.4')),
+                 build_thumb(ThumbnailMetadata('n4', 'vid1', rank=3,
+                                               ttype='neon',
+                                               model_score='3.3')),
+                 build_thumb(ThumbnailMetadata('ctr', 'vid1',
+                                               ttype='centerframe')),
+                 build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
+                                               ttype='brightcove'))]))[1]
+        self.assertEqual(
+            sorted(directive.keys(), key=lambda x: directive[x])[2:],
+            ['n3', 'ctr', 'bc', 'n1'])
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+        self.assertAlmostEqual(directive['n2'], 0.0)
+        self.assertAlmostEqual(directive['n4'], 0.0)
+        self.assertGreater(directive['n1'], 0.0)
+        self.assertGreater(directive['n3'], 0.0)
+        self.assertGreater(directive['ctr'], 0.0)
+        self.assertGreater(directive['bc'], 0.0)
+
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestUpdatingFuncs, self).setUp()
