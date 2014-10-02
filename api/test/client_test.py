@@ -592,7 +592,6 @@ class TestVideoClient(unittest.TestCase):
         # Modify params in vprocessor
         vprocessor.model_version = "reprocess_model"
         vprocessor.job_params = api_request.__dict__
-        import pdb; pdb.set_trace()
         ct_output, ft_output = pickle.load(open(self.model_file)) 
         for i in range(3):
             ct_output[i][0][0][0] = 255

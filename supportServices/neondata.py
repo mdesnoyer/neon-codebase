@@ -1124,7 +1124,8 @@ class AbstractPlatform(object):
         ''' return list of i_vids for an account which have been processed '''
 
         i_vids = []
-        processed_state = [RequestState.FINISHED, RequestState.ACTIVE]
+        processed_state = [RequestState.FINISHED, RequestState.ACTIVE,
+                RequestState.REPROCESS]
         request_keys = [generate_request_key(self.neon_api_key, v) for v in
                         self.videos.values()]
         api_requests = NeonApiRequest.get_requests(request_keys)
