@@ -73,9 +73,10 @@ class ThumbnailInfo(object):
         self.enabled = metadata.enabled
         self.type = str(metadata.type)
         self.chosen = metadata.chosen
-        self.rank = metadata.rank
+        self.rank = None if metadata.rank is None else int(metadata.rank)
         self.phash = metadata.phash
-        self.model_score = metadata.model_score
+        self.model_score = None if metadata.model_score is None \
+          else float(metadata.model_score)
 
         # Last chunk of the thumbnail id
         self.id = str(metadata.key).split('_')
@@ -468,6 +469,16 @@ class Mastermind(object):
                     'Testing was disabled and there was no baseline for'
                     ' video %s' % video_id, 5)
                 return None
+
+        # Limit the number of Neon thumbnails being shown
+        if strategy.max_neon_thumbs is not None:
+            neon_thumbs = [thumb for thumb in candidates if 
+                           thumb.type == neondata.ThumbnailType.NEON]
+            neon_thumbs = sorted(neon_thumbs,
+                                 key=lambda x: (x.rank, -x.model_score))
+            if len(neon_thumbs) > strategy.max_neon_thumbs:
+                candidates = candidates.difference(
+                    neon_thumbs[strategy.max_neon_thumbs:])
 
         # Done finding all the thumbnail types, so start doing the allocations 
         if not video_info.testing_enabled:
