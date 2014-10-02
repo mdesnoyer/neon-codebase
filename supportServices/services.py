@@ -210,11 +210,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             platform_account = yield tornado.gen.Task(
                                         neondata.BrightcovePlatform.get_account,
                                         self.api_key, i_id)
-        elif i_type == "ooyala":
+        elif "ooyala" in i_type:
             platform_account = yield tornado.gen.Task(
                                         neondata.OoyalaPlatform.get_account,
                                         self.api_key, i_id)
-        elif i_type == "neon": 
+        elif "neon" in i_type: 
             platform_account = yield tornado.gen.Task(
                                         neondata.NeonPlatform.get_account,
                                         self.api_key)
@@ -1860,6 +1860,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         data = json.dumps(response)
         self.send_json_response(data, 200)
 
+    @tornado.gen.engine
     def update_thumbnail_property(self, tid):
        
         invalid_msg = "invalid thumbnail id or thumbnail id not found" 
