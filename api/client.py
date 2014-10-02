@@ -898,6 +898,7 @@ class VideoProcessor(object):
             r = sqsmgr.add_callback_response(video_id, request.url, request.body)
         except SQSError, e:
             _log.error('SQS Error %s' % e)
+            _log.info('Tried to send response: %s' % request.body)
             return False 
 
         if not r:
