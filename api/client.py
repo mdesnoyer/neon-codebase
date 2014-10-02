@@ -57,6 +57,7 @@ from utils import statemon
 
 from boto.exception import S3ResponseError
 from boto.s3.connection import S3Connection
+from boto.exception import SQSError
 from utils.imageutils import PILImageUtils
 from StringIO import StringIO
 from supportServices import neondata
@@ -674,8 +675,7 @@ class VideoProcessor(object):
         api_request.response = tornado.escape.json_decode(result)
         api_request.publish_date = time.time() *1000.0 #ms
 
-        # previous thumbnail, ignore saving if its being reprocessed
-        # May be add this later, if there is an use case
+        # TODO(Sunil): Save the previous thumbnail to VMData
         if hasattr(api_request, "previous_thumbnail"):
             self.save_previous_thumbnail(api_request)
         else:
@@ -885,7 +885,7 @@ class VideoProcessor(object):
  
     def send_client_callback_response(self, video_id, request):
         '''
-        Send client response
+        Schedule client response to be sent to the client
         '''
         # Check if url in request object is empty, if so just return True
 
@@ -893,8 +893,13 @@ class VideoProcessor(object):
             return True
 
         # Schedule the callback in SQS
-        sqsmgr = utils.sqsmanager.CustomerCallbackManager()
-        r = sqsmgr.add_callback_response(video_id, request.url, request.body)
+        try:
+            sqsmgr = utils.sqsmanager.CustomerCallbackManager()
+            r = sqsmgr.add_callback_response(video_id, request.url, request.body)
+        except SQSError, e:
+            _log.error('SQS Error %s' % e)
+            return False 
+
         if not r:
             statemon.state.increment('customer_callback_schedule_error')
             _log.error("Callback schedule failed for video %s" % video_id)
@@ -974,8 +979,8 @@ class VideoClient(object):
                         api_request.state = neondata.RequestState.PROCESSING
                         api_request.model_version = self.model_version
                         api_request.save()
-                    _log.info("key=worker [%s] msg=processing request %s "
-                              %(self.pid, job_params[properties.REQUEST_UUID_KEY]))
+                    _log.info("key=worker [%s] msg=processing request %s for %s "
+                              % (self.pid, job_id, api_key))
                 except Exception,e:
                     _log.error("key=worker [%s] msg=db error %s" %(self.pid, e.message))
             return result
@@ -1031,10 +1036,12 @@ class VideoClient(object):
 
 def main():
     utils.neon.InitNeon()
-    
+   
+    # TODO(sunil): Add signal handler for SIGTERM, do a clean
+    # shutdown after finishing the current request
+
     if options.local:
         _log.info("Running locally")
-        options.video_server = properties.LOCALHOST_URL
 
     vc = VideoClient(options.model_file,
                      options.debug, options.sync)

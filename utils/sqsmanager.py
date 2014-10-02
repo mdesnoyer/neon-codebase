@@ -56,8 +56,6 @@ class SQSManager(object):
     def __init__(self, sqs_name):
         # should connect with server HMAC credentials
         conn = boto.connect_sqs()
-                            #'AKIAJ5G2RZ6BDNBZ2VBA',
-                            #'d9Q9abhaUh625uXpSrKElvQ/DrbKsCUAYAPaeVLU')
 
         # create_queue method will create (and return) the requested queue if it
         # does not exist or will return the existing queue if it does.
