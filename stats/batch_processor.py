@@ -269,6 +269,15 @@ def build_impala_tables(input_path, cluster, timeout=None):
                        % thread.event)
             raise ImpalaError("Error building impala table")
 
+    _log.info('Updating table table_build_times')
+    impala_conn = impala.dbapi.connect(host=cluster.master_ip,
+                                       port=options.impala_port)
+    cursor = impala_conn.cursor()
+    cursor.execute('create table if not exists table_build_times '
+                   '(done_time timestamp) stored as PARQUET')
+    cursor.execute("insert into table_build_times (done_time) values ('%s')" %
+                   datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+
     _log.info('Finished building Impala tables')
     return True
 
