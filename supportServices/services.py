@@ -268,9 +268,15 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 video_state = None
                 #NOTE: Video ids here are external video ids
                 ids = self.get_argument('video_ids', None)
-                video_ids = None if ids is None else ids.split(',') 
+                video_ids = None if ids is None else ids.split(',')
+                
                 if len(uri_parts) == 9:
                     video_state = uri_parts[-1].split('?')[0] 
+                    if video_state not in ["processing", "recommended",
+                            "published"]:
+                            # Check if param after videos is a videoId 
+                            video_ids = [uri_parts[-1]]
+                            video_state = None
 
                 if itype  == "neon_integrations":
                     self.get_video_status("neon", i_id, video_ids, video_state)
@@ -730,11 +736,21 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             _log.error("key=get_video_status_%s msg=account not found" %i_type)
             self.send_json_response("%s account not found"%i_type, 400)
             return
-       
+
+        # single video state, if video not found return an error
+        if vids is not None and len(vids) == 1:
+            i_vid = neondata.InternalVideoID.generate(self.api_key, vids[0])
+            v = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)   
+            if v is None:
+                self.send_json_response("Invalid request state or video not\
+                        found", 400)
+                return
+
         #return all videos in the account
         if vids is None:
             vids = platform_account.get_videos()
-       
+      
+
         # No videos in the account
         if not vids:
             vstatus_response = GetVideoStatusResponse(
@@ -919,7 +935,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         else:
             s_vresult = sorted(vresult, key=lambda k: k['publish_date'], reverse=True)
 
-        
         vstatus_response = GetVideoStatusResponse(
                         s_vresult, total_count, page_no, page_size,
                         c_processing, c_recommended, c_published)
@@ -1757,12 +1772,20 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         result = vmdata.add_custom_thumbnail(t_url)
         
         if result:
-            _log.info("key=update_video_brightcove" 
-                        " msg=thumbnail updated for video=%s tid=%s"\
-                        %(p_vid, result))
-            data = ''
-            self.send_json_response(data, 202)
-            return
+            # save the video data
+            vm_save = yield tornado.gen.Task(vmdata.save)
+            if vm_save:
+                _log.info("key=update_video_brightcove" 
+                            " msg=thumbnail updated for video=%s tid=%s"\
+                            %(p_vid, result))
+                data = ''
+                self.send_json_response(data, 202)
+                return
+            else:
+                data = '{"error": "internal error"}'
+                self.send_json_response(data, 500)
+                return
+            
         else:
             data = '{"error": "internal error"}'
             self.send_json_response(data, 500)

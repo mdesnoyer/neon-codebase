@@ -2543,7 +2543,7 @@ class VideoMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def download_and_add_thumbnail(self, image_url, keyname,
-                                    s3url, ttype, rank=1):
+                                    s3url, ttype, rank=1, cdn_metadata=None):
         '''
         Download the image and save its metadata. Used to save thumbnail
         of custom type or previous thumbnail given in the Neon API
@@ -2564,8 +2564,15 @@ class VideoMetadata(StoredObject):
             imgdata = response.body
             image = Image.open(StringIO(imgdata))
             tdata = self.save_thumbnail_to_s3_and_store_metadata(image, score,
-                                                keyname, s3url, ttype, rank)
-            raise tornado.gen.Return(tdata)
+                                                keyname, s3url, ttype, rank,
+                                                cdn_metadata=cdn_metadata)
+            tid_save = yield tornado.gen.Task(tdata.save)
+            if tid_save:
+                raise tornado.gen.Return(tdata)
+            else:
+                _log.error("failed to save thumbnail %s" % tdata.key)
+                raise tornado.gen.Return(None)
+
         else:
             _log.error("failed to download the image")
         raise tornado.gen.Return(None)
@@ -2578,8 +2585,11 @@ class VideoMetadata(StoredObject):
         fname = "custom%s.jpeg" % int(time.time())
         keyname = "%s/%s/%s" % (self.get_account_id(), self.job_id, fname)  
         s3url = "https://%s.s3.amazonaws.com/%s" % (options.thumbnailBucket, keyname) 
+        np = NeonPlatform.get_account(self.get_account_id())
+        cdn_metadata = np.cdn_metadata
         ttype = ThumbnailType.CUSTOMUPLOAD
-        return self.download_and_add_thumbnail(image_url, keyname, s3url, ttype)
+        return self.download_and_add_thumbnail(image_url, keyname, s3url, ttype,
+                cdn_metadata=cdn_metadata)
 
     @classmethod
     def get_video_request(cls, internal_video_id, callback=None):

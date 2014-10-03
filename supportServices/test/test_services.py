@@ -1126,7 +1126,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
                 %(self.a_id, "0", page_no, page_size))
         resp = self.get_request(url, self.api_key)
         self.assertEqual(resp.code, 400)
-   
+
     def test_video_response_object(self):
         pass
     
@@ -1295,6 +1295,20 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         response = self.put_request(url, vals, self.api_key, jsonheader=True)
         self.assertEqual(response.code, 202) 
 
+        # Get all thumbnails, check custom_upload & verify in DB
+        # Verify Thumbnail in videometadata obj
+        i_vid = self.api_key + "_" + vid
+        vmdata = neondata.VideoMetadata.get(i_vid)
+        thumbs = neondata.ThumbnailMetadata.get_many(vmdata.thumbnail_ids)
+        c_thumb = None
+        for thumb in thumbs:
+            if thumb.type == "customupload":
+                c_thumb = thumb
+        self.assertIsNotNone(c_thumb)
+        
+        s_url = neondata.ThumbnailServingURLs.get(c_thumb.key)
+        self.assertIsNotNone(s_url)
+
     def test_disable_thumbnail(self):
         '''
         Test disable thumbnail
@@ -1346,6 +1360,23 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(response.code, 400)
         err_msg = '{"error": "invalid data type or not boolean"}'
         self.assertEqual(response.body, err_msg)
+    
+    def test_get_video(self):
+        '''
+        Get Video via videos/:video_id endpoint
+        '''
+
+        self._setup_initial_brightcove_state()
+        vids = self._get_videos()
+        vid  = vids[0]
+        job_id = self.job_ids[0]
+        tids = self._get_thumbnails(vid)
+        url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
+                    "/%s/videos/%s" %(self.a_id, self.b_id, vid))
+        response = self.get_request(url, self.api_key)
+        self.assertEqual(response.code, 200)
+        resp = json.loads(response.body)
+        self.assertEqual(resp['items'][0]['video_id'], vid)
 
 ##### OOYALA PLATFORM TEST ######
 
