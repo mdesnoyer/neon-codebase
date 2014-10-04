@@ -1000,6 +1000,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
              'cts' : '2345623',
              'tids' : 'acct1_vid2_tid1'}))
         self.assertEqual(response.code, 400)
+        self.assertRegexpMatches(response.body, 'Invalid event: abc')
 
     def test_caseinsentive_tracker_type(self):
         response = self.fetch('/v2?%s' % urllib.urlencode(
@@ -1024,29 +1025,33 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
              'cts' : '2345623',
              'tids' : 'acct1_vid2_tid1 56.3 48'}))
         self.assertEqual(response.code, 400)
+        self.assertRegexpMatches(response.body, 'Invalid ttype monkeyland')
 
     def test_invalid_tid_tuples(self):
         response = self.fetch('/v2?%s' % urllib.urlencode(
             {'a' : 'il',
              'pageid' : 'pageid123',
              'tai' : 'tai123',
-             'ttype' : 'monkeyland',
+             'ttype' : 'brightcove',
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
              'tids' : 'acct1_vid2_tid1 45'}))
         self.assertEqual(response.code, 400)
+        self.assertRegexpMatches(response.body, 'Missing argument tuple')
 
         response = self.fetch('/v2?%s' % urllib.urlencode(
             {'a' : 'il',
              'pageid' : 'pageid123',
              'tai' : 'tai123',
-             'ttype' : 'monkeyland',
+             'ttype' : 'brightcove',
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
              'tids' : 'acct1_vid2_tid1 width 98'}))
         self.assertEqual(response.code, 400)
+        self.assertRegexpMatches(response.body,
+                                 'height and width must be ints')
 
     @patch('clickTracker.trackserver.socket.create_connection')    
     def test_heartbeat_good_flume_connection(self, sockmock):
@@ -1242,6 +1247,29 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               }))
 
         self.assertEqual(response.code, 400)
+        self.assertRegexpMatches(response.body,
+                                 'Missing argument prcnt')
+
+    def test_missing_click_arguments(self):
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            { 'a' : 'ic',
+              'pageid' : 'pageid123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'tid' : 'tid1',
+              'x' : '56',
+              'y' : '23',
+              'wx' : '78',
+              'wy' : '34',
+              'cx' : '6',
+              'cy' : '8'
+              }))
+
+        self.assertEqual(response.code, 400)
+        self.assertRegexpMatches(response.body,
+                                 'Missing argument tai')
 
     def test_utf8_header(self):
         # TODO(mdesnoyer): Make this test cleaner
