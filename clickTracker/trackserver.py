@@ -125,8 +125,9 @@ class BaseTrackerDataV2(object):
             self.trackerType = \
               BaseTrackerDataV2.tracker_type_map[request.get_argument('ttype').lower()]
         except KeyError:
-            raise tornado.web.HTTPError(
-                400, "Invalid ttype %s" % request.get_argument('ttype'))
+            msg = "Invalid ttype %s" % request.get_argument('ttype')
+            _log.error(msg)
+            raise tornado.web.HTTPError(400, reason=msg)
         
         self.pageURL = request.get_argument('page') # page_url
         self.refURL = request.get_argument('ref', None) # referral_url
@@ -320,8 +321,9 @@ class BaseTrackerDataV2(object):
             yield event.fill_thumbnail_ids(request_handler)
             raise tornado.gen.Return(event)
         except KeyError as e:
-            _log.error('Invalid event: %s' % action)
-            raise tornado.web.HTTPError(400)
+            msg = 'Invalid event: %s' % action
+            _log.error(msg)
+            raise tornado.web.HTTPError(400, reason=msg)
     
 class ImagesVisible(BaseTrackerDataV2):
     '''An event specifying that the image became visible.'''
@@ -367,9 +369,9 @@ class ImagesLoaded(BaseTrackerDataV2):
             for tup in arg_list.split(','):
                 elems = tup.split(' ') # '+' delimiter converts to ' '
                 if len(elems) != 3:
-                    raise tornado.web.MissingArgumentError(
-                        "a tuple of (tid,width,height) is needed but found: %s"
-                        % elems)
+                    msg = ("tuple of (tid,width,height) is needed but "
+                           "found: %s" % elems)
+                    raise tornado.web.MissingArgumentError(msg)
                 if has_tids:
                     tids.append(elems[0])
                 else:
@@ -379,7 +381,7 @@ class ImagesLoaded(BaseTrackerDataV2):
                     heights.append(int(float(elems[2])))
                 except ValueError:
                     raise tornado.web.MissingArgumentError(
-                        'Height and width must be ints. Saw: %s' % elems[1:])
+                        'height and width must be ints. Saw: %s' % elems[1:])
 
             if not has_tids:
                 tids = yield self._lookup_thumbnail_ids_from_isp(vids)
@@ -626,7 +628,11 @@ class LogLines(TrackerDataHandler):
             except tornado.web.MissingArgumentError as e:
                 _log.error('Invalid request: %s' % self.request.uri)
                 statemon.state.increment('invalid_messages')
-                raise
+                if e.reason is None:
+                    e.reason = e.log_message
+                else:
+                    e.reason = '%s: %s' % (e.reason, e.log_message)
+                raise e
             except tornado.web.HTTPError as e:
                 _log.error('Error processing request %s: %s' % (
                     self.request.uri, e))

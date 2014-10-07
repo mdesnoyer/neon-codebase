@@ -60,7 +60,7 @@ record VideoClick {
   boolean isVideoClick = true; // Used so that the event isn't confused in the union.
 
   string videoId;  // External video id
-  string playerId;
+  union{null, string} playerId;
   union{null, string} thumbnailId;
 }
 
