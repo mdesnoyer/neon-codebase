@@ -106,8 +106,20 @@ def process_neon_api_requests(api_requests, api_key, i_id, t_type):
         retid = neondata.ThumbnailMetadata.save_all(thumbnails)
         returl = neondata.ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
 
+        # standard mock response
+        response_body = {}
+        response_body["job_id"] = job_id 
+        response_body["video_id"] = video_id 
+        response_body["data"] = [] 
+        response_body["thumbnails"] = [] 
+        response_body["timestamp"] = str(time.time())
+        response_body["serving_url"] =\
+            "http://i1.neon-images.com/v1/client/%s/neonvid_%s" % ("tai", video_id)
+        response_body["error"] = "" 
+
         #Update request state to FINISHED
-        api_request.state = neondata.RequestState.FINISHED 
+        api_request.state = neondata.RequestState.FINISHED
+        api_request.response = response_body
         api_request.save()
         tids = []
         for thumb in thumbnails:
@@ -236,7 +248,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         tids = vmdata.thumbnail_ids
         return tids
 
-    def _process_neon_api_requests(self, api_requests):
+    def _process_brightcove_neon_api_requests(self, api_requests):
         self.images, self.thumbnail_url_to_image = process_neon_api_requests(
             api_requests,self.api_key, self.b_id, 'brightcove')
 
@@ -500,7 +512,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertTrue(strategy.only_exp_if_chosen)
         
         reqs = self._create_neon_api_requests()
-        self._process_neon_api_requests(reqs)
+        self._process_brightcove_neon_api_requests(reqs)
 
 
     ################################################################
@@ -623,7 +635,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         
             #auto publish test
             reqs = self._create_neon_api_requests()
-            self._process_neon_api_requests(reqs)
+            self._process_brightcove_neon_api_requests(reqs)
             self._check_video_status_brightcove(
                 vstatus=neondata.RequestState.FINISHED)
         
@@ -664,7 +676,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         
             #process requests
             reqs = self._create_neon_api_requests()
-            self._process_neon_api_requests(reqs)
+            self._process_brightcove_neon_api_requests(reqs)
             
             videos = []
             vitems = json.loads(bcove_responses.find_all_videos_response)
@@ -883,6 +895,14 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         items = json.loads(resp.body)['items']
         result_vids = [x['video_id'] for x in items]
         self.assertItemsEqual(result_vids, test_video_ids)
+        
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
+                '%s/videos/?video_ids=%s'
+                %(self.a_id, self.b_id, video_ids))
+        resp = self.get_request(url, self.api_key)
+        items = json.loads(resp.body)['items']
+        result_vids = [x['video_id'] for x in items]
+        self.assertItemsEqual(result_vids, test_video_ids)
     
     def test_invalid_model_scores(self):
         ''' test filtering of invalid model scores like -inf, nan '''
@@ -1090,7 +1110,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         nplatform.save()
         random.seed(1123)
 
-        self._process_neon_api_requests(api_requests[:-1])
+        self._process_brightcove_neon_api_requests(api_requests[:-1])
 
         page_no = 0
         page_size = 2
@@ -1128,9 +1148,16 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(resp.code, 400)
 
     def test_video_response_object(self):
+        '''
+        Test expected fields of a video response object
+        '''
         pass
     
     def test_winner_thumbnail_in_video_response(self):
+        '''
+        Test winner thumbnail, after A/B test is complete
+        '''
+
         self.api_key = self.create_neon_account()
         nplatform = neondata.NeonPlatform.get_account(self.api_key)
         vid = "testvideo1"
@@ -1147,7 +1174,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         nplatform.add_video(vid, job_id)
 
         nplatform.save()
-        self._process_neon_api_requests([api_request])
+        self._process_brightcove_neon_api_requests([api_request])
         
         i_vid = neondata.InternalVideoID.generate(self.api_key, vid) 
         TMD = neondata.ThumbnailMetadata
@@ -1603,7 +1630,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         #create feed request
         oo_account.check_feed_and_create_requests()
   
-    def _process_neon_api_requests(self):
+    def _process_ooyala_neon_api_requests(self):
         '''
         Mock process the neon api requests
         '''
@@ -1655,7 +1682,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         ''' test pagination of ooyala integration '''
 
         self._create_request_from_feed()
-        self._process_neon_api_requests()
+        self._process_ooyala_neon_api_requests()
 
         #get videos in pages
         page_no = 0
@@ -1683,7 +1710,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         '''
 
         self._create_request_from_feed()
-        self._process_neon_api_requests()
+        self._process_ooyala_neon_api_requests()
         
         oo_account = neondata.OoyalaPlatform.get_account(self.api_key,
                                                          self.i_id)
@@ -1704,7 +1731,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         '''
             
         self._create_request_from_feed()
-        self._process_neon_api_requests()
+        self._process_ooyala_neon_api_requests()
         url = self.get_url('/api/v1/accounts/%s/ooyala_integrations/%s' \
                             %(self.a_id, self.i_id))
         vals = {'oo_secret_key' : 'sec', 'oo_api_key': 'okey', 
