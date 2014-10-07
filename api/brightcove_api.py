@@ -416,6 +416,10 @@ class BrightcoveApi(object):
             f_width = rend["frameWidth"]
             url = rend["url"]
             video_urls[f_width] = url 
+       
+        # no renditions
+        if len(video_urls.keys()) < 1:
+            return d_url
         
         if frame_width:
             if video_urls.has_key(frame_width):
@@ -774,8 +778,9 @@ class BrightcoveApi(object):
             
         resp = tornado.escape.json_decode(response.body)
         still = resp['videoStillURL']
+        video_url = self.get_video_url_to_download(resp)
         response = self.format_neon_api_request(resp['id'],
-                                                resp['FLVURL'], 
+                                                video_url, 
                                                 still, 
                                                 request_type='topn', 
                                                 i_id=i_id,

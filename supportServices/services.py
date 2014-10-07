@@ -28,6 +28,7 @@ import tornado.gen
 import tornado.httpclient
 import traceback
 import utils.neon
+import utils.logs
 
 from StringIO import StringIO
 from supportServices import neondata
@@ -269,14 +270,20 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 #NOTE: Video ids here are external video ids
                 ids = self.get_argument('video_ids', None)
                 video_ids = None if ids is None else ids.split(',')
-                
+               
+                #NOTE: Clean up the parsing 
                 if len(uri_parts) == 9:
-                    video_state = uri_parts[-1].split('?')[0] 
+                    video_state = uri_parts[-1].split('?')[0]
                     if video_state not in ["processing", "recommended",
                             "published"]:
-                            # Check if param after videos is a videoId 
-                            video_ids = [uri_parts[-1]]
-                            video_state = None
+                            
+                            # Check if there was a "/" 
+                            if len(video_state) < 2: 
+                                vide_state = None
+                            else:
+                                # Check if param after videos is a videoId 
+                                video_ids = [uri_parts[-1]]
+                                video_state = None
 
                 if itype  == "neon_integrations":
                     self.get_video_status("neon", i_id, video_ids, video_state)
@@ -806,6 +813,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             elif request.state in failed_states:
                 status = "failed" 
                 thumbs = None
+                f_videos.append(vid)
             else:
                 #Jobs have finished
                 #append to completed_videos 
@@ -830,6 +838,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                               pub_date,
                               0, #current tid,add fake tid
                               thumbs)
+
+            # Add Serving URL if present
+            try:
+                vr.serving_url = request.response['serving_url']
+            except KeyError, e:
+                pass
+
             result[vid] = vr
          
         #2b Filter videos based on state as requested

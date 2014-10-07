@@ -43,6 +43,7 @@ import time
 import api.brightcove_api #coz of cyclic import 
 import api.youtube_api
 import utils.http
+import utils.logs
 import utils.neon
 import utils.sync
 import utils.s3
@@ -2666,7 +2667,8 @@ class InMemoryCache(object):
 class VideoResponse(object):
     ''' VideoResponse object that contains list of thumbs for a video '''
     def __init__(self, vid, status, i_type, i_id, title, duration,
-            pub_date, cur_tid, thumbs, abtest=True, winner_thumbnail=None):
+            pub_date, cur_tid, thumbs, abtest=True, winner_thumbnail=None,
+            serving_url=None):
         self.video_id = vid
         self.status = status
         self.integration_type = i_type
@@ -2679,7 +2681,8 @@ class VideoResponse(object):
         self.thumbnails = thumbs if thumbs else [] 
         self.abtest = abtest
         self.winner_thumbnail = winner_thumbnail
-    
+        self.serving_url = serving_url
+
     def to_dict(self):
         return self.__dict__
 
