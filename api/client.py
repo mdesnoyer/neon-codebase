@@ -435,7 +435,7 @@ class VideoProcessor(object):
                 #Now grab the frame
                 read_sucess, image = mov.read()
                 if read_sucess:
-                    return utils.pycvutils.to_pil(image[:,:,::-1])
+                    return utils.pycvutils.to_pil(image)
             _log.error('key=get_center_frame '
                         'msg=Error reading middle frame of video %s'
                         % video_file)
