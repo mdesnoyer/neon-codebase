@@ -2572,7 +2572,7 @@ class VideoMetadata(StoredObject):
                 raise tornado.gen.Return(tdata)
             else:
                 _log.error("failed to save thumbnail %s" % tdata.key)
-                raise tornado.gen.Return(None)
+                raise tornado.gen.Return(False)
 
         else:
             _log.error("failed to download the image")

@@ -36,6 +36,9 @@ from utils.inputsanitizer import InputSanitizer
 from utils import statemon
 import utils.sync
 from utils.options import define, options
+
+define("thumbnailBucket", default="host-thumbnails", type=str,
+        help="S3 bucket to Host thumbnails ")
 define("port", default=8083, help="run on the given port", type=int)
 define("local", default=0, help="call local service", type=int)
 define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
@@ -1780,12 +1783,30 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         # TODO: should we handle multiple thumb uploads ?
         t_url = thumbs[0]["urls"][0]
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
+       
+        # Configure the upload of a custom thumbnail
+        fname = "custom%s.jpeg" % int(time.time())
+        keyname = "%s/%s/%s" % (vmdata.get_account_id(), vmdata.job_id, fname)
+        s3url = "https://%s.s3.amazonaws.com/%s" % ("host-thumbnails", keyname)
+        np = yield tornado.gen.Task(neondata.NeonPlatform.get_account, vmdata.get_account_id())
+        if not np:
+            data = '{"error": "internal error"}'
+            self.send_json_response(data, 500)
+            return
         
-        # TODO(Sunil): make async; currently test fails with async error on using
-        # optional sync
+        cdn_metadata = np.cdn_metadata
+        ttype = neondata.ThumbnailType.CUSTOMUPLOAD
 
-        result = vmdata.add_custom_thumbnail(t_url)
+        # upload & add thumb to VideoMetadata
+        result = yield tornado.gen.Task(vmdata.download_and_add_thumbnail, 
+                        t_url, keyname, s3url, ttype,
+                        cdn_metadata=cdn_metadata)
         
+        if result is None:
+            data = '{"error": "failed to download image"}'
+            self.send_json_response(data, 400)
+            return
+
         if result:
             # save the video data
             vm_save = yield tornado.gen.Task(vmdata.save)

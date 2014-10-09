@@ -1126,6 +1126,10 @@ class SmokeTesting(test_utils.neontest.TestCase):
         lines = bucket.get_key('mastermind').get_contents_as_string().split('\n')
         self.assertEqual(len(lines), 4)
         
+        # Check that the sqsmgr scheduler gets called
+        self.assertEqual(self.directive_publisher.sqsmgr.schedule_all_callbacks.call_args[0][0],
+                       [vid.key])
+        
 if __name__ == '__main__':
     utils.neon.InitNeonTest()
     unittest.main()

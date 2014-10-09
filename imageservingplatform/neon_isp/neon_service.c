@@ -760,7 +760,7 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
 
     ngx_str_t base_url = ngx_string("/v1/getthumbnailid/");
     ngx_str_t params_key = ngx_string("params");
-    ngx_str_t video_ids; 
+    ngx_str_t video_ids = ngx_string(""); 
     ngx_str_t bucket_id = ngx_string(""); 
     ngx_str_t neonglobaluserid;
     NEON_BOOLEAN abtest_ready = NEON_FALSE;
@@ -830,6 +830,13 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
 
     char * context = 0;
     const char s[] = ", \n";
+    
+    // If video_ids haven't been parsed 
+    if (video_ids.len <= 0){
+        neon_service_no_content(request, chain);
+        return NEON_GETTHUMB_API_FAIL;
+    }
+
     char *vids = strndup((char *)video_ids.data, video_ids.len);
     char *vtoken = strtok_r(vids, s, &context);
     while(vtoken != NULL){

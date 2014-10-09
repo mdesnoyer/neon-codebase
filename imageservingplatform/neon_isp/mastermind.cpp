@@ -19,8 +19,8 @@ const std::string Mastermind::typePublisher      = "pub";
 
 char Mastermind::lineBuffer[MaxLineBufferSize];
 
-// Formatter for Cloudinary Image URLs
-const char * cloudinary_image_format = "http://res.cloudinary.com/neon-labs/image/upload/w_%d,h_%d/neontn%s_w%d_h%d.jpg";
+// Formatter for Cloudinary Image URLs (Cloudinary insert .jpg after upload)
+const char * cloudinary_image_format = "http://res.cloudinary.com/neon-labs/image/upload/w_%d,h_%d/neontn%s_w0_h0.jpg.jpg";
 
 
 Mastermind::Mastermind()
@@ -366,7 +366,7 @@ Mastermind::GetImageUrl(const char * account_id,
     if (image == 0){
         char buffer[1024]; // sufficiently large buffer for the URL
         const char * tid = fraction->GetThumbnailID();
-        sprintf(buffer, cloudinary_image_format, width, height, tid, width, height);
+        sprintf(buffer, cloudinary_image_format, width, height, tid);
         const char * url = strdup(buffer);
         size = strlen(url);
         return url;
