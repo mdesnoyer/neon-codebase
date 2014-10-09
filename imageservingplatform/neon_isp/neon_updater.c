@@ -12,7 +12,7 @@
 #include <signal.h>
 #include <pthread.h>
 #include "neon_updater.h"
-#include "neon_mastermind.h"
+#include "neon_mastermind.h" 
 #include "neon_fetch.h"
 #include "neon_utils.h"
 #include "neon_stats.h"
@@ -153,8 +153,16 @@ neon_runloop(void * arg){
              *  validate meta data of new file 
              */
             
-           	// TODO(Sunil) : Spawn a process to validate the Expiry 
-           	if (neon_get_expiry(mastermind_filepath) < time(0)){
+           	// TODO(Sunil) : Spawn a process to validate the Expiry
+            time_t new_mastermind_expiry = neon_get_expiry(mastermind_filepath);
+           	if (new_mastermind_expiry < time(0)){
+                
+                // Check if the expiry is greater than the current expiry, if
+                // Yes Load IT !
+                
+                //if(neon_mastermind_is_expiry_greater_than_current(new_mastermind_expiry)){
+                //    neon_log_error("mastermind file has expired, But loading new one ");
+                //} 
                 neon_log_error("mastermind file has expired, hence not loading it");
                 neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
                 neon_sleep(sleep_time);

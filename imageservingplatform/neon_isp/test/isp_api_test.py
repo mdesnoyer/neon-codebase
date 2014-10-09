@@ -272,6 +272,9 @@ class TestImageServingPlatformAPI(unittest.TestCase):
 
         except urllib2.URLError, e:
             pass
+        
+        except BadStatusLine, e:
+            pass
 
     def server_api_request(self, pub_id, vid, width, height, ip=None):
         '''
