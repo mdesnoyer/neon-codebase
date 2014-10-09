@@ -362,14 +362,24 @@ Mastermind::GetImageUrl(const char * account_id,
 
     const ScaledImage * image = fraction->GetScaledImage(height, width);
 
-    // Didn't get a "pre-sized" image so send a cloudinary URL
+    // Didn't get a "pre-sized" image so send default URL 
     if (image == 0){
-        char buffer[1024]; // sufficiently large buffer for the URL
-        const char * tid = fraction->GetThumbnailID();
-        sprintf(buffer, cloudinary_image_format, width, height, tid);
-        const char * url = strdup(buffer);
+
+        const char * url = fraction->GetDefaultURL();
         size = strlen(url);
         return url;
+
+        // NOTE: IGN Doesn't want to use cloudinary, hence we'll return a
+        // default URL for non-standard sizes
+        // re-enable when needed
+
+        //char buffer[1024]; // sufficiently large buffer for the URL
+        //const char * tid = fraction->GetThumbnailID();
+        //sprintf(buffer, cloudinary_image_format, width, height, tid);
+        //const char * url = strdup(buffer);
+        //size = strlen(url);
+        //return url;
+
     }
 
     return image->GetUrl(size);
