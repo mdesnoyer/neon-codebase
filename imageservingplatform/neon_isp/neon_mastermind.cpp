@@ -243,3 +243,10 @@ neon_mastermind_healthcheck()
     return 2;
 }
 
+NEON_BOOLEAN 
+neon_mastermind_is_expiry_greater_than_current(time_t exp){
+    if(exp >= mastermind_current->GetExpiry())
+        return NEON_TRUE;
+    else
+        return NEON_FALSE;
+}

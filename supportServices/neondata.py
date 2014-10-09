@@ -1033,6 +1033,9 @@ class CDNHostingMetadata(object):
         ''' to json '''
         return json.dumps(self, default=lambda o: o.__dict__) 
     
+    def to_dict(self):
+        return self.__dict__
+
     @classmethod
     def save_metadata(cls, api_key, i_id, hosting_directive):
         '''
@@ -1044,8 +1047,12 @@ class CDNHostingMetadata(object):
             accnt = NeonPlatform.get_account(api_key)
         else:
             raise Exception("To be implemented")
-        accnt.cdn_metadata = hosting_directive
-        return accnt.save()
+        # NOTE: Its safer to use a dict than double encoded json   
+        if isinstance(hosting_directive, dict):
+            accnt.cdn_metadata = hosting_directive
+            return accnt.save()
+        else:
+            raise Exception("hosting_directive should be a dictionary")
 
 class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
@@ -1247,14 +1254,24 @@ class NeonPlatform(AbstractPlatform):
         for key in data_dict.keys():
             obj.__dict__[key] = data_dict[key]
         
-        # create the cdnhostingmetadata object
-        if obj.cdn_metadata is not None:
-            cdn_dict = json.loads(obj.cdn_metadata)
-            cdn_obj = CDNHostingMetadata("", "")
-            for key in cdn_dict.keys():
-                cdn_obj.__dict__[key] = cdn_dict[key]
-            obj.cdn_metadata = cdn_obj
+        try:
+            # create the cdnhostingmetadata object
+            if obj.cdn_metadata is not None:
+                if isinstance(obj.cdn_metadata, dict):
+                    cdn_dict = obj.cdn_metadata
+                else:
+                    _log.error("The object changed externally for %s" %
+                            obj.neon_api_key)
+                    return None
 
+                cdn_obj = CDNHostingMetadata("", "")
+                for key in cdn_dict.keys():
+                    cdn_obj.__dict__[key] = cdn_dict[key]
+                obj.cdn_metadata = cdn_obj
+        except Exception, e:
+            #Catch any exception
+            _log.error("Error creating CDN Metadata Object %s" % e)
+            return
         return obj
     
     @classmethod

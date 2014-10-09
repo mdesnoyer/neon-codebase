@@ -117,8 +117,8 @@ Fraction::GetScaledImage(int height, int width) const{
 
     for(unsigned i=0; i < images.size(); i++){
         
-        if(ApproxEqual(images[i]->GetHeight(), height, 2) &&
-           ApproxEqual(images[i]->GetWidth(), width, 2))
+        if(ApproxEqual(images[i]->GetHeight(), height, 6) &&
+           ApproxEqual(images[i]->GetWidth(), width, 6))
             return images[i];
     }
     

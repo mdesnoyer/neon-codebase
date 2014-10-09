@@ -7,7 +7,6 @@
 #include <ngx_http.h>
 #include "neon_error_codes.h"
 
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -18,6 +17,11 @@ extern "C" {
  */
 NEON_BOOLEAN neon_mastermind_init();
 
+/*
+ * Check if expiry is greater than current mastermind
+ * */
+
+NEON_BOOLEAN neon_mastermind_is_expiry_greater_than_current(time_t);
 
 /*
  *  Parse new mastermind file into memory and make it current

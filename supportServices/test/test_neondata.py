@@ -407,7 +407,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         np.save()
         s3mdata = S3CDNHostingMetadata("a", "s", "b", ["p1", "p2"], "")
         ret = CDNHostingMetadata.save_metadata(na.neon_api_key, "0",
-                s3mdata.to_json())
+                s3mdata.to_dict())
         self.assertTrue(ret)
 
         accnt = NeonPlatform.get_account(na.neon_api_key)
@@ -415,6 +415,17 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         for key in s3mdata.__dict__.keys():
             self.assertEqual(s3mdata.__dict__[key],
                     accnt.cdn_metadata.__dict__[key])
+
+        # modify the account check if the object is modified such that it cant'
+        # be restored
+        accnt.abtest = True
+        accnt.add_video("v1", "j1")
+        accnt.cdn_metadata.access_key = "new_key"
+        accnt.save()
+        
+        accnt = NeonPlatform.get_account(na.neon_api_key)
+        self.assertIsNotNone(accnt)
+        self.assertEqual(accnt.cdn_metadata.access_key, "new_key")
 
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
@@ -749,7 +760,6 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         es.save()
         winner_tid = v0.get_winner_tid()     
         self.assertEqual(winner_tid, 't1')
-
 
 if __name__ == '__main__':
     unittest.main()
