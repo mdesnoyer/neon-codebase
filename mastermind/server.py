@@ -434,6 +434,7 @@ class DirectivePublisher(threading.Thread):
         self.activity_watcher = activity_watcher
 
         self.last_publish_time = datetime.datetime.utcnow()
+        self._update_time_since_publish()
 
         self.lock = threading.RLock()
         self._stopped = threading.Event()
@@ -482,9 +483,19 @@ class DirectivePublisher(threading.Thread):
         with self.lock:
             self.default_sizes = new_map
 
+    def _update_time_since_publish(self):
+        statemon.state.time_since_publish = (
+            datetime.datetime.utcnow() -
+            self.last_publish_time).total_seconds()
+
+        timer = threading.Timer(10.0, self._update_time_since_publish)
+        timer.daemon = True
+        timer.start()
+
     def _publish_directives(self):
         '''Publishes the directives to S3'''
         # Create the directives file
+        _log.info("Building directives file")
         curtime = datetime.datetime.utcnow()
         directive_file = tempfile.TemporaryFile()
         valid_length = options.expiry_buffer + options.publishing_period
@@ -532,21 +543,22 @@ class DirectivePublisher(threading.Thread):
         key.copy(bucket.name, options.directive_filename, encrypt_key=True,
                  preserve_acl=True)
 
-        statemon.state.time_since_publish = (
-            curtime - self.last_publish_time).total_seconds()
         self.last_publish_time = curtime
 
         # Dispatch the callbacks to the customer
+        _log.info("Running any necessary customer callbacks")
         self.sqsmgr.schedule_all_callbacks(self.video_ids)
 
     def _write_directives(self, stream):
         '''Write the current directives to the stream.'''
         # First write out the tracker id maps
+        _log.info("Writing tracker id maps")
         for tracker_id, account_id in self.tracker_id_map.iteritems():
             stream.write('\n' + json.dumps({'type': 'pub', 'pid': tracker_id,
                                             'aid': account_id}))
 
         # Now write the directives
+        _log.info("Writing directives")
         serving_urls_missing = 0
         for key, directive in self.mastermind.get_directives():
             account_id, video_id = key
