@@ -69,7 +69,7 @@ def calc_aggregate_ab_metrics(data):
     And Relative Risk approximations from:
     http://en.wikipedia.org/wiki/Relative_risk
 
-    This is the DerSimonian and Laird method
+    This is the DerSimonian and Laird method.
 
     Inputs:
     data - Matrix of ab data where each row corresponds to a video and is of
