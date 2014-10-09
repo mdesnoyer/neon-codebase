@@ -54,8 +54,6 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         # independently
         self.sqs_patcher = patch('utils.sqsmanager.CustomerCallbackManager')
         self.sqs_patcher.start().return_value = MagicMock()
-        #sqsmgr = MagicMock()
-        #sqsmgr.schedule_all_callbacks.return_value = True
         
         self.mastermind = mastermind.core.Mastermind()
         self.directive_publisher = mastermind.server.DirectivePublisher(
@@ -683,8 +681,6 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         # independently
         self.sqs_patcher = patch('utils.sqsmanager.CustomerCallbackManager')
         self.sqs_patcher.start().return_value = MagicMock()
-        #sqsmgr = MagicMock()
-        #sqsmgr.schedule_all_callbacks.return_value = True
 
         self.mastermind = mastermind.core.Mastermind()
         self.publisher = mastermind.server.DirectivePublisher(
@@ -1026,8 +1022,6 @@ class SmokeTesting(test_utils.neontest.TestCase):
         # independently
         self.sqs_patcher = patch('utils.sqsmanager.CustomerCallbackManager')
         self.sqs_patcher.start().return_value = MagicMock()
-        #sqsmgr = MagicMock()
-        #sqsmgr.schedule_all_callbacks.return_value = True
 
         self.mastermind = mastermind.core.Mastermind()
         self.directive_publisher = mastermind.server.DirectivePublisher(
