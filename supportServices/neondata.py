@@ -1037,19 +1037,19 @@ class CDNHostingMetadata(object):
         return self.__dict__
 
     @classmethod
-    def save_metadata(cls, api_key, i_id, hosting_directive):
+    def save_metadata(cls, api_key, i_id, hosting_metadata):
         '''
         Save the hosting directive in the platform account
 
-        @hosting_directive - json of the hosting directive object
+        @hosting_directive - dict of the hosting metadata object
         '''
         if i_id == "0":
             accnt = NeonPlatform.get_account(api_key)
         else:
             raise Exception("To be implemented")
         # NOTE: Its safer to use a dict than double encoded json   
-        if isinstance(hosting_directive, dict):
-            accnt.cdn_metadata = hosting_directive
+        if isinstance(hosting_metadata, dict):
+            accnt.cdn_metadata = hosting_metadata
             return accnt.save()
         else:
             raise Exception("hosting_directive should be a dictionary")

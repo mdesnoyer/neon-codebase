@@ -227,15 +227,3 @@ TEST_F(NeonMastermindTest, test_loading_expired_mastermind){
     
 }
 
-// Test loading an expired mastermind which has expiry greater than
-// current mastermind
-TEST_F(NeonMastermindTest,
-test_loading_expired_mastermind_greater_than_current){
-
-    string mastermind;
-    set_absolute_path("/mastermind.expired", &mastermind);
-    NEON_LOAD_ERROR ret = neon_mastermind_load(mastermind.c_str());
-    EXPECT_EQ(ret, NEON_LOAD_FAIL);
-    
-}
-

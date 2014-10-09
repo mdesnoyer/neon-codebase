@@ -160,13 +160,15 @@ neon_runloop(void * arg){
                 // Check if the expiry is greater than the current expiry, if
                 // Yes Load IT !
                 
-                //if(neon_mastermind_is_expiry_greater_than_current(new_mastermind_expiry)){
-                //    neon_log_error("mastermind file has expired, But loading new one ");
-                //} 
-                neon_log_error("mastermind file has expired, hence not loading it");
-                neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
-                neon_sleep(sleep_time);
-				continue;	
+                if(neon_mastermind_is_expiry_greater_than_current(new_mastermind_expiry) == NEON_TRUE){
+                    neon_log_error("mastermind file has expired, But loading new one since expiry is greater");
+                    neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
+                }else{ 
+                    neon_log_error("mastermind file has expired and older than current file being used, hence not loading it");
+                    neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
+                    neon_sleep(sleep_time);
+                    continue;
+                }
 			} 
             
             /*
