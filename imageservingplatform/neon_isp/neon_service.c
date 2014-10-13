@@ -43,7 +43,7 @@ neon_service_get_uri_token(const ngx_http_request_t *req,
         neon_stats[NGINX_OUT_OF_MEMORY] ++;
         return NULL;
     }
-    memset(uri, 0 , uri_size);
+    memset(uri, 0, uri_size);
     memcpy((char*)uri, (char*)(req->uri).data, (size_t)(req->uri).len);
     
     // move up in the uri when the first token shoud be

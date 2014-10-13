@@ -748,6 +748,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             return
 
         # single video state, if video not found return an error
+        # GET /api/v1/accounts/{account_id}/{integration_type}/{integration_id}/videos/{video_id}
         if vids is not None and len(vids) == 1:
             i_vid = neondata.InternalVideoID.generate(self.api_key, vids[0])
             v = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)   
@@ -759,7 +760,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         #return all videos in the account
         if vids is None:
             vids = platform_account.get_videos()
-      
 
         # No videos in the account
         if not vids:
@@ -781,10 +781,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 pass #job id not found
  
         #2 Get Job status
-        #jobs that have completed, used to reduce # of keys to fetch 
+        # jobs that have completed, used to reduce # of keys to fetch 
         completed_videos = [] 
 
-        #get all requests and populate video response object in advance
+        # Get all requests and populate video response object in advance
         requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_requests,
                     job_request_keys) 
         ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -818,14 +818,18 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 thumbs = None
                 f_videos.append(vid)
             else:
-                #Jobs have finished
-                #append to completed_videos 
-                #for backward compatibility with all videos api call 
+                # Jobs have finished
+                # append to completed_videos 
+                # for backward compatibility with all videos api call 
                 completed_videos.append(vid)
                 status = "finished"
                 thumbs = None
+                # TODO (Sunil) : NEW STATE
                 if request.state == neondata.RequestState.FINISHED:
                     r_videos.append(vid) #finshed processing
+                elif request.state == neondata.RequestState.SERVING:
+                    r_videos.append(vid) #finshed processing
+                    status = neondata.RequestState.SERVING
                 elif request.state == neondata.RequestState.ACTIVE:
                     a_videos.append(vid) #published /active 
 

@@ -34,7 +34,6 @@ import tornado.ioloop
 import utils.neon
 from utils.options import define, options
 import utils.ps
-import utils.sqsmanager
 from utils import statemon
 import zlib
 
@@ -428,7 +427,10 @@ class DirectivePublisher(threading.Thread):
         super(DirectivePublisher, self).__init__(name='DirectivePublisher')
         self.mastermind = mastermind
         self.tracker_id_map = tracker_id_map
-        self.video_ids = []
+        # Keep track of videos for which the directive has been published
+        # This map is used to keep track of video_ids for which serving urls
+        # state has been updated.
+        self.video_id_serving_map = {} # video_id => serving_state
         self.serving_urls = serving_urls
         self.default_sizes = default_sizes
         self.activity_watcher = activity_watcher
@@ -438,7 +440,6 @@ class DirectivePublisher(threading.Thread):
 
         self.lock = threading.RLock()
         self._stopped = threading.Event()
-        self.sqsmgr = utils.sqsmanager.CustomerCallbackManager()
 
         # For some reason, when testing on some machines, the patch
         # for the S3Connection doesn't work in a separate thread. So,
@@ -491,6 +492,30 @@ class DirectivePublisher(threading.Thread):
         timer = threading.Timer(10.0, self._update_time_since_publish)
         timer.daemon = True
         timer.start()
+    
+    def _add_video_id_to_serving_map(self, vid):
+        try:
+            self.video_id_serving_map[vid]
+        except KeyError, e:
+            # new video is inserted, by default its serving state
+            # should be false. i.e request state not updated
+            self.video_id_serving_map[vid] = False
+        
+    def _update_request_state_to_serving(self):
+        ''' update all the new video's serving state 
+            i.e ISP URLs are ready
+        '''
+        vids = []
+        for key, value in self.video_id_serving_map.iteritems():
+            if value == False:
+                vids.append(key)
+        requests = neondata.VideoMetadata.get_video_requests(vids)
+        for vid, request in zip(vids, requests):
+            # TODO(Sunil) : Bulk update
+            if request:
+                request.state = neondata.RequestState.SERVING
+                if request.save():
+                    self.video_id_serving_map[vid] = True
 
     def _publish_directives(self):
         '''Publishes the directives to S3'''
@@ -545,9 +570,9 @@ class DirectivePublisher(threading.Thread):
 
         self.last_publish_time = curtime
 
-        # Dispatch the callbacks to the customer
-        _log.info("Running any necessary customer callbacks")
-        self.sqsmgr.schedule_all_callbacks(self.video_ids)
+        # The serving directives for videos are active, update the request state
+        # for videos
+        self._update_request_state_to_serving()
 
     def _write_directives(self, stream):
         '''Write the current directives to the stream.'''
@@ -563,7 +588,7 @@ class DirectivePublisher(threading.Thread):
         for key, directive in self.mastermind.get_directives():
             account_id, video_id = key
             # keep track of video_ids in directive file
-            self.video_ids.append(video_id) 
+            self._add_video_id_to_serving_map(video_id)
             fractions = []
             missing_urls = False
             for thumb_id, frac in directive:

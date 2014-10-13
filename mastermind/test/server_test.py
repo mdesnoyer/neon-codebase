@@ -50,10 +50,6 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.redis_patcher = patch(
             'supportServices.neondata.blockingRedis.StrictRedis')
         self.redis_patcher.start()
-        # Mock the SQS Mgr, just return true on the call here, its unit tested
-        # independently
-        self.sqs_patcher = patch('utils.sqsmanager.CustomerCallbackManager')
-        self.sqs_patcher.start().return_value = MagicMock()
         
         self.mastermind = mastermind.core.Mastermind()
         self.directive_publisher = mastermind.server.DirectivePublisher(
@@ -66,7 +62,6 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
         self.redis_patcher.stop()
-        self.sqs_patcher.stop()
 
     def test_good_db_data(self, datamock):
         # Define platforms in the database
@@ -677,11 +672,6 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestDirectivePublisher, self).setUp()
         
-        # Mock the SQS Mgr, just return true on the call here, its unit tested
-        # independently
-        self.sqs_patcher = patch('utils.sqsmanager.CustomerCallbackManager')
-        self.sqs_patcher.start().return_value = MagicMock()
-
         self.mastermind = mastermind.core.Mastermind()
         self.publisher = mastermind.server.DirectivePublisher(
             self.mastermind)
@@ -707,7 +697,6 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         neondata.DBConnection.clear_singleton_instance()
         mastermind.server.tempfile = self.real_tempfile
         self.s3_patcher.stop()
-        self.sqs_patcher.stop()
         del self.mastermind
         super(TestDirectivePublisher, self).tearDown()
 
@@ -964,6 +953,53 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             },
             directives[('acct1', 'acct1_vid2')])
 
+    def test_update_request_state_to_serving(self):
+        '''
+        Test the update_request_state logic
+        '''
+        api_key = "apikey"
+        i_vids = []; request_keys = []
+        def add_video(i):    
+            jid = 'job%s' % i
+            vid = 'vid%s' % i 
+            i_vid = "%s_%s" % (api_key, vid)
+            nar = neondata.NeonApiRequest(jid, api_key, vid, 't', 't', 'r', 'h')
+            vm = neondata.VideoMetadata(i_vid, [], jid, 'v0.mp4')
+            nar.save()
+            vm.save()
+            request_keys.append(nar.key)
+            i_vids.append(i_vid)
+            self.publisher._add_video_id_to_serving_map(i_vid)
+
+        # Add videos
+        for i in range(5):
+            add_video(i)
+
+        # Check initial state in the map
+        for i_vid in i_vids:
+            self.assertFalse(self.publisher.video_id_serving_map[i_vid])
+
+        self.publisher._update_request_state_to_serving()
+        
+        def validate():
+            for i_vid in i_vids:
+                self.assertTrue(self.publisher.video_id_serving_map[i_vid])
+
+            reqs = neondata.NeonApiRequest.get_requests(request_keys)
+            for req in reqs:
+                self.assertEqual(req.state, neondata.RequestState.SERVING)
+        
+        validate()
+
+        # Second iteration of directive publisher with no video change
+        self.publisher._update_request_state_to_serving()
+        validate()
+
+        # Add a video
+        add_video('6')
+        self.publisher._update_request_state_to_serving()
+        validate()
+
 class SmokeTesting(test_utils.neontest.TestCase):
 
     def setUp(self):
@@ -1018,10 +1054,6 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.cluster_patcher.start()
 
         self.activity_watcher = utils.ps.ActivityWatcher()
-        # Mock the SQS Mgr, just return true on the call here, its unit tested
-        # independently
-        self.sqs_patcher = patch('utils.sqsmanager.CustomerCallbackManager')
-        self.sqs_patcher.start().return_value = MagicMock()
 
         self.mastermind = mastermind.core.Mastermind()
         self.directive_publisher = mastermind.server.DirectivePublisher(
@@ -1038,7 +1070,6 @@ class SmokeTesting(test_utils.neontest.TestCase):
         mastermind.server.tempfile = self.real_tempfile
         self.cluster_patcher.stop()
         self.s3_patcher.stop()
-        self.sqs_patcher.stop()
         self.sqlite_connect_patcher.stop()
         self.redis.stop()
         self.directive_publisher.stop()
@@ -1119,11 +1150,11 @@ class SmokeTesting(test_utils.neontest.TestCase):
         bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
         lines = bucket.get_key('mastermind').get_contents_as_string().split('\n')
         self.assertEqual(len(lines), 4)
-        
-        # Check that the sqsmgr scheduler gets called
-        self.assertEqual(self.directive_publisher.sqsmgr.schedule_all_callbacks.call_args[0][0],
-                       [vid.key])
-        
+    
+        # Check if the serving state of the video has changed
+        self.assertTrue(
+                self.directive_publisher.video_id_serving_map['key1_vid1'])
+
 if __name__ == '__main__':
     utils.neon.InitNeonTest()
     unittest.main()

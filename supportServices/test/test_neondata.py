@@ -779,5 +779,31 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         winner_tid = v0.get_winner_tid()     
         self.assertEqual(winner_tid, 't1')
 
+    def test_video_metadata_methods(self):
+        '''
+        Currently only Tests the video_requests methods 
+        '''
+        api_key = "TEST"
+        job_ids = []
+        i_vids = []
+        for i in range(10):
+            jid = 'job%s' % i
+            vid = 'vid%s' % i 
+            i_vid = "%s_%s" % (api_key, vid)
+            nar = NeonApiRequest(jid, api_key, vid, 't', 't', 'r', 'h')
+            vm = VideoMetadata(i_vid, [], jid, 'v0.mp4')
+            nar.save()
+            vm.save()
+            i_vids.append(i_vid)
+
+        reqs = VideoMetadata.get_video_requests(i_vids)
+        for jid, req in zip(job_ids, reqs):
+            self.assertEqual(jid, req.job_id)
+       
+        # Non existent video
+        i_vids = ["dummy_vid"]
+        reqs = VideoMetadata.get_video_requests(i_vids)
+        self.assertEqual(reqs, [None])
+
 if __name__ == '__main__':
     unittest.main()
