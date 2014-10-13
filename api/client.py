@@ -591,8 +591,8 @@ class VideoProcessor(object):
                                             ttype=neondata.ThumbnailType.NEON,
                                             cdn_metadata=cdn_metadata)
             self.thumbnails.extend(thumbnails)
-            #TODO(Sunil): Extract at least a single frame if every image is
-            #filtered
+            # TODO(Sunil): If no thumbs, should the state be indicated
+            # differently & not be serving enabled ?  
             if len(self.thumbnails) < 1:
                 statemon.state.increment('no_thumbs')
                 _log.error("no thumbnails extracted for video %s" % vmdata.key)
@@ -636,7 +636,7 @@ class VideoProcessor(object):
             
             if request_type in ["neon", "brightcove", "ooyala"]:
                 self.finalize_api_request(cr_request.body, request_type,
-                        reprocess)
+                        reprocess, vmdata)
 
                 # SAVE VMDATA atomically
                 def _modify_vmdata_atomically(video_obj):
@@ -656,7 +656,8 @@ class VideoProcessor(object):
         else:
             _log.error("request param not supported")
     
-    def finalize_api_request(self, result, request_type, reprocess=False):
+    def finalize_api_request(self, result, request_type, reprocess=False,
+                            vmdata=None):
         '''
         - host neon thumbs and also save bcove previous thumbnail in s3
         - Get Account settings and replace default thumbnail if enabled 
@@ -675,9 +676,13 @@ class VideoProcessor(object):
         api_request.response = tornado.escape.json_decode(result)
         api_request.publish_date = time.time() *1000.0 #ms
 
-        # TODO(Sunil): Save the previous thumbnail to VMData
+        # Save the previous thumbnail to VMData
         if hasattr(api_request, "previous_thumbnail"):
-            self.save_previous_thumbnail(api_request)
+            tdata = self.save_previous_thumbnail(api_request)
+            # If reprocess, save to the vmdata passed
+            if reprocess and vmdata is not None:
+                vmdata.thumbnail_ids.append(tdata.key)
+
         else:
             _log.info("key=finalize_api_request "
                        " msg=no previous thumbnail for %s %s" %(api_key, video_id))
@@ -892,6 +897,9 @@ class VideoProcessor(object):
         if request.url is None or request.url == "null":
             return True
 
+        '''
+        # NOTE: Disabling SQS Callback since IGN doesn't need it
+
         # Schedule the callback in SQS
         try:
             sqsmgr = utils.sqsmanager.CustomerCallbackManager()
@@ -905,6 +913,7 @@ class VideoProcessor(object):
             statemon.state.increment('customer_callback_schedule_error')
             _log.error("Callback schedule failed for video %s" % video_id)
             return False
+        '''
 
         return True
 

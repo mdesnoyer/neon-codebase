@@ -359,7 +359,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                 self.assertIsNone(
                     self.mastermind._calculate_current_serving_directive(
                         video_info))
-
+        print self.mastermind._calculate_current_serving_directive(video_info)
         # Now add a baseline and it should be shown all the time
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr', 'vid1',

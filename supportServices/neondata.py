@@ -1081,7 +1081,8 @@ class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
 class AbstractPlatform(object):
     ''' Abstract Platform/ Integration class '''
 
-    def __init__(self, abtest=False, enabled=True, serving_enabled=True):
+    def __init__(self, abtest=False, enabled=True, 
+                serving_enabled=True, serving_controller="imageplatform"):
         self.key = None 
         self.neon_api_key = ''
         self.videos = {} # External video id (Original Platform VID) => Job ID
@@ -1095,7 +1096,10 @@ class AbstractPlatform(object):
         self.cdn_metadata = None   
 
         # Will thumbnails be served by our system?
-        self.serving_enabled = serving_enabled 
+        self.serving_enabled = serving_enabled
+
+        # How is the A/B testing done, default to imageplatform
+        self.serving_controller = serving_controller 
 
     def generate_key(self, i_id):
         ''' generate db key '''
@@ -1139,7 +1143,7 @@ class AbstractPlatform(object):
 
         i_vids = []
         processed_state = [RequestState.FINISHED, RequestState.ACTIVE,
-                RequestState.REPROCESS]
+                RequestState.REPROCESS, RequestState.SERVING]
         request_keys = [generate_request_key(self.neon_api_key, v) for v in
                         self.videos.values()]
         api_requests = NeonApiRequest.get_requests(request_keys)
@@ -1884,8 +1888,9 @@ class RequestState(object):
     REQUEUED   = "requeued"
     FAILED     = "failed"
     FINISHED   = "finished"
+    SERVING    = "serving" # Thumbnails are ready to be served 
     INT_ERROR  = "internal_error"
-    ACTIVE     = "active" #thumbnail live 
+    ACTIVE     = "active" # Thumbnail pushed by editor to platform(ex. BC)
     REPROCESS  = "reprocess" #new state added to support clean reprocessing
 
 class NeonApiRequest(object):
@@ -2620,6 +2625,22 @@ class VideoMetadata(StoredObject):
             return nreq
         else:
             raise AttributeError("Callbacks not allowed")
+
+    @classmethod
+    def get_video_requests(cls, i_vids):
+        '''
+        Get video request objs given video_ids
+        '''
+        vms = VideoMetadata.get_many(i_vids)
+        request_keys = []
+        for vm in vms:
+            rkey = "request_nonexistent_key"
+            if vm:
+                api_key = vm.key.split('_')[0]
+                rkey = generate_request_key(api_key, vm.job_id)
+            request_keys.append(rkey)
+        return NeonApiRequest.get_requests(request_keys)
+
 
 class InMemoryCache(object):
 

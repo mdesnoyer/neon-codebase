@@ -57,6 +57,8 @@ from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 
 _log = logging.getLogger(__name__)
 
+TMD = neondata.ThumbnailMetadata
+
 class TestVideoClient(unittest.TestCase):
     ''' 
     Test Video Processing client
@@ -586,6 +588,7 @@ class TestVideoClient(unittest.TestCase):
         # Set State to reprocess
         api_request = neondata.NeonApiRequest.get(api_key, job_id)
         api_request.video_url = "http://reprocess_video_url"
+        api_request.previous_thumbnail = "http://previous_thumb" 
         api_request.state = neondata.RequestState.REPROCESS
         api_request.save()
 
@@ -600,13 +603,22 @@ class TestVideoClient(unittest.TestCase):
         vprocessor.model.choose_thumbnails.return_value = (ct_output, 9)
         vprocessor.thumbnails = []
         vprocessor.process_video(self.test_video_file2)
+        spr_mock = MagicMock()
+        vprocessor.save_previous_thumbnail = spr_mock
+        p_tid = TMD('p_tid',i_vid,[0],0,0,0,'custom_upload',0,0,True,False,0)
+        spr_mock.return_value = p_tid
+
         vprocessor.finalize_request() 
+        
+        # add p_tid to vp object to emulate behavior of spr method
+        vprocessor.thumbnails.append(p_tid) 
 
         vmdata = neondata.VideoMetadata.get(i_vid)
 
         # Verify Videometadata object
         tids = [t.key for t in vprocessor.thumbnails]
         print tids
+        print vmdata.thumbnail_ids
         self.assertEqual(vmdata.thumbnail_ids, tids)
         self.assertEqual(vmdata.frame_size, [1280, 720])
         self.assertEqual(vmdata.model_version, "reprocess_model")

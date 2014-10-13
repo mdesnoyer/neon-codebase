@@ -1147,6 +1147,18 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         resp = self.get_request(url, self.api_key)
         self.assertEqual(resp.code, 400)
 
+        # TODO (Sunil) More test cases on states
+        # get videos with serving state
+        api_requests[-1].state = neondata.RequestState.SERVING
+        api_requests[-1].save()
+
+        url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/videos'  %(self.a_id, "0"))
+        resp = self.get_request(url, self.api_key)
+        items = json.loads(resp.body)['items']
+        status = [item['status'] for item in items]
+        self.assertEqual(status.count("serving"), 1)
+
     def test_video_response_object(self):
         '''
         Test expected fields of a video response object

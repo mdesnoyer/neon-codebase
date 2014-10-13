@@ -24,6 +24,7 @@ import time
 from utils.options import define, options
 
 define('region', type=str, default="us-east-1", help='region to connect to')
+define('callback_sqs', type=str, default="neon-customer-callback", help='SQS Q')
 
 _log = logging.getLogger(__name__)
 

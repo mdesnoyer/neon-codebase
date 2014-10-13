@@ -65,6 +65,8 @@ neon_mastermind_load(const char * filepath){
     to_delete = mastermind_old;
     mastermind_old = 0;
     deallocate_mastermind(to_delete);
+   
+    // TODO(Sunil): More specific counters
     
     // parse
     try {

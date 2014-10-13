@@ -175,7 +175,7 @@ neon_runloop(void * arg){
              *  parse and process new mastermind file into memory
              */
             // process file into memory
-            if( neon_mastermind_load(mastermind_filepath) == NEON_LOAD_FAIL) {
+            if(neon_mastermind_load(mastermind_filepath) == NEON_LOAD_FAIL) {
                 
                 // the load function will log the specific error
                 neon_log_error("failed to load mastermind file");
