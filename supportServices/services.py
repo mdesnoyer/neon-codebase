@@ -824,13 +824,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 completed_videos.append(vid)
                 status = "finished"
                 thumbs = None
-                # TODO (Sunil) : NEW STATE
                 if request.state == neondata.RequestState.FINISHED:
                     r_videos.append(vid) #finshed processing
                 elif request.state == neondata.RequestState.SERVING:
                     r_videos.append(vid) #finshed processing
                     status = neondata.RequestState.SERVING
-                elif request.state == neondata.RequestState.ACTIVE:
+                elif request.state in [neondata.RequestState.ACTIVE, 
+                        neondata.RequestState.SERVING_AND_ACTIVE]:
                     a_videos.append(vid) #published /active 
 
             pub_date = None if not request.__dict__.has_key('publish_date') \
@@ -935,8 +935,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             if vres.status == "finished" and vres.current_thumbnail == 0:
                 vres.current_thumbnail = platform_thumb_id
 
-        #TODO
-        #5. Set Winner thumbnail
         #6. Set ab test state
         
         #convert to dict and count total counts for each state
@@ -948,6 +946,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             
         c_processing = len(p_videos)
         c_recommended = len(r_videos)
+        # Fix this number
         c_published = len(a_videos)
 
         if i_type == "brightcove":

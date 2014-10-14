@@ -513,7 +513,11 @@ class DirectivePublisher(threading.Thread):
         for vid, request in zip(vids, requests):
             # TODO(Sunil) : Bulk update
             if request:
-                request.state = neondata.RequestState.SERVING
+                if request.state in [neondata.RequestState.ACTIVE, 
+                        neondata.RequestState.SERVING_AND_ACTIVE]:
+                    request.state = neondata.RequestState.SERVING_AND_ACTIVE
+                else:
+                    request.state = neondata.RequestState.SERVING
                 if request.save():
                     self.video_id_serving_map[vid] = True
 

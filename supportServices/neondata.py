@@ -1142,8 +1142,10 @@ class AbstractPlatform(object):
         ''' return list of i_vids for an account which have been processed '''
 
         i_vids = []
-        processed_state = [RequestState.FINISHED, RequestState.ACTIVE,
-                RequestState.REPROCESS, RequestState.SERVING]
+        processed_state = [RequestState.FINISHED, 
+                            RequestState.ACTIVE,
+                            RequestState.REPROCESS, RequestState.SERVING, 
+                            RequestState.SERVING_AND_ACTIVE]
         request_keys = [generate_request_key(self.neon_api_key, v) for v in
                         self.videos.values()]
         api_requests = NeonApiRequest.get_requests(request_keys)
@@ -1886,12 +1888,17 @@ class RequestState(object):
     SUBMIT     = "submit"
     PROCESSING = "processing"
     REQUEUED   = "requeued"
-    FAILED     = "failed"
+    FAILED     = "failed" # Failed due to video url issue/ network issue
     FINISHED   = "finished"
     SERVING    = "serving" # Thumbnails are ready to be served 
-    INT_ERROR  = "internal_error"
-    ACTIVE     = "active" # Thumbnail pushed by editor to platform(ex. BC)
+    INT_ERROR  = "internal_error" # Neon had some code error
+    ACTIVE     = "active" # Thumbnail selected by editor; Only releavant to BC
     REPROCESS  = "reprocess" #new state added to support clean reprocessing
+
+    # NOTE: This state is being added to save DB lookup calls to determine the active state
+    # This is required for the UI. Re-evaluate this state for new UI
+    # For CMS API response if SERVING_AND_ACTIVE return active state
+    SERVING_AND_ACTIVE = "serving_active" # indicates there is a chosen thumb & is serving ready 
 
 class NeonApiRequest(object):
     '''
