@@ -450,6 +450,17 @@ class TestImageServingPlatformAPI(unittest.TestCase):
                                             "12.2.2.4", headers={})
         self.assertEquals(response.code, 204)
 
+    def test_client_video_id_url_token_missing(self):
+        '''
+        video id is missing in url
+        '''
+        url = "http://localhost:" + self.port + "/v1/client/22334223432/"
+        ip = "203.2.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response = self.make_api_request(url, headers)
+        self.assertEqual(response.code, 204)
+
+
     ################### Server API tests #####################
 
     def test_server_api_request(self):

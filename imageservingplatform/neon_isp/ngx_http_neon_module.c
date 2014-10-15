@@ -528,6 +528,8 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
     ",\"NEON_SERVICE_COOKIE_PRESENT\" : %llu"
     ",\"NEON_SERVICE_COOKIE_SET\" : %llu"
     ",\"NEON_SERVICE_COOKIE_SET_FAIL\" : %llu"
+    ",\"NEON_SERVICE_PUBLISHER_ID_MISSING_FROM_URL\" : %llu"
+    ",\"NEON_SERVICE_VIDEO_ID_MISSING_FROM_URL\" : %llu"
     ",\"NEON_CLIENT_API_ACCOUNT_ID_NOT_FOUND\": %llu"
     ",\"NEON_CLIENT_API_URL_NOT_FOUND\": %llu"
     ",\"NEON_SERVER_API_ACCOUNT_ID_NOT_FOUND\": %llu"
@@ -579,7 +581,9 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
           neon_stats[18],
           neon_stats[19],
           neon_stats[20],
-          neon_stats[21]
+          neon_stats[21],
+          neon_stats[22],
+          neon_stats[23]
           );
     
     b->pos = resp;
