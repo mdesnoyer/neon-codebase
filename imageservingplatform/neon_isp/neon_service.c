@@ -368,9 +368,19 @@ int neon_service_parse_api_args(ngx_http_request_t *request,
     // get publisher id
     *publisher_id = neon_service_get_uri_token(request, base_url, 0);
 
+    if(*publisher_id == NULL) {
+        neon_stats[NEON_SERVICE_PUBLISHER_ID_MISSING_FROM_URL]++;     
+        return 1;
+    }
+
     // get video id
     *video_id = neon_service_get_uri_token(request, base_url, 1);
   
+    if(*video_id == NULL) {
+            neon_stats[NEON_SERVICE_VIDEO_ID_MISSING_FROM_URL]++;                     
+        return 1;
+    }
+
     // Clean up the video id from the neonvid_ parameter
     // neonvid_ is a prefix used to identify a Neon video in beacon api
     // Used only for the client API call
