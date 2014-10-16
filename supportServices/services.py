@@ -1907,9 +1907,16 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     rdata.append(s_url)
                 response['data'] = rdata
                 
-                #Get original sized thumbnail
-                o_url = s_urls.get_serving_url(vmdata.frame_size[0],
+                # Get original sized thumbnail or max resolution 
+                try:
+                    o_url = s_urls.get_serving_url(vmdata.frame_size[0],
                         vmdata.frame_size[1])
+                except KeyError, e:
+                    # TODO: get nearest to original frame_size
+                    # For IGN this is sufficient, enhance this when needed
+                    s_tup = max(s_urls.size_map, key=lambda item:item[0])
+                    o_url = s_urls.get_serving_url(s_tup[0], s_tup[1]) 
+
                 response['original_thumbnail'] = o_url
                 
                 if o_url is None:
