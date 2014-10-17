@@ -129,7 +129,7 @@ def calc_aggregate_click_based_metrics(data):
                      <acting impressions>,<acting conversions>
 
     output (All number are in fractions):
-     (Mean lift, p_value, lower 95% confidence bound,
+     (Mean lift (Positive value is good), p_value, lower 95% confidence bound,
      upper 95% confidence bound)
     '''
     counts = np.sum(data, axis=0)

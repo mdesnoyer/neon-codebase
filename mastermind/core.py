@@ -147,8 +147,8 @@ class Mastermind(object):
     This object is thread safe, so only one thread is allow in at a time
     as long as you keep to the public interface.
     '''
-    PRIOR_IMPRESSION_SIZE = 1000
-    PRIOR_CTR = 0.01
+    PRIOR_IMPRESSION_SIZE = 100
+    PRIOR_CTR = 0.1
     
     def __init__(self):
         self.video_info = {} # video_id -> VideoInfo
@@ -575,10 +575,10 @@ class Mastermind(object):
         # based on a prior of its model score and its measured ctr.
         bandit_ids = [x.id for x in valid_bandits]
         conv = dict([(x.id, self._get_prior_conversions(x) + x.conv)
-                             for x in valid_bandits])
+                for x in valid_bandits])
         imp = dict([(x.id, Mastermind.PRIOR_IMPRESSION_SIZE * 
                              (1 - Mastermind.PRIOR_CTR) + 
-                             x.imp - x.conv)
+                             x.imp - conv[x.id])
                              for x in valid_bandits])
 
         # Run the monte carlo series
@@ -588,26 +588,26 @@ class Mastermind(object):
                                       size=MC_SAMPLES)
                                       for x in bandit_ids]
         if non_exp_thumb is not None:
+            conv = self._get_prior_conversions(non_exp_thumb) + \
+              non_exp_thumb.conv
             mc_series.append(
-                spstats.beta.rvs(self._get_prior_conversions(non_exp_thumb) + 
-                                 non_exp_thumb.conv,
+                spstats.beta.rvs(conv,
                                  Mastermind.PRIOR_IMPRESSION_SIZE * 
                                  (1 - Mastermind.PRIOR_CTR) + 
-                                 non_exp_thumb.imp - non_exp_thumb.conv,
+                                 non_exp_thumb.imp - conv,
                                  size=MC_SAMPLES))
 
         win_frac = np.array(np.bincount(np.argmax(mc_series, axis=0)),
                             dtype=np.float) / MC_SAMPLES
+        
         win_frac = np.append(win_frac, [0.0 for x in range(len(mc_series) - 
                                                            win_frac.shape[0])])
-
         winner_idx = np.argmax(win_frac)
 
-        winner_imp = None
-        if winner_idx == len(bandit_ids):
-            winner_imp = non_exp_thumb.imp
-        else:
-            winner_imp = valid_bandits[winner_idx].imp
+        # Determine the number of real impressions for each entry in win_frac
+        impressions = [x.imp for x in valid_bandits]
+        if non_exp_thumb is not None:
+            impressions.append(non_exp_thumb.imp)
 
         # Determine the value remaining. This is equivalent to
         # determing that one of the other arms might beat the winner
@@ -616,9 +616,18 @@ class Mastermind(object):
                       mc_series[:][winner_idx])
         value_remaining = np.sort(lost_value)[0.95*MC_SAMPLES]
 
+        # For all those thumbs that haven't been seen for 5x the
+        # prior, make sure that they will get some traffic
+        for i in range(len(valid_bandits)):
+            if impressions[i] < 5 * Mastermind.PRIOR_IMPRESSION_SIZE:
+                win_frac[i] = max(0.1, win_frac[i])
+        win_frac = win_frac / np.sum(win_frac)
+
         if win_frac[winner_idx] >= 0.95:
             # There is a winner. See if there were enough imp to call it
-            if win_frac.shape[0] == 1 or winner_imp >= 500:
+            if (win_frac.shape[0] == 1 or 
+                impressions[winner_idx] >= 
+                5 * Mastermind.PRIOR_IMPRESSION_SIZE):
                 # The experiment is done
                 experiment_state = neondata.ExperimentState.COMPLETE
                 try:
@@ -665,16 +674,16 @@ class Mastermind(object):
         if score is None or score < 1e-4:
             if thumb_info.chosen:
                 # An editor chose this thumb, so give it a 5% lift
-                return (Mastermind.PRIOR_CTR * 
-                        Mastermind.PRIOR_IMPRESSION_SIZE * 1.05)
+                return max(1.0, (Mastermind.PRIOR_CTR * 
+                                 Mastermind.PRIOR_IMPRESSION_SIZE * 1.05))
             else:
-                return (Mastermind.PRIOR_CTR * 
-                        Mastermind.PRIOR_IMPRESSION_SIZE)
+                return max(1.0, (Mastermind.PRIOR_CTR * 
+                                 Mastermind.PRIOR_IMPRESSION_SIZE))
 
         # Peg a score of 5.5 as a 10% lift over random and a score of
         # 4.0 as neutral
-        return ((0.10*(score-4.0)/1.5 + 1) * Mastermind.PRIOR_CTR * 
-                Mastermind.PRIOR_IMPRESSION_SIZE)
+        return max(1.0, ((0.10*(score-4.0)/1.5 + 1) * Mastermind.PRIOR_CTR * 
+                         Mastermind.PRIOR_IMPRESSION_SIZE))
 
     def _get_sequential_fracs(self, strategy, baseline, editor, candidates):
         '''Gets the serving fractions for a sequential testing strategy.'''
