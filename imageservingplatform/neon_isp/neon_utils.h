@@ -52,7 +52,15 @@ extern const char * neon_rename_error;
 
 unsigned long neon_sdbm_hash(unsigned char *str, int s_len);
 
-void neon_get_uuid(char *dest, size_t length);
+
+/*
+ * Fills a string with n number of random alphanuneric characters. A terminating zero is
+ * added after, so the string must be at least of n+1 size. Behavior is undefined if
+ * a null pointer or a shorter string is supplied.
+ */
+void neon_get_uuid(char *dest, size_t n);
+
+
 
 NEON_BOOLEAN neon_is_valid_ip_string(unsigned char *ip);
 
