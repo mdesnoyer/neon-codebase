@@ -595,7 +595,8 @@ class VideoProcessor(object):
             # differently & not be serving enabled ?  
             if len(self.thumbnails) < 1:
                 statemon.state.increment('no_thumbs')
-                _log.error("no thumbnails extracted for video %s" % vmdata.key)
+                _log.error("no thumbnails extracted for video %s url %s"\
+                        % (vmdata.key, vmdata.url))
 
             #host Center Frame on s3
             if self.center_frame is not None:
