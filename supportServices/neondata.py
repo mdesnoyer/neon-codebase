@@ -42,10 +42,13 @@ import threading
 import time
 import api.brightcove_api #coz of cyclic import 
 import api.youtube_api
-import utils.http
+import utils.logs
 import utils.neon
 import utils.sync
 import utils.s3
+# import utils.http after utils.logs coz it uses NeonLogger which
+# defines the log_n function
+import utils.http 
 import urllib
 
 from api.cdnhosting import CDNHosting
@@ -969,7 +972,8 @@ class ExperimentStrategy(NamespacedStoredObject):
                  override_when_done=True,
                  experiment_type=MULTIARMED_BANDIT,
                  impression_type=MetricType.VIEWS,
-                 conversion_type=MetricType.CLICKS):
+                 conversion_type=MetricType.CLICKS,
+                 max_neon_thumbs=None):
         super(ExperimentStrategy, self).__init__(account_id)
         # Fraction of traffic to experiment on.
         self.exp_frac = exp_frac
@@ -1006,9 +1010,14 @@ class ExperimentStrategy(NamespacedStoredObject):
         # The strategy used to run the experiment phase
         self.experiment_type = experiment_type
 
-        # The types of measurements that mean an impression or a conversion for this account
+        # The types of measurements that mean an impression or a
+        # conversion for this account
         self.impression_type = impression_type
         self.conversion_type = conversion_type
+
+        # The maximum number of Neon thumbs to run in the
+        # experiment. If None, all of them are used.
+        self.max_neon_thumbs = max_neon_thumbs
 
 
 class CDNHostingMetadata(object):
@@ -1026,19 +1035,26 @@ class CDNHostingMetadata(object):
         ''' to json '''
         return json.dumps(self, default=lambda o: o.__dict__) 
     
+    def to_dict(self):
+        return self.__dict__
+
     @classmethod
-    def save_metadata(cls, api_key, i_id, hosting_directive):
+    def save_metadata(cls, api_key, i_id, hosting_metadata):
         '''
         Save the hosting directive in the platform account
 
-        @hosting_directive - json of the hosting directive object
+        @hosting_directive - dict of the hosting metadata object
         '''
         if i_id == "0":
             accnt = NeonPlatform.get_account(api_key)
         else:
             raise Exception("To be implemented")
-        accnt.cdn_metadata = hosting_directive
-        return accnt.save()
+        # NOTE: Its safer to use a dict than double encoded json   
+        if isinstance(hosting_metadata, dict):
+            accnt.cdn_metadata = hosting_metadata
+            return accnt.save()
+        else:
+            raise Exception("hosting_directive should be a dictionary")
 
 class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
@@ -1067,7 +1083,8 @@ class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
 class AbstractPlatform(object):
     ''' Abstract Platform/ Integration class '''
 
-    def __init__(self, abtest=False, enabled=True, serving_enabled=True):
+    def __init__(self, abtest=False, enabled=True, 
+                serving_enabled=True, serving_controller="imageplatform"):
         self.key = None 
         self.neon_api_key = ''
         self.videos = {} # External video id (Original Platform VID) => Job ID
@@ -1081,7 +1098,10 @@ class AbstractPlatform(object):
         self.cdn_metadata = None   
 
         # Will thumbnails be served by our system?
-        self.serving_enabled = serving_enabled 
+        self.serving_enabled = serving_enabled
+
+        # How is the A/B testing done, default to imageplatform
+        self.serving_controller = serving_controller 
 
     def generate_key(self, i_id):
         ''' generate db key '''
@@ -1124,7 +1144,10 @@ class AbstractPlatform(object):
         ''' return list of i_vids for an account which have been processed '''
 
         i_vids = []
-        processed_state = [RequestState.FINISHED, RequestState.ACTIVE]
+        processed_state = [RequestState.FINISHED, 
+                            RequestState.ACTIVE,
+                            RequestState.REPROCESS, RequestState.SERVING, 
+                            RequestState.SERVING_AND_ACTIVE]
         request_keys = [generate_request_key(self.neon_api_key, v) for v in
                         self.videos.values()]
         api_requests = NeonApiRequest.get_requests(request_keys)
@@ -1239,14 +1262,24 @@ class NeonPlatform(AbstractPlatform):
         for key in data_dict.keys():
             obj.__dict__[key] = data_dict[key]
         
-        # create the cdnhostingmetadata object
-        if obj.cdn_metadata is not None:
-            cdn_dict = json.loads(obj.cdn_metadata)
-            cdn_obj = CDNHostingMetadata("", "")
-            for key in cdn_dict.keys():
-                cdn_obj.__dict__[key] = cdn_dict[key]
-            obj.cdn_metadata = cdn_obj
+        try:
+            # create the cdnhostingmetadata object
+            if obj.cdn_metadata is not None:
+                if isinstance(obj.cdn_metadata, dict):
+                    cdn_dict = obj.cdn_metadata
+                else:
+                    _log.error("The object changed externally for %s" %
+                            obj.neon_api_key)
+                    return None
 
+                cdn_obj = CDNHostingMetadata("", "")
+                for key in cdn_dict.keys():
+                    cdn_obj.__dict__[key] = cdn_dict[key]
+                obj.cdn_metadata = cdn_obj
+        except Exception, e:
+            #Catch any exception
+            _log.error("Error creating CDN Metadata Object %s" % e)
+            return
         return obj
     
     @classmethod
@@ -1857,10 +1890,17 @@ class RequestState(object):
     SUBMIT     = "submit"
     PROCESSING = "processing"
     REQUEUED   = "requeued"
-    FAILED     = "failed"
+    FAILED     = "failed" # Failed due to video url issue/ network issue
     FINISHED   = "finished"
-    INT_ERROR  = "internal_error"
-    ACTIVE     = "active" #thumbnail live 
+    SERVING    = "serving" # Thumbnails are ready to be served 
+    INT_ERROR  = "internal_error" # Neon had some code error
+    ACTIVE     = "active" # Thumbnail selected by editor; Only releavant to BC
+    REPROCESS  = "reprocess" #new state added to support clean reprocessing
+
+    # NOTE: This state is being added to save DB lookup calls to determine the active state
+    # This is required for the UI. Re-evaluate this state for new UI
+    # For CMS API response if SERVING_AND_ACTIVE return active state
+    SERVING_AND_ACTIVE = "serving_active" # indicates there is a chosen thumb & is serving ready 
 
 class NeonApiRequest(object):
     '''
@@ -2238,7 +2278,9 @@ class ThumbnailMetadata(StoredObject):
         # Fraction of traffic currently being served by this thumbnail.
         # =None indicates that Mastermind doesn't know of the fraction yet
         self.serving_frac = serving_frac 
-
+        
+        # NOTE: If you add more fields here, modify the merge code in
+        # api/client, Add unit test to check this
 
     def update_phash(self, image):
         '''Update the phash from a PIL image.'''
@@ -2503,9 +2545,9 @@ class VideoMetadata(StoredObject):
         tid = ThumbnailID.generate(imgdata, i_vid)
 
         #If tid already exists, then skip saving metadata
-        if ThumbnailMetadata.get(tid) is not None:
-            _log.warn('Already have thumbnail id: %s' % tid)
-            return
+        #if ThumbnailMetadata.get(tid) is not None:
+        #    _log.warn('Already have thumbnail id: %s' % tid)
+        #    return
 
         urls.append(s3fname)
         created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2533,7 +2575,7 @@ class VideoMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def download_and_add_thumbnail(self, image_url, keyname,
-                                    s3url, ttype, rank=1):
+                                    s3url, ttype, rank=1, cdn_metadata=None):
         '''
         Download the image and save its metadata. Used to save thumbnail
         of custom type or previous thumbnail given in the Neon API
@@ -2554,18 +2596,32 @@ class VideoMetadata(StoredObject):
             imgdata = response.body
             image = Image.open(StringIO(imgdata))
             tdata = self.save_thumbnail_to_s3_and_store_metadata(image, score,
-                                                keyname, s3url, ttype, rank)
-            raise tornado.gen.Return(tdata)
+                                                keyname, s3url, ttype, rank,
+                                                cdn_metadata=cdn_metadata)
+            tid_save = yield tornado.gen.Task(tdata.save)
+            if tid_save:
+                raise tornado.gen.Return(tdata)
+            else:
+                _log.error("failed to save thumbnail %s" % tdata.key)
+                raise tornado.gen.Return(False)
+
         else:
             _log.error("failed to download the image")
         raise tornado.gen.Return(None)
 
     def add_custom_thumbnail(self, image_url, callback=None):
+        '''
+        Add a custom thumbnail for the video
+        '''
+
         fname = "custom%s.jpeg" % int(time.time())
         keyname = "%s/%s/%s" % (self.get_account_id(), self.job_id, fname)  
         s3url = "https://%s.s3.amazonaws.com/%s" % (options.thumbnailBucket, keyname) 
+        np = NeonPlatform.get_account(self.get_account_id())
+        cdn_metadata = np.cdn_metadata
         ttype = ThumbnailType.CUSTOMUPLOAD
-        return self.download_and_add_thumbnail(image_url, keyname, s3url, ttype)
+        return self.download_and_add_thumbnail(image_url, keyname, s3url, ttype,
+                cdn_metadata=cdn_metadata)
 
     @classmethod
     def get_video_request(cls, internal_video_id, callback=None):
@@ -2578,6 +2634,22 @@ class VideoMetadata(StoredObject):
             return nreq
         else:
             raise AttributeError("Callbacks not allowed")
+
+    @classmethod
+    def get_video_requests(cls, i_vids):
+        '''
+        Get video request objs given video_ids
+        '''
+        vms = VideoMetadata.get_many(i_vids)
+        request_keys = []
+        for vm in vms:
+            rkey = "request_nonexistent_key"
+            if vm:
+                api_key = vm.key.split('_')[0]
+                rkey = generate_request_key(api_key, vm.job_id)
+            request_keys.append(rkey)
+        return NeonApiRequest.get_requests(request_keys)
+
 
 class InMemoryCache(object):
 
@@ -2642,7 +2714,8 @@ class InMemoryCache(object):
 class VideoResponse(object):
     ''' VideoResponse object that contains list of thumbs for a video '''
     def __init__(self, vid, status, i_type, i_id, title, duration,
-            pub_date, cur_tid, thumbs, abtest=True, winner_thumbnail=None):
+            pub_date, cur_tid, thumbs, abtest=True, winner_thumbnail=None,
+            serving_url=None):
         self.video_id = vid
         self.status = status
         self.integration_type = i_type
@@ -2655,7 +2728,8 @@ class VideoResponse(object):
         self.thumbnails = thumbs if thumbs else [] 
         self.abtest = abtest
         self.winner_thumbnail = winner_thumbnail
-    
+        self.serving_url = serving_url
+
     def to_dict(self):
         return self.__dict__
 

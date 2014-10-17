@@ -65,6 +65,8 @@ neon_mastermind_load(const char * filepath){
     to_delete = mastermind_old;
     mastermind_old = 0;
     deallocate_mastermind(to_delete);
+   
+    // TODO(Sunil): More specific counters
     
     // parse
     try {
@@ -243,3 +245,10 @@ neon_mastermind_healthcheck()
     return 2;
 }
 
+NEON_BOOLEAN 
+neon_mastermind_is_expiry_greater_than_current(time_t exp){
+    if(exp >= mastermind_current->GetExpiry())
+        return NEON_TRUE;
+    else
+        return NEON_FALSE;
+}

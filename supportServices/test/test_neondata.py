@@ -34,7 +34,7 @@ from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         ThumbnailMetadata, InternalVideoID, OoyalaPlatform, \
         TrackerAccountIDMapper, ThumbnailServingURLs, ExperimentStrategy, \
         ExperimentState, NeonApiRequest, CDNHostingMetadata,\
-        S3CDNHostingMetadata
+        S3CDNHostingMetadata, CloudinaryCDNHostingMetadata
 
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
@@ -407,13 +407,42 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         np.save()
         s3mdata = S3CDNHostingMetadata("a", "s", "b", ["p1", "p2"], "")
         ret = CDNHostingMetadata.save_metadata(na.neon_api_key, "0",
-                s3mdata.to_json())
+                s3mdata.to_dict())
         self.assertTrue(ret)
 
         accnt = NeonPlatform.get_account(na.neon_api_key)
         self.assertTrue(isinstance(accnt.cdn_metadata, CDNHostingMetadata))
         for key in s3mdata.__dict__.keys():
             self.assertEqual(s3mdata.__dict__[key],
+                    accnt.cdn_metadata.__dict__[key])
+
+        # modify the account check if the object is modified such that it cant'
+        # be restored
+        accnt.abtest = True
+        accnt.add_video("v1", "j1")
+        accnt.cdn_metadata.access_key = "new_key"
+        accnt.save()
+        
+        accnt = NeonPlatform.get_account(na.neon_api_key)
+        self.assertIsNotNone(accnt)
+        self.assertEqual(accnt.cdn_metadata.access_key, "new_key")
+
+    def test_cloudinary_hosting_metadata(self):
+        '''
+        Test saving and retrieving CDNHostingMetadata object
+        '''
+        na = NeonUserAccount('acct1')
+        na.save()
+        np = NeonPlatform('acct1', na.neon_api_key)
+        np.save()
+        cd = CloudinaryCDNHostingMetadata()
+        ret = CDNHostingMetadata.save_metadata(na.neon_api_key, "0",
+                cd.to_dict())
+        self.assertTrue(ret)
+        accnt = NeonPlatform.get_account(na.neon_api_key)
+        self.assertTrue(isinstance(accnt.cdn_metadata, CDNHostingMetadata))
+        for key in cd.__dict__.keys():
+            self.assertEqual(cd.__dict__[key],
                     accnt.cdn_metadata.__dict__[key])
 
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
@@ -750,6 +779,31 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         winner_tid = v0.get_winner_tid()     
         self.assertEqual(winner_tid, 't1')
 
+    def test_video_metadata_methods(self):
+        '''
+        Currently only Tests the video_requests methods 
+        '''
+        api_key = "TEST"
+        job_ids = []
+        i_vids = []
+        for i in range(10):
+            jid = 'job%s' % i
+            vid = 'vid%s' % i 
+            i_vid = "%s_%s" % (api_key, vid)
+            nar = NeonApiRequest(jid, api_key, vid, 't', 't', 'r', 'h')
+            vm = VideoMetadata(i_vid, [], jid, 'v0.mp4')
+            nar.save()
+            vm.save()
+            i_vids.append(i_vid)
+
+        reqs = VideoMetadata.get_video_requests(i_vids)
+        for jid, req in zip(job_ids, reqs):
+            self.assertEqual(jid, req.job_id)
+       
+        # Non existent video
+        i_vids = ["dummy_vid"]
+        reqs = VideoMetadata.get_video_requests(i_vids)
+        self.assertEqual(reqs, [None])
 
 if __name__ == '__main__':
     unittest.main()

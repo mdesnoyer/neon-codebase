@@ -21,6 +21,7 @@ import impala.dbapi
 import impala.error
 import logging
 import pandas
+import re
 import stats.metrics
 from stats import statutils
 from supportServices import neondata
@@ -66,7 +67,8 @@ def get_thumbnail_ids():
                       statutils.get_time_clause(options.start_time,
                                                   options.end_time)))
 
-    retval = [x[0] for x in cursor]
+    tidRe = re.compile('[0-9a-zA-Z]+_[0-9a-zA-Z]+_[0-9a-zA-Z]+')
+    retval = [x[0] for x in cursor if tidRe.match(x[0])]
     return retval
 
 def collect_stats(thumb_info,
@@ -271,8 +273,8 @@ def main():
     
 
     _log.info('Calculating aggregate statistics')
-    names = ['Mean Lift', 'P Value', 'Lower 95%', 'Upper 95%',
-             'Random Effects Error']
+    agg_stat_names = ['Mean Lift', 'P Value', 'Lower 95%',
+                      'Upper 95%', 'Random Effects Error']
     agg_data = {}
 
     for stat_name, video_stat in video_stats.items():
@@ -294,11 +296,22 @@ def main():
                                    axis=1, join='inner').dropna()
 
         # Calculate the ab metrics
-        agg_data[stat_name] = dict(
-            zip(names, stats.metrics.calc_aggregate_ab_metrics(
+        cur_averages = dict(
+            zip([('Video Based', x) for x in agg_stat_names],
+                stats.metrics.calc_aggregate_ab_metrics(
                 agg_counts.as_matrix())))
+        cur_averages.update(dict(
+            zip([('Click Based', x) for x in agg_stat_names[0:4]],
+                stats.metrics.calc_aggregate_click_based_metrics(
+                    agg_counts.as_matrix()))))
+
+        index = pandas.MultiIndex.from_tuples(cur_averages.keys(),
+                                              names=['Type', 'Stat'])
+        agg_data[stat_name] = pandas.Series(cur_averages.values(),
+                                            index=index)
 
     agg_data = pandas.DataFrame(agg_data)
+    agg_data = agg_data.sortlevel()
 
     
     with pandas.ExcelWriter(options.output) as writer:

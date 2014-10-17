@@ -12,7 +12,7 @@
 #include <signal.h>
 #include <pthread.h>
 #include "neon_updater.h"
-#include "neon_mastermind.h"
+#include "neon_mastermind.h" 
 #include "neon_fetch.h"
 #include "neon_utils.h"
 #include "neon_stats.h"
@@ -153,19 +153,29 @@ neon_runloop(void * arg){
              *  validate meta data of new file 
              */
             
-           	// TODO(Sunil) : Spawn a process to validate the Expiry 
-           	if (neon_get_expiry(mastermind_filepath) < time(0)){
-                neon_log_error("mastermind file has expired, hence not loading it");
-                neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
-                neon_sleep(sleep_time);
-				continue;	
+           	// TODO(Sunil) : Spawn a process to validate the Expiry
+            time_t new_mastermind_expiry = neon_get_expiry(mastermind_filepath);
+           	if (new_mastermind_expiry < time(0)){
+                
+                // Check if the expiry is greater than the current expiry, if
+                // Yes Load IT !
+                
+                if(neon_mastermind_is_expiry_greater_than_current(new_mastermind_expiry) == NEON_TRUE){
+                    neon_log_error("mastermind file has expired, But loading new one since expiry is greater");
+                    neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
+                }else{ 
+                    neon_log_error("mastermind file has expired and older than current file being used, hence not loading it");
+                    neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
+                    neon_sleep(sleep_time);
+                    continue;
+                }
 			} 
             
             /*
              *  parse and process new mastermind file into memory
              */
             // process file into memory
-            if( neon_mastermind_load(mastermind_filepath) == NEON_LOAD_FAIL) {
+            if(neon_mastermind_load(mastermind_filepath) == NEON_LOAD_FAIL) {
                 
                 // the load function will log the specific error
                 neon_log_error("failed to load mastermind file");

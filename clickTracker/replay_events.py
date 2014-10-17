@@ -28,6 +28,8 @@ _log = logging.getLogger(__name__)
 from utils.options import define, options
 define("flume_port", default=6367, type=int,
        help='Port to talk to the flume agent running locally')
+define("max_batch_size", default=500, type=int,
+       help='maximum batch size to send to flume')
 
 def connect_to_flume():
     transport = TTornado.TTornadoStreamTransport('localhost',
@@ -39,7 +41,7 @@ def connect_to_flume():
 @tornado.gen.coroutine
 def process_file(cur_file):
     flume, sock = connect_to_flume()
-
+    yield tornado.gen.Task(sock.open)
     try:
         _log.info('Processing file %s' % cur_file)
 
@@ -61,9 +63,11 @@ def process_file(cur_file):
                 pass
 
         _log.info("Finished reading %s, sending to flume" % cur_file)
-        status = yield tornado.gen.Task(flume.appendBatch, events)
-        if status != Status.OK:
-            raise Thrift.TException('Flume returned error: %s' % status)
+        n = options.max_batch_size
+        for i in xrange(0, len(events), n):
+            status = yield tornado.gen.Task(flume.appendBatch, events[i:i+n])
+            if status != Status.OK:
+                raise Thrift.TException('Flume returned error: %s' % status)
 
         _log.info("Sucessfully replayed %s. Deleting the file" %
                   cur_file)

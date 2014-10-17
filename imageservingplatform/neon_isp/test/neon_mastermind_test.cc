@@ -217,7 +217,7 @@ TEST_F(NeonMastermindTest, test_new_mastermind_load){
     verify_neon_mastermind_tid_lookup(vid, expTid);
 }
 
-// Test loading an expired mastermind
+// Test loading an expired mastermind with an old expiry
 TEST_F(NeonMastermindTest, test_loading_expired_mastermind){
 
     string mastermind;
@@ -226,3 +226,4 @@ TEST_F(NeonMastermindTest, test_loading_expired_mastermind){
     EXPECT_EQ(ret, NEON_LOAD_FAIL);
     
 }
+

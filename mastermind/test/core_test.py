@@ -247,6 +247,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # When the baseline wins, it should be shown for 100%
         video_info.thumbnails[1].conv = 5000
         video_info.thumbnails[1].imp = 5000
+        video_info.thumbnails[2].imp = 1000
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'bc': 1.0, 'ctr': 0.0, 'n1': 0.0})
@@ -268,6 +269,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertEqual(directive, {'bc': 0.99, 'ctr': 0.0, 'n1': 0.01})
 
         # When the baseline wins, it should be shown for all 100%
+        video_info.thumbnails[1].imp = 1000
         video_info.thumbnails[2].conv = 5000
         video_info.thumbnails[2].imp = 5000
         directive = self.mastermind._calculate_current_serving_directive(
@@ -276,7 +278,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         # If the default one wins, we show the baseline for the holdback
         video_info.thumbnails[2].conv = 0
-        video_info.thumbnails[2].imp = 0
+        video_info.thumbnails[2].imp = 1000
         video_info.thumbnails[1].conv = 5000
         video_info.thumbnails[1].imp = 5000
         directive = self.mastermind._calculate_current_serving_directive(
@@ -359,7 +361,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                 self.assertIsNone(
                     self.mastermind._calculate_current_serving_directive(
                         video_info))
-
+        print self.mastermind._calculate_current_serving_directive(video_info)
         # Now add a baseline and it should be shown all the time
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr', 'vid1',
@@ -629,7 +631,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         def _set_winner(thumb_name):
             for thumb in video_info.thumbnails:
                 thumb.conv = 5000 if thumb.id == thumb_name else 0
-                thumb.imp = 5000 if thumb.id == thumb_name else 0
+                thumb.imp = 5000 if thumb.id == thumb_name else 1000
 
         _set_winner('n2')
 
@@ -693,7 +695,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         def _set_winner(thumb_name):
             for thumb in video_info.thumbnails:
                 thumb.conv = 5000 if thumb.id == thumb_name else 0
-                thumb.imp = 5000 if thumb.id == thumb_name else 0
+                thumb.imp = 5000 if thumb.id == thumb_name else 1000
 
         _set_winner('n2')
         # There is no editor choice, so show the winner for 100%
@@ -776,7 +778,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             self.assertGreater(val, 0.0)
 
     def test_not_enough_impressions_for_winner(self):
-        # There needs to be 500 impressions of the winner in order to declare it
+        # There needs to be 500 impressions of the winner in order to declare
+        # it
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
         
@@ -824,6 +827,97 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         self.assertGreater(directive['n2'], 0.0)
         self.assertGreater(directive['n1'], directive['n2'])
+
+    def test_limit_num_neon_thumbs(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', max_neon_thumbs=2,
+                                        exp_frac=1.0))
+
+        directive = self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon', model_score=5.8)),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=1,
+                                               ttype='neon', enabled=False,
+                                               model_score='3.5')),
+                 build_thumb(ThumbnailMetadata('n3', 'vid1', rank=2,
+                                               ttype='neon',
+                                               model_score='3.4')),
+                 build_thumb(ThumbnailMetadata('n4', 'vid1', rank=3,
+                                               ttype='neon',
+                                               model_score='3.3')),
+                 build_thumb(ThumbnailMetadata('ctr', 'vid1',
+                                               ttype='centerframe')),
+                 build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
+                                               ttype='brightcove'))]))[1]
+        self.assertEqual(
+            sorted(directive.keys(), key=lambda x: directive[x])[2:],
+            ['n3', 'ctr', 'bc', 'n1'])
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+        self.assertAlmostEqual(directive['n2'], 0.0)
+        self.assertAlmostEqual(directive['n4'], 0.0)
+        self.assertGreater(directive['n1'], 0.0)
+        self.assertGreater(directive['n3'], 0.0)
+        self.assertGreater(directive['ctr'], 0.0)
+        self.assertGreater(directive['bc'], 0.0)
+
+    def test_not_enough_baseline_impressions(self):
+        # There needs to be enough impressions of each thumb in order
+        # to shut them off.
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
+        
+        video_info = VideoInfo(
+            'acct1', True,
+            [build_thumb(ThumbnailMetadata('n1', 'vid1',
+                                           ttype='neon', model_score=5.8),
+                         impressions=3000, conversions=900),
+             build_thumb(ThumbnailMetadata('n2', 'vid1',
+                                           ttype='neon', model_score=3.5)),
+             build_thumb(ThumbnailMetadata('ctr', 'vid1',
+                                           ttype='centerframe'),
+                         impressions=10, conversions=4),
+             build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
+                                           ttype='brightcove'),
+                         impressions=600, conversions=150)])
+        directive = self.mastermind._calculate_current_serving_directive(
+            video_info)[1]
+        
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+        self.assertAlmostEqual(max(directive.values()), directive['n1'])
+        self.assertGreater(0.001, directive['bc'])
+        self.assertGreater(directive['ctr'], 0.05)
+        self.assertGreater(directive['n2'], 0.05)
+
+    def test_much_worse_than_prior(self):
+        # When the real ctr is much worse than the prior, for thumbs
+        # that we don't know anything about, we drive a lot of
+        # traffice there.
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
+        
+        video_info = VideoInfo(
+            'acct1', True,
+            [build_thumb(ThumbnailMetadata('n1', 'vid1',
+                                           ttype='neon', model_score=5.8),
+                         impressions=6000, conversions=2),
+             build_thumb(ThumbnailMetadata('n2', 'vid1',
+                                           ttype='neon', model_score=3.5)),
+             build_thumb(ThumbnailMetadata('ctr', 'vid1',
+                                           ttype='centerframe'),
+                         impressions=350, conversions=1),
+             build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
+                                           ttype='brightcove'),
+                         impressions=600, conversions=2)])
+        directive = self.mastermind._calculate_current_serving_directive(
+            video_info)[1]
+        
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+        self.assertAlmostEqual(max(directive.values()), directive['n2'])
+        self.assertGreater(0.001, directive['n1'])
+        self.assertGreater(0.001, directive['bc'])
+        self.assertGreater(directive['ctr'], 0.05) # Not enough imp
 
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
@@ -1163,7 +1257,10 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
 
     def test_db_experiment_finished(self):
         self.mastermind.update_stats_info([
-            ('acct1_vid1', 'n2', 5000, 200)])
+            ('acct1_vid1', 'n2', 5000, 200),
+            ('acct1_vid1', 'n1', 5000, 50),
+            ('acct1_vid1', 'bc', 5000, 10),
+            ('acct1_vid1', 'ctr', 5000, 20)])
         self._wait_for_db_updates()
 
         video = VideoMetadata.get('acct1_vid1')

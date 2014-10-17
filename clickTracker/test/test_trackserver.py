@@ -28,12 +28,13 @@ import os
 import Queue
 import random
 import socket
+import test_utils.neontest
 from thrift import Thrift
 from thrift.transport import TTransport
 from thrift.protocol import TCompactProtocol
 import time
-import tornado.testing
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
+import tornado.iostream
 import urllib
 import urlparse
 import unittest
@@ -216,7 +217,7 @@ class TestFileBackupHandler(unittest.TestCase):
                         pass
         
 
-class TestFullServer(tornado.testing.AsyncHTTPTestCase):
+class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
     '''A set of tests that fire up the whole server and throws http requests at it.'''
 
     def setUp(self):
@@ -283,12 +284,11 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
     
     def mock_isp_response(self, request, retries=1, callback=None):
         if request.url.endswith('.avsc'):
-            retval = tornado.httpclient.HTTPResponse(
-                request, 200)
+            retval = HTTPResponse(request, 200)
         else:
             bns = urlparse.parse_qs(urlparse.urlparse(request.url).query
                                     )['params'][0].split(',')
-            retval = tornado.httpclient.HTTPResponse(
+            retval = HTTPResponse(
                 request,
                 200,
                 buffer=StringIO(','.join([self.bn_map.get(x, "null") 
@@ -322,7 +322,6 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
             '%s?%s' % (path, urllib.urlencode(url_params)),
             headers=headers)
 
-        #print url_params
         self.assertEqual(response.code, 200)
 
         # Check that a response was found
@@ -644,9 +643,9 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
 
     def test_no_tids_but_basename(self):
         self.bn_map = {
-            'acct1_vid2' : 'acct1_vid2_tid1',
-            'acct1_vid3' : 'acct1_vid3_tid0',
-            'acct1_vid5' : 'acct1_vid5_tid5'
+            'vid2' : 'acct1_vid2_tid1',
+            'vid3' : 'acct1_vid3_tid0',
+            'vid5' : 'acct1_vid5_tid5'
             }
 
         # Image Visible Message
@@ -658,7 +657,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'bns' : ('neonvid_acct1_vid2,neonvid_acct1_vid5,'
+              'bns' : ('neonvid_vid2, neonvid_vid5,'
                        'neontnacct1_vid3_tid2.jpg')},
             { 'eventType' : 'IMAGES_VISIBLE',
               'pageId' : 'pageid123',
@@ -677,7 +676,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'neon_id1'
             )
         bnrequest = self.isp_mock.call_args[0][0]
-        self.assertEqual(bnrequest.url, 'http://127.0.0.1:8089/v1/getthumbnailid/tai123?params=acct1_vid2,acct1_vid5')
+        self.assertEqual(bnrequest.url, 'http://127.0.0.1:8089/v1/getthumbnailid/tai123?params=vid2,vid5')
         self.assertDictContainsSubset({'Cookie' : 'neonglobaluserid=neon_id1'},
                                       bnrequest.headers)
 
@@ -690,7 +689,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'bns' : ('neonvid_acct1_vid2 56 67,'
+              'bns' : ('neonvid_vid2 56 67,'
                        'neontnacct1_vid3_tid2.jpg 89 123')}, #tornado converts + to " "
             { 'eventType' : 'IMAGES_LOADED',
               'pageId' : 'pageid123',
@@ -721,7 +720,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'bn' : 'neonvid_acct1_vid3',
+              'bn' : 'neonvid_vid3',
               'x' : '56',
               'y' : '23',
               'wx' : '78',
@@ -794,7 +793,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'bn' : 'neonvid_acct1_vid3',
+              'bn' : 'neonvid_vid3',
               'vid' : 'vid1',
               'adplay': 'False',
               'adelta': 'null',
@@ -829,7 +828,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'bn' : 'neonvid_acct1_vid3',
+              'bn' : 'neonvid_vid3',
               'vid' : 'vid1',
               'adelta': '214',
               'pcount' : '1',
@@ -866,7 +865,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'bns' : 'neonvid_acct1_vid2'}))
+             'bns' : 'neonvid_vid2'}))
         self.assertEqual(response.code, 200)
         self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
 
@@ -968,10 +967,9 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
     def test_bad_connection_to_isp(self):
         def _mock_isp(request, retries=1, callback=None):
             if request.url.endswith('.avsc'):
-                retval = tornado.httpclient.HTTPResponse(
-                    request, 200)
+                retval = HTTPResponse(request, 200)
             else:
-                retval = tornado.httpclient.HTTPResponse(
+                retval = HTTPResponse(
                     request, 404, error=tornado.httpclient.HTTPError(404))
 
             if callback:
@@ -988,7 +986,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'bns' : 'neonvid_acct1_vid2'}))
+             'bns' : 'neonvid_vid2'}))
         self.assertEqual(response.code, 500)
 
     def test_invalid_event_type(self):
@@ -1002,6 +1000,7 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'cts' : '2345623',
              'tids' : 'acct1_vid2_tid1'}))
         self.assertEqual(response.code, 400)
+        self.assertRegexpMatches(response.body, 'Invalid event: abc')
 
     def test_caseinsentive_tracker_type(self):
         response = self.fetch('/v2?%s' % urllib.urlencode(
@@ -1026,29 +1025,33 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
              'cts' : '2345623',
              'tids' : 'acct1_vid2_tid1 56.3 48'}))
         self.assertEqual(response.code, 400)
+        self.assertRegexpMatches(response.body, 'Invalid ttype monkeyland')
 
     def test_invalid_tid_tuples(self):
         response = self.fetch('/v2?%s' % urllib.urlencode(
             {'a' : 'il',
              'pageid' : 'pageid123',
              'tai' : 'tai123',
-             'ttype' : 'monkeyland',
+             'ttype' : 'brightcove',
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
              'tids' : 'acct1_vid2_tid1 45'}))
         self.assertEqual(response.code, 400)
+        self.assertRegexpMatches(response.body, 'Missing argument tuple')
 
         response = self.fetch('/v2?%s' % urllib.urlencode(
             {'a' : 'il',
              'pageid' : 'pageid123',
              'tai' : 'tai123',
-             'ttype' : 'monkeyland',
+             'ttype' : 'brightcove',
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
              'tids' : 'acct1_vid2_tid1 width 98'}))
         self.assertEqual(response.code, 400)
+        self.assertRegexpMatches(response.body,
+                                 'height and width must be ints')
 
     @patch('clickTracker.trackserver.socket.create_connection')    
     def test_heartbeat_good_flume_connection(self, sockmock):
@@ -1057,8 +1060,24 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
 
     @patch('clickTracker.trackserver.socket.create_connection')    
     def test_heartbeat_bad_flume_connection(self, sockmock):
-        sockmock.side_effect = [socket.error()]
-        response = self.fetch('/healthcheck')
+        def mock_socket(dest, time):
+            if dest[1] == options.get('clickTracker.trackserver.flume_port'):
+                raise socket.error()
+            return MagicMock()
+        sockmock.side_effect = mock_socket
+        with self.assertLogExists(logging.ERROR, 'Could not open flume port'):
+            response = self.fetch('/healthcheck')
+        self.assertEqual(response.code, 500)
+
+    @patch('clickTracker.trackserver.socket.create_connection')    
+    def test_heartbeat_bad_isp_connection(self, sockmock):
+        def mock_socket(dest, time):
+            if dest[1] == options.get('clickTracker.trackserver.isp_port'):
+                raise socket.error()
+            return MagicMock()
+        sockmock.side_effect = mock_socket
+        with self.assertLogExists(logging.ERROR, 'Could not open isp port'):
+            response = self.fetch('/healthcheck')
         self.assertEqual(response.code, 500)
 
     def test_test_endpoint(self):
@@ -1228,6 +1247,29 @@ class TestFullServer(tornado.testing.AsyncHTTPTestCase):
               }))
 
         self.assertEqual(response.code, 400)
+        self.assertRegexpMatches(response.body,
+                                 'Missing argument prcnt')
+
+    def test_missing_click_arguments(self):
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            { 'a' : 'ic',
+              'pageid' : 'pageid123',
+              'ttype' : 'brightcove',
+              'page' : 'http://go.com',
+              'ref' : 'http://ref.com',
+              'cts' : '2345623',
+              'tid' : 'tid1',
+              'x' : '56',
+              'y' : '23',
+              'wx' : '78',
+              'wy' : '34',
+              'cx' : '6',
+              'cy' : '8'
+              }))
+
+        self.assertEqual(response.code, 400)
+        self.assertRegexpMatches(response.body,
+                                 'Missing argument tai')
 
     def test_utf8_header(self):
         # TODO(mdesnoyer): Make this test cleaner

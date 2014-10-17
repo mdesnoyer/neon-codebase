@@ -43,7 +43,7 @@ neon_service_get_uri_token(const ngx_http_request_t *req,
         neon_stats[NGINX_OUT_OF_MEMORY] ++;
         return NULL;
     }
-    memset(uri, 0 , uri_size);
+    memset(uri, 0, uri_size);
     memcpy((char*)uri, (char*)(req->uri).data, (size_t)(req->uri).len);
     
     // move up in the uri when the first token shoud be
@@ -368,9 +368,19 @@ int neon_service_parse_api_args(ngx_http_request_t *request,
     // get publisher id
     *publisher_id = neon_service_get_uri_token(request, base_url, 0);
 
+    if(*publisher_id == NULL) {
+        neon_stats[NEON_SERVICE_PUBLISHER_ID_MISSING_FROM_URL]++;     
+        return 1;
+    }
+
     // get video id
     *video_id = neon_service_get_uri_token(request, base_url, 1);
   
+    if(*video_id == NULL) {
+            neon_stats[NEON_SERVICE_VIDEO_ID_MISSING_FROM_URL]++;                     
+        return 1;
+    }
+
     // Clean up the video id from the neonvid_ parameter
     // neonvid_ is a prefix used to identify a Neon video in beacon api
     // Used only for the client API call
@@ -760,7 +770,7 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
 
     ngx_str_t base_url = ngx_string("/v1/getthumbnailid/");
     ngx_str_t params_key = ngx_string("params");
-    ngx_str_t video_ids; 
+    ngx_str_t video_ids = ngx_string(""); 
     ngx_str_t bucket_id = ngx_string(""); 
     ngx_str_t neonglobaluserid;
     NEON_BOOLEAN abtest_ready = NEON_FALSE;
@@ -830,6 +840,13 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
 
     char * context = 0;
     const char s[] = ", \n";
+    
+    // If video_ids haven't been parsed 
+    if (video_ids.len <= 0){
+        neon_service_no_content(request, chain);
+        return NEON_GETTHUMB_API_FAIL;
+    }
+
     char *vids = strndup((char *)video_ids.data, video_ids.len);
     char *vtoken = strtok_r(vids, s, &context);
     while(vtoken != NULL){

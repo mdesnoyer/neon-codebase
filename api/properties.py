@@ -55,7 +55,7 @@ NOTIFICATION_API_KEY_STAGING = 'kR0ks7NpdSD0w6xXAAvWfw'
 #IMAGE CDN
 CDN_IMAGE_SIZES = [(120, 67), (160, 90), (320, 180), (480, 270), 
         (640, 360), (120, 90), (160, 120), (320, 240), (480, 360),
-        (640, 480)]
+        (640, 480), (1280, 720)]
 S3_IMAGE_CDN_BUCKET_NAME = "neon-image-cdn"
 CDN_URL_PREFIX = "imagecdn.neon-lab.com"
 

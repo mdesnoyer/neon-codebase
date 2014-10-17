@@ -57,6 +57,8 @@ from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 
 _log = logging.getLogger(__name__)
 
+TMD = neondata.ThumbnailMetadata
+
 class TestVideoClient(unittest.TestCase):
     ''' 
     Test Video Processing client
@@ -76,6 +78,8 @@ class TestVideoClient(unittest.TestCase):
         self.model.score.return_value = 1, 2 
         self.test_video_file = os.path.join(os.path.dirname(__file__), 
                                 "test.mp4") 
+        self.test_video_file2 = os.path.join(os.path.dirname(__file__), 
+                                "test2.mp4") 
         #Redis
         self.redis = test_utils.redis.RedisServer()
         self.redis.start() 
@@ -99,6 +103,9 @@ class TestVideoClient(unittest.TestCase):
         
         self.na = neondata.NeonUserAccount('acc1')
         self.na.save()
+        
+        self.np = neondata.NeonPlatform('acc1', self.na.neon_api_key)
+        self.np.save()
 
         j_id = "j123"
         api_key = self.na.neon_api_key 
@@ -106,17 +113,18 @@ class TestVideoClient(unittest.TestCase):
         i_id = 0
 
         if request_type == "neon":
-            jparams = request_template.neon_api_request %(
+            jparams = request_template.neon_api_request % (
                     j_id, vid, api_key, "neon", api_key, j_id)
             self.api_request = neondata.NeonApiRequest(j_id, api_key, vid, "title",
-                            None, None, None)
+                    'url', 'neon', None)
         elif request_type == "brightcove":
             i_id = "b_id"
             jparams = request_template.brightcove_api_request %(j_id, vid, api_key,
                             "brightcove", api_key, j_id, i_id)
             self.api_request = neondata.BrightcoveApiRequest(
-                                        j_id, api_key, vid, 'title', None,
-                                        None, None, None)
+                                        j_id, api_key, vid, 
+                                        'title', 'http://url',
+                                        'rtok', 'wtok', None) 
             self.api_request.previous_thumbnail = "http://prevthumb"
         elif request_type == "ooyala":
             i_id = "b_id"
@@ -133,6 +141,8 @@ class TestVideoClient(unittest.TestCase):
                                         4, None, i_id, [640,480])
         vmdata.save()
         
+        self.api_request.api_method = 'topn'
+        self.api_request.api_param = 1 
         self.api_request.save()
         vprocessor = api.client.VideoProcessor(job, self.model, self.model_version)
 
@@ -307,6 +317,10 @@ class TestVideoClient(unittest.TestCase):
         conn.create_bucket('neon-image-cdn')
         mock_conntype.return_value = conn
         
+        # Mock customerCallback
+        sqsmgr = MagicMock()
+        sqsmgr.add_callback_response.return_value = True
+        
         mresponse = MagicMock()
         mresponse.read.return_value = '{"url": "http://cloudinary.jpg"}' 
         mock_urllib2.urlopen.return_value = mresponse 
@@ -314,26 +328,6 @@ class TestVideoClient(unittest.TestCase):
         vprocessor = self.setup_video_processor("neon")
         vprocessor.process_video(self.test_video_file)
         vprocessor.finalize_request() 
-
-        #TODO: Mock customerCallback
-        #verify callback response
-        #url_call = mock_client.send_request.call_args[0][0].url
-        #self.assertEqual(url_call, "http://localhost:8081/testcallback")
-        #self.assertEqual(mock_client.send_request.call_count, 1)
-
-        #verify data in the callback response
-        #callback_result = json.loads(mock_client.send_request.call_args[0][0].body)
-        #result_data = [15, 30, 60, 45, 105] #hardcoded for now, perhaps extract this from model data  
-        #self.assertEqual(callback_result["data"], result_data)
-        #self.assertEqual(len(callback_result["thumbnails"]), len(result_data))
-        #self.assertEqual(callback_result["video_id"], 'video1')
-        #self.assertEqual(callback_result["error"], None)
-        #self.assertEqual(callback_result["serving_url"][len("http://i1"):],
-        #    ".neon-images.com/v1/client/%s/neonvid_video1" %
-        #     self.na.tracker_account_id)
-            
-        #verify the number of thumbs in self.thumbnails  
-        #self.assertEqual(len(vprocessor.thumbnails), len(callback_result["thumbnails"]) + 1)
 
         #verify the center frame thumbnail
         self.assertEqual(vprocessor.thumbnails[-1].type,
@@ -358,16 +352,17 @@ class TestVideoClient(unittest.TestCase):
         api_key = vprocessor.job_params['api_key']
         job_id  = vprocessor.job_params['job_id']
         api_request = neondata.NeonApiRequest.get(api_key, job_id)
-        self.assertEqual(api_request.state, neondata.RequestState.REQUEUED)
+        self.assertEqual(api_request.state, neondata.RequestState.INT_ERROR)
         
+        #NOTE: disabled now, since we don't requeue currently
         #Induce a requeue error
         #This also emulates requeue count > 3
-        response = tornado.httpclient.HTTPResponse(request, 500,
-                            buffer=StringIO(''))
-        mock_client.send_request.return_value = response
-        vprocessor.finalize_request() 
-        api_request = neondata.NeonApiRequest.get(api_key, job_id)
-        self.assertEqual(api_request.state, neondata.RequestState.INT_ERROR)
+        #response = tornado.httpclient.HTTPResponse(request, 500,
+        #                    buffer=StringIO(''))
+        #mock_client.send_request.return_value = response
+        #vprocessor.finalize_request() 
+        #api_request = neondata.NeonApiRequest.get(api_key, job_id)
+        #self.assertEqual(api_request.state, neondata.RequestState.INT_ERROR)
         
         #verify callback response
         #TODO: Mock customerCallback
@@ -514,6 +509,7 @@ class TestVideoClient(unittest.TestCase):
         vmdata = neondata.VideoMetadata.get(i_vid)
         self.assertIsNotNone(vmdata)
 
+    @unittest.skip("requeuing is disabled now")
     @patch('utils.http')
     def test_requeue_job(self, mock_client):
         request = tornado.httpclient.HTTPRequest("http://neon-lab.com")
@@ -540,6 +536,92 @@ class TestVideoClient(unittest.TestCase):
         img = vprocessor.get_center_frame(self.test_video_file)
         self.assertIsNotNone(img)
         self.assertTrue(isinstance(img, PIL.Image.Image))
+
+
+    @patch('utils.sqsmanager')
+    @patch('api.cdnhosting.urllib2')
+    @patch('api.cdnhosting.S3Connection')
+    @patch('utils.http')
+    def test_finalize_request_reprocess(self, mock_client,
+                               mock_conntype, mock_urllib2, sqsmgr):
+        '''
+        Process a request (normal flow)
+        modify the video URL
+        Change request state
+        Change few video metadata params
+
+        Generate a few thumbnails (2 old  & rest new)
+        Verify TMData, Apirequest, VMData, Serving URLs
+
+        '''
+        request = tornado.httpclient.HTTPRequest("http://xyz")
+        response = tornado.httpclient.HTTPResponse(request, 200,
+                            buffer=StringIO(''))
+        mock_client.send_request.return_value = response
+        
+        #s3mocks to mock host_thumbnails_to_s3
+        conn = boto_mock.MockConnection()
+        conn.create_bucket('host-thumbnails')
+        conn.create_bucket('neon-image-cdn')
+        mock_conntype.return_value = conn
+        
+        # Mock customerCallback
+        sqsmgr = MagicMock()
+        sqsmgr.add_callback_response.return_value = True
+        
+        mresponse = MagicMock()
+        mresponse.read.return_value = '{"url": "http://cloudinary.jpg"}' 
+        mock_urllib2.urlopen.return_value = mresponse 
+        
+        vprocessor = self.setup_video_processor("neon")
+
+        api_key = self.na.neon_api_key
+        job_id = "j123"
+        i_vid = neondata.InternalVideoID.generate(api_key, "video1")
+        
+        vprocessor.process_video(self.test_video_file)
+        vprocessor.finalize_request() 
+        old_tids = [t.key for t in vprocessor.thumbnails]
+        vmdata = neondata.VideoMetadata.get(i_vid)
+        self.assertEqual(vmdata.thumbnail_ids, old_tids)
+
+        # Set State to reprocess
+        api_request = neondata.NeonApiRequest.get(api_key, job_id)
+        api_request.video_url = "http://reprocess_video_url"
+        api_request.previous_thumbnail = "http://previous_thumb" 
+        api_request.state = neondata.RequestState.REPROCESS
+        api_request.save()
+
+        # Modify params in vprocessor
+        vprocessor.model_version = "reprocess_model"
+        vprocessor.job_params = api_request.__dict__
+        ct_output, ft_output = pickle.load(open(self.model_file)) 
+        for i in range(3):
+            ct_output[i][0][0][0] = 255
+            ct_output[i][0][0][1] = 255
+
+        vprocessor.model.choose_thumbnails.return_value = (ct_output, 9)
+        vprocessor.thumbnails = []
+        vprocessor.process_video(self.test_video_file2)
+        spr_mock = MagicMock()
+        vprocessor.save_previous_thumbnail = spr_mock
+        p_tid = TMD('p_tid',i_vid,[0],0,0,0,'custom_upload',0,0,True,False,0)
+        spr_mock.return_value = p_tid
+
+        vprocessor.finalize_request() 
+        
+        # add p_tid to vp object to emulate behavior of spr method
+        vprocessor.thumbnails.append(p_tid) 
+
+        vmdata = neondata.VideoMetadata.get(i_vid)
+
+        # Verify Videometadata object
+        tids = [t.key for t in vprocessor.thumbnails]
+        print tids
+        print vmdata.thumbnail_ids
+        self.assertEqual(vmdata.thumbnail_ids, tids)
+        self.assertEqual(vmdata.frame_size, [1280, 720])
+        self.assertEqual(vmdata.model_version, "reprocess_model")
 
 if __name__ == '__main__':
     unittest.main()

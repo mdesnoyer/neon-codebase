@@ -69,6 +69,8 @@ def calc_aggregate_ab_metrics(data):
     And Relative Risk approximations from:
     http://en.wikipedia.org/wiki/Relative_risk
 
+    This is the DerSimonian and Laird method.
+
     Inputs:
     data - Matrix of ab data where each row corresponds to a video and is of
            the form: <base impressions>,<base conversions>,
@@ -96,7 +98,7 @@ def calc_aggregate_ab_metrics(data):
          (np.square(np.dot(w, log_ratio)) / w_sum))
     c = w_sum - np.sum(np.square(w)) / w_sum
 
-    t_2 = (q - len(data) + 1) / c
+    t_2 = max(0, (q - len(data) + 1) / c)
 
     w_star = 1 / (var_log_ratio + t_2)
 
@@ -113,3 +115,40 @@ def calc_aggregate_ab_metrics(data):
     return (float(mn - 1), float(p_value),
             float(low - 1), float(up - 1),
             float(1 - np.sqrt(1/w_sum) / standard_error))
+
+def calc_aggregate_click_based_metrics(data):
+    '''Caclulates the aggregate A/B metrics assuming that the average is
+    click centric.
+
+    In other words, this gives you the expected ctr for the next click
+    across all videos; videos aren't reweighted.
+
+    Inputs:
+    data - Matrix of ab data where each row corresponds to a video and is of
+           the form: <base impressions>,<base conversions>,
+                     <acting impressions>,<acting conversions>
+
+    output (All number are in fractions):
+     (Mean lift (Positive value is good), p_value, lower 95% confidence bound,
+     upper 95% confidence bound)
+    '''
+    counts = np.sum(data, axis=0)
+
+    p_base = float(counts[1]) / counts[0]
+    p_act = float(counts[3]) / counts[2]
+    p_diff = p_act - p_base
+
+    se_base = math.sqrt(p_base*(1-p_base)/counts[0])
+    se_act = math.sqrt(p_act*(1-p_act)/counts[2])
+    se_tot = math.sqrt(se_base*se_base + se_act*se_act)
+
+    low = p_diff - 1.96*se_tot
+    up = p_diff + 1.96*se_tot
+
+    z_score = p_diff / se_tot
+    p_value = scipy.stats.norm.sf(z_score) * 2
+
+    return (p_diff/p_base,
+            p_value,
+            low/p_base,
+            up/p_base)

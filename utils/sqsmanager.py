@@ -24,6 +24,7 @@ import time
 from utils.options import define, options
 
 define('region', type=str, default="us-east-1", help='region to connect to')
+define('callback_sqs', type=str, default="neon-customer-callback", help='SQS Q')
 
 _log = logging.getLogger(__name__)
 
@@ -56,8 +57,6 @@ class SQSManager(object):
     def __init__(self, sqs_name):
         # should connect with server HMAC credentials
         conn = boto.connect_sqs()
-                            #'AKIAJ5G2RZ6BDNBZ2VBA',
-                            #'d9Q9abhaUh625uXpSrKElvQ/DrbKsCUAYAPaeVLU')
 
         # create_queue method will create (and return) the requested queue if it
         # does not exist or will return the existing queue if it does.

@@ -664,7 +664,7 @@ class Cluster():
 
             
         instance_groups = [
-            InstanceGroup(1, 'MASTER', 'm1.large', 'SPOT',
+            InstanceGroup(1, 'MASTER', 'm1.large', 'ON_DEMAND',
                           'Master Instance Group', 0.50),
             self._get_core_instance_group()
             ]
@@ -695,7 +695,7 @@ class Cluster():
         cur_state = conn.describe_jobflow(self.cluster_id)
         while cur_state.state != 'WAITING':
             if cur_state.state in ['TERMINATING', 'TERMINATED',
-                             'TERMINATED_WITH_ERRORS']:
+                             'TERMINATED_WITH_ERRORS', 'FAILED']:
                 msg = ('Cluster could not start because: %s',
                            cur_state.laststatechangereason)
                 _log.error(msg)

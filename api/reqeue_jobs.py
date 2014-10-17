@@ -35,8 +35,8 @@ def main():
         request = neondata.NeonApiRequest.create(request_json)
 
         #If request state is submitted, being processed, Requeued or Failed
-        if request.state in [neondata.RequestState.SUBMIT,neondata.RequestState.PROCESSING,
-                neondata.RequestState.REQUEUED,neondata.RequestState.FAILED]:
+        if request.state in [neondata.RequestState.SUBMIT, neondata.RequestState.PROCESSING, 
+                neondata.RequestState.REQUEUED, neondata.RequestState.FAILED]:
             url = 'http://%s:%s/requeue' % (options.host, options.port)
             response = urllib2.urlopen(url, request.to_json())
 
