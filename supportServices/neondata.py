@@ -42,11 +42,13 @@ import threading
 import time
 import api.brightcove_api #coz of cyclic import 
 import api.youtube_api
-import utils.http
 import utils.logs
 import utils.neon
 import utils.sync
 import utils.s3
+# import utils.http after utils.logs coz it uses NeonLogger which
+# defines the log_n function
+import utils.http 
 import urllib
 
 from api.cdnhosting import CDNHosting

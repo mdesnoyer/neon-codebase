@@ -1283,6 +1283,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     # Ooyala Methods
     ##################################################################
 
+    @tornado.web.asynchronous
     @tornado.gen.engine
     def create_ooyala_integration(self):
         '''
@@ -1370,7 +1371,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     vstatus_response = GetVideoStatusResponse(
                                         video_response, len(video_response))
                     data = vstatus_response.to_json() 
-                    self.send_json_response(data, 201) 
+                    self.send_json_response(data, 201)
+                    return
                 else:
                     data = '{"error": "platform was not added,\
                                 account creation issue"}'
