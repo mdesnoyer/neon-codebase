@@ -33,7 +33,6 @@ import sys
 import tornado.httpclient
 import urllib
 import urllib2
-import utils.http
 
 from utils.options import define, options
 ### Options to define the root logger when AddConfiguredLogger is called ###
@@ -229,6 +228,10 @@ class TornadoHTTPHandler(logging.Handler):
                         self.handleError(record)
 
         try:
+            # import utils.http here, so that the log_n function of NeonLogger is imported
+            # from utils.log. If imported earlier, then the log_n function is not available
+            # Yes, this is a circular dependency, but lets live with this for now ! 
+            import utils.http
             utils.http.send_request(self.generate_request(record),
                                     callback=handle_response,
                                     do_logging=False)
