@@ -6,9 +6,11 @@
 #include <boost/scoped_ptr.hpp>
 #include <gtest/gtest.h>
 #include <libgen.h>
+#include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <time.h>
-
+#include <stdlib.h>
 #include "neon_error_codes.h"
 extern "C" {
     #include "neon_updater.h"
@@ -58,10 +60,31 @@ TEST_F(NeonISPMiscTest, DISABLED_test_utils_get_expiry){
 TEST_F(NeonISPMiscTest, test_uuid_generator){
 
     const int len = 10;
-    char uuid[len];
+    //  add terminating char
+    char uuid[len+2];
+
+    // wipe with invalid values in return string
+    memset(uuid, 1, len+2);
+
+    // testing
     neon_get_uuid((char*)uuid, len);
-    // dd
-    //EXPECT_STRNE(uuid, NULL);
+    
+    NEON_BOOLEAN ret = NEON_TRUE;
+    
+    // should only contain digits and lower and upper characters
+    for(int i=0; i < len; i++)
+        if(isalnum(uuid[i]) == 0)
+            ret = NEON_FALSE;
+
+    // check that a terminating char has been added
+    if(uuid[len] != 0)
+        ret = NEON_FALSE;
+
+    // check that buffer is unchanged after terminating char
+    if(uuid[len+1] != 1)
+        ret = NEON_FALSE;
+
+    EXPECT_EQ(ret, NEON_TRUE);
 }
 
 TEST_F(NeonISPMiscTest, test_ip_string){
