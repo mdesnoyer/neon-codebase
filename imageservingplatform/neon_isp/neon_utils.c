@@ -148,10 +148,14 @@ void neon_get_uuid(char *dest, size_t length){
 		"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 		"abcdefghijklmnopqrstuvwxyz";
 
+    //  62 characters, last one being at index 61
+    static const int charset_max_index = 10 + 26 + 26 - 1;
+
     while (length-- > 0) {
-        size_t index = (double) rand() / RAND_MAX * (sizeof (charset) - 1);
+        size_t index = (double) rand() / RAND_MAX * charset_max_index;
         *dest++ = charset[index];
     }
+  
     *dest = '\0';
 }
 

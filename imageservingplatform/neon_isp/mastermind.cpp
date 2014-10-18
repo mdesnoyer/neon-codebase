@@ -286,7 +286,9 @@ Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
     if(publisherTable.GetSize() == 0 && directiveTable.GetSize() == 0)
         throw new NeonException("Mastermind::Init: zero publishers and "
                                 "directives read from mastermind file");
-        
+   
+    neon_stats[MASTERMIND_PARSE_SUCCESS]++;
+
     int ret = fclose(f);
     
     std::cout << "\nParsed "<< lineNumber << " lines" << endl;

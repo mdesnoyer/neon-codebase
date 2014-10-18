@@ -152,7 +152,7 @@ neon_service_isset_neon_cookie(ngx_http_request_t *request){
     NEON_BOOLEAN ret = neon_service_isset_cookie(request, 
                                                  &neon_cookie_name, 
                                                  &value);
-    if(ret == NEON_FALSE)
+    if(ret == NEON_TRUE)
         neon_stats[NEON_SERVICE_COOKIE_PRESENT] ++;
     return ret;
 }
