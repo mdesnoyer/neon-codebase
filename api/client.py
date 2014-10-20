@@ -77,6 +77,8 @@ statemon.define('save_tmdata_error', int)
 statemon.define('save_vmdata_error', int)
 statemon.define('customer_callback_schedule_error', int)
 statemon.define('no_thumbs', int)
+statemon.define('model_load_error', int)
+statemon.define('unknown_exception', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -534,7 +536,7 @@ class VideoProcessor(object):
             # Cron Requeue is more helpful
 
             api_request = neondata.NeonApiRequest.get(api_key, job_id)
-            api_request.state = neondata.RequestState.INT_ERROR
+            api_request.state = neondata.RequestState.FAILED
             api_request.save()
             return
 
@@ -776,7 +778,7 @@ class VideoProcessor(object):
                                 video_id, image, tid, frame_size)
 
             if ret[0]:
-                #NOTE: By default Neon rank 1 is always uploaded
+                #NOTE: By default Neon rank 0 is always uploaded
                 self.thumbnails[0].chosen = True 
             else:
                 _log.error("autosync failed for video %s" % video_id)
@@ -927,9 +929,11 @@ class VideoProcessor(object):
         video_id = self.job_params[properties.VIDEO_ID]
         title = self.job_params[properties.VIDEO_TITLE]
         i_id = self.job_params[properties.INTEGRATION_ID]
+        job_id  = job_params[properties.REQUEST_UUID_KEY]
         ba = neondata.BrightcovePlatform.get_account(api_key, i_id) 
         thumbs = [t.to_dict_for_video_response() for t in self.thumbnails]
         vr = neondata.VideoResponse(video_id,
+                                    job_id,
                                     "processed",
                                     "brightcove",
                                     i_id,
@@ -1010,6 +1014,7 @@ class VideoClient(object):
                   % (self.model_file, self.model_version))
         self.model = model.load_model(self.model_file)
         if not self.model:
+            statemon.state.increment('model_load_error')
             _log.error('Error loading the Model')
             exit(1)
 
@@ -1041,6 +1046,7 @@ class VideoClient(object):
             time.sleep(self.SLEEP_INTERVAL * random.random())
         
         except Exception,e:
+            statemon.state.increment('unknown_exception')
             _log.exception("key=worker [%s] "
                     " msg=exception %s" %(self.pid, e.message))
             time.sleep(self.SLEEP_INTERVAL)
