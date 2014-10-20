@@ -84,7 +84,7 @@ class TestSampledLogging(test_utils.neontest.TestCase):
 
 class TestLogglyHandler(test_utils.neontest.TestCase):
     def setUp(self):
-        self.url_patcher = patch('utils.logs.utils.http.send_request')
+        self.url_patcher = patch('utils.http.send_request')
         self.url_mock = self.url_patcher.start()
 
         self.url_mock.side_effect = \
@@ -127,7 +127,7 @@ class TestLogglyHandler(test_utils.neontest.TestCase):
 
 class TestFlumeHandler(test_utils.neontest.TestCase):
     def setUp(self):
-        self.url_patcher = patch('utils.logs.utils.http.send_request')
+        self.url_patcher = patch('utils.http.send_request')
         self.url_mock = self.url_patcher.start()
 
         self.url_mock.side_effect = \

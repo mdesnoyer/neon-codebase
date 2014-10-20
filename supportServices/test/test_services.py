@@ -296,7 +296,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         
         items = self._get_video_status_brightcove()
         for item in items['items']:
-            vr = neondata.VideoResponse(None, None, None, None, None, 
+            vr = neondata.VideoResponse(None, None, None, None, None, None, 
                                     None, None, None, None)
             vr.__dict__ = item
             status = vr.status
@@ -360,7 +360,9 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
                     "/%s/videos/%s" %(self.a_id, self.b_id, vid))
         vals = {'current_thumbnail' : tid }
         return self.put_request(url, vals, self.api_key)
-   
+  
+    ## HTTP Side efffect for all Tornado HTTP Requests
+
     def _success_http_side_effect(self, *args, **kwargs):
         ''' generic sucess http side effects for all patched http calls 
             for this test ''' 
@@ -458,13 +460,18 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
             return response
 
         elif "jpg" in http_request.url or "jpeg" in http_request.url:
-            #downloading any image (create a random image response)
-            response = create_random_image_response()
+            if "error_image" in http_request.url:
+                response = tornado.httpclient.HTTPResponse(request, 500)
+            else:
+                #downloading any image (create a random image response)
+                response = create_random_image_response()
+
             if callback:
                 return tornado.ioloop.IOLoop.current().add_callback(callback,
                                                                      response)
             else:
                 return response
+            
 
         elif ".mp4" in http_request.url:
             headers = {"Content-Type": "video/mp4"}
@@ -702,7 +709,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
             thumbs = []
             items = self._get_video_status_brightcove()
             for item, tid in zip(items['items'], new_tids):
-                vr = neondata.VideoResponse(None, None, None, None,
+                vr = neondata.VideoResponse(None, None, None, None, None,
                                         None, None, None, None, None)
                 vr.__dict__ = item
                 thumbs.append(vr.current_thumbnail)
@@ -1211,7 +1218,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         resp = self.get_request(url, self.api_key)
         vresponse = json.loads(resp.body)["items"][0]
 
-        expected_vresponse = neondata.VideoResponse(vid, "finished", "neon",
+        expected_vresponse = neondata.VideoResponse(vid, job_id, "finished", "neon",
                 "0", title, None, None, None, thumbs, True, thumbs[0].key)
 
         self.assertEqual(vresponse["winner_thumbnail"],
@@ -1347,6 +1354,34 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         
         s_url = neondata.ThumbnailServingURLs.get(c_thumb.key)
         self.assertIsNotNone(s_url)
+    
+        # Image download error
+        url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
+                    "/%s/videos/%s" %(self.a_id, self.b_id, vid))
+        data = {
+                "created_time": time.time(),
+                "type": "custom_upload",
+                "urls": ["http://error_image.jpg"]
+                }
+
+        vals = {'thumbnails' : [data]}
+        response = self.put_request(url, vals, self.api_key, jsonheader=True)
+        self.assertEqual(response.code, 400)
+
+        # cloudinary error 
+        mresponse.read.return_value =  '{"error": "fake error"}' 
+        mock_urllib2.urlopen.return_value = mresponse 
+        url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
+                    "/%s/videos/%s" %(self.a_id, self.b_id, vid))
+        data = {
+                "created_time": time.time(),
+                "type": "custom_upload",
+                "urls": ["http://custom_thumbnail.jpg"]
+                }
+
+        vals = {'thumbnails' : [data]}
+        response = self.put_request(url, vals, self.api_key, jsonheader=True)
+        self.assertEqual(response.code, 202) 
 
     def test_disable_thumbnail(self):
         '''

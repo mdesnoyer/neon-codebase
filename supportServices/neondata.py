@@ -46,8 +46,6 @@ import utils.logs
 import utils.neon
 import utils.sync
 import utils.s3
-# import utils.http after utils.logs coz it uses NeonLogger which
-# defines the log_n function
 import utils.http 
 import urllib
 
@@ -2713,10 +2711,11 @@ class InMemoryCache(object):
 
 class VideoResponse(object):
     ''' VideoResponse object that contains list of thumbs for a video '''
-    def __init__(self, vid, status, i_type, i_id, title, duration,
+    def __init__(self, vid, job_id, status, i_type, i_id, title, duration,
             pub_date, cur_tid, thumbs, abtest=True, winner_thumbnail=None,
             serving_url=None):
         self.video_id = vid
+        self.job_id = job_id 
         self.status = status
         self.integration_type = i_type
         self.integration_id = i_id

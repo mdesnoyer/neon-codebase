@@ -684,6 +684,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                         0, 0)
         thumbs.append(tm.to_dict_for_video_response())
         vr = neondata.VideoResponse(video_id,
+                            None,
                             neondata.RequestState.PROCESSING,
                             "neon",
                             "0",
@@ -837,6 +838,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                             else request.publish_date
             pub_date = int(pub_date) if pub_date else None #type
             vr = neondata.VideoResponse(vid,
+                              request.job_id,
                               status,
                               request.request_type,
                               i_id,
@@ -1164,6 +1166,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                 "brightcove", 0, 0)
                         thumbs.append(tm.to_dict_for_video_response())
                         vr = neondata.VideoResponse(item["id"],
+                              None,
                               "processing",
                               "brightcove",
                               i_id,
@@ -1358,6 +1361,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                 t_urls, ctime, 0, 0, "ooyala", 0, 0)
                         thumbs.append(tm.to_dict_for_video_response())
                         vr = neondata.VideoResponse(item["embed_code"],
+                              None,
                               "processing",
                               "ooyala",
                               i_id,
@@ -1793,13 +1797,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         fname = "custom%s.jpeg" % int(time.time())
         keyname = "%s/%s/%s" % (vmdata.get_account_id(), vmdata.job_id, fname)
         s3url = "https://%s.s3.amazonaws.com/%s" % ("host-thumbnails", keyname)
-        np = yield tornado.gen.Task(neondata.NeonPlatform.get_account, vmdata.get_account_id())
-        if not np:
-            data = '{"error": "internal error"}'
-            self.send_json_response(data, 500)
-            return
-        
-        cdn_metadata = np.cdn_metadata
+        cdn_metadata = platform_account.cdn_metadata
         ttype = neondata.ThumbnailType.CUSTOMUPLOAD
 
         # upload & add thumb to VideoMetadata
@@ -1808,7 +1806,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                         cdn_metadata=cdn_metadata)
         
         if result is None:
-            data = '{"error": "failed to download image"}'
+            data = '{"error": "Invalid image link or failed to download image"}'
             self.send_json_response(data, 400)
             return
 
