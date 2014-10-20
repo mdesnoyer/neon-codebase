@@ -929,7 +929,7 @@ class VideoProcessor(object):
         video_id = self.job_params[properties.VIDEO_ID]
         title = self.job_params[properties.VIDEO_TITLE]
         i_id = self.job_params[properties.INTEGRATION_ID]
-        job_id  = job_params[properties.REQUEST_UUID_KEY]
+        job_id  = self.job_params[properties.REQUEST_UUID_KEY]
         ba = neondata.BrightcovePlatform.get_account(api_key, i_id) 
         thumbs = [t.to_dict_for_video_response() for t in self.thumbnails]
         vr = neondata.VideoResponse(video_id,

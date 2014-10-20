@@ -25,6 +25,7 @@ from utils.options import options, define
 define("carbon_server", default="54.225.235.97", help="Montioring server", type=str)
 define("carbon_port", default=8090, help="Monitoring port", type=int)
 define("interval", default=60, help="time between stats", type=int)
+define("isp_port", default=80, help="ISP port", type=int)
 
 def send_data(name, value):
     '''
@@ -48,7 +49,7 @@ def query_neon_isp():
     Query Neon isp and get the json data
     '''
     try:
-        url = "http://localhost/stats"
+        url = "http://localhost:%d/stats" % options.isp_port
         req = urllib2.Request(url)
         r = urllib2.urlopen(req)
         return r.read()
@@ -63,6 +64,9 @@ def main():
     utils.neon.InitNeon()
     while True:
         jvals = query_neon_isp()
+        if jvals is None:
+            continue
+            
         vals = json.loads(jvals)
         for name, val in vals.iteritems():
             send_data(name.lower(), val)
