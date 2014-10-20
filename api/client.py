@@ -776,7 +776,7 @@ class VideoProcessor(object):
                                 video_id, image, tid, frame_size)
 
             if ret[0]:
-                #NOTE: By default Neon rank 1 is always uploaded
+                #NOTE: By default Neon rank 0 is always uploaded
                 self.thumbnails[0].chosen = True 
             else:
                 _log.error("autosync failed for video %s" % video_id)
