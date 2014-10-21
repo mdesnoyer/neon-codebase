@@ -381,6 +381,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         elif method == "create_thumbnail_api_request":
             self.create_neon_thumbnail_api_request()
+        elif method == "reprocess_video_request":
+            #TODO(Sunil): Implement this endpoint
+            self.method_not_supported()
         else:
             self.method_not_supported()
 
@@ -671,7 +674,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             self.send_json_response(data, 502)
             return
 
-        #note: job id gets inserted into Neon platform account on video server
+        # NOTE: job id gets inserted into Neon platform account on video server
+
+        job_id = json.loads(result.body)["job_id"] # get job id from response
         t_urls = [] 
         thumbs = []
         im_index = int(hashlib.md5(video_id).hexdigest(), 16) \
@@ -684,7 +689,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                         0, 0)
         thumbs.append(tm.to_dict_for_video_response())
         vr = neondata.VideoResponse(video_id,
-                            None,
+                            job_id,
                             neondata.RequestState.PROCESSING,
                             "neon",
                             "0",

@@ -370,7 +370,7 @@ class TestVideoClient(test_utils.neontest.TestCase):
         api_key = vprocessor.job_params['api_key']
         job_id  = vprocessor.job_params['job_id']
         api_request = neondata.NeonApiRequest.get(api_key, job_id)
-        self.assertEqual(api_request.state, neondata.RequestState.INT_ERROR)
+        self.assertEqual(api_request.state, neondata.RequestState.FAILED)
         
         #NOTE: disabled now, since we don't requeue currently
         #Induce a requeue error
