@@ -403,13 +403,19 @@ class VideoProcessor(object):
                   sample_step=self.sec_to_extract_offset,
                   start_time=self.sec_to_extract)
 
+        exists_unfiltered_images = np.any([x[4] is not None and x[4] == ''
+                                           for x in results])
         for image, score, frame_no, timecode, attribute in results:
-            if attribute is not None and attribute == '':
+            # Only return unfiltered images unless they are all
+            # filtered, in which case, return them all.
+            if not exists_unfiltered_images or (
+                    attribute is not None and attribute == ''):
                 self.valence_scores[0].append(timecode)
                 self.valence_scores[1].append(score)
                 self.timecodes[frame_no] = timecode
                 self.data_map[frame_no] = (score, image[:, :, ::-1])
                 self.attr_map[frame_no] = attribute
+                found_valid_image = True        
         
         end_process = time.time()
         _log.info("key=process_video msg=debug " 
