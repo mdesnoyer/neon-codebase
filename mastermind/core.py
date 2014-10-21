@@ -671,7 +671,8 @@ class Mastermind(object):
         score = thumb_info.model_score
         if score is not None:
             score = float(score)
-        if score is None or score < 1e-4:
+        if (score is None or score < 1e-4 or math.isinf(score) or 
+            math.isnan(score)):
             if thumb_info.chosen:
                 # An editor chose this thumb, so give it a 5% lift
                 return max(1.0, (Mastermind.PRIOR_CTR * 

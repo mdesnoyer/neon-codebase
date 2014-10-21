@@ -93,9 +93,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         directive = self.mastermind._calculate_current_serving_directive(
             VideoInfo(
                 'acct1', True,
-                [build_thumb(ThumbnailMetadata('n1', 'vid1',
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
                                                ttype='neon', model_score=5.8)),
-                 build_thumb(ThumbnailMetadata('n2', 'vid1',
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=1,
                                                ttype='neon',
                                                model_score='3.5')),
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
@@ -105,6 +105,29 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
                          ['n2', 'ctr', 'bc', 'n1'])
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+        for val in directive.values():
+            self.assertGreater(val, 0.0)
+
+    def test_inf_model_score(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
+        
+        directive = self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon', model_score=5.8)),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=1,
+                                               ttype='neon',
+                                               model_score=float('nan'))),
+                 build_thumb(ThumbnailMetadata('n3', 'vid1', rank=2,
+                                               ttype='neon',
+                                               model_score='-inf')),
+                 build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
+                                               ttype='brightcove'))]))[1]
+
+        self.assertEquals(len(directive), 4)
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
             self.assertGreater(val, 0.0)

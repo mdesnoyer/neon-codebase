@@ -77,6 +77,8 @@ statemon.define('save_tmdata_error', int)
 statemon.define('save_vmdata_error', int)
 statemon.define('customer_callback_schedule_error', int)
 statemon.define('no_thumbs', int)
+statemon.define('model_load_error', int)
+statemon.define('unknown_exception', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -403,13 +405,19 @@ class VideoProcessor(object):
                   sample_step=self.sec_to_extract_offset,
                   start_time=self.sec_to_extract)
 
+        exists_unfiltered_images = np.any([x[4] is not None and x[4] == ''
+                                           for x in results])
         for image, score, frame_no, timecode, attribute in results:
-            if attribute is not None and attribute == '':
+            # Only return unfiltered images unless they are all
+            # filtered, in which case, return them all.
+            if not exists_unfiltered_images or (
+                    attribute is not None and attribute == ''):
                 self.valence_scores[0].append(timecode)
                 self.valence_scores[1].append(score)
                 self.timecodes[frame_no] = timecode
                 self.data_map[frame_no] = (score, image[:, :, ::-1])
                 self.attr_map[frame_no] = attribute
+                found_valid_image = True        
         
         end_process = time.time()
         _log.info("key=process_video msg=debug " 
@@ -534,7 +542,7 @@ class VideoProcessor(object):
             # Cron Requeue is more helpful
 
             api_request = neondata.NeonApiRequest.get(api_key, job_id)
-            api_request.state = neondata.RequestState.INT_ERROR
+            api_request.state = neondata.RequestState.FAILED
             api_request.save()
             return
 
@@ -776,7 +784,7 @@ class VideoProcessor(object):
                                 video_id, image, tid, frame_size)
 
             if ret[0]:
-                #NOTE: By default Neon rank 1 is always uploaded
+                #NOTE: By default Neon rank 0 is always uploaded
                 self.thumbnails[0].chosen = True 
             else:
                 _log.error("autosync failed for video %s" % video_id)
@@ -927,9 +935,11 @@ class VideoProcessor(object):
         video_id = self.job_params[properties.VIDEO_ID]
         title = self.job_params[properties.VIDEO_TITLE]
         i_id = self.job_params[properties.INTEGRATION_ID]
+        job_id  = self.job_params[properties.REQUEST_UUID_KEY]
         ba = neondata.BrightcovePlatform.get_account(api_key, i_id) 
         thumbs = [t.to_dict_for_video_response() for t in self.thumbnails]
         vr = neondata.VideoResponse(video_id,
+                                    job_id,
                                     "processed",
                                     "brightcove",
                                     i_id,
@@ -1010,6 +1020,7 @@ class VideoClient(object):
                   % (self.model_file, self.model_version))
         self.model = model.load_model(self.model_file)
         if not self.model:
+            statemon.state.increment('model_load_error')
             _log.error('Error loading the Model')
             exit(1)
 
@@ -1041,6 +1052,7 @@ class VideoClient(object):
             time.sleep(self.SLEEP_INTERVAL * random.random())
         
         except Exception,e:
+            statemon.state.increment('unknown_exception')
             _log.exception("key=worker [%s] "
                     " msg=exception %s" %(self.pid, e.message))
             time.sleep(self.SLEEP_INTERVAL)
