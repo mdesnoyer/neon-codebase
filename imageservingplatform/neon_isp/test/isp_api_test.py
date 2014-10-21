@@ -20,6 +20,7 @@ from boto.s3.connection import S3Connection
 from boto.s3.bucketlistresultset import BucketListResultSet
 import json
 import logging
+import httplib
 import nginx_isp_test_conf
 import os
 import random
@@ -32,10 +33,12 @@ import unittest
 import urllib
 import urllib2
 import utils
+import utils.neon
 import utils.ps
 import time
 import tempfile
 from test_utils import net
+import test_utils.neontest
 
 _log = logging.getLogger(__name__)
 
@@ -172,7 +175,7 @@ class MyHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
         return cls.redirect_response
 
 
-class TestImageServingPlatformAPI(unittest.TestCase):
+class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
     '''
     API testing
     '''
@@ -273,7 +276,7 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         except urllib2.URLError, e:
             pass
         
-        except BadStatusLine, e:
+        except httplib.BadStatusLine, e:
             pass
 
     def server_api_request(self, pub_id, vid, width, height, ip=None):
@@ -649,4 +652,5 @@ class TestImageServingPlatformAPI(unittest.TestCase):
         pass
 
 if __name__ == '__main__':
-    unittest.main()
+    utils.neon.InitNeon()
+    test_utils.neontest.main()

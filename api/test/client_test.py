@@ -19,47 +19,44 @@ if sys.path[0] != __base_path__:
 
 import api.client
 import api.cdnhosting
+from boto.s3.connection import S3Connection
 import json
 import logging
-import mock
+from mock import MagicMock, patch
 import multiprocessing
+import numpy as np
 import os
 import pickle
-import PIL
+from PIL import Image
 import random
 import request_template
 import signal
+from StringIO import StringIO
 import subprocess
+from supportServices import neondata
 import time
 import tempfile
 import test_utils
 import test_utils.mock_boto_s3 as boto_mock
+import test_utils.neontest
 import test_utils.net
 import test_utils.redis
-import tornado
+from tornado.concurrent import Future
+from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
+import tornado.ioloop
+from tornado.testing import AsyncHTTPTestCase,AsyncTestCase,AsyncHTTPClient
+from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 import urllib
 import unittest
 import utils
 from utils.imageutils import PILImageUtils
 import utils.ps
 
-from boto.s3.connection import S3Connection
-from mock import patch
-from mock import MagicMock
-from PIL import Image
-from supportServices import neondata
-from StringIO import StringIO
-from utils.options import options
-from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
-from tornado.concurrent import Future
-from tornado.testing import AsyncHTTPTestCase,AsyncTestCase,AsyncHTTPClient
-from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
-
 _log = logging.getLogger(__name__)
 
 TMD = neondata.ThumbnailMetadata
 
-class TestVideoClient(unittest.TestCase):
+class TestVideoClient(test_utils.neontest.TestCase):
     ''' 
     Test Video Processing client
     '''
@@ -147,7 +144,7 @@ class TestVideoClient(unittest.TestCase):
         vprocessor = api.client.VideoProcessor(job, self.model, self.model_version)
 
         #Add a mock to the get_center_frame
-        vprocessor.get_center_frame = mock.Mock(return_value=
+        vprocessor.get_center_frame = MagicMock(return_value=
                 PILImageUtils.create_random_image(360, 480)) 
         return vprocessor 
 
@@ -297,6 +294,27 @@ class TestVideoClient(unittest.TestCase):
         self.assertGreater(len(vprocessor.attr_map), 0)
         self.assertGreater(len(vprocessor.timecodes), 0)
         self.assertNotIn(float('-inf'), vprocessor.valence_scores[1])
+
+    def test_process_filtered_video(self):
+        '''Test processing a video where every frame is filtered.'''
+        self.model.choose_thumbnails.return_value = (
+            [(np.zeros((480, 640, 3)), float('-inf'), 120, 4.0, 'black'),
+             (np.zeros((480, 640, 3)), float('-inf'), 600, 20.0, 'black'),
+             (np.zeros((480, 640, 3)), float('-inf'), 900, 30.0, 'black')],
+             40.0)
+        vprocessor = self.setup_video_processor("neon")
+        self.assertTrue(vprocessor.process_video(self.test_video_file,
+                                                 n_thumbs=3))
+
+        # Verify that all the frames were added to the data maps
+        self.assertEquals(vprocessor.attr_map,
+                          {120: 'black', 600: 'black', 900: 'black'})
+        self.assertEquals(vprocessor.timecodes,
+                          {120: 4.0, 600: 20.0, 900: 30.0})
+        self.assertEquals(vprocessor.data_map[120][0], float('-inf'))
+        self.assertEquals(vprocessor.data_map[600][0], float('-inf'))
+        self.assertEquals(vprocessor.data_map[900][0], float('-inf'))
+        self.assertEquals(len(vprocessor.data_map), 3)
    
     @patch('utils.sqsmanager')
     @patch('api.cdnhosting.urllib2')
@@ -407,9 +425,8 @@ class TestVideoClient(unittest.TestCase):
         imgstream.seek(0)
         data = imgstream.read()
 
-        request = tornado.httpclient.HTTPRequest("http://VideoURL.mp4")
-        response = tornado.httpclient.HTTPResponse(request, 200,
-                            buffer=StringIO(data))
+        request = HTTPRequest("http://VideoURL.mp4")
+        response = HTTPResponse(request, 200, buffer=StringIO(data))
         mclient = MagicMock()
         mclient.fetch.return_value = response
         mock_client.return_value = mclient
@@ -535,7 +552,7 @@ class TestVideoClient(unittest.TestCase):
                 self.model_version)
         img = vprocessor.get_center_frame(self.test_video_file)
         self.assertIsNotNone(img)
-        self.assertTrue(isinstance(img, PIL.Image.Image))
+        self.assertTrue(isinstance(img, Image.Image))
 
 
     @patch('utils.sqsmanager')
