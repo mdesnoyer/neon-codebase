@@ -80,6 +80,9 @@ statemon.define('no_thumbs', int)
 statemon.define('model_load_error', int)
 statemon.define('unknown_exception', int)
 statemon.define('video_download_error', int)
+statemon.define('ffvideo_metadata_error', int)
+statemon.define('video_duration_30m', int)
+statemon.define('video_duration_60m', int)
 statemon.define('video_read_error', int)
 
 # ======== Parameters  =======================#
@@ -98,6 +101,14 @@ define('serving_url_format',
 # ======== API String constants  =======================#
 INTERNAL_PROCESSING_ERROR = "internal error"
 
+
+# ======== Signal Handler  =======================#
+sigterm_received = False
+def sig_handler(sig, frame):
+    _log.info("Sigterm recieved")
+    vc.kill_received = True
+    return
+    
 ###########################################################################
 # Global Helper functions
 ###########################################################################
@@ -304,6 +315,7 @@ class VideoProcessor(object):
                 return
 
         if response.error:
+            statemon.state.increment('video_download_error')
             #Do we need to handle timeout for long running http calls ? 
             self.error = "http error downloading file"
             statemon.state.increment('video_download_error')
@@ -369,7 +381,7 @@ class VideoProcessor(object):
         except Exception, e:
             _log.error("key=process_video msg=FFVIDEO error %s" % e)
             self.error = "processing_error"
-            statemon.state.increment('video_read_error')
+            statemon.state.increment('ffvideo_metadata_error')
             return False
 
         #Try to open the video file using openCV
@@ -394,10 +406,12 @@ class VideoProcessor(object):
 
         #If a really long video, then increase the sampling rate
         if duration > 1800:
+            statemon.state.increment('video_duration_30m')
             self.sec_to_extract_offset = 2 
 
         # >1 hr
         if duration > 3600:
+            statemon.state.increment('video_duration_60m')
             self.sec_to_extract_offset = 4
 
         try:
@@ -646,6 +660,7 @@ class VideoProcessor(object):
             # Generate the Serving URL
             # TODO(Sunil): Pass TAI as part of the request?
             serving_url = None
+            # Currently Neon has 4 sub-domains
             subdomain_index = random.randint(1, 4)
             na = neondata.NeonUserAccount.get_account(api_key)
             if na:
@@ -1060,6 +1075,7 @@ class VideoClient(object):
     def do_work(self):   
         ''' do actual work here'''
         try:
+
             job = self.dequeue_job()
             if not job or job == "{}": #string match
                 raise Queue.Empty
@@ -1082,12 +1098,14 @@ class VideoClient(object):
 def main():
     utils.neon.InitNeon()
    
-    # TODO(sunil): Add signal handler for SIGTERM, do a clean
+    # Add signal handler for SIGTERM, do a clean
     # shutdown after finishing the current request
+    signal.signal(signal.SIGTERM, sig_handler)
 
     if options.local:
         _log.info("Running locally")
 
+    global vc
     vc = VideoClient(options.model_file,
                      options.debug, options.sync)
     vc.run()

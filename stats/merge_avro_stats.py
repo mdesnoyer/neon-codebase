@@ -37,6 +37,8 @@ define("temp_s3_dir", default="s3://neon-test/temp/",
        help="S3 path to put temporary files in")
 define("backup_root", default="s3://neon-tracker-logs-v2/orig/v2.2/",
        help="Location to backup put the original avro files")
+define("local_temp_dir", default="tmp",
+       help="Prefix for where to store temporary files.")
 
 s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
 
@@ -110,13 +112,19 @@ def merge_files_in_directory(root_dir, backup_dir, temp_dir):
             _log.exception('Unexpected Error %s' % e)
     
 def _merge_files_in_directory_impl(root_dir, backup_dir, temp_dir):
+    local_temp_prefix = options.local_temp_dir
+    if local_temp_prefix != "tmp":
+        local_temp_prefix += '/'
+    
     to_merge = [x for x in root_dir.files() if x.name.endswith('.avro')]
     to_merge = sorted(to_merge, key=lambda x: x.name)
     if len(to_merge) > 1:
         _log.info('Merging all the files in %s' % root_dir.name())
 
         # Grab the schema of the last file
-        with tempfile.SpooledTemporaryFile(__MAX_MEM_FILESIZE__) as cur_file:
+        with tempfile.SpooledTemporaryFile(
+                __MAX_MEM_FILESIZE__,
+                prefix=local_temp_prefix) as cur_file:
             _log.info('Getting schema from %s' % to_merge[-1].name)
             to_merge[-1].get_contents_to_file(cur_file)
             cur_file.seek(0, 0)
@@ -127,7 +135,8 @@ def _merge_files_in_directory_impl(root_dir, backup_dir, temp_dir):
         merged_name = 'merged.%s' % os.path.basename(to_merge[0].name)
 
         # Open a temporary file to write to
-        with tempfile.NamedTemporaryFile() as local_file:
+        with tempfile.NamedTemporaryFile(
+                prefix=local_temp_prefix) as local_file:
             # Make a writer to append to the file
             writer = avro.datafile.DataFileWriter(
                 local_file, avro.io.DatumWriter(), schema, 'snappy')
@@ -136,7 +145,8 @@ def _merge_files_in_directory_impl(root_dir, backup_dir, temp_dir):
             for small_avro in to_merge:
                 _log.info('Reading data from %s. Size %f MB' % 
                           (small_avro.name, small_avro.size/(1024.*1024)))
-                with tempfile.SpooledTemporaryFile(__MAX_MEM_FILESIZE__) \
+                with tempfile.SpooledTemporaryFile(__MAX_MEM_FILESIZE__,
+                                                   prefix=local_temp_prefix) \
                     as streamf:
                     small_avro.get_contents_to_file(streamf)
                     streamf.seek(0, 0)

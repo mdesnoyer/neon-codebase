@@ -6,11 +6,6 @@ Send Neon ISP counters to carbon to be alerted on
 
 import os
 import os.path
-import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0, base_path)
-
 import json
 import platform
 import socket
@@ -18,16 +13,10 @@ import threading
 import time
 import urllib
 import urllib2
-import utils.neon
-import utils.http
-from utils.options import options, define
+from optparse import OptionParser
 
-define("carbon_server", default="54.225.235.97", help="Montioring server", type=str)
-define("carbon_port", default=8090, help="Monitoring port", type=int)
-define("interval", default=60, help="time between stats", type=int)
-define("isp_port", default=80, help="ISP port", type=int)
 
-def send_data(name, value):
+def send_data(name, value, options):
     '''
     Format metric name/val pair and send the data to the carbon server
 
@@ -44,12 +33,12 @@ def send_data(name, value):
     except Exception, e:
         pass
         
-def query_neon_isp():
+def query_neon_isp(port):
     '''
     Query Neon isp and get the json data
     '''
     try:
-        url = "http://localhost:%d/stats" % options.isp_port
+        url = "http://localhost:%s/stats" % port
         req = urllib2.Request(url)
         r = urllib2.urlopen(req)
         return r.read()
@@ -60,17 +49,23 @@ def query_neon_isp():
     except urllib2.URLError, e:
         pass
 
-def main():
-    utils.neon.InitNeon()
+def main(options):
     while True:
-        jvals = query_neon_isp()
+        jvals = query_neon_isp(options.isp_port)
         if jvals is None:
             continue
             
         vals = json.loads(jvals)
         for name, val in vals.iteritems():
-            send_data(name.lower(), val)
-        time.sleep(options.interval)
+            send_data(name.lower(), val, options)
+        time.sleep(options.sleep_interval)
 
 if __name__ == "__main__":
-    main()
+    parser = OptionParser()
+    parser.add_option("-s", "--carbon_server", dest="carbon_server", default="54.225.235.97")
+    parser.add_option("-d", "--carbon_port", dest="carbon_port", default=8090)
+    parser.add_option("-i", "--sleep_interval", dest="sleep_interval", default=60)
+    parser.add_option("-p", "--port", dest="isp_port", default=80)
+    (options, args) = parser.parse_args()
+    main(options)
+
