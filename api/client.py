@@ -79,6 +79,8 @@ statemon.define('customer_callback_schedule_error', int)
 statemon.define('no_thumbs', int)
 statemon.define('model_load_error', int)
 statemon.define('unknown_exception', int)
+statemon.define('video_download_error', int)
+statemon.define('video_read_error', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -291,21 +293,25 @@ class VideoProcessor(object):
         try:
             response = http_client.fetch(req)
         except Exception, e:
-            #Enable fallback is needed for tornado errors, explore a single solution
+            #Enable fallback is needed for tornado errors, explore a
+            #single solution
             try:
                 self.download_video_file_urllib2()
                 return
             except urllib2.HTTPError, e:
                 self.error = "http error conencting to url"
+                statemon.state.increment('video_download_error')
                 return
 
         if response.error:
             #Do we need to handle timeout for long running http calls ? 
             self.error = "http error downloading file"
+            statemon.state.increment('video_download_error')
             return
 
         if not response.headers.has_key('Content-Length'):
             self.error = "url not a video file"
+            statemon.state.increment('video_download_error')
             return
 
         #Write contents to the temp file 
@@ -363,6 +369,7 @@ class VideoProcessor(object):
         except Exception, e:
             _log.error("key=process_video msg=FFVIDEO error %s" % e)
             self.error = "processing_error"
+            statemon.state.increment('video_read_error')
             return False
 
         #Try to open the video file using openCV
@@ -372,6 +379,7 @@ class VideoProcessor(object):
             _log.error("key=process_video worker " 
                         " msg=%s "  % e)
             self.error = "processing_error"
+            statemon.state.increment('video_read_error')
             return False
 
         duration = self.video_metadata['duration']
@@ -379,7 +387,10 @@ class VideoProcessor(object):
         if duration <= 1e-3:
             _log.error("key=process_video worker "
                        "msg=video %s has no length. skipping." %
-                       (video_file)) 
+                       (self.video_url))
+            self.error = "video_no_length"
+            statemon.state.increment('video_read_error')
+            return False
 
         #If a really long video, then increase the sampling rate
         if duration > 1800:
@@ -395,15 +406,21 @@ class VideoProcessor(object):
                   mov,
                   n=n_thumbs,
                   sample_step=self.sec_to_extract_offset,
-                  start_time=self.sec_to_extract)
+                  start_time=self.sec_to_extract,
+                  video_name=self.video_url)
         except model.VideoReadError:
             _log.error("Error using OpenCV to read video. Trying ffvideo")
-            results, self.sec_to_extract = \
-              self.model.ffvideo_choose_thumbnails(
-                  fmov,
-                  n=n_thumbs,
-                  sample_step=self.sec_to_extract_offset,
-                  start_time=self.sec_to_extract)
+            statemon.state.increment('video_read_error')
+            try:
+                results, self.sec_to_extract = \
+                  self.model.ffvideo_choose_thumbnails(
+                      fmov,
+                      n=n_thumbs,
+                      sample_step=self.sec_to_extract_offset,
+                      start_time=self.sec_to_extract)
+            except Exception:
+                self.error = "video_processing_error"
+                return False
 
         exists_unfiltered_images = np.any([x[4] is not None and x[4] == ''
                                            for x in results])
@@ -437,16 +454,17 @@ class VideoProcessor(object):
             mov = cv2.VideoCapture(video_file)
             if nframes is None:
                 nframes = mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
-            read_sucess, image = utils.pycvutils.seek_video(mov, int(nframes /
+            seek_sucess, image = utils.pycvutils.seek_video(mov, int(nframes /
                 2))
-            if read_sucess:
+            if seek_sucess:
                 #Now grab the frame
                 read_sucess, image = mov.read()
                 if read_sucess:
                     return utils.pycvutils.to_pil(image)
             _log.error('key=get_center_frame '
                         'msg=Error reading middle frame of video %s'
-                        % video_file)
+                        % self.video_url)
+            statemon.state.increment('video_read_error')
         except Exception,e:
             _log.debug("key=get_center_frame msg=%s" % e)
 
@@ -594,10 +612,11 @@ class VideoProcessor(object):
                 pass
 
             #host top MAX_T images on s3
-            thumbnails, s3_urls = host_images_s3(vmdata, api_key, img_score_list, 
-                                            self.base_filename, model_version=0, 
-                                            ttype=neondata.ThumbnailType.NEON,
-                                            cdn_metadata=cdn_metadata)
+            thumbnails, s3_urls = host_images_s3(
+                vmdata, api_key, img_score_list, 
+                self.base_filename, model_version=0, 
+                ttype=neondata.ThumbnailType.NEON,
+                cdn_metadata=cdn_metadata)
             self.thumbnails.extend(thumbnails)
             # TODO(Sunil): If no thumbs, should the state be indicated
             # differently & not be serving enabled ?  
@@ -608,10 +627,11 @@ class VideoProcessor(object):
 
             #host Center Frame on s3
             if self.center_frame is not None:
-                cthumbnail, s3_url = host_images_s3(vmdata, api_key, [(self.center_frame, None)], 
-                                            self.base_filename, model_version=0, 
-                                            ttype=neondata.ThumbnailType.CENTERFRAME,
-                                            cdn_metadata=cdn_metadata)
+                cthumbnail, s3_url = host_images_s3(
+                    vmdata, api_key, [(self.center_frame, None)], 
+                    self.base_filename, model_version=0, 
+                    ttype=neondata.ThumbnailType.CENTERFRAME,
+                    cdn_metadata=cdn_metadata)
                 self.thumbnails.extend(cthumbnail)
             else:
                 _log.error("centerframe was None for %s" % video_id)
@@ -655,7 +675,8 @@ class VideoProcessor(object):
                     video_obj.model_version = vmdata.model_version
             
                 if reprocess:
-                    neondata.VideoMetadata.modify(vmdata.key, _modify_vmdata_atomically)
+                    neondata.VideoMetadata.modify(vmdata.key,
+                                                  _modify_vmdata_atomically)
 
                 ## Notification enabled for brightcove only 
                 if request_type == "brightcove":
@@ -694,7 +715,8 @@ class VideoProcessor(object):
 
         else:
             _log.info("key=finalize_api_request "
-                       " msg=no previous thumbnail for %s %s" %(api_key, video_id))
+                       " msg=no previous thumbnail for %s %s" %(api_key,
+                                                                video_id))
        
         #autosync    
         if hasattr(api_request, "autosync"):
