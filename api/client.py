@@ -79,6 +79,11 @@ statemon.define('customer_callback_schedule_error', int)
 statemon.define('no_thumbs', int)
 statemon.define('model_load_error', int)
 statemon.define('unknown_exception', int)
+statemon.define('video_download_error', int)
+statemon.define('ffvideo_metadata_error', int)
+statemon.define('opencv_video_error', int)
+statemon.define('video_duration_30m', int)
+statemon.define('video_duration_60m', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -96,6 +101,14 @@ define('serving_url_format',
 # ======== API String constants  =======================#
 INTERNAL_PROCESSING_ERROR = "internal error"
 
+
+# ======== Signal Handler  =======================#
+sigterm_received = False
+def sig_handler(sig, frame):
+    _log.info("Sigterm recieved")
+    vc.kill_received = True
+    return
+    
 ###########################################################################
 # Global Helper functions
 ###########################################################################
@@ -297,9 +310,11 @@ class VideoProcessor(object):
                 return
             except urllib2.HTTPError, e:
                 self.error = "http error conencting to url"
+                statemon.state.increment('video_download_error')
                 return
 
         if response.error:
+            statemon.state.increment('video_download_error')
             #Do we need to handle timeout for long running http calls ? 
             self.error = "http error downloading file"
             return
@@ -361,6 +376,7 @@ class VideoProcessor(object):
             self.video_metadata['frame_size'] = fmov.frame_size
             self.video_size = fmov.duration * fmov.bitrate / 8 # in bytes
         except Exception, e:
+            statemon.state.increment('ffvideo_metadata_error')
             _log.error("key=process_video msg=FFVIDEO error %s" % e)
             self.error = "processing_error"
             return False
@@ -369,6 +385,7 @@ class VideoProcessor(object):
         try:
             mov = cv2.VideoCapture(video_file)
         except Exception, e:
+            statemon.state.increment('opencv_video_error')
             _log.error("key=process_video worker " 
                         " msg=%s "  % e)
             self.error = "processing_error"
@@ -377,16 +394,19 @@ class VideoProcessor(object):
         duration = self.video_metadata['duration']
 
         if duration <= 1e-3:
+            statemon.state.increment('opencv_video_error')
             _log.error("key=process_video worker "
                        "msg=video %s has no length. skipping." %
                        (video_file)) 
 
         #If a really long video, then increase the sampling rate
         if duration > 1800:
+            statemon.state.increment('video_duration_30m')
             self.sec_to_extract_offset = 2 
 
         # >1 hr
         if duration > 3600:
+            statemon.state.increment('video_duration_60m')
             self.sec_to_extract_offset = 4
 
         try:
@@ -397,6 +417,7 @@ class VideoProcessor(object):
                   sample_step=self.sec_to_extract_offset,
                   start_time=self.sec_to_extract)
         except model.VideoReadError:
+            statemon.state.increment('opencv_video_error')
             _log.error("Error using OpenCV to read video. Trying ffvideo")
             results, self.sec_to_extract = \
               self.model.ffvideo_choose_thumbnails(
@@ -620,6 +641,7 @@ class VideoProcessor(object):
             # Generate the Serving URL
             # TODO(Sunil): Pass TAI as part of the request?
             serving_url = None
+            # Currently Neon has 4 sub-domains
             subdomain_index = random.randint(1, 4)
             na = neondata.NeonUserAccount.get_account(api_key)
             if na:
@@ -1032,6 +1054,7 @@ class VideoClient(object):
     def do_work(self):   
         ''' do actual work here'''
         try:
+
             job = self.dequeue_job()
             if not job or job == "{}": #string match
                 raise Queue.Empty
@@ -1054,12 +1077,14 @@ class VideoClient(object):
 def main():
     utils.neon.InitNeon()
    
-    # TODO(sunil): Add signal handler for SIGTERM, do a clean
+    # Add signal handler for SIGTERM, do a clean
     # shutdown after finishing the current request
+    signal.signal(signal.SIGTERM, sig_handler)
 
     if options.local:
         _log.info("Running locally")
 
+    global vc
     vc = VideoClient(options.model_file,
                      options.debug, options.sync)
     vc.run()

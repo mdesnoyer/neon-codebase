@@ -75,7 +75,7 @@ Mastermind::ConvertUTC(const char * line)
     
     struct tm when;
 
-    memset(&when, sizeof(struct tm), 1);
+    memset(&when, 0, sizeof(struct tm));
     
     // this function takes care of proper conversion to a struct tm, with proper
     // year and month numbers
