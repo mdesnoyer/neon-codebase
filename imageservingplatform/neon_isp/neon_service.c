@@ -96,19 +96,25 @@ neon_service_get_uri_token(const ngx_http_request_t *req,
 //////////////////// Cookie Helper methods ////////////////////////////
 
 /*
- * Given UUID, VideoId, generate the bucketId  
- * 
+ * Given a unique identifier, VideoId, generate and set the bucket id for 
+ * a given video in to bucketId  
+ *
+ * NOTE: The identifier is a neonglobaluserid in most cases. but when the
+ * user is not ready to be A/B tested, the ipAddress of the user is
+ * used at the identifier to generate the bucket ID
+ *
+ * bucketId = hash(identifier + video_id)
  * */
 
 static void 
-neon_service_set_bucket_id(const ngx_str_t * neon_uuid, 
+neon_service_set_bucket_id(const ngx_str_t * identifier, 
                            const ngx_str_t * video_id, 
                            ngx_str_t * bucket_id){
 
     unsigned char hashstring[256]; // max size = 18 + sizeof(vid)
     int offset = 0;
-    memcpy(hashstring + offset, neon_uuid->data, neon_uuid->len);
-    offset += neon_uuid->len;
+    memcpy(hashstring + offset, identifier->data, identifier->len);
+    offset += identifier->len;
     if(offset + video_id->len < 256){
         memcpy(hashstring + offset, video_id->data, video_id->len);
         offset += video_id->len;
@@ -249,7 +255,7 @@ neon_service_set_neon_cookie(ngx_http_request_t *request){
 /*
  * Determine if the user is ready start AB Testing
  *
- * If the userid is present, set the uuid param
+ * If the userid is present in the cookie, set the uuid arg 
  *
  * */
 static NEON_BOOLEAN
@@ -311,9 +317,12 @@ neon_service_set_abtest_bucket_cookie(ngx_http_request_t *request,
     ngx_str_t neonglobaluserid;
     
     // Skip setting the cookie if the ABTest bucket cookie is present
+    if (neon_service_isset_cookie(request, &cookie_name, &value) == NEON_TRUE){
+        return NEON_TRUE; // skip 
+    }
+    
     // Or if the userid isnt' ready for AB Testing !
-    if (neon_service_isset_cookie(request, &cookie_name, &value) == NEON_TRUE || 
-            neon_service_userid_abtest_ready(request, &neonglobaluserid) == NEON_FALSE){
+    if (neon_service_userid_abtest_ready(request, &neonglobaluserid) == NEON_FALSE){
         return NEON_TRUE; // skip 
     }
 
@@ -377,7 +386,7 @@ int neon_service_parse_api_args(ngx_http_request_t *request,
     *video_id = neon_service_get_uri_token(request, base_url, 1);
   
     if(*video_id == NULL) {
-            neon_stats[NEON_SERVICE_VIDEO_ID_MISSING_FROM_URL]++;                     
+        neon_stats[NEON_SERVICE_VIDEO_ID_MISSING_FROM_URL]++;                     
         return 1;
     }
 
@@ -668,6 +677,13 @@ neon_service_client_api_redirect(ngx_http_request_t *request,
  *
  * input: http request, nginx buffer chain
  *
+ * Code flow 
+ * - parse all the args from URI & ip address
+ * - check if Neon UUID cookie is present, if not set it
+ * - set A/B test bucket cookie for the given video
+ * - Lookup the image for the given videoId & bucketId
+ * - send redirect response to the user
+ *
  * @return: NEON_CLIENT_API_OK or NEON_CLIENT_API_FAIL 
  */
 
@@ -721,10 +737,16 @@ neon_service_client_api(ngx_http_request_t *request,
     // Set the AB Test bucket cookie
     ngx_str_t bucket_id = ngx_string(""); 
     neon_service_set_abtest_bucket_cookie(request, &vid, &pid, &bucket_id);
+    
+    // Check if the user is ready for A/B Testing, if no then use the ip adress to
+    // generate the bucketId 
+    ngx_str_t neonglobaluserid = ngx_string("");
+    if (neon_service_userid_abtest_ready(request, &neonglobaluserid) == NEON_FALSE){
+        neon_service_set_bucket_id(&ipAddress, &vid, &bucket_id);
+    }
 
     // look up thumbnail image url
-    
-    const char * url= 0;
+    const char * url = 0;
     int url_size = 0;
 
     NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR error_url =
@@ -780,15 +802,16 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
     // Check if the user is ready to be in a A/B test bucket
     abtest_ready = neon_service_userid_abtest_ready(request, &neonglobaluserid);
     
-    //ngx_str_t ipAddress = ngx_string("");
-    //static ngx_str_t xf = ngx_string("X-Forwarded-For");
-    //ngx_table_elt_t * xf_header;
-    //xf_header = search_headers_in(request, xf.data, xf.len); 
-
-    // Check if X-Forwarded-For header is set (Its set by the load balancer)
-    //if (xf_header){
-    //    ipAddress = xf_header->value;
-    //}
+    // Get IP Address
+    static ngx_str_t xf = ngx_string("X-Forwarded-For");
+    ngx_str_t ipAddress = ngx_string("");
+    ngx_table_elt_t * xf_header;
+    if(ipAddress.len == 0 || ipAddress.len > 15){
+        xf_header = search_headers_in(request, xf.data, xf.len); 
+        if (xf_header && neon_is_valid_ip_string(xf_header->value.data)){
+            ipAddress = xf_header->value;
+        }
+    }
 
     // get publisher id
     unsigned char * publisher_id = neon_service_get_uri_token(request, &base_url, 0);
@@ -860,6 +883,9 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
         // Get the bucket id for a given video
         if(abtest_ready == NEON_TRUE){
             neon_service_set_bucket_id(&neonglobaluserid, &vid_str, &bucket_id);
+        }else{
+            // Use the IP Address of the client to generate the bucket_id
+            neon_service_set_bucket_id(&ipAddress, &vid_str, &bucket_id);
         }
 
         NEON_MASTERMIND_TID_LOOKUP_ERROR err =

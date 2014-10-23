@@ -101,7 +101,6 @@ define('serving_url_format',
 # ======== API String constants  =======================#
 INTERNAL_PROCESSING_ERROR = "internal error"
 
-
 # ======== Signal Handler  =======================#
 sigterm_received = False
 def sig_handler(sig, frame):
@@ -244,8 +243,9 @@ class VideoProcessor(object):
         self.job_params = params
         self.video_url = self.job_params[properties.VIDEO_DOWNLOAD_URL]
         vsuffix = self.video_url.split('/')[-1]  #get the video file extension
+        vsuffix = vsuffix.strip("!@#$%^&*[]^()+~")
         self.tempfile = tempfile.NamedTemporaryFile(
-                                    suffix='_%s'%vsuffix, delete=True)
+                                    suffix='_%s' % vsuffix, delete=True)
         self.headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
             Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})

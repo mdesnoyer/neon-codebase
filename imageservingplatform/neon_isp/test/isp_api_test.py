@@ -651,6 +651,8 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         '''
         pass
 
+    # TODO(Sunil) : Test cases for AB test using IPAddress
+
 if __name__ == '__main__':
     utils.neon.InitNeon()
     test_utils.neontest.main()
