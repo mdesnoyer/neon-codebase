@@ -19,23 +19,42 @@ DirectiveHashtable::~DirectiveHashtable(){
 
 void
 DirectiveHashtable::Init(unsigned numOfBuckets){
+
+    if(initialized == true)
+        return;
+    
     table = new DirectiveTable(numOfBuckets);
+    initialized = true;
 }
 
 
 void
 DirectiveHashtable::Shutdown(){
+ 
+    if(initialized == false)
+        return;
+
     if(table == 0)
         return;
     
     for(DirectiveTable::iterator it = table->begin(); it != table->end(); it ++)
     {
-        ((*it).second)->Shutdown();
-        delete (*it).second;
+
+        Directive * d = (Directive *) ((*it).second);
+        (*it).second = NULL;
+
+        if(d == NULL)
+            continue;
+
+        d->Shutdown();
+        delete d;
     }
+
+    table->clear();
 
     delete table;
 	table = 0;
+    initialized = false;
 }
 
 
