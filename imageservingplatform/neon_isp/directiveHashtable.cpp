@@ -9,6 +9,7 @@
 
 DirectiveHashtable::DirectiveHashtable(){
     table = 0;
+    initialized = false;
 }
 
 
