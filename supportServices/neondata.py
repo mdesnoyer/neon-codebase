@@ -563,6 +563,10 @@ class StoredObject(object):
           lambda d: thumb.update_phash() for thumb in d.iteritems())
         '''
         def _getandset(pipe):
+            # mget can't handle an empty list 
+            if len(keys) == 0:
+                return {}
+
             items = pipe.mget(keys)
             pipe.multi()
 

@@ -438,7 +438,7 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
                 cookie = header.split("Set-Cookie: ")[-1]
 
         self.assertEqual(im_url, self.expected_img_url + "\r\n")
-        self.assertIsNone(cookie)
+        #TODO: Should check the bucket id cookie ?
 
     def test_client_api_with_bucket_id_cookie(self):
         #TODO: finish test when we start using the bucketID
@@ -597,6 +597,8 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
     def test_get_thumbnailid(self):
         '''
         Test get thumbnailid API
+        
+        Since no cookie is sent, hash is based on ip address
         '''
 
         url = "http://localhost:" + self.port + "/v1/%s/%s/?params=%s" %\
@@ -605,11 +607,12 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         headers = {"X-Forwarded-For" : ip}
         response = self.make_api_request(url, headers)
         self.assertIsNotNone(response)
-        self.assertEqual(response.read(), "thumb1")
+        self.assertEqual(response.read(), "thumb2")
 
     def test_multiple_thumbnailids(self):
         '''
         Test CSV response from the API
+        Since no cookie is sent, hash is based on ip address
         '''
 
         url = "http://localhost:" + self.port + "/v1/%s/%s/?params=%s,%s" %\
@@ -618,11 +621,12 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         headers = {"X-Forwarded-For" : ip}
         response = self.make_api_request(url, headers)
         self.assertIsNotNone(response)
-        self.assertEqual(response.read(), "thumb1,thumb1")
+        self.assertEqual(response.read(), "thumb2,thumb2")
     
     def test_multiple_thumbnailids_with_invalid_vid(self):
         '''
         Test that the API return "null" for invalid video id
+        Since no cookie is sent, hash is based on ip address
         '''
 
         url = "http://localhost:" + self.port + "/v1/%s/%s/?params=%s,%s" %\
@@ -631,7 +635,7 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         headers = {"X-Forwarded-For" : ip}
         response = self.make_api_request(url, headers)
         self.assertIsNotNone(response)
-        self.assertEqual(response.read(), "thumb1,null")
+        self.assertEqual(response.read(), "thumb2,null")
     
     def test_thumbnailids_with_malformed_url(self):
         '''
@@ -650,6 +654,8 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         Random urls
         '''
         pass
+
+    # TODO(Sunil) : Test cases for AB test using IPAddress
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

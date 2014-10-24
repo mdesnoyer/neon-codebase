@@ -1061,7 +1061,17 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         response = self.post_request(uri, vals, api_key)
         self.assertTrue(response.code, 201)
         jresponse = json.loads(response.body)
-        self.assertIsNotNone(jresponse['job_id'])
+        job_id = jresponse['job_id']
+        self.assertIsNotNone(job_id)
+
+        # Test duplicate request
+        request = tornado.httpclient.HTTPRequest('http://thumbnails.neon-lab.com')
+        response = tornado.httpclient.HTTPResponse(request, 409,
+                buffer=StringIO('{"error":"already processed","video_id":"vid", "job_id":"%s"}' % job_id))
+        self.cp_mock_async_client().fetch.side_effect = \
+        response = self.post_request(uri, vals, api_key)
+        self.assertTrue(response.code, 409)
+        self.assertTrue(json.loads(response.body)["job_id"], job_id)
 
     def test_create_neon_video_request_invalid_url(self):
         ''' invalid url test '''
