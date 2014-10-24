@@ -39,6 +39,7 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
     callback - If it is a function, it will be called when the request
                returns with its response as the parameter. If it is None,
                this call blocks and returns the HTTPResponse.
+    do_logging - True if logging should be turned on
 
     '''
 
@@ -150,36 +151,40 @@ class RequestThread(threading.Thread):
 
     def stop(self):
         self._stopped.set()
-        self.q.put((None, None, None))
+        self.q.put((None, None, None, None))
 
     def run(self):
         while not self._stopped.is_set():
             try:
-                request, callback, ntries = self.q.get()
+                request, callback, ntries, do_logging = self.q.get()
 
                 if request is None:
                     self.q.task_done()
                     if not self._stopped.is_set():
                         # This stop was for somebody else who is
                         # listening on the queue, so requeue it.
-                        self.q.put((None, None, None))
+                        self.q.put((None, None, None, None))
                     continue
 
-                response = send_request(request, ntries=1)
+                response = send_request(request, ntries=1,
+                                        do_logging=do_logging)
                 if response.error is not None:
                     # Do retry logic
                     if (ntries + 1) >= self.max_tries:
-                        _log.error(('key=http_too_many_errors '
-                                    'msg=Abort. Too many errors for %s '
-                                    'request to %s with body starting: %s')
-                                    % (request.method, request.url,
-                                       ('' if request.body is None else request.body[0:100])))
+                        if do_logging:
+                            _log.error(('key=http_too_many_errors '
+                                        'msg=Abort. Too many errors for %s '
+                                        'request to %s with body starting: %s')
+                                        % (request.method, request.url,
+                                           ('' if request.body is None else 
+                                            request.body[0:100])))
                         callback(response)
                         self.q.task_done()
                     else:
                         delay = (1 << ntries) * 0.1 # in seconds
                         ntries += 1
-                        self._delayed_requeue(request, callback, ntries, delay)
+                        self._delayed_requeue(request, callback, ntries, 
+                                              do_logging, delay)
                 else:
                     callback(response)
                     self.q.task_done()
@@ -193,10 +198,10 @@ class RequestThread(threading.Thread):
                 # so flag it being done.
                 self.q.task_done()
 
-    def _delayed_requeue(self, request, callback, ntries, delay):
+    def _delayed_requeue(self, request, callback, ntries, do_logging, delay):
         '''Adds a request to the queue after delay seconds.'''
         def do_requeue():
-            self.q.put((request, callback, ntries))
+            self.q.put((request, callback, ntries, do_logging))
             self.q.task_done()
 
         timer = threading.Timer(delay, do_requeue)
@@ -217,7 +222,7 @@ class RequestPool(object):
             thread.start()
             self.threads.append(thread)
 
-    def send_request(self, request, callback=None):
+    def send_request(self, request, callback=None, do_logging=True):
         '''Queues up a request to send to the connection.
 
         Inputs:
@@ -225,12 +230,13 @@ class RequestPool(object):
         callback - If it is a function, it will be called when the request
                    returns with its response as the parameter. If it is None,
                    this call blocks and returns the HTTPResponse.
+        do_logging - True if logging should be done
         '''
         if request is None:
             raise TypeError('Request must be non Null')
         
         if callback is not None:
-            self.request_q.put((request, callback, 0))
+            self.request_q.put((request, callback, 0, do_logging))
             return
 
         # Setup a callback that pushes the response into the queue and
@@ -238,7 +244,8 @@ class RequestPool(object):
         response_q = Queue.Queue()
         self.request_q.put((request,
                             lambda response: response_q.put(response),
-                            0))
+                            0,
+                            do_logging))
         return response_q.get()
 
     def stop(self):

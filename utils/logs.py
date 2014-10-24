@@ -30,6 +30,7 @@ import logging.handlers
 import platform
 import SocketServer
 import sys
+import threading
 import tornado.httpclient
 import urllib
 import urllib2
@@ -194,6 +195,14 @@ class TornadoHTTPHandler(logging.Handler):
         self.emit_error_sampling_period = emit_error_sampling_period
         self.last_emit_error = None
 
+        # import utils.http here, so that the NeonLogger is sets as
+        # the default logger before utils.http loads its logger. If
+        # imported earlier, then the log_n function is not available
+        # to utils.http Yes, this is a circular dependency, but lets
+        # live with this for now !
+        import utils.http
+        self.request_pool = utils.http.RequestPool(5)
+
     def get_verbose_dict(self, record):
         '''Returns a verbose dictionary of the record.'''
         retval = copy.copy(record.__dict__)
@@ -228,15 +237,9 @@ class TornadoHTTPHandler(logging.Handler):
                         self.handleError(record)
 
         try:
-            # import utils.http here, so that the log_n function of
-            # NeonLogger is imported from utils.log. If imported
-            # earlier, then the log_n function is not available to
-            # utils.http Yes, this is a circular dependency, but lets
-            # live with this for now !
-            import utils.http
-            utils.http.send_request(self.generate_request(record),
-                                    callback=handle_response,
-                                    do_logging=False)
+            self.request_pool.send_request(self.generate_request(record),
+                                           callback=handle_response,
+                                           do_logging=False)
         except:
             curtime = datetime.datetime.utcnow()
             if (self.last_emit_error is None or 
