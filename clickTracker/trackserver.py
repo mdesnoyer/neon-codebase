@@ -216,7 +216,12 @@ class BaseTrackerDataV2(object):
         to_req =  [x for x in vids if x is not None]
         if len(to_req) > 0:
             headers = ({"Cookie" : 'neonglobaluserid=%s' % self.neonUserId} 
-                       if self.neonUserId else None)
+                       if self.neonUserId else {})
+            # GetThumbnailId uses xfr if userId is not ready to be tested
+            # to determine the abtest bucket
+            if self.clientIP:
+                headers["X-Forwarded-For"] = self.clientIP 
+
             request = tornado.httpclient.HTTPRequest(
                 'http://%s:%s/v1/getthumbnailid/%s?params=%s' % (
                     self.isp_host,

@@ -554,8 +554,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         
         if result.code == 409:
             job_id = json.loads(result.body)["job_id"]
-            data = '{"error":"request already processed",\
-                    "video_id":"%s", "job_id":"%s"}' % (video_id, job_id)
+            data = '{"error":"request already processed","video_id":"%s","job_id":"%s"}'\
+                    % (video_id, job_id)
             self.send_json_response(data, 409)
             return
         if result.error:
@@ -885,8 +885,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             #sort video ids
             s_index = page_no * page_size
             e_index = (page_no +1) * page_size
-            vids = sorted(vids, reverse=True)
-            vids = vids[s_index:e_index]
+            #vids = sorted(vids, reverse=True)
+            #vids = vids[s_index:e_index]
         
         #3. Populate Completed videos
         keys = [neondata.InternalVideoID.generate(
@@ -964,6 +964,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             s_vresult = sorted(vresult, key=lambda k: int(k['video_id']), reverse=True)
         else:
             s_vresult = sorted(vresult, key=lambda k: k['publish_date'], reverse=True)
+           
+        if len(vids) > page_size:
+            s_index = page_no * page_size
+            e_index = (page_no +1) * page_size
+            s_vresult = s_vresult[s_index:e_index]
 
         vstatus_response = GetVideoStatusResponse(
                         s_vresult, total_count, page_no, page_size,
