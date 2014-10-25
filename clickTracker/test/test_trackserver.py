@@ -679,6 +679,8 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(bnrequest.url, 'http://127.0.0.1:8089/v1/getthumbnailid/tai123?params=vid2,vid5')
         self.assertDictContainsSubset({'Cookie' : 'neonglobaluserid=neon_id1'},
                                       bnrequest.headers)
+        self.assertDictContainsSubset({'X-Forwarded-For' : '127.0.0.1'},
+                                      bnrequest.headers)
 
         # Image loaded message
         self.check_message_sent(
