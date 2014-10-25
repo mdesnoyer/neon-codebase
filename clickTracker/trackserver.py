@@ -180,6 +180,35 @@ class BaseTrackerDataV2(object):
                 raise NotInterestingData()
             self.eventData['thumbnailId'] = InputSanitizer.sanitize_null(
                 tids[0])
+        self.eventData['thumbnailId'] = self.validate_thumbnail_ids(
+            [self.eventData['thumbnailId']])[0]
+
+    def validate_thumbnail_ids(self, tids):
+        '''Replaces thumbnail id by None if it is not valid.
+
+        Inputs:
+        tids - List of tids
+
+        Returns:
+        list of valid tids, or None if it was invalid
+        '''
+        tidRe = re.compile('[0-9a-zA-Z]+_[0-9a-zA-Z\-~\.]+_[0-9a-zA-Z]+')
+        return [None if x is None or not tidRe.match(x) else x for x in
+                tids]
+
+    def validate_video_id(self, vid):
+        '''Returns the video id or None if it is invalid
+
+        Inputs:
+        vid - Video id to validate
+
+        Returns:
+        valid video id, or raises tornado.web.MissingArgumentError
+        '''
+        vidRe = re.compile('[0-9a-zA-Z\-~\.]+')
+        if vid is None or vidRe.match(vid):
+            return vid
+        raise tornado.web.MissingArgumentError('vid')
 
     @tornado.gen.coroutine
     def _lookup_thumbnail_ids_from_isp(self, basenames):
@@ -192,7 +221,7 @@ class BaseTrackerDataV2(object):
         list of thumbnail ids, or None if it is unknown
         '''
         vidRe = re.compile('neonvid_([0-9a-zA-Z]+)')
-        tidRe = re.compile('neontn([0-9a-zA-Z]+_[0-9a-zA-Z]+_[0-9a-zA-Z]+)')
+        tidRe = re.compile('neontn([0-9a-zA-Z]+_[0-9a-zA-Z\-~\.]+_[0-9a-zA-Z]+)')
 
         # Parse the basenames
         vids = []
@@ -340,6 +369,7 @@ class ImagesVisible(BaseTrackerDataV2):
         except tornado.web.MissingArgumentError:
             tids = yield self._lookup_thumbnail_ids_from_isp(
                 request.get_argument('bns').split(','))
+        tids = self.validate_thumbnail_ids(tids)
         self.eventData['thumbnailIds'] = [x for x in tids if x is not None]
         if len(self.eventData['thumbnailIds']) == 0:
             raise NotInterestingData()
@@ -385,6 +415,7 @@ class ImagesLoaded(BaseTrackerDataV2):
 
             if not has_tids:
                 tids = yield self._lookup_thumbnail_ids_from_isp(vids)
+                tids = self.validate_thumbnail_ids(tids)
 
             for w, h, tid in zip(widths, heights, tids):
                 if tid is not None:
@@ -424,9 +455,12 @@ class ImageClicked(BaseTrackerDataV2):
         except tornado.web.MissingArgumentError:
             tids = yield self._lookup_thumbnail_ids_from_isp(
                 [request.get_argument('bn')])
-            if tids[0] is None:
-                raise NotInterestingData()
             self.eventData['thumbnailId'] = tids[0]
+        self.eventData['thumbnailId'] = self.validate_thumbnail_ids(
+            [self.eventData['thumbnailId']])[0]
+
+        if self.eventData['thumbnailId'] is None:
+            raise NotInterestingData()
 
 class VideoClick(BaseTrackerDataV2):
     '''An event specifying that the image was clicked within the player'''
@@ -435,7 +469,9 @@ class VideoClick(BaseTrackerDataV2):
         self.eventData['isVideoClick'] = True
         self.eventData['thumbnailId'] = None
         self.eventType = 'VIDEO_CLICK'
-        self.eventData['videoId'] = request.get_argument('vid') # External Video id
+         # External Video id
+        self.eventData['videoId'] = self.validate_video_id(
+            request.get_argument('vid'))
         self.eventData['playerId'] = request.get_argument('playerid', None) # Player id
 
 class VideoPlay(BaseTrackerDataV2):
@@ -447,8 +483,11 @@ class VideoPlay(BaseTrackerDataV2):
         self.eventType = 'VIDEO_PLAY'
         # Thumbnail id
         self.eventData['thumbnailId'] = None
-        self.eventData['videoId'] = request.get_argument('vid') # External Video id
-        self.eventData['playerId'] = request.get_argument('playerid', None) # Player id
+         # External Video id
+        self.eventData['videoId'] = self.validate_video_id(
+            request.get_argument('vid'))
+         # Player id
+        self.eventData['playerId'] = request.get_argument('playerid', None)
          # If an adplay preceeded video play 
         self.eventData['didAdPlay'] = InputSanitizer.to_bool(
             request.get_argument('adplay', False))
@@ -472,7 +511,8 @@ class AdPlay(BaseTrackerDataV2):
         self.eventData['thumbnailId'] = None
         #VID can be null, if VideoClick event doesn't fire before adPlay
         # Video id
-        self.eventData['videoId'] = InputSanitizer.sanitize_null(request.get_argument('vid')) 
+        self.eventData['videoId'] = self.validate_video_id(
+            InputSanitizer.sanitize_null(request.get_argument('vid'))) 
         self.eventData['playerId'] = request.get_argument('playerid', None) # Player id
         # (time when player initiates request to play video - Last time an image or the player was clicked) 
         self.eventData['autoplayDelta'] = InputSanitizer.sanitize_int(
@@ -489,7 +529,8 @@ class VideoViewPercentage(BaseTrackerDataV2):
         self.eventType = 'VIDEO_VIEW_PERCENTAGE'
 
         # External video id
-        self.eventData['videoId'] = request.get_argument('vid')
+        self.eventData['videoId'] = self.validate_video_id(
+            request.get_argument('vid'))
 
         #the current count of the video playing on the page
         self.eventData['playCount'] = InputSanitizer.sanitize_int(request.get_argument('pcount'))
