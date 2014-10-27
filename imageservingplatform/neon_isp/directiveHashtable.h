@@ -41,6 +41,8 @@ public:
     
 protected:
 
+    bool initialized;
+
     struct hash_directive {
         size_t operator()(const std::string & key)  const;
 	};

@@ -84,10 +84,10 @@ class TestSampledLogging(test_utils.neontest.TestCase):
 
 class TestLogglyHandler(test_utils.neontest.TestCase):
     def setUp(self):
-        self.url_patcher = patch('utils.http.send_request')
+        self.url_patcher = patch('utils.http.RequestPool')
         self.url_mock = self.url_patcher.start()
 
-        self.url_mock.side_effect = \
+        self.url_mock().send_request.side_effect = \
           lambda x, callback, do_logging: callback(HTTPResponse(x, 200))
 
         
@@ -103,8 +103,8 @@ class TestLogglyHandler(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.INFO, 'I got a.* log'):
             _log.info('I got an %s log', 'INFO')
 
-        self.assertEqual(self.url_mock.call_count, 1)
-        request = self.url_mock.call_args[0][0]
+        self.assertEqual(self.url_mock().send_request.call_count, 1)
+        request = self.url_mock().send_request.call_args[0][0]
         self.assertRegexpMatches(request.url, 'https://.*/tag/mytag')
         self.assertDictContainsSubset(
             {'Content-type' : 'application/x-www-form-urlencoded'},
@@ -117,7 +117,7 @@ class TestLogglyHandler(test_utils.neontest.TestCase):
 
     @patch('sys.stderr', new_callable=StringIO)
     def test_bad_connection(self, mock_stderr):
-        self.url_mock.side_effect = HTTPError(404)
+        self.url_mock().send_request.side_effect = HTTPError(404)
 
         with self.assertLogExists(logging.ERROR, 'I got a.* log'):
             _log.error('I got an %s log', 'ERROR')
@@ -127,10 +127,10 @@ class TestLogglyHandler(test_utils.neontest.TestCase):
 
 class TestFlumeHandler(test_utils.neontest.TestCase):
     def setUp(self):
-        self.url_patcher = patch('utils.http.send_request')
+        self.url_patcher = patch('utils.http.RequestPool')
         self.url_mock = self.url_patcher.start()
 
-        self.url_mock.side_effect = \
+        self.url_mock().send_request.side_effect = \
           lambda x, callback, do_logging: callback(HTTPResponse(x, 200))
 
         
@@ -146,8 +146,8 @@ class TestFlumeHandler(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.INFO, 'I got a.* log'):
             _log.info('I got an %s log', 'INFO')
 
-        self.assertEqual(self.url_mock.call_count, 1)
-        request = self.url_mock.call_args[0][0]
+        self.assertEqual(self.url_mock().send_request.call_count, 1)
+        request = self.url_mock().send_request.call_args[0][0]
         self.assertRegexpMatches(request.url, 'http://localhost:6366')
         self.assertDictContainsSubset(
             {'Content-type' : 'application/json'},
@@ -161,7 +161,7 @@ class TestFlumeHandler(test_utils.neontest.TestCase):
 
     @patch('sys.stderr', new_callable=StringIO)
     def test_bad_connection(self, mock_stderr):
-        self.url_mock.side_effect = \
+        self.url_mock().send_request.side_effect = \
         lambda x, callback, do_logging: callback(
             HTTPResponse(x, 404, error=HTTPError(404)))
 

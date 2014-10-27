@@ -78,6 +78,22 @@ class TestSyncSendRequest(test_utils.neontest.TestCase):
 
         self.assertEqual(found_response, valid_response)
 
+    def test_no_logging(self):
+        request, valid_response = create_valid_ack()
+        invalid_response = HTTPError(500) 
+        self.mock_client().fetch.side_effect = [
+            invalid_response,
+            invalid_response,
+            valid_response
+            ]
+
+        with self.assertLogNotExists(logging.WARNING,
+                                  'key=http_connection_error msg=.*500'):
+            found_response = utils.http.send_request(request, 3,
+                                                     do_logging=False)
+
+        self.assertEqual(found_response, valid_response)
+
     def test_not_raised_connection_errors(self):
         request, valid_response = create_valid_ack()
         invalid_response = HTTPResponse(request, 500,
@@ -237,6 +253,26 @@ class TestRequestPool(test_utils.neontest.TestCase):
 
         with self.assertLogExists(logging.ERROR, 'key=http_too_many_errors'):
             self.pool.send_request(request, lambda x: self.response_q.put(x))
+            self.pool.join()
+
+        found_response = self.response_q.get_nowait()
+        self.assertEqual(found_response.error.code, 503)
+        self.assertEqual(found_response, invalid_response)
+        self.assertTrue(self.response_q.empty())
+
+    def test_no_logging(self):
+        request = HTTPRequest('http://www.neon.com', body='Lalalalal')
+        invalid_response = HTTPResponse(request, 200,
+                                        buffer=StringIO('{"error":600}'))
+        self.mock_client().fetch.side_effect = [
+            invalid_response,
+            invalid_response,
+            invalid_response,
+            ]
+
+        with self.assertLogNotExists(logging.ERROR,'key=http_too_many_errors'):
+            self.pool.send_request(request, lambda x: self.response_q.put(x),
+                                   do_logging=False)
             self.pool.join()
 
         found_response = self.response_q.get_nowait()

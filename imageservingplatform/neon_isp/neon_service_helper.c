@@ -107,6 +107,9 @@ static long neon_service_parse_number(ngx_str_t * value){
 static void 
 neon_service_cleanup_video_id(unsigned char ** vid){
 
+    if (*vid == NULL)
+        return;
+
     const char * prefix = "neonvid_";
     const int prefix_size = 8;
 

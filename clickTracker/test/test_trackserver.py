@@ -76,7 +76,7 @@ class TestFileBackupHandler(unittest.TestCase):
                         'ref' : 'http://ref.com',
                         'cts' : '23945827',
                         'a' : 'ic',
-                        'tid' : 'tid345',
+                        'tid' : 'acct1_vid1_tid345',
                         'x' : '3467',
                         'y' : '123',
                         'wx' : '567',
@@ -99,7 +99,7 @@ class TestFileBackupHandler(unittest.TestCase):
                        'ref' : 'http://ref1.com',
                        'cts' : '23945898',
                        'a' : 'iv',
-                       'tids' : 'tid345,tid346'
+                       'tids' : 'acct1_vid1_tid345,acct1_vid2_tid346'
                        }
         def mock_view_get_request(field, default=[]):
             return view_fields[field]
@@ -176,7 +176,7 @@ class TestFileBackupHandler(unittest.TestCase):
                                 self.assertGreater(body['serverTime'],
                                                    1300000000000)
                                 self.assertEqual(body['eventData']['thumbnailId'],
-                                                 'tid345')
+                                                 'acct1_vid1_tid345')
                                 self.assertEqual(
                                     body['eventData']['pageCoords']['x'], 3467)
                                 self.assertEqual(
@@ -198,7 +198,7 @@ class TestFileBackupHandler(unittest.TestCase):
                                                    1300000000000)
                                 self.assertItemsEqual(
                                     body['eventData']['thumbnailIds'], 
-                                    ['tid345', 'tid346'])
+                                    ['acct1_vid1_tid345', 'acct1_vid2_tid346'])
                                 self.assertEqual(
                                     body["ipGeoData"]["city"], "San Francisco")
                                 self.assertEqual(
@@ -368,7 +368,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'tids' : 'tid1,tid2'},
+              'tids' : 'acct1_vid1_tid1,acct1_vid2_tid2'},
             { 'eventType' : 'IMAGES_VISIBLE',
               'pageId' : 'pageid123',
               'trackerAccountId' : 'tai123',
@@ -378,7 +378,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'clientTime' : 2345623,
               'eventData': { 
                   'isImagesVisible' : True,
-                  'thumbnailIds' : ['tid1', 'tid2']
+                  'thumbnailIds' : ['acct1_vid1_tid1', 'acct1_vid2_tid2']
                   },
               'neonUserId' : 'neon_id1'},
               'neon_id1'
@@ -393,7 +393,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'tids' : 'tid1 56 67,tid2 89 123'}, #tornado converts + to " "
+              'tids' : 'acct1_vid1_tid1 56 67,acct1_vid2_tid2 89 123'}, #tornado converts + to " "
             { 'eventType' : 'IMAGES_LOADED',
               'pageId' : 'pageid123',
               'trackerAccountId' : 'tai123',
@@ -404,10 +404,10 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'eventData': {
                   'isImagesLoaded' : True,
                   'images' : [
-                  {'thumbnailId': 'tid1',
+                  {'thumbnailId': 'acct1_vid1_tid1',
                    'height' : 67,
                    'width' :56 },
-                  {'thumbnailId': 'tid2',
+                  {'thumbnailId': 'acct1_vid2_tid2',
                    'height' : 123,
                    'width' : 89}]},
               'neonUserId' : 'neon_id1'},
@@ -423,7 +423,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'tid' : 'tid1',
+              'tid' : 'acct1_vid1_tid1',
               'x' : '56',
               'y' : '23',
               'wx' : '78',
@@ -439,7 +439,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'clientTime' : 2345623,
               'eventData' : {
                   'isImageClick' : True,
-                  'thumbnailId' : 'tid1',
+                  'thumbnailId' : 'acct1_vid1_tid1',
                   'pageCoords' : {
                       'x' : 56,
                       'y' : 23,
@@ -467,7 +467,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'ref' : 'http://ref.com',
               'cts' : '2345623',
               'vid' : 'vid1',
-              'tid' : 'tid1',
+              'tid' : 'acct1_vid1_tid1',
               'playerid' : 'brightcoveP123',
               },
             { 'eventType' : 'VIDEO_CLICK',
@@ -479,7 +479,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'clientTime' : 2345623,
               'eventData' : {
                   'videoId' : 'vid1',
-                  'thumbnailId' : 'tid1',
+                  'thumbnailId' : 'acct1_vid1_tid1',
                   'playerId' : 'brightcoveP123',
                   'isVideoClick' : True
                   },
@@ -496,7 +496,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'tid' : 'tid1',
+              'tid' : 'acct1_vid1_tid1',
               'vid' : 'vid1',
               'adplay': 'False',
               'adelta': 'null',
@@ -510,7 +510,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'refURL' : 'http://ref.com',
               'clientTime' : 2345623,
               'eventData' : {
-                  'thumbnailId' : 'tid1',
+                  'thumbnailId' : 'acct1_vid1_tid1',
                   'videoId' : 'vid1',
                   'didAdPlay': False,
                   'autoplayDelta': None,
@@ -531,7 +531,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'tid' : 'tid1',
+              'tid' : 'acct1_vid1_tid1',
               'vid' : 'vid1',
               'adelta': '214',
               'pcount' : '1',
@@ -545,7 +545,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'refURL' : 'http://ref.com',
               'clientTime' : 2345623,
               'eventData' : {
-                  'thumbnailId' : 'tid1',
+                  'thumbnailId' : 'acct1_vid1_tid1',
                   'videoId' : 'vid1',
                   'autoplayDelta': 214,
                   'playCount': 1,
@@ -594,7 +594,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'tids' : 'tid1,tid2'},
+              'tids' : 'acct1_vid1_tid1,acct1_vid2_tid2'},
             { 'eventType' : 'IMAGES_VISIBLE',
               'pageId' : 'pageid123',
               'trackerAccountId' : 'tai123',
@@ -604,7 +604,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'clientTime' : 2345623,
               'eventData': { 
                   'isImagesVisible' : True,
-                  'thumbnailIds' : ['tid1', 'tid2']
+                  'thumbnailIds' : ['acct1_vid1_tid1', 'acct1_vid2_tid2']
                   },
               'neonUserId' : 'neon_id1'},
               'neon_id1',
@@ -621,7 +621,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'cts' : '2345623',
               'vid' : 'vid1',
-              'tid' : 'tid1',
+              'tid' : 'acct1_vid1_tid1',
               'playerid' : 'brightcoveP123',
               },
             { 'eventType' : 'VIDEO_CLICK',
@@ -633,7 +633,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'clientTime' : 2345623,
               'eventData' : {
                   'videoId' : 'vid1',
-                  'thumbnailId' : 'tid1',
+                  'thumbnailId' : 'acct1_vid1_tid1',
                   'playerId' : 'brightcoveP123',
                   'isVideoClick' : True
                   },
@@ -678,6 +678,8 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
         bnrequest = self.isp_mock.call_args[0][0]
         self.assertEqual(bnrequest.url, 'http://127.0.0.1:8089/v1/getthumbnailid/tai123?params=vid2,vid5')
         self.assertDictContainsSubset({'Cookie' : 'neonglobaluserid=neon_id1'},
+                                      bnrequest.headers)
+        self.assertDictContainsSubset({'X-Forwarded-For' : '127.0.0.1'},
                                       bnrequest.headers)
 
         # Image loaded message
@@ -1179,7 +1181,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'tids' : 'tid1,tid2'}))
+             'tids' : 'acct1_vid1_tid1,acct1_vid2_tid2'}))
 
         # If flume is down, we still want to respond with a 200 if it
         # is stored on disk
@@ -1200,7 +1202,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'tids' : 'tid1,tid2'}))
+             'tids' : 'acct1_vid1_tid1,acct1_vid2_tid2'}))
 
         # If flume is down, we still want to respond with a 200 if it
         # is stored on disk
@@ -1221,7 +1223,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'tids' : 'tid1,tid2'}))
+             'tids' : 'acct1_vid1_tid1,acct1_vid2_tid2'}))
 
         # If flume is down, we still want to respond with a 200 if it
         # is stored on disk
@@ -1258,7 +1260,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'tid' : 'tid1',
+              'tid' : 'acct1_vid1_tid1',
               'x' : '56',
               'y' : '23',
               'wx' : '78',
