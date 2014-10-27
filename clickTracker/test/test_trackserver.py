@@ -257,6 +257,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
         self.thrift_transport_mock().open.side_effect = \
           lambda callback: self.io_loop.add_callback(callback)
 
+        # Set the flush interval to 1 so that the data isn't buffered 
         self.old_flush_interval = \
           options.get('clickTracker.trackserver.flume_flush_interval')
         options._set('clickTracker.trackserver.flume_flush_interval', 1)
@@ -281,6 +282,8 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
     def get_app(self):
         return self.server_obj.application
 
+    def get_httpserver_options(self):
+        return {'xheaders': True}
     
     def mock_isp_response(self, request, retries=1, callback=None):
         if request.url.endswith('.avsc'):
@@ -318,6 +321,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
             "Mobile Safari/533.1")
         if neon_id is not None:
             headers['Cookie'] = 'neonglobaluserid=%s' % neon_id
+        headers['X-Forwarded-For'] = '123.4.56.78'
         response = self.fetch(
             '%s?%s' % (path, urllib.urlencode(url_params)),
             headers=headers)
@@ -343,7 +347,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
             self.assertEqual(headers['tai'],
                              ebody['trackerAccountId'])
             
-            self.assertEqual(body['clientIP'], '127.0.0.1')
+            self.assertEqual(body['clientIP'], '123.4.56.78')
             if neon_id is not None:
                 self.assertEqual(body['neonUserId'], neon_id)
 
@@ -645,7 +649,8 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
         self.bn_map = {
             'vid2' : 'acct1_vid2_tid1',
             'vid3' : 'acct1_vid3_tid0',
-            'vid5' : 'acct1_vid5_tid5'
+            'vid5' : 'acct1_vid5_tid5',
+            'my.vid~-3' : 'acct3_my.vid~-3_tid7'
             }
 
         # Image Visible Message
@@ -658,7 +663,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'ref' : 'http://ref.com',
               'cts' : '2345623',
               'bns' : ('neonvid_vid2, neonvid_vid5,'
-                       'neontnacct1_vid3_tid2.jpg')},
+                       'neontnacct1_vid3_tid2.jpg,neonvid_my.vid~-3')},
             { 'eventType' : 'IMAGES_VISIBLE',
               'pageId' : 'pageid123',
               'trackerAccountId' : 'tai123',
@@ -670,16 +675,19 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
                   'isImagesVisible' : True,
                   'thumbnailIds' : ['acct1_vid2_tid1',
                                     'acct1_vid5_tid5',
-                                    'acct1_vid3_tid2']
+                                    'acct1_vid3_tid2',
+                                    'acct3_my.vid~-3_tid7'
+                                    ]
                   },
               'neonUserId' : 'neon_id1'},
               'neon_id1'
             )
         bnrequest = self.isp_mock.call_args[0][0]
-        self.assertEqual(bnrequest.url, 'http://127.0.0.1:8089/v1/getthumbnailid/tai123?params=vid2,vid5')
+        self.assertEqual(bnrequest.url,
+                         'http://127.0.0.1:8089/v1/getthumbnailid/tai123?params=vid2,vid5,my.vid~-3')
         self.assertDictContainsSubset({'Cookie' : 'neonglobaluserid=neon_id1'},
                                       bnrequest.headers)
-        self.assertDictContainsSubset({'X-Forwarded-For' : '127.0.0.1'},
+        self.assertDictContainsSubset({'X-Forwarded-For' : '123.4.56.78'},
                                       bnrequest.headers)
 
         # Image loaded message
@@ -903,8 +911,8 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'bn' : 'some_video.jpg',
-             'vid' : 'some_video',
+             'bn' : 'somevideo.jpg',
+             'vid' : 'somevideo',
              'adelta' : '520',
              'pcount' : '2'}))
         self.assertEqual(response.code, 200)
@@ -918,8 +926,8 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'bn' : 'some_video.jpg',
-             'vid' : 'some_video',
+             'bn' : 'somevideo.jpg',
+             'vid' : 'somevideo',
              'adelta' : '520',
              'pcount' : '2'}))
         self.assertEqual(response.code, 200)
@@ -991,6 +999,64 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
              'bns' : 'neonvid_vid2'}))
         self.assertEqual(response.code, 500)
 
+    def test_unexpected_parsing_exception(self):
+        # Inject an exception when isp is queried. It doesn't matter
+        # where we cause the injection, so this will work
+        self.isp_mock.side_effect = Exception()
+        with self.assertLogExists(logging.ERROR, "Unexpected error parsing"):
+            response = self.fetch('/v2?%s' % urllib.urlencode(
+                {'a' : 'iv',
+                 'pageid' : 'pageid123',
+                 'tai' : 'tai123',
+                 'ttype' : 'brightcove',
+                 'page' : 'http://go.com',
+                 'ref' : 'http://ref.com',
+                 'cts' : '2345623',
+                 'bns' : 'neonvid_vid2'}))
+            self.assertEqual(response.code, 500)
+
+    def test_unexpected_exception_sending_flume_data(self):
+        self.thrift_mock.appendBatch.side_effect = Exception()
+
+        with self.assertLogExists(logging.ERROR,
+                                  "Unexpected error sending data to flume:"):
+            response = self.fetch('/v2?%s' % urllib.urlencode(
+                {'a' : 'iv',
+                 'pageid' : 'pageid123',
+                 'tai' : 'tai123',
+                 'ttype' : 'brightcove',
+                 'page' : 'http://go.com',
+                 'ref' : 'http://ref.com',
+                 'cts' : '2345623',
+                 'tids' : 'acct1_vid1_tid1,acct1_vid2_tid2'}))
+            self.assertEqual(response.code, 500)
+
+    def test_malformed_isp_response(self):
+        def _mock_isp(request, retries=1, callback=None):
+            if request.url.endswith('.avsc'):
+                retval = HTTPResponse(request, 200)
+            else:
+                retval = HTTPResponse(
+                    request, 200,
+                    buffer=StringIO("This is a malformed response"))
+
+            if callback:
+                callback(retval)
+            else:
+                return retval
+        
+        self.isp_mock.side_effect = _mock_isp
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'iv',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bns' : 'neonvid_vid2,neonvid_vid4'}))
+        self.assertEqual(response.code, 500)
+
     def test_invalid_event_type(self):
         response = self.fetch('/v2?%s' % urllib.urlencode(
             {'a' : 'abc',
@@ -1003,6 +1069,78 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
              'tids' : 'acct1_vid2_tid1'}))
         self.assertEqual(response.code, 400)
         self.assertRegexpMatches(response.body, 'Invalid event: abc')
+
+    def test_invalid_video_id(self):
+        with self.assertLogExists(logging.WARNING,
+                                  'Video some_video is not interesting'):
+            response = self.fetch('/v2?%s' % urllib.urlencode(
+                {'a' : 'vp',
+                 'pageid' : 'pageid123',
+                 'tai' : 'tai123',
+                 'ttype' : 'brightcove',
+                 'page' : 'http://go.com',
+                 'ref' : 'http://ref.com',
+                 'cts' : '2345623',
+                 'tid' : 'acct1_vid2_tid1',
+                 'vid' : 'some_video',
+                 'adplay': 'False',
+                 'adelta': 'null',
+                 'pcount': '1',
+                 'playerid' : 'brightcoveP123'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
+
+    def test_invalid_thumbnail_id(self):
+        # For all these tests, we should return a 200, but ignore the data.
+        
+        # Test on a Image Visible event
+        with self.assertLogExists(logging.WARNING,
+                                  'No valid thumbnail ids'):
+            response = self.fetch('/v2?%s' % urllib.urlencode(
+                {'a' : 'iv',
+                 'pageid' : 'pageid123',
+                 'tai' : 'tai123',
+                 'ttype' : 'brightcove',
+                 'page' : 'http://go.com',
+                 'ref' : 'http://ref.com',
+                 'cts' : '2345623',
+                 'tids' : 'acct1_some_video_tid1,vid~o_tid1,thumb3,acct1_v!r_tid1'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
+
+        with self.assertLogExists(logging.WARNING,
+                                  'No interesting thumbnail ids'):
+            response = self.fetch('/v2?%s' % urllib.urlencode(
+                {'a' : 'il',
+                 'pageid' : 'pageid123',
+                 'tai' : 'tai123',
+                 'ttype' : 'brightcove',
+                 'page' : 'http://go.com',
+                 'ref' : 'http://ref.com',
+                 'cts' : '2345623',
+                 'tids' : 'acct1_some_video_tid1 56 87,vid~o_tid1 48 95,thumb3 32 65,acct1_v!r_tid1 32 45'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
+
+        with self.assertLogExists(logging.WARNING,
+                                  'Invalid thumbnail id'):
+            response = self.fetch('/v2?%s' % urllib.urlencode(
+                { 'a' : 'ic',
+                  'pageid' : 'pageid123',
+                  'tai' : 'tai123',
+                  'ttype' : 'brightcove',
+                  'page' : 'http://go.com',
+                  'ref' : 'http://ref.com',
+                  'cts' : '2345623',
+                  'tid' : 'acct1_vid_1_tid1',
+                  'x' : '56',
+                  'y' : '23',
+                  'wx' : '78',
+                  'wy' : '34',
+                  'cx' : '6',
+                  'cy' : '8'}))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 0)
 
     def test_caseinsentive_tracker_type(self):
         response = self.fetch('/v2?%s' % urllib.urlencode(
@@ -1162,7 +1300,6 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'neonUserId' : 'neon_id1'},
               'neon_id1'
             )
-        
 
     def test_flume_error_code(self):
         # Simulate an error code from the flume server
