@@ -83,6 +83,8 @@ statemon.define('unknown_basename', int)
 statemon.define('malformed_basename', int)
 statemon.define('isp_connection_error', int)
 statemon.define('not_interesting_message', int)
+statemon.define('invalid_video_id', int)
+statemon.define('invalid_thumbnails', int)
 
 class NotInterestingData(Exception): pass
 
@@ -192,7 +194,7 @@ class BaseTrackerDataV2(object):
         Returns:
         list of valid tids, or None if it was invalid
         '''
-        tidRe = re.compile('[0-9a-zA-Z]+_[0-9a-zA-Z\-~\.]+_[0-9a-zA-Z]+')
+        tidRe = re.compile('^[0-9a-zA-Z]+_[0-9a-zA-Z\-~\.]+_[0-9a-zA-Z]+$')
         return [None if x is None or not tidRe.match(x) else x for x in
                 tids]
 
@@ -205,10 +207,12 @@ class BaseTrackerDataV2(object):
         Returns:
         valid video id, or raises tornado.web.MissingArgumentError
         '''
-        vidRe = re.compile('[0-9a-zA-Z\-~\.]+')
+        vidRe = re.compile('^[0-9a-zA-Z~\-\.]+$')
         if vid is None or vidRe.match(vid):
             return vid
-        raise tornado.web.MissingArgumentError('vid')
+        _log.warn_n("Video %s is not interesting" % vid, 100)
+        statemon.state.increment('invalid_video_id')
+        raise NotInterestingData()
 
     @tornado.gen.coroutine
     def _lookup_thumbnail_ids_from_isp(self, basenames):
@@ -220,7 +224,7 @@ class BaseTrackerDataV2(object):
         Returns:
         list of thumbnail ids, or None if it is unknown
         '''
-        vidRe = re.compile('neonvid_([0-9a-zA-Z]+)')
+        vidRe = re.compile('neonvid_([0-9a-zA-Z\-~\.]+)')
         tidRe = re.compile('neontn([0-9a-zA-Z]+_[0-9a-zA-Z\-~\.]+_[0-9a-zA-Z]+)')
 
         # Parse the basenames
@@ -272,13 +276,18 @@ class BaseTrackerDataV2(object):
                            'invalid. Request was %s. Response was %s' % 
                            (request.url, response.body))
                 raise tornado.web.HTTPError(500)
-            for i in range(len(to_req)):
-                if tid_response[i] == 'null':
+            responseI = 0
+            for i in range(len(vids)):
+                if tids[i] is not None:
+                    # we didn't request this entry
+                    continue
+                elif tid_response[responseI] == 'null':
                     statemon.state.increment('unknown_basename')
                     _log.error_n('No thumbnail id known for video id %s' %
-                                 to_req[i], 10)
+                                 to_req[responseI], 10)
                 else:
-                    tids[i] = tid_response[i]
+                    tids[i] = tid_response[responseI]
+                responseI += 1
 
         raise tornado.gen.Return(tids)
 
@@ -374,9 +383,11 @@ class ImagesVisible(BaseTrackerDataV2):
         except tornado.web.MissingArgumentError:
             tids = yield self._lookup_thumbnail_ids_from_isp(
                 request.get_argument('bns').split(','))
-        tids = self.validate_thumbnail_ids(tids)
-        self.eventData['thumbnailIds'] = [x for x in tids if x is not None]
+        vtids = self.validate_thumbnail_ids(tids)
+        self.eventData['thumbnailIds'] = [x for x in vtids if x is not None]
         if len(self.eventData['thumbnailIds']) == 0:
+            _log.warn_n("No valid thumbnail ids in %s" % tids, 100)
+            statemon.state.increment('invalid_thumbnails')
             raise NotInterestingData()
 
 class ImagesLoaded(BaseTrackerDataV2):
@@ -420,7 +431,7 @@ class ImagesLoaded(BaseTrackerDataV2):
 
             if not has_tids:
                 tids = yield self._lookup_thumbnail_ids_from_isp(vids)
-                tids = self.validate_thumbnail_ids(tids)
+            tids = self.validate_thumbnail_ids(tids)
 
             for w, h, tid in zip(widths, heights, tids):
                 if tid is not None:
@@ -429,6 +440,9 @@ class ImagesLoaded(BaseTrackerDataV2):
                                    'height' : h})
         self.eventData['images'] = images
         if len(self.eventData['images']) == 0:
+            _log.warn_n("No interesting thumbnail ids in %s" % arg_list,
+                        100)
+            statemon.state.increment('invalid_thumbnails')
             raise NotInterestingData()
             
 
@@ -456,15 +470,16 @@ class ImageClicked(BaseTrackerDataV2):
     def fill_thumbnail_ids(self, request):
         '''The thumbnail id is required, so we can't use the default.'''
         try:
-            self.eventData['thumbnailId'] = request.get_argument('tid')
+            tid = request.get_argument('tid')
         except tornado.web.MissingArgumentError:
             tids = yield self._lookup_thumbnail_ids_from_isp(
                 [request.get_argument('bn')])
-            self.eventData['thumbnailId'] = tids[0]
-        self.eventData['thumbnailId'] = self.validate_thumbnail_ids(
-            [self.eventData['thumbnailId']])[0]
+            tid = tids[0]
+        self.eventData['thumbnailId'] = self.validate_thumbnail_ids([tid])[0]
 
         if self.eventData['thumbnailId'] is None:
+            _log.warn_n("Invalid thumbnail id %s" % tid, 100)
+            statemon.state.increment('invalid_thumbnails')
             raise NotInterestingData()
 
 class VideoClick(BaseTrackerDataV2):
@@ -693,7 +708,7 @@ class LogLines(TrackerDataHandler):
                 self.finish()
                 return
             except Exception, err:
-                _log.exception("key=get_track request=%s msg=%s",
+                _log.exception("Unexpected error parsing %s: %s",
                                self.request.uri, err)
                 statemon.state.increment('internal_server_error')
                 self.set_status(500)
@@ -707,7 +722,8 @@ class LogLines(TrackerDataHandler):
                 self.set_status(200)
                 
             except Exception, err:
-                _log.exception("key=loglines msg=Q error %s", err)
+                _log.exception("Unexpected error sending data to flume: %s",
+                               err)
                 self.set_status(500)
             self.finish()
 
