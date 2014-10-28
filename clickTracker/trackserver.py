@@ -194,7 +194,10 @@ class BaseTrackerDataV2(object):
         Returns:
         list of valid tids, or None if it was invalid
         '''
-        tidRe = re.compile('^[0-9a-zA-Z]+_[0-9a-zA-Z\-~\.]+_[0-9a-zA-Z]+$')
+        # TODO(mdesnoyer): Remove the split by dashes once the
+        # brightcove tracker code is fixed. It should just be
+        # underscores.
+        tidRe = re.compile('^[0-9a-zA-Z]+[\-_][0-9a-zA-Z\-~\.]+[\-_][0-9a-zA-Z]+$')
         return [None if x is None or not tidRe.match(x) else x for x in
                 tids]
 
@@ -225,15 +228,23 @@ class BaseTrackerDataV2(object):
         list of thumbnail ids, or None if it is unknown
         '''
         vidRe = re.compile('neonvid_([0-9a-zA-Z\-~\.]+)')
+        # TODO(mdesnoyer): Remove the split by dashes once the
+        # brightcove tracker code is fixed. It should just be
+        # underscores.
         tidRe = re.compile('neontn([0-9a-zA-Z]+_[0-9a-zA-Z\-~\.]+_[0-9a-zA-Z]+)')
+        dashTidRe = re.compile('neontn([0-9a-zA-Z]+\-[0-9a-zA-Z~\.]+\-[0-9a-zA-Z]+)')
 
         # Parse the basenames
         vids = []
         tids = []
         for bn in basenames:
             tidSearch = tidRe.search(bn)
+            dashSearch = dashTidRe.search(bn)
             if tidSearch:
                 tids.append(tidSearch.group(1))
+                vids.append(None)
+            elif dashSearch:
+                tids.append(re.sub('\-', '_', dashSearch.group(1)))
                 vids.append(None)
             else:
                 vidSearch = vidRe.search(bn)

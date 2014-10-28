@@ -364,6 +364,9 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
 
     def test_v2_valid_messages(self):
         # Image Visible Message
+        
+        # TODO(mdesnoyer): Remove dash separated example once the
+        # tracker won't send it anymore.
         self.check_message_sent(
             { 'a' : 'iv',
               'pageid' : 'pageid123',
@@ -372,7 +375,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'tids' : 'acct1_vid1_tid1,acct1_vid2_tid2'},
+              'tids' : 'acct1_vid1_tid1,acct1_vid2_tid2,acct2-vid1-tid3'},
             { 'eventType' : 'IMAGES_VISIBLE',
               'pageId' : 'pageid123',
               'trackerAccountId' : 'tai123',
@@ -382,7 +385,8 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'clientTime' : 2345623,
               'eventData': { 
                   'isImagesVisible' : True,
-                  'thumbnailIds' : ['acct1_vid1_tid1', 'acct1_vid2_tid2']
+                  'thumbnailIds' : ['acct1_vid1_tid1', 'acct1_vid2_tid2',
+                                    'acct2-vid1-tid3']
                   },
               'neonUserId' : 'neon_id1'},
               'neon_id1'
@@ -944,14 +948,16 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'bns' : 'someotherfile.jpg,acct1_vid2,neontnacct1_vid3_tid.jpg'}))
+             'bns' : ('someotherfile.jpg,acct1_vid2,neontnacct1_vid3_tid.jpg,'
+                      'neontnacct1-vid4-tid6.jpg')}))
 
         self.assertEqual(response.code, 200)
         self.assertEqual(self.thrift_mock.appendBatch.call_count, 1)
         request_saw = self.thrift_mock.appendBatch.call_args[0][0][0]
         msgbuf = StringIO(request_saw.body)
         body = self.avro_reader.read(avro.io.BinaryDecoder(msgbuf))
-        self.assertEqual(body['eventData']['thumbnailIds'], ['acct1_vid3_tid'])
+        self.assertEqual(body['eventData']['thumbnailIds'],
+                         ['acct1_vid3_tid', 'acct1_vid4_tid6'])
 
         self.thrift_mock.appendBatch.reset_mock()
         response = self.fetch('/v2?%s' % urllib.urlencode(
