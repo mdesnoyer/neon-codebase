@@ -16,7 +16,11 @@ public:
     ~Mastermind();
     
     static void InitStatic();
-    
+
+    // basic init with empty tables
+    void Init();
+
+    // full init with a json document
     void Init(const char * mastermindFile, time_t previousMastermindExpiry);
     
     void Shutdown();
@@ -66,8 +70,8 @@ protected:
     
     time_t expiry;
 
-    PublisherHashtable publisherTable;
-    DirectiveHashtable directiveTable;
+    PublisherHashtable * publisherTable;
+    DirectiveHashtable * directiveTable;
 };
 
 
