@@ -1057,12 +1057,18 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
 
         self.cp_mock_async_client().fetch.side_effect = \
           self._success_http_side_effect
-
+        
+        vid = "vid1"
         response = self.post_request(uri, vals, api_key)
         self.assertTrue(response.code, 201)
         jresponse = json.loads(response.body)
         job_id = jresponse['job_id']
         self.assertIsNotNone(job_id)
+        
+        # add video to account
+        np = neondata.NeonPlatform.get_account(api_key)
+        np.add_video(vid, job_id)
+        np.save()
 
         # Test duplicate request
         request = tornado.httpclient.HTTPRequest('http://thumbnails.neon-lab.com')
@@ -1072,6 +1078,45 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         response = self.post_request(uri, vals, api_key)
         self.assertTrue(response.code, 409)
         self.assertTrue(json.loads(response.body)["job_id"], job_id)
+
+
+    def test_video_request_in_submit_state(self):
+        '''
+        Create video request and then query it via Neon API
+        '''
+
+        api_key = self.create_neon_account()
+        vals = { 'video_url' : "http://test.mp4", "video_title": "test_title", 
+                 'video_id'  : "vid1", "callback_url" : "http://callback"
+                }
+        uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/create_thumbnail_api_request'%(self.a_id, "0"))
+
+        self.cp_mock_async_client().fetch.side_effect = \
+          self._success_http_side_effect
+        
+        vid = "vid1"
+        response = self.post_request(uri, vals, api_key)
+        self.assertTrue(response.code, 201)
+        jresponse = json.loads(response.body)
+        job_id = jresponse['job_id']
+        self.assertIsNotNone(job_id)
+        
+        # add video to account
+        np = neondata.NeonPlatform.get_account(api_key)
+        np.add_video(vid, job_id)
+        np.save()
+        
+        # Query a video that was just submitted 
+        url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/videos/%s'
+                % (self.a_id, "0", vid))
+        resp = self.get_request(url, api_key)
+        items = json.loads(resp.body)['items']
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['video_id'], vid)
+
+
 
     def test_create_neon_video_request_invalid_url(self):
         ''' invalid url test '''
@@ -1139,7 +1184,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(len(items), page_size)
         result_vids = [x['video_id'] for x in items]
         
-        #recommended
+        # recommended
         page_size = 5
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos/recommended?page_no=%s&page_size=%s'
@@ -1149,15 +1194,27 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(len(items), page_size)
         result_vids = [ x['video_id'] for x in items]
 
-        #processing
+        # processing
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos/processing?page_no=%s&page_size=%s'
                 %(self.a_id, "0", page_no, page_size))
         resp = self.get_request(url, self.api_key)
         items = json.loads(resp.body)['items']
         self.assertEqual(len(items), 1) #1 video in processing
-        
-        #invalid state
+       
+        # failed state
+        api_requests[0].state = neondata.RequestState.FAILED
+        api_requests[0].save()
+        url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/videos/failed?page_no=%s&page_size=%s'
+                %(self.a_id, "0", page_no, page_size))
+        resp = self.get_request(url, self.api_key)
+        items = json.loads(resp.body)['items']
+        self.assertEqual(len(items), 1) #1 video failed 
+        self.assertEqual(items[0]['status'], 'failed')
+        self.assertEqual(items[0]['job_id'], api_requests[0].job_id)
+       
+        # invalid state
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos/invalid?page_no=%s&page_size=%s'
                 %(self.a_id, "0", page_no, page_size))
