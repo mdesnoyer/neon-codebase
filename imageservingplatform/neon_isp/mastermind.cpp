@@ -443,9 +443,22 @@ Mastermind::GetThumbnailID(const char * c_accountId,
 
 void
 Mastermind::Shutdown(){
-    
-    publisherTable->Shutdown();
-    directiveTable->Shutdown();
-    publisherTable = 0;
-    directiveTable = 0;
+   
+    if(publisherTable != 0) {
+        publisherTable->Shutdown();
+        delete publisherTable;
+        publisherTable = 0;
+    }
+
+    if(directiveTable != 0) {
+        directiveTable->Shutdown();
+        delete directiveTable;
+        directiveTable = 0;
+    }
 }
+
+
+
+
+
+
