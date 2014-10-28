@@ -13,27 +13,26 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] <> base_path:
         sys.path.insert(0, base_path)
 
-import Image
+from api import brightcove_api
+import datetime
 import json
+from mock import MagicMock, patch 
 import random
-import unittest
-import urllib
+from PIL import Image
+from StringIO import StringIO
+from supportServices import services, neondata
+import test_utils.mock_boto_s3 as boto_mock
 import test_utils.redis
+import time
 import tornado.gen
 import tornado.ioloop
-import utils.imageutils
-import utils.neon
-import time
-import datetime
-from StringIO import StringIO
-from mock import MagicMock, patch 
-from supportServices import services, neondata
-from api import brightcove_api
-import test_utils.mock_boto_s3 as boto_mock
 import tornado.testing
 import tornado.httpclient
+import unittest
+import urllib
 from utils.imageutils import PILImageUtils
 from utils.options import define, options
+import utils.neon
 import logging
 _log = logging.getLogger(__name__)
 
@@ -454,10 +453,6 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         #neon api request
         elif "api/v1/submitvideo" in http_request.url:
             response = _neon_submit_job_response()
-            if callback:    
-                return tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                                     response)
-            return response
 
         elif "jpg" in http_request.url or "jpeg" in http_request.url:
             if "error_image" in http_request.url:
@@ -466,11 +461,17 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
                 #downloading any image (create a random image response)
                 response = create_random_image_response()
 
-            if callback:
-                return tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                                     response)
-            else:
-                return response
+        elif ".png" in http_request.url:
+            # Open an RGBA image
+            im = Image.open(os.path.join(os.path.dirname(__file__),
+                                         os.path.basename(http_request.url)))
+            self.assertEqual(im.mode, "RGBA")
+            imgstream = StringIO()
+            im.save(imgstream, "png")
+            imgstream.seek(0)
+            response = tornado.httpclient.HTTPResponse(http_request, 200,
+                                                       buffer=imgstream)
+            
             
 
         elif ".mp4" in http_request.url:
@@ -478,17 +479,18 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
             response = tornado.httpclient.HTTPResponse(request, 200,
                                                        headers=headers,
                                                        buffer=StringIO('videodata'))
-            if callback:
-                return tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                                     response)
+            
         else:
             headers = {"Content-Type": "text/plain"}
             response = tornado.httpclient.HTTPResponse(request, 200, headers=headers,
                 buffer=StringIO('someplaindata'))
-            if callback:
-                return tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                                     response)
-            return response
+            
+        if callback:
+            return tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                                response)
+        return response
+
+        
 
     def _setup_initial_brightcove_state(self):
         '''
@@ -1421,6 +1423,22 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         
         s_url = neondata.ThumbnailServingURLs.get(c_thumb.key)
         self.assertIsNotNone(s_url)
+
+        # RGBA image
+        url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
+                    "/%s/videos/%s" %(self.a_id, self.b_id, vid))
+        data = {
+                "created_time": time.time(),
+                "type": "custom_upload",
+                "urls": ["http://rgba.png"]
+                }
+        vals = {'thumbnails' : [data]}
+        response = self.put_request(url, vals, self.api_key, jsonheader=True)
+        self.assertEqual(response.code, 202)
+
+        # Check that the image is converted to RGB
+        
+        
     
         # Image download error
         url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
