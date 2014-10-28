@@ -81,10 +81,12 @@ statemon.define('invalid_messages', int)
 statemon.define('internal_server_error', int)
 statemon.define('unknown_basename', int)
 statemon.define('malformed_basename', int)
+_malformed_basename_ref = statemon.state.get_ref('malformed_basename')
 statemon.define('isp_connection_error', int)
 statemon.define('not_interesting_message', int)
 statemon.define('invalid_video_id', int)
 statemon.define('invalid_thumbnails', int)
+_invalid_thumbnails_ref = statemon.state.get_ref('invalid_thumbnails')
 
 class NotInterestingData(Exception): pass
 
@@ -254,7 +256,8 @@ class BaseTrackerDataV2(object):
                 else:
                     _log.warn_n('Malformed basename %s' % bn, 100)
                     vids.append(None)
-                    statemon.state.increment('malformed_basename')
+                    statemon.state.increment(ref=_malformed_basename_ref,
+                                             safe=False)
 
         # Send a request to the image serving platform for all the video ids
         to_req =  [x for x in vids if x is not None]
@@ -398,7 +401,8 @@ class ImagesVisible(BaseTrackerDataV2):
         self.eventData['thumbnailIds'] = [x for x in vtids if x is not None]
         if len(self.eventData['thumbnailIds']) == 0:
             _log.warn_n("No valid thumbnail ids in %s" % tids, 100)
-            statemon.state.increment('invalid_thumbnails')
+            statemon.state.increment(ref=_invalid_thumbnails_ref,
+                                     safe=False)
             raise NotInterestingData()
 
 class ImagesLoaded(BaseTrackerDataV2):
@@ -453,7 +457,8 @@ class ImagesLoaded(BaseTrackerDataV2):
         if len(self.eventData['images']) == 0:
             _log.warn_n("No interesting thumbnail ids in %s" % arg_list,
                         100)
-            statemon.state.increment('invalid_thumbnails')
+            statemon.state.increment(ref=_invalid_thumbnails_ref,
+                                     safe=False)
             raise NotInterestingData()
             
 
@@ -490,7 +495,8 @@ class ImageClicked(BaseTrackerDataV2):
 
         if self.eventData['thumbnailId'] is None:
             _log.warn_n("Invalid thumbnail id %s" % tid, 100)
-            statemon.state.increment('invalid_thumbnails')
+            statemon.state.increment(ref=_invalid_thumbnails_ref,
+                                     safe=False)
             raise NotInterestingData()
 
 class VideoClick(BaseTrackerDataV2):
@@ -687,6 +693,10 @@ class LogLines(TrackerDataHandler):
         # lot and the inspection can take a while. So do the
         # inspection now.
         self.message_counter = statemon.state.get_ref('messages_handled')
+        self.not_interesting_counter = \
+          statemon.state.get_ref('not_interesting_message')
+        self.invalid_msg_counter = \
+          statemon.state.get_ref('invalid_messages')
     
     @tornado.web.asynchronous
     @tornado.gen.coroutine
@@ -699,7 +709,8 @@ class LogLines(TrackerDataHandler):
                 tracker_data = yield self.parse_tracker_data(self.version)
             except tornado.web.MissingArgumentError as e:
                 _log.error('Invalid request: %s' % self.request.uri)
-                statemon.state.increment('invalid_messages')
+                statemon.state.increment(ref=self.invalid_msg_counter,
+                                         safe=False)
                 if e.reason is None:
                     e.reason = e.log_message
                 else:
@@ -714,7 +725,8 @@ class LogLines(TrackerDataHandler):
                 # The data wasn't interesting to us even though it was
                 # valid, so just record that and don't send the data
                 # on.
-                statemon.state.increment('not_interesting_message')
+                statemon.state.increment(ref=self.not_interesting_counter,
+                                         safe=False)
                 self.set_status(200)
                 self.finish()
                 return
