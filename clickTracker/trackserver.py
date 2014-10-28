@@ -278,7 +278,7 @@ class BaseTrackerDataV2(object):
                 raise tornado.web.HTTPError(500)
             responseI = 0
             for i in range(len(vids)):
-                if tids[i] is not None:
+                if vids[i] is None:
                     # we didn't request this entry
                     continue
                 elif tid_response[responseI] == 'null':

@@ -944,7 +944,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'bns' : 'acct1_vid2,neontnacct1_vid3_tid.jpg'}))
+             'bns' : 'someotherfile.jpg,acct1_vid2,neontnacct1_vid3_tid.jpg'}))
 
         self.assertEqual(response.code, 200)
         self.assertEqual(self.thrift_mock.appendBatch.call_count, 1)
@@ -962,7 +962,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
              'page' : 'http://go.com',
              'ref' : 'http://ref.com',
              'cts' : '2345623',
-             'bns' : 'acct1_vid2 32 45,neontnacct1_vid3_tid.jpg 78 94'}))
+             'bns' : 'someotherfile.jpg 65 48,acct1_vid2 32 45,neontnacct1_vid3_tid.jpg 78 94'}))
 
         self.assertEqual(response.code, 200)
         self.assertEqual(self.thrift_mock.appendBatch.call_count, 1)
@@ -973,6 +973,33 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
                          [{'thumbnailId' : 'acct1_vid3_tid',
                            'height' : 94,
                            'width' : 78}])
+
+    def test_basenames_with_size_params(self):
+        self.bn_map = {
+            '3b6da68d318061a5a1df3e7ba44f54c7' : 
+            'acct1_3b6da68d318061a5a1df3e7ba44f54c7_tid1'
+            }
+        
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'il',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bns' : 'neonvid_3b6da68d318061a5a1df3e7ba44f54c7?width=240&height=135 240 135'}))
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(self.thrift_mock.appendBatch.call_count, 1)
+        request_saw = self.thrift_mock.appendBatch.call_args[0][0][0]
+        msgbuf = StringIO(request_saw.body)
+        body = self.avro_reader.read(avro.io.BinaryDecoder(msgbuf))
+        self.assertEqual(body['eventData']['images'],
+                         [{'thumbnailId' : 
+                           'acct1_3b6da68d318061a5a1df3e7ba44f54c7_tid1',
+                           'height' : 135,
+                           'width' : 240}])
 
     def test_bad_connection_to_isp(self):
         def _mock_isp(request, retries=1, callback=None):
@@ -1417,6 +1444,8 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
             headers = {'Geoip_country_code3': 'CAN', 'Accept-Language': 'en-us', 'Accept-Encoding': 'gzip, deflate', 'Geoip_city': 'Qu\xc3\xa9bec', 'X-Forwarded-Port': '80', 'Dnt': '1', 'Connection': 'close', 'X-Real-Ip': '65.94.184.97', 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_2) AppleWebKit/537.75.14 (KHTML, like Gecko) Version/7.0.3 Safari/537.75.14', 'Geoip_postal_code': 'G6K', 'Geoip_latitude': '46.7038', 'Geoip_longitude': '-71.2837', 'X-Forwarded-For': '65.94.184.97, 65.94.184.97', 'Accept': '*/*', 'Geoip_region': 'QC', 'Host': 'trackserver-test-691751517.us-east-1.elb.amazonaws.com', 'X-Forwarded-Proto': 'http', 'Referer': 'http://www.stack.com/2009/05/01/nutrition-plan-for-football/'})
 
         self.assertEqual(response.code, 200)
+
+
 
     # TODO(mdesnoyer) add tests for when the schema isn't on S3 and
     # for when arguments are missing
