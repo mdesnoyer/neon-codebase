@@ -46,8 +46,11 @@ neon_mastermind_init(){
     Mastermind::InitStatic();
 
     mastermind_current = new Mastermind();
-    mastermind_old = new Mastermind();
+    mastermind_current->Init();
     
+    mastermind_old = new Mastermind();
+    mastermind_old->Init();
+
     return NEON_TRUE;
 }
 
@@ -66,8 +69,6 @@ neon_mastermind_load(const char * filepath){
     mastermind_old = 0;
     deallocate_mastermind(to_delete);
    
-    // TODO(Sunil): More specific counters
-    
     // parse
     try {
         candidate = new Mastermind();

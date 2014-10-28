@@ -13,27 +13,26 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] <> base_path:
         sys.path.insert(0, base_path)
 
-import Image
+from api import brightcove_api
+import datetime
 import json
+from mock import MagicMock, patch 
 import random
-import unittest
-import urllib
+from PIL import Image
+from StringIO import StringIO
+from supportServices import services, neondata
+import test_utils.mock_boto_s3 as boto_mock
 import test_utils.redis
+import time
 import tornado.gen
 import tornado.ioloop
-import utils.imageutils
-import utils.neon
-import time
-import datetime
-from StringIO import StringIO
-from mock import MagicMock, patch 
-from supportServices import services, neondata
-from api import brightcove_api
-import test_utils.mock_boto_s3 as boto_mock
 import tornado.testing
 import tornado.httpclient
+import unittest
+import urllib
 from utils.imageutils import PILImageUtils
 from utils.options import define, options
+import utils.neon
 import logging
 _log = logging.getLogger(__name__)
 
@@ -454,10 +453,6 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         #neon api request
         elif "api/v1/submitvideo" in http_request.url:
             response = _neon_submit_job_response()
-            if callback:    
-                return tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                                     response)
-            return response
 
         elif "jpg" in http_request.url or "jpeg" in http_request.url:
             if "error_image" in http_request.url:
@@ -466,11 +461,17 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
                 #downloading any image (create a random image response)
                 response = create_random_image_response()
 
-            if callback:
-                return tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                                     response)
-            else:
-                return response
+        elif ".png" in http_request.url:
+            # Open an RGBA image
+            im = Image.open(os.path.join(os.path.dirname(__file__),
+                                         os.path.basename(http_request.url)))
+            self.assertEqual(im.mode, "RGBA")
+            imgstream = StringIO()
+            im.save(imgstream, "png")
+            imgstream.seek(0)
+            response = tornado.httpclient.HTTPResponse(http_request, 200,
+                                                       buffer=imgstream)
+            
             
 
         elif ".mp4" in http_request.url:
@@ -478,17 +479,18 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
             response = tornado.httpclient.HTTPResponse(request, 200,
                                                        headers=headers,
                                                        buffer=StringIO('videodata'))
-            if callback:
-                return tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                                     response)
+            
         else:
             headers = {"Content-Type": "text/plain"}
             response = tornado.httpclient.HTTPResponse(request, 200, headers=headers,
                 buffer=StringIO('someplaindata'))
-            if callback:
-                return tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                                     response)
-            return response
+            
+        if callback:
+            return tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                                response)
+        return response
+
+        
 
     def _setup_initial_brightcove_state(self):
         '''
@@ -1057,12 +1059,18 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
 
         self.cp_mock_async_client().fetch.side_effect = \
           self._success_http_side_effect
-
+        
+        vid = "vid1"
         response = self.post_request(uri, vals, api_key)
         self.assertTrue(response.code, 201)
         jresponse = json.loads(response.body)
         job_id = jresponse['job_id']
         self.assertIsNotNone(job_id)
+        
+        # add video to account
+        np = neondata.NeonPlatform.get_account(api_key)
+        np.add_video(vid, job_id)
+        np.save()
 
         # Test duplicate request
         request = tornado.httpclient.HTTPRequest('http://thumbnails.neon-lab.com')
@@ -1072,6 +1080,45 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         response = self.post_request(uri, vals, api_key)
         self.assertTrue(response.code, 409)
         self.assertTrue(json.loads(response.body)["job_id"], job_id)
+
+
+    def test_video_request_in_submit_state(self):
+        '''
+        Create video request and then query it via Neon API
+        '''
+
+        api_key = self.create_neon_account()
+        vals = { 'video_url' : "http://test.mp4", "video_title": "test_title", 
+                 'video_id'  : "vid1", "callback_url" : "http://callback"
+                }
+        uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/create_thumbnail_api_request'%(self.a_id, "0"))
+
+        self.cp_mock_async_client().fetch.side_effect = \
+          self._success_http_side_effect
+        
+        vid = "vid1"
+        response = self.post_request(uri, vals, api_key)
+        self.assertTrue(response.code, 201)
+        jresponse = json.loads(response.body)
+        job_id = jresponse['job_id']
+        self.assertIsNotNone(job_id)
+        
+        # add video to account
+        np = neondata.NeonPlatform.get_account(api_key)
+        np.add_video(vid, job_id)
+        np.save()
+        
+        # Query a video that was just submitted 
+        url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/videos/%s'
+                % (self.a_id, "0", vid))
+        resp = self.get_request(url, api_key)
+        items = json.loads(resp.body)['items']
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['video_id'], vid)
+
+
 
     def test_create_neon_video_request_invalid_url(self):
         ''' invalid url test '''
@@ -1139,7 +1186,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(len(items), page_size)
         result_vids = [x['video_id'] for x in items]
         
-        #recommended
+        # recommended
         page_size = 5
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos/recommended?page_no=%s&page_size=%s'
@@ -1149,15 +1196,27 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(len(items), page_size)
         result_vids = [ x['video_id'] for x in items]
 
-        #processing
+        # processing
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos/processing?page_no=%s&page_size=%s'
                 %(self.a_id, "0", page_no, page_size))
         resp = self.get_request(url, self.api_key)
         items = json.loads(resp.body)['items']
         self.assertEqual(len(items), 1) #1 video in processing
-        
-        #invalid state
+       
+        # failed state
+        api_requests[0].state = neondata.RequestState.FAILED
+        api_requests[0].save()
+        url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/videos/failed?page_no=%s&page_size=%s'
+                %(self.a_id, "0", page_no, page_size))
+        resp = self.get_request(url, self.api_key)
+        items = json.loads(resp.body)['items']
+        self.assertEqual(len(items), 1) #1 video failed 
+        self.assertEqual(items[0]['status'], 'failed')
+        self.assertEqual(items[0]['job_id'], api_requests[0].job_id)
+       
+        # invalid state
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos/invalid?page_no=%s&page_size=%s'
                 %(self.a_id, "0", page_no, page_size))
@@ -1364,6 +1423,22 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         
         s_url = neondata.ThumbnailServingURLs.get(c_thumb.key)
         self.assertIsNotNone(s_url)
+
+        # RGBA image
+        url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
+                    "/%s/videos/%s" %(self.a_id, self.b_id, vid))
+        data = {
+                "created_time": time.time(),
+                "type": "custom_upload",
+                "urls": ["http://rgba.png"]
+                }
+        vals = {'thumbnails' : [data]}
+        response = self.put_request(url, vals, self.api_key, jsonheader=True)
+        self.assertEqual(response.code, 202)
+
+        # Check that the image is converted to RGB
+        
+        
     
         # Image download error
         url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
