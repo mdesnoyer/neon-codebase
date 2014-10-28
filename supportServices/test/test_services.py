@@ -1079,6 +1079,34 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertTrue(response.code, 409)
         self.assertTrue(json.loads(response.body)["job_id"], job_id)
 
+
+    def test_video_request_in_submit_state(self):
+        '''
+        Create video request and then query it via Neon API
+        '''
+
+        api_key = self.create_neon_account()
+        vals = { 'video_url' : "http://test.mp4", "video_title": "test_title", 
+                 'video_id'  : "vid1", "callback_url" : "http://callback"
+                }
+        uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/create_thumbnail_api_request'%(self.a_id, "0"))
+
+        self.cp_mock_async_client().fetch.side_effect = \
+          self._success_http_side_effect
+        
+        vid = "vid1"
+        response = self.post_request(uri, vals, api_key)
+        self.assertTrue(response.code, 201)
+        jresponse = json.loads(response.body)
+        job_id = jresponse['job_id']
+        self.assertIsNotNone(job_id)
+        
+        # add video to account
+        np = neondata.NeonPlatform.get_account(api_key)
+        np.add_video(vid, job_id)
+        np.save()
+        
         # Query a video that was just submitted 
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos/%s'
@@ -1087,6 +1115,8 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         items = json.loads(resp.body)['items']
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]['video_id'], vid)
+
+
 
     def test_create_neon_video_request_invalid_url(self):
         ''' invalid url test '''
