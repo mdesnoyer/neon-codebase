@@ -25,16 +25,16 @@ const char * cloudinary_image_format = "http://res.cloudinary.com/neon-labs/imag
 
 Mastermind::Mastermind()
 {
-    
-    publisherTable.Init(100);
-    directiveTable.Init(100);
+    publisherTable = 0;
+    directiveTable = 0;
     expiry = 0;
 }
 
 
 Mastermind::~Mastermind()
 {
-    //std::cout << "\nMastermind destruct" << endl;
+    publisherTable = 0;
+    directiveTable = 0;
 }
 
 
@@ -163,9 +163,24 @@ Mastermind::InitStatic()
 }
 
 
+void 
+Mastermind::Init() {
+    publisherTable = new PublisherHashtable();
+    directiveTable = new DirectiveHashtable();
+    publisherTable->Init(100);
+    directiveTable->Init(100);
+}
+
+
 void
 Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
 {
+    publisherTable = new PublisherHashtable();
+    directiveTable = new DirectiveHashtable();
+
+    publisherTable->Init(100);
+    directiveTable->Init(100);
+    
     int lineNumber = 1;
 
     if(mastermindFile == 0)
@@ -251,12 +266,12 @@ Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
         
         // a publisher entry
         if(type == typePublisher) {
-            publisherTable.AddPublisher(document);
+            publisherTable->AddPublisher(document);
         }
         
         // a directive entry
         else if(type == typeDirective) {
-            directiveTable.AddDirective(document);
+            directiveTable->AddDirective(document);
         }
         
         // unrecognized type
@@ -283,7 +298,7 @@ Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
                                 "end marker \"end\", which should is invalid");
     
     // check that we got non-zero number of publishers and directives
-    if(publisherTable.GetSize() == 0 && directiveTable.GetSize() == 0)
+    if(publisherTable->GetSize() == 0 && directiveTable->GetSize() == 0)
         throw new NeonException("Mastermind::Init: zero publishers and "
                                 "directives read from mastermind file");
    
@@ -309,7 +324,7 @@ const char *
 Mastermind::GetAccountId(const char * publisherId, int & size){
     
     Publisher * pub = 0;
-    pub = publisherTable.Find(publisherId);
+    pub = publisherTable->Find(publisherId);
     
     if(pub == 0)
         return 0;
@@ -341,7 +356,7 @@ Mastermind::GetImageUrl(const char * account_id,
     string videoId = video_id;
 
     const Directive * directive = 0;
-    directive = directiveTable.Find(accountId, videoId);
+    directive = directiveTable->Find(accountId, videoId);
     
     // Invalid VideoId or VideoId not found
     if(directive == 0){
@@ -401,7 +416,7 @@ Mastermind::GetThumbnailID(const char * c_accountId,
     string videoId = c_videoId;
 
     const Directive * directive = 0;
-    directive = directiveTable.Find(accountId, videoId);
+    directive = directiveTable->Find(accountId, videoId);
     
     if(directive == 0){
         neon_stats[NEON_INVALID_VIDEO_ID] ++;
@@ -428,7 +443,22 @@ Mastermind::GetThumbnailID(const char * c_accountId,
 
 void
 Mastermind::Shutdown(){
-    
-    publisherTable.Shutdown();
-    directiveTable.Shutdown();
+   
+    if(publisherTable != 0) {
+        publisherTable->Shutdown();
+        delete publisherTable;
+        publisherTable = 0;
+    }
+
+    if(directiveTable != 0) {
+        directiveTable->Shutdown();
+        delete directiveTable;
+        directiveTable = 0;
+    }
 }
+
+
+
+
+
+

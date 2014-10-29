@@ -143,7 +143,9 @@ class BatchProcessManager(threading.Thread):
                     statemon.state.increment('cluster_resize_failures')
             else:
                 # We finished in time, so shrink the cluster size
-                self.n_task_instances -= 1
+                if (statemon.state.last_batch_success and 
+                    self.n_task_instances > 0):
+                    self.n_task_instances -= 1
 
             self._ready_to_run.wait()
 

@@ -563,6 +563,10 @@ class StoredObject(object):
           lambda d: thumb.update_phash() for thumb in d.iteritems())
         '''
         def _getandset(pipe):
+            # mget can't handle an empty list 
+            if len(keys) == 0:
+                return {}
+
             items = pipe.mget(keys)
             pipe.multi()
 
@@ -2512,9 +2516,10 @@ class VideoMetadata(StoredObject):
 
         raise tornado.gen.Return(tid)
 
-    def save_thumbnail_to_s3_and_store_metadata(self, image, score, keyname,
-                                        s3fname, ttype, rank=0, model_version=0,
-                                        cdn_metadata=None, callback=None):
+    def save_thumbnail_to_s3_and_store_metadata(
+            self, image, score, keyname,
+            s3fname, ttype, rank=0, model_version=0,
+            cdn_metadata=None, callback=None):
 
         '''
         Save a thumbnail to s3 and its metadata in the DB
@@ -2529,6 +2534,14 @@ class VideoMetadata(StoredObject):
         @return thumbnail metadata object
         '''
         i_vid = self.key #internal video id
+
+        if image.mode == "RGBA":
+            # Composite the image to a white background
+            new_image = Image.new("RGB", image.size, (255,255,255))
+            new_image.paste(image, mask=image)
+            image = new_image
+        elif image.mode != "RGB":
+            image = image.convert("RGB")
 
         fmt = 'jpeg'
         filestream = StringIO()

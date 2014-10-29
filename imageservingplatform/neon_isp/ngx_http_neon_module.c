@@ -7,7 +7,7 @@
  *
 */
 
-#include <ngx_config.h>
+
 #include <ngx_core.h>
 #include <ngx_http.h>
 #include <stdlib.h>
@@ -49,6 +49,10 @@ static ngx_conf_post_handler_pt ngx_http_neon_fetch_s3downloader_p = ngx_http_ne
 ngx_int_t neon_init_process(ngx_cycle_t *cycle);
 void neon_exit_process(ngx_cycle_t *cycle);
 ngx_int_t neon_init_module(ngx_cycle_t *cycle);
+
+
+// helpers
+static void create_stats_formatter(int num_of_counters, char * format_string, int format_string_size);
 
 
 /*
@@ -516,34 +520,11 @@ static ngx_int_t ngx_http_neon_handler_healthcheck(ngx_http_request_t *r)
 
 static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
 {
-    static u_char stats_response[] = 
-    "{\"MASTERMIND_FILE_FETCH_SUCCESS\": %llu "
-    ",\"MASTERMIND_FILE_FETCH_FAIL\" : %llu"
-    ",\"MASTERMIND_PARSE_SUCCESS\" : %llu"
-    ",\"MASTERMIND_PARSE_FAIL\" : %llu"
-    ",\"MASTERMIND_RENAME_SUCCESS\" : %llu"
-    ",\"MASTERMIND_RENAME_FAIL\" : %llu"
-    ",\"NEON_SERVICE_TOKEN_FAIL\" : %llu"
-    ",\"NEON_SERVICE_TOKEN_NOT_FOUND\" : %llu"
-    ",\"NEON_SERVICE_COOKIE_PRESENT\" : %llu"
-    ",\"NEON_SERVICE_COOKIE_SET\" : %llu"
-    ",\"NEON_SERVICE_COOKIE_SET_FAIL\" : %llu"
-    ",\"NEON_SERVICE_PUBLISHER_ID_MISSING_FROM_URL\" : %llu"
-    ",\"NEON_SERVICE_VIDEO_ID_MISSING_FROM_URL\" : %llu"
-    ",\"NEON_CLIENT_API_ACCOUNT_ID_NOT_FOUND\": %llu"
-    ",\"NEON_CLIENT_API_URL_NOT_FOUND\": %llu"
-    ",\"NEON_SERVER_API_ACCOUNT_ID_NOT_FOUND\": %llu"
-    ",\"NEON_SERVER_API_URL_NOT_FOUND\": %llu"
-    ",\"NEON_UPDATER_HTTP_FETCH_FAIL\": %llu"
-    ",\"NEON_UPDATER_MASTERMIND_EXPIRED\": %llu"
-    ",\"NEON_UPDATER_MASTERMIND_LOAD_FAIL\": %llu"
-    ",\"NEON_UPDATER_MASTERMIND_RENAME_FAIL\": %llu"
-    ",\"NEON_SERVER_API_REQUESTS\": %llu"
-    ",\"NEON_CLIENT_API_REQUESTS\": %llu"
-    ",\"NEON_GETTHUMBNAIL_API_REQUESTS\": %llu"
-    "}";
-
     static u_char resp[2048];
+    char formatter[2048];
+    
+    // creates a formatter string capable of holding all counters
+    create_stats_formatter((int)NEON_STATS_NUM_OF_ELEMENTS, formatter, 2048);
 
     //static unsigned char test_response[] = "stats";
     ngx_buf_t    *b;
@@ -557,35 +538,52 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
     out.buf = b;
     out.next = NULL;
   
-    // fill the stats response
+    // this prints out all counters. You can Add any new one at the end but the order is not
+    // important. However, this will likely core if any are forgotten.
     sprintf((char *) resp,
-          (const char *) stats_response,
-          neon_stats[0],
-          neon_stats[1],
-          neon_stats[2],
-          neon_stats[3],
-          neon_stats[4],
-          neon_stats[5],
-          neon_stats[6],
-          neon_stats[7],
-          neon_stats[8],
-          neon_stats[9],
-          neon_stats[10],
-          neon_stats[11],
-          neon_stats[12],
-          neon_stats[13],
-          neon_stats[14],
-          neon_stats[15],
-          neon_stats[16],
-          neon_stats[17],
-          neon_stats[18],
-          neon_stats[19],
-          neon_stats[20],
-          neon_stats[21],
-          neon_stats[22],
-          neon_stats[23]
-          );
-    
+          (const char *) formatter,
+    "MASTERMIND_FILE_FETCH_SUCCESS", neon_stats[MASTERMIND_FILE_FETCH_SUCCESS],
+	"MASTERMIND_FILE_FETCH_FAIL", neon_stats[MASTERMIND_FILE_FETCH_FAIL],
+	"MASTERMIND_PARSE_SUCCESS", neon_stats[MASTERMIND_PARSE_SUCCESS],
+	"MASTERMIND_PARSE_FAIL", neon_stats[MASTERMIND_PARSE_FAIL],
+	"MASTERMIND_RENAME_SUCCESS", neon_stats[MASTERMIND_RENAME_SUCCESS],
+	"MASTERMIND_RENAME_FAIL", neon_stats[MASTERMIND_RENAME_FAIL],
+	"NEON_SERVICE_TOKEN_FAIL", neon_stats[NEON_SERVICE_TOKEN_FAIL],
+	"NEON_SERVICE_TOKEN_NOT_FOUND", neon_stats[NEON_SERVICE_TOKEN_NOT_FOUND],
+	"NEON_SERVICE_COOKIE_PRESENT", neon_stats[NEON_SERVICE_COOKIE_PRESENT],
+	"NEON_SERVICE_COOKIE_SET", neon_stats[NEON_SERVICE_COOKIE_SET],
+	"NEON_SERVICE_COOKIE_SET_FAIL", neon_stats[NEON_SERVICE_COOKIE_SET_FAIL],
+    "NEON_SERVICE_PUBLISHER_ID_MISSING_FROM_URL", neon_stats[NEON_SERVICE_PUBLISHER_ID_MISSING_FROM_URL],
+    "NEON_SERVICE_VIDEO_ID_MISSING_FROM_URL", neon_stats[NEON_SERVICE_VIDEO_ID_MISSING_FROM_URL],
+	"NEON_CLIENT_API_ACCOUNT_ID_NOT_FOUND", neon_stats[NEON_CLIENT_API_ACCOUNT_ID_NOT_FOUND],
+	"NEON_CLIENT_API_URL_NOT_FOUND", neon_stats[NEON_CLIENT_API_URL_NOT_FOUND],
+	"NEON_SERVER_API_ACCOUNT_ID_NOT_FOUND", neon_stats[NEON_SERVER_API_ACCOUNT_ID_NOT_FOUND],
+	"NEON_SERVER_API_URL_NOT_FOUND", neon_stats[NEON_SERVER_API_URL_NOT_FOUND],
+    "NEON_UPDATER_HTTP_FETCH_FAIL", neon_stats[NEON_UPDATER_HTTP_FETCH_FAIL],
+    "NEON_UPDATER_MASTERMIND_EXPIRED", neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED],
+    "NEON_UPDATER_MASTERMIND_LOAD_FAIL", neon_stats[NEON_UPDATER_MASTERMIND_LOAD_FAIL],
+    "NEON_UPDATER_MASTERMIND_RENAME_FAIL", neon_stats[NEON_UPDATER_MASTERMIND_RENAME_FAIL],
+    "NEON_SERVER_API_REQUESTS", neon_stats[NEON_SERVER_API_REQUESTS],
+    "NEON_CLIENT_API_REQUESTS", neon_stats[NEON_CLIENT_API_REQUESTS],
+    "NEON_GETTHUMBNAIL_API_REQUESTS", neon_stats[NEON_GETTHUMBNAIL_API_REQUESTS],
+    "NEON_INVALID_VIDEO_ID", neon_stats[NEON_INVALID_VIDEO_ID],
+    "NEON_DIRECTIVE_HASTABLE_INVALID_SHUTDOWN", neon_stats[NEON_DIRECTIVE_HASTABLE_INVALID_SHUTDOWN],
+    "NEON_DIRECTIVE_HASTABLE_INVALID_INIT", neon_stats[NEON_DIRECTIVE_HASTABLE_INVALID_INIT],
+    "NEON_PUBLISHER_HASTABLE_INVALID_SHUTDOWN", neon_stats[NEON_PUBLISHER_HASTABLE_INVALID_SHUTDOWN],
+    "NEON_PUBLISHER_HASTABLE_INVALID_INIT", neon_stats[NEON_PUBLISHER_HASTABLE_INVALID_INIT],
+    "NEON_PUBLISHER_SHUTDOWN_NULL_POINTER", neon_stats[NEON_PUBLISHER_SHUTDOWN_NULL_POINTER],
+    "NEON_DIRECTIVE_PARSE_ERROR", neon_stats[NEON_DIRECTIVE_PARSE_ERROR],
+    "NEON_DIRECTIVE_INVALID", neon_stats[NEON_DIRECTIVE_INVALID],
+    "NEON_DIRECTIVE_SHUTDOWN_NULL_POINTER", neon_stats[NEON_DIRECTIVE_SHUTDOWN_NULL_POINTER],
+    "NEON_FRACTION_PARSE_ERROR", neon_stats[NEON_FRACTION_PARSE_ERROR],
+    "NEON_FRACTION_INVALID", neon_stats[NEON_FRACTION_INVALID],
+    "NEON_FRACTION_SHUTDOWN_NULL_POINTER", neon_stats[NEON_FRACTION_SHUTDOWN_NULL_POINTER],
+    "NEON_SCALED_IMAGE_PARSE_ERROR", neon_stats[NEON_SCALED_IMAGE_PARSE_ERROR],
+    "NEON_SCALED_IMAGE_INVALID", neon_stats[NEON_SCALED_IMAGE_INVALID],
+    "NEON_SCALED_IMAGE_SHUTDOWN_NULL_POINTER", neon_stats[NEON_SCALED_IMAGE_SHUTDOWN_NULL_POINTER],
+    "NGINX_OUT_OF_MEMORY", neon_stats[NGINX_OUT_OF_MEMORY]
+    );
+
     b->pos = resp;
     b->last = (u_char*)resp + strlen((char*)resp);
     
@@ -600,6 +598,30 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
     return ngx_http_output_filter(r, &out);
 }
 
+
+static void create_stats_formatter(int num_of_counters, char * format_string, int format_string_size) {
+ 
+    char * ptr = format_string;
+    
+    int add_comma = 0;
+    int used  = sprintf((char*)ptr, "%s", "{");
+    ptr += used;
+
+    int e=0;
+    for(e=0; e < num_of_counters; e++) {
+        if(add_comma == 1) {
+            used = sprintf(ptr, "%s", ",\"\%s\": \%llu");
+            ptr += used;
+        }
+        else {
+            used = sprintf(ptr, "%s", "\"\%s\": \%llu");
+            ptr += used;
+            add_comma = 1;
+        }
+    }
+
+    sprintf(ptr, "%s", "}");
+}
 
 
  // Handlers installers : Hooks for each of the Interface handlers

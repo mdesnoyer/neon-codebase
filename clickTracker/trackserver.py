@@ -81,8 +81,12 @@ statemon.define('invalid_messages', int)
 statemon.define('internal_server_error', int)
 statemon.define('unknown_basename', int)
 statemon.define('malformed_basename', int)
+_malformed_basename_ref = statemon.state.get_ref('malformed_basename')
 statemon.define('isp_connection_error', int)
 statemon.define('not_interesting_message', int)
+statemon.define('invalid_video_id', int)
+statemon.define('invalid_thumbnails', int)
+_invalid_thumbnails_ref = statemon.state.get_ref('invalid_thumbnails')
 
 class NotInterestingData(Exception): pass
 
@@ -180,6 +184,40 @@ class BaseTrackerDataV2(object):
                 raise NotInterestingData()
             self.eventData['thumbnailId'] = InputSanitizer.sanitize_null(
                 tids[0])
+        self.eventData['thumbnailId'] = self.validate_thumbnail_ids(
+            [self.eventData['thumbnailId']])[0]
+
+    def validate_thumbnail_ids(self, tids):
+        '''Replaces thumbnail id by None if it is not valid.
+
+        Inputs:
+        tids - List of tids
+
+        Returns:
+        list of valid tids, or None if it was invalid
+        '''
+        # TODO(mdesnoyer): Remove the split by dashes once the
+        # brightcove tracker code is fixed. It should just be
+        # underscores.
+        tidRe = re.compile('^[0-9a-zA-Z]+[\-_][0-9a-zA-Z\-~\.]+[\-_][0-9a-zA-Z]+$')
+        return [None if x is None or not tidRe.match(x) else x for x in
+                tids]
+
+    def validate_video_id(self, vid):
+        '''Returns the video id or None if it is invalid
+
+        Inputs:
+        vid - Video id to validate
+
+        Returns:
+        valid video id, or raises tornado.web.MissingArgumentError
+        '''
+        vidRe = re.compile('^[0-9a-zA-Z~\-\.]+$')
+        if vid is None or vidRe.match(vid):
+            return vid
+        _log.warn_n("Video %s is not interesting" % vid, 100)
+        statemon.state.increment('invalid_video_id')
+        raise NotInterestingData()
 
     @tornado.gen.coroutine
     def _lookup_thumbnail_ids_from_isp(self, basenames):
@@ -191,16 +229,24 @@ class BaseTrackerDataV2(object):
         Returns:
         list of thumbnail ids, or None if it is unknown
         '''
-        vidRe = re.compile('neonvid_([0-9a-zA-Z]+)')
-        tidRe = re.compile('neontn([0-9a-zA-Z]+_[0-9a-zA-Z]+_[0-9a-zA-Z]+)')
+        vidRe = re.compile('neonvid_([0-9a-zA-Z\-~\.]+)')
+        # TODO(mdesnoyer): Remove the split by dashes once the
+        # brightcove tracker code is fixed. It should just be
+        # underscores.
+        tidRe = re.compile('neontn([0-9a-zA-Z]+_[0-9a-zA-Z\-~\.]+_[0-9a-zA-Z]+)')
+        dashTidRe = re.compile('neontn([0-9a-zA-Z]+\-[0-9a-zA-Z~\.]+\-[0-9a-zA-Z]+)')
 
         # Parse the basenames
         vids = []
         tids = []
         for bn in basenames:
             tidSearch = tidRe.search(bn)
+            dashSearch = dashTidRe.search(bn)
             if tidSearch:
                 tids.append(tidSearch.group(1))
+                vids.append(None)
+            elif dashSearch:
+                tids.append(re.sub('\-', '_', dashSearch.group(1)))
                 vids.append(None)
             else:
                 vidSearch = vidRe.search(bn)
@@ -210,13 +256,19 @@ class BaseTrackerDataV2(object):
                 else:
                     _log.warn_n('Malformed basename %s' % bn, 100)
                     vids.append(None)
-                    statemon.state.increment('malformed_basename')
+                    statemon.state.increment(ref=_malformed_basename_ref,
+                                             safe=False)
 
         # Send a request to the image serving platform for all the video ids
         to_req =  [x for x in vids if x is not None]
         if len(to_req) > 0:
             headers = ({"Cookie" : 'neonglobaluserid=%s' % self.neonUserId} 
-                       if self.neonUserId else None)
+                       if self.neonUserId else {})
+            # GetThumbnailId uses xfr if userId is not ready to be tested
+            # to determine the abtest bucket
+            if self.clientIP:
+                headers["X-Forwarded-For"] = self.clientIP 
+
             request = tornado.httpclient.HTTPRequest(
                 'http://%s:%s/v1/getthumbnailid/%s?params=%s' % (
                     self.isp_host,
@@ -238,13 +290,18 @@ class BaseTrackerDataV2(object):
                            'invalid. Request was %s. Response was %s' % 
                            (request.url, response.body))
                 raise tornado.web.HTTPError(500)
-            for i in range(len(to_req)):
-                if tid_response[i] == 'null':
+            responseI = 0
+            for i in range(len(vids)):
+                if vids[i] is None:
+                    # we didn't request this entry
+                    continue
+                elif tid_response[responseI] == 'null':
                     statemon.state.increment('unknown_basename')
                     _log.error_n('No thumbnail id known for video id %s' %
-                                 to_req[i], 10)
+                                 to_req[responseI], 10)
                 else:
-                    tids[i] = tid_response[i]
+                    tids[i] = tid_response[responseI]
+                responseI += 1
 
         raise tornado.gen.Return(tids)
 
@@ -340,8 +397,12 @@ class ImagesVisible(BaseTrackerDataV2):
         except tornado.web.MissingArgumentError:
             tids = yield self._lookup_thumbnail_ids_from_isp(
                 request.get_argument('bns').split(','))
-        self.eventData['thumbnailIds'] = [x for x in tids if x is not None]
+        vtids = self.validate_thumbnail_ids(tids)
+        self.eventData['thumbnailIds'] = [x for x in vtids if x is not None]
         if len(self.eventData['thumbnailIds']) == 0:
+            _log.warn_n("No valid thumbnail ids in %s" % tids, 100)
+            statemon.state.increment(ref=_invalid_thumbnails_ref,
+                                     safe=False)
             raise NotInterestingData()
 
 class ImagesLoaded(BaseTrackerDataV2):
@@ -385,6 +446,7 @@ class ImagesLoaded(BaseTrackerDataV2):
 
             if not has_tids:
                 tids = yield self._lookup_thumbnail_ids_from_isp(vids)
+            tids = self.validate_thumbnail_ids(tids)
 
             for w, h, tid in zip(widths, heights, tids):
                 if tid is not None:
@@ -393,6 +455,10 @@ class ImagesLoaded(BaseTrackerDataV2):
                                    'height' : h})
         self.eventData['images'] = images
         if len(self.eventData['images']) == 0:
+            _log.warn_n("No interesting thumbnail ids in %s" % arg_list,
+                        100)
+            statemon.state.increment(ref=_invalid_thumbnails_ref,
+                                     safe=False)
             raise NotInterestingData()
             
 
@@ -420,13 +486,18 @@ class ImageClicked(BaseTrackerDataV2):
     def fill_thumbnail_ids(self, request):
         '''The thumbnail id is required, so we can't use the default.'''
         try:
-            self.eventData['thumbnailId'] = request.get_argument('tid')
+            tid = request.get_argument('tid')
         except tornado.web.MissingArgumentError:
             tids = yield self._lookup_thumbnail_ids_from_isp(
                 [request.get_argument('bn')])
-            if tids[0] is None:
-                raise NotInterestingData()
-            self.eventData['thumbnailId'] = tids[0]
+            tid = tids[0]
+        self.eventData['thumbnailId'] = self.validate_thumbnail_ids([tid])[0]
+
+        if self.eventData['thumbnailId'] is None:
+            _log.warn_n("Invalid thumbnail id %s" % tid, 100)
+            statemon.state.increment(ref=_invalid_thumbnails_ref,
+                                     safe=False)
+            raise NotInterestingData()
 
 class VideoClick(BaseTrackerDataV2):
     '''An event specifying that the image was clicked within the player'''
@@ -435,7 +506,9 @@ class VideoClick(BaseTrackerDataV2):
         self.eventData['isVideoClick'] = True
         self.eventData['thumbnailId'] = None
         self.eventType = 'VIDEO_CLICK'
-        self.eventData['videoId'] = request.get_argument('vid') # External Video id
+         # External Video id
+        self.eventData['videoId'] = self.validate_video_id(
+            request.get_argument('vid'))
         self.eventData['playerId'] = request.get_argument('playerid', None) # Player id
 
 class VideoPlay(BaseTrackerDataV2):
@@ -447,8 +520,11 @@ class VideoPlay(BaseTrackerDataV2):
         self.eventType = 'VIDEO_PLAY'
         # Thumbnail id
         self.eventData['thumbnailId'] = None
-        self.eventData['videoId'] = request.get_argument('vid') # External Video id
-        self.eventData['playerId'] = request.get_argument('playerid', None) # Player id
+         # External Video id
+        self.eventData['videoId'] = self.validate_video_id(
+            request.get_argument('vid'))
+         # Player id
+        self.eventData['playerId'] = request.get_argument('playerid', None)
          # If an adplay preceeded video play 
         self.eventData['didAdPlay'] = InputSanitizer.to_bool(
             request.get_argument('adplay', False))
@@ -472,7 +548,8 @@ class AdPlay(BaseTrackerDataV2):
         self.eventData['thumbnailId'] = None
         #VID can be null, if VideoClick event doesn't fire before adPlay
         # Video id
-        self.eventData['videoId'] = InputSanitizer.sanitize_null(request.get_argument('vid')) 
+        self.eventData['videoId'] = self.validate_video_id(
+            InputSanitizer.sanitize_null(request.get_argument('vid'))) 
         self.eventData['playerId'] = request.get_argument('playerid', None) # Player id
         # (time when player initiates request to play video - Last time an image or the player was clicked) 
         self.eventData['autoplayDelta'] = InputSanitizer.sanitize_int(
@@ -489,7 +566,8 @@ class VideoViewPercentage(BaseTrackerDataV2):
         self.eventType = 'VIDEO_VIEW_PERCENTAGE'
 
         # External video id
-        self.eventData['videoId'] = request.get_argument('vid')
+        self.eventData['videoId'] = self.validate_video_id(
+            request.get_argument('vid'))
 
         #the current count of the video playing on the page
         self.eventData['playCount'] = InputSanitizer.sanitize_int(request.get_argument('pcount'))
@@ -615,6 +693,10 @@ class LogLines(TrackerDataHandler):
         # lot and the inspection can take a while. So do the
         # inspection now.
         self.message_counter = statemon.state.get_ref('messages_handled')
+        self.not_interesting_counter = \
+          statemon.state.get_ref('not_interesting_message')
+        self.invalid_msg_counter = \
+          statemon.state.get_ref('invalid_messages')
     
     @tornado.web.asynchronous
     @tornado.gen.coroutine
@@ -627,7 +709,8 @@ class LogLines(TrackerDataHandler):
                 tracker_data = yield self.parse_tracker_data(self.version)
             except tornado.web.MissingArgumentError as e:
                 _log.error('Invalid request: %s' % self.request.uri)
-                statemon.state.increment('invalid_messages')
+                statemon.state.increment(ref=self.invalid_msg_counter,
+                                         safe=False)
                 if e.reason is None:
                     e.reason = e.log_message
                 else:
@@ -642,12 +725,13 @@ class LogLines(TrackerDataHandler):
                 # The data wasn't interesting to us even though it was
                 # valid, so just record that and don't send the data
                 # on.
-                statemon.state.increment('not_interesting_message')
+                statemon.state.increment(ref=self.not_interesting_counter,
+                                         safe=False)
                 self.set_status(200)
                 self.finish()
                 return
             except Exception, err:
-                _log.exception("key=get_track request=%s msg=%s",
+                _log.exception("Unexpected error parsing %s: %s",
                                self.request.uri, err)
                 statemon.state.increment('internal_server_error')
                 self.set_status(500)
@@ -661,7 +745,8 @@ class LogLines(TrackerDataHandler):
                 self.set_status(200)
                 
             except Exception, err:
-                _log.exception("key=loglines msg=Q error %s", err)
+                _log.exception("Unexpected error sending data to flume: %s",
+                               err)
                 self.set_status(500)
             self.finish()
 

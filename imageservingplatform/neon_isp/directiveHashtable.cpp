@@ -1,5 +1,6 @@
 #include <iostream>
 #include "directiveHashtable.h"
+#include "neon_stats.h"
 #include "neonHash.h"
 
 
@@ -9,33 +10,60 @@
 
 DirectiveHashtable::DirectiveHashtable(){
     table = 0;
+    initialized = false;
 }
 
 
 DirectiveHashtable::~DirectiveHashtable(){
     table = 0;
+    initialized = false;
 }
 
 
 void
 DirectiveHashtable::Init(unsigned numOfBuckets){
+
+    if(initialized == true) {
+        neon_stats[NEON_DIRECTIVE_HASTABLE_INVALID_INIT]++;
+        return;
+    }
+    
     table = new DirectiveTable(numOfBuckets);
+    initialized = true;
 }
 
 
 void
 DirectiveHashtable::Shutdown(){
+ 
+    if(initialized == false) {
+        neon_stats[NEON_DIRECTIVE_HASTABLE_INVALID_SHUTDOWN]++;
+        return;
+    }
+
     if(table == 0)
         return;
     
     for(DirectiveTable::iterator it = table->begin(); it != table->end(); it ++)
     {
-        ((*it).second)->Shutdown();
-        delete (*it).second;
+
+        Directive * d = (Directive *) ((*it).second);
+        (*it).second = NULL;
+
+        if(d == NULL) {
+            neon_stats[NEON_DIRECTIVE_SHUTDOWN_NULL_POINTER]++;
+            continue;
+        }
+
+        d->Shutdown();
+        delete d;
     }
+
+    table->clear();
 
     delete table;
 	table = 0;
+    initialized = false;
 }
 
 

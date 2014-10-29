@@ -259,7 +259,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
             if method == "status":
                 #self.get_account_status(itype,i_id)
-                self.send_json_response('{"error":"not yet impl"}',200)
+                self.send_json_response('{"error":"not yet impl"}', 200)
 
             elif method == "tracker_account_id":
                 self.get_tracker_account_id()
@@ -278,7 +278,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 if len(uri_parts) == 9:
                     video_state = uri_parts[-1].split('?')[0]
                     if video_state not in ["processing", "recommended",
-                            "published"]:
+                            "published", "failed"]:
                             
                             # Check if there was a "/" 
                             if len(video_state) < 2: 
@@ -553,7 +553,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         result = yield tornado.gen.Task(http_client.fetch, req)
         
         if result.code == 409:
-            data = '{"error":"url already processed","video_id":"%s"}'%video_id
+            job_id = json.loads(result.body)["job_id"]
+            data = '{"error":"request already processed","video_id":"%s","job_id":"%s"}'\
+                    % (video_id, job_id)
             self.send_json_response(data, 409)
             return
         if result.error:
@@ -722,6 +724,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         c_published = 0
         c_processing = 0
         c_recommended = 0
+        c_failed = 0
 
         #videos by state
         p_videos = []
@@ -753,20 +756,42 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             self.send_json_response("%s account not found"%i_type, 400)
             return
 
+        
         # single video state, if video not found return an error
         # GET /api/v1/accounts/{account_id}/{integration_type}/{integration_id}/videos/{video_id}
         if vids is not None and len(vids) == 1:
-            i_vid = neondata.InternalVideoID.generate(self.api_key, vids[0])
-            v = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)   
-            if v is None:
-                self.send_json_response("Invalid request state or video not\
-                        found", 400)
+            vid = vids[0]
+            all_vids = platform_account.get_videos()
+            i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
+            if vid not in all_vids:
+                self.send_json_response("Video not found", 400)
                 return
+            else:
+                v = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)   
+                if not v:
+                    # Video is in submit or processing state, so send dummy VResponse
+                    job_id = platform_account.videos[vid]
+                    vr = neondata.VideoResponse(vid,
+                                        job_id,
+                                        neondata.RequestState.PROCESSING,
+                                        i_type,
+                                        "0",
+                                        "title",
+                                        None, #duration
+                                        time.time() * 1000,
+                                        0, 
+                                        None)
+                    vstatus_response = GetVideoStatusResponse(
+                                        [vr.to_dict()], 0, page_no, page_size,
+                                        c_processing, c_recommended, c_published)
+                    data = vstatus_response.to_json() 
+                    self.send_json_response(data, 200)
+                    return
 
         #return all videos in the account
         if vids is None:
             vids = platform_account.get_videos()
-
+        
         # No videos in the account
         if not vids:
             vstatus_response = GetVideoStatusResponse(
@@ -870,22 +895,15 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             elif video_state == "processing":
                 vids = p_videos
                 completed_videos = []
+            elif video_state == "failed":
+                vids = f_videos
+                completed_videos = []
             else:
                 _log.error("key=get_video_status_%s" 
                         " msg=invalid state requested" %i_type)
                 self.send_json_response('{"error":"invalid state request"}', 400)
                 return
 
-        #2c Pagination, case: There are more vids than page_size
-        if len(vids) > page_size:
-            #This means paging is valid
-            #check if for the page_no request there are 
-            #sort video ids
-            s_index = page_no * page_size
-            e_index = (page_no +1) * page_size
-            vids = sorted(vids, reverse=True)
-            vids = vids[s_index:e_index]
-        
         #3. Populate Completed videos
         keys = [neondata.InternalVideoID.generate(
             self.api_key, vid) for vid in completed_videos] #get internal vids
@@ -953,15 +971,21 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             
         c_processing = len(p_videos)
         c_recommended = len(r_videos)
-        # Fix this number
         c_published = len(a_videos)
+        c_failed = len(f_videos)
 
         if i_type == "brightcove":
             #Sort brightcove videos by video_id, since publish_date 
-            #is not currently
+            #is not currently set on ingest of videos
             s_vresult = sorted(vresult, key=lambda k: int(k['video_id']), reverse=True)
         else:
             s_vresult = sorted(vresult, key=lambda k: k['publish_date'], reverse=True)
+           
+        #2c Pagination, case: There are more vids than page_size
+        if len(s_vresult) > page_size:
+            s_index = page_no * page_size
+            e_index = (page_no +1) * page_size
+            s_vresult = s_vresult[s_index:e_index]
 
         vstatus_response = GetVideoStatusResponse(
                         s_vresult, total_count, page_no, page_size,

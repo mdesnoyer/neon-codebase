@@ -1,3 +1,4 @@
+#include "neon_stats.h"
 #include "neonHash.h"
 #include "publisherHashtable.h"
 
@@ -10,36 +11,56 @@
 PublisherHashtable::PublisherHashtable()
 {
     table = 0;
+    initialized = false;
 }
 
 
 PublisherHashtable::~PublisherHashtable()
 {
     table = 0;
+    initialized = false;
 }
 
 
 void
 PublisherHashtable::Init(unsigned numOfBuckets)
 {
+    if(initialized == true) {
+        neon_stats[NEON_PUBLISHER_HASTABLE_INVALID_INIT]++;
+        return;
+    }
+
     table = new PublisherTable(numOfBuckets);
+    
+    initialized = true;
 }
 
 
 void
 PublisherHashtable::Shutdown()
 {
-    if(table == 0)
+    if(initialized == false) {
+        neon_stats[NEON_PUBLISHER_HASTABLE_INVALID_SHUTDOWN]++;
         return;
+    }
     
     for(PublisherTable::iterator it = table->begin(); it != table->end(); it ++)
     {
-        ((*it).second)->Shutdown();
-        delete (*it).second;
+        Publisher * p = (*it).second;
+        (*it).second = 0;
+
+        if(p == NULL) {
+            neon_stats[NEON_PUBLISHER_SHUTDOWN_NULL_POINTER]++;
+            continue;
+        }
+
+        p->Shutdown();
+        delete p;
     }
     
     delete table;
 	table = 0;
+    initialized = false;
 }
 
 

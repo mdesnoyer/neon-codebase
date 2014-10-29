@@ -29,7 +29,7 @@ public:
     const std::string & GetUrlString() const;
     
 protected:
-    
+
     int height;
     int width;
     std::string url;
