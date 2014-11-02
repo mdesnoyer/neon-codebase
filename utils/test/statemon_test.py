@@ -33,6 +33,11 @@ class TestStatemonObj(unittest.TestCase):
         self.state.a_float = 10.5
         self.assertAlmostEqual(self.state.a_float, 10.5)
 
+        self.state.define('a_default_int', int, default=8)
+        self.assertEqual(self.state.a_default_int, 8)
+        self.state.a_default_int = 5
+        self.assertEqual(self.state.a_default_int, 5)
+
     def test_proper_increment(self):
         self.state.define('an_int', int)
         self.assertEqual(self.state.an_int, 0)
