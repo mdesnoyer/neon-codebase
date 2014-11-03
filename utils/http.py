@@ -127,6 +127,10 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
             response = tornado.httpclient.HTTPResponse(request,
                                                         502,
                                                         error=error)
+            
+        finally:
+            http_client.close()
+            
         return handle_response(response, cur_try)
     else:
         http_client = tornado.httpclient.AsyncHTTPClient()
