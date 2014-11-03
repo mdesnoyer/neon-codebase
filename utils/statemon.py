@@ -107,12 +107,14 @@ class State(object):
 
         return '%s.%s' % (prefix, local)
 
-    def define(self, name, typ, stack_depth=2):
+    def define(self, name, typ, default=None, stack_depth=2):
         '''Define a new monitoring variable
 
         Inputs:
         name - Name of the variable
         typ - Type of object to expect
+        default - Default value for the parameter. If not set, takes the 
+                  type's default value
         stack_depth - Stack depth to your module
         '''
 
@@ -131,6 +133,8 @@ class State(object):
             raise Error('Invalid type: %s' % typ)
 
         self._vars[global_name] = multiprocessing.Value(typech)
+        if default is not None:
+            self._vars[global_name].value = default
 
     def increment(self, name=None, diff=1, ref=None, safe=True,
                   stack_depth=1):
@@ -180,7 +184,7 @@ class State(object):
 state = State()
 '''Global state variable object'''
 
-def define(name, typ):
-    return state.define(name, typ, stack_depth=3)
+def define(name, typ, default=None):
+    return state.define(name, typ, default=default, stack_depth=3)
             
         
