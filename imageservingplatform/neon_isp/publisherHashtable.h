@@ -67,6 +67,8 @@ public:
     typedef __gnu_cxx::hash_map<std::string, Publisher *, hash_publisher>  PublisherTable;
 
 
+    bool initialized;
+
     PublisherTable * table;
 };
 
