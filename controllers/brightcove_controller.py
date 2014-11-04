@@ -467,8 +467,9 @@ class BrightcoveABController(object):
 
             self.monitored_videos.add(video_id)
             self.taskmgr.add_video_info(video_id, distribution)
-            self.thumbnail_change_scheduler(video_id, distribution,
-                                            max_update_delay)
+            # disabled for dbug safety:
+            #self.thumbnail_change_scheduler(video_id, distribution,
+            #                                max_update_delay)
 
 
     def start(self):
