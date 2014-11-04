@@ -21,7 +21,7 @@ def resize_and_crop(image, h, w):
     image into the desired size.
 
     Inputs:
-    image - Image to resize.
+    image - Image to resize. Image in OpenCV format
     h - desired height
     w - desired width
 
