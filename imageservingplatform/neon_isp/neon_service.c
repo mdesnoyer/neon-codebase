@@ -799,7 +799,15 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
 
     // get publisher id
     unsigned char * publisher_id = neon_service_get_uri_token(request, &base_url, 0);
+   
     
+    if(publisher_id == NULL) {
+        neon_stats[NEON_GETTHUMBNAIL_API_PUBLISHER_NOT_FOUND] ++;
+        neon_service_no_content(request);
+        return NEON_GETTHUMB_API_FAIL;
+    }
+
+
     // Account ID
     const char * account_id = 0;
     int account_id_size = 0;
@@ -810,8 +818,7 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
                                           &account_id_size);
     
     if(error_account_id != NEON_MASTERMIND_ACCOUNT_ID_LOOKUP_OK){
-        neon_stats[NEON_CLIENT_API_ACCOUNT_ID_NOT_FOUND] ++;
-        // Same response as client api not found
+        neon_stats[NEON_GETTHUMBNAIL_API_ACCOUNT_ID_NOT_FOUND] ++;
         neon_service_no_content(request);
         return NEON_GETTHUMB_API_FAIL;
     }
@@ -833,12 +840,14 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
         return NEON_GETTHUMB_API_FAIL;
     }
 
-    // 
+    // make a copy of params o we can parse and extract them with str_tok
+    // this could be better with ngx functions
     unsigned char * vids = ngx_pcalloc(request->pool, video_ids.len + 1);
     vids[video_ids.len] = 0;
     strncpy((char*) vids, (char *)video_ids.data, video_ids.len);
     char *vtoken = strtok_r((char*)vids, s, &context);
     
+    // for each video id  passd to us as params
     while(vtoken != NULL) {
 
         size_t sz = strlen(vtoken) +1;
