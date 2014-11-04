@@ -881,12 +881,12 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
                 clen += noimage.len;
             }
         
-            // add this chain ans lets setup the next
+            // add this chain and lets setup the next
             (*chain)->buf = buf;
             (*chain)->next = NULL;
             chain = &(*chain)->next;
        
-            // let's see if there is another toke to process
+            // let's see if there is another token to process
             vtoken = strtok_r(NULL, s, &context);
         
             // if there's another token, then we need a separator
@@ -910,7 +910,7 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
 
     request->headers_out.status = NGX_HTTP_OK;
     request->headers_out.content_type.len = sizeof("text/plain") - 1;
-    request->headers_out.content_type.data = (u_char *) "test/plain";
+    request->headers_out.content_type.data = (u_char *) "text/plain";
     request->headers_out.content_length_n = clen;
     buf->last_buf = 1; //Mark the last buffer   
         
