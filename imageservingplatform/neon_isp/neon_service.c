@@ -601,28 +601,12 @@ neon_service_server_api(ngx_http_request_t *request,
 /////////// CLIENT API METHODS ////////////
 
 static void
-neon_service_no_content(ngx_http_request_t *request,
-                                  ngx_chain_t  * chain){
-
-    ngx_buf_t * b;
-    b = (ngx_buf_t *) ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
-    if(b == NULL){
-        request->headers_out.status = NGX_HTTP_INTERNAL_SERVER_ERROR; //500
-        neon_stats[NGINX_OUT_OF_MEMORY] ++;
-        return;
-    } 
-    
-    chain->buf = b;
-    chain->next = NULL;
-    
+neon_service_no_content(ngx_http_request_t *request)
+{
     request->headers_out.status = NGX_HTTP_NO_CONTENT;  // 204
     request->headers_out.content_type.len = sizeof("text/plain") - 1;
     request->headers_out.content_type.data = (u_char *) "text/plain";
     request->headers_out.content_length_n = 0; 
-    b->pos = 0;
-    b->last = 0;
-    b->memory = 1;
-    b->last_buf = 1;
 }
 
 
@@ -719,7 +703,7 @@ neon_service_client_api(ngx_http_request_t *request,
        
     if (ret !=0){
         neon_stats[NEON_CLIENT_API_ACCOUNT_ID_NOT_FOUND] ++;
-        neon_service_no_content(request, chain);
+        neon_service_no_content(request);
         return NEON_CLIENT_API_FAIL;
     }
     
@@ -760,7 +744,7 @@ neon_service_client_api(ngx_http_request_t *request,
 
     if(error_url != NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK) {
         neon_stats[NEON_CLIENT_API_URL_NOT_FOUND] ++;
-        neon_service_no_content(request, chain);
+        neon_service_no_content(request);
         return NEON_CLIENT_API_FAIL;
     }
 
@@ -786,7 +770,7 @@ neon_service_client_api(ngx_http_request_t *request,
 
 NEON_GETTHUMB_API_ERROR 
 neon_service_getthumbnailid(ngx_http_request_t *request,
-                            ngx_chain_t  * chain){
+                            ngx_chain_t  **  chain){
 
     int clen = 0; 
 
@@ -828,36 +812,15 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
     if(error_account_id != NEON_MASTERMIND_ACCOUNT_ID_LOOKUP_OK){
         neon_stats[NEON_CLIENT_API_ACCOUNT_ID_NOT_FOUND] ++;
         // Same response as client api not found
-        neon_service_no_content(request, chain);
+        neon_service_no_content(request);
         return NEON_GETTHUMB_API_FAIL;
     }
 
-    /*
-    static ngx_str_t j_open = ngx_string("{");
-    static ngx_str_t j_close = ngx_string("}");
-    static ngx_str_t quote = ngx_string("\"");
-    static ngx_str_t comma = ngx_string(",,");
-    static ngx_buf_t comma_buf;
-    comma_buf.pos = comma.data;
-    comma_buf.last = comma.data + comma.len;
-    */
-
-    static ngx_str_t colon = ngx_string(":");
     static ngx_str_t noimage = ngx_string("null");
-    // use sprintf
 
-    ngx_buf_t * video_buf; 
-    ngx_chain_t * vchain;
-    ngx_chain_t * prev = chain; 
+    // used repetitively
+    ngx_buf_t * buf; 
    
-    // dummy to start the chain, figure out a way to elminate this 
-    ngx_buf_t * colon_buf = ngx_calloc_buf(request->pool);
-    colon_buf->pos = colon.data;
-    colon_buf->last = colon.data + colon.len;
-
-    chain->buf = colon_buf; 
-    chain->next = NULL;
-
     const char * tid = 0;
     int tid_size = 0;
 
@@ -866,13 +829,18 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
     
     // If video_ids haven't been parsed 
     if (video_ids.len <= 0){
-        neon_service_no_content(request, chain);
+        neon_service_no_content(request);
         return NEON_GETTHUMB_API_FAIL;
     }
 
-    char *vids = strndup((char *)video_ids.data, video_ids.len);
-    char *vtoken = strtok_r(vids, s, &context);
-    while(vtoken != NULL){
+    // 
+    unsigned char * vids = ngx_pcalloc(request->pool, video_ids.len + 1);
+    vids[video_ids.len] = 0;
+    strncpy((char*) vids, (char *)video_ids.data, video_ids.len);
+    char *vtoken = strtok_r((char*)vids, s, &context);
+    
+    while(vtoken != NULL) {
+
         size_t sz = strlen(vtoken) +1;
         unsigned char * video_id = ngx_pcalloc(request->pool, sz);
         memset(video_id, 0, sz);
@@ -895,49 +863,56 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
                     &tid,
                     &tid_size);
 
-        video_buf = ngx_calloc_buf(request->pool);
-        video_buf->memory = 1;   
-        vchain = ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
-
+        // if the tid is found then add it
         if(err == NEON_MASTERMIND_TID_LOOKUP_OK) {
-            video_buf->pos = (unsigned char *)tid;
-            video_buf->last = (unsigned char *)tid + tid_size;
-            clen += tid_size;
-        }else{
-            video_buf->pos = noimage.data;
-            video_buf->last = noimage.data + noimage.len;
-            clen += noimage.len;
-        }
+
+            // allocate a buffer and its chain
+            buf = ngx_calloc_buf(request->pool);
+            buf->memory = 1;   
+            *chain = ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
+
+            if(err == NEON_MASTERMIND_TID_LOOKUP_OK) {
+                buf->start = buf->pos  = (unsigned char *)tid;
+                buf->end = buf->last = (unsigned char *)tid + tid_size;
+                clen += tid_size;
+            }else{
+                buf->start = buf->pos = noimage.data;
+                buf->end = buf->last = noimage.data + noimage.len;
+                clen += noimage.len;
+            }
         
-        //Add VideoId to the buffer chain
-        prev->next = vchain;
-        vchain->buf = video_buf;
-        vchain->next = NULL;
-        prev = vchain;
+            // add this chain ans lets setup the next
+            (*chain)->buf = buf;
+            (*chain)->next = NULL;
+            chain = &(*chain)->next;
+       
+            // let's see if there is another toke to process
+            vtoken = strtok_r(NULL, s, &context);
         
-        vtoken = strtok_r(NULL, s, &context);
-        // check if this is the final token
-        if (vtoken){
+            // if there's another token, then we need a separator
+            if (vtoken){
                 // Add seperator buffer
-                ngx_chain_t * s_chain = ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
+                *chain = ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
                 ngx_buf_t * s_buf = ngx_calloc_buf(request->pool);
                 char * sep = ",";
-                s_buf->pos = (unsigned char*) sep;
+                s_buf->start = s_buf->pos = (unsigned char*) sep;
+                s_buf->end = s_buf->last = (unsigned char*) sep + 1; 
                 s_buf->memory = 1;   
-                s_buf->last = (unsigned char*) sep + 1; 
                 clen += 1;
-                
-                prev->next = s_chain;
-                s_chain->buf = s_buf;
-                s_chain->next = NULL; 
-                prev = s_chain;
+              
+                // add this chain ans lets setup the next
+                (*chain)->buf = s_buf;
+                (*chain)->next = NULL; 
+                chain = &(*chain)->next;
+            }
         }
     }
+
     request->headers_out.status = NGX_HTTP_OK;
-    request->headers_out.content_type.len = sizeof("application/json") - 1;
-    request->headers_out.content_type.data = (u_char *) "application/json";
+    request->headers_out.content_type.len = sizeof("text/plain") - 1;
+    request->headers_out.content_type.data = (u_char *) "test/plain";
     request->headers_out.content_length_n = clen;
-    video_buf->last_buf = 1; //Mark the last buffer   
+    buf->last_buf = 1; //Mark the last buffer   
         
     return NEON_GETTHUMB_API_OK;
 }

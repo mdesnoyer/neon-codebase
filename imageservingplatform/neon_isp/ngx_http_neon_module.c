@@ -446,13 +446,18 @@ static ngx_int_t ngx_http_neon_handler_getthumbnailid(ngx_http_request_t *reques
 {
     neon_stats[NEON_GETTHUMBNAIL_API_REQUESTS] ++;
 
-    ngx_chain_t   chain;
+    // this will be allocated if a response body is created
+    ngx_chain_t *  chain = 0; 
     
     neon_service_getthumbnailid(request, &chain);
     
     ngx_http_send_header(request);
-    
-    return ngx_http_output_filter(request, &chain);
+   
+    // if a response body 
+    if(chain)
+        return ngx_http_output_filter(request, chain);
+    else
+        return ngx_http_output_filter(request, 0);
 }
 
 
