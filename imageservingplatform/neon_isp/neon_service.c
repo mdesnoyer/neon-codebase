@@ -909,7 +909,7 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
     }
 
     request->headers_out.status = NGX_HTTP_OK;
-    request->headers_out.content_type.len = sizeof("text/plain") - 1;
+    request->headers_out.content_type.len = strlen(("text/plain");
     request->headers_out.content_type.data = (u_char *) "text/plain";
     request->headers_out.content_length_n = clen;
     buf->last_buf = 1; //Mark the last buffer   
