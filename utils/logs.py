@@ -145,7 +145,10 @@ def CreateLogger(name=None,
 
     # For a file output
     if logfile is not None:
-        handler = logging.FileHandler(logfile)
+        # Rotating file handler
+        max_size = 10 *1024 *1024 #10 MB
+        handler = logging.handlers.RotatingFileHandler(logfile,
+                    maxBytes=max_size, backupCount=3)
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 
@@ -158,9 +161,9 @@ def CreateLogger(name=None,
 
     # For a loggly output
     if loggly_tag is not None:
-         handler = LogglyHandler(loggly_tag)
-         handler.setFormatter(formatter)
-         logger.addHandler(handler)
+        handler = LogglyHandler(loggly_tag)
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
 
     # For a flume output
     if flume_url is not None:
