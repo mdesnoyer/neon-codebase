@@ -24,8 +24,8 @@ from multiprocessing.pool import ThreadPool
 import random
 import re
 from supportServices.neondata import VideoMetadata, ThumbnailMetadata, \
-     InMemoryCache, InternalVideoID, ThumbnailID, BrightcovePlatform
-from supportServices.url2thumbnail import URL2ThumbnailIndex
+      AbstractPlatform, InternalVideoID, ThumbnailID, BrightcovePlatform, \
+      NeonApiRequest
 import time
 import threading
 import tornado
@@ -351,7 +351,6 @@ class BrightcoveABController(object):
         self.cushion_time = cushion_time
 
         self.taskmgr = TaskManager()
-        self.url2thumb = URL2ThumbnailIndex()
         self.monitored_videos = set()
         
         # Check for new directives every minute
@@ -464,12 +463,15 @@ class BrightcoveABController(object):
         # Check if the account is enabled for ABTesting and controller type
         # is BC controller
         if self._check_testing_with_bcontroller(internal_account_id):
-
-            self.monitored_videos.add(video_id)
-            self.taskmgr.add_video_info(video_id, distribution)
-            # disabled for dbug safety:
-            #self.thumbnail_change_scheduler(video_id, distribution,
-            #                                max_update_delay)
+            # Check that video state is "active" or "serving_active" 
+            # if yes, then we should A/B Test 
+            
+            request = VideoMetadata.get_video_request(video_id)
+            if request.state in ["active", "serving_active"]:
+                self.monitored_videos.add(video_id)
+                self.taskmgr.add_video_info(video_id, distribution)
+                self.thumbnail_change_scheduler(video_id, distribution,
+                                                max_update_delay)
 
 
     def start(self):
