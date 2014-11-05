@@ -63,7 +63,6 @@ statemon.define('nvideos_abtesting', int)
 # The number of videos being monitored by this controller
 statemon.define('nvideos', int)
 
-random.seed(25110)
 
 ###################################################################################
 ## Priority Q Impl
@@ -340,6 +339,8 @@ class TaskManager(object):
 class BrightcoveABController(object):
     ''' Brightcove AB controller '''
 
+    random.seed(25110)
+    
     # a thumbnail shall not be scheduled to last less than 10 minutes
     # in the overall video rotation period 
     MIN_THUMBNAIL_DURATION = 10 * 60 
@@ -376,7 +377,7 @@ class BrightcoveABController(object):
         Load account level settings for each platform account
         (abtesting enabled, testing type etc..)
         '''
-        for platform in neondata.AbstractPlatform.get_all_instances():
+        for platform in AbstractPlatform.get_all_instances():
             self.account_settings[platform.neon_api_key] = platform 
 
     def load_directives(self, max_update_delay=0):
@@ -411,6 +412,9 @@ class BrightcoveABController(object):
         
         lines = key.get_contents_as_string().split('\n')
         for line in lines[1:]:
+            if line == "end":
+                continue
+
             record = json.loads(line)
             if record['type'] == 'dir':
                 # Create the directive from the record
@@ -455,11 +459,15 @@ class BrightcoveABController(object):
         '''
 
         video_id, distribution = directive
-        _log.info('New directive for video %s: %s' % (video_id,
-                                                      distribution))
+        #_log.info('New directive for video %s: %s' % (video_id,
+        #                                              distribution))
 
         internal_account_id = video_id.split('_')[0]
         
+        # NOTE: (In the spirit of limited release, only test for PPG now)
+        if internal_account_id not in ["6d3d519b15600c372a1f6735711d956e"]:
+            continue
+    
         # Check if the account is enabled for ABTesting and controller type
         # is BC controller
         if self._check_testing_with_bcontroller(internal_account_id):
@@ -472,7 +480,6 @@ class BrightcoveABController(object):
                 self.taskmgr.add_video_info(video_id, distribution)
                 self.thumbnail_change_scheduler(video_id, distribution,
                                                 max_update_delay)
-
 
     def start(self):
         '''Starts running the brightcove controller on the current thread.
@@ -501,10 +508,12 @@ class BrightcoveABController(object):
         # create a task for each thumbnail
         for t in time_dist:
             # thumbnail tuple is in format (thumb id, time slice)  
-            taskA = ThumbnailChangeTask(account_id, video_id, t[0])
-            # schedule it in the future, now + time slicei
+            task = ThumbnailChangeTask(account_id, video_id, t[0])
+            # schedule it in the future, now + time slice
             tslice = cur_time + t[1]
-            self.taskmgr.add_task(taskA, int(tslice))
+            self.taskmgr.add_task(task, int(tslice))
+            _log.info("Added ThumbnailChangeTask for vid %s tid %s"
+                        % (video_id, t[0]))
         
         # TODO (Sunil) : Add a CheckThumbnail task, skipping this for now
         
