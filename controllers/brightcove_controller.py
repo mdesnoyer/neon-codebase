@@ -296,6 +296,25 @@ class TaskManager(object):
             self.taskQ.remove_task(task)
 
         vtinfo.tasks = []
+    
+    def check_video_exists(self, vid):
+        try:
+            self.video_map[vid]
+            return True
+        except KeyError:
+            pass
+        return False
+    
+    def check_distribution_change(self, vid, distribution):
+        try:
+            dist = self.get_thumbnail_distribution(vid)
+            tids1 = [d[0] for d in dist]
+            tids2 = [d[0] for d in distribution]
+            return set(tids1) != set(tids2)
+        except KeyError:
+            pass
+
+        return True
 
     def add_video_info(self, vid, tdist):
         ''' Add video info '''
@@ -422,14 +441,6 @@ class BrightcoveABController(object):
                     record['vid'],
                     [(x['tid'], x['pct']) for x in record['fractions']])
 
-                # See if it is a new directive
-                try:
-                    old_directive = self.directives[record['vid']]
-                    if old_directive == directive:
-                        continue
-                except KeyError:
-                    pass
-
                 # There is a new directive so apply it
                 self.apply_directive(directive, max_update_delay)
                 statemon.state.decrement('nvideos_abtesting')
@@ -452,6 +463,9 @@ class BrightcoveABController(object):
 
     def apply_directive(self, directive, max_update_delay=0):
         '''Apply a directive to a controller.
+        
+        Allow current directive cycle to continue even if %s change on it.
+        Apply new directive only if the thumbnail ids being tested with change
 
         Inputs:
         directive - The directive as (video_id, [(thumb_id, fraction)])
@@ -471,16 +485,28 @@ class BrightcoveABController(object):
         # Check if the account is enabled for ABTesting and controller type
         # is BC controller
         if self._check_testing_with_bcontroller(internal_account_id):
+            
             # Check that video state is "active" or "serving_active" 
             # if yes, then we should A/B Test 
-            
             request = VideoMetadata.get_video_request(video_id)
             if request.state in ["active", "serving_active"]:
                 self.monitored_videos.add(video_id)
                 self.directives[video_id] = directive
+                if self.taskmgr.check_video_exists(video_id):
+                    # only schedule if distribution has changed 
+                    if self.taskmgr.check_distribution_change(video_id, 
+                                distribution):
+                        self.thumbnail_change_scheduler(video_id, 
+                                            distribution,
+                                            max_update_delay)
+                else:
+                    self.thumbnail_change_scheduler(video_id, 
+                                            distribution,
+                                            max_update_delay)
+            
+                # Add lastest distribution to the map
                 self.taskmgr.add_video_info(video_id, distribution)
-                self.thumbnail_change_scheduler(video_id, distribution,
-                                                max_update_delay)
+
 
     def start(self):
         '''Starts running the brightcove controller on the current thread.

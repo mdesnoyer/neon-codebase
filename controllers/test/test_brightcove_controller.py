@@ -230,9 +230,6 @@ class TestScheduler(test_utils.neontest.TestCase):
         video_id = 'vid0'
         distribution = [(u'thumb1', 0.7), (u'thumb2', 0.2), (u'thumb3', 0.1)] 
         controller.thumbnail_change_scheduler(video_id, distribution) 
-
-        # Verify that the tasks are in the Q and 
-        # the ordering of them.Random.seed() ensures the same ordering for tests
         change_tids = []
         for dist in distribution:
             task, priority = controller.taskmgr.pop_task()
@@ -240,8 +237,27 @@ class TestScheduler(test_utils.neontest.TestCase):
             if task.__class__.__name__ != "TimesliceEndTask": 
                 change_tids.append(task.tid)
 
-        self.assertListEqual(change_tids, ['thumb3', 'thumb2', 'thumb1'])
+        self.assertListEqual(sorted(change_tids), ['thumb1', 'thumb2', 'thumb3'])
 
+    def test_apply_directive(self):
+       
+        # Apply a change with different tids
+        self.controller.apply_directive(("testapikey_vid1", [('B', 1)]), 
+                              self.max_interval)
+        
+        expected_order = ["ThumbnailChangeTask_A", "TimesliceEndTask"]
+        task_map = self.get_video_task_map()
+        self._verify_tasks(task_map, expected_order)
+        
+        # Apply the same directive again and verify change scheduler wasn't called
+        # Mock method
+        self.controller.thumbnail_change_scheduler = MagicMock()
+        self.controller.apply_directive(("testapikey_vid1", [('B', 1)]), 
+                              self.max_interval)
+        self.assertEqual(
+                self.controller.thumbnail_change_scheduler._mock_call_count, 0)
+
+        
 class TestBrightcoveController(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestBrightcoveController, self).setUp()
@@ -298,7 +314,6 @@ class TestBrightcoveController(test_utils.neontest.TestCase):
                                   'Error getting directive file'):
             self.controller.load_directives()
         self.assertFalse(self.controller.apply_directive.called)
-
 
 if __name__ == '__main__':
     unittest.main()
