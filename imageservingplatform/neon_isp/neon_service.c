@@ -872,48 +872,44 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
                     &tid,
                     &tid_size);
 
-        // if the tid is found then add it
+        // allocate a buffer and its chain
+        buf = ngx_calloc_buf(request->pool);
+        buf->memory = 1;   
+        *chain = ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
+
         if(err == NEON_MASTERMIND_TID_LOOKUP_OK) {
-
-            // allocate a buffer and its chain
-            buf = ngx_calloc_buf(request->pool);
-            buf->memory = 1;   
-            *chain = ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
-
-            if(err == NEON_MASTERMIND_TID_LOOKUP_OK) {
-                buf->start = buf->pos  = (unsigned char *)tid;
-                buf->end = buf->last = (unsigned char *)tid + tid_size;
-                clen += tid_size;
-            }else{
-                buf->start = buf->pos = noimage.data;
-                buf->end = buf->last = noimage.data + noimage.len;
-                clen += noimage.len;
-            }
+            buf->start = buf->pos  = (unsigned char *)tid;
+            buf->end = buf->last = (unsigned char *)tid + tid_size;
+            clen += tid_size;
+        }else{
+            buf->start = buf->pos = noimage.data;
+            buf->end = buf->last = noimage.data + noimage.len;
+            clen += noimage.len;
+        }
         
-            // add this chain and lets setup the next
-            (*chain)->buf = buf;
-            (*chain)->next = NULL;
-            chain = &(*chain)->next;
+        // add this chain and lets setup the next
+        (*chain)->buf = buf;
+        (*chain)->next = NULL;
+        chain = &(*chain)->next;
        
-            // let's see if there is another token to process
-            vtoken = strtok_r(NULL, s, &context);
+        // let's see if there is another token to process
+        vtoken = strtok_r(NULL, s, &context);
         
-            // if there's another token, then we need a separator
-            if (vtoken){
-                // Add seperator buffer
-                *chain = ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
-                ngx_buf_t * s_buf = ngx_calloc_buf(request->pool);
-                char * sep = ",";
-                s_buf->start = s_buf->pos = (unsigned char*) sep;
-                s_buf->end = s_buf->last = (unsigned char*) sep + 1; 
-                s_buf->memory = 1;   
-                clen += 1;
+        // if there's another token, then we need a separator
+        if (vtoken){
+            // Add seperator buffer
+            *chain = ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
+             ngx_buf_t * s_buf = ngx_calloc_buf(request->pool);
+             char * sep = ",";
+             s_buf->start = s_buf->pos = (unsigned char*) sep;
+             s_buf->end = s_buf->last = (unsigned char*) sep + 1; 
+             s_buf->memory = 1;   
+             clen += 1;
               
-                // add this chain ans lets setup the next
-                (*chain)->buf = s_buf;
-                (*chain)->next = NULL; 
-                chain = &(*chain)->next;
-            }
+             // add this chain and lets setup the next
+             (*chain)->buf = s_buf;
+             (*chain)->next = NULL; 
+             chain = &(*chain)->next;
         }
     }
 
