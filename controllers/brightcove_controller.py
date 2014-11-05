@@ -139,7 +139,7 @@ class ThumbnailChangeTask(AbstractTask):
         super(ThumbnailChangeTask, self).__init__(video_id)
         self.tid = new_tid
         self.service_url = options.service_url + \
-                "/api/v1/brightcovecontroller/%s/updatethumbnail/%s" \
+                "api/v1/brightcovecontroller/%s/updatethumbnail/%s" \
                 %(account_id, video_id)
         self.nosave = nosave
 
@@ -466,7 +466,7 @@ class BrightcoveABController(object):
         
         # NOTE: (In the spirit of limited release, only test for PPG now)
         if internal_account_id not in ["6d3d519b15600c372a1f6735711d956e"]:
-            continue
+            return
     
         # Check if the account is enabled for ABTesting and controller type
         # is BC controller
@@ -477,6 +477,7 @@ class BrightcoveABController(object):
             request = VideoMetadata.get_video_request(video_id)
             if request.state in ["active", "serving_active"]:
                 self.monitored_videos.add(video_id)
+                self.directives[video_id] = directive
                 self.taskmgr.add_video_info(video_id, distribution)
                 self.thumbnail_change_scheduler(video_id, distribution,
                                                 max_update_delay)
@@ -506,14 +507,16 @@ class BrightcoveABController(object):
         cur_time = time.time()
 
         # create a task for each thumbnail
+        prev_offset = random.randint(0, 30) # stagger videos
         for t in time_dist:
             # thumbnail tuple is in format (thumb id, time slice)  
             task = ThumbnailChangeTask(account_id, video_id, t[0])
             # schedule it in the future, now + time slice
-            tslice = cur_time + t[1]
+            tslice = cur_time + prev_offset
+            prev_offset = t[1]
             self.taskmgr.add_task(task, int(tslice))
-            _log.info("Added ThumbnailChangeTask for vid %s tid %s"
-                        % (video_id, t[0]))
+            _log.info("Added ThumbnailChangeTask for vid %s tid %s time %s"
+                        % (video_id, t[0], tslice))
         
         # TODO (Sunil) : Add a CheckThumbnail task, skipping this for now
         
@@ -521,6 +524,8 @@ class BrightcoveABController(object):
         task_time_slice = TimesliceEndTask(video_id, self) 
         time_to_exec_task = cur_time + sum([tup[1] for tup in time_dist])
         self.taskmgr.add_task(task_time_slice, time_to_exec_task)
+        _log.info("Added TimesliceEndTask for vid %s time %s"
+                        % (video_id, time_to_exec_task))
 
     @classmethod
     def enforce_minimum_time_slice(cls, ts):
