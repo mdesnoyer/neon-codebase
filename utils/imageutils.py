@@ -111,5 +111,19 @@ class PILImageUtils(object):
 
         raise tornado.gen.Return(image)
 
+    @classmethod
+    def convert_to_rgb(cls, image):
+        '''Convert the image to RGB if it is not.'''
+        
+        if image.mode == "RGBA":
+            # Composite the image to a white background
+            new_image = Image.new("RGB", image.size, (255,255,255))
+            new_image.paste(image, mask=image)
+            image = new_image
+        elif image.mode != "RGB":
+            image = image.convert("RGB")
+
+        return image
+
     
             

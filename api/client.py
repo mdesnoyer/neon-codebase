@@ -84,6 +84,7 @@ statemon.define('ffvideo_metadata_error', int)
 statemon.define('video_duration_30m', int)
 statemon.define('video_duration_60m', int)
 statemon.define('video_read_error', int)
+statemon.define('extract_frame_error', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -276,6 +277,7 @@ class VideoProcessor(object):
         self.timecodes = {}
         self.thumbnails = [] 
         self.center_frame = None
+        self.random_frame = None
         self.sec_to_extract = 1 
         self.sec_to_extract_offset = 1
 
@@ -455,10 +457,11 @@ class VideoProcessor(object):
                     "time_processing=%s" %(end_process - start_process))
 
         # Get the center frame of the video
-        self.center_frame = self.get_center_frame(video_file)
+        self.center_frame = self._get_center_frame(video_file)
+        self.random_frame = self._get_random_frame(video_file)
         return True
 
-    def get_center_frame(self, video_file, nframes=None):
+    def _get_center_frame(self, video_file, nframes=None):
         '''approximation of brightcove logic 
          #Note: Its unclear the exact nature of brighcove thumbnailing,
          the images are close but this is not the exact frame
@@ -468,19 +471,45 @@ class VideoProcessor(object):
             mov = cv2.VideoCapture(video_file)
             if nframes is None:
                 nframes = mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
-            seek_sucess, image = utils.pycvutils.seek_video(mov, int(nframes /
-                2))
+
+            return self._get_specific_frame(mov, int(nframes / 2))
+        except Exception, e:
+            _log.exception("Unexpected error extracting center frame from %s:"
+                           " %s" % (self.video_url, e))
+
+    def _get_random_frame(self, video_file, nframes=None):
+        try:
+            mov = cv2.VideoCapture(video_file)
+            if nframes is None:
+                nframes = mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
+
+            return self._get_specific_frame(mov, random.randint(0, nframes-1))
+        except Exception, e:
+            _log.exception("Unexpected error extracting random frame from %s:"
+                           " %s" % (self.video_url, e))
+
+    def _get_specific_frame(self, mov, frameno):
+        ''' Grab a specific frame from the video.
+
+        mov - The cv2 VideoCapture object
+        frameno - The frame number to read
+        '''
+        _log.debug('Extracting frame %i from video %s' %
+                   (frameno, self.video_url))
+        try:            
+            seek_sucess, image = utils.pycvutils.seek_video(mov, frameno)
             if seek_sucess:
                 #Now grab the frame
                 read_sucess, image = mov.read()
                 if read_sucess:
                     return utils.pycvutils.to_pil(image)
-            _log.error('key=get_center_frame '
-                        'msg=Error reading middle frame of video %s'
-                        % self.video_url)
-            statemon.state.increment('video_read_error')
-        except Exception,e:
-            _log.debug("key=get_center_frame msg=%s" % e)
+            _log.error('Error reading frame %i of video %s'
+                        % (frameno, self.video_url))
+            statemon.state.increment('extract_frame_error')
+        except Exception, e:
+            _log.exception("Unexpected error extracting frame %i from %s: %s" 
+                           % (frameno, self.video_url, e))
+            statemon.state.increment('extract_frame_error')
 
     def valence_score(self, image):
         ''' valence of pil.image '''
@@ -639,7 +668,7 @@ class VideoProcessor(object):
                 _log.error("no thumbnails extracted for video %s url %s"\
                         % (vmdata.key, vmdata.url))
 
-            #host Center Frame on s3
+            #host Baseline frames on s3
             if self.center_frame is not None:
                 cthumbnail, s3_url = host_images_s3(
                     vmdata, api_key, [(self.center_frame, None)], 
@@ -648,7 +677,16 @@ class VideoProcessor(object):
                     cdn_metadata=cdn_metadata)
                 self.thumbnails.extend(cthumbnail)
             else:
-                _log.error("centerframe was None for %s" % video_id)
+                _log.error("center frame was None for %s" % video_id)
+            if self.random_frame is not None:
+                rthumbnail, s3_url = host_images_s3(
+                    vmdata, api_key, [(self.random_frame, None)], 
+                    self.base_filename, model_version=0, 
+                    ttype=neondata.ThumbnailType.RANDOM,
+                    cdn_metadata=cdn_metadata)
+                self.thumbnails.extend(rthumbnail)
+            else:
+                _log.error("random frame was None for %s" % video_id)
 
             # Save videometadata 
             if reprocess == False:

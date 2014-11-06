@@ -34,7 +34,8 @@ from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         ThumbnailMetadata, InternalVideoID, OoyalaPlatform, \
         TrackerAccountIDMapper, ThumbnailServingURLs, ExperimentStrategy, \
         ExperimentState, NeonApiRequest, CDNHostingMetadata,\
-        S3CDNHostingMetadata, CloudinaryCDNHostingMetadata
+        S3CDNHostingMetadata, CloudinaryCDNHostingMetadata, \
+        NeonCDNHostingMetadata, CDNHostingMetadataList
 
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
@@ -399,51 +400,144 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
     def test_hosting_metadata(self):
         '''
-        Test saving and retrieving CDNHostingMetadata object
+        Test saving and retrieving CDNHostingMetadataList object
         '''
-        na = NeonUserAccount('acct1')
-        na.save()
-        np = NeonPlatform('acct1', na.neon_api_key)
-        np.save()
-        s3mdata = S3CDNHostingMetadata("a", "s", "b", ["p1", "p2"], "")
-        ret = CDNHostingMetadata.save_metadata(na.neon_api_key, "0",
-                s3mdata.to_dict())
-        self.assertTrue(ret)
+        cloud = CloudinaryCDNHostingMetadata()
+        self.assertFalse(cloud.resize)
+        self.assertFalse(cloud.update_serving_urls)
+        neon_cdn = NeonCDNHostingMetadata('my-bucket',
+                                          ['mycdn.neon-lab.com'])
+        self.assertTrue(neon_cdn.resize)
+        self.assertEqual(neon_cdn.update_serving_urls, True)
+        self.assertEqual(neon_cdn.folder_prefix, '')
+        s3_cdn = S3CDNHostingMetadata('access-key',
+                                      'secret-key',
+                                      'customer-bucket',
+                                      ['cdn.cdn.com'],
+                                      'folder/',
+                                      True,
+                                      True)
+        cdns = CDNHostingMetadataList('integration0',
+                                      [cloud, neon_cdn, s3_cdn])
+        cdns.save()
 
-        accnt = NeonPlatform.get_account(na.neon_api_key)
-        self.assertTrue(isinstance(accnt.cdn_metadata, CDNHostingMetadata))
-        for key in s3mdata.__dict__.keys():
-            self.assertEqual(s3mdata.__dict__[key],
-                    accnt.cdn_metadata.__dict__[key])
+        new_cdns = CDNHostingMetadataList.get('integration0')
 
-        # modify the account check if the object is modified such that it cant'
-        # be restored
-        accnt.abtest = True
-        accnt.add_video("v1", "j1")
-        accnt.cdn_metadata.access_key = "new_key"
-        accnt.save()
+        self.assertEqual(cdns, new_cdns)
+
+    
+    
+
+    def test_internal_video_id(self):
+        '''
+        Generate bunch of random video ids, covert them to internal VID
+        and try to get external VID out of them.
+        '''
+        random.seed(time.time())
+        def id_generator(size=32, 
+                chars=string.ascii_lowercase + string.digits + "_"):
+            
+            return ''.join(random.choice(chars) for x in range(size))
         
-        accnt = NeonPlatform.get_account(na.neon_api_key)
-        self.assertIsNotNone(accnt)
-        self.assertEqual(accnt.cdn_metadata.access_key, "new_key")
+        external_vids = ['5ieGdqMjoiVJJjw7YIZk5fMBvIE86Z1c', 
+                'xhdG5nMjoiKNbeAz0UrQo2_YVPcZRng8', '12451561361', 
+                'R4YjBnMjrzRQRcDLf34bXbRH4qR6CEF1', 'vid_3' ]
 
-    def test_cloudinary_hosting_metadata(self):
+        for i in range(100):
+            external_vids.append(id_generator())
+
+        i_vids = [InternalVideoID.generate("apikey", vid) for vid in external_vids]
+
+        result = [InternalVideoID.to_external(i_vid) for i_vid in i_vids]
+
+        self.assertEqual(result, external_vids)
+
+    def test_get_winner_tid(self):
         '''
-        Test saving and retrieving CDNHostingMetadata object
+        Test the get_winner_tid logic for a given video id
+
         '''
-        na = NeonUserAccount('acct1')
+        acc_id = 'acct1'
+        na = NeonUserAccount(acc_id)
         na.save()
-        np = NeonPlatform('acct1', na.neon_api_key)
-        np.save()
-        cd = CloudinaryCDNHostingMetadata()
-        ret = CDNHostingMetadata.save_metadata(na.neon_api_key, "0",
-                cd.to_dict())
-        self.assertTrue(ret)
-        accnt = NeonPlatform.get_account(na.neon_api_key)
-        self.assertTrue(isinstance(accnt.cdn_metadata, CDNHostingMetadata))
-        for key in cd.__dict__.keys():
-            self.assertEqual(cd.__dict__[key],
-                    accnt.cdn_metadata.__dict__[key])
+        vid = InternalVideoID.generate(na.neon_api_key, 'vid1')
+        
+        #Set experiment strategy
+        es = ExperimentStrategy(na.neon_api_key)
+        es.chosen_thumb_overrides = True
+        es.override_when_done = True
+        es.save()
+        
+        #Save thumbnails 
+        thumbs = [
+            ThumbnailMetadata('t1', vid, ['t1.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.8),
+            ThumbnailMetadata('t2', vid, ['t2.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.15),
+            ThumbnailMetadata('t3', vid, ['t3.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.01),
+            ThumbnailMetadata('t4', vid, ['t4.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.04),
+            ThumbnailMetadata('t5', vid, ['t5.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.0)
+            ]
+        ThumbnailMetadata.save_all(thumbs)
+        
+        #Save VideoMetadata
+        tids = [thumb.key for thumb in thumbs]
+        v0 = VideoMetadata(vid, tids, 'reqid0', 'v0.mp4', 0, 0, None, 0, None,
+                            True, ExperimentState.COMPLETE)
+        v0.save()
+        
+        #Set up Serving URLs (2 per tid)
+        for thumb in thumbs:
+            inp = ThumbnailServingURLs('%s_%s' % (vid, thumb.key))
+            inp.add_serving_url('http://servingurl_800_600.jpg', 800, 600) 
+            inp.add_serving_url('http://servingurl_120_90.jpg', 120, 90) 
+            inp.save()
+
+        winner_tid = v0.get_winner_tid()     
+        self.assertEqual(winner_tid, 't1')
+
+        # Case 2: chosen_thumb_overrides is False (holdback state)
+        es.chosen_thumb_overrides = False
+        es.override_when_done = False
+        es.exp_frac = 0.2
+        es.save()
+        winner_tid = v0.get_winner_tid()     
+        self.assertEqual(winner_tid, 't1')
+    
+        # Case 3: Experiement is in experimental state
+        es.exp_frac = es.holdback_frac = 0.8
+        es.save()
+        winner_tid = v0.get_winner_tid()     
+        self.assertEqual(winner_tid, 't1')
+
+    def test_video_metadata_methods(self):
+        '''
+        Currently only Tests the video_requests methods 
+        '''
+        api_key = "TEST"
+        job_ids = []
+        i_vids = []
+        for i in range(10):
+            jid = 'job%s' % i
+            vid = 'vid%s' % i 
+            i_vid = "%s_%s" % (api_key, vid)
+            nar = NeonApiRequest(jid, api_key, vid, 't', 't', 'r', 'h')
+            vm = VideoMetadata(i_vid, [], jid, 'v0.mp4')
+            nar.save()
+            vm.save()
+            i_vids.append(i_vid)
+
+        reqs = VideoMetadata.get_video_requests(i_vids)
+        for jid, req in zip(job_ids, reqs):
+            self.assertEqual(jid, req.job_id)
+       
+        # Non existent video
+        i_vids = ["dummy_vid"]
+        reqs = VideoMetadata.get_video_requests(i_vids)
+        self.assertEqual(reqs, [None])
 
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
@@ -670,6 +764,91 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         self.assertFalse(ThumbnailMetadata.get(tid2).chosen)
         self.assertTrue(ThumbnailMetadata.get(tid1).enabled)
         self.assertFalse(ThumbnailMetadata.get(tid2).enabled)
+
+    def test_create_or_modify(self):
+        vid1 = InternalVideoID.generate('api1', 'vid1')
+        tid1 = ThumbnailID.generate(self.image, vid1)
+        self.assertIsNone(ThumbnailMetadata.get(tid1))
+
+        ThumbnailMetadata.modify(tid1,
+                                 lambda x: x.urls.append('http://image.jpg'),
+                                 create_missing=True)
+
+        val = ThumbnailMetadata.get(tid1)
+        self.assertIsNotNone(val)
+        self.assertEqual(val.urls, ['http://image.jpg'])
+
+    @tornado.testing.gen_test
+    def test_create_or_modify_async(self):
+        vid1 = InternalVideoID.generate('api1', 'vid1')
+        tid1 = ThumbnailID.generate(self.image, vid1)
+        self.assertIsNone(ThumbnailMetadata.get(tid1))
+
+        yield tornado.gen.Task(
+            ThumbnailMetadata.modify,
+            tid1,
+            lambda x: x.urls.append('http://image.jpg'),
+            create_missing=True)
+
+        val = ThumbnailMetadata.get(tid1)
+        self.assertIsNotNone(val)
+        self.assertEqual(val.urls, ['http://image.jpg'])
+
+    def test_create_or_modify_many(self):
+        vid1 = InternalVideoID.generate('api1', 'vid1')
+        tid1 = ThumbnailID.generate(self.image, vid1)
+        tdata1 = ThumbnailMetadata(tid1, vid1, ['one.jpg', 'two.jpg'],
+                                   None, self.image.size[1],
+                                   self.image.size[0],
+                                   'brightcove', 1.0, '1.2')
+        tdata1.save()
+
+        vid2 = InternalVideoID.generate('api1', 'vid2')
+        tid2 = ThumbnailID.generate(self.image, vid2)
+        self.assertIsNone(ThumbnailMetadata.get(tid2))
+
+        def _add_thumb(d):
+            for thumb in d.itervalues():
+                thumb.urls.append('%s.jpg' % thumb.key)
+
+        ThumbnailMetadata.modify_many(
+            [tid1, tid2],
+            _add_thumb,
+            create_missing=True)
+
+        self.assertEqual(ThumbnailMetadata.get(tid1).urls,
+                         ['one.jpg', 'two.jpg', '%s.jpg' % tid1])
+        self.assertEqual(ThumbnailMetadata.get(tid2).urls,
+                         ['%s.jpg' % tid2])
+
+    @tornado.testing.gen_test
+    def test_create_or_modify_many_async(self):
+        vid1 = InternalVideoID.generate('api1', 'vid1')
+        tid1 = ThumbnailID.generate(self.image, vid1)
+        tdata1 = ThumbnailMetadata(tid1, vid1, ['one.jpg', 'two.jpg'],
+                                   None, self.image.size[1],
+                                   self.image.size[0],
+                                   'brightcove', 1.0, '1.2')
+        tdata1.save()
+
+        vid2 = InternalVideoID.generate('api1', 'vid2')
+        tid2 = ThumbnailID.generate(self.image, vid2)
+        self.assertIsNone(ThumbnailMetadata.get(tid2))
+
+        def _add_thumb(d):
+            for thumb in d.itervalues():
+                thumb.urls.append('%s.jpg' % thumb.key)
+
+        yield tornado.gen.Task(
+            ThumbnailMetadata.modify_many,
+            [tid1, tid2],
+            _add_thumb,
+            create_missing=True)
+
+        self.assertEqual(ThumbnailMetadata.get(tid1).urls,
+                         ['one.jpg', 'two.jpg', '%s.jpg' % tid1])
+        self.assertEqual(ThumbnailMetadata.get(tid2).urls,
+                         ['%s.jpg' % tid2])
         
 
     def test_read_thumbnail_old_format(self):
@@ -692,118 +871,8 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         
         with self.assertRaises(AttributeError):
             thumb.thumbnail_id
+
     
-
-    def test_internal_video_id(self):
-        '''
-        Generate bunch of random video ids, covert them to internal VID
-        and try to get external VID out of them.
-        '''
-        random.seed(time.time())
-        def id_generator(size=32, 
-                chars=string.ascii_lowercase + string.digits + "_"):
-            
-            return ''.join(random.choice(chars) for x in range(size))
-        
-        external_vids = ['5ieGdqMjoiVJJjw7YIZk5fMBvIE86Z1c', 
-                'xhdG5nMjoiKNbeAz0UrQo2_YVPcZRng8', '12451561361', 
-                'R4YjBnMjrzRQRcDLf34bXbRH4qR6CEF1', 'vid_3' ]
-
-        for i in range(100):
-            external_vids.append(id_generator())
-
-        i_vids = [InternalVideoID.generate("apikey", vid) for vid in external_vids]
-
-        result = [InternalVideoID.to_external(i_vid) for i_vid in i_vids]
-
-        self.assertEqual(result, external_vids)
-
-    def test_get_winner_tid(self):
-        '''
-        Test the get_winner_tid logic for a given video id
-
-        '''
-        acc_id = 'acct1'
-        na = NeonUserAccount(acc_id)
-        na.save()
-        vid = InternalVideoID.generate(na.neon_api_key, 'vid1')
-        
-        #Set experiment strategy
-        es = ExperimentStrategy(na.neon_api_key)
-        es.chosen_thumb_overrides = True
-        es.override_when_done = True
-        es.save()
-        
-        #Save thumbnails 
-        thumbs = [
-            ThumbnailMetadata('t1', vid, ['t1.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.8),
-            ThumbnailMetadata('t2', vid, ['t2.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.15),
-            ThumbnailMetadata('t3', vid, ['t3.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.01),
-            ThumbnailMetadata('t4', vid, ['t4.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.04),
-            ThumbnailMetadata('t5', vid, ['t5.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.0)
-            ]
-        ThumbnailMetadata.save_all(thumbs)
-        
-        #Save VideoMetadata
-        tids = [thumb.key for thumb in thumbs]
-        v0 = VideoMetadata(vid, tids, 'reqid0', 'v0.mp4', 0, 0, None, 0, None,
-                            True, ExperimentState.COMPLETE)
-        v0.save()
-        
-        #Set up Serving URLs (2 per tid)
-        for thumb in thumbs:
-            inp = ThumbnailServingURLs('%s_%s' % (vid, thumb.key))
-            inp.add_serving_url('http://servingurl_800_600.jpg', 800, 600) 
-            inp.add_serving_url('http://servingurl_120_90.jpg', 120, 90) 
-            inp.save()
-
-        winner_tid = v0.get_winner_tid()     
-        self.assertEqual(winner_tid, 't1')
-
-        # Case 2: chosen_thumb_overrides is False (holdback state)
-        es.chosen_thumb_overrides = False
-        es.override_when_done = False
-        es.exp_frac = 0.2
-        es.save()
-        winner_tid = v0.get_winner_tid()     
-        self.assertEqual(winner_tid, 't1')
-    
-        # Case 3: Experiement is in experimental state
-        es.exp_frac = es.holdback_frac = 0.8
-        es.save()
-        winner_tid = v0.get_winner_tid()     
-        self.assertEqual(winner_tid, 't1')
-
-    def test_video_metadata_methods(self):
-        '''
-        Currently only Tests the video_requests methods 
-        '''
-        api_key = "TEST"
-        job_ids = []
-        i_vids = []
-        for i in range(10):
-            jid = 'job%s' % i
-            vid = 'vid%s' % i 
-            i_vid = "%s_%s" % (api_key, vid)
-            nar = NeonApiRequest(jid, api_key, vid, 't', 't', 'r', 'h')
-            vm = VideoMetadata(i_vid, [], jid, 'v0.mp4')
-            nar.save()
-            vm.save()
-            i_vids.append(i_vid)
-
-        reqs = VideoMetadata.get_video_requests(i_vids)
-        for jid, req in zip(job_ids, reqs):
-            self.assertEqual(jid, req.job_id)
-       
-        # Non existent video
-        i_vids = ["dummy_vid"]
-        reqs = VideoMetadata.get_video_requests(i_vids)
-        self.assertEqual(reqs, [None])
 
 if __name__ == '__main__':
     unittest.main()

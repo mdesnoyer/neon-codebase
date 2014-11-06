@@ -8,64 +8,164 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import api.cdnhosting
+import boto.exception
+import random
 import json
 import logging
 from mock import MagicMock, patch
 from supportServices import neondata
 import test_utils.mock_boto_s3 as boto_mock
+import test_utils.neontest
 import test_utils.redis
+import tornado.testing
 import unittest
 from utils.imageutils import PILImageUtils
 
 _log = logging.getLogger(__name__)
 
-class TestCDNHosting(unittest.TestCase):
+#TODO(Sunil): Make this test async once cdnhosting is
+class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     ''' 
-    Test Video Processing client
+    Test the ability to host images on an aws cdn (aka S3)
     '''
     def setUp(self):
-        super(TestCDNHosting, self).setUp()
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start() 
+        self.s3conn = boto_mock.MockConnection()
+        self.s3_patcher = patch('api.cdnhosting.S3Connection')
+        self.mock_conn = self.s3_patcher.start()
+        self.mock_conn.return_value = self.s3conn
+        self.s3conn.create_bucket('hosting-bucket')
+        self.bucket = self.s3conn.get_bucket('hosting-bucket')
+
+        random.seed(1654984)
+
+        self.image = PILImageUtils.create_random_image(480, 640)
+        super(TestAWSHosting, self).setUp()
 
     def tearDown(self):
-        self.redis.stop()
-        super(TestCDNHosting, self).tearDown()
-        
-    @patch('api.cdnhosting.S3Connection')
-    def test_neon_hosting(self, mock_conntype):
-        
-        #s3mocks to mock host_thumbnails_to_s3
-        conn = boto_mock.MockConnection()
-        conn.create_bucket('neon-image-cdn')
-        mock_conntype.return_value = conn
-        imbucket = conn.get_bucket("neon-image-cdn")
-        image = PILImageUtils.create_random_image(360, 480) 
-        keyname = "test_key"
-        tid = "test_tid"
-        hosting = api.cdnhosting.AWSHosting()
-        hosting.upload(image, tid)
-        sizes = api.properties.CDN_IMAGE_SIZES   
-        s3_keys = [x for x in imbucket.get_all_keys()]
-        self.assertEqual(len(s3_keys), len(sizes))
-        
-        # Verify the contents in serving url 
-        serving_urls = neondata.ThumbnailServingURLs.get(tid)
-        for w, h in sizes:
-            url = serving_urls.get_serving_url(w, h)
-            fname = "neontntest_tid_w%s_h%s.jpg" % (w, h)
-            exp_url = "http://%s/%s" % ("imagecdn.neon-lab.com", fname)
-            self.assertEqual(exp_url, url)
+        self.s3_patcher.stop()
+        super(TestAWSHosting, self).tearDown()
 
-        #image-cdn/NEON_PUB_ID/neontntest_tid_w800_h600.jpg
-        #Build a per video stats page to monitor each video
+    @tornado.testing.gen_test
+    def test_host_single_image(self):
+        metadata = neondata.S3CDNHostingMetadata(
+            'access_key', 'secret_key',
+            'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
+            'folder1', False, False)
+
+        hoster = api.cdnhosting.CDNHosting.create(metadata)
+        yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+
+        self.mock_conn.assert_called_with('access_key', 'secret_key')
+
+        s3_key = self.bucket.get_key('folder1/neontnacct1_vid1_tid1_w640_h480.jpg')
+        self.assertIsNotNone(s3_key)
+        self.assertEqual(s3_key.content_type, 'image/jpeg')
+        self.assertNotEqual(s3_key.policy, 'public-read')
+
+        # Make sure that the serving urls weren't added
+        self.assertIsNone(
+            neondata.ThumbnailServingURLs.get('acct1_vid1_tid1'))
+
+
+    @tornado.testing.gen_test
+    def test_permissions_error_uploading_image(self):
+        self.s3conn.get_bucket = MagicMock()
+        self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3PermissionsError('Permission error')]
+        
+        metadata = neondata.S3CDNHostingMetadata(
+            'access_key', 'secret_key',
+            'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
+            'folder1', False, False)
+        hoster = api.cdnhosting.CDNHosting.create(metadata)
+
+        with self.assertLogExists(logging.ERROR, 'AWS client error'):
+            with self.assertRaises(boto.exception.S3PermissionsError):
+                yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+
+    @tornado.testing.gen_test
+    def test_create_error_uploading_image(self):
+        self.s3conn.get_bucket = MagicMock()
+        self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3CreateError('oops', 'seriously, oops')]
+        
+        metadata = neondata.S3CDNHostingMetadata(
+            'access_key', 'secret_key',
+            'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
+            'folder1', False, False)
+        hoster = api.cdnhosting.CDNHosting.create(metadata)
+
+        with self.assertLogExists(logging.ERROR, 'AWS Server error'):
+            with self.assertRaises(boto.exception.S3CreateError):
+                yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+
+    @tornado.testing.gen_test
+    def test_s3_redirect(self):
+        self.s3conn.create_bucket('my-bucket')
+        self.s3conn.create_bucket('host-bucket')
+        self.s3conn.create_bucket('obucket')
+        self.s3conn.create_bucket('mine')
+
+        with patch('api.cdnhosting.get_s3_hosting_bucket') as location_mock:
+            location_mock.return_value = 'host-bucket'
+            yield [
+                api.cdnhosting.create_s3_redirect(
+                    'dest/image.jpg', 'src/samebuc.jpg', 'my-bucket',
+                    'my-bucket', async=True),
+                api.cdnhosting.create_s3_redirect(
+                    'dest/image.jpg', 'src/diffbuc.jpg', 'my-bucket',
+                    'obucket', async=True),
+                api.cdnhosting.create_s3_redirect(
+                        'dest/image.jpg', 'src/bothdefault.jpg', async=True),
+                api.cdnhosting.create_s3_redirect(
+                        'dest/image.jpg', 'src/destdefault.jpg',
+                        src_bucket='mine', async=True),
+                api.cdnhosting.create_s3_redirect(
+                        'dest/image.jpg', 'src/srcdefault.jpg',
+                        dest_bucket='mine', async=True), 
+                ]
+
+        self.assertEqual(self.s3conn.get_bucket('my-bucket').get_key(
+            'src/samebuc.jpg').redirect_destination, 'dest/image.jpg')
+        self.assertEqual(self.s3conn.get_bucket('obucket').get_key(
+            'src/diffbuc.jpg').redirect_destination,
+            'https://my-bucket.s3.amazonaws.com/dest/image.jpg')
+        self.assertEqual(self.s3conn.get_bucket('host-bucket').get_key(
+            'src/bothdefault.jpg').redirect_destination, 'dest/image.jpg')
+        self.assertEqual(self.s3conn.get_bucket('mine').get_key(
+            'src/destdefault.jpg').redirect_destination,
+            'https://host-bucket.s3.amazonaws.com/dest/image.jpg')
+        self.assertEqual(self.s3conn.get_bucket('host-bucket').get_key(
+            'src/srcdefault.jpg').redirect_destination,
+            'https://mine.s3.amazonaws.com/dest/image.jpg')
+
+    @tornado.testing.gen_test
+    def test_permissions_error_s3_redirect(self):
+        self.s3conn.get_bucket = MagicMock()
+        self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3PermissionsError('Permission Error')]
+        self.s3conn.create_bucket('host-bucket')
+
+        with self.assertLogExists(logging.ERROR, 'AWS client error'):
+            with self.assertRaises(boto.exception.S3PermissionsError):
+                yield api.cdnhosting.create_s3_redirect('dest.jpg', 'src.jpg',
+                                                        async=True)
+
+    @tornado.testing.gen_test
+    def test_create_error_s3_redirect(self):
+        self.s3conn.get_bucket = MagicMock()
+        self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3CreateError('oops', 'seriously, oops')]
+        self.s3conn.create_bucket('host-bucket')
+
+        with self.assertLogExists(logging.ERROR, 'AWS Server error'):
+            with self.assertRaises(boto.exception.S3CreateError):
+                yield api.cdnhosting.create_s3_redirect('dest.jpg', 'src.jpg',
+                                                        async=True)
 
     @patch('api.cdnhosting.urllib2')
     def test_cloudinary_hosting(self, mock_http):
         
         mock_response = '{"public_id":"bfea94933dc752a2def8a6d28f9ac4c2","version":1406671711,"signature":"26bd2ffa2b301b9a14507d152325d7692c0d4957","width":480,"height":268,"format":"jpg","resource_type":"image","created_at":"2014-07-29T22:08:19Z","bytes":74827,"type":"upload","etag":"99fd609b49a802fdef7e2952a5e75dc3","url":"http://res.cloudinary.com/neon-labs/image/upload/v1406671711/bfea94933dc752a2def8a6d28f9ac4c2.jpg","secure_url":"https://res.cloudinary.com/neon-labs/image/upload/v1406671711/bfea94933dc752a2def8a6d28f9ac4c2.jpg"}'
 
-        cd = api.cdnhosting.CloudinaryHosting()
+        metadata = neondata.CloudinaryCDNHostingMetadata()
+        cd = api.cdnhosting.CDNHosting.create(metadata)
         im = 'https://host-thumbnails.s3.amazonaws.com/image.jpg'
         tid = 'bfea94933dc752a2def8a6d28f9ac4c2'
         mresponse = MagicMock()
@@ -73,32 +173,58 @@ class TestCDNHosting(unittest.TestCase):
         mock_http.urlopen.return_value = mresponse 
         uploaded_url = cd.upload(im, tid)
         self.assertEqual(uploaded_url, json.loads(mock_response)['url'])
-    
-    @patch('api.cdnhosting.S3Connection')
-    def test_customer_s3_hosting(self, mock_conntype):
-        
-        bucket = 'customer-bucket'
-        s3mdata = neondata.S3CDNHostingMetadata('a', 's', bucket, ['p1', 'p1'],
-                'folder/')
-        conn = boto_mock.MockConnection()
-        conn.create_bucket(bucket)
-        mock_conntype.return_value = conn
-        imbucket = conn.get_bucket(bucket)
-        image = PILImageUtils.create_random_image(360, 480) 
-        keyname = "test_key"
-        tid = "test_tid"
-        hosting = api.cdnhosting.AWSHosting(s3mdata)
-        hosting.upload(image, tid)
-        sizes = api.properties.CDN_IMAGE_SIZES   
-        s3_keys = [x for x in imbucket.get_all_keys()]
-        self.assertEqual(len(s3_keys), len(sizes))
-        self.assertTrue('folder/' in s3_keys[0].name) 
-        serving_urls = neondata.ThumbnailServingURLs.get(tid)
+
+    # TODO(Sunil): Add error testing for the uploads of cloudinary
+
+class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
+    ''' 
+    Test the ability to host images on an aws cdn (aka S3)
+    '''
+    def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+        self.s3conn = boto_mock.MockConnection()
+        self.s3_patcher = patch('api.cdnhosting.S3Connection')
+        self.mock_conn = self.s3_patcher.start()
+        self.mock_conn.return_value = self.s3conn
+        self.s3conn.create_bucket('hosting-bucket')
+        self.bucket = self.s3conn.get_bucket('hosting-bucket')
+
+        random.seed(1654984)
+
+        self.image = PILImageUtils.create_random_image(480, 640)
+        super(TestAWSHostingWithServingUrls, self).setUp()
+
+    def tearDown(self):
+        self.s3_patcher.stop()
+        self.redis.stop()
+        super(TestAWSHostingWithServingUrls, self).tearDown()
+
+    @tornado.testing.gen_test
+    def test_host_resized_images(self):
+        metadata = neondata.NeonCDNHostingMetadata(
+            'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
+            'folder1', True, True)
+
+        hoster = api.cdnhosting.CDNHosting.create(metadata)
+        yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+
+        serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
+        self.assertIsNotNone(serving_urls)
+
+        sizes = api.properties.CDN_IMAGE_SIZES 
         for w, h in sizes:
+
+            # check that the image is in s3
+            key_name = 'folder1/neontnacct1_vid1_tid1_w%i_h%i.jpg' % (w, h)
+            s3key = self.bucket.get_key(key_name)
+            self.assertIsNotNone(s3key)
+            self.assertEqual(s3key.policy, 'public-read')
+
+            # Check that the serving url is included
             url = serving_urls.get_serving_url(w, h)
-            fname = "neontntest_tid_w%s_h%s.jpg" % (w, h)
-            exp_url = "http://%s/%s%s" % ("p1", "folder/", fname)
-            self.assertEqual(exp_url, url)
+            self.assertRegexpMatches(
+                url, 'http://cdn[1-2].cdn.com/%s' % key_name)
 
 if __name__ == '__main__':
     unittest.main()

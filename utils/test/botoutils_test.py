@@ -7,16 +7,18 @@ Copyright 2014 Neon Labs
 '''
 import os.path
 import sys
-__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__),
+                                             '..', '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import boto.exception
 import logging
 from mock import patch, MagicMock
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
 import tornado.testing
-from utils.boto import run_async
+from utils.botoutils import run_async
 import utils.neon
 
 _log = logging.getLogger(__name__)
@@ -25,20 +27,9 @@ class TestAsyncCalls(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestAsyncCalls, self).setUp()
         self.conn = boto_mock.MockConnection()
-        
-        self.async_patcher = \
-          patch('utils.http.tornado.httpclient.AsyncHTTPClient')
-
-        self.mock_client = self.async_patcher.start()
-        self.mock_responses = MagicMock()                              
-
-        self.mock_client().fetch.side_effect = \
-          lambda x, callback: self.io_loop.add_callback(callback,
-                                                        self.mock_responses(x))
 
 
     def tearDown(self):
-        self.async_patcher.stop()
         super(TestAsyncCalls, self).tearDown()
 
     @tornado.testing.gen_test
@@ -57,7 +48,13 @@ class TestAsyncCalls(test_utils.neontest.AsyncTestCase):
         self.assertIsNotNone(key1)
         self.assertIsNotNone(key2)
         self.assertEquals(key1.get_contents_as_string(), 'my key1')
-        self.assertEquals(key1.get_contents_as_string(), 'my key2')
+        self.assertEquals(key2.get_contents_as_string(), 'my key2')
+
+    @tornado.testing.gen_test
+    def test_exception_async_s3_calls(self):
+        # Make sure that exceptions bubble up
+        with self.assertRaises(boto.exception.StorageResponseError):
+            yield run_async(self.conn.get_bucket('my-bucket'))
 
         
     

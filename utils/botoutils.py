@@ -4,7 +4,6 @@ Tools for using boto to interact with s3
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright 2014 Neon Labs
 '''
-import os
 import os.path
 import sys
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
