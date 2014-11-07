@@ -32,6 +32,7 @@ import datetime
 import hashlib
 import json
 import random
+import re
 import redis as blockingRedis
 import string
 import supportServices.url2thumbnail
@@ -44,6 +45,7 @@ import api.brightcove_api #coz of cyclic import
 import api.youtube_api
 import utils.botoutils
 import utils.logs
+from utils.imageutils import PILImageUtils
 import utils.neon
 import utils.sync
 import utils.s3
@@ -2384,7 +2386,7 @@ class ThumbnailMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def add_image_data(self, image, cdn_metadata=None):
-        '''Incorporates image data to the ThumbnailMetadata.
+        '''Incorporates image data to the ThumbnailMetadata object.
 
         Also uploads the image to the CDNs and S3.
 
@@ -2401,13 +2403,6 @@ class ThumbnailMetadata(StoredObject):
         self.height = image.size[1]
         self.update_phash(image)
 
-        # Figure out the S3 location,
-        # which is <API_KEY>/<VIDEO_ID>/<THUMB_ID>.jpg
-        s3key = re.sub('_', '/', self.key) + '.jpg'
-        s3_url = 'https://%s.s3.amazonaws.com/%s' % \
-          (api.cdnhosting.get_s3_hosting_bucket(), s3_key)
-        self.urls.append(s3_url)
-
         # Convert the image to JPG
         fmt = 'jpeg'
         filestream = StringIO()
@@ -2417,25 +2412,25 @@ class ThumbnailMetadata(StoredObject):
 
         self.key = ThumbnailID.generate(imgdata, self.video_id)
 
-        if len(self.key.split('_')) != 3:
-            raise ValueError('The thumbnail id is not valid')
+        # Figure out the S3 location,
+        # which is <API_KEY>/<VIDEO_ID>/<THUMB_ID>.jpg
+        s3key = re.sub('_', '/', self.key) + '.jpg'
+        s3_url = 'https://%s.s3.amazonaws.com/%s' % \
+          (api.cdnhosting.get_s3_hosting_bucket(), s3key)
+        self.urls.append(s3_url)
 
         # Upload the image to s3
-        # TODO(Sunil): Have this yield the function directly instead
-        # of going through the run_async function once cdnhosting is
-        # written asynchronously.
         # TODO(Sunil): Merge the primary hosting copy into the 
         # CDNHostingMetadataList
-        yield utils.botoutils.run_async(
-            api.cdnhosting.upload_to_s3_host_thumbnails, 
-            s3key, imgdata)
+        yield api.cdnhosting.upload_image_to_s3(
+            s3key, imgdata, async=True)
 
         # Create a redirect with a video based url
-        yield api.cdnhosting.create_s3_redirect_to_image(
+        yield api.cdnhosting.create_s3_redirect(
             s3key, '{video_prefix}/{type}{rank:d}.jpg'.format(
-                {'video_prefix': re.sub('_', '/', self.video_id),
-                 'type' : self.ttype,
-                 'rank' : self.rank}),
+                video_prefix=re.sub('_', '/', self.video_id),
+                type=self.type,
+                rank=self.rank),
             async=True)
 
         # Send the image to cloudinary
@@ -2444,8 +2439,9 @@ class ThumbnailMetadata(StoredObject):
         # written asynchronously.
         # TODO(Sunil): Merge the cloudinary hosting into the 
         # CDNHostingMetadataList
-        cloudinary_hoster = CDNHosting.create(CloudinaryCDNHostingMetadata())
-        yield utils.botoutils.run_async(cloundinary_hoster.upload, s3_url,
+        cloudinary_hoster = api.cdnhosting.CDNHosting.create(
+            CloudinaryCDNHostingMetadata())
+        yield utils.botoutils.run_async(cloudinary_hoster.upload, s3_url,
                                         self.key)
 
         # Host the image on the CDN
@@ -2460,8 +2456,8 @@ class ThumbnailMetadata(StoredObject):
                 # Default to hosting on the Neon CDN if we don't know about it
                 cdn_metadata = [NeonCDNHostingMetadata()]
             
-        hosters = [CDNHosting.create(x) for x in cdn_metadata]
-        yield [utils.botoutils.run_async(x.upload, image, self.key) for x 
+        hosters = [api.cdnhosting.CDNHosting.create(x) for x in cdn_metadata]
+        yield [x.upload(image, self.key, async=True) for x 
                in hosters]
 
     @classmethod
@@ -2590,7 +2586,7 @@ class VideoMetadata(StoredObject):
                  experiment_value_remaining=None,
                  serving_enabled=True):
         super(VideoMetadata, self).__init__(video_id) 
-        self.thumbnail_ids = tids 
+        self.thumbnail_ids = tids or []
         self.url = video_url 
         self.duration = duration
         self.video_valence = vid_valence 
@@ -2632,7 +2628,8 @@ class VideoMetadata(StoredObject):
         def almost_equal(a, b, threshold=0.001):
             return abs(a -b) <= threshold
 
-        tmds = yield tornado.gen.Task(ThumbnailMetadata.get_many, self.thumbnail_ids)
+        tmds = yield tornado.gen.Task(ThumbnailMetadata.get_many,
+                                      self.thumbnail_ids)
         tid = None
 
         if self.experiment_state == ExperimentState.COMPLETE:
@@ -2684,8 +2681,9 @@ class VideoMetadata(StoredObject):
                 information about the video. The object will be updated with
                 the proper key and other information
         @image: PIL Image
-        @cdn_metadata: A list CDNHostingMetadata objects for how to upload the
-                       images. If this is None, it is looked up, which is slow.
+        @cdn_metadata: A list of CDNHostingMetadata objects for how to upload
+                       the images. If this is None, it is looked up, which is 
+                       slow.
         @save_objects: If true, the database is updated. Otherwise, 
                        just this object is updated along with the thumbnail
                        object.
@@ -2701,7 +2699,8 @@ class VideoMetadata(StoredObject):
             yield tornado.gen.Task(thumb.save)
 
             updated_video = yield tornado.gen.Task(
-                self.modify,
+                VideoMetadata.modify,
+                self.key,
                 lambda x: x.thumbnail_ids.append(thumb.key))
             if updated_video is None:
                 # It wasn't in the database, so save this object
@@ -2709,6 +2708,8 @@ class VideoMetadata(StoredObject):
                 yield tornado.gen.Task(self.save)
             else:
                 self.__dict__ = updated_video.__dict__
+        else:
+            self.thumbnail_ids.append(thumb.key)
 
     
 

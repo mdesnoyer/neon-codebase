@@ -253,7 +253,10 @@ class AWSHosting(CDNHosting):
             cdn_prefix = "%s.s3.amazonaws.com" % self.s3bucket_name
         
         fname = AWSHosting.neon_fname_fmt % (tid, image.size[0], image.size[1])
-        key_name = '%s/%s' % (self.folder_prefix, fname)
+        if self.folder_prefix:
+            key_name = '%s/%s' % (self.folder_prefix, fname)
+        else:
+            key_name = fname
 
         cdn_url = "http://%s/%s" % (cdn_prefix, key_name)
         fmt = 'jpeg'
