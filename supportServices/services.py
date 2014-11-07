@@ -448,13 +448,24 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     elif new_tid is None and abtest is None:
                         # custom thumbnail upload
                         thumbs = json.loads(self.get_argument('thumbnails'))
-                        self.upload_video_custom_thumbnail(itype, i_id, i_vid,
-                                                            thumbs)
+                        thumb_urls = [x['urls'][0] for x in thumbs 
+                                      if x['type'] == 'custom_upload'] 
+                        return self.upload_video_custom_thumbnails(
+                            i_id, i_vid,
+                            thumb_urls,
+                            async=True)
                         return
-                except Exception, e:
+                except IOError, e:
+                    data = '{"error": "internal error adding custom thumb"}'
+                    self.send_json_response(data, 500)
+                except tornado.web.MissingArgumentError, e:
                     data = '{"error": "missing thumbnail_id or thumbnails argument"}'
                     self.send_json_response(data, 400)
                     return
+                except Exception, e:
+                    _log.exception('Unexpected exception: %s' % e)
+                    data = '{"error": "internal error"}'
+                    self.send_json_response(data, 500)
 
                 if "brightcove_integrations" == itype:
                     self.update_video_brightcove(i_id, i_vid, new_tid)
@@ -1804,57 +1815,95 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     #    pass
 
 
-    @tornado.gen.engine
-    def upload_video_custom_thumbnail(self, itype, i_id, i_vid, thumbs):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def upload_video_custom_thumbnails(self, i_id, i_vid, thumb_urls):
         '''
-        Update a custom thumbnail for a video
+        Add custom thumbnails to the video
+
+        Inputs:
+        @i_id: Integration id
+        @i_vid: Internal video id
+        @thumb_urls: List of image urls that will be ingested
         '''
 
         p_vid = neondata.InternalVideoID.to_external(i_vid)
-        platform_account = yield tornado.gen.Task(self.get_platform_account, itype, i_id)
-        
-        if not platform_account:
-            _log.error("key=upload_video_custom_thumbnail msg=%s account not found" % itype)
-            self.send_json_response("%s account not found" % itype, 400)
-            return
-     
-        # TODO: should we handle multiple thumb uploads ?
-        t_url = thumbs[0]["urls"][0]
-        vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
-       
-        # Configure the upload of a custom thumbnail
-        fname = "custom%s.jpeg" % int(time.time())
-        keyname = "%s/%s/%s" % (vmdata.get_account_id(), vmdata.job_id, fname)
-        s3url = "https://%s.s3.amazonaws.com/%s" % ("host-thumbnails", keyname)
-        cdn_metadata = platform_account.cdn_metadata
-        ttype = neondata.ThumbnailType.CUSTOMUPLOAD
 
-        # upload & add thumb to VideoMetadata
-        result = yield tornado.gen.Task(vmdata.download_and_add_thumbnail, 
-                        t_url, keyname, s3url, ttype,
-                        cdn_metadata=cdn_metadata)
-        
-        if result is None:
+        # Get the video object
+        vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
+        if not vmdata:
+            _log.error("Could not find video: %s" % i_vid)
+            self.send_json_response("Video not found: %s" % p_vid, 400)
+
+        # Figure out the rank of the custom thumbs we know about so far
+        existing_thumbs = yield tornado.gen.Task(
+            neondata.ThumbnailMetadata.get_many,
+            vmdata.thumbnail_ids)
+        min_rank = 1
+        for thumb in existing_thumbs:
+            if (thumb.type == neondata.ThumbnailType.CUSTOMUPLOAD and 
+                thumb.rank < min_rank):
+                min_rank = thumb.rank
+        cur_rank = min_rank - 1
+
+        # Get the CDN metadata
+        cdn_metadata = yield tornado.gen.Task(
+            neondata.CDNHostingMetadataList.get, i_id)
+        if not cdn_metadata:
+            _log.warn("Could not find hosting information for platform %s" %
+                      i_id)
+            cdn_metadata = [neondata.NeonCDNHostingMetadata()]
+
+        # Upload the thumbnails to the hosting services
+        thumb_futures = []
+        new_thumbs = []
+        for url in thumb_urls:
+            new_thumb = neondata.ThumbnailMetadata(
+                None,
+                internal_vid = i_vid,
+                ttype=neondata.ThumbnailType.CUSTOMUPLOAD,
+                rank=cur_rank)
+            new_thumbs.append(new_thumb)
+            thumb_futures.append(vmdata.download_and_add_thumbnail(
+                new_thumb,
+                url,
+                cdn_metadata,
+                async=True))
+                                                                
+            cur_rank -= cur_rank
+
+        try:
+            yield thumb_futures
+        except Exception as e:
             data = '{"error": "Invalid image link or failed to download image"}'
             self.send_json_response(data, 400)
             return
+        new_tids = [x.key for x in new_thumbs]
 
+        # Now save the information in the database
+        # TODO(sunil): Do this as a transaction
+        result = yield tornado.gen.Task(neondata.ThumbnailMetadata.save_all,
+                                        new_thumbs)
         if result:
-            # save the video data
-            vm_save = yield tornado.gen.Task(vmdata.save)
+            vm_save = yield tornado.gen.Task(
+                neondata.VideoMetadata.modify,
+                i_vid,
+                lambda x: x.thumbnail_ids.extend(new_tids))
             if vm_save:
-                _log.info("key=update_video_brightcove" 
-                            " msg=thumbnail updated for video=%s tid=%s"\
-                            %(p_vid, result))
+                _log.info("custom thumbnails added to video=%s tids=%s"\
+                          %(i_vid, new_tids))
                 data = ''
                 self.send_json_response(data, 202)
                 return
             else:
+                _log.error('Error modifying the video metadata for vid %s' %
+                           i_vid)
                 data = '{"error": "internal error"}'
                 self.send_json_response(data, 500)
                 return
-            
         else:
+            _log.error('Error saving new thumbnail metadata to vid %s' %
+                       i_vid)
             data = '{"error": "internal error"}'
             self.send_json_response(data, 500)
             return

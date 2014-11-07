@@ -9,11 +9,13 @@ if sys.path[0] != __base_path__:
 
 import api.cdnhosting
 import boto.exception
-import random
+from cStringIO import StringIO
 import json
 import logging
 from mock import MagicMock, patch
 from supportServices import neondata
+import PIL
+import random
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
 import test_utils.redis
@@ -79,7 +81,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         hoster = api.cdnhosting.CDNHosting.create(metadata)
 
         with self.assertLogExists(logging.ERROR, 'AWS client error'):
-            with self.assertRaises(boto.exception.S3PermissionsError):
+            with self.assertRaises(IOError):
                 yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
 
     @tornado.testing.gen_test
@@ -94,7 +96,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         hoster = api.cdnhosting.CDNHosting.create(metadata)
 
         with self.assertLogExists(logging.ERROR, 'AWS Server error'):
-            with self.assertRaises(boto.exception.S3CreateError):
+            with self.assertRaises(IOError):
                 yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
 
     @tornado.testing.gen_test
@@ -144,7 +146,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.s3conn.create_bucket('host-bucket')
 
         with self.assertLogExists(logging.ERROR, 'AWS client error'):
-            with self.assertRaises(boto.exception.S3PermissionsError):
+            with self.assertRaises(IOError):
                 yield api.cdnhosting.create_s3_redirect('dest.jpg', 'src.jpg',
                                                         async=True)
 
@@ -155,7 +157,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.s3conn.create_bucket('host-bucket')
 
         with self.assertLogExists(logging.ERROR, 'AWS Server error'):
-            with self.assertRaises(boto.exception.S3CreateError):
+            with self.assertRaises(IOError):
                 yield api.cdnhosting.create_s3_redirect('dest.jpg', 'src.jpg',
                                                         async=True)
 
@@ -219,6 +221,12 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
             key_name = 'folder1/neontnacct1_vid1_tid1_w%i_h%i.jpg' % (w, h)
             s3key = self.bucket.get_key(key_name)
             self.assertIsNotNone(s3key)
+            buf = StringIO()
+            s3key.get_contents_to_file(buf)
+            buf.seek(0)
+            im = PIL.Image.open(buf)
+            self.assertEqual(im.size, (w, h))
+            self.assertEqual(im.mode, 'RGB')
             self.assertEqual(s3key.policy, 'public-read')
 
             # Check that the serving url is included

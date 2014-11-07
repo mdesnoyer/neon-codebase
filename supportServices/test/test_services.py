@@ -18,6 +18,7 @@ import datetime
 import json
 from mock import MagicMock, patch 
 import random
+import re
 from PIL import Image
 from StringIO import StringIO
 from supportServices import services, neondata
@@ -452,26 +453,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
 
         #neon api request
         elif "api/v1/submitvideo" in http_request.url:
-            response = _neon_submit_job_response()
-
-        elif "jpg" in http_request.url or "jpeg" in http_request.url:
-            if "error_image" in http_request.url:
-                response = tornado.httpclient.HTTPResponse(request, 500)
-            else:
-                #downloading any image (create a random image response)
-                response = create_random_image_response()
-
-        elif ".png" in http_request.url:
-            # Open an RGBA image
-            im = Image.open(os.path.join(os.path.dirname(__file__),
-                                         os.path.basename(http_request.url)))
-            self.assertEqual(im.mode, "RGBA")
-            imgstream = StringIO()
-            im.save(imgstream, "png")
-            imgstream.seek(0)
-            response = tornado.httpclient.HTTPResponse(http_request, 200,
-                                                       buffer=imgstream)
-            
+            response = _neon_submit_job_response()            
             
 
         elif ".mp4" in http_request.url:
@@ -1365,10 +1347,13 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(res['original_thumbnail'],
                             "http://servingurl_120_90.jpg")
 
+        
 
+    @patch('utils.imageutils.utils.http.send_request')
     @patch('api.cdnhosting.urllib2')
     @patch('api.cdnhosting.S3Connection')
-    def test_upload_video_custom_thumbnail(self, mock_conntype, mock_urllib2):
+    def test_upload_video_custom_thumbnail(self, mock_conntype, mock_urllib2,
+                                           mock_img_download):
         '''
         Test uploading a custom thumbnail for a video
         PUT
@@ -1395,6 +1380,36 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         mresponse = MagicMock()
         mresponse.read.return_value = '{"url": "http://cloudinary.jpg"}' 
         mock_urllib2.urlopen.return_value = mresponse 
+
+        # Mock the image download
+        def _handle_img_download(request, callback=None, *args, **kwargs):
+            if "jpg" in request.url or "jpeg" in request.url:
+                if "error_image" in request.url:
+                    response = tornado.httpclient.HTTPResponse(request, 500)
+                else:
+                    #downloading any image (create a random image response)
+                    response = create_random_image_response()
+
+            elif ".png" in request.url:
+                # Open an RGBA image
+                im = Image.open(os.path.join(
+                    os.path.dirname(__file__),
+                    os.path.basename(request.url)))
+                self.assertEqual(im.mode, "RGBA")
+                imgstream = StringIO()
+                im.save(imgstream, "png")
+                imgstream.seek(0)
+                response = tornado.httpclient.HTTPResponse(request, 200,
+                                                           buffer=imgstream)
+            else:
+                response = self._success_http_side_effect(request,
+                                                          callback=callback,
+                                                          *args, **kwargs)
+            if callback:
+                return self.io_loop.add_callback(callback, response)
+            else:
+                return response
+        mock_img_download.side_effect = _handle_img_download 
         
         self._setup_initial_brightcove_state()
         vid = self._get_videos()[0]
@@ -1417,12 +1432,25 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         thumbs = neondata.ThumbnailMetadata.get_many(vmdata.thumbnail_ids)
         c_thumb = None
         for thumb in thumbs:
-            if thumb.type == "customupload":
+            if thumb.type == neondata.ThumbnailType.CUSTOMUPLOAD:
                 c_thumb = thumb
         self.assertIsNotNone(c_thumb)
+        self.assertEqual(c_thumb.type, neondata.ThumbnailType.CUSTOMUPLOAD)
+        self.assertIsNotNone(c_thumb.phash)
+        self.assertEqual(c_thumb.urls, 
+                         ['https://host-thumbnails.s3.amazonaws.com/%s.jpg' %
+                          re.sub('_', '/', c_thumb.key)])
         
         s_url = neondata.ThumbnailServingURLs.get(c_thumb.key)
         self.assertIsNotNone(s_url)
+
+        # Make sure that image is in S3 both for serving and main
+        self.assertIsNotNone(conn.get_bucket('host-thumbnails').get_key(
+            re.sub('_', '/', c_thumb.key) + '.jpg'))
+        self.assertIsNotNone(conn.get_bucket('host-thumbnails').get_key(
+            "%s/%s/customupload0.jpg" % (self.api_key, vid)))
+        self.assertIsNotNone(conn.get_bucket('neon-image-cdn').get_key(
+            "neontn%s_w160_h120.jpg" % (c_thumb.key)))
 
         # RGBA image
         url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
@@ -1437,7 +1465,23 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(response.code, 202)
 
         # Check that the image is converted to RGB
-        
+        i_vid = self.api_key + "_" + vid
+        vmdata = neondata.VideoMetadata.get(i_vid)
+        thumbs = neondata.ThumbnailMetadata.get_many(vmdata.thumbnail_ids)
+        for thumb in thumbs:
+            if thumb.type == neondata.ThumbnailType.CUSTOMUPLOAD:
+                s3key = conn.get_bucket('host-thumbnails').get_key(
+                    re.sub('_', '/', thumb.key) + '.jpg')
+                self.assertIsNotNone(s3key)
+                buf = StringIO()
+                s3key.get_contents_to_file(buf)
+                buf.seek(0)
+                im = Image.open(buf)
+                self.assertEqual(im.mode, 'RGB')
+
+        # Check that the ranks decrease for custom uploads
+        self.assertIsNotNone(conn.get_bucket('host-thumbnails').get_key(
+            "%s/%s/customupload-1.jpg" % (self.api_key, vid)))
         
     
         # Image download error
@@ -1467,6 +1511,14 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         vals = {'thumbnails' : [data]}
         response = self.put_request(url, vals, self.api_key, jsonheader=True)
         self.assertEqual(response.code, 202) 
+
+        # Make sure that there are 3 custom thumbs now
+        i_vid = self.api_key + "_" + vid
+        vmdata = neondata.VideoMetadata.get(i_vid)
+        thumbs = neondata.ThumbnailMetadata.get_many(vmdata.thumbnail_ids)
+        self.assertEqual(
+            len([x for x in thumbs 
+                 if x.type == neondata.ThumbnailType.CUSTOMUPLOAD]), 3)
 
     def test_disable_thumbnail(self):
         '''

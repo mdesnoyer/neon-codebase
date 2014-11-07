@@ -80,13 +80,13 @@ def upload_image_to_s3(
         _log.error(
             'AWS Server error when uploading image to s3://%s: %s' % 
                     (keyname, e))
-        raise
+        raise IOError(str(e))
 
     except BotoClientError as e:
         _log.error(
             'AWS client error when uploading image to s3://%s : %s' % 
                     (keyname, e))
-        raise
+        raise IOError(str(e))
 
 # TODO(Sunil): Change this to use the options instead of properties
 def get_s3_hosting_bucket():
@@ -130,12 +130,12 @@ def create_s3_redirect(dest_key, src_key, dest_bucket=None,
     except BotoServerError as e:
         _log.error('AWS Server error when creating a redirect s3://%s/%s -> '
                    '%s : %s' % (src_bucket, src_key, redirect_loc, e))
-        raise
+        raise IOError(str(e))
 
     except BotoClientError as e:
         _log.error('AWS client error when creating a redirect s3://%s/%s -> '
                    '%s : %s' %  (src_bucket, src_key, redirect_loc, e))
-        raise
+        raise IOError(str(e))
     
     
 
@@ -277,7 +277,8 @@ class AWSHosting(CDNHosting):
         raise tornado.gen.Return(cdn_url)
         
 
-# TODO(Sunil): Update this class with the _upload_impl approach
+# TODO(Sunil): Update this class with the _upload_impl
+# approach. Should raise an IOError on a problem.
 class CloudinaryHosting(CDNHosting):
     
     '''

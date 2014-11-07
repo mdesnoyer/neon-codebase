@@ -101,10 +101,10 @@ class PILImageUtils(object):
             raise
         except ValueError as e:
             _log.error('Invalid image at %s: %s' % (url, e))
-            raise
+            raise IOError('Invalid image at %s: %s' % (url, e))
         except TypeError as e:
             _log.error('Invalid image at %s: %s' % (url, e))
-            raise
+            raise IOError('Invalid image at %s: %s' % (url, e))
         except Exception as e:
             _log.exception('Uncaught exception %s' % e)
             raise

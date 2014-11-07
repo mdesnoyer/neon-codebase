@@ -2696,7 +2696,9 @@ class VideoMetadata(StoredObject):
         # to the two objects are atomic. For now, put in the thumbnail
         # data and then update the video metadata.
         if save_objects:
-            yield tornado.gen.Task(thumb.save)
+            sucess = yield tornado.gen.Task(thumb.save)
+            if not sucess:
+                raise IOError("Could not save thumbnail")
 
             updated_video = yield tornado.gen.Task(
                 VideoMetadata.modify,
@@ -2705,11 +2707,15 @@ class VideoMetadata(StoredObject):
             if updated_video is None:
                 # It wasn't in the database, so save this object
                 self.thumbnail_ids.append(thumb.key)
-                yield tornado.gen.Task(self.save)
+                sucess = yield tornado.gen.Task(self.save)
+                if not sucess:
+                    raise IOError("Could not save video data")
             else:
                 self.__dict__ = updated_video.__dict__
         else:
             self.thumbnail_ids.append(thumb.key)
+
+        raise tornado.gen.Return(thumb)
 
     
 
@@ -2734,8 +2740,9 @@ class VideoMetadata(StoredObject):
         '''
         image = yield utils.imageutils.PILImageUtils.download_image(image_url,
                                                                     async=True)
-        yield self.add_thumbnail(thumb, image, cdn_metadata, save_objects,
-                                 async=True)
+        thumb = yield self.add_thumbnail(thumb, image, cdn_metadata,
+                                         save_objects, async=True)
+        raise tornado.gen.Return(thumb)
 
     @classmethod
     def get_video_request(cls, internal_video_id, callback=None):
