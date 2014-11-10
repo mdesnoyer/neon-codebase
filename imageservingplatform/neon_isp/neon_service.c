@@ -124,10 +124,8 @@ neon_service_set_bucket_id(const ngx_str_t * identifier,
     
     unsigned long bucket_hash = neon_sdbm_hash(hashstring, offset);
     bucket_hash %= N_ABTEST_BUCKETS;
-    //char bid[N_ABTEST_BUCKET_DIGITS] = {0};
     bucket_id->data = ngx_pcalloc(pool, N_ABTEST_BUCKET_DIGITS + 1);
     sprintf((char*)bucket_id->data, "%x", (unsigned int)bucket_hash);
-    //ret = 0;
     bucket_id->len = strlen((char*)bucket_id->data);
 }
 
