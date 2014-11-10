@@ -55,6 +55,15 @@ neon_mastermind_init(){
 }
 
 
+void 
+neon_mastermind_shutdown() {
+    deallocate_mastermind(mastermind_current);
+    deallocate_mastermind(mastermind_old);
+    mastermind_current = 0;
+    mastermind_old = 0;
+}
+
+
 const char * neon_load_error = 0;
 
 NEON_LOAD_ERROR
