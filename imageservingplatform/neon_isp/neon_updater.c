@@ -208,7 +208,9 @@ neon_runloop(void * arg){
         neon_sleep(sleep_time);
         
     }
-    
+
+    neon_mastermind_shutdown();
+
     return 0;
 }
 
@@ -246,7 +248,10 @@ neon_terminate_updater(){
     
     if(ret != 0)
         neon_log_error("cannot stop updater thread");
-    
+
     return 0;
 }
+
+
+
 

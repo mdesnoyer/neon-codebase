@@ -109,9 +109,11 @@ neon_service_get_uri_token(const ngx_http_request_t *req,
 static void 
 neon_service_set_bucket_id(const ngx_str_t * identifier, 
                            const ngx_str_t * video_id, 
-                           ngx_str_t * bucket_id){
+                           ngx_str_t * bucket_id,
+                           ngx_pool_t *pool){
 
     unsigned char hashstring[256]; // max size = 18 + sizeof(vid)
+    memset(hashstring, 0, 256);
     int offset = 0;
     memcpy(hashstring + offset, identifier->data, identifier->len);
     offset += identifier->len;
@@ -122,10 +124,9 @@ neon_service_set_bucket_id(const ngx_str_t * identifier,
     
     unsigned long bucket_hash = neon_sdbm_hash(hashstring, offset);
     bucket_hash %= N_ABTEST_BUCKETS;
-    char bid[N_ABTEST_BUCKET_DIGITS] = {0}; 
-    sprintf(bid, "%x", (unsigned int)bucket_hash);
-    bucket_id->data = (unsigned char*) strdup(bid);
-    bucket_id->len = strlen(bid);
+    bucket_id->data = ngx_pcalloc(pool, N_ABTEST_BUCKET_DIGITS + 1);
+    sprintf((char*)bucket_id->data, "%x", (unsigned int)bucket_hash);
+    bucket_id->len = strlen((char*)bucket_id->data);
 }
 
 /*
@@ -327,7 +328,7 @@ neon_service_set_abtest_bucket_cookie(ngx_http_request_t *request,
     }
 
     // Bucket ID
-    neon_service_set_bucket_id(&neonglobaluserid, video_id, bucket_id); 
+    neon_service_set_bucket_id(&neonglobaluserid, video_id, bucket_id, request->pool); 
     
     // alloc memory, use cookie_max_expiry as a template
     expires.data = (u_char *) ngx_palloc(request->pool, cookie_max_expiry.len);
@@ -382,7 +383,7 @@ int neon_service_parse_api_args(ngx_http_request_t *request,
         return 1;
     }
 
-    // get video id
+    // get an allocated video id
     *video_id = neon_service_get_uri_token(request, base_url, 1);
   
     if(*video_id == NULL) {
@@ -393,8 +394,20 @@ int neon_service_parse_api_args(ngx_http_request_t *request,
     // Clean up the video id from the neonvid_ parameter
     // neonvid_ is a prefix used to identify a Neon video in beacon api
     // Used only for the client API call
-    if (cleanup_video == 1)
-        neon_service_cleanup_video_id(video_id);
+    if (cleanup_video == 1) {
+          const char * prefix = "neonvid_";
+          const int prefix_size = 8;
+    
+          // look for the prefix and skip ahead of it 
+          if(ngx_strncmp(*video_id, prefix, prefix_size) == 0) {    
+            *video_id = *video_id + prefix_size;
+          }
+          // no prefix, this request is invalid
+          else {
+              neon_stats[NEON_SERVICE_VIDEO_ID_MISSING_FROM_URL]++;
+              return 1;
+          }
+    }
 
     // get height and width
     ngx_str_t value = ngx_string("");
@@ -726,7 +739,7 @@ neon_service_client_api(ngx_http_request_t *request,
     // generate the bucketId 
     ngx_str_t neonglobaluserid = ngx_string("");
     if (neon_service_userid_abtest_ready(request, &neonglobaluserid) == NEON_FALSE){
-        neon_service_set_bucket_id(&ipAddress, &vid, &bucket_id);
+        neon_service_set_bucket_id(&ipAddress, &vid, &bucket_id, request->pool);
     }
 
     // look up thumbnail image url
@@ -859,10 +872,10 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
 
         // Get the bucket id for a given video
         if(abtest_ready == NEON_TRUE){
-            neon_service_set_bucket_id(&neonglobaluserid, &vid_str, &bucket_id);
+            neon_service_set_bucket_id(&neonglobaluserid, &vid_str, &bucket_id, request->pool);
         }else{
             // Use the IP Address of the client to generate the bucket_id
-            neon_service_set_bucket_id(&ipAddress, &vid_str, &bucket_id);
+            neon_service_set_bucket_id(&ipAddress, &vid_str, &bucket_id, request->pool);
         }
 
         NEON_MASTERMIND_TID_LOOKUP_ERROR err =

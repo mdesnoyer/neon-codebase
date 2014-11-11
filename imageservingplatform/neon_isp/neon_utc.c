@@ -11,9 +11,13 @@ NEON_UTC_ERROR
 neon_convert_string_to_time(const char * const str, time_t * result)
 {
     // ISO-8601  "2014-03-27T23:20:00Z"
-    
+    static int size = sizeof(struct tm);
+
     struct tm when;
-    
+
+    // wipe to zero
+    memset(&when, 0, size);
+
     // this function takes care of proper conversion to a struct tm, with proper
     // year and month numbers
     strptime(str, "%Y-%m-%dT%H:%M:%SZ", &when);
