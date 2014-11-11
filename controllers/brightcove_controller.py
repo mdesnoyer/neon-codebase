@@ -245,8 +245,8 @@ class VideoTaskInfo(object):
         ''' remove task '''
         try:
             self.tasks.remove(task)
-        except Exception,e:
-            _log.exception('key=VideoTaskInfo msg=remove task exception %s' %e)
+        except Exception, e:
+            pass
 
     def add_task(self, task):
         ''' Add task '''

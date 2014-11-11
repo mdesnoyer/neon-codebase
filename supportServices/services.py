@@ -298,7 +298,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     self.get_video_status("ooyala", i_id, video_ids, video_state)
                 
                 elif itype == "youtube_integrations":
-                    self.get_youtube_videos(i_id)
+                    self.send_json_response("not supported yet", 400)
+                   
+            elif method == "videoids":
+                self.get_all_video_ids(itype, i_id)
+            
             else:
                 _log.warning(('key=account_handler '
                               'msg=Invalid method in request %s method %s') 
@@ -1803,6 +1807,22 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     #    '''
     #    pass
 
+    
+    # Get all the video ids
+    @tornado.gen.engine
+    def get_all_video_ids(self, itype, i_id):
+        '''
+        Get all the video ids from an account
+        '''
+        platform_account = yield tornado.gen.Task(self.get_platform_account, itype, i_id)
+        if not platform_account:
+            _log.error("key=upload_video_custom_thumbnail msg=%s account not found" % itype)
+            self.send_json_response('{"error":"%s account not found"}' % itype, 400)
+            return
+
+        vids = platform_account.get_videos()
+        vidlist = "".join(vids)
+        self.send_json_response('{"videoids":[%s]}' % vidlist, 200)
 
     @tornado.gen.engine
     def upload_video_custom_thumbnail(self, itype, i_id, i_vid, thumbs):
@@ -1815,7 +1835,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         
         if not platform_account:
             _log.error("key=upload_video_custom_thumbnail msg=%s account not found" % itype)
-            self.send_json_response("%s account not found" % itype, 400)
+            self.send_json_response('{"error":"%s account not found"}' % itype, 400)
             return
      
         # TODO: should we handle multiple thumb uploads ?

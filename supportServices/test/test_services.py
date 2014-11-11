@@ -1537,6 +1537,17 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         resp = json.loads(response.body)
         self.assertEqual(resp['items'][0]['video_id'], vid)
 
+    def test_get_video_ids(self):
+        ''' /videoids api '''
+        self._setup_initial_brightcove_state()
+        vids = self._get_videos()
+        url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
+                    "/%s/videoids/%s" %(self.a_id, self.b_id, vid))
+        response = self.get_request(url, self.api_key)
+        self.assertEqual(response.code, 200)
+        resp = json.loads(response.body)
+        self.assertListEqual(resp['videoids'], vids)
+
 ##### OOYALA PLATFORM TEST ######
 
 class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
