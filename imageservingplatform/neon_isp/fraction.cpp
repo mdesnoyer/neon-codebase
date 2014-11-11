@@ -15,7 +15,8 @@
 Fraction::Fraction()
 {
    defaultURL = 0;
-   tid = 0;    
+   tid = 0;  
+   initialized = false;
 }
 
 
@@ -23,23 +24,52 @@ Fraction::~Fraction()
 {
      defaultURL = 0;
      tid = 0;
+     initialized = false;
+}
+
+int
+Fraction::Init(double floor, const rapidjson::Value& frac)
+{
+    try {
+        int ret = InitSafe(floor, frac);
+
+        // success
+        if (ret == 0)
+            return 0;
+    }
+
+    // on any error, clean up 
+    catch (NeonException * e) {
+    }
+    catch (std::bad_alloc e) {
+    }
+    catch (...) {
+    }
+    
+    Dealloc();
+    return -1;
 }
 
 
-void
-Fraction::Init(double floor, const rapidjson::Value& frac)
+int
+Fraction::InitSafe(double floor, const rapidjson::Value& frac)
 {
+    if(initialized == true) {
+        neon_stats[NEON_FRACTION_INVALID_INIT]++;
+        return -1;
+    }
+
     /*
      *  Percentage of being selected at random
      */
     if(frac.HasMember("pct") == false) {
         neon_stats[NEON_FRACTION_PARSE_ERROR]++;
-        throw new NeonException("Fraction::Init: no percentage key/value found");
+        return -1; 
     }
 
     if(frac["pct"].IsDouble() == false) {
         neon_stats[NEON_FRACTION_PARSE_ERROR]++;
-        throw new NeonException("Fraction::Init: percentage value isnt a double type");
+        return -1;;
     }
 
     pct = frac["pct"].GetDouble();
@@ -53,7 +83,7 @@ Fraction::Init(double floor, const rapidjson::Value& frac)
     // Default URL
     if (frac.HasMember("default_url") == false)  {
         neon_stats[NEON_FRACTION_PARSE_ERROR]++;
-        throw new NeonException("Fraction::Init: no default_url key found");
+        return -1;
     }
 
     defaultURL = strdup(frac["default_url"].GetString()); 
@@ -61,7 +91,7 @@ Fraction::Init(double floor, const rapidjson::Value& frac)
     // Thumbnail ID
     if (frac.HasMember("tid") == false) {
         neon_stats[NEON_FRACTION_PARSE_ERROR]++;
-        throw new NeonException("Fraction::Init: no tid key found");
+        return -1; 
     }
 
     tid = strdup(frac["tid"].GetString());
@@ -73,14 +103,14 @@ Fraction::Init(double floor, const rapidjson::Value& frac)
     
     if(imageArray.IsArray() == false) {
         neon_stats[NEON_FRACTION_PARSE_ERROR]++;
-        throw new NeonException("Fraction::Init: imgs element not in array json format");
+        return -1;
     }
 
     rapidjson::SizeType numOfImages = imageArray.Size();
     
     if(numOfImages == 0) {
         neon_stats[NEON_FRACTION_INVALID]++;
-        throw new NeonException("Fraction::Init: no images found");
+        return -1;
     }
 
     images.reserve(numOfImages);
@@ -97,14 +127,35 @@ Fraction::Init(double floor, const rapidjson::Value& frac)
         const rapidjson::Value& elem = imageArray[i];
         
         // init the image instance with json elem
-        img->Init(elem);
+        int ret = img->Init(elem);
+            
+        if(ret != 0) {
+            neon_stats[NEON_FRACTION_INVALID]++;
+            return -1;
+        }
     }
+
+    initialized = true;
+    return 0;
 }
 
 
 void
 Fraction::Shutdown()
 {
+    if(initialized == false) {
+        neon_stats[NEON_FRACTION_INVALID_SHUTDOWN]++;
+        return;
+    }
+    
+    Dealloc();
+    initialized = false;
+}
+
+
+void
+Fraction::Dealloc()  {
+
     for(std::vector<ScaledImage*>::iterator it = images.begin(); it != images.end(); it ++)
     {
         ScaledImage * img = (*it);
@@ -120,9 +171,12 @@ Fraction::Shutdown()
         img = 0;
     }   
 
-   free((void *)defaultURL);
-   free((void *)tid); 
+    if(defaultURL != 0)
+        free((void *)defaultURL);
+    if(tid != 0)
+        free((void *)tid);
 }
+
 
 // check if a & b approx equal i.e in the range of the window size specified 
 bool
