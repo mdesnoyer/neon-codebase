@@ -666,7 +666,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
-              'bns' : ('neonvid_vid2, neonvid_vid5,'
+              'bns' : ('neonvid_vid2, neonvid_vid5.jpg?width=50&height=30,'
                        'neontnacct1_vid3_tid2.jpg,neonvid_my.vid~-3')},
             { 'eventType' : 'IMAGES_VISIBLE',
               'pageId' : 'pageid123',
