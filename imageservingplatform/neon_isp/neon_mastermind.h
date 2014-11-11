@@ -17,6 +17,11 @@ extern "C" {
  */
 NEON_BOOLEAN neon_mastermind_init();
 
+
+void
+neon_mastermind_shutdown();
+
+
 /*
  * Check if expiry is greater than current mastermind
  * */

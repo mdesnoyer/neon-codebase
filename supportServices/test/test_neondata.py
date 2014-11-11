@@ -554,6 +554,43 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         reqs = VideoMetadata.get_video_requests(i_vids)
         self.assertEqual(reqs, [None])
 
+    # TODO(Sunil): move the test to VideoMetadata specific tests 
+    def test_neon_serving_url(self):
+        '''
+        Test Serving URL generation and management
+        '''
+        
+        na = NeonUserAccount('acct1')
+        na.save()
+        np = NeonPlatform('acct1', na.neon_api_key)
+        np.save()
+       
+        vid = InternalVideoID.generate(na.neon_api_key, 'vid1')
+        vm = VideoMetadata(vid, [], 'reqid0', 'v0.mp4', 0, 0, None, 0, None, True)
+        vm.save()
+        
+        # check staging URL first, since it isn't saved in the DB
+        staging_url = vm.get_serving_url(staging=True)
+        serving_format = "neon-images.com/v1/client/%s/neonvid_%s.jpg"
+        expected_url = serving_format % (na.staging_tracker_account_id, 'vid1')
+        self.assertTrue(expected_url in staging_url)
+        
+        s_url = vm.get_serving_url()
+        serving_format = "neon-images.com/v1/client/%s/neonvid_%s.jpg"
+        expected_url = serving_format % (na.tracker_account_id, 'vid1')
+        
+        # ignore http://i{} and check if there is a substring match
+        self.assertTrue(expected_url in s_url)
+
+        # Check serving URL is in the VM object
+        vm = VideoMetadata.get(vid) 
+        self.assertTrue(expected_url in vm.serving_url)
+        
+        # check staging URL
+        staging_url = vm.get_serving_url(staging=True)
+        expected_url = serving_format % (na.staging_tracker_account_id, 'vid1')
+        self.assertTrue(expected_url in staging_url)
+
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()

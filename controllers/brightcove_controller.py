@@ -24,8 +24,8 @@ from multiprocessing.pool import ThreadPool
 import random
 import re
 from supportServices.neondata import VideoMetadata, ThumbnailMetadata, \
-     InMemoryCache, InternalVideoID, ThumbnailID, BrightcovePlatform
-from supportServices.url2thumbnail import URL2ThumbnailIndex
+     AbstractPlatform, InternalVideoID, ThumbnailID, BrightcovePlatform, \
+     NeonApiRequest
 import time
 import threading
 import tornado
@@ -45,9 +45,6 @@ define("service_url", default="http://localhost:8083",
 define('directive_address',
        default='s3://neon-image-serving-directives/mastermind', 
        help='Address to get the directive file from')
-define("max_thumb_check_threads", default=10,
-       help=("Maximum number of threads used to check the brightcove "
-             "thumbnail state"))
 define("thumbnail_sampling_period", default=304,
        help="Period, in seconds for checking brightcove for new thumbs")
 
@@ -199,6 +196,7 @@ class ThumbnailCheckTask(AbstractTask):
         self.url2thumb = url2thumb
         
     def execute(self):
+        
         # Get the BrightcovePlatform associated with this video id
         video = VideoMetadata.get(self.video_id)
         if video is None:
@@ -226,41 +224,12 @@ class ThumbnailCheckTask(AbstractTask):
             statemon.state.increment('thumbchecktask_fail')
             return
 
-        # Record the new thumbnail if it's new
-        thumb_info = self.url2thumb.get_thumbnail_info(
-            thumb_url, 
-            internal_video_id=self.video_id)
+        # Check if a neontn exists, then its a Neon thumb. Else save this 
+        # thumbnail as user upload
+        # skip this for now
+        # TODO: (Sunil) : complete the check thumbnail task 
 
-        if thumb_info is None:
-            # Somebody uploaded a new thumbnail to Brightcove so we
-            # are going to record it.
-            image = PILImageUtils.download_image(thumb_url)
-            tid = ThumbnailID.generate(image, self.video_id)
-            created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            thumb = ThumbnailMetadata(tid, self.video_id, [thumb_url],
-                                      created, image.size[0], image.size[1],
-                                      'brightcove', rank=0)
-            thumb.update_phash(image)
-            thumb.save()
-
-            #TODO(mdesnoyer): We have a potential race condition here
-            #when updating the ranks in the brightcove thumbnails for
-            #this video. It's not very risky because this task is only
-            #ever running once (unless it takes longer than the
-            #period), but it should be locked properly.
-            video = VideoMetadata.get(self.video_id)
-            if tid not in video.thumbnail_ids:
-                video.thumbnail_ids.append(tid)
-                video.save()
-            for thumb_id in video.thumbnail_ids:
-                if thumb_id == tid:
-                    continue
-                def inc_rank(t): 
-                    if t.type == 'brightcove':
-                        t.rank += 1
-                ThumbnailMetadata.modify(thumb_id, inc_rank)
-
-            self.url2thumb.add_thumbnail_to_index(thumb)
+        return
 
 
 class VideoTaskInfo(object):
@@ -371,6 +340,10 @@ class TaskManager(object):
 class BrightcoveABController(object):
     ''' Brightcove AB controller '''
 
+    # a thumbnail shall not be scheduled to last less than 10 minutes
+    # in the overall video rotation period 
+    MIN_THUMBNAIL_DURATION = 10 * 60 
+
     def __init__(self, timeslice=4260, cushion_time=600):
         self.neon_service_url = options.service_url
         
@@ -378,15 +351,8 @@ class BrightcoveABController(object):
         self.cushion_time = cushion_time
 
         self.taskmgr = TaskManager()
-        self.url2thumb = URL2ThumbnailIndex()
         self.monitored_videos = set()
-        self.thumb_check_pool = ThreadPool(options.max_thumb_check_threads)
         
-        # Check brightcove for the thumbnail state at least every 5 minutes
-        tornado.ioloop.PeriodicCallback(
-            self.check_thumbnails,
-            options.thumbnail_sampling_period * 1000).start()
-
         # Check for new directives every minute
         tornado.ioloop.PeriodicCallback(
             self.load_directives,
@@ -395,14 +361,23 @@ class BrightcoveABController(object):
         self.directives = {} # Map of video_id -> directive
         self.directive_etag = None
 
+        self.account_settings = {} # api_key => AbstractPlatform obj
+        
         self._initialized = False
 
     def load_initial_state(self):
         _log.info('Initializing the BrightCove controller')
         
-        self.url2thumb.build_index_from_neondata()
-
+        self.load_accounts()
         self.load_directives(options.delay)
+        
+    def load_accounts(self):
+        '''
+        Load account level settings for each platform account
+        (abtesting enabled, testing type etc..)
+        '''
+        for platform in AbstractPlatform.get_all_instances():
+            self.account_settings[platform.neon_api_key] = platform 
 
     def load_directives(self, max_update_delay=0):
         s3regex = re.compile('s3://([0-9a-zA-Z_\-]+)/(.+)')
@@ -436,6 +411,10 @@ class BrightcoveABController(object):
         
         lines = key.get_contents_as_string().split('\n')
         for line in lines[1:]:
+            if line == "end":
+                _log.info('read entire directive file')
+                continue
+
             record = json.loads(line)
             if record['type'] == 'dir':
                 # Create the directive from the record
@@ -455,6 +434,21 @@ class BrightcoveABController(object):
                 self.apply_directive(directive, max_update_delay)
                 statemon.state.decrement('nvideos_abtesting')
         
+    def _check_testing_with_bcontroller(self, api_key):
+        '''
+        Check account is enabled for AB Testing and 
+        the controller type is bc controller
+        '''
+        try:
+            accnt = self.account_settings[api_key]
+            if accnt.abtest and accnt.serving_controller == "bc_controller":
+                return True
+
+        except KeyError, e:
+            _log.error("Account not found %s" % api_key)
+            return False
+
+        return False 
 
     def apply_directive(self, directive, max_update_delay=0):
         '''Apply a directive to a controller.
@@ -463,31 +457,26 @@ class BrightcoveABController(object):
         directive - The directive as (video_id, [(thumb_id, fraction)])
         max_update_delay - Maximum delay to apply the directive
         '''
-        #if not self._initialized:
-        #    _log.critical('The controller has not been initialized and you '
-        #                  'are trying to load a directive.')
-        #    raise RuntimeError('Controller must be initialized first')
 
         video_id, distribution = directive
         _log.info('New directive for video %s: %s' % (video_id,
                                                       distribution))
 
-        self.monitored_videos.add(video_id)
+        internal_account_id = video_id.split('_')[0]
+        
+        # Check if the account is enabled for ABTesting and controller type
+        # is BC controller
+        if self._check_testing_with_bcontroller(internal_account_id):
 
-        # New data from mastermind, so add any new thumbnails to the
-        # url2thumb index.
-        for thumb in ThumbnailMetadata.get_many([x[0] for x in distribution]):
-            self.url2thumb.add_thumbnail_to_index(thumb)
-
-        self.taskmgr.add_video_info(video_id, distribution)
-        self.thumbnail_change_scheduler(video_id, distribution,
-                                        max_update_delay)
-
-    def check_thumbnails(self):
-        '''Launch jobs to check all of the urls on Brightcove.'''
-        for video_id in self.monitored_videos:
-            task = ThumbnailCheckTask(video_id, self.url2thumb)
-            self.thumb_check_pool.apply_async(task.execute)
+            # Check that video state is "active" or "serving_active" 
+            # if yes, then we should A/B Test 
+            
+            request = VideoMetadata.get_video_request(video_id)
+            if request.state in ["active", "serving_active"]:
+                self.monitored_videos.add(video_id)
+                self.taskmgr.add_video_info(video_id, distribution)
+                self.thumbnail_change_scheduler(video_id, distribution,
+                                                max_update_delay)
 
     def start(self):
         '''Starts running the brightcove controller on the current thread.
@@ -502,138 +491,98 @@ class BrightcoveABController(object):
 
         account_id = video_id.split('_')[0] 
 
-        #The time in seconds each thumbnail to be run
+        # The time in seconds each thumbnail to be run
         time_dist = self.convert_from_percentages(distribution)
-        
-        active_thumbs = 0
-        for thumb, thumb_time in time_dist:
-            if thumb_time > 0.0:
-                active_thumbs += 1
 
-        #No thumbs are active, skip
-        if active_thumbs == 0:
+        # no thumbnails to run
+        if time_dist is None:
             return
-        
-        #If Active thumbnail ==1 and is brightcove
-        #and no thumb is chosen, then skip. 
-        if active_thumbs ==1:
-            vm = VideoMetadata.get(video_id)
-            tids = vm.thumbnail_ids 
-            thumbnails = ThumbnailMetadata.get_many([tids])
-            chosen = False
-            for thumb in thumbnails:
-                if thumb and thumb.chosen == True:
-                    chosen = True
-            
-            if not chosen:
-                return
 
-        #Make a decision based on the current state of the video data
-        delay = random.randint(0, max_update_delay)
+        # randomize the thumbnails order
+        random.shuffle(time_dist)
         cur_time = time.time()
-        time_to_exec_task = cur_time + delay
-        timeslice_start = time_to_exec_task 
-        thumbA = time_dist.pop(0)
+
+        # create a task for each thumbnail
+        for t in time_dist:
+            # thumbnail tuple is in format (thumb id, time slice)  
+            taskA = ThumbnailChangeTask(account_id, video_id, t[0])
+            # schedule it in the future, now + time slicei
+            tslice = cur_time + t[1]
+            self.taskmgr.add_task(taskA, int(tslice))
         
-        #Minority thumbnail sums 
-        majority_thumb_timeslice = thumbA[1]
-        minority_thumb_timeslice = self.timeslice -\
-                                        majority_thumb_timeslice 
-        minority_thumb_boundary = self.timeslice -\
-                                        2*self.cushion_time
-
-        #Time when the thumbnail to be A/B tested starts (the lower % thumbnail)
-        abtest_start_time = random.randint(self.cushion_time,
-                                self.timeslice -
-                                    int(minority_thumb_timeslice +1) #could be fraction, hence +1s 
-                                    - self.cushion_time)
-        # Task sched visualization
-        #-----------------------------------------------------
-        #| check |  sched A  | sched B | sched A |  end task |
-        #--------0-------------------------------------------E-
-
-        #Thumbnail Check Task -- May need to run more than once?
-        self.taskmgr.add_task(ThumbnailCheckTask(video_id, self.url2thumb),
-                              cur_time)
-
-        #NOTE: Check what happens when you push same refID thumb to bcove
-        #ans: It keeps the same thumb, discards the image being uploaded
-    
-        #TODO: Randomize the minority thumbnail scheduling
-
-        #schedule A - The Majority run thumbnail at the start of time slice 
-        taskA = ThumbnailChangeTask(account_id, video_id, 
-                                    thumbA[0], active_thumbs==1) 
-        self.taskmgr.add_task(taskA, timeslice_start) 
-        _log.info("Sched A %s %s" % ((time_to_exec_task - cur_time - delay), 
-                                     time_dist))
-
-        #if Active thumbnail count <=1, skip
-        if active_thumbs >1:
-            #schedule the B's - the lower % thumbnails
-            time_to_exec_task += abtest_start_time
-            for tup in time_dist:
-                #Avoid scheduling if time allocated is 0
-                if tup[1] <= 0.0:
-                    continue
-
-                # Schedule a check of the brightcove url before we change it
-                self.taskmgr.add_task(
-                    ThumbnailCheckTask(video_id, self.url2thumb),
-                    time_to_exec_task - 10)
-
-                task = ThumbnailChangeTask(account_id, video_id, tup[0]) 
-                self.taskmgr.add_task(task, time_to_exec_task)
-                #print "---" , cur_time,delay,abtest_start_time
-                _log.info ("Sched B %d" %(time_to_exec_task - cur_time - delay))
-                
-                # Add the time the thumbnail should run for 
-                time_to_exec_task += tup[1] 
-            
-            _log.info ("Sched A %d" %(time_to_exec_task - cur_time - delay))
-            #schedule A - The Majority run thumbnail for the rest of timeslice 
-            taskA = ThumbnailChangeTask(account_id, video_id, thumbA[0]) 
-            self.taskmgr.add_task(taskA, time_to_exec_task) 
-            time_to_exec_task += (self.timeslice 
-                                    - sum([tup[1] for tup in time_dist])
-                                    - abtest_start_time)
-
-            _log.info("end task %d" %(time_to_exec_task - cur_time - delay)) 
-            task_time_slice = TimesliceEndTask(video_id, self) 
+        # TODO (Sunil) : Add a CheckThumbnail task, skipping this for now
         
-            #schedule End of Timeslice for a particular video
-            self.taskmgr.add_task(task_time_slice, time_to_exec_task)
-            
-            statemon.state.increment('nvideos_abtesting')
-        else:
-            #Dont need to end the timeslice since the majority thumbnail is 
-            #designated to run until mastermind sends a changed directive
-            _log.info("key=thumbnail_change_scheduler"
-                    " msg=less than 1 active thumbnail for video %s" %video_id)
-            pass
+        # Schedule end of timeslice for a particular video
+        task_time_slice = TimesliceEndTask(video_id, self) 
+        time_to_exec_task = cur_time + sum([tup[1] for tup in time_dist])
+        self.taskmgr.add_task(task_time_slice, time_to_exec_task)
+
+    @classmethod
+    def enforce_minimum_time_slice(cls, ts):
+        ''' 
+        Returns an adjusted tslice 
+        '''
+        
+        return max(ts, BrightcoveABController.MIN_THUMBNAIL_DURATION)
 
     def convert_from_percentages(self, pd):
         ''' Convert from fraction(%) to time 
 
+        Thumbnails with zero or negative values percentege are skipped.
+        If thumbnails total percentage do not add to 1.0, they will be scaled
+        accordingly so the minimum rotation loop is fully filled proprotionally.
+
+
         Returns: [(thumb_id, # of seconds to run)] sorted by the number of seconds
         '''
         
-        total_pcnt = sum([float(tup[1]) for tup in pd])
+        #  the result, a list of thumbnails with their associated calculated time slice 
         time_dist = []
 
-        for tup in pd:
-            pcnt = float(tup[1])
-            if total_pcnt > 1:
-                tslice = (pcnt/total_pcnt) * self.timeslice  
-            else:
-                tslice = pcnt * self.timeslice
+        # add all thumbs percentage, should normally be a total of 1.0
+        # but it is possible that it might less or more. Note that humbnails with
+        # zero pct are in effect disregarded.   
+        total_pcnt = 0.0
 
+        for tup in pd:
+            pct = float(tup[1])
+
+            if pct >= 0.0:
+                total_pcnt += pct
+            else:
+                _log.info('Dismissing fraction with negative percentage value: %s' %(pct))
+
+        # no active thumbnails in this case,  return
+        if total_pcnt <= 0.0:
+            return None
+
+        # if total_pcnt is not be exactly 1.0 we will use a scale factor
+        scale_factor = 1.0
+        if total_pcnt != 1.0:
+            scale_factor = 1.0 / total_pcnt
+            _log.info('Scaling used since total of all percentages isnt exactly 1.0:  %s' %(total_pcnt))
+
+        # add each active thumbnail to the result sequence
+        for tup in pd:
+
+            pcnt = float(tup[1]) * scale_factor
+           
+            # thumbnails with zero percent are disregarded
+            if pcnt == 0.0:
+                continue
+
+            # how long should this thumbnail have in the rotation 
+            tslice = pcnt * self.timeslice
+
+            # time slice must be at least minimum length
+            tslice = BrightcoveABController.enforce_minimum_time_slice(tslice)
+
+            # add thumbnail to result
             pair = (tup[0], tslice)
             time_dist.append(pair)
-        
-        sorted_time_dist = sorted(time_dist, key=lambda tup: tup[1], reverse=True)
-        return sorted_time_dist 
-   
+     
+        return time_dist
+  
 ###################################################################################
 # MAIN
 ###################################################################################

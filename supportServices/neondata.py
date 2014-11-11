@@ -2620,6 +2620,10 @@ class VideoMetadata(StoredObject):
 
         # Will thumbnails for this video be served by our system?
         self.serving_enabled = serving_enabled 
+        
+        # Serving URL (ISP redirect URL) 
+        # NOTE: always use the get_serving_url() method to get the serving_url 
+        self.serving_url = None
 
     def get_id(self):
         ''' get internal video id '''
@@ -2786,6 +2790,45 @@ class VideoMetadata(StoredObject):
             request_keys.append(rkey)
         return NeonApiRequest.get_requests(request_keys)
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_serving_url(self, staging=False):
+        '''
+        Get the serving URL of the video. If self.serving_url is not
+        set, fetch the neon publisher id (TAI) and save the video object 
+        with the serving_url set
+        '''
+        def _update_serving_url(vobj):
+            vobj.serving_url = self.serving_url
+
+        random.seed(int(time.time()))
+        subdomain_index = random.randrange(1, 4)
+        platform_vid = InternalVideoID.to_external(self.get_id())
+        serving_format = "http://i%s.neon-images.com/v1/client/%s/neonvid_%s.jpg"
+
+        if self.serving_url:
+            if staging:
+                # replace with staging id
+                nu = yield tornado.gen.Task(
+                        NeonUserAccount.get_account, self.get_account_id())
+                s_id = nu.staging_tracker_account_id
+                serving_url = serving_format % (subdomain_index, s_id, platform_vid)
+                raise tornado.gen.Return(serving_url)
+
+            raise tornado.gen.Return(self.serving_url)
+        else:
+            # Fill in the Serving URL
+            nu = yield tornado.gen.Task(
+                    NeonUserAccount.get_account, self.get_account_id())
+            pub_id = nu.tracker_account_id
+            if staging:
+                pub_id = nu.staging_tracker_account_id
+                serving_url = serving_format % (subdomain_index, pub_id, platform_vid)
+                raise tornado.gen.Return(serving_url)
+
+            self.serving_url = serving_format % (subdomain_index, pub_id, platform_vid)
+            res = yield tornado.gen.Task(VideoMetadata.modify, self.key, _update_serving_url)
+            raise tornado.gen.Return(self.serving_url)
 
 class InMemoryCache(object):
 
