@@ -20,7 +20,7 @@ public:
     ~ScaledImage();
     
     
-    void Init(const rapidjson::Value& img);
+    int Init(const rapidjson::Value& img);
     void Shutdown();
  
     int GetHeight() const;
