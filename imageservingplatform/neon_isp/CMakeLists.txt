@@ -5,14 +5,14 @@ include(${CMAKE_SOURCE_DIR}/Common.cmake)
 
 include_directories(${imageservingplatform_SOURCE_DIR})
 include_directories(${imageservingplatform_SOURCE_DIR}/rapidJson)
-include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.4.7/objs)
-include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.4.7/src/core)
-include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.4.7/src/event)
-include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.4.7/src/http)
-include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.4.7/src/mail)
-include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.4.7/src/misc)
-include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.4.7/src/http/modules)
-include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.4.7/src/os/unix)
+include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.6.2/objs)
+include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.6.2/src/core)
+include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.6.2/src/event)
+include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.6.2/src/http)
+include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.6.2/src/mail)
+include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.6.2/src/misc)
+include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.6.2/src/http/modules)
+include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.6.2/src/os/unix)
 
 add_library(NeonISP STATIC
  neon_mastermind.cpp

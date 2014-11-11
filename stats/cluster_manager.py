@@ -45,7 +45,7 @@ statemon.define('cluster_is_alive', int)
 statemon.define('cluster_deaths', int)
 statemon.define('cluster_resize_failures', int)
 statemon.define('successful_batch_runs', int)
-statemon.define('last_batch_success', int)
+statemon.define('last_batch_success', int, default=1)
 
 class BatchProcessManager(threading.Thread):
     '''Thread that will manage the batch process runs.'''

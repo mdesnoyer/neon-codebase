@@ -124,7 +124,7 @@ class ISP:
         self.config_file.write(config_contents)
         self.config_file.flush()
 
-        self.nginx_path = base_path + "/imageservingplatform/nginx-1.4.7/objs/nginx" #get build path
+        self.nginx_path = base_path + "/imageservingplatform/nginx-1.6.2/objs/nginx" #get build path
 
     def start(self):
         self.proc = subprocess.Popen([
