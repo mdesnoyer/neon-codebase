@@ -878,12 +878,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                               0, #current tid,add fake tid
                               thumbs)
 
-            # Add Serving URL if present
-            try:
-                vr.serving_url = request.response['serving_url']
-            except KeyError, e:
-                pass
-
             result[vid] = vr
          
         #2b Filter videos based on state as requested
@@ -910,11 +904,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         if len(keys) > 0:
             video_results = yield tornado.gen.Task(
-                neondata.VideoMetadata.get_many,
-                keys)
+                            neondata.VideoMetadata.get_many, keys)
             tids = []
             for vresult in video_results:
-                
                 if vresult:
                     # extend list of tids
                     tids.extend(vresult.thumbnail_ids)
@@ -922,6 +914,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     # Update A/B Test state for the videos
                     vid = neondata.InternalVideoID.to_external(vresult.key)
                     result[vid].abtest = vresult.testing_enabled
+
+                    # Add a Serving URL 
+                    result[vid].serving_url = yield tornado.gen.Task(vresult.get_serving_url) 
 
                     # If there is a winner, populate the winner thumbnail
                     if vresult.experiment_state == \
@@ -932,7 +927,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 
             #Get all the thumbnail data for videos that are done
             thumbnails = yield tornado.gen.Task(
-                        neondata.ThumbnailMetadata.get_many, tids)
+                            neondata.ThumbnailMetadata.get_many, tids)
             for thumb in thumbnails:
                 if thumb:
                     vid = neondata.InternalVideoID.to_external(thumb.video_id)
