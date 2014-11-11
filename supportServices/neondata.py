@@ -1070,11 +1070,11 @@ class CDNHostingMetadataList(NamespacedStoredObject):
             obj = cls(key)
 
             #populate the object dictionary
-            for key, value in data_dict.iteritems():
-                obj.__dict__[str(key)] = value
+            for k, value in data_dict.iteritems():
+                obj.__dict__[str(k)] = value
 
             # Create each cdn object
-            obj.cdns = [CDNHostingMetadata._create(x) for x in obj.cdns]
+            obj.cdns = [CDNHostingMetadata._create(x, key) for x in obj.cdns]
             obj.cdns = [x for x in obj.cdns if x is not None]
         
             return obj
@@ -1115,7 +1115,7 @@ class CDNHostingMetadata(object):
         return str(self)
 
     @classmethod
-    def _create(cls, obj_dict):
+    def _create(cls, obj_dict, integration_id):
         '''Create an object from a dictionary that was created with to_dict.
 
         Returns None if the object could not be created.
@@ -1123,7 +1123,13 @@ class CDNHostingMetadata(object):
         if obj_dict and len(obj_dict) == 2:
 
             # Get the class type to create
-            classtype = globals()[obj_dict['type']]
+            try:
+                classtype = globals()[obj_dict['type']]
+            except KeyError:
+                _log.error('Unknown hosting metadata classtype %s for '
+                           'integration id %s' % 
+                           (obj_dict['type'], integration_id))
+                raise
             obj = classtype()
 
             #populate the object dictionary
@@ -1139,7 +1145,7 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
     def __init__(self, access_key=None, secret_key=None, bucket_name=None,
                  cdn_prefixes=None, folder_prefix=None, resize=False,
-                 update_serving_urls=False):
+                 update_serving_urls=False, do_salt=True):
         '''
         Create the object
         '''
@@ -1150,21 +1156,29 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
         self.bucket_name = bucket_name # S3 bucket to host in
         self.folder_prefix = folder_prefix # Folder prefix to host in
 
+        # Add a random named directory between folder prefix and the 
+        # image name? Useful for performance when serving.
+        self.do_salt = do_salt 
+
 class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     '''
     Hosting on S3 using the Neon keys.
+    
+    This default hosting just uses pure S3, no cloudfront.
     '''
     def __init__(self, bucket_name='neon-image-cdn',
                  cdn_prefixes=None,
                  folder_prefix='',
                  resize=True,
-                 update_serving_urls=True):
+                 update_serving_urls=True,
+                 do_salt=True):
         super(NeonCDNHostingMetadata, self).__init__(
             bucket_name=bucket_name,
-            cdn_prefixes=(cdn_prefixes or ['imagecdn.neon-lab.com']),
+            cdn_prefixes=(cdn_prefixes or ['n3.neon-images.com']),
             folder_prefix=folder_prefix,
             resize=resize,
-            update_serving_urls=update_serving_urls)
+            update_serving_urls=update_serving_urls,
+            do_salt=do_salt)
 
 class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     '''
@@ -2330,7 +2344,7 @@ class ThumbnailMetadata(StoredObject):
                  width=None, height=None, ttype=None,
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None,
-                 serving_frac=None, frameno=None):
+                 serving_frac=None, frameno=None, filtered=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
         self.urls = urls or []  # List of all urls associated with single image
@@ -2345,6 +2359,7 @@ class ThumbnailMetadata(StoredObject):
         self.model_score = model_score #string
         self.model_version = model_version #string
         self.frameno = frameno #int Frame Number
+        self.filtered = filtered # String describing how it was filtered
         #TODO: remove refid. It's not necessary
         self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
         self.phash = phash # Perceptual hash of the image. None if unknown

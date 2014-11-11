@@ -412,7 +412,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         neon_cdn = NeonCDNHostingMetadata('my-bucket',
                                           ['mycdn.neon-lab.com'])
         self.assertTrue(neon_cdn.resize)
-        self.assertEqual(neon_cdn.update_serving_urls, True)
+        self.assertTrue(neon_cdn.update_serving_urls)
         self.assertEqual(neon_cdn.folder_prefix, '')
         s3_cdn = S3CDNHostingMetadata('access-key',
                                       'secret-key',
@@ -428,6 +428,20 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         new_cdns = CDNHostingMetadataList.get('integration0')
 
         self.assertEqual(cdns, new_cdns)
+
+    def test_hosting_metadata_bad_classname_in_json(self):
+        neon_cdn = NeonCDNHostingMetadata('my-bucket',
+                                          ['mycdn.neon-lab.com'])
+        cdns = CDNHostingMetadataList('integration0',
+                                      [neon_cdn])
+        good_json = cdns.to_json()
+        bad_json = re.sub('NeonCDNHostingMetadata', 'UnknownHostingMetadata',
+                          good_json)
+
+        with self.assertLogExists(logging.ERROR, 'Unknown hosting metadata'):
+            with self.assertRaises(KeyError):
+                CDNHostingMetadataList._create('integration0',
+                                               bad_json)
 
     def test_internal_video_id(self):
         '''
@@ -915,8 +929,9 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         VideoMetadata(InternalVideoID.generate('acct1', 'vid1'),
                       i_id='i6').save()
         cdn_list = CDNHostingMetadataList(
-            'i6', [ NeonCDNHostingMetadata(),
-                    S3CDNHostingMetadata(bucket_name='customer-bucket') ])
+            'i6', [ NeonCDNHostingMetadata(do_salt=False),
+                    S3CDNHostingMetadata(bucket_name='customer-bucket',
+                                         do_salt=False) ])
         cdn_list.save()
 
         thumb_info = ThumbnailMetadata(None, 'acct1_vid1',
@@ -960,7 +975,8 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.s3conn.create_bucket('customer-bucket')
         self.s3conn.create_bucket('host-thumbnails')
 
-        cdn_metadata = S3CDNHostingMetadata(bucket_name='customer-bucket') 
+        cdn_metadata = S3CDNHostingMetadata(bucket_name='customer-bucket',
+                                            do_salt=False) 
 
         video_info = VideoMetadata('acct1_vid1')
         thumb_info = ThumbnailMetadata(None,
@@ -1021,7 +1037,8 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.s3conn.create_bucket('customer-bucket')
         self.s3conn.create_bucket('host-thumbnails')
 
-        cdn_metadata = S3CDNHostingMetadata(bucket_name='customer-bucket') 
+        cdn_metadata = S3CDNHostingMetadata(bucket_name='customer-bucket',
+                                            do_salt=False) 
 
         video_info = VideoMetadata('acct1_vid1')
         thumb_info = ThumbnailMetadata(None,

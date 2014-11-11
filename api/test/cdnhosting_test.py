@@ -16,6 +16,7 @@ from mock import MagicMock, patch
 from supportServices import neondata
 import PIL
 import random
+import re
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
 import test_utils.redis
@@ -52,7 +53,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         metadata = neondata.S3CDNHostingMetadata(
             'access_key', 'secret_key',
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
-            'folder1', False, False)
+            'folder1', False, False, False)
 
         hoster = api.cdnhosting.CDNHosting.create(metadata)
         yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
@@ -206,7 +207,7 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
     def test_host_resized_images(self):
         metadata = neondata.NeonCDNHostingMetadata(
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
-            'folder1', True, True)
+            'folder1', True, True, False)
 
         hoster = api.cdnhosting.CDNHosting.create(metadata)
         yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
@@ -233,6 +234,47 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
             url = serving_urls.get_serving_url(w, h)
             self.assertRegexpMatches(
                 url, 'http://cdn[1-2].cdn.com/%s' % key_name)
+
+    @tornado.testing.gen_test
+    def test_salted_path(self):
+        metadata = neondata.NeonCDNHostingMetadata(
+            'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
+            'folder1', True, True, True)
+
+        hoster = api.cdnhosting.CDNHosting.create(metadata)
+        yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+
+        serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
+        self.assertIsNotNone(serving_urls)
+
+        keyRe = re.compile('folder1/[0-9a-zA-Z]{3}/neontnacct1_vid1_tid1_'
+                           'w([0-9]+)_h([0-9]+).jpg')
+        sizes_found = []
+        for s3key in self.bucket.list():
+            # Make sure that the key is the expected format with salt
+            match = keyRe.match(s3key.name)
+            self.assertIsNotNone(match)
+
+            width = int(match.group(1))
+            height = int(match.group(2))
+            sizes_found.append((width, height))
+
+            # Check that the serving url is included
+            url = serving_urls.get_serving_url(width, height)
+            self.assertRegexpMatches(
+                url, 'http://cdn[1-2].cdn.com/%s' % s3key.name)
+
+            # Check that the image is as expected
+            buf = StringIO()
+            s3key.get_contents_to_file(buf)
+            buf.seek(0)
+            im = PIL.Image.open(buf)
+            self.assertEqual(im.size, (width, height))
+            self.assertEqual(im.mode, 'RGB')
+            self.assertEqual(s3key.policy, 'public-read')
+
+        # Make sure that all the expected files were found
+        self.assertItemsEqual(sizes_found, api.properties.CDN_IMAGE_SIZES)
 
 if __name__ == '__main__':
     unittest.main()

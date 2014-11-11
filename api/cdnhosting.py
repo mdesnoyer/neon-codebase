@@ -14,6 +14,7 @@ import hashlib
 import random
 import properties
 import socket
+import string
 import supportServices.neondata
 import time
 import tornado.gen
@@ -237,6 +238,7 @@ class AWSHosting(CDNHosting):
         self.folder_prefix = cdn_metadata.folder_prefix or ''
         if self.folder_prefix.endswith('/'):
             self.folder_prefix = self.folder_prefix[:-1]
+        self.do_salt = cdn_metadata.do_salt
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -251,12 +253,19 @@ class AWSHosting(CDNHosting):
             cdn_prefix = random.choice(self.cdn_prefixes)
         else:
             cdn_prefix = "%s.s3.amazonaws.com" % self.s3bucket_name
-        
-        fname = AWSHosting.neon_fname_fmt % (tid, image.size[0], image.size[1])
+
+
+        # Build the key name
+        name_pieces = []
         if self.folder_prefix:
-            key_name = '%s/%s' % (self.folder_prefix, fname)
-        else:
-            key_name = fname
+            name_pieces.append(self.folder_prefix)
+        if self.do_salt:
+            name_pieces.append(''.join(
+                random.choice(string.letters + string.digits) 
+                for _ in range(3)))
+        name_pieces.append(AWSHosting.neon_fname_fmt % 
+                           (tid, image.size[0], image.size[1]))
+        key_name = '/'.join(name_pieces)
 
         cdn_url = "http://%s/%s" % (cdn_prefix, key_name)
         fmt = 'jpeg'
