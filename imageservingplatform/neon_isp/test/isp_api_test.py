@@ -382,7 +382,9 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         location header
         presence of a valid Set-Cookie header
         '''
-       
+
+        import pdb; pdb.set_trace();
+
         prefix = "neonvid_"
         jpg_extention = '.jpg'
         response = self.client_api_request(self.pub_id, prefix + self.vid + jpg_extention, 600, 500, "12.2.2.4")
