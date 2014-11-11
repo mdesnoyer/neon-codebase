@@ -1299,7 +1299,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(vresponse["integration_type"], "neon")
         self.assertEqual(vresponse["status"], "serving")
         self.assertEqual(vresponse["abtest"], True)
-        self.assertEqual(serving_url in vresponse["serving_url"])
+        self.assertTrue(serving_url in vresponse["serving_url"])
         self.assertEqual(vresponse["winner_thumbnail"], None)
 
     def test_get_abtest_state(self):
