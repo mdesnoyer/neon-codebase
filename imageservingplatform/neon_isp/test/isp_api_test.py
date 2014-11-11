@@ -373,6 +373,96 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         ts = int(time.time()) / 100
         self.assertTrue(str(ts) in cookie_value)
 
+    def test_client_api_request_jpg_extention(self):
+        '''
+        Test Client API call
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+       
+        prefix = "neonvid_"
+        jpg_extention = '.jpg'
+        response = self.client_api_request(self.pub_id, prefix + self.vid + jpg_extention, 600, 500, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+        
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+            if "Set-Cookie" in header:
+                cookie = header.split("Set-Cookie: ")[-1]
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, self.expected_img_url)
+        self.assertIsNotNone(cookie)
+        
+        #verify cookie values
+        cookie_pair, cookie_expiry, cookie_domain, cookie_path = \
+                                                self.parse_cookie(cookie)
+
+        cookie_name, cookie_value = cookie_pair.split('=')
+        self.assertEqual(cookie_name, self.neon_cookie_name)
+        self.assertEqual(cookie_domain, self.cookie_domain)
+        self.assertEqual(cookie_path, "/")
+
+        #Verify cookie inclusion of timestamp in the cookie
+        ts = int(time.time()) / 100
+        self.assertTrue(str(ts) in cookie_value)
+
+
+    def test_client_api_request_jpg_extention_uppercase(self):
+        '''
+        Test Client API call
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+       
+        prefix = "neonvid_"
+        jpg_extention = '.JPG'
+        response = self.client_api_request(self.pub_id, prefix + self.vid + jpg_extention, 600, 500, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+        
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+            if "Set-Cookie" in header:
+                cookie = header.split("Set-Cookie: ")[-1]
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, self.expected_img_url)
+        self.assertIsNotNone(cookie)
+        
+        #verify cookie values
+        cookie_pair, cookie_expiry, cookie_domain, cookie_path = \
+                                                self.parse_cookie(cookie)
+
+        cookie_name, cookie_value = cookie_pair.split('=')
+        self.assertEqual(cookie_name, self.neon_cookie_name)
+        self.assertEqual(cookie_domain, self.cookie_domain)
+        self.assertEqual(cookie_path, "/")
+
+        #Verify cookie inclusion of timestamp in the cookie
+        ts = int(time.time()) / 100
+        self.assertTrue(str(ts) in cookie_value)
+
+
     def test_client_api_request_with_cookie(self):
         '''
         Test client api request when a neonglobaluserid 

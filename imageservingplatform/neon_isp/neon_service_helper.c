@@ -3,6 +3,8 @@
  * 
  * */
 
+#include <string.h>
+#include <ctype.h>
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
@@ -11,7 +13,7 @@
  * Header Search Function (Used to get custom headers)
  *
  * */
-static ngx_table_elt_t *
+ngx_table_elt_t *
 search_headers_in(ngx_http_request_t *r, u_char *name, size_t len) {
     ngx_list_part_t            *part;
     ngx_table_elt_t            *h;
@@ -65,7 +67,8 @@ search_headers_in(ngx_http_request_t *r, u_char *name, size_t len) {
  * Parse a ngx_str value in to long 
  *
  * */
-static long neon_service_parse_number(ngx_str_t * value){
+long 
+neon_service_parse_number(ngx_str_t * value){
 
     int base = 10;
     static const int bufferSize = 16;
@@ -96,6 +99,36 @@ static long neon_service_parse_number(ngx_str_t * value){
     
     return val;
 }
+
+
+
+void
+remove_jpg_extention(unsigned char * token)
+{
+    // the jpg extention we're looking for is 4 bytes long (.jpg)
+    const int jpg_ext_size = 4;
+
+    int token_size = strlen((char*)token);
+
+    // if string token is too small to contain a jpg extention
+    if(token_size < jpg_ext_size)
+        return;
+
+    // look for jpg extention at end of string, get index of the period char
+    int i  = token_size - jpg_ext_size;
+
+    // is present then terminate string at period to in effect 
+    // remove the jpg extention.  Lowercase and uppercase are 
+    // handled.
+    if( token[i]             == '.'  &&
+        toupper(token[i+1])  == 'J'  &&
+        toupper(token[i+2])  == 'P'  &&
+        toupper(token[i+3])  == 'G')
+            token[i] = 0;
+
+}
+
+
 
 
 
