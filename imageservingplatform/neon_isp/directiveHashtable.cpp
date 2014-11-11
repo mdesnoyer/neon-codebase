@@ -62,7 +62,7 @@ DirectiveHashtable::Shutdown(){
     table->clear();
 
     delete table;
-	table = 0;
+    table = 0;
     initialized = false;
 }
 
@@ -78,7 +78,12 @@ DirectiveHashtable::AddDirective(rapidjson::Document & directive){
     
     Directive * d = new Directive();
     
-    d->Init(directive);
+    int ret = d->Init(directive);
+    
+    if(ret != 0) {
+        delete d;
+        return;
+    }
     
     (*table)[d->GetKey()] = d;
 }
