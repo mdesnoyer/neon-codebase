@@ -11,6 +11,7 @@
 extern "C" {
 #endif
 
+extern char * neon_load_error;
 
 /*
  *  Initialization
