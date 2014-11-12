@@ -48,8 +48,6 @@ neon_mastermind_init(){
     
     neon_load_error = new char[neon_load_error_size + 1];
     
-    Mastermind::InitStatic();
-
     mastermind_current = new Mastermind();
     mastermind_current->Init();
     
