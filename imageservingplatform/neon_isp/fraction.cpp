@@ -86,7 +86,13 @@ Fraction::InitSafe(double floor, const rapidjson::Value& frac)
         return -1;
     }
 
-    defaultURL = strdup(frac["default_url"].GetString()); 
+    defaultURL = 0;
+    defaultURL = strdup(frac["default_url"].GetString());
+    
+    if(defaultURL == 0) {
+       neon_stats[NGINX_OUT_OF_MEMORY]++;
+       return -1;
+    }
 
     // Thumbnail ID
     if (frac.HasMember("tid") == false) {
@@ -94,7 +100,13 @@ Fraction::InitSafe(double floor, const rapidjson::Value& frac)
         return -1; 
     }
 
+    tid = 0;
     tid = strdup(frac["tid"].GetString());
+
+    if(tid == 0) {
+       neon_stats[NGINX_OUT_OF_MEMORY]++;
+       return -1;
+    }
 
     /*
      *  Images array
