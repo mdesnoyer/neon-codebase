@@ -21,8 +21,8 @@
 static Mastermind * mastermind_current = 0;
 static Mastermind * mastermind_old = 0;
 
-char * neon_load_error = 0;
-const int neon_load_error_size = 2048;
+char * neon_mastermind_error = 0;
+const int neon_mastermind_error_size = 2048;
 
 Mastermind *
 neon_get_mastermind(){
@@ -46,7 +46,7 @@ deallocate_mastermind(Mastermind * m){
 NEON_BOOLEAN
 neon_mastermind_init(){
     
-    neon_load_error = new char[neon_load_error_size + 1];
+    neon_mastermind_error = new char[neon_mastermind_error_size + 1];
     
     mastermind_current = new Mastermind();
     mastermind_current->Init();
@@ -65,8 +65,8 @@ neon_mastermind_shutdown() {
     mastermind_current = 0;
     mastermind_old = 0;
     
-    if(neon_load_error)
-        delete neon_load_error;
+    if(neon_mastermind_error)
+        delete neon_mastermind_error;
 }
 
 
@@ -87,13 +87,11 @@ neon_mastermind_load(const char * filepath){
         candidate = new Mastermind();
         
         candidate->Init(filepath, mastermind_current->GetExpiry());
-        //NeonLog::Error("Neon mastermind load complete");
-
     }
     catch (NeonException * error)
     {
         // create error message
-        snprintf(neon_load_error, neon_load_error_size, "%s", error->GetMessage());
+        snprintf(neon_mastermind_error, neon_mastermind_error_size, "%s", error->GetMessage());
         delete error;
         
         // erase candidate
@@ -104,7 +102,7 @@ neon_mastermind_load(const char * filepath){
     }
     catch (std::bad_alloc e) {
         
-        snprintf(neon_load_error, neon_load_error_size, "%s", "unable to allocate memory");
+        snprintf(neon_mastermind_error, neon_mastermind_error_size, "%s", "unable to allocate memory");
         neon_stats[NGINX_OUT_OF_MEMORY]++; 
         
         // erase candidate
@@ -115,7 +113,7 @@ neon_mastermind_load(const char * filepath){
     }
     catch (...) {
         
-        snprintf(neon_load_error, neon_load_error_size, "%s", "unable to allocate memory");
+        snprintf(neon_mastermind_error, neon_mastermind_error_size, "%s", "unable to allocate memory");
         
         // erase candidate
         if(candidate)

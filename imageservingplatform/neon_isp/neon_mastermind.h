@@ -11,7 +11,11 @@
 extern "C" {
 #endif
 
-extern char * neon_load_error;
+
+/*
+ *  Contains an error message in case of function call failure
+ */
+extern char * neon_mastermind_error;
 
 /*
  *  Initialization

@@ -132,7 +132,6 @@ neon_runloop(void * arg){
         // check if the current mastermind's expiry is approaching
         if(neon_mastermind_expired() == NEON_TRUE){
         
-            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: mastermind is now expired, fetching new one");
             /*
              *  fetch new mastermind file from S3
              */
@@ -155,13 +154,11 @@ neon_runloop(void * arg){
             time_t new_mastermind_expiry = neon_get_expiry(mastermind_filepath);
             if (new_mastermind_expiry < time(0)){
                 
-                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: fetched mastermind expiry is passed: %d", new_mastermind_expiry);
-                
                 if(neon_mastermind_is_expiry_greater_than_current(new_mastermind_expiry) == NEON_TRUE){
-                    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: fetched mastermind expiry is ahead of current");
+                    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: fetched mastermind is expired but ahead of current");
                     neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
                 }else{ 
-                    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: fetched mastermind is older than current");
+                    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: fetched mastermind is expired and older than current");
                     neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
                     neon_sleep(sleep_time);
                     continue;
@@ -174,7 +171,7 @@ neon_runloop(void * arg){
             // process file into memory
             if(neon_mastermind_load(mastermind_filepath) == NEON_LOAD_FAIL) {
                 
-                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: mastermind load failed: %s", neon_load_error);
+                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: mastermind load failed: %s", neon_mastermind_error);
                 neon_stats[NEON_UPDATER_MASTERMIND_LOAD_FAIL]++;
                 neon_sleep(sleep_time);
                 continue;
@@ -185,14 +182,14 @@ neon_runloop(void * arg){
              */
             if( neon_rename(mastermind_filepath, validated_mastermind_filepath) == NEON_RENAME_FAIL) {
         
-                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: failed to remane vailidated mastermind, error: %s", neon_rename_error);
+                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: failed to rename validated mastermind file, error: %s", neon_rename_error);
                 neon_stats[NEON_UPDATER_MASTERMIND_RENAME_FAIL]++;
                 neon_sleep(sleep_time);
                 continue;
             }
 
 	    // success
-            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: fetched mastermind successfully loaded");
+            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: fetched and loaded mastermind file successfully");
             neon_stats[MASTERMIND_RENAME_SUCCESS]++;
         }
         
