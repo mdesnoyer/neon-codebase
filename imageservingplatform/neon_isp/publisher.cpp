@@ -46,6 +46,8 @@ Publisher::Init(const char* pub, const char* acc)
         return -1;
     
     accountId = acc;
+    
+    return 0;
 }
 
 
