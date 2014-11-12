@@ -14,8 +14,6 @@ public:
     
     Mastermind();
     ~Mastermind();
-    
-    static void InitStatic();
 
     // basic init with empty tables
     void Init();
