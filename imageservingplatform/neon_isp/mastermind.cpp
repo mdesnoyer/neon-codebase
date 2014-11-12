@@ -158,12 +158,6 @@ Mastermind::GetExpiry()
 }
 
 
-void
-Mastermind::InitStatic()
-{
-}
-
-
 void 
 Mastermind::Init() {
    
