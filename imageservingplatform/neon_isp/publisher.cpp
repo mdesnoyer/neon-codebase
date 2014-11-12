@@ -10,7 +10,8 @@
 
 Publisher::Publisher()
 {
-    // left empty
+    publisherId = "";
+    accountId = "";
 }
 
 
@@ -23,7 +24,8 @@ Publisher::Publisher(const Publisher &  p)
 
 Publisher::~Publisher()
 {
-     //std::cout << "\nPublisher destructor";
+    publisherId = "";
+    accountId = "";
 }
 
 
@@ -54,8 +56,6 @@ Publisher::Init(const char* pub, const char* acc)
 void
 Publisher::Shutdown()
 {
-    
-    
 }
 
 
