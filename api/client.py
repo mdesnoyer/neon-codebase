@@ -239,7 +239,7 @@ class VideoProcessor(object):
         model: model obj
         '''
 
-        self.timeout = 300000.0 #long running tasks ## -- is this necessary ???
+        self.timeout = 3000.0 # 50Mins long running tasks ## -- is this necessary ???
         self.job_params = params
         self.video_url = self.job_params[properties.VIDEO_DOWNLOAD_URL]
         vsuffix = self.video_url.split('/')[-1]  #get the video file extension
