@@ -158,6 +158,8 @@ Directive::InitSafe(const rapidjson::Document & document)
             fractions[i]->SetPct(pcnt);
         } 
     }
+    
+    return 0;
 }
 
 
