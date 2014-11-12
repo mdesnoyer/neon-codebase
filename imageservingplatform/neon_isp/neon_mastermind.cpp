@@ -66,7 +66,7 @@ neon_mastermind_shutdown() {
     mastermind_old = 0;
     
     if(neon_load_error)
-        delete neon_load_error;
+        delete [] neon_load_error;
 }
 
 
