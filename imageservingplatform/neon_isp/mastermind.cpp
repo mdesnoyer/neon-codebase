@@ -176,6 +176,8 @@ Mastermind::Init() {
     directiveTable = new DirectiveHashtable();
     publisherTable->Init(100);
     directiveTable->Init(100);
+    
+    initialized = true;
 }
 
 
