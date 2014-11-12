@@ -87,7 +87,11 @@ PublisherHashtable::AddPublisher(rapidjson::Document & document)
     // document["pid"].IsString());
     const char * accountId = document["aid"].GetString();
     
-    p->Init(publisherId, accountId);
+    int ret = p->Init(publisherId, accountId);
+    
+    if(ret != 0)
+    	return;
+    
     std::string key = publisherId;
     
     (*table)[key] = p;
