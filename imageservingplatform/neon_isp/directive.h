@@ -26,7 +26,7 @@ public:
     Directive(const Directive &  p);
     ~Directive();
     
-    void Init(const rapidjson::Document & document);
+    int Init(const rapidjson::Document & document);
     
     void Shutdown();
     
