@@ -66,10 +66,10 @@ neon_mastermind_shutdown() {
     deallocate_mastermind(mastermind_old);
     mastermind_current = 0;
     mastermind_old = 0;
-    delete neon_load_error;
+    
+    if(neon_load_error)
+        delete neon_load_error;
 }
-
-
 
 
 NEON_LOAD_ERROR
