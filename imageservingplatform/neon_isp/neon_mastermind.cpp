@@ -21,6 +21,8 @@
 static Mastermind * mastermind_current = 0;
 static Mastermind * mastermind_old = 0;
 
+char * neon_load_error = 0;
+const int neon_load_error_size = 2048;
 
 Mastermind *
 neon_get_mastermind(){
@@ -43,6 +45,9 @@ deallocate_mastermind(Mastermind * m){
 
 NEON_BOOLEAN
 neon_mastermind_init(){
+    
+    neon_load_error = new char[neon_load_error_size + 1];
+    
     Mastermind::InitStatic();
 
     mastermind_current = new Mastermind();
@@ -61,10 +66,11 @@ neon_mastermind_shutdown() {
     deallocate_mastermind(mastermind_old);
     mastermind_current = 0;
     mastermind_old = 0;
+    delete neon_load_error;
 }
 
 
-const char * neon_load_error = 0;
+
 
 NEON_LOAD_ERROR
 neon_mastermind_load(const char * filepath){
@@ -88,9 +94,8 @@ neon_mastermind_load(const char * filepath){
     }
     catch (NeonException * error)
     {
-        // log
-        //NeonLog::Error("neon_mastermind_load: %s", error->GetMessage());
-        
+        // create error message
+        snprintf(neon_load_error, neon_load_error_size, "%s", error->GetMessage());
         delete error;
         
         // erase candidate
@@ -101,8 +106,8 @@ neon_mastermind_load(const char * filepath){
     }
     catch (std::bad_alloc e) {
         
-        // log here
-        //NeonLog::Error("neon_mastermind_load: bad_alloc, out of memory");
+        snprintf(neon_load_error, neon_load_error_size, "%s", "unable to allocate memory");
+        neon_stats[NGINX_OUT_OF_MEMORY]++; 
         
         // erase candidate
         if(candidate)
@@ -112,8 +117,7 @@ neon_mastermind_load(const char * filepath){
     }
     catch (...) {
         
-        // log here
-        //NeonLog::Error("neon_mastermind_load: unspecified exception");
+        snprintf(neon_load_error, neon_load_error_size, "%s", "unable to allocate memory");
         
         // erase candidate
         if(candidate)
