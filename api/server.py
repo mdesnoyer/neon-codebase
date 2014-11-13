@@ -133,13 +133,13 @@ class JobStatusHandler(tornado.web.RequestHandler):
                 self.finish()
                 return
 
-            self.write(result)
+            self.write(result.to_json())
             self.finish()
 
         try:
             api_key = self.get_argument(properties.API_KEY)
             job_id  = self.get_argument(properties.REQUEST_UUID_KEY)
-            neondata.NeonApiRequest.get_request(api_key,job_id, db_callback)
+            neondata.NeonApiRequest.get(job_id, api_key, db_callback)
 
         except Exception,e:
             _log.error("key=jobstatus_handler msg=exception " + e.__str__())
@@ -314,9 +314,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             #Validate Request & Insert in to Queue (serialized/json)
             #job_result = None #NeonApiRequest.blocking_conn.get(api_request.key)
             job_result = yield tornado.gen.Task(
-                neondata.BrightcoveApiRequest.get,
-                api_request.api_key,
-                api_request.job_id)
+                neondata.NeonApiRequest.get,
+                api_request.job_id,
+                api_request.api_key)
             if job_result is not None:
                 response_data = '{"error":"duplicate job", "job_id": "%s" }'%job_result.job_id 
                 self.write(response_data)

@@ -525,10 +525,8 @@ class BrightcoveApi(object):
                 #Sync the changes in brightcove account to NeonDB
                 #TODO: Sync not just the latest 100 videos
                 job_id = bc.videos[vid]
-                req_data = supportServices.neondata.NeonApiRequest.get_request(
-                        self.neon_api_key,job_id)
-                vid_request = supportServices.neondata.NeonApiRequest.create(
-                        req_data)
+                vid_request = supportServices.neondata.NeonApiRequest.get(
+                    job_id, self.neon_api_key)
                 pub_date = int(item['publishedDate']) if item['publishedDate'] else None
                 vid_request.publish_date = pub_date 
                 vid_request.video_title = title
@@ -547,10 +545,8 @@ class BrightcoveApi(object):
             title = item['name']
             if vid in videos_processed:
                 job_id = bc.videos[vid]
-                req_data = supportServices.neondata.NeonApiRequest.get_request(
-                        self.neon_api_key,job_id)
-                vid_request = supportServices.neondata.NeonApiRequest.create(
-                        req_data)
+                vid_request = supportServices.neondata.NeonApiRequest.get(
+                    job_id, self.neon_api_key)
                 pub_date = int(item['publishedDate']) if item['publishedDate'] else None
                 vid_request.publish_date = pub_date 
                 vid_request.video_title = title
@@ -725,10 +721,8 @@ class BrightcoveApi(object):
             item = tornado.escape.json_decode(response.body)
             title = item['name']
             job_id = bc.videos[vid]
-            req_data = supportServices.neondata.NeonApiRequest.get_request(
-                    self.neon_api_key,job_id)
-            vid_request = supportServices.neondata.NeonApiRequest.create(
-                    req_data)
+            vid_request = supportServices.neondata.NeonApiRequest.get(
+                    job_id, self.neon_api_key)
             pub_date = int(item['publishedDate']) if item['publishedDate'] else None
             vid_request.publish_date = pub_date 
             vid_request.title = title

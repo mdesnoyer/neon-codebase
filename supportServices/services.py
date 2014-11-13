@@ -509,10 +509,12 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         Return the status of the job
         '''
         
-        req = yield tornado.gen.Task(neondata.NeonApiRequest.get_request,
-                                    self.api_key, job_id)
+        req = yield tornado.gen.Task(neondata.NeonApiRequest.get,
+                                     job_id, self.api_key)
         if req:
-            self.send_json_response(json.loads(req))
+            
+            self.send_json_response(json.dumps(req,
+                                               default=lambda o: o.__dict__))
             return
 
         self.send_json_response('{"error":"job not found"}', 400)
@@ -805,9 +807,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         job_request_keys = [] 
         for vid in vids:
             try:
-                jid = neondata.generate_request_key(self.api_key,
-                                                    platform_account.videos[vid])
-                job_request_keys.append(jid)
+                job_request_keys.append((platform_account.videos[vid],
+                                         self.api_key))
             except:
                 pass #job id not found
  
@@ -816,7 +817,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         completed_videos = [] 
 
         # Get all requests and populate video response object in advance
-        requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_requests,
+        requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_many,
                     job_request_keys) 
         ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for request, vid in zip(requests, vids):
