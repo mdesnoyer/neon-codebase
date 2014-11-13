@@ -63,7 +63,6 @@ statemon.define('nvideos_abtesting', int)
 # The number of videos being monitored by this controller
 statemon.define('nvideos', int)
 
-random.seed(25110)
 
 ###################################################################################
 ## Priority Q Impl

@@ -41,6 +41,7 @@ import psutil
 import Queue
 import random
 import signal
+import socket
 from supportServices import neondata
 import tempfile
 import tornado.web
@@ -52,6 +53,7 @@ import tornado.ioloop
 import time
 import urllib
 import urllib2
+from utils.imageutils import PILImageUtils
 import utils.neon
 import utils.pycvutils
 import utils.http
@@ -60,8 +62,6 @@ from utils import statemon
 
 import logging
 _log = logging.getLogger(__name__)
-
-random.seed(232315)
 
 #Monitoring
 statemon.define('processed_video', int)
@@ -94,68 +94,11 @@ define('dequeue_period', default=10,
        help='Number of seconds between dequeues on a worker')
 
 
-class BadVideoError(IOError): pass
-class VideoReadError(IOError): pass
+class VideoError(Exception): pass
+class BadVideoError(VideoError): pass
+class VideoReadError(VideoError, IOError): pass
+class VideoDownloadError(VideoError, IOError): pass  
 class DBError(IOError): pass
-
-    
-###########################################################################
-# Global Helper functions
-###########################################################################
-
-def callback_response_builder(job_id, vid, data, 
-                              thumbnails, client_url,
-                              serving_url=None, error=None):
-        '''
-        build callback response that will be sent to the callback url
-        which was specified when the request was created
-
-        @data: frame numbers in rank order
-        @thumbnails: s3 urls of the recommended images
-        @client_url: the callback url to send the data to
-
-        '''
-
-        response_body = {}
-        response_body["job_id"] = job_id 
-        response_body["video_id"] = vid 
-        response_body["data"] = data
-        response_body["thumbnails"] = thumbnails
-        response_body["timestamp"] = str(time.time())
-        response_body["serving_url"] = serving_url 
-        response_body["error"] = error 
-
-        #CREATE POST REQUEST
-        body = tornado.escape.json_encode(response_body)
-        h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
-        cb_response_request = tornado.httpclient.HTTPRequest(
-                                url=client_url, 
-                                method="POST",
-                                headers=h, 
-                                body=body, 
-                                request_timeout=60.0, 
-                                connect_timeout=10.0)
-        return cb_response_request 
-
-def notification_response_builder(a_id, i_id, video_json, 
-                                  event="processing_complete"):
-        '''
-        Notification to rails end point
-        '''
-        r = {}
-
-        notification_url = 'http://www.neon-lab.com/api/accounts/%s/events'%a_id
-        r["api_key"] = properties.NOTIFICATION_API_KEY
-        r["video"] = video_json
-        r["event"] = event
-        body = urllib.urlencode(r)
-        nt_response_request = tornado.httpclient.HTTPRequest(
-                                url=notification_url, 
-                                method="POST",
-                                body=body, 
-                                request_timeout=60.0, 
-                                connect_timeout=10.0)
-        return nt_response_request
     
 
 ###########################################################################
@@ -178,7 +121,7 @@ class VideoProcessor(object):
         model: model obj
         '''
 
-        self.timeout = 300000.0 #long running tasks ## -- is this necessary ???
+        self.timeout = 300.0 #long running tasks ## -- is this necessary ???
         self.job_params = params
         self.video_url = self.job_params[properties.VIDEO_DOWNLOAD_URL]
         vsuffix = self.video_url.split('/')[-1]  #get the video file extension
@@ -196,11 +139,11 @@ class VideoProcessor(object):
 
         integration_id = self.job_params[properties.INTEGRATION_ID] \
           if self.job_params.has_key(properties.INTEGRATION_ID) else 0
-        self.video_metadata = VideoMetadata(
+        self.video_metadata = neondata.VideoMetadata(
             neondata.InternalVideoID.generate(
-                job_params[properties.API_KEY],
+                self.job_params[properties.API_KEY],
                 self.job_params[properties.VIDEO_ID]),
-            model_version=self.model_version,
+            model_version=model_version,
             request_id=self.job_params[properties.REQUEST_UUID_KEY],
             video_url=self.job_params[properties.VIDEO_DOWNLOAD_URL],
             i_id=integration_id)
@@ -230,7 +173,7 @@ class VideoProcessor(object):
             #response
             self.finalize_response()
 
-        except Exception as e:
+        except VideoError as e:
             # Flag that the job failed in the database
             statemon.state.increment('processing_error')
 
@@ -238,6 +181,16 @@ class VideoProcessor(object):
             # neondata is refactored.
             api_request = neondata.NeonApiRequest.get(api_key, job_id)
             api_request.state = neondata.RequestState.FAILED
+            api_request.save()
+
+        except Exception as e:
+            # Flag that the job failed in the database
+            statemon.state.increment('processing_error')
+
+            # TODO(sunil): Make this an atomic modify operation once
+            # neondata is refactored.
+            api_request = neondata.NeonApiRequest.get(api_key, job_id)
+            api_request.state = neondata.RequestState.INT_ERROR
             api_request.save()
        
         finally:
@@ -264,18 +217,18 @@ class VideoProcessor(object):
             _log.error("Error downloading video from %s: %s" % 
                        (self.video_url, e))
             statemon.state.increment('video_download_error')
-            raise
+            raise VideoDownloadError(str(e))
 
         except socket.error as e:
             _log.error("Error downloading video from %s: %s" % 
                        (self.video_url, e))
             statemon.state.increment('video_download_error')
-            raise
+            raise VideoDownloadError(str(e))
 
         except IOError as e:
             _log.error("Error saving video to disk: %s" % e)
             statemon.state.increment('video_download_error')
-            raise
+            raise VideoDownloadError(str(e))
 
     def process_video(self, video_file, n_thumbs=1):
         ''' process all the frames from the partial video downloaded '''
@@ -293,7 +246,7 @@ class VideoProcessor(object):
             _log.error("Error reading ffvideo metadata of %s: %s" %
                        (self.video_url, e))
             statemon.state.increment('ffvideo_metadata_error')
-            raise
+            raise VideoReadError(str(e))
 
         #Try to open the video file using openCV
         try:
@@ -302,7 +255,7 @@ class VideoProcessor(object):
             _log.error("Error opening video file %s: %s"  % 
                        (self.video_url, e))
             statemon.state.increment('video_read_error')
-            raise
+            raise VideoReadError(str(e))
 
         duration = self.video_metadata.duration or 0.0
 
@@ -334,8 +287,8 @@ class VideoProcessor(object):
                       n=n_thumbs,
                       sample_step=1.0,
                       start_time=self.sec_to_extract)
-            except Exception:
-                raise
+            except Exception as e:
+                raise VideoReadError(str(e))
 
         exists_unfiltered_images = np.any([x[4] is not None and x[4] == ''
                                            for x in results])
@@ -361,6 +314,7 @@ class VideoProcessor(object):
         self._get_random_frame(video_file)
 
         statemon.state.increment('processed_video')
+        _log.info('Finished processing video %s' % self.video_url)
 
     def _get_center_frame(self, video_file, nframes=None):
         '''approximation of brightcove logic 
@@ -374,10 +328,11 @@ class VideoProcessor(object):
                 nframes = mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
 
             cv_image = self._get_specific_frame(mov, int(nframes / 2))
-            meta = ThumbnailMetadata(None,
-                                     ttype=neondata.ThumbnailType.CENTERFRAME,
-                                     frameno=int(nframes / 2),
-                                     rank=0)
+            meta = neondata.ThumbnailMetadata(
+                None,
+                ttype=neondata.ThumbnailType.CENTERFRAME,
+                frameno=int(nframes / 2),
+                rank=0)
             #TODO(Sunil): Get valence score once flann global data
             #corruption is fixed.
             self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
@@ -397,10 +352,11 @@ class VideoProcessor(object):
             frameno = random.randint(0, nframes-1)
 
             cv_image = self._get_specific_frame(mov, frameno)
-            meta = ThumbnailMetadata(None,
-                                     ttype=neondata.ThumbnailType.RANDOM,
-                                     frameno=frameno,
-                                     rank=0)
+            meta = neondata.ThumbnailMetadata(
+                None,
+                ttype=neondata.ThumbnailType.RANDOM,
+                frameno=frameno,
+                rank=0)
             #TODO(Sunil): Get valence score once flann global data
             #corruption is fixed.
             self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
@@ -423,7 +379,7 @@ class VideoProcessor(object):
                 #Now grab the frame
                 read_sucess, image = mov.read()
                 if read_sucess:
-                    return utils.pycvutils.to_pil(image)            
+                    return image      
         except Exception, e:
             _log.exception("Unexpected error extracting frame %i from %s: %s" 
                            % (frameno, self.video_url, e))
@@ -437,16 +393,14 @@ class VideoProcessor(object):
 
     def finalize_response(self):
         '''
-        Finalize request after video has been processed
+        Finalize the respon after video has been processed.
+
+        This updates the database and does any callbacks necessary.
         '''
         
         api_key = self.job_params[properties.API_KEY]  
         job_id  = self.job_params[properties.REQUEST_UUID_KEY]
         video_id = self.job_params[properties.VIDEO_ID]
-        callback_url = self.job_params[properties.CALLBACK_URL]
-        request_type = self.job_params['request_type']
-        api_method = self.job_params['api_method'] 
-        api_param =  self.job_params['api_param']
         
         # get api request object
         api_request = neondata.NeonApiRequest.get(api_key, job_id)
@@ -475,6 +429,9 @@ class VideoProcessor(object):
                                               cdn_metadata=cdn_metadata,
                                               save_objects=False)
 
+        # Generate the serving url
+        self.video_metadata.get_serving_url(save=False)
+
         # Save the thumbnail and video data into the database
         # TODO(mdesnoyer): do this as a single transaction
         def _merge_thumbnails(t_objs):
@@ -497,10 +454,10 @@ class VideoProcessor(object):
                     # Create the new entry
                     t_objs[new_thumb.key] = new_thumb
             to_add = dict([(x.key, x) for x in self.thumbnails])
-        sucess = neondata.ThumbnailMetadata.modify_many(
+        new_thumb_dict = neondata.ThumbnailMetadata.modify_many(
             [x[0].key for x in self.thumbnails],
             _merge_thumbnails)
-        if not sucess:
+        if len(new_thumb_dict) == 0:
             _log.error("Error writing thumbnail data to database")
             statemon.state.append('save_tmdata_error')
             raise DBError("Error writing thumbnail data to database")
@@ -527,193 +484,67 @@ class VideoProcessor(object):
             video_obj.integration_id = self.video_metadata.integration_id
             video_obj.frame_size = self.video_metadata.frame_size
             video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
-        sucess = neondata.VideoMetadata.modify(self.video_metadata.key,
-                                               _modify_video_data,
-                                               create_missing=True)
-        if not sucess:
+            video_obj.get_serving_url = self.video_metadata.get_serving_url()
+        new_video_metadata = neondata.VideoMetadata.modify(
+            self.video_metadata.key,
+            _modify_video_data,
+            create_missing=True)
+        if not new_video_metadata:
             _log.error("Error writing video data to database")
             statemon.state.append('save_vmdata_error')
             raise DBError("Error writing video data to database")
+        self.video_metadata = new_video_metadata
+
+        # Save the default thumbnail
+        # TODO(sunil): Remove this function once this functionality is
+        # in the video api server.
+        api_request.save_default_thumbnail(self.video_metadata, cdn_metadata)
+
+        # Build the callback request
+        cb_request = self.build_callback_request()
+
+        # Tell the database that the request is done
+        # TODO(sunil): Once NeonApiRequest is StoredObject, make this a modify
+        api_request.state = neondata.RequestState.FINISHED
+        api_request.publish_date = time.time() *1000.0
+        api_request.response = tornado.escape.json_decode(cr_request.body)
+        sucess = api_request.save()
+        if not sucess:
+            _log.error("Error writing request state to database")
+            raise DBError("Error writing video data to database")
+
+        # Send callbacks and notifications
+        self.send_client_callback_response(video_id, cb_request)
+        self.send_notifiction_response(api_request)
         
 
+    def build_callback_request(self):
+        '''
+        build callback request that will be sent to the callback url
+        which was specified when the request was created
 
-        # Build the callbacks
+        '''
 
-        # Generate the Serving URL
-        # TODO(Sunil): Pass TAI as part of the request?
-        serving_url = None
-        # Currently Neon has 4 sub-domains
-        subdomain_index = random.randint(1, 4)
-        na = neondata.NeonUserAccount.get_account(api_key)
-        if na:
-            neon_publisher_id = na.tracker_account_id  
-            serving_url = options.serving_url_format % (subdomain_index,
-                           neon_publisher_id, video_id)
+        response_body = {}
+        response_body["job_id"] = self.video_metadata.job_id 
+        response_body["video_id"] = self.video_metadata.key 
+        response_body["framenos"] = [x[0].frameno for x in self.thumbnails]
+        response_body["thumbnails"] = [x[0].urls[0] for x in self.thumbnails]
+        response_body["timestamp"] = str(time.time())
+        response_body["serving_url"] = self.video_metadata.get_serving_url()
 
-        cr_request = callback_response_builder(job_id, video_id, data, 
-                                               s3_urls[:topn], callback_url,
-                                               serving_url,
-                                               error=self.error)
-
-        # TODO(Sunil): Do we need to send the callback again? 
-        # On reprocess, the serving URL doesn't change
-        if reprocess == False:
-            self.send_client_callback_response(video_id, cr_request)
-
-        if request_type in ["neon", "brightcove", "ooyala"]:
-            self.finalize_api_request(cr_request.body, request_type,
-                    reprocess, vmdata)
-
-            # SAVE VMDATA atomically
-            def _modify_vmdata_atomically(video_obj):
-                video_obj.frame_size = vmdata.frame_size
-                video_obj.thumbnail_ids = vmdata.thumbnail_ids
-                video_obj.video_valence = vmdata.video_valence
-                video_obj.model_version = vmdata.model_version
-
-            if reprocess:
-                neondata.VideoMetadata.modify(vmdata.key,
-                                              _modify_vmdata_atomically)
-
-            ## Notification enabled for brightcove only 
-            if request_type == "brightcove":
-                self.send_notifiction_response()
-        else:
-            _log.error("request type not supported")
+        #CREATE POST REQUEST
+        body = tornado.escape.json_encode(response_body)
+        h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
+        cb_response_request = tornado.httpclient.HTTPRequest(
+                                url=self.job_params[properties.CALLBACK_URL], 
+                                method="POST",
+                                headers=h, 
+                                body=body, 
+                                request_timeout=60.0, 
+                                connect_timeout=10.0)
+        return cb_response_request 
     
-    def finalize_api_request(self, result, request_type, reprocess=False,
-                            vmdata=None):
-        '''
-        - host neon thumbs and also save bcove previous thumbnail in s3
-        - Get Account settings and replace default thumbnail if enabled 
-        - update request object with the thumbnails
-        '''
-        
-        api_key = self.job_params[properties.API_KEY]  
-        job_id = self.job_params[properties.REQUEST_UUID_KEY]
-        video_id = self.job_params[properties.VIDEO_ID]
-        title = self.job_params[properties.VIDEO_TITLE]
-        i_id = 0
-        if request_type != "neon":
-            i_id = self.job_params[properties.INTEGRATION_ID]
-        
-        api_request = neondata.NeonApiRequest.get(api_key, job_id)
-        api_request.response = tornado.escape.json_decode(result)
-        api_request.publish_date = time.time() *1000.0 #ms
-
-        # Save the previous thumbnail to VMData
-        if hasattr(api_request, "previous_thumbnail"):
-            tdata = self.save_previous_thumbnail(api_request)
-            # If reprocess, save to the vmdata passed
-            if reprocess and vmdata is not None:
-                vmdata.thumbnail_ids.append(tdata.key)
-
-        else:
-            _log.info("key=finalize_api_request "
-                       " msg=no previous thumbnail for %s %s" %(api_key,
-                                                                video_id))
-       
-        #autosync    
-        if hasattr(api_request, "autosync"):
-            if api_request.autosync:
-                fno = api_request.response["data"][0]
-                img = Image.fromarray(self.data_map[fno][1])
-                self.autosync(api_request, img)
-
-        api_request.state = neondata.RequestState.FINISHED 
-        
-        if api_request.save():
-            
-            # Save the Thumbnail URL and ID to Mapper DB
-            if not self.save_thumbnail_metadata(request_type, i_id, reprocess):
-                _log.error("save_thumbnail_metadata failed")
-                statemon.state.increment('save_tmdata_error')
-        else:
-            
-            # Need to reprocess the request
-            _log.error("key=finalize_api_request msg=failed to save request %s"
-                    % api_request.key)
-    
-    def save_previous_thumbnail(self, api_request):
-        '''
-        Save the previous thumbnail / default thumbnail in the request
-        '''
-
-        if not api_request.previous_thumbnail:
-            return 
-
-        p_url = api_request.previous_thumbnail.split('?')[0]
-        api_key = self.job_params[properties.API_KEY]  
-        video_id = self.job_params[properties.VIDEO_ID]
-        i_vid = neondata.InternalVideoID.generate(api_key, video_id)
-
-        score = 0 #no score for previous thumbnails
-        s3bucket_name = properties.S3_IMAGE_HOST_BUCKET_NAME
-        s3_url_prefix = "https://" + s3bucket_name + ".s3.amazonaws.com"
-        if api_request.request_type == "brightcove":
-            keyname =  self.base_filename + "/brightcove.jpeg" 
-            ttype = neondata.ThumbnailType.BRIGHTCOVE
-        elif api_request.request_type == "ooyala":
-            keyname =  self.base_filename + "/ooyala.jpeg" 
-            ttype = neondata.ThumbnailType.OOYALA
-        else:
-            ttype = neondata.ThumbnailType.DEFAULT
-            keyname =  self.base_filename + "/default.jpeg" 
-
-        s3fname = s3_url_prefix + "/" + keyname
-
-        #get vmdata
-        vmdata = neondata.VideoMetadata.get(i_vid)
-
-        #get neon pub id
-        tdata = vmdata.download_and_add_thumbnail(p_url, keyname, s3fname, 
-                                                  ttype, rank=1)
-        if tdata:
-            self.thumbnails.append(tdata)
-            if not vmdata.save():
-                _log.error("key=save_previous_thumbnail msg=failed to save videometadata")
-                #TODO: requeue the video ? 
-
-        api_request.previous_thumbnail = s3fname
-        return tdata
-
-    def save_thumbnail_metadata(self, platform, i_id, reprocess=False):
-        '''Save the Thumbnail URL and ID to Mapper DB '''
-
-        api_key = self.job_params[properties.API_KEY] 
-        vid = self.job_params[properties.VIDEO_ID]
-        job_id = self.job_params[properties.REQUEST_UUID_KEY]
-        i_vid = neondata.InternalVideoID.generate(api_key, vid)
-
-        thumbnail_url_mapper_list = []
-        tids = [thumb.key for thumb in self.thumbnails]
-
-        if len(self.thumbnails) > 0:
-            for thumb in self.thumbnails:
-                tid = thumb.key
-                for t_url in thumb.urls:
-                    uitem = neondata.ThumbnailURLMapper(t_url, tid)
-                    thumbnail_url_mapper_list.append(uitem)
-
-            # Merge specific fields if its being reprocesed
-            def _atomically_merge_tmdata(t_objs):
-                for thumb in self.thumbnails:
-                    t_obj = t_objs[thumb.key]
-                    if t_obj is not None:
-                        thumb.chosen = t_obj.chosen
-                        thumb.enabled = t_obj.enabled
-                        thumb.serving_frac = t_obj.serving_frac
-                    t_objs[thumb.key] = thumb
-
-            if reprocess:
-                retid = neondata.ThumbnailMetadata.modify_many(tids,
-                    _atomically_merge_tmdata)
-            else:
-                retid = neondata.ThumbnailMetadata.save_all(self.thumbnails)
-            
-            returl = neondata.ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
-            
-            return (retid and returl)
  
     def send_client_callback_response(self, video_id, request):
         '''
@@ -724,15 +555,14 @@ class VideoProcessor(object):
         if request.url is None or request.url == "null":
             return True
 
-        '''
-        # NOTE: Disabling SQS Callback since IGN doesn't need it
-
         # Schedule the callback in SQS
         try:
             sqsmgr = utils.sqsmanager.CustomerCallbackManager()
-            r = sqsmgr.add_callback_response(video_id, request.url, request.body)
+            r = sqsmgr.add_callback_response(video_id, request.url,
+                                             request.body)
         except SQSError, e:
             _log.error('SQS Error %s' % e)
+            statemon.state.increment('customer_callback_schedule_error')
             _log.info('Tried to send response: %s' % request.body)
             return False 
 
@@ -740,11 +570,10 @@ class VideoProcessor(object):
             statemon.state.increment('customer_callback_schedule_error')
             _log.error("Callback schedule failed for video %s" % video_id)
             return False
-        '''
 
         return True
 
-    def send_notifiction_response(self):
+    def send_notifiction_response(self, api_request):
         '''
         Send Notification to endpoint
         '''
@@ -754,19 +583,35 @@ class VideoProcessor(object):
         title = self.job_params[properties.VIDEO_TITLE]
         i_id = self.job_params[properties.INTEGRATION_ID]
         job_id  = self.job_params[properties.REQUEST_UUID_KEY]
-        ba = neondata.BrightcovePlatform.get_account(api_key, i_id) 
-        thumbs = [t.to_dict_for_video_response() for t in self.thumbnails]
+        account = neondata.NeonUserAccount.get_account(api_key)
+        if account is None:
+            _log.error('Could not get the account for api key %s' %
+                       api_key)
+            return
+        thumbs = [t[0].to_dict_for_video_response() for t in self.thumbnails]
         vr = neondata.VideoResponse(video_id,
                                     job_id,
                                     "processed",
-                                    "brightcove",
+                                    api_request.integration_type,
                                     i_id,
                                     title,
-                                    None, 
-                                    None,
+                                    self.video_metadata.duration, 
+                                    api_request.publish_date,
                                     0, #current_tid
                                     thumbs)
-        request = notification_response_builder(ba.account_id, i_id, vr.to_json()) 
+
+        notification_url = \
+          'http://www.neon-lab.com/api/accounts/%s/events' % account.account_id
+        request_dict = {}
+        request_dict["api_key"] = properties.NOTIFICATION_API_KEY
+        request_dict["video"] = vr.to_json()
+        request_dict["event"] = "processing_complete"
+        request = tornado.httpclient.HTTPRequest(
+            url=notification_url, 
+            method="POST",
+            body=urllib.urlencode(request_dict), 
+            request_timeout=60.0, 
+            connect_timeout=10.0)
         response = utils.http.send_request(request)
         if response.error:
             _log.error("Notification response not sent to %r " % request)

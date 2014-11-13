@@ -34,8 +34,6 @@ import utils.sync
 import logging
 _log = logging.getLogger(__name__)
 
-random.seed(125135)
-
 @utils.sync.optional_sync
 @tornado.gen.coroutine
 def upload_image_to_s3(

@@ -8,9 +8,11 @@ if sys.path[0] <> base_path:
         sys.path.insert(0,base_path)
 
 import bcove_responses
+import copy
 from concurrent.futures import Future
 import logging
 _log = logging.getLogger(__name__)
+import json
 import multiprocessing
 from mock import patch, MagicMock
 import os
@@ -31,7 +33,7 @@ import unittest
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.redis 
 from StringIO import StringIO
-import supportServices.neondata
+from supportServices import neondata
 from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         YoutubePlatform, NeonUserAccount, DBConnection, NeonApiKey, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
@@ -590,6 +592,115 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         staging_url = vm.get_serving_url(staging=True)
         expected_url = serving_format % (na.staging_tracker_account_id, 'vid1')
         self.assertTrue(expected_url in staging_url)
+
+
+    @patch('supportServices.neondata.VideoMetadata.get')
+    def test_save_default_thumbnail(self, get_video_mock): 
+        get_video_mock.side_effect = lambda x, callback: callback(None)
+
+        # Start with no default thumbnail specified
+        api_request = NeonApiRequest('job1', 'acct1', 'vid1', 'title',
+                                     'video.mp4', 'neon', None,
+                                     default_thumbnail=None)
+        api_request.save_default_thumbnail()
+        self.assertEquals(get_video_mock.call_count, 0)
+
+        
+        # Add an old url and there is no video data in the database yet
+        api_request.previous_thumbnail = 'old_thumbnail'
+        with self.assertLogExists(logging.ERROR, 
+                                 'VideoMetadata for job .* is missing'):
+            with self.assertRaises(neondata.DBStateError):
+                api_request.save_default_thumbnail()
+
+        # Add the video data to the database
+        video = VideoMetadata('acct1_vid1')
+        add_thumb_mock = MagicMock()
+        video.download_and_add_thumbnail = add_thumb_mock
+        add_future = Future()
+        add_future.set_result(MagicMock())
+        add_thumb_mock.return_value = add_future
+        get_video_mock.side_effect = lambda x, callback: callback(video)
+        
+        api_request.save_default_thumbnail()
+        self.assertEquals(add_thumb_mock.call_count, 1)
+        thumbmeta, url_seen, cdn = add_thumb_mock.call_args[0]
+        self.assertEquals(url_seen, 'old_thumbnail')
+        self.assertEquals(thumbmeta.rank, 0)
+        self.assertEquals(thumbmeta.type, ThumbnailType.DEFAULT)
+        add_thumb_mock.reset_mock()
+
+        # Use the default_thumbnail attribute
+        api_request.default_thumbnail = 'new_thumbnail'
+        api_request.save_default_thumbnail()
+        thumbmeta, url_seen, cdn = add_thumb_mock.call_args[0]
+        self.assertEquals(url_seen, 'new_thumbnail')
+        add_thumb_mock.reset_mock()
+
+        # Add a different default to the database, so rank should be lower
+        thumb = ThumbnailMetadata('acct1_vid1_thumb1', 
+                                  urls=['other_default.jpg'], 
+                                  rank=0, ttype=ThumbnailType.DEFAULT)
+        thumb.save()
+        video.thumbnail_ids.append(thumb.key)
+        api_request.save_default_thumbnail()
+        self.assertEquals(add_thumb_mock.call_count, 1)
+        thumbmeta, url_seen, cdn = add_thumb_mock.call_args[0]
+        self.assertEquals(url_seen, 'new_thumbnail')
+        self.assertEquals(thumbmeta.rank, -1)
+        self.assertEquals(thumbmeta.type, ThumbnailType.DEFAULT)
+        add_thumb_mock.reset_mock()
+
+        # Try to add the same default again and it shouldn't be
+        # added. Need to add it to the database manually because we
+        # mocked out the call that does that.
+        thumb = ThumbnailMetadata('acct1_vid1_thumb2', 
+                                  urls=['new_thumbnail'], 
+                                  rank=-1, ttype=ThumbnailType.DEFAULT)
+        thumb.save()
+        video.thumbnail_ids.append(thumb.key)
+        api_request.save_default_thumbnail()
+        self.assertEquals(add_thumb_mock.call_count, 0)
+
+    def test_api_request(self):
+        # Make sure that the Api Requests are saved and read from the
+        # database consistently.
+        bc_request = neondata.BrightcoveApiRequest(
+            'bc_job', 'api_key', 'vid0', 'title',
+            'url', 'rtoken', 'wtoken', 'pid',
+            'callback_url', 'i_id',
+            'default_thumbnail')
+        bc_request.save()
+
+        bc_found = NeonApiRequest.get('api_key', 'bc_job')
+        self.assertEquals(bc_request, bc_found)
+        self.assertIsInstance(bc_found, neondata.BrightcoveApiRequest)
+
+        oo_request = neondata.OoyalaApiRequest(
+            'oo_job', 'api_key', 'i_id', 'vid0', 'title',
+            'url', 'oo_api_key', 'oo_secret_key', 'p_thumb',
+            'callback_url', 'default_thumbnail')
+        oo_request.save()
+
+        self.assertEquals(oo_request, NeonApiRequest.get('api_key', 'oo_job'))
+
+        yt_request = neondata.OoyalaApiRequest(
+            'yt_job', 'api_key', 'vid0', 'title',
+            'url', 'access_token', 'request_token', 'expiry',
+            'callback_url', 'default_thumbnail')
+        yt_request.save()
+
+        self.assertEquals(oo_request, NeonApiRequest.get('api_key', 'yt_job'))
+
+        n_request = NeonApiRequest(
+            'n_job', 'api_key', 'vid0', 'title',
+            'url', 'neon', 'callback_url', 'default_thumbnail')
+        n_request.save()
+
+        self.assertEquals(oo_request, NeonApiRequest.get('api_key', 'n_job'))
+
+        
+        
 
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):

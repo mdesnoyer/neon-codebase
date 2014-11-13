@@ -1515,7 +1515,8 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertIsNotNone(c_thumb.phash)
         self.assertEqual(c_thumb.urls, 
                          ['https://host-thumbnails.s3.amazonaws.com/%s.jpg' %
-                          re.sub('_', '/', c_thumb.key)])
+                          re.sub('_', '/', c_thumb.key),
+                          'http://custom_thumbnail.jpg'])
         
         s_url = neondata.ThumbnailServingURLs.get(c_thumb.key)
         self.assertIsNotNone(s_url)

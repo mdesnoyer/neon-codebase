@@ -81,6 +81,8 @@ define('async_pool_size', type=int, default=10,
 #constants 
 BCOVE_STILL_WIDTH = 480
 
+class DBStateError(ValueError):pass
+
 class DBConnection(object):
     '''Connection to the database.
 
@@ -382,9 +384,9 @@ def id_generator(size=32,
     ''' Generate a random alpha numeric string to be used as 
         unique ids
     '''
+    retval = ''.join(random.choice(chars) for x in range(size))
 
-    random.seed(time.time())
-    return ''.join(random.choice(chars) for x in range(size))
+    return retval
 
 ##############################################################################
 ## Enum types
@@ -433,6 +435,9 @@ class StoredObject(object):
         return str(self)
 
     def __cmp__(self, other):
+        classcmp = cmp(self.__class__, other.__class__)
+        if classcmp != 0:
+            return classcmp
         return cmp(self.__dict__, other.__dict__)
 
     def to_json(self):
@@ -490,6 +495,7 @@ class StoredObject(object):
         if len(keys) == 0:
             if callback:
                 callback([])
+                return
             else:
                 return []
 
@@ -734,7 +740,6 @@ class NeonApiKey(object):
     @classmethod
     def id_generator(cls, size=24, 
             chars=string.ascii_lowercase + string.digits):
-        random.seed(time.time())
         return ''.join(random.choice(chars) for x in range(size))
 
     @classmethod
@@ -842,7 +847,7 @@ class NeonUserAccount(object):
 
     '''
     def __init__(self, a_id, api_key=None, default_size=(160,90)):
-        self.account_id = a_id
+        self.account_id = a_id # Account id chosen when account is created
         self.neon_api_key = NeonApiKey.generate(a_id) if api_key is None \
                             else api_key
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
@@ -1205,7 +1210,7 @@ class AbstractPlatform(object):
         # Will thumbnails be served by our system?
         self.serving_enabled = serving_enabled
 
-        # How is the A/B testing done, default to imageplatform
+        # What controller is used to serve the image? Default to imageplatform
         self.serving_controller = serving_controller 
 
     def generate_key(self, i_id):
@@ -2002,7 +2007,7 @@ class NeonApiRequest(object):
     '''
 
     def __init__(self, job_id, api_key, vid, title, url, 
-            request_type, http_callback):
+            request_type, http_callback, default_thumbnail=None):
         self.key = generate_request_key(api_key, job_id) 
         self.job_id = job_id
         self.api_key = api_key 
@@ -2013,6 +2018,7 @@ class NeonApiRequest(object):
         self.callback_url = http_callback
         self.state = "submit" # submit / processing / success / fail 
         self.integration_type = "neon"
+        self.default_thumbnail = None # URL of a default thumb
 
         #Save the request response
         self.response = {}  
@@ -2024,6 +2030,12 @@ class NeonApiRequest(object):
 
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__) 
+
+    def get_default_thumbnail_type(self):
+        '''Return the thumbnail type that should be used for a default 
+        thumbnail in the request.
+        '''
+        return ThumbnailType.DEFAULT
 
     def add_response(self, frames, timecodes=None, urls=None, error=None):
         ''' add response to the api request '''
@@ -2128,21 +2140,96 @@ class NeonApiRequest(object):
 
             return obj
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def save_default_thumbnail(self, cdn_metadata=None):
+        '''Save the default thumbnail by attaching it to a video.
+
+        The video metadata for this request must be in the database already.
+
+        Inputs:
+        cdn_metadata - If known, the metadata to save to the cdn.
+                       Otherwise it will be looked up.
+        '''
+        try:
+            thumb_url = self.default_thumbnail
+        except AttributeError:
+            thumb_url = None
+
+        if thumb_url is None:
+            # Fallback to the old previous_thumbnail
+            
+            # TODO(sunil): remove this once the video api server only
+            # handles default thumbnail.
+            try:
+                thumb_url = self.previous_thumbnail
+            except AttributeError:
+                thumb_url = None
+
+        if not thumb_url:
+            # No default thumb to upload
+            return
+
+        thumb_type = self.get_default_thumbnail_type()
+
+        # Check to see if there is already a thumbnail that the system
+        # knows about (and thus was already uploaded)
+        video = yield tornado.gen.Task(
+            VideoMetadata.get,
+            InternalVideoID.generate(self.api_key,
+                                     self.video_id))
+        if video is None:
+            msg = ('VideoMetadata for job %s is missing. '
+                   'Cannot add thumbnail' % self.job_id)
+            _log.error(msg)
+            raise DBStateError(msg)
+
+        known_thumbs = yield tornado.gen.Task(
+            ThumbnailMetadata.get_many,
+            video.thumbnail_ids)
+        min_rank = 1
+        for thumb in known_thumbs:
+            if thumb.type == thumb_type:
+                if thumb_url in thumb.urls:
+                    # The exact thumbnail is already there
+                    return
+            
+                if thumb.rank < min_rank:
+                    min_rank = thumb.rank
+        cur_rank = min_rank - 1
+
+        # Upload the new thumbnail
+        meta = ThumbnailMetadata(
+            None,
+            ttype=thumb_type,
+            rank=cur_rank)
+        yield video.download_and_add_thumbnail(meta,
+                                               thumb_url,
+                                               cdn_metadata,
+                                               async=True)
+
 class BrightcoveApiRequest(NeonApiRequest):
     '''
     Brightcove API Request class
     '''
     def __init__(self, job_id, api_key, vid, title, url, rtoken, wtoken, pid,
-                callback=None, i_id=None):
+                callback=None, i_id=None, default_thumbnail=None):
         self.read_token = rtoken
         self.write_token = wtoken
         self.publisher_id = pid
         self.integration_id = i_id 
-        self.previous_thumbnail = None
+        self.previous_thumbnail = None # TODO(Sunil): Remove this
         self.autosync = False
         request_type = "brightcove"
-        super(BrightcoveApiRequest,self).__init__(job_id, api_key, vid, title, url,
-                request_type, callback)
+        super(BrightcoveApiRequest,self).__init__(job_id, api_key, vid, title,
+                                                  url, request_type, callback,
+                                                  default_thumbnail)
+
+    def get_default_thumbnail_type(self):
+        '''Return the thumbnail type that should be used for a default 
+        thumbnail in the request.
+        '''
+        return ThumbnailType.BRIGHTCOVE
 
 class OoyalaApiRequest(NeonApiRequest):
     '''
@@ -2150,30 +2237,45 @@ class OoyalaApiRequest(NeonApiRequest):
     '''
     def __init__(self, job_id, api_key, i_id, vid, title, url, 
                         oo_api_key, oo_secret_key,
-                        p_thumb, http_callback):
+                        p_thumb, http_callback, default_thumbnail=None):
         self.oo_api_key = oo_api_key
         self.oo_secret_key = oo_secret_key
         self.integration_id = i_id 
-        self.previous_thumbnail = p_thumb 
+        self.previous_thumbnail = p_thumb # TODO(Sunil): Remove this
         self.autosync = False
         request_type = "ooyala"
-        super(OoyalaApiRequest, self).__init__(job_id, api_key, vid, title, url,
-                request_type, http_callback)
+        super(OoyalaApiRequest, self).__init__(job_id, api_key, vid, title,
+                                               url, request_type,
+                                               http_callback,
+                                               default_thumbnail)
+
+    def get_default_thumbnail_type(self):
+        '''Return the thumbnail type that should be used for a default 
+        thumbnail in the request.
+        '''
+        return ThumbnailType.OOYALA
 
 class YoutubeApiRequest(NeonApiRequest):
     '''
     Youtube API Request class
     '''
-    def __init__(self, job_id, api_key, vid, title, url, access_token, refresh_token,
-            expiry, callback=None):
+    def __init__(self, job_id, api_key, vid, title, url, access_token,
+                 refresh_token, expiry, callback=None, default_thumbnail=None):
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.integration_type = "youtube"
-        self.previous_thumbnail = None
+        self.previous_thumbnail = None # TODO(Sunil): Remove this
         self.expiry = expiry
         request_type = "youtube"
-        super(YoutubeApiRequest,self).__init__(job_id, api_key, vid, title, url,
-                request_type, callback)
+        super(YoutubeApiRequest,self).__init__(job_id, api_key, vid, title,
+                                               url, request_type, callback,
+                                               default_thumbnail)
+
+    def get_default_thumbnail_type(self):
+        '''Return the thumbnail type that should be used for a default 
+        thumbnail in the request.
+        '''
+        return ThumbnailType.YOUTUBE
 
 ###############################################################################
 ## Thumbnail store T_URL => TID => Metadata
@@ -2432,7 +2534,7 @@ class ThumbnailMetadata(StoredObject):
         s3key = re.sub('_', '/', self.key) + '.jpg'
         s3_url = 'https://%s.s3.amazonaws.com/%s' % \
           (api.cdnhosting.get_s3_hosting_bucket(), s3key)
-        self.urls.append(s3_url)
+        self.urls.insert(0, s3_url)
 
         # Upload the image to s3
         # TODO(Sunil): Merge the primary hosting copy into the 
@@ -2759,6 +2861,7 @@ class VideoMetadata(StoredObject):
         '''
         image = yield utils.imageutils.PILImageUtils.download_image(image_url,
                                                                     async=True)
+        thumb.urls.append(image_url)
         thumb = yield self.add_thumbnail(thumb, image, cdn_metadata,
                                          save_objects, async=True)
         raise tornado.gen.Return(thumb)
@@ -2792,43 +2895,40 @@ class VideoMetadata(StoredObject):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def get_serving_url(self, staging=False):
+    def get_serving_url(self, staging=False, save=True):
         '''
         Get the serving URL of the video. If self.serving_url is not
         set, fetch the neon publisher id (TAI) and save the video object 
         with the serving_url set
-        '''
-        def _update_serving_url(vobj):
-            vobj.serving_url = self.serving_url
 
-        random.seed(int(time.time()))
+        save_url - If true, the url is saved to the database
+        '''
         subdomain_index = random.randrange(1, 4)
         platform_vid = InternalVideoID.to_external(self.get_id())
         serving_format = "http://i%s.neon-images.com/v1/client/%s/neonvid_%s.jpg"
 
-        if self.serving_url:
-            if staging:
-                # replace with staging id
-                nu = yield tornado.gen.Task(
-                        NeonUserAccount.get_account, self.get_account_id())
-                s_id = nu.staging_tracker_account_id
-                serving_url = serving_format % (subdomain_index, s_id, platform_vid)
-                raise tornado.gen.Return(serving_url)
-
+        if self.serving_url and not staging:
+            # Return the saved serving_url
             raise tornado.gen.Return(self.serving_url)
-        else:
-            # Fill in the Serving URL
-            nu = yield tornado.gen.Task(
-                    NeonUserAccount.get_account, self.get_account_id())
-            pub_id = nu.tracker_account_id
-            if staging:
-                pub_id = nu.staging_tracker_account_id
-                serving_url = serving_format % (subdomain_index, pub_id, platform_vid)
-                raise tornado.gen.Return(serving_url)
 
-            self.serving_url = serving_format % (subdomain_index, pub_id, platform_vid)
-            res = yield tornado.gen.Task(VideoMetadata.modify, self.key, _update_serving_url)
-            raise tornado.gen.Return(self.serving_url)
+        nu = yield tornado.gen.Task(
+                NeonUserAccount.get_account, self.get_account_id())
+        pub_id = nu.staging_tracker_account_id if staging else \
+          nu.tracker_account_id
+        serving_url = serving_format % (subdomain_index, pub_id,
+                                                platform_vid)
+
+        if not staging:
+            # Keep information about the serving url around
+            self.serving_url = serving_url
+            
+            def _update_serving_url(vobj):
+                vobj.serving_url = self.serving_url
+            if save:
+                yield tornado.gen.Task(VideoMetadata.modify, self.key,
+                                       _update_serving_url)
+
+        raise tornado.gen.Return(serving_url)
 
 class InMemoryCache(object):
 
