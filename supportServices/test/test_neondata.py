@@ -482,6 +482,43 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         expected_url = serving_format % (na.staging_tracker_account_id, 'vid1')
         self.assertTrue(expected_url in staging_url)
 
+    def test_api_request(self):
+        # Make sure that the Api Requests are saved and read from the
+        # database consistently.
+        bc_request = neondata.BrightcoveApiRequest(
+            'bc_job', 'api_key', 'vid0', 'title',
+            'url', 'rtoken', 'wtoken', 'pid',
+            'callback_url', 'i_id',
+            'default_thumbnail')
+        bc_request.save()
+
+        bc_found = NeonApiRequest.get('api_key', 'bc_job')
+        self.assertEquals(bc_request, bc_found)
+        self.assertIsInstance(bc_found, neondata.BrightcoveApiRequest)
+
+        oo_request = neondata.OoyalaApiRequest(
+            'oo_job', 'api_key', 'i_id', 'vid0', 'title',
+            'url', 'oo_api_key', 'oo_secret_key', 'p_thumb',
+            'callback_url', 'default_thumbnail')
+        oo_request.save()
+
+        self.assertEquals(oo_request, NeonApiRequest.get('api_key', 'oo_job'))
+
+        yt_request = neondata.OoyalaApiRequest(
+            'yt_job', 'api_key', 'vid0', 'title',
+            'url', 'access_token', 'request_token', 'expiry',
+            'callback_url', 'default_thumbnail')
+        yt_request.save()
+
+        self.assertEquals(oo_request, NeonApiRequest.get('api_key', 'yt_job'))
+
+        n_request = NeonApiRequest(
+            'n_job', 'api_key', 'vid0', 'title',
+            'url', 'neon', 'callback_url', 'default_thumbnail')
+        n_request.save()
+
+        self.assertEquals(oo_request, NeonApiRequest.get('api_key', 'n_job'))
+
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()

@@ -425,13 +425,14 @@ class StoredObject(object):
         self.key = str(key)
 
     def __str__(self):
-        return str(self.__dict__)
+        return "%s: %s" % (self.__class__.__name__, self.__dict__)
 
     def __repr__(self):
         return str(self)
 
     def __cmp__(self, other):
-        return cmp(self.__dict__, other.__dict__)
+        return cmp((self.__class__, self.__dict__),
+                   (other.__class__, other.__dict__))
 
     def to_json(self):
         '''Returns a json version of the object'''
@@ -635,15 +636,29 @@ class StoredObject(object):
         db_connection.clear_db()
 
 class NamespacedStoredObject(StoredObject):
-    '''An abstract StoredObject that is namespaced by its classname.'''
+    '''An abstract StoredObject that is namespaced by its classname.
+
+    This can also do a class hierarchy but it requires that the base
+    class defines _baseclass_name
+    '''
+    
     def __init__(self, key):
         super(NamespacedStoredObject, self).__init__(
             self.__class__.format_key(key))
 
     @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+
+        This should be implemented in the base class as:
+        return <Class>.__name__
+        '''
+        raise NotImplementedError()
+
+    @classmethod
     def format_key(cls, key):
         ''' Format the database key with a class specific prefix '''
-        return cls.__name__.lower() + '_%s' % key
+        return cls._baseclass_name.lower() + '_%s' % key
 
     @classmethod
     def get(cls, key, callback=None):
@@ -701,6 +716,18 @@ class NamespacedStoredObject(StoredObject):
             [cls.format_key(x) for x in keys],
             func,
             callback=callback)
+
+class HierarchicalStoredObject(StoredObject):
+    '''An abstract StoredObject that is namespaced by its classname.
+    '''
+    def __init__(self, key):
+        super(NamespacedStoredObject, self).__init__(
+            self.__class__.format_key(key))
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.'''
+        raise NotImplementedError()
 
 class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
