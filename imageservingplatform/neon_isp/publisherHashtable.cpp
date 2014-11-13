@@ -78,16 +78,22 @@ PublisherHashtable::AddPublisher(rapidjson::Document & document)
     Publisher * p = new Publisher();
     
     // get publisher id
-    document.HasMember("pid");
-    // document["pid"].IsString());
+    if(document.HasMember("pid") == false)
+    	return;
+    	
     const char * publisherId = document["pid"].GetString();
     
     // get account id
-    document.HasMember("aid");
-    // document["pid"].IsString());
+    if(document.HasMember("aid") == false)
+    	return;
+    	
     const char * accountId = document["aid"].GetString();
     
-    p->Init(publisherId, accountId);
+    int ret = p->Init(publisherId, accountId);
+    
+    if(ret != 0)
+    	return;
+    
     std::string key = publisherId;
     
     (*table)[key] = p;

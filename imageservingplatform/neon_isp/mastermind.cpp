@@ -28,6 +28,7 @@ Mastermind::Mastermind()
     publisherTable = 0;
     directiveTable = 0;
     expiry = 0;
+    initialized = false;
 }
 
 
@@ -35,6 +36,7 @@ Mastermind::~Mastermind()
 {
     publisherTable = 0;
     directiveTable = 0;
+    initialized = false;
 }
 
 
@@ -156,31 +158,56 @@ Mastermind::GetExpiry()
 }
 
 
-void
-Mastermind::InitStatic()
-{
-    srand(time(0));
-}
-
-
 void 
 Mastermind::Init() {
+   
+   if(initialized == true) {
+        //neon_stats[NEON_MASTERMIND_INVALID_INIT]++;
+        throw new NeonException("Mastermind::Init: calling Init on mastermind object already initialized");
+    }
+   
     publisherTable = new PublisherHashtable();
     directiveTable = new DirectiveHashtable();
     publisherTable->Init(100);
     directiveTable->Init(100);
+    
+    initialized = true;
 }
 
 
 void
 Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
 {
-    publisherTable = new PublisherHashtable();
-    directiveTable = new DirectiveHashtable();
+    NeonException * error = 0;
 
-    publisherTable->Init(100);
-    directiveTable->Init(100);
-    
+    try {
+        InitSafe(mastermindFile, previousMastermindExpiry);
+        return;
+    }
+    catch (NeonException * e) {
+        error = e;
+    }
+    catch (std::bad_alloc e) {
+        error = new NeonException("Mastermind::Init: bad alloc exception");
+    }
+    catch (...) {
+        error = new NeonException("Mastermind::Init: unspecified exception");
+    }
+
+    Dealloc();
+    throw error;
+}
+
+
+void
+Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpiry)
+{
+
+    if(initialized == true) {
+        //neon_stats[NEON_MASTERMIND_INVALID_INIT]++;
+        throw new NeonException("Mastermind::Init: calling Init on mastermind object already initialized");
+    }
+
     int lineNumber = 1;
 
     if(mastermindFile == 0)
@@ -215,10 +242,17 @@ Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
         throw new NeonException("Mastermind::Init: expiry in new mastermind file is lower or the same as the "
                                 "current mastermind in memory: new file expiry %d, current mastermind expiry "
                                 " %d", expiry, previousMastermindExpiry);
+    
+    // allocate all tables
+    publisherTable = new PublisherHashtable();
+    directiveTable = new DirectiveHashtable();
+
+    publisherTable->Init(100);
+    directiveTable->Init(100);
+    
     /*
      *  get publishers and directives
      */
-    
     while(1)
     {
         // put a terminating char at end of read buffer.  If overwritten while reading a line
@@ -306,10 +340,11 @@ Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
 
     int ret = fclose(f);
     
-    std::cout << "\nParsed "<< lineNumber << " lines" << endl;
+    if(ret != 0) {
+        // add a counter here
+    }
     
-    if(ret != 0)
-        throw new NeonException("Mastermind::Init: cannot close mastermind file");
+    initialized = true;
 }
 
 
@@ -444,6 +479,18 @@ Mastermind::GetThumbnailID(const char * c_accountId,
 void
 Mastermind::Shutdown(){
    
+    if(initialized == false) {
+        //neon_stats[NEON_MASTERMIND_INVALID_SHUTDOWN] ++;
+        return;
+    }
+
+    Dealloc();
+    initialized = false;
+}
+
+void 
+Mastermind::Dealloc() {
+
     if(publisherTable != 0) {
         publisherTable->Shutdown();
         delete publisherTable;
@@ -456,7 +503,6 @@ Mastermind::Shutdown(){
         directiveTable = 0;
     }
 }
-
 
 
 

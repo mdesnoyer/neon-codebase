@@ -9,6 +9,7 @@ ScaledImage::ScaledImage()
 {
     height = 0;
     width = 0;
+    initialized = false;
 }
 
 
@@ -16,24 +17,29 @@ ScaledImage::~ScaledImage()
 {
     height = 0;
     width = 0;
+    initialized = false;
 }
 
 
-void
+int
 ScaledImage::Init(const rapidjson::Value& img)
 {
+    if(initialized == true) {
+        neon_stats[NEON_SCALED_IMAGE_INVALID_INIT]++;
+        return -1;
+    }
     
     /*
      *  Image height
      */
     if(img.HasMember("h") == false) {
         neon_stats[NEON_SCALED_IMAGE_PARSE_ERROR]++;
-        throw new NeonException("ScaledImage::Init: no height key found");
+        return -1;
     }
 
     if(img["h"].IsInt() == false) {
         neon_stats[NEON_SCALED_IMAGE_PARSE_ERROR]++;
-        throw new NeonException("ScaledImage::Init: height value isnt a json int");
+        return -1;
     }
 
     height = img["h"].GetInt();
@@ -44,12 +50,12 @@ ScaledImage::Init(const rapidjson::Value& img)
      */
     if(img.HasMember("w") == false) {
         neon_stats[NEON_SCALED_IMAGE_PARSE_ERROR]++;
-        throw new NeonException("ScaledImage::Init: no width key found");
+        return -1;
     }
 
     if(img["w"].IsInt() == false) {
         neon_stats[NEON_SCALED_IMAGE_PARSE_ERROR]++;
-        throw new NeonException("ScaledImage::Init: width value isnt a json int");
+        return -1;
     }
 
     width = img["w"].GetInt();
@@ -60,22 +66,29 @@ ScaledImage::Init(const rapidjson::Value& img)
      */
     if(img.HasMember("url") == false) {
         neon_stats[NEON_SCALED_IMAGE_PARSE_ERROR]++;
-        throw new NeonException("ScaledImage::Init: no url key found");
+        return -1;
     }
 
     if(img["url"].IsString() == false) {
         neon_stats[NEON_SCALED_IMAGE_PARSE_ERROR]++;
-        throw new NeonException("ScaledImage::Init: url value isnt a json string");
+        return -1;
     }
 
     url = img["url"].GetString();
+    initialized = true;
+    return 0;
 }
 
 
 void
 ScaledImage::Shutdown()
 {
-    // nothing to do
+    if(initialized == false) { 
+        neon_stats[NEON_SCALED_IMAGE_INVALID_SHUTDOWN]++;
+        return;
+    }
+
+    initialized = false;
 }
 
 

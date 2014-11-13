@@ -13,6 +13,11 @@ extern "C" {
 
 
 /*
+ *  Contains an error message in case of function call failure
+ */
+extern char * neon_mastermind_error;
+
+/*
  *  Initialization
  */
 NEON_BOOLEAN neon_mastermind_init();

@@ -101,7 +101,7 @@ neon_runloop(void * arg){
    	// Enable the SIGCHLD default handler (else it doesnt work on ubuntu)
    	signal(SIGCHLD, SIG_DFL);	
     
-    neon_log_error("neon updater started");
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: started");
   
     neon_stats_init();
     
@@ -132,16 +132,13 @@ neon_runloop(void * arg){
         // check if the current mastermind's expiry is approaching
         if(neon_mastermind_expired() == NEON_TRUE){
         
-            neon_log_error("mastermind expired");
             /*
              *  fetch new mastermind file from S3
              */
             if(neon_fetch(mastermind_url, mastermind_filepath, s3downloader, s3port, fetch_timeout) == NEON_FETCH_FAIL) {
                 
                 // log
-                neon_log_error("failed to fetch mastermind file, error: %s",
-                               neon_fetch_error);
-                // alert
+                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: failed to fetch mastermind file: %s", neon_fetch_error);
                 neon_stats[NEON_UPDATER_HTTP_FETCH_FAIL]++; 
                 neon_sleep(sleep_time);
                 continue;
@@ -155,21 +152,18 @@ neon_runloop(void * arg){
             
            	// TODO(Sunil) : Spawn a process to validate the Expiry
             time_t new_mastermind_expiry = neon_get_expiry(mastermind_filepath);
-           	if (new_mastermind_expiry < time(0)){
-                
-                // Check if the expiry is greater than the current expiry, if
-                // Yes Load IT !
+            if (new_mastermind_expiry < time(0)){
                 
                 if(neon_mastermind_is_expiry_greater_than_current(new_mastermind_expiry) == NEON_TRUE){
-                    neon_log_error("mastermind file has expired, But loading new one since expiry is greater");
+                    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: fetched mastermind is expired but ahead of current");
                     neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
                 }else{ 
-                    neon_log_error("mastermind file has expired and older than current file being used, hence not loading it");
+                    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: fetched mastermind is expired and older than current");
                     neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
                     neon_sleep(sleep_time);
                     continue;
                 }
-			} 
+	    } 
             
             /*
              *  parse and process new mastermind file into memory
@@ -177,10 +171,7 @@ neon_runloop(void * arg){
             // process file into memory
             if(neon_mastermind_load(mastermind_filepath) == NEON_LOAD_FAIL) {
                 
-                // the load function will log the specific error
-                neon_log_error("failed to load mastermind file");
-                
-                // alert
+                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: mastermind load failed: %s", neon_mastermind_error);
                 neon_stats[NEON_UPDATER_MASTERMIND_LOAD_FAIL]++;
                 neon_sleep(sleep_time);
                 continue;
@@ -191,16 +182,14 @@ neon_runloop(void * arg){
              */
             if( neon_rename(mastermind_filepath, validated_mastermind_filepath) == NEON_RENAME_FAIL) {
         
-                // log
-                neon_log_error("failed to rename mastermind file, error: %s",
-                               neon_rename_error);
-                
-                // alert
+                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: failed to rename validated mastermind file, error: %s", neon_rename_error);
                 neon_stats[NEON_UPDATER_MASTERMIND_RENAME_FAIL]++;
                 neon_sleep(sleep_time);
                 continue;
             }
 
+	    // success
+            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: fetched and loaded mastermind file successfully");
             neon_stats[MASTERMIND_RENAME_SUCCESS]++;
         }
         

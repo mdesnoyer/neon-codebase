@@ -26,20 +26,46 @@ Directive::~Directive()
 }
 
 
-void
-Directive::Init(const rapidjson::Document & document)
+int
+Directive::Init(const rapidjson::Document & document) {
+
+    try {
+        int ret = InitSafe(document);
+        
+        // success
+        if(ret == 0)
+            return 0;
+    }
+
+    // on any error, clean up 
+    catch (NeonException * e) {
+    
+    }
+    catch (std::bad_alloc e) {
+    
+    }
+    catch (...) {
+    }
+
+    Dealloc();
+    return -1;
+}
+
+
+int
+Directive::InitSafe(const rapidjson::Document & document)
 {
     /*
      *  account id
      */
     if(document.HasMember("aid") == false) {
         neon_stats[NEON_DIRECTIVE_PARSE_ERROR]++;
-        throw new NeonException("Directive::Init: no account id key found");
+        return -1;
     }
 
     if(document["aid"].IsString() == false) {
         neon_stats[NEON_DIRECTIVE_PARSE_ERROR]++;
-        throw new NeonException("Directive::Init: account id value isnt a string");
+        return -1;
     }
 
     accountId = document["aid"].GetString();
@@ -49,12 +75,12 @@ Directive::Init(const rapidjson::Document & document)
      */
     if(document.HasMember("vid") == false)  {
         neon_stats[NEON_DIRECTIVE_PARSE_ERROR]++;
-        throw new NeonException("Directive::Init: no video id key found");
+        return -1;
     }
 
     if(document["vid"].IsString() == false) {
         neon_stats[NEON_DIRECTIVE_PARSE_ERROR]++;
-        throw new NeonException("Directive::Init: video id value isnt a string");
+        return -1;
     }
 
     videoId = document["vid"].GetString();
@@ -68,12 +94,12 @@ Directive::Init(const rapidjson::Document & document)
      */
     if(document.HasMember("sla") == false) {
         neon_stats[NEON_DIRECTIVE_PARSE_ERROR]++;
-        throw new NeonException("Directive::Init: no SLA key found");
+        return -1;
     }
 
     if(document["sla"].IsString() == false) {
         neon_stats[NEON_DIRECTIVE_PARSE_ERROR]++;
-        throw new NeonException("Directive::Init: SLA value isnt a string");
+        return -1;
     }
 
     const char * t = document["sla"].GetString();
@@ -86,14 +112,14 @@ Directive::Init(const rapidjson::Document & document)
 
     if(fract.IsArray() == false) {
         neon_stats[NEON_DIRECTIVE_PARSE_ERROR]++;
-        throw new NeonException("Directive::Init: fractions not in array json format");
+        return -1;
     }
 
     rapidjson::SizeType numOfFractions = fract.Size();
 
     if(numOfFractions == 0) {
         neon_stats[NEON_DIRECTIVE_INVALID]++;
-        throw new NeonException("Directive::Init: no fractions in directive");
+        return -1;
     }
 
     double pctFloor = 0.0;
@@ -112,7 +138,12 @@ Directive::Init(const rapidjson::Document & document)
         const rapidjson::Value& fa = fract[i];
 
         // init the fraction, passing along the floor value
-        f->Init(pctFloor, fa);
+        int ret = f->Init(pctFloor, fa);
+
+        if(ret != 0) {
+            neon_stats[NEON_DIRECTIVE_INVALID]++;
+            return -1;
+        }
 
         // this is the floor value of the next one
         pctFloor = f->GetThreshold();
@@ -127,11 +158,20 @@ Directive::Init(const rapidjson::Document & document)
             fractions[i]->SetPct(pcnt);
         } 
     }
+    
+    return 0;
 }
 
 
 void
 Directive::Shutdown()
+{
+    Dealloc();
+}
+
+
+void 
+Directive::Dealloc()
 {
     for(std::vector<Fraction*>::iterator it = fractions.begin(); 
             it != fractions.end(); it ++)
