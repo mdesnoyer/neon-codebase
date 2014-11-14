@@ -51,6 +51,7 @@ import utils.sync
 import utils.s3
 import utils.http 
 import urllib
+import warnings
 
 import api.cdnhosting
 from api import ooyala_api
@@ -374,11 +375,6 @@ class RedisClient(object):
 
 ##############################################################################
 
-def generate_request_key(api_key, job_id):
-    ''' Format request key (with job_id) to find NeonApiRequest Object'''
-    key = "request_" + api_key + "_" + job_id
-    return key
-
 def id_generator(size=32, 
             chars=string.ascii_lowercase + string.digits):
     ''' Generate a random alpha numeric string to be used as 
@@ -422,6 +418,8 @@ class MetricType:
 class StoredObject(object):
     '''Abstract class to represent an object that is stored in the database.
 
+    Fields can be either native types or other StoreObjects
+
     This contains common routines for interacting with the data.
     TODO: Convert all the objects to use this consistent interface.
     '''
@@ -429,20 +427,24 @@ class StoredObject(object):
         self.key = str(key)
 
     def __str__(self):
-        return str(self.__dict__)
+        return "%s: %s" % (self.__class__.__name__, self.__dict__)
 
     def __repr__(self):
         return str(self)
 
     def __cmp__(self, other):
-        classcmp = cmp(self.__class__, other.__class__)
-        if classcmp != 0:
-            return classcmp
-        return cmp(self.__dict__, other.__dict__)
+        return cmp((self.__class__, self.__dict__),
+                   (other.__class__, other.__dict__))
+
+    def to_dict(self):
+        return {
+            '_type': self.__class__.__name__,
+            '_data': self.__dict__
+            }
 
     def to_json(self):
         '''Returns a json version of the object'''
-        return json.dumps(self, default=lambda o: o.__dict__)
+        return json.dumps(self, default=lambda o: o.to_dict())
 
     def save(self, callback=None):
         '''Save the object to the database.'''
@@ -455,6 +457,39 @@ class StoredObject(object):
         else:
             return db_connection.blocking_conn.set(self.key, value)
 
+
+    @classmethod
+    def _create(cls, key, obj_dict):
+        '''Create an object from a dictionary that was created by save().
+
+        Returns None if the object could not be created.
+        '''
+        
+        if obj_dict:
+            # Get the class type to create
+            try:
+                classtype = globals()[obj_dict['_type']]
+                data_dict = obj_dict['_data']
+            except KeyError:
+                # For backwards compatibility, assume that the class is cls
+                classtype = cls
+                data_dict = obj_dict
+            obj = classtype(key)
+
+            #populate the object dictionary
+            for k, value in data_dict.iteritems():
+                # Build object for this field if it is a StoredObject
+                if (isinstance(value, dict) and '_type' in value and 
+                    '_data' in value):
+                    value = cls._create(k, value)
+                obj.__dict__[str(k)] = value
+        
+            return obj
+
+    def get_id(self):
+        '''Return the non-namespaced id for the object.'''
+        return self.key
+
     @classmethod
     def get(cls, key, callback=None):
         '''Retrieve this object from the database.
@@ -465,7 +500,7 @@ class StoredObject(object):
 
         def cb(result):
             if result:
-                obj = cls._create(key, result)
+                obj = cls._create(key, json.loads(result))
                 callback(obj)
             else:
                 callback(None)
@@ -476,7 +511,7 @@ class StoredObject(object):
             jdata = db_connection.blocking_conn.get(key)
             if jdata is None:
                 return None
-            return cls._create(key, jdata)
+            return cls._create(key, json.loads(jdata))
 
     @classmethod
     def get_many(cls, keys, callback=None):
@@ -504,7 +539,10 @@ class StoredObject(object):
         def process(results):
             mappings = [] 
             for key, item in zip(keys, results):
-                obj = cls._create(key, item)
+                if item:
+                    obj = cls._create(key, json.loads(item))
+                else:
+                    obj = None
                 mappings.append(obj)
             callback(mappings)
 
@@ -514,7 +552,10 @@ class StoredObject(object):
             mappings = [] 
             items = db_connection.blocking_conn.mget(keys)
             for key, item in zip(keys, items):
-                obj = cls._create(key, item)
+                if item:
+                    obj = cls._create(key, json.loads(item))
+                else:
+                    obj = None
                 mappings.append(obj)
             return mappings
 
@@ -599,7 +640,7 @@ class StoredObject(object):
                         _log.error('Could not get redis object: %s' % key)
                         mappings[key] = None
                 else:
-                    mappings[key] = create_class._create(key, item)
+                    mappings[key] = create_class._create(key, json.loads(item))
             try:
                 func(mappings)
             finally:
@@ -635,38 +676,43 @@ class StoredObject(object):
             return db_connection.blocking_conn.mset(data)
 
     @classmethod
-    def _create(cls, key, json_data):
-        '''Create an object from the json_data.
-
-        Returns None if the object could not be created.
-        '''
-        if json_data:
-            data_dict = json.loads(json_data)
-            #create basic object
-            obj = cls(key)
-
-            #populate the object dictionary
-            for key, value in data_dict.iteritems():
-                obj.__dict__[str(key)] = value
-        
-            return obj
-
-    @classmethod
     def _erase_all_data(cls):
         '''Clear the database that contains objects of this type '''
         db_connection = DBConnection.get(cls)
         db_connection.clear_db()
 
 class NamespacedStoredObject(StoredObject):
-    '''An abstract StoredObject that is namespaced by its classname.'''
+    '''An abstract StoredObject that is namespaced by the baseclass classname.
+
+    Subclasses of this must define _baseclass_name in the base class
+    of the hierarchy. 
+    '''
+    
     def __init__(self, key):
         super(NamespacedStoredObject, self).__init__(
             self.__class__.format_key(key))
+        self._id = key
+
+    def get_id(self):
+        '''Return the non-namespaced id for the object.'''
+        return self._id
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+
+        This should be implemented in the base class as:
+        return <Class>.__name__
+        '''
+        raise NotImplementedError()
 
     @classmethod
     def format_key(cls, key):
         ''' Format the database key with a class specific prefix '''
-        return cls.__name__.lower() + '_%s' % key
+        if key.startswith(cls._baseclass_name().lower()):
+            return key
+        else:
+            return '%s_%s' % (cls._baseclass_name().lower(), key)
 
     @classmethod
     def get(cls, key, callback=None):
@@ -677,7 +723,10 @@ class NamespacedStoredObject(StoredObject):
 
     @classmethod
     def get_many(cls, keys, callback=None):
-        '''Returns the list of objects from a list of keys.'''
+        '''Returns the list of objects from a list of keys.
+
+        Each key must be a tuple
+        '''
         return super(NamespacedStoredObject, cls).get_many(
             [cls.format_key(x) for x in keys],
             callback=callback)
@@ -703,10 +752,11 @@ class NamespacedStoredObject(StoredObject):
                 keys, callback=filtered_callback)
             
         if callback:
-            db_connection.conn.keys(cls.__name__.lower() + "_*",
+            db_connection.conn.keys(cls._baseclass_name().lower() + "_*",
                                     callback=process_keylist)
         else:
-            keys = db_connection.blocking_conn.keys(cls.__name__.lower()+"_*")
+            keys = db_connection.blocking_conn.keys(
+                cls._baseclass_name().lower()+"_*")
             return  [x for x in 
                      super(NamespacedStoredObject, cls).get_many(keys)
                      if x is not None]
@@ -796,7 +846,7 @@ class TrackerAccountID(object):
     @staticmethod
     def generate(_input):
         ''' Generate a CRC 32 for Tracker Account ID'''
-        return abs(binascii.crc32(_input))
+        return str(abs(binascii.crc32(_input)))
 
 class TrackerAccountIDMapper(NamespacedStoredObject):
     '''
@@ -815,6 +865,12 @@ class TrackerAccountIDMapper(NamespacedStoredObject):
     def get_tai(self):
         '''Retrieves the TrackerAccountId of the object.'''
         return self.key.partition('_')[2]
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return TrackerAccountIDMapper.__name__
     
     @classmethod
     def get_neon_account_id(cls, tai, callback=None):
@@ -824,17 +880,12 @@ class TrackerAccountIDMapper(NamespacedStoredObject):
         def format_tuple(result):
             ''' format result tuple '''
             if result:
-                data = json.loads(result)
-                return data['value'], data['itype']
+                return result.value, result.itype
 
-        key = cls.format_key(tai)
-        db_connection = DBConnection.get(cls)
-       
         if callback:
-            db_connection.conn.get(key, lambda x: callback(format_tuple(x)))
+            cls.get(tai, lambda x: callback(format_tuple(x)))
         else:
-            data = db_connection.blocking_conn.get(key)
-            return format_tuple(data)
+            return format_tuple(cls.get(tai))
 
 class NeonUserAccount(object):
     ''' NeonUserAccount
@@ -1044,6 +1095,12 @@ class ExperimentStrategy(NamespacedStoredObject):
         # The maximum number of Neon thumbs to run in the
         # experiment. If None, all of them are used.
         self.max_neon_thumbs = max_neon_thumbs
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return ExperimentStrategy.__name__
 
 class CDNHostingMetadataList(NamespacedStoredObject):
     '''A list of CDNHostingMetadata objects.
@@ -1258,9 +1315,9 @@ class AbstractPlatform(object):
                             RequestState.ACTIVE,
                             RequestState.REPROCESS, RequestState.SERVING, 
                             RequestState.SERVING_AND_ACTIVE]
-        request_keys = [generate_request_key(self.neon_api_key, v) for v in
+        request_keys = [(v, self.neon_api_key) for v in
                         self.videos.values()]
-        api_requests = NeonApiRequest.get_requests(request_keys)
+        api_requests = NeonApiRequest.get_many(request_keys)
         for api_request in api_requests:
             if api_request and api_request.state in processed_state:
                 i_vids.append(InternalVideoID.generate(self.neon_api_key, 
@@ -1557,8 +1614,7 @@ class BrightcovePlatform(AbstractPlatform):
         else:
             #Success      
             #Update the request state to Active to facilitate faster filtering
-            req_data = NeonApiRequest.get_request(self.neon_api_key, vmdata.job_id) 
-            vid_request = NeonApiRequest.create(req_data)
+            vid_request = NeonApiRequest.get(vmdata.job_id, self.neon_api_key)
             vid_request.state = RequestState.ACTIVE
             ret = vid_request.save()
             if not ret:
@@ -1943,8 +1999,7 @@ class OoyalaPlatform(AbstractPlatform):
             raise tornado.gen.Return(False)
             
 
-        req_data = NeonApiRequest.get_request(self.neon_api_key, vmdata.job_id) 
-        vid_request = NeonApiRequest.create(req_data)
+        vid_request = NeonApiRequest.get(vmdata.job_id, self.neon_api_key)
         vid_request.state = RequestState.ACTIVE
         ret = vid_request.save()
         if not ret:
@@ -1993,28 +2048,24 @@ class RequestState(object):
     # For CMS API response if SERVING_AND_ACTIVE return active state
     SERVING_AND_ACTIVE = "serving_active" # indicates there is a chosen thumb & is serving ready 
 
-class NeonApiRequest(object):
+class NeonApiRequest(NamespacedStoredObject):
     '''
     Instance of this gets created during request creation
     (Neon web account, RSS Cron)
     Json representation of the class is saved in the server queue and redis  
-    
-    Saving request blobs : 
-    create instance of the request object and call save()
-
-    Getting request blobs :
-    use static get method to get a json based response NeonApiRequest.get_request()
     '''
 
-    def __init__(self, job_id, api_key, vid, title, url, 
-            request_type, http_callback, default_thumbnail=None):
-        self.key = generate_request_key(api_key, job_id) 
+    def __init__(self, job_id, api_key=None, vid=None, title=None, url=None, 
+            request_type=None, http_callback=None, default_thumbnail=None):
+        super(NeonApiRequest, self).__init__(
+            self._generate_subkey(job_id, api_key))
         self.job_id = job_id
         self.api_key = api_key 
         self.video_id = vid #external video_id
         self.video_title = title
         self.video_url = url
         self.request_type = request_type
+        # The url to send the callback response
         self.callback_url = http_callback
         self.state = "submit" # submit / processing / success / fail 
         self.integration_type = "neon"
@@ -2028,8 +2079,41 @@ class NeonApiRequest(object):
         self.api_param  = None
         self.publish_date = None
 
-    def to_json(self):
-        return json.dumps(self, default=lambda o: o.__dict__) 
+    @classmethod
+    def _generate_subkey(cls, job_id, api_key):
+        if job_id.startswith('request'):
+            # Is is really the full key, so just return the subportion
+            return job_id.partition('_')[2]
+        return '_'.join([job_id, api_key])
+
+    @classmethod
+    def _baseclass_name(cls):
+        # For backwards compatibility, we don't use the classname
+        return 'request'
+
+    @classmethod
+    def _create(cls, key, obj_dict):
+        '''Create the object.
+
+        Needed for backwards compatibility for old style data that
+        doesn't include the classname. Instead, request_type holds
+        which class to create.
+        '''
+        if obj_dict:
+            if not '_type' in obj_dict or not '_data' in obj_dict:
+                # Old style object, so adjust the object dictionary
+                typemap = {
+                    'brightcove' : BrightcoveApiRequest,
+                    'ooyala' : OoyalaApiRequest,
+                    'youtube' : YoutubeApiRequest,
+                    'neon' : NeonApiRequest,
+                    None : NeonApiRequest
+                    }
+                obj_dict = {
+                    '_type': typemap[obj_dict['request_type']].__name__,
+                    '_data': copy.deepcopy(obj_dict)
+                    }
+            return super(NeonApiRequest, cls)._create(key, obj_dict)
 
     def get_default_thumbnail_type(self):
         '''Return the thumbnail type that should be used for a default 
@@ -2053,92 +2137,42 @@ class NeonApiRequest(object):
 
         #TODO:validate supported methods
 
-    def save(self, callback=None):
-        ''' save instance '''
-        db_connection = DBConnection.get(self)
-        value = self.to_json()
-        if self.key is None:
-            raise Exception("key not set")
-        if callback:
-            db_connection.conn.set(self.key, value, callback)
-        else:
-            return db_connection.blocking_conn.set(self.key, value)
-
     @classmethod
-    def get(cls, api_key, job_id, callback=None):
+    def get(cls, job_id, api_key, callback=None):
         ''' get instance '''
-        db_connection = DBConnection.get(cls)
-        def package(result):
-            if result:
-                nar = NeonApiRequest.create(result)
-                callback(nar)
-            else:
-                callback(None)
-
-        key = generate_request_key(api_key, job_id)
-        if callback:
-            db_connection.conn.get(key, lambda x: callback(package(x)))
-        else:
-            result = db_connection.blocking_conn.get(key)
-            if result:
-                return NeonApiRequest.create(result)
+        return super(NeonApiRequest, cls).get(
+            cls._generate_subkey(job_id, api_key),
+            callback=callback)
 
     @classmethod
-    def get_request(cls, api_key, job_id, callback=None):
-        ''' get request data '''
-        db_connection=DBConnection.get(cls)
-        key = generate_request_key(api_key, job_id)
-        if callback:
-            db_connection.conn.get(key,callback)
-        else:
-            return db_connection.blocking_conn.get(key)
+    def get_many(cls, keys, callback=None):
+        '''Returns the list of objects from a list of keys.
+
+        Each key must be a tuple of (job_id, api_key)
+        '''
+        return super(NeonApiRequest, cls).get_many(
+            [cls._generate_subkey(job_id, api_key) for 
+             job_id, api_key in keys],
+            callback=callback)
 
     @classmethod
-    def get_requests(cls, keys, callback=None):
-        ''' mget results '''
-        #MGET raises an exception for wrong number of args if keys = []
-        if len(keys) == 0:
-            if callback:
-                callback([])
-            else:
-                return []
+    def modify(cls, api_key, job_id, func, callback=None):
+        super(NeonApiRequest, cls).modify(
+            cls._generate_subkey(job_id, api_key),
+            func,
+            callback=callback)
 
-        db_connection = DBConnection.get(cls)
-        def create(jdata):
-            if not jdata:
-                return 
-            data_dict = json.loads(jdata)
-            #create basic object
-            obj = NeonApiRequest("dummy", "dummy", None, None, None, None, None) 
-            for key in data_dict.keys():
-                obj.__dict__[key] = data_dict[key]
-            return obj
-       
-        def get_results(results):
-            response = [create(result) for result in results]
-            callback(response)
+    @classmethod
+    def modify_many(cls, keys, func, callback=None):
+        '''Modify many keys.
 
-        if callback:
-            db_connection.conn.mget(keys, get_results)
-        else:
-            results = db_connection.blocking_conn.mget(keys)
-            response = [create(result) for result in results]
-            return response 
-
-    @staticmethod
-    def create(json_data):
-        ''' create object '''
-        if json_data:
-            data_dict = json.loads(json_data)
-
-            #create basic object
-            obj = NeonApiRequest("dummy", "dummy", None, None, None, None, None) 
-
-            #populate the object dictionary
-            for key in data_dict.keys():
-                obj.__dict__[key] = data_dict[key]
-
-            return obj
+        Each key must be a tuple of (job_id, api_key)
+        '''
+        super(NeonApiRequest, cls).modify_many(
+            [cls._generate_subkey(job_id, api_key) for 
+             job_id, api_key in keys],
+            func,
+            callback=callback)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -2212,19 +2246,21 @@ class BrightcoveApiRequest(NeonApiRequest):
     '''
     Brightcove API Request class
     '''
-    def __init__(self, job_id, api_key, vid, title, url, rtoken, wtoken, pid,
-                callback=None, i_id=None, default_thumbnail=None):
+    def __init__(self, job_id, api_key=None, vid=None, title=None, url=None,
+                 rtoken=None, wtoken=None, pid=None, http_callback=None,
+                 i_id=None, default_thumbnail=None):
+        super(BrightcoveApiRequest,self).__init__(job_id, api_key, vid, title,
+                                                  url,
+                                                  request_type='brightcove',
+                                                  http_callback=http_callback,
+                                                  default_thumbnail=default_thumbnail)
         self.read_token = rtoken
         self.write_token = wtoken
         self.publisher_id = pid
         self.integration_id = i_id 
         self.previous_thumbnail = None # TODO(Sunil): Remove this
         self.autosync = False
-        request_type = "brightcove"
-        super(BrightcoveApiRequest,self).__init__(job_id, api_key, vid, title,
-                                                  url, request_type, callback,
-                                                  default_thumbnail)
-
+     
     def get_default_thumbnail_type(self):
         '''Return the thumbnail type that should be used for a default 
         thumbnail in the request.
@@ -2235,17 +2271,19 @@ class OoyalaApiRequest(NeonApiRequest):
     '''
     Ooyala API Request class
     '''
-    def __init__(self, job_id, api_key, i_id, vid, title, url, 
-                        oo_api_key, oo_secret_key,
-                        p_thumb, http_callback, default_thumbnail=None):
+    def __init__(self, job_id, api_key=None, i_id=None, vid=None, title=None,
+                 url=None, oo_api_key=None, oo_secret_key=None, p_thumb=None,
+                 http_callback=None, default_thumbnail=None):
+        super(OoyalaApiRequest, self).__init__(job_id, api_key, vid, title,
+                                               url,
+                                               request_type='ooyala',
+                                               http_callback=http_callback,
+                                               default_thumbnail=default_thumbnail)
         self.oo_api_key = oo_api_key
         self.oo_secret_key = oo_secret_key
         self.integration_id = i_id 
         self.previous_thumbnail = p_thumb # TODO(Sunil): Remove this
         self.autosync = False
-        request_type = "ooyala"
-        super(OoyalaApiRequest, self).__init__(job_id, api_key, vid, title,
-                                               url, request_type,
                                                http_callback,
                                                default_thumbnail)
 
@@ -2259,16 +2297,19 @@ class YoutubeApiRequest(NeonApiRequest):
     '''
     Youtube API Request class
     '''
-    def __init__(self, job_id, api_key, vid, title, url, access_token,
-                 refresh_token, expiry, callback=None, default_thumbnail=None):
+    def __init__(self, job_id, api_key=None, vid=None, title=None, url=None,
+                 access_token=None, refresh_token=None, expiry=None,
+                 http_callback=None, default_thumbnail=None):
+        super(YoutubeApiRequest,self).__init__(job_id, api_key, vid, title,
+                                               url,
+                                               request_type='youtube',
+                                               http_callback=http_callback,
+                                               default_thumbnail=default_thumbnail)
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.integration_type = "youtube"
         self.previous_thumbnail = None # TODO(Sunil): Remove this
         self.expiry = expiry
-        request_type = "youtube"
-        super(YoutubeApiRequest,self).__init__(job_id, api_key, vid, title,
-                                               url, request_type, callback,
                                                default_thumbnail)
 
     def get_default_thumbnail_type(self):
@@ -2338,6 +2379,12 @@ class ThumbnailServingURLs(NamespacedStoredObject):
         super(ThumbnailServingURLs, self).__init__(thumbnail_id)
         self.size_map = size_map or {}
 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return ThumbnailServingURLs.__name__
+
     def get_thumbnail_id(self):
         '''Return the thumbnail id for this mapping.'''
         return str(self.key.partition('_')[2])
@@ -2356,26 +2403,23 @@ class ThumbnailServingURLs(NamespacedStoredObject):
         '''
         return self.size_map[(width, height)]
 
-    def to_json(self):
-        new_dict = copy.copy(self.__dict__)
-        new_dict['size_map'] = self.size_map.items()
-        return json.dumps(new_dict)
+    def to_dict(self):
+        new_dict = {
+            '_type': self.__class__.__name__,
+            '_data': copy.copy(self.__dict__)
+            }
+        new_dict['_data']['size_map'] = self.size_map.items()
+        return new_dict
 
     @classmethod
-    def _create(cls, key, json_data):
-        if json_data:
-            data_dict = json.loads(json_data)
-            #create basic object
-            obj = cls(key)
-
-            #populate the object dictionary
-            for key, value in data_dict.iteritems():
-                obj.__dict__[str(key)] = value
-
+    def _create(cls, key, obj_dict):
+        obj = super(ThumbnailServingURLs, cls)._create(key, obj_dict)
+        if obj:
             # Load in the size map as a dictionary
             obj.size_map = dict([[tuple(x[0]), str(x[1])] for 
                                  x in obj.size_map])
             return obj
+
         
 class ThumbnailURLMapper(object):
     '''
@@ -2487,10 +2531,6 @@ class ThumbnailMetadata(StoredObject):
         This function is deprecated and is kept only for backwards compatibility
         '''
         return self.to_dict()
-
-    def to_dict(self):
-        ''' to dict '''
-        return self.__dict__
     
     def to_dict_for_video_response(self):
         ''' to dict for video response object
@@ -2578,14 +2618,10 @@ class ThumbnailMetadata(StoredObject):
                in hosters]
 
     @classmethod
-    def _create(cls, key, json_data):
+    def _create(cls, key, data_dict):
         ''' create object '''
-
-        if json_data:
-            data_dict = json.loads(json_data)
-            #create basic object
-            obj = ThumbnailMetadata(key, None, None, None, None, None, None,
-                                    None, None)
+        obj = super(ThumbnailMetadata, cls)._create(key, data_dict)
+        if obj:
 
             # For backwards compatibility, check to see if there is a
             # json entry for thumbnail_metadata. If so, grab all
@@ -2596,10 +2632,6 @@ class ThumbnailMetadata(StoredObject):
                         obj.__dict__[str(key)] = value
                 del data_dict['thumbnail_metadata']
 
-            #populate the object dictionary
-            for key, value in data_dict.iteritems():
-                obj.__dict__[str(key)] = value
-        
             return obj
 
     @classmethod
@@ -2872,9 +2904,7 @@ class VideoMetadata(StoredObject):
         if not callback:
             vm = cls.get(internal_video_id)
             api_key = vm.key.split('_')[0]
-            jdata = NeonApiRequest.get_request(api_key, vm.job_id)
-            nreq = NeonApiRequest.create(jdata)
-            return nreq
+            return NeonApiRequest.get(vm.job_id, api_key)
         else:
             raise AttributeError("Callbacks not allowed")
 
@@ -2884,14 +2914,22 @@ class VideoMetadata(StoredObject):
         Get video request objs given video_ids
         '''
         vms = VideoMetadata.get_many(i_vids)
+        retval = [None for x in vms]
         request_keys = []
+        request_idx = []
+        cur_idx = 0
         for vm in vms:
-            rkey = "request_nonexistent_key"
+            rkey = None
             if vm:
                 api_key = vm.key.split('_')[0]
-                rkey = generate_request_key(api_key, vm.job_id)
-            request_keys.append(rkey)
-        return NeonApiRequest.get_requests(request_keys)
+                rkey = (vm.job_id, api_key)
+                request_keys.append(rkey)
+                request_idx.append(cur_idx)
+            cur_idx += 1
+        for api_request, idx in zip(NeonApiRequest.get_many(request_keys),
+                                    request_idx):
+            retval[idx] = api_request
+        return retval
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine

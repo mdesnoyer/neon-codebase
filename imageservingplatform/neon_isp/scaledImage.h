@@ -20,7 +20,7 @@ public:
     ~ScaledImage();
     
     
-    void Init(const rapidjson::Value& img);
+    int Init(const rapidjson::Value& img);
     void Shutdown();
  
     int GetHeight() const;
@@ -29,7 +29,7 @@ public:
     const std::string & GetUrlString() const;
     
 protected:
-
+    bool initialized;
     int height;
     int width;
     std::string url;

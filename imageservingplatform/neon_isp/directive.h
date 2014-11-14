@@ -9,7 +9,6 @@
 #define _NEON_DIRECTIVE__
 
 #include <vector>
-
 #include "fraction.h"
 #include "neon_constants.h"
 #include "rapidjson/document.h"
@@ -27,7 +26,7 @@ public:
     Directive(const Directive &  p);
     ~Directive();
     
-    void Init(const rapidjson::Document & document);
+    int Init(const rapidjson::Document & document);
     
     void Shutdown();
     
@@ -48,6 +47,9 @@ public:
     Fraction * GetFraction(int index) {return fractions[index];};
 
 protected:
+    
+    int InitSafe(const rapidjson::Document & document);
+    void Dealloc();
     
     std::string  accountId;
     std::string  videoId;

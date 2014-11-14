@@ -686,8 +686,8 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
                 self.assertEqual(resp.code, 200)
                 
                 #assert request state
-                req_data = neondata.NeonApiRequest.get_request(self.api_key,job_id)
-                vid_request = neondata.NeonApiRequest.create(req_data)
+                vid_request = neondata.NeonApiRequest.get(job_id,
+                                                          self.api_key)
                 self.assertEqual(vid_request.state,neondata.RequestState.ACTIVE)
 
             thumbs = []
@@ -789,8 +789,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(resp.code, 200)
 
         #assert request state is not updated to active
-        req_data = neondata.NeonApiRequest.get_request(self.api_key, job_id)
-        vid_request = neondata.NeonApiRequest.create(req_data)
+        vid_request = neondata.NeonApiRequest.get(job_id, self.api_key)
         self.assertEqual(vid_request.state, neondata.RequestState.FINISHED)
         
         #assert the previous thumbnail is still the thumb in DB
@@ -1236,8 +1235,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self._process_brightcove_neon_api_requests([api_request])
         
         # set the state to serving
-        jreq = neondata.NeonApiRequest.get_request(self.api_key, job_id) 
-        api_request = neondata.NeonApiRequest.create(jreq) 
+        api_request = neondata.NeonApiRequest.get(job_id, self.api_key)
         api_request.state = neondata.RequestState.SERVING
         api_request.save()
 
@@ -1899,8 +1897,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
                                                          self.i_id)
         api_request_keys = []
         for vid, job_id in oo_account.videos.iteritems():
-            key = neondata.generate_request_key(self.api_key, job_id)
-            api_request_keys.append(key)
+            api_request_keys.append((job_id, self.api_key))
             api_request = neondata.OoyalaApiRequest(job_id, self.api_key, 
                                             self.i_id, vid, 'title', 'url',
                                             'oo_api_key', 'oo_secret_key', 
@@ -1911,7 +1908,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
             api_request.state = neondata.RequestState.SUBMIT
             self.assertTrue(api_request.save())
         
-        api_requests = neondata.NeonApiRequest.get_requests(api_request_keys)
+        api_requests = neondata.NeonApiRequest.get_many(api_request_keys)
         process_neon_api_requests(api_requests, self.api_key,
                                   self.i_id, "ooyala")
 

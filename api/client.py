@@ -403,7 +403,7 @@ class VideoProcessor(object):
         video_id = self.job_params[properties.VIDEO_ID]
         
         # get api request object
-        api_request = neondata.NeonApiRequest.get(api_key, job_id)
+        api_request = neondata.NeonApiRequest.get(job_id, api_key)
 
         reprocess = False 
         if api_request.state == neondata.RequestState.REPROCESS:
@@ -656,7 +656,7 @@ class VideoClient(multiprocessing.Process):
                     #Change Job State
                     api_key = job_params[properties.API_KEY]
                     job_id  = job_params[properties.REQUEST_UUID_KEY]
-                    api_request = neondata.NeonApiRequest.get(api_key, job_id)
+                    api_request = neondata.NeonApiRequest.get(job_id, api_key)
                     if api_request.state == neondata.RequestState.SUBMIT:
                         api_request.state = neondata.RequestState.PROCESSING
                         api_request.model_version = self.model_version

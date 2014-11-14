@@ -12,7 +12,7 @@
 #include "neon_service.h"
 #include "neon_stats.h"
 #include "neon_utils.h"
-#include "neon_service_helper.c"
+#include "neon_service_helper.h"
 
 #define ngx_uchar_to_string(str)     { strlen((const char*)str), (u_char *) str }
 
@@ -370,7 +370,7 @@ int neon_service_parse_api_args(ngx_http_request_t *request,
                                 ngx_str_t * ipAddress, 
                                 int *width, 
                                 int *height,
-                                int cleanup_video){
+                                int remove_neon_prefix){
 
     static const ngx_str_t height_key = ngx_string("height");
     static const ngx_str_t width_key = ngx_string("width");
@@ -391,10 +391,13 @@ int neon_service_parse_api_args(ngx_http_request_t *request,
         return 1;
     }
 
+    // remove the trailing jpg extention, if any.  
+    remove_jpg_extention(*video_id); 
+
     // Clean up the video id from the neonvid_ parameter
     // neonvid_ is a prefix used to identify a Neon video in beacon api
     // Used only for the client API call
-    if (cleanup_video == 1) {
+    if (remove_neon_prefix  == 1) {
           const char * prefix = "neonvid_";
           const int prefix_size = 8;
     

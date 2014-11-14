@@ -292,7 +292,7 @@ class TestVideoClient(test_utils.neontest.TestCase):
         #verify request state 
         api_key = vprocessor.job_params['api_key']
         job_id  = vprocessor.job_params['job_id']
-        api_request = neondata.NeonApiRequest.get(api_key, job_id)
+        api_request = neondata.NeonApiRequest.get(job_id, api_key)
         self.assertEqual(api_request.state, neondata.RequestState.FAILED)
         
         #NOTE: disabled now, since we don't requeue currently
@@ -320,7 +320,7 @@ class TestVideoClient(test_utils.neontest.TestCase):
         vprocessor.finalize_api_request(cr_request.body, "neon")
         api_key = vprocessor.job_params['api_key']
         job_id = vprocessor.job_params['job_id']
-        api_request = neondata.NeonApiRequest.get(api_key, job_id)
+        api_request = neondata.NeonApiRequest.get(job_id, api_key)
         self.assertEqual(api_request.state, neondata.RequestState.FINISHED)
 
     def test_get_center_frame(self):
@@ -411,7 +411,7 @@ class TestVideoClient(test_utils.neontest.TestCase):
         self.assertEqual(vmdata.thumbnail_ids, old_tids)
 
         # Set State to reprocess
-        api_request = neondata.NeonApiRequest.get(api_key, job_id)
+        api_request = neondata.NeonApiRequest.get(job_id, api_key)
         api_request.video_url = "http://reprocess_video_url"
         api_request.previous_thumbnail = "http://previous_thumb" 
         api_request.state = neondata.RequestState.REPROCESS
