@@ -1997,7 +1997,7 @@ class NeonApiRequest(NamespacedStoredObject):
         if job_id.startswith('request'):
             # Is is really the full key, so just return the subportion
             return job_id.partition('_')[2]
-        return '_'.join([job_id, api_key])
+        return '_'.join([api_key, job_id])
 
     @classmethod
     def _baseclass_name(cls):
