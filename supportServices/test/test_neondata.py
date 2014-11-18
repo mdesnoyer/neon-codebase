@@ -10,6 +10,7 @@ if sys.path[0] <> base_path:
 import bcove_responses
 import logging
 _log = logging.getLogger(__name__)
+import json
 import multiprocessing
 from mock import patch, MagicMock
 import os
@@ -28,6 +29,7 @@ from utils.imageutils import PILImageUtils
 import unittest
 import test_utils.redis 
 from StringIO import StringIO
+from supportServices import neondata
 from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
         YoutubePlatform, NeonUserAccount, DBConnection, NeonApiKey, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
@@ -482,6 +484,77 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         expected_url = serving_format % (na.staging_tracker_account_id, 'vid1')
         self.assertTrue(expected_url in staging_url)
 
+    def test_api_request(self):
+        # Make sure that the Api Requests are saved and read from the
+        # database consistently.
+        bc_request = neondata.BrightcoveApiRequest(
+            'bc_job', 'api_key', 'vid0', 'title',
+            'url', 'rtoken', 'wtoken', 'pid',
+            'callback_url', 'i_id')
+        bc_request.save()
+
+        bc_found = NeonApiRequest.get('bc_job', 'api_key')
+        self.assertEquals(bc_found.key, 'request_api_key_bc_job')
+        self.assertEquals(bc_request, bc_found)
+        self.assertIsInstance(bc_found, neondata.BrightcoveApiRequest)
+
+        oo_request = neondata.OoyalaApiRequest(
+            'oo_job', 'api_key', 'i_id', 'vid0', 'title',
+            'url', 'oo_api_key', 'oo_secret_key', 'p_thumb',
+            'callback_url')
+        oo_request.save()
+
+        self.assertEquals(oo_request, NeonApiRequest.get('oo_job', 'api_key'))
+
+        yt_request = neondata.OoyalaApiRequest(
+            'yt_job', 'api_key', 'vid0', 'title',
+            'url', 'access_token', 'request_token', 'expiry',
+            'callback_url')
+        yt_request.save()
+
+        self.assertEquals(yt_request, NeonApiRequest.get('yt_job', 'api_key'))
+
+        n_request = NeonApiRequest(
+            'n_job', 'api_key', 'vid0', 'title',
+            'url', 'neon', 'callback_url')
+        n_request.save()
+
+        self.assertEquals(n_request, NeonApiRequest.get('n_job', 'api_key'))
+
+    def test_multiple_object_saves(self):
+        obj1 = ExperimentStrategy('acct1')
+        obj1.save()
+
+        obj2 = ExperimentStrategy.get('acct1')
+        self.assertEquals(obj2, obj1)
+
+        obj2.baseline_type = neondata.ThumbnailType.BRIGHTCOVE
+        obj2.save()
+
+        obj3 = ExperimentStrategy.get('acct1')
+        self.assertEquals(obj2, obj3)
+        self.assertEquals(obj3.baseline_type,
+                          neondata.ThumbnailType.BRIGHTCOVE)
+
+    def test_thumbnail_serving_url_backwards_compatibility(self):
+        json_str = "{\"size_map\": [[[480, 360], \"http://imagecdn.neon-lab.com/neontnqvcpu0u51t7bb60s6ct206us_3876542124001_7cfc23e4b142ee98be78010eb751d79c_w480_h360.jpg\"], [[160, 90], \"http://imagecdn.neon-lab.com/neontnqvcpu0u51t7bb60s6ct206us_3876542124001_7cfc23e4b142ee98be78010eb751d79c_w160_h90.jpg\"], [[320, 180], \"http://imagecdn.neon-lab.com/neontnqvcpu0u51t7bb60s6ct206us_3876542124001_7cfc23e4b142ee98be78010eb751d79c_w320_h180.jpg\"], [[480, 270], \"http://imagecdn.neon-lab.com/neontnqvcpu0u51t7bb60s6ct206us_3876542124001_7cfc23e4b142ee98be78010eb751d79c_w480_h270.jpg\"], [[160, 120], \"http://imagecdn.neon-lab.com/neontnqvcpu0u51t7bb60s6ct206us_3876542124001_7cfc23e4b142ee98be78010eb751d79c_w160_h120.jpg\"], [[120, 90], \"http://imagecdn.neon-lab.com/neontnqvcpu0u51t7bb60s6ct206us_3876542124001_7cfc23e4b142ee98be78010eb751d79c_w120_h90.jpg\"], [[120, 67], \"http://imagecdn.neon-lab.com/neontnqvcpu0u51t7bb60s6ct206us_3876542124001_7cfc23e4b142ee98be78010eb751d79c_w120_h67.jpg\"], [[320, 240], \"http://imagecdn.neon-lab.com/neontnqvcpu0u51t7bb60s6ct206us_3876542124001_7cfc23e4b142ee98be78010eb751d79c_w320_h240.jpg\"], [[640, 480], \"http://imagecdn.neon-lab.com/neontnqvcpu0u51t7bb60s6ct206us_3876542124001_7cfc23e4b142ee98be78010eb751d79c_w640_h480.jpg\"], [[640, 360], \"http://imagecdn.neon-lab.com/neontnqvcpu0u51t7bb60s6ct206us_3876542124001_7cfc23e4b142ee98be78010eb751d79c_w640_h360.jpg\"], [[1280, 720], \"http://imagecdn.neon-lab.com/neontnqvcpu0u51t7bb60s6ct206us_3876542124001_7cfc23e4b142ee98be78010eb751d79c_w1280_h720.jpg\"]], \"key\": \"thumbnailservingurls_qvcpu0u51t7bb60s6ct206us_3876542124001_7cfc23e4b142ee98be78010eb751d79c\"}"
+
+        obj = ThumbnailServingURLs._create('thumbnailservingurls_qvcpu0u51t7bb60s6ct206us_3876542124001_7cfc23e4b142ee98be78010eb751d79c', json.loads(json_str))
+
+        self.assertEquals(obj.size_map[(480, 360)], 'http://imagecdn.neon-lab.com/neontnqvcpu0u51t7bb60s6ct206us_3876542124001_7cfc23e4b142ee98be78010eb751d79c_w480_h360.jpg')
+
+    def test_neon_api_request_backwards_compatibility(self):
+        json_str="{\"api_method\": \"topn\", \"video_url\": \"http://brightcove.vo.llnwd.net/pd16/media/136368194/201407/1283/136368194_3671520771001_linkasia2014071109-lg.mp4\", \"model_version\": \"20130924\", \"job_id\": \"e38ef7abba4c9102b26feb90bc5df3a8\", \"state\": \"serving\", \"api_param\": 1, \"api_key\": \"dhfaagb0z0h6n685ntysas00\", \"publisher_id\": \"136368194\", \"integration_type\": \"neon\", \"autosync\": false, \"request_type\": \"brightcove\", \"key\": \"request_dhfaagb0z0h6n685ntysas00_e38ef7abba4c9102b26feb90bc5df3a8\", \"submit_time\": \"1405130164.16\", \"response\": {\"job_id\": \"e38ef7abba4c9102b26feb90bc5df3a8\", \"timestamp\": \"1405130266.52\", \"video_id\": \"3671481626001\", \"error\": null, \"data\": [7139.97], \"thumbnails\": [\"https://host-thumbnails.s3.amazonaws.com/dhfaagb0z0h6n685ntysas00/e38ef7abba4c9102b26feb90bc5df3a8/neon0.jpeg\"]}, \"integration_id\": \"35\", \"read_token\": \"rgkAluxK9pAC26XCRusctnSfWwzrujq9cTRdmrNpWU4.\", \"video_id\": \"3671481626001\", \"previous_thumbnail\": \"https://host-thumbnails.s3.amazonaws.com/dhfaagb0z0h6n685ntysas00/e38ef7abba4c9102b26feb90bc5df3a8/brightcove.jpeg\", \"publish_date\": 1405128996278, \"callback_url\": \"http://localhost:8081/testcallback\", \"write_token\": \"v4OZjhHCkoFOqlNFJZLBA-KcbnNUhtQjseDXO9Y4dyA.\", \"video_title\": \"How Was China's Xi Jinping Welcomed in South Korea?\"}"
+
+        obj = NeonApiRequest._create('request_dhfaagb0z0h6n685ntysas00_e38ef7abba4c9102b26feb90bc5df3a8', json.loads(json_str))
+
+        self.assertIsInstance(obj, neondata.BrightcoveApiRequest)
+        self.assertEquals(obj.read_token,
+                          'rgkAluxK9pAC26XCRusctnSfWwzrujq9cTRdmrNpWU4.')
+        self.assertEquals(
+            obj.get_id(),
+            'dhfaagb0z0h6n685ntysas00_e38ef7abba4c9102b26feb90bc5df3a8')
+
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()
@@ -711,7 +784,7 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
 
     def test_read_thumbnail_old_format(self):
         # Make sure that we're backwards compatible
-        thumb = ThumbnailMetadata._create('2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15', "{\"video_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001\", \"thumbnail_metadata\": {\"chosen\": false, \"thumbnail_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\", \"model_score\": 4.1698684091322846, \"enabled\": true, \"rank\": 5, \"height\": 232, \"width\": 416, \"model_version\": \"20130924\", \"urls\": [\"https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg\"], \"created_time\": \"2013-12-02 09:55:19\", \"type\": \"neon\", \"refid\": null}, \"key\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\"}")
+        thumb = ThumbnailMetadata._create('2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15', json.loads("{\"video_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001\", \"thumbnail_metadata\": {\"chosen\": false, \"thumbnail_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\", \"model_score\": 4.1698684091322846, \"enabled\": true, \"rank\": 5, \"height\": 232, \"width\": 416, \"model_version\": \"20130924\", \"urls\": [\"https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg\"], \"created_time\": \"2013-12-02 09:55:19\", \"type\": \"neon\", \"refid\": null}, \"key\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\"}"))
 
         self.assertEqual(thumb.key, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15')
         self.assertEqual(thumb.video_id, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001')

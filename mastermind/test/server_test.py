@@ -967,7 +967,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             vm = neondata.VideoMetadata(i_vid, [], jid, 'v0.mp4')
             nar.save()
             vm.save()
-            request_keys.append(nar.key)
+            request_keys.append((jid, api_key))
             i_vids.append(i_vid)
             self.publisher._add_video_id_to_serving_map(i_vid)
 
@@ -985,7 +985,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             for i_vid in i_vids:
                 self.assertTrue(self.publisher.video_id_serving_map[i_vid])
 
-            reqs = neondata.NeonApiRequest.get_requests(request_keys)
+            reqs = neondata.NeonApiRequest.get_many(request_keys)
             for req in reqs:
                 self.assertEqual(req.state, neondata.RequestState.SERVING)
         

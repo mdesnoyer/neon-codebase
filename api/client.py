@@ -562,7 +562,7 @@ class VideoProcessor(object):
         api_param =  self.job_params['api_param']
         
         # get api request object
-        api_request = neondata.NeonApiRequest.get(api_key, job_id)
+        api_request = neondata.NeonApiRequest.get(job_id, api_key)
       
         if self.error:
             #If Internal error, requeue and dont send response to client yet
@@ -573,7 +573,7 @@ class VideoProcessor(object):
             #TODO(Sunil): Re-enable Requeuing, its not been helpful so far
             # Cron Requeue is more helpful
 
-            api_request = neondata.NeonApiRequest.get(api_key, job_id)
+            api_request = neondata.NeonApiRequest.get(job_id, api_key)
             api_request.state = neondata.RequestState.FAILED
             api_request.save()
             return
@@ -717,7 +717,7 @@ class VideoProcessor(object):
         if request_type != "neon":
             i_id = self.job_params[properties.INTEGRATION_ID]
         
-        api_request = neondata.NeonApiRequest.get(api_key, job_id)
+        api_request = neondata.NeonApiRequest.get(job_id, api_key)
         api_request.response = tornado.escape.json_decode(result)
         api_request.publish_date = time.time() *1000.0 #ms
 
@@ -1032,7 +1032,7 @@ class VideoClient(object):
                     #Change Job State
                     api_key = job_params[properties.API_KEY]
                     job_id  = job_params[properties.REQUEST_UUID_KEY]
-                    api_request = neondata.NeonApiRequest.get(api_key, job_id)
+                    api_request = neondata.NeonApiRequest.get(job_id, api_key)
                     if api_request.state == neondata.RequestState.SUBMIT:
                         api_request.state = neondata.RequestState.PROCESSING
                         api_request.model_version = self.model_version
