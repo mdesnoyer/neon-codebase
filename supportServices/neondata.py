@@ -836,6 +836,15 @@ class NeonUserAccount(object):
 
         # The default thumbnail (w, h) to serve for this account
         self.default_size = default_size
+        
+        # Priority Q number for processing, currently supports {0,1}
+        self.processing_priority = 1
+
+    def get_processing_priority(self):
+        return self.processing_priority
+
+    def set_processing_priority(self, p):
+        self.processing_priority = p
 
     def add_platform(self, platform):
         '''Adds a platform object to the account.'''
