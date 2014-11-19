@@ -22,6 +22,8 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
+import api.cdnhosting
+from api import ooyala_api
 import base64
 import binascii
 import code
@@ -31,10 +33,14 @@ import copy
 import datetime
 import hashlib
 import json
+import logging
+import multiprocessing
+from PIL import Image
 import random
 import re
 import redis as blockingRedis
 import string
+from StringIO import StringIO
 import supportServices.url2thumbnail
 import tornado.ioloop
 import tornado.gen
@@ -47,19 +53,14 @@ import utils.botoutils
 import utils.logs
 from utils.imageutils import PILImageUtils
 import utils.neon
+from utils.options import define, options
 import utils.sync
 import utils.s3
 import utils.http 
 import urllib
 import warnings
 
-import api.cdnhosting
-from api import ooyala_api
-from PIL import Image
-from StringIO import StringIO
-from utils.options import define, options
 
-import logging
 _log = logging.getLogger(__name__)
 
 define("thumbnailBucket", default="host-thumbnails", type=str,
@@ -238,13 +239,25 @@ class RedisAsyncWrapper(object):
     you can get the callback attribue as well when call is made
     '''
 
-    _thread_pool = concurrent.futures.ThreadPoolExecutor(
-        options.async_pool_size)
+    _thread_pools = {}
+    _pool_lock = multiprocessing.RLock()
     
     def __init__(self, host='127.0.0.1', port=6379):
         self.client = blockingRedis.StrictRedis(host, port, socket_timeout=10)
         self.max_tries = options.maxRedisRetries
         self.base_wait = options.baseRedisRetryWait
+
+    @classmethod
+    def _get_thread_pool(cls):
+        '''Get the thread pool for this process.'''
+        with cls._pool_lock:
+            try:
+                return cls._thread_pools[os.getpid()]
+            except KeyError:
+                pool = concurrent.futures.ThreadPoolExecutor(
+                    options.async_pool_size)
+                cls._thread_pools[os.getpid()] = pool
+                return pool
 
     def _get_wrapped_async_func(self, func):
         '''Returns an asynchronous function wrapped around the given func.
@@ -279,11 +292,11 @@ class RedisAsyncWrapper(object):
                     io_loop.add_timeout(
                         time.time() + delay,
                         lambda: io_loop.add_future(
-                            RedisAsyncWrapper._thread_pool.submit(
+                            RedisAsyncWrapper._get_thread_pool().submit(
                                 func, *args, **kwargs),
                             lambda x: _cb(x, cur_try)))
 
-            future = RedisAsyncWrapper._thread_pool.submit(
+            future = RedisAsyncWrapper._get_thread_pool().submit(
                 func, *args, **kwargs)
             io_loop.add_future(future, _cb)
         return AsyncWrapper
@@ -433,8 +446,10 @@ class StoredObject(object):
         return str(self)
 
     def __cmp__(self, other):
-        return cmp((self.__class__, self.__dict__),
-                   (other.__class__, other.__dict__))
+        classcmp = cmp(self.__class__, other.__class__)
+        if classcmp:
+            return classcmp
+        return cmp(self.__dict__, other.__dict__)
 
     def to_dict(self):
         return {
@@ -468,23 +483,41 @@ class StoredObject(object):
         if obj_dict:
             # Get the class type to create
             try:
-                classtype = globals()[obj_dict['_type']]
                 data_dict = obj_dict['_data']
+                classname = obj_dict['_type']
+                try:
+                    classtype = globals()[classname]
+                except KeyError:
+                    _log.error('Unknown class of type %s in database key %s'
+                               % (classname, key))
+                    return None
             except KeyError:
-                # For backwards compatibility, assume that the class is cls
+                # For backwards compatibility, we didn't store the
+                # type in the databse, so assume that the class is cls
                 classtype = cls
                 data_dict = obj_dict
             obj = classtype(key)
 
             #populate the object dictionary
             for k, value in data_dict.iteritems():
-                # Build object for this field if it is a StoredObject
-                if (isinstance(value, dict) and '_type' in value and 
-                    '_data' in value):
-                    value = cls._create(k, value)
-                obj.__dict__[str(k)] = value
+                obj.__dict__[str(k)] = cls._deserialize_field(k, value)
         
             return obj
+    @classmethod
+    def _deserialize_field(cls, key, value):
+        '''Deserializes a field by creating a StoredObject as necessary.'''
+        if isinstance(value, dict):
+            if '_type' in value and '_data' in value:
+                # It is a stored object, so unpack it
+                return cls._create(key, value)
+            else:
+                # It is a dictionary do deserialize each of the fields
+                for k, v in value.iteritems():
+                    value[str(k)] = cls._deserialize_field(k, v)
+        elif hasattr(value, '__iter__'):
+            # It is iterable to treat it like a list
+            value = [cls._deserialize_field(None, x) for x in value]
+        return value
 
     def get_id(self):
         '''Return the non-namespaced id for the object.'''
@@ -1113,42 +1146,28 @@ class CDNHostingMetadataList(NamespacedStoredObject):
 
     def __iter__(self):
         '''Iterate through the cdns.'''
-        return self.cdns.__iter__()
-
-    def to_json(self):
-        data = copy.copy(self.__dict__)
-        data['cdns'] = [x.to_dict() for x in data['cdns']]
-        return json.dumps(data)
+        return [x for x in self.cdns if x is not None].__iter__()
 
     @classmethod
-    def _create(cls, key, json_data):
-        '''Create an object from the json_data.
-
-        Returns None if the object was not in the database
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
         '''
-        if json_data:
-            data_dict = json.loads(json_data)
-            #create basic object
-            obj = cls(key)
-
-            #populate the object dictionary
-            for k, value in data_dict.iteritems():
-                obj.__dict__[str(k)] = value
-
-            # Create each cdn object
-            obj.cdns = [CDNHostingMetadata._create(x, key) for x in obj.cdns]
-            obj.cdns = [x for x in obj.cdns if x is not None]
-        
-            return obj
+        return CDNHostingMetadataList.__name__
 
 
-class CDNHostingMetadata(object):
+class CDNHostingMetadata(NamespacedStoredObject):
     '''
     Specify how to host the the images with one CDN platform.
 
     Currently on S3 hosting to customer bucket is well defined
-    '''
-    def __init__(self, cdn_prefixes=None, resize=False,
+
+    These objects are not stored directly in the database.  They are
+    actually stored in CDNHostingMetadataLists. If you try to save
+    them directly, you will get a NotImplementedError because
+    _baseclass_name is not implemented.
+    ''' 
+    
+    def __init__(self, key=None, cdn_prefixes=None, resize=False, 
                  update_serving_urls=False):
         self.cdn_prefixes = cdn_prefixes # List of url prefixes
         
@@ -1158,61 +1177,20 @@ class CDNHostingMetadata(object):
 
         # Should the images be added to ThumbnailServingURL object?
         self.update_serving_urls = update_serving_urls
-    
-    def to_dict(self):
-        ''' Return a dictionary representing this object '''
-        return {
-            'type': self.__class__.__name__,
-            'data': self.__dict__
-            }
-
-    def __cmp__(self, other):
-        return cmp((self.__class__, self.__dict__),
-                   (other.__class__, other.__dict__))
-    
-    def __str__(self):
-        return "%s: %s" % (self.__class__, str(self.__dict__))
-
-    def __repr__(self):
-        return str(self)
-
-    @classmethod
-    def _create(cls, obj_dict, integration_id):
-        '''Create an object from a dictionary that was created with to_dict.
-
-        Returns None if the object could not be created.
-        '''
-        if obj_dict and len(obj_dict) == 2:
-
-            # Get the class type to create
-            try:
-                classtype = globals()[obj_dict['type']]
-            except KeyError:
-                _log.error('Unknown hosting metadata classtype %s for '
-                           'integration id %s' % 
-                           (obj_dict['type'], integration_id))
-                raise
-            obj = classtype()
-
-            #populate the object dictionary
-            for key, value in obj_dict['data'].iteritems():
-                obj.__dict__[str(key)] = value
-        
-            return obj
 
 class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
     If the images are to be uploaded to S3 bucket use this formatter  
 
     '''
-    def __init__(self, access_key=None, secret_key=None, bucket_name=None,
-                 cdn_prefixes=None, folder_prefix=None, resize=False,
-                 update_serving_urls=False, do_salt=True):
+    def __init__(self, key=None, access_key=None, secret_key=None, 
+                 bucket_name=None, cdn_prefixes=None, folder_prefix=None,
+                 resize=False, update_serving_urls=False, do_salt=True):
         '''
         Create the object
         '''
         super(S3CDNHostingMetadata, self).__init__(
-            cdn_prefixes, resize, update_serving_urls)
+            key, cdn_prefixes, resize, update_serving_urls)
         self.access_key = access_key # S3 access key
         self.secret_key = secret_key # S3 secret access key
         self.bucket_name = bucket_name # S3 bucket to host in
@@ -1228,13 +1206,15 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     
     This default hosting just uses pure S3, no cloudfront.
     '''
-    def __init__(self, bucket_name='neon-image-cdn',
+    def __init__(self, key=None,
+                 bucket_name='neon-image-cdn',
                  cdn_prefixes=None,
                  folder_prefix='',
                  resize=True,
                  update_serving_urls=True,
                  do_salt=True):
         super(NeonCDNHostingMetadata, self).__init__(
+            key,
             bucket_name=bucket_name,
             cdn_prefixes=(cdn_prefixes or ['n3.neon-images.com']),
             folder_prefix=folder_prefix,
@@ -1247,8 +1227,9 @@ class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     Cloudinary images
     '''
 
-    def __init__(self):
+    def __init__(self, key=None):
         super(CloudinaryCDNHostingMetadata, self).__init__(
+            key,
             resize=False,
             update_serving_urls=False)
 
@@ -2067,9 +2048,9 @@ class NeonApiRequest(NamespacedStoredObject):
         self.request_type = request_type
         # The url to send the callback response
         self.callback_url = http_callback
-        self.state = "submit" # submit / processing / success / fail 
+        self.state = RequestState.SUBMIT 
         self.integration_type = "neon"
-        self.default_thumbnail = None # URL of a default thumb
+        self.default_thumbnail = default_thumbnail # URL of a default thumb
 
         #Save the request response
         self.response = {}  
@@ -2077,7 +2058,7 @@ class NeonApiRequest(NamespacedStoredObject):
         #API Method
         self.api_method = None
         self.api_param  = None
-        self.publish_date = None
+        self.publish_date = None # Timestamp in ms
 
     @classmethod
     def _generate_subkey(cls, job_id, api_key):
@@ -2240,6 +2221,7 @@ class NeonApiRequest(NamespacedStoredObject):
         yield video.download_and_add_thumbnail(meta,
                                                thumb_url,
                                                cdn_metadata,
+                                               save_objects=True,
                                                async=True)
 
 class BrightcoveApiRequest(NeonApiRequest):
@@ -2249,11 +2231,11 @@ class BrightcoveApiRequest(NeonApiRequest):
     def __init__(self, job_id, api_key=None, vid=None, title=None, url=None,
                  rtoken=None, wtoken=None, pid=None, http_callback=None,
                  i_id=None, default_thumbnail=None):
-        super(BrightcoveApiRequest,self).__init__(job_id, api_key, vid, title,
-                                                  url,
-                                                  request_type='brightcove',
-                                                  http_callback=http_callback,
-                                                  default_thumbnail=default_thumbnail)
+        super(BrightcoveApiRequest,self).__init__(
+            job_id, api_key, vid, title, url,
+            request_type='brightcove',
+            http_callback=http_callback,
+            default_thumbnail=default_thumbnail)
         self.read_token = rtoken
         self.write_token = wtoken
         self.publisher_id = pid
@@ -2274,18 +2256,16 @@ class OoyalaApiRequest(NeonApiRequest):
     def __init__(self, job_id, api_key=None, i_id=None, vid=None, title=None,
                  url=None, oo_api_key=None, oo_secret_key=None, p_thumb=None,
                  http_callback=None, default_thumbnail=None):
-        super(OoyalaApiRequest, self).__init__(job_id, api_key, vid, title,
-                                               url,
-                                               request_type='ooyala',
-                                               http_callback=http_callback,
-                                               default_thumbnail=default_thumbnail)
+        super(OoyalaApiRequest, self).__init__(
+            job_id, api_key, vid, title, url,
+            request_type='ooyala',
+            http_callback=http_callback,
+            default_thumbnail=default_thumbnail)
         self.oo_api_key = oo_api_key
         self.oo_secret_key = oo_secret_key
         self.integration_id = i_id 
         self.previous_thumbnail = p_thumb # TODO(Sunil): Remove this
         self.autosync = False
-                                               http_callback,
-                                               default_thumbnail)
 
     def get_default_thumbnail_type(self):
         '''Return the thumbnail type that should be used for a default 
@@ -2300,17 +2280,16 @@ class YoutubeApiRequest(NeonApiRequest):
     def __init__(self, job_id, api_key=None, vid=None, title=None, url=None,
                  access_token=None, refresh_token=None, expiry=None,
                  http_callback=None, default_thumbnail=None):
-        super(YoutubeApiRequest,self).__init__(job_id, api_key, vid, title,
-                                               url,
-                                               request_type='youtube',
-                                               http_callback=http_callback,
-                                               default_thumbnail=default_thumbnail)
+        super(YoutubeApiRequest,self).__init__(
+            job_id, api_key, vid, title, url,
+            request_type='youtube',
+            http_callback=http_callback,
+            default_thumbnail=default_thumbnail)
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.integration_type = "youtube"
         self.previous_thumbnail = None # TODO(Sunil): Remove this
         self.expiry = expiry
-                                               default_thumbnail)
 
     def get_default_thumbnail_type(self):
         '''Return the thumbnail type that should be used for a default 
@@ -2536,7 +2515,7 @@ class ThumbnailMetadata(StoredObject):
         ''' to dict for video response object
             replace key to thumbnail_id 
         '''
-        new_dict = self.__dict__
+        new_dict = copy.copy(self.__dict__)
         new_dict["thumbnail_id"] = new_dict.pop("key")
         return new_dict
 
@@ -3033,7 +3012,7 @@ class VideoResponse(object):
     def __init__(self, vid, job_id, status, i_type, i_id, title, duration,
             pub_date, cur_tid, thumbs, abtest=True, winner_thumbnail=None,
             serving_url=None):
-        self.video_id = vid
+        self.video_id = vid # External video id
         self.job_id = job_id 
         self.status = status
         self.integration_type = i_type

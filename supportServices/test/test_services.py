@@ -1518,6 +1518,10 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         
         s_url = neondata.ThumbnailServingURLs.get(c_thumb.key)
         self.assertIsNotNone(s_url)
+        s3httpRe = re.compile('http://n[0-9].neon-images.com/([a-zA-Z0-9\-\._/]+)')
+        serving_url = s_url.get_serving_url(160, 120)
+        self.assertRegexpMatches(serving_url, s3httpRe)
+        serving_key = s3httpRe.search(serving_url).group(1)
 
         # Make sure that image is in S3 both for serving and main
         self.assertIsNotNone(conn.get_bucket('host-thumbnails').get_key(
@@ -1525,7 +1529,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertIsNotNone(conn.get_bucket('host-thumbnails').get_key(
             "%s/%s/customupload0.jpg" % (self.api_key, vid)))
         self.assertIsNotNone(conn.get_bucket('neon-image-cdn').get_key(
-            "neontn%s_w160_h120.jpg" % (c_thumb.key)))
+            serving_key))
 
         # RGBA image
         url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"

@@ -50,7 +50,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_host_single_image(self):
-        metadata = neondata.S3CDNHostingMetadata(
+        metadata = neondata.S3CDNHostingMetadata(None,
             'access_key', 'secret_key',
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
             'folder1', False, False, False)
@@ -75,7 +75,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.s3conn.get_bucket = MagicMock()
         self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3PermissionsError('Permission error')]
         
-        metadata = neondata.S3CDNHostingMetadata(
+        metadata = neondata.S3CDNHostingMetadata(None,
             'access_key', 'secret_key',
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
             'folder1', False, False)
@@ -90,7 +90,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.s3conn.get_bucket = MagicMock()
         self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3CreateError('oops', 'seriously, oops')]
         
-        metadata = neondata.S3CDNHostingMetadata(
+        metadata = neondata.S3CDNHostingMetadata(None,
             'access_key', 'secret_key',
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
             'folder1', False, False)
@@ -205,7 +205,7 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_host_resized_images(self):
-        metadata = neondata.NeonCDNHostingMetadata(
+        metadata = neondata.NeonCDNHostingMetadata(None,
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
             'folder1', True, True, False)
 
@@ -237,7 +237,7 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_salted_path(self):
-        metadata = neondata.NeonCDNHostingMetadata(
+        metadata = neondata.NeonCDNHostingMetadata(None,
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
             'folder1', True, True, True)
 

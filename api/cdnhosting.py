@@ -69,7 +69,7 @@ def upload_image_to_s3(
                                                      bucket_name)
 
         key = bucket.new_key(keyname)
-            
+
         yield utils.botoutils.run_async(
             key.set_contents_from_string,
             data,
@@ -77,14 +77,14 @@ def upload_image_to_s3(
             *args, **kwargs)
     except BotoServerError as e:
         _log.error(
-            'AWS Server error when uploading image to s3://%s: %s' % 
-                    (keyname, e))
+            'AWS Server error when uploading image to s3://%s/%s: %s' % 
+                    (bucket_name, keyname, e))
         raise IOError(str(e))
 
     except BotoClientError as e:
         _log.error(
-            'AWS client error when uploading image to s3://%s : %s' % 
-                    (keyname, e))
+            'AWS client error when uploading image to s3://%s/%s : %s' % 
+                    (bucket_name, keyname, e))
         raise IOError(str(e))
 
 # TODO(Sunil): Change this to use the options instead of properties
@@ -178,7 +178,7 @@ class CDNHosting(object):
             def add_serving_urls(obj):
                 for params in new_serving_thumbs:
                     obj.add_serving_url(*params)
-                    
+
             yield tornado.gen.Task(
                 supportServices.neondata.ThumbnailServingURLs.modify,
                 tid,
@@ -218,7 +218,7 @@ class CDNHosting(object):
 
         else:
             raise ValueError("CDNHosting type %s not supported yet, please"
-                             "implement" % cdn_metadata.__class__.__name__)
+                             " implement" % cdn_metadata.__class__.__name__)
 
 class AWSHosting(CDNHosting):
 

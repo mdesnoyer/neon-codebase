@@ -313,7 +313,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         # Now make sure that the iteration goes through all the thumbnails
         found_thumb_ids = [x.key for x in  
                            ThumbnailMetadata.iterate_all_thumbnails()]
-        print found_thumb_ids
         self.assertItemsEqual(found_thumb_ids, [x.key for x in thumbs])
 
     def test_ThumbnailServingURLs(self):
@@ -411,12 +410,14 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         cloud = CloudinaryCDNHostingMetadata()
         self.assertFalse(cloud.resize)
         self.assertFalse(cloud.update_serving_urls)
-        neon_cdn = NeonCDNHostingMetadata('my-bucket',
+        neon_cdn = NeonCDNHostingMetadata(None, 
+                                          'my-bucket',
                                           ['mycdn.neon-lab.com'])
         self.assertTrue(neon_cdn.resize)
         self.assertTrue(neon_cdn.update_serving_urls)
         self.assertEqual(neon_cdn.folder_prefix, '')
-        s3_cdn = S3CDNHostingMetadata('access-key',
+        s3_cdn = S3CDNHostingMetadata(None,
+                                      'access-key',
                                       'secret-key',
                                       'customer-bucket',
                                       ['cdn.cdn.com'],
@@ -432,7 +433,8 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEqual(cdns, new_cdns)
 
     def test_hosting_metadata_bad_classname_in_json(self):
-        neon_cdn = NeonCDNHostingMetadata('my-bucket',
+        neon_cdn = NeonCDNHostingMetadata(None,
+                                          'my-bucket',
                                           ['mycdn.neon-lab.com'])
         cdns = CDNHostingMetadataList('integration0',
                                       [neon_cdn])
@@ -440,10 +442,12 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         bad_json = re.sub('NeonCDNHostingMetadata', 'UnknownHostingMetadata',
                           good_json)
 
-        with self.assertLogExists(logging.ERROR, 'Unknown hosting metadata'):
-            with self.assertRaises(KeyError):
-                CDNHostingMetadataList._create('integration0',
-                                               bad_json)
+        with self.assertLogExists(logging.ERROR,
+                                  'Unknown class .* UnknownHostingMetadata'):
+            cdn_list = CDNHostingMetadataList._create(
+                'integration0',
+                json.loads(bad_json))
+            self.assertItemsEqual(cdn_list, [])
 
     def test_internal_video_id(self):
         '''
@@ -672,7 +676,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             'default_thumbnail')
         bc_request.save()
 
-        bc_found = NeonApiRequest.get('api_key', 'bc_job')
+        bc_found = NeonApiRequest.get('bc_job', 'api_key')
         self.assertEquals(bc_request, bc_found)
         self.assertIsInstance(bc_found, neondata.BrightcoveApiRequest)
 
@@ -682,7 +686,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             'callback_url', 'default_thumbnail')
         oo_request.save()
 
-        self.assertEquals(oo_request, NeonApiRequest.get('api_key', 'oo_job'))
+        self.assertEquals(oo_request, NeonApiRequest.get('oo_job', 'api_key'))
 
         yt_request = neondata.OoyalaApiRequest(
             'yt_job', 'api_key', 'vid0', 'title',
@@ -690,14 +694,14 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             'callback_url', 'default_thumbnail')
         yt_request.save()
 
-        self.assertEquals(oo_request, NeonApiRequest.get('api_key', 'yt_job'))
+        self.assertEquals(yt_request, NeonApiRequest.get('yt_job', 'api_key'))
 
         n_request = NeonApiRequest(
             'n_job', 'api_key', 'vid0', 'title',
             'url', 'neon', 'callback_url', 'default_thumbnail')
         n_request.save()
 
-        self.assertEquals(oo_request, NeonApiRequest.get('api_key', 'n_job'))
+        self.assertEquals(n_request, NeonApiRequest.get('n_job', 'api_key'))
 
         
     def test_neon_api_request_backwards_compatibility(self):

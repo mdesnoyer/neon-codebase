@@ -181,6 +181,22 @@ class State(object):
 
         return self._vars[global_name]
 
+    def _reset_values(self):
+        '''Reset all the values in the state object.
+
+        This should only be used for unittesting. Doesn't pay
+        attention to the default value from the define function at
+        this time.
+        '''
+        
+        with self._lock:
+            for value in self._vars.itervalues():
+                with value.get_lock():
+                    try:
+                        value.value = 0
+                    except TypeError:
+                        value.value = 0.0
+
 state = State()
 '''Global state variable object'''
 

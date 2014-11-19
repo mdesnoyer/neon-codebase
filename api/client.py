@@ -28,7 +28,6 @@ import api.ooyala_api
 from api import properties
 import atexit
 import boto.exception
-from boto.s3.connection import S3Connection
 import cv2
 import ffvideo
 import hashlib
@@ -99,6 +98,7 @@ class BadVideoError(VideoError): pass
 class VideoReadError(VideoError, IOError): pass
 class VideoDownloadError(VideoError, IOError): pass  
 class DBError(IOError): pass
+class CallbackError(IOError): pass
     
 
 ###########################################################################
@@ -165,31 +165,35 @@ class VideoProcessor(object):
             n_thumbs = 5
             if self.job_params.has_key(properties.TOP_THUMBNAILS):
                 n_thumbs = int(self.job_params[properties.TOP_THUMBNAILS])
-                
+
             with self.cv_semaphore:
                 self.process_video(self.tempfile.name, n_thumbs=n_thumbs)
 
-            #finalize request, if success send client and notification
+            #finalize response, if success send client and notification
             #response
             self.finalize_response()
 
         except VideoError as e:
-            # Flag that the job failed in the database
+            # Flag that the job failed getting the data
             statemon.state.increment('processing_error')
 
             # TODO(sunil): Make this an atomic modify operation once
             # neondata is refactored.
-            api_request = neondata.NeonApiRequest.get(api_key, job_id)
+            api_request = neondata.NeonApiRequest.get(
+                self.job_params[properties.REQUEST_UUID_KEY],
+                self.job_params[properties.API_KEY])
             api_request.state = neondata.RequestState.FAILED
             api_request.save()
 
         except Exception as e:
-            # Flag that the job failed in the database
+            # Flag that the job failed for some internal reason
             statemon.state.increment('processing_error')
 
             # TODO(sunil): Make this an atomic modify operation once
             # neondata is refactored.
-            api_request = neondata.NeonApiRequest.get(api_key, job_id)
+            api_request = neondata.NeonApiRequest.get(
+                self.job_params[properties.REQUEST_UUID_KEY],
+                self.job_params[properties.API_KEY])
             api_request.state = neondata.RequestState.INT_ERROR
             api_request.save()
        
@@ -420,9 +424,10 @@ class VideoProcessor(object):
 
         # Attach the thumbnails to the video. This will upload the
         # thumbnails to the appropriate CDNs.
-        if len(self.thumbnails) < 1:
+        if len(filter(lambda x: x[0].type == neondata.ThumbnailType.NEON,
+                      self.thumbnails)) < 1:
             statemon.state.increment('no_thumbs')
-            _log.warn("no thumbnails extracted for video %s url %s"\
+            _log.warn("No thumbnails extracted for video %s url %s"\
                     % (self.video_metadata.key, self.video_metadata.url))
         for thumb_meta, image in self.thumbnails:
             self.video_metadata.add_thumbnail(thumb_meta, image,
@@ -453,20 +458,23 @@ class VideoProcessor(object):
                 else:
                     # Create the new entry
                     t_objs[new_thumb.key] = new_thumb
-            to_add = dict([(x.key, x) for x in self.thumbnails])
-        new_thumb_dict = neondata.ThumbnailMetadata.modify_many(
-            [x[0].key for x in self.thumbnails],
-            _merge_thumbnails)
-        if len(new_thumb_dict) == 0:
-            _log.error("Error writing thumbnail data to database")
-            statemon.state.append('save_tmdata_error')
+        try:
+            new_thumb_dict = neondata.ThumbnailMetadata.modify_many(
+                [x[0].key for x in self.thumbnails],
+                _merge_thumbnails)
+            if len(self.thumbnails) > 0 and len(new_thumb_dict) == 0:
+                raise DBError("Couldn't change some thumbs")
+        except Exception, e:
+            _log.error("Error writing thumbnail data to database: %s" % e)
+            statemon.state.increment('save_tmdata_error')
             raise DBError("Error writing thumbnail data to database")
         
         def _merge_video_data(video_obj):
             # If we are reprocessing, then we don't keep the random,
             # centerframe or neon thumbnails
             if reprocess:
-                thumbs = ThumbnailMetadata.get_many(video_obj.thumbnail_ids)
+                thumbs = neondata.ThumbnailMetadata.get_many(
+                    video_obj.thumbnail_ids)
                 keep_thumbs = [x.key for x in thumbs if x.type not in [
                     neondata.ThumbnailType.NEON,
                     neondata.ThumbnailType.CENTERFRAME,
@@ -484,21 +492,29 @@ class VideoProcessor(object):
             video_obj.integration_id = self.video_metadata.integration_id
             video_obj.frame_size = self.video_metadata.frame_size
             video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
-            video_obj.get_serving_url = self.video_metadata.get_serving_url()
-        new_video_metadata = neondata.VideoMetadata.modify(
-            self.video_metadata.key,
-            _modify_video_data,
-            create_missing=True)
-        if not new_video_metadata:
-            _log.error("Error writing video data to database")
-            statemon.state.append('save_vmdata_error')
+            video_obj.serving_url = self.video_metadata.get_serving_url()
+        try:
+            new_video_metadata = neondata.VideoMetadata.modify(
+                self.video_metadata.key,
+                _merge_video_data,
+                create_missing=True)
+            if not new_video_metadata:
+                raise DBError('This should not ever happen')
+        except Exception, e:
+            _log.error("Error writing video data to database: %s" % e)
+            statemon.state.increment('save_vmdata_error')
             raise DBError("Error writing video data to database")
         self.video_metadata = new_video_metadata
 
         # Save the default thumbnail
         # TODO(sunil): Remove this function once this functionality is
         # in the video api server.
-        api_request.save_default_thumbnail(self.video_metadata, cdn_metadata)
+        api_request.save_default_thumbnail(cdn_metadata)
+        def _set_serving_enabled(video_obj):
+            video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
+        new_video_metadata = neondata.VideoMetadata.modify(
+            self.video_metadata.key,
+            _set_serving_enabled)
 
         # Build the callback request
         cb_request = self.build_callback_request()
@@ -507,10 +523,13 @@ class VideoProcessor(object):
         # TODO(sunil): Once NeonApiRequest is StoredObject, make this a modify
         api_request.state = neondata.RequestState.FINISHED
         api_request.publish_date = time.time() *1000.0
-        api_request.response = tornado.escape.json_decode(cr_request.body)
-        sucess = api_request.save()
-        if not sucess:
-            _log.error("Error writing request state to database")
+        api_request.response = tornado.escape.json_decode(cb_request.body)
+        try:
+            sucess = api_request.save()
+            if not sucess:
+                raise DBError('Api Request save failed')
+        except Exception, e:
+            _log.error("Error writing request state to database: %s" % e)
             raise DBError("Error writing video data to database")
 
         # Send callbacks and notifications
@@ -528,8 +547,12 @@ class VideoProcessor(object):
         response_body = {}
         response_body["job_id"] = self.video_metadata.job_id 
         response_body["video_id"] = self.video_metadata.key 
-        response_body["framenos"] = [x[0].frameno for x in self.thumbnails]
-        response_body["thumbnails"] = [x[0].urls[0] for x in self.thumbnails]
+        response_body["framenos"] = [
+            x[0].frameno for x in self.thumbnails 
+            if x[0].type == neondata.ThumbnailType.NEON]
+        response_body["thumbnails"] = [
+            x[0].urls[0] for x in self.thumbnails 
+            if x[0].type == neondata.ThumbnailType.NEON]
         response_body["timestamp"] = str(time.time())
         response_body["serving_url"] = self.video_metadata.get_serving_url()
 
@@ -560,7 +583,7 @@ class VideoProcessor(object):
             sqsmgr = utils.sqsmanager.CustomerCallbackManager()
             r = sqsmgr.add_callback_response(video_id, request.url,
                                              request.body)
-        except SQSError, e:
+        except boto.exception.SQSError, e:
             _log.error('SQS Error %s' % e)
             statemon.state.increment('customer_callback_schedule_error')
             _log.info('Tried to send response: %s' % request.body)
@@ -622,13 +645,13 @@ class VideoClient(multiprocessing.Process):
     Video Client processor
     '''
     def __init__(self, model_file, cv_semaphore):
+        super(VideoClient, self).__init__()
         self.model_file = model_file
         self.kill_received = multiprocessing.Event()
         self.dequeue_url = options.video_server + "/dequeue"
         self.state = "start"
         self.model_version = None
         self.model = None
-        self.pid = os.getpid()
         self.cv_semaphore = cv_semaphore
         self.videos_processed = 0
 
@@ -689,17 +712,20 @@ class VideoClient(multiprocessing.Process):
     def run(self):
         ''' run/start method '''
         _log.info("starting worker [%s] " % (self.pid))
+        
+        # Register a function to die cleanly on a sigterm
+        atexit.register(self.stop)
+        signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
+        
         while (not self.kill_received.is_set() and 
                self.videos_processed < options.max_videos_per_proc):
             self.do_work()
-            self.videos_processed += 1
 
         _log.info("stopping worker [%s] " % (self.pid))
 
     def do_work(self):   
         ''' do actual work here'''
         try:
-
             job = self.dequeue_job()
             if not job or job == "{}": #string match
                 raise Queue.Empty
@@ -713,6 +739,7 @@ class VideoClient(multiprocessing.Process):
                                         self.model_version,
                                         self.cv_semaphore)
             vprocessor.start()
+            self.videos_processed += 1
 
         except Queue.Empty:
             _log.debug("Q,Empty")
@@ -724,12 +751,13 @@ class VideoClient(multiprocessing.Process):
                     " msg=exception %s" %(self.pid, e.message))
             time.sleep(options.dequeue_period)
 
-    def kill(self):
+    def stop(self):
         self.kill_received.set()
 
 __workers = []   
 __master_pid = None
 __shutting_down = False
+@atexit.register
 def shutdown_master_process():
     if os.getpid() != __master_pid:
         return
@@ -756,7 +784,6 @@ def main():
     __master_pid = os.getpid()
 
     # Register a function that will shutdown the workers
-    atexit.register(shutdown_master_process)
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
 
     max_workers = multiprocessing.cpu_count() + 2
