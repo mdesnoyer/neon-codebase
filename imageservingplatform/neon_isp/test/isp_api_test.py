@@ -124,7 +124,9 @@ class ISP:
         self.config_file.write(config_contents)
         self.config_file.flush()
 
-        self.nginx_path = base_path + "/imageservingplatform/nginx-1.4.7/objs/nginx" #get build path
+        #get build path
+        self.nginx_path = \
+                base_path + "/imageservingplatform/nginx-1.6.2/objs/nginx"
 
     def start(self):
         self.proc = subprocess.Popen([
@@ -166,14 +168,14 @@ class MyHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
     
     def http_error_302(self, req, fp, code, msg, headers):
         MyHTTPRedirectHandler.redirect_response = headers
-        return urllib2.HTTPRedirectHandler.http_error_302(self, req, fp, code, msg, headers)
+        return urllib2.HTTPRedirectHandler.http_error_302(self, 
+                                    req, fp, code, msg, headers)
 
     http_error_301 = http_error_303 = http_error_307 = http_error_302
 
     @classmethod
     def get_last_redirect_response(cls):
         return cls.redirect_response
-
 
 class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
     '''
@@ -266,18 +268,18 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
 
         try:
             req = urllib2.Request(url, headers=headers)
-            r = urllib2.urlopen(req)
-            return r
+            response = urllib2.urlopen(req)
+            return response.read(), response.code
 
         except urllib2.HTTPError, e:
             print e
             return None, e.code
 
         except urllib2.URLError, e:
-            pass
+            return None, None
         
         except httplib.BadStatusLine, e:
-            pass
+            return None, None
 
     def server_api_request(self, pub_id, vid, width, height, ip=None):
         '''
@@ -373,6 +375,96 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         ts = int(time.time()) / 100
         self.assertTrue(str(ts) in cookie_value)
 
+    def test_client_api_request_jpg_extention(self):
+        '''
+        Test Client API call
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+
+        prefix = "neonvid_"
+        jpg_extention = '.jpg'
+        response = self.client_api_request(self.pub_id, prefix + self.vid + jpg_extention, 600, 500, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+        
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+            if "Set-Cookie" in header:
+                cookie = header.split("Set-Cookie: ")[-1]
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, self.expected_img_url)
+        self.assertIsNotNone(cookie)
+        
+        #verify cookie values
+        cookie_pair, cookie_expiry, cookie_domain, cookie_path = \
+                                                self.parse_cookie(cookie)
+
+        cookie_name, cookie_value = cookie_pair.split('=')
+        self.assertEqual(cookie_name, self.neon_cookie_name)
+        self.assertEqual(cookie_domain, self.cookie_domain)
+        self.assertEqual(cookie_path, "/")
+
+        #Verify cookie inclusion of timestamp in the cookie
+        ts = int(time.time()) / 100
+        self.assertTrue(str(ts) in cookie_value)
+
+
+    def test_client_api_request_jpg_extention_uppercase(self):
+        '''
+        Test Client API call
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+       
+        prefix = "neonvid_"
+        jpg_extention = '.JPG'
+        response = self.client_api_request(self.pub_id, prefix + self.vid + jpg_extention, 600, 500, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+        
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+            if "Set-Cookie" in header:
+                cookie = header.split("Set-Cookie: ")[-1]
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, self.expected_img_url)
+        self.assertIsNotNone(cookie)
+        
+        #verify cookie values
+        cookie_pair, cookie_expiry, cookie_domain, cookie_path = \
+                                                self.parse_cookie(cookie)
+
+        cookie_name, cookie_value = cookie_pair.split('=')
+        self.assertEqual(cookie_name, self.neon_cookie_name)
+        self.assertEqual(cookie_domain, self.cookie_domain)
+        self.assertEqual(cookie_path, "/")
+
+        #Verify cookie inclusion of timestamp in the cookie
+        ts = int(time.time()) / 100
+        self.assertTrue(str(ts) in cookie_value)
+
+
     def test_client_api_request_with_cookie(self):
         '''
         Test client api request when a neonglobaluserid 
@@ -460,8 +552,9 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         url = "http://localhost:" + self.port + "/v1/client/22334223432/"
         ip = "203.2.113.7"
         headers = {"X-Forwarded-For" : ip}
-        response = self.make_api_request(url, headers)
-        self.assertEqual(response.code, 204)
+        response, code = self.make_api_request(url, headers)
+        self.assertEqual(response, '')
+        self.assertEqual(code, 204)
 
 
     ################### Server API tests #####################
@@ -471,32 +564,32 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         Server API request
         '''
 
-        response = self.server_api_request(self.pub_id, self.vid, 600, 500, "12.2.2.4")
+        response, code = self.server_api_request(self.pub_id, self.vid, 600, 500, "12.2.2.4")
         self.assertIsNotNone(response)
-        self.assertTrue(response.code, 200)
-        headers = response.info().headers
-        im_url = json.loads(response.read())["data"]
-        self.assertEqual(headers[2], 'Content-Type: application/json\r\n')
+        self.assertTrue(code, 200)
+        im_url = json.loads(response)["data"]
+        #headers = response.info().headers
+        #self.assertEqual(headers[2], 'Content-Type: application/json\r\n')
         self.assertIsNotNone(im_url)
-        self.assertIsNotNone(TestImageServingPlatformAPI.get_header_value(headers,
-                                "application/json"))
+        #self.assertIsNotNone(TestImageServingPlatformAPI.get_header_value(headers,
+        #                        "application/json"))
     
     def test_server_api_request_without_custom_header(self):
         '''
         Server api when client ip is missing
         '''
         
-        response = self.server_api_request(self.pub_id, self.vid, 600, 500)
+        response, code = self.server_api_request(self.pub_id, self.vid, 600, 500)
         self.assertIsNotNone(response)
-        self.assertTrue(response.code, 200)
-        im_url = json.loads(response.read())["data"]
+        self.assertTrue(code, 200)
+        im_url = json.loads(response)["data"]
         self.assertEqual(im_url, self.expected_img_url)
 
     def test_server_api_without_width(self):
         url = self.base_url % ("server", self.pub_id, self.vid)
         url += "?height=500"
-        response = self.make_api_request(url, {})
-        im_url = json.loads(response.read())["data"]
+        response, code = self.make_api_request(url, {})
+        im_url = json.loads(response)["data"]
         self.assertEqual(im_url, self.default_url)
 
     def test_server_api_without_height(self):
@@ -506,8 +599,8 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
 
         url = self.base_url % ("server", self.pub_id, self.vid)
         url += "?width=600"
-        response = self.make_api_request(url, {})
-        im_url = json.loads(response.read())["data"]
+        response, code = self.make_api_request(url, {})
+        im_url = json.loads(response)["data"]
         self.assertEqual(im_url, self.default_url)
 
     @unittest.skip("cloudinary URL not being sent currently") 
@@ -517,9 +610,9 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         '''
         h = 1; w =1
         tid = 'thumb1' 
-        response = self.server_api_request(self.pub_id, self.vid, w, h)
+        response, code = self.server_api_request(self.pub_id, self.vid, w, h)
         self.assertIsNotNone(response)
-        im_url = json.loads(response.read())["data"]
+        im_url = json.loads(response)["data"]
         cloudinary_url =\
                 "http://res.cloudinary.com/neon-labs/image/upload/w_%s,h_%s/neontn%s_w%s_h%s.jpg.jpg";
         self.assertEqual(im_url, cloudinary_url % (w, h, tid, "0", "0"))
@@ -545,8 +638,8 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         url += self.get_params % (width, height)
         url += "&cip=%s" % cip
         headers = {}
-        response = self.make_api_request(url, headers)
-        data = json.loads(response.read())["data"]
+        response, code = self.make_api_request(url, headers)
+        data = json.loads(response)["data"]
         self.assertIsNotNone(data)
 
     def test_ab_test_ratio(self):
@@ -605,9 +698,9 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
                 ("getthumbnailid", self.pub_id, self.vid)
         ip = "203.2.113.7"
         headers = {"X-Forwarded-For" : ip}
-        response = self.make_api_request(url, headers)
+        response, code = self.make_api_request(url, headers)
         self.assertIsNotNone(response)
-        self.assertEqual(response.read(), "thumb2")
+        self.assertEqual(response, "thumb2")
 
     def test_multiple_thumbnailids(self):
         '''
@@ -619,9 +712,9 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
                 ("getthumbnailid", self.pub_id, self.vid, self.vid)
         ip = "203.2.113.7"
         headers = {"X-Forwarded-For" : ip}
-        response = self.make_api_request(url, headers)
+        response, code = self.make_api_request(url, headers)
         self.assertIsNotNone(response)
-        self.assertEqual(response.read(), "thumb2,thumb2")
+        self.assertEqual(response, "thumb2,thumb2")
     
     def test_multiple_thumbnailids_with_invalid_vid(self):
         '''
@@ -633,9 +726,9 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
                 ("getthumbnailid", self.pub_id, self.vid, "invalid_vid")
         ip = "203.2.113.7"
         headers = {"X-Forwarded-For" : ip}
-        response = self.make_api_request(url, headers)
+        response, code = self.make_api_request(url, headers)
         self.assertIsNotNone(response)
-        self.assertEqual(response.read(), "thumb2,null")
+        self.assertEqual(response, "thumb2,null")
     
     def test_thumbnailids_with_malformed_url(self):
         '''
@@ -646,16 +739,8 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
                 ("getthumbnailid", self.pub_id, self.vid, "invalid_vid")
         ip = "203.2.113.7"
         headers = {"X-Forwarded-For" : ip}
-        response = self.make_api_request(url, headers)
-        self.assertEqual(response.code, 204)
-
-    def test_random_urls(self):
-        '''
-        Random urls
-        '''
-        pass
-
-    # TODO(Sunil) : Test cases for AB test using IPAddress
+        response, code = self.make_api_request(url, headers)
+        self.assertEqual(code, 204)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

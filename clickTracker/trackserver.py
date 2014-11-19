@@ -229,7 +229,8 @@ class BaseTrackerDataV2(object):
         Returns:
         list of thumbnail ids, or None if it is unknown
         '''
-        vidRe = re.compile('neonvid_([0-9a-zA-Z\-~\.]+)')
+        vidRe = re.compile('neonvid_([0-9a-zA-Z\-~\.]+)(\.jpg)?')
+        vidReJpg = re.compile('neonvid_([0-9a-zA-Z\-~\.]+)\.jpg')
         # TODO(mdesnoyer): Remove the split by dashes once the
         # brightcove tracker code is fixed. It should just be
         # underscores.
@@ -250,8 +251,11 @@ class BaseTrackerDataV2(object):
                 vids.append(None)
             else:
                 vidSearch = vidRe.search(bn)
+                vidSearchJpg = vidReJpg.search(bn)
                 tids.append(None)
-                if vidSearch:
+                if vidSearchJpg:
+                    vids.append(vidSearchJpg.group(1))
+                elif vidSearch:
                     vids.append(vidSearch.group(1))
                 else:
                     _log.warn_n('Malformed basename %s' % bn, 100)

@@ -446,13 +446,18 @@ static ngx_int_t ngx_http_neon_handler_getthumbnailid(ngx_http_request_t *reques
 {
     neon_stats[NEON_GETTHUMBNAIL_API_REQUESTS] ++;
 
-    ngx_chain_t   chain;
+    // this will be allocated if a response body is created
+    ngx_chain_t *  chain = 0; 
     
     neon_service_getthumbnailid(request, &chain);
     
     ngx_http_send_header(request);
-    
-    return ngx_http_output_filter(request, &chain);
+   
+    // if a response body 
+    if(chain)
+        return ngx_http_output_filter(request, chain);
+    else
+        return ngx_http_output_filter(request, 0);
 }
 
 
@@ -559,6 +564,8 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
 	"NEON_CLIENT_API_URL_NOT_FOUND", neon_stats[NEON_CLIENT_API_URL_NOT_FOUND],
 	"NEON_SERVER_API_ACCOUNT_ID_NOT_FOUND", neon_stats[NEON_SERVER_API_ACCOUNT_ID_NOT_FOUND],
 	"NEON_SERVER_API_URL_NOT_FOUND", neon_stats[NEON_SERVER_API_URL_NOT_FOUND],
+    "NEON_GETTHUMBNAIL_API_PUBLISHER_NOT_FOUND", neon_stats[NEON_GETTHUMBNAIL_API_PUBLISHER_NOT_FOUND],
+    "NEON_GETTHUMBNAIL_API_ACCOUNT_ID_NOT_FOUND", neon_stats[NEON_GETTHUMBNAIL_API_ACCOUNT_ID_NOT_FOUND],
     "NEON_UPDATER_HTTP_FETCH_FAIL", neon_stats[NEON_UPDATER_HTTP_FETCH_FAIL],
     "NEON_UPDATER_MASTERMIND_EXPIRED", neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED],
     "NEON_UPDATER_MASTERMIND_LOAD_FAIL", neon_stats[NEON_UPDATER_MASTERMIND_LOAD_FAIL],
@@ -567,6 +574,8 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
     "NEON_CLIENT_API_REQUESTS", neon_stats[NEON_CLIENT_API_REQUESTS],
     "NEON_GETTHUMBNAIL_API_REQUESTS", neon_stats[NEON_GETTHUMBNAIL_API_REQUESTS],
     "NEON_INVALID_VIDEO_ID", neon_stats[NEON_INVALID_VIDEO_ID],
+    "NEON_MASTERMIND_INVALID_INIT", neon_stats[NEON_MASTERMIND_INVALID_INIT],
+    "NEON_MASTERMIND_INVALID_SHUTDOWN", neon_stats[NEON_MASTERMIND_INVALID_SHUTDOWN],
     "NEON_DIRECTIVE_HASTABLE_INVALID_SHUTDOWN", neon_stats[NEON_DIRECTIVE_HASTABLE_INVALID_SHUTDOWN],
     "NEON_DIRECTIVE_HASTABLE_INVALID_INIT", neon_stats[NEON_DIRECTIVE_HASTABLE_INVALID_INIT],
     "NEON_PUBLISHER_HASTABLE_INVALID_SHUTDOWN", neon_stats[NEON_PUBLISHER_HASTABLE_INVALID_SHUTDOWN],
@@ -577,7 +586,11 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
     "NEON_DIRECTIVE_SHUTDOWN_NULL_POINTER", neon_stats[NEON_DIRECTIVE_SHUTDOWN_NULL_POINTER],
     "NEON_FRACTION_PARSE_ERROR", neon_stats[NEON_FRACTION_PARSE_ERROR],
     "NEON_FRACTION_INVALID", neon_stats[NEON_FRACTION_INVALID],
+    "NEON_FRACTION_INVALID_INIT", neon_stats[NEON_FRACTION_INVALID_INIT],
+    "NEON_FRACTION_INVALID_SHUTDOWN", neon_stats[NEON_FRACTION_INVALID_SHUTDOWN],
     "NEON_FRACTION_SHUTDOWN_NULL_POINTER", neon_stats[NEON_FRACTION_SHUTDOWN_NULL_POINTER],
+    "NEON_SCALED_IMAGE_INVALID_INIT", neon_stats[NEON_SCALED_IMAGE_INVALID_INIT],
+    "NEON_SCALED_IMAGE_INVALID_SHUTDOWN", neon_stats[NEON_SCALED_IMAGE_INVALID_SHUTDOWN],
     "NEON_SCALED_IMAGE_PARSE_ERROR", neon_stats[NEON_SCALED_IMAGE_PARSE_ERROR],
     "NEON_SCALED_IMAGE_INVALID", neon_stats[NEON_SCALED_IMAGE_INVALID],
     "NEON_SCALED_IMAGE_SHUTDOWN_NULL_POINTER", neon_stats[NEON_SCALED_IMAGE_SHUTDOWN_NULL_POINTER],
@@ -610,7 +623,7 @@ static void create_stats_formatter(int num_of_counters, char * format_string, in
     int e=0;
     for(e=0; e < num_of_counters; e++) {
         if(add_comma == 1) {
-            used = sprintf(ptr, "%s", ",\"\%s\": \%llu");
+            used = sprintf(ptr, "%s", ",\"\%s\": \%llu\n");
             ptr += used;
         }
         else {

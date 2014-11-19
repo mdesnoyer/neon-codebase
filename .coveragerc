@@ -1,0 +1,30 @@
+# .coveragerc to control coverage.py
+[run]
+branch = True
+parallel = True       
+
+[report]
+exclude_lines =
+              # Have to re-enable the standard pragma
+              pragma: no cover
+
+              # Don't count the main code
+              if __name__ == .__main__.:
+              def main(.*:
+
+              raise NotImplementedError*
+
+              if sys.path[0]
+              sys.path.insert(0,
+
+omit = 
+     */test/*
+     */tests/*
+     test_*.py
+     *_test.py
+     externalLibs/*
+     lib/*
+     bin/*
+     .pyenv/*
+     *gen-py*
+     */flume/*

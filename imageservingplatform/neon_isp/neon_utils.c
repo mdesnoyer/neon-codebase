@@ -128,7 +128,8 @@ unsigned long
 neon_sdbm_hash(unsigned char *str, int s_len) 
 {
     unsigned long hash = 0;
-    int c, i=0;
+    int c = 0;
+    int i = 0;
 
     if(str){
         while ((c = *str++) && i++ < s_len){

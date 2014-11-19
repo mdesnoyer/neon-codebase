@@ -153,6 +153,7 @@ class TestAsyncSendRequest(test_utils.neontest.AsyncTestCase):
 
         self.assertEqual(found_response, response)
 
+    @tornado.testing.gen_test
     def test_yielding(self):
         request, response = create_valid_ack()
         self.mock_responses.side_effect = [response]
@@ -369,15 +370,21 @@ class TestTornadoAsyncRequestPool(test_utils.neontest.AsyncTestCase):
 
         self.mock_responses = MagicMock()
 
-        self.mock_client().fetch.side_effect = \
-          lambda x, callback: self.io_loop.add_callback(callback,
-                                                        self.mock_responses(x))
+        def _response(x, callback=None):
+            if callback:
+                self.io_loop.add_callback(callback,
+                                          self.mock_responses(x))
+            else:
+                return self.mock_responses(x)
+
+        self.mock_client().fetch.side_effect = _response
         
     def tearDown(self):
         self.pool.stop()
         self.patcher.stop()
         super(TestTornadoAsyncRequestPool, self).tearDown()
 
+    @tornado.testing.gen_test
     def test_yielding(self):
         request, response = create_valid_ack()
         self.mock_responses.side_effect = [response]
