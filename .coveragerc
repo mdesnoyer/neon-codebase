@@ -10,9 +10,12 @@ exclude_lines =
 
               # Don't count the main code
               if __name__ == .__main__.:
-              def main():
+              def main(.*:
 
               raise NotImplementedError*
+
+              if sys.path[0]
+              sys.path.insert(0,
 
 omit = 
      */test/*

@@ -424,11 +424,13 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                                       'folder/',
                                       True,
                                       True)
-        cdns = CDNHostingMetadataList('integration0',
-                                      [cloud, neon_cdn, s3_cdn])
+        cdns = CDNHostingMetadataList(
+            CDNHostingMetadataList.create_key('api-key', 'integration0'),
+            [cloud, neon_cdn, s3_cdn])
         cdns.save()
 
-        new_cdns = CDNHostingMetadataList.get('integration0')
+        new_cdns = CDNHostingMetadataList.get(
+            CDNHostingMetadataList.create_key('api-key', 'integration0'))
 
         self.assertEqual(cdns, new_cdns)
 
@@ -436,7 +438,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         neon_cdn = NeonCDNHostingMetadata(None,
                                           'my-bucket',
                                           ['mycdn.neon-lab.com'])
-        cdns = CDNHostingMetadataList('integration0',
+        cdns = CDNHostingMetadataList('api-key_integration0',
                                       [neon_cdn])
         good_json = cdns.to_json()
         bad_json = re.sub('NeonCDNHostingMetadata', 'UnknownHostingMetadata',
@@ -445,9 +447,16 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.ERROR,
                                   'Unknown class .* UnknownHostingMetadata'):
             cdn_list = CDNHostingMetadataList._create(
-                'integration0',
+                'api-key_integration0',
                 json.loads(bad_json))
             self.assertItemsEqual(cdn_list, [])
+
+    def test_hosting_metadata_list_bad_key(self):
+        with self.assertRaises(ValueError):
+            CDNHostingMetadataList('integration0')
+
+        with self.assertRaises(ValueError):
+            CDNHostingMetadataList('acct_1_integration0')
 
     def test_internal_video_id(self):
         '''
@@ -1094,9 +1103,10 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         VideoMetadata(InternalVideoID.generate('acct1', 'vid1'),
                       i_id='i6').save()
         cdn_list = CDNHostingMetadataList(
-            'i6', [ NeonCDNHostingMetadata(do_salt=False),
-                    S3CDNHostingMetadata(bucket_name='customer-bucket',
-                                         do_salt=False) ])
+            CDNHostingMetadataList.create_key('acct1', 'i6'), 
+            [ NeonCDNHostingMetadata(do_salt=False),
+              S3CDNHostingMetadata(bucket_name='customer-bucket',
+                                   do_salt=False) ])
         cdn_list.save()
 
         thumb_info = ThumbnailMetadata(None, 'acct1_vid1',

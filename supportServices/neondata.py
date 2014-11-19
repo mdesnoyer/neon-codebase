@@ -724,11 +724,10 @@ class NamespacedStoredObject(StoredObject):
     def __init__(self, key):
         super(NamespacedStoredObject, self).__init__(
             self.__class__.format_key(key))
-        self._id = key
 
     def get_id(self):
         '''Return the non-namespaced id for the object.'''
-        return self._id
+        return re.sub(self._baseclass_name().lower() + '_', '', self.key)
 
     @classmethod
     def _baseclass_name(cls):
@@ -742,7 +741,7 @@ class NamespacedStoredObject(StoredObject):
     @classmethod
     def format_key(cls, key):
         ''' Format the database key with a class specific prefix '''
-        if key.startswith(cls._baseclass_name().lower()):
+        if key and key.startswith(cls._baseclass_name().lower()):
             return key
         else:
             return '%s_%s' % (cls._baseclass_name().lower(), key)
@@ -1138,15 +1137,26 @@ class ExperimentStrategy(NamespacedStoredObject):
 class CDNHostingMetadataList(NamespacedStoredObject):
     '''A list of CDNHostingMetadata objects.
 
-    Keyed by integration_id (in the AbstractPlatform)
+    Keyed by (api_key, integration_id). Use the create_key method to
+    generate it before calling a normal function like get().
+    
     '''
-    def __init__(self, integration_id, cdns=None):
-        super(CDNHostingMetadataList, self).__init__(integration_id)
+    def __init__(self, key, cdns=None):
+        super(CDNHostingMetadataList, self).__init__(key)
+        if self.get_id() and len(self.get_id().split('_')) != 2:
+            raise ValueError('Invalid key %s. Must be generated using '
+                             'create_key()' % self.get_id())
         self.cdns = cdns or []
 
     def __iter__(self):
         '''Iterate through the cdns.'''
         return [x for x in self.cdns if x is not None].__iter__()
+
+    @classmethod
+    def create_key(cls, api_key, integration_id):
+        '''Create a key for using in this table'''
+        return '_'.join([api_key or 'None',
+                         integration_id or 'None'])
 
     @classmethod
     def _baseclass_name(cls):
@@ -1163,12 +1173,13 @@ class CDNHostingMetadata(NamespacedStoredObject):
 
     These objects are not stored directly in the database.  They are
     actually stored in CDNHostingMetadataLists. If you try to save
-    them directly, you will get a NotImplementedError because
-    _baseclass_name is not implemented.
+    them directly, you will get a NotImplementedError.
     ''' 
     
     def __init__(self, key=None, cdn_prefixes=None, resize=False, 
                  update_serving_urls=False):
+        self.key = key
+        
         self.cdn_prefixes = cdn_prefixes # List of url prefixes
         
         # If true, the images should be resized into all the desired
@@ -1177,6 +1188,21 @@ class CDNHostingMetadata(NamespacedStoredObject):
 
         # Should the images be added to ThumbnailServingURL object?
         self.update_serving_urls = update_serving_urls
+
+    def save(self):
+        raise NotImplementedError()
+
+    @classmethod
+    def save_all(self, *args, **kwargs):
+        raise NotImplementedError()
+
+    @classmethod
+    def modify(self, *args, **kwargs):
+        raise NotImplementedError()
+
+    @classmethod
+    def modify_many(self, *args, **kwargs):
+        raise NotImplementedError()
 
 class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
@@ -2585,9 +2611,11 @@ class ThumbnailMetadata(StoredObject):
             # Lookup the cdn metadata
             video_info = yield tornado.gen.Task(VideoMetadata.get,
                                                 self.video_id)
-            
+
+            cdn_key = CDNHostingMetadataList.create_key(
+                video_info.get_account_id(), video_info.integration_id)
             cdn_metadata = yield tornado.gen.Task(CDNHostingMetadataList.get,
-                                                  video_info.integration_id)
+                                                  cdn_key)
             if cdn_metadata is None:
                 # Default to hosting on the Neon CDN if we don't know about it
                 cdn_metadata = [NeonCDNHostingMetadata()]
