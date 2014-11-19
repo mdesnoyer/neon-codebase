@@ -102,7 +102,7 @@ class CustomerCallbackManager(SQSManager):
 
     def add_callback_response(self, video_id, callback_url, response):
         '''
-        @key : video_id
+        @key : external video_id
         @response: json response to be sent to the customer
         '''
 

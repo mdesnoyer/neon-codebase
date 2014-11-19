@@ -22,6 +22,8 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
+import api.cdnhosting
+from api import ooyala_api
 import base64
 import binascii
 import code
@@ -31,9 +33,14 @@ import copy
 import datetime
 import hashlib
 import json
+import logging
+import multiprocessing
+from PIL import Image
 import random
+import re
 import redis as blockingRedis
 import string
+from StringIO import StringIO
 import supportServices.url2thumbnail
 import tornado.ioloop
 import tornado.gen
@@ -42,22 +49,18 @@ import threading
 import time
 import api.brightcove_api #coz of cyclic import 
 import api.youtube_api
+import utils.botoutils
 import utils.logs
+from utils.imageutils import PILImageUtils
 import utils.neon
+from utils.options import define, options
 import utils.sync
 import utils.s3
 import utils.http 
 import urllib
 import warnings
 
-from api.cdnhosting import CDNHosting
-from api.cdnhosting import upload_to_s3_host_thumbnails 
-from api import ooyala_api
-from PIL import Image
-from StringIO import StringIO
-from utils.options import define, options
 
-import logging
 _log = logging.getLogger(__name__)
 
 define("thumbnailBucket", default="host-thumbnails", type=str,
@@ -79,6 +82,8 @@ define('async_pool_size', type=int, default=10,
 
 #constants 
 BCOVE_STILL_WIDTH = 480
+
+class DBStateError(ValueError):pass
 
 class DBConnection(object):
     '''Connection to the database.
@@ -234,13 +239,25 @@ class RedisAsyncWrapper(object):
     you can get the callback attribue as well when call is made
     '''
 
-    _thread_pool = concurrent.futures.ThreadPoolExecutor(
-        options.async_pool_size)
+    _thread_pools = {}
+    _pool_lock = multiprocessing.RLock()
     
     def __init__(self, host='127.0.0.1', port=6379):
         self.client = blockingRedis.StrictRedis(host, port, socket_timeout=10)
         self.max_tries = options.maxRedisRetries
         self.base_wait = options.baseRedisRetryWait
+
+    @classmethod
+    def _get_thread_pool(cls):
+        '''Get the thread pool for this process.'''
+        with cls._pool_lock:
+            try:
+                return cls._thread_pools[os.getpid()]
+            except KeyError:
+                pool = concurrent.futures.ThreadPoolExecutor(
+                    options.async_pool_size)
+                cls._thread_pools[os.getpid()] = pool
+                return pool
 
     def _get_wrapped_async_func(self, func):
         '''Returns an asynchronous function wrapped around the given func.
@@ -275,11 +292,11 @@ class RedisAsyncWrapper(object):
                     io_loop.add_timeout(
                         time.time() + delay,
                         lambda: io_loop.add_future(
-                            RedisAsyncWrapper._thread_pool.submit(
+                            RedisAsyncWrapper._get_thread_pool().submit(
                                 func, *args, **kwargs),
                             lambda x: _cb(x, cur_try)))
 
-            future = RedisAsyncWrapper._thread_pool.submit(
+            future = RedisAsyncWrapper._get_thread_pool().submit(
                 func, *args, **kwargs)
             io_loop.add_future(future, _cb)
         return AsyncWrapper
@@ -376,9 +393,9 @@ def id_generator(size=32,
     ''' Generate a random alpha numeric string to be used as 
         unique ids
     '''
+    retval = ''.join(random.choice(chars) for x in range(size))
 
-    random.seed(time.time())
-    return ''.join(random.choice(chars) for x in range(size))
+    return retval
 
 ##############################################################################
 ## Enum types
@@ -429,8 +446,10 @@ class StoredObject(object):
         return str(self)
 
     def __cmp__(self, other):
-        return cmp((self.__class__, self.__dict__),
-                   (other.__class__, other.__dict__))
+        classcmp = cmp(self.__class__, other.__class__)
+        if classcmp:
+            return classcmp
+        return cmp(self.__dict__, other.__dict__)
 
     def to_dict(self):
         return {
@@ -464,23 +483,41 @@ class StoredObject(object):
         if obj_dict:
             # Get the class type to create
             try:
-                classtype = globals()[obj_dict['_type']]
                 data_dict = obj_dict['_data']
+                classname = obj_dict['_type']
+                try:
+                    classtype = globals()[classname]
+                except KeyError:
+                    _log.error('Unknown class of type %s in database key %s'
+                               % (classname, key))
+                    return None
             except KeyError:
-                # For backwards compatibility, assume that the class is cls
+                # For backwards compatibility, we didn't store the
+                # type in the databse, so assume that the class is cls
                 classtype = cls
                 data_dict = obj_dict
             obj = classtype(key)
 
             #populate the object dictionary
             for k, value in data_dict.iteritems():
-                # Build object for this field if it is a StoredObject
-                if (isinstance(value, dict) and '_type' in value and 
-                    '_data' in value):
-                    value = cls._create(k, value)
-                obj.__dict__[str(k)] = value
+                obj.__dict__[str(k)] = cls._deserialize_field(k, value)
         
             return obj
+    @classmethod
+    def _deserialize_field(cls, key, value):
+        '''Deserializes a field by creating a StoredObject as necessary.'''
+        if isinstance(value, dict):
+            if '_type' in value and '_data' in value:
+                # It is a stored object, so unpack it
+                return cls._create(key, value)
+            else:
+                # It is a dictionary do deserialize each of the fields
+                for k, v in value.iteritems():
+                    value[str(k)] = cls._deserialize_field(k, v)
+        elif hasattr(value, '__iter__'):
+            # It is iterable to treat it like a list
+            value = [cls._deserialize_field(None, x) for x in value]
+        return value
 
     def get_id(self):
         '''Return the non-namespaced id for the object.'''
@@ -526,6 +563,7 @@ class StoredObject(object):
         if len(keys) == 0:
             if callback:
                 callback([])
+                return
             else:
                 return []
 
@@ -556,7 +594,7 @@ class StoredObject(object):
 
     
     @classmethod
-    def modify(cls, key, func, callback=None):
+    def modify(cls, key, func, create_missing=False, callback=None):
         '''Allows you to modify the object in the database atomically.
 
         While in func, you have a lock on the object so you are
@@ -566,12 +604,13 @@ class StoredObject(object):
         Inputs:
         func - Function that takes a single parameter (the object being edited)
         key - The key of the object to modify
+        create_missing - If True, create the default object if it doesn't exist
 
         Returns: A copy of the updated object or None, if the object wasn't
                  in the database and thus couldn't be updated.
 
         Example usage:
-        SoredObject.modify('thumb_a', lambda thumb: thumb.update_phash())
+        StoredObject.modify('thumb_a', lambda thumb: thumb.update_phash())
         '''
         def _process_one(d):
             val = d[key]
@@ -580,14 +619,19 @@ class StoredObject(object):
 
         if callback:
             return StoredObject.modify_many(
-                [key], _process_one,
+                [key], _process_one, create_missing=create_missing,
+                create_class=cls,
                 callback=lambda d: callback(d[key]))
         else:
-            updated_d = StoredObject.modify_many([key], _process_one)
+            updated_d = StoredObject.modify_many(
+                [key], _process_one,
+                create_missing=create_missing,
+                create_class=cls)
             return updated_d[key]
 
     @classmethod
-    def modify_many(cls, keys, func, callback=None):
+    def modify_many(cls, keys, func, create_missing=False, create_class=None, 
+                    callback=None):
         '''Allows you to modify objects in the database atomically.
 
         While in func, you have a lock on the objects so you are
@@ -597,6 +641,9 @@ class StoredObject(object):
         Inputs:
         func - Function that takes a single parameter (dictionary of key -> object being edited)
         keys - List of keys of the objects to modify
+        create_missing - If True, create the default object if it doesn't exist
+        create_class - The class of the object to create. If None, 
+                       cls is used (which is the most common case)
 
         Returns: A dictionary of {key -> updated object}. The updated
         object could be None if it wasn't in the database and thus
@@ -604,8 +651,11 @@ class StoredObject(object):
 
         Example usage:
         SoredObject.modify_many(['thumb_a'], 
-          lambda d: thumb.update_phash() for thumb in d.iteritems())
+          lambda d: thumb.update_phash() for thumb in d.itervalues())
         '''
+        if create_class is None:
+            create_class = cls
+            
         def _getandset(pipe):
             # mget can't handle an empty list 
             if len(keys) == 0:
@@ -617,10 +667,13 @@ class StoredObject(object):
             mappings = {}
             for key, item in zip(keys, items):
                 if item is None:
-                    _log.error('Could not get redis object: %s' % key)
-                    mappings[key] = None
+                    if create_missing:
+                        mappings[key] = create_class(key)
+                    else:
+                        _log.error('Could not get redis object: %s' % key)
+                        mappings[key] = None
                 else:
-                    mappings[key] = cls._create(key, json.loads(item))
+                    mappings[key] = create_class._create(key, json.loads(item))
             try:
                 func(mappings)
             finally:
@@ -742,17 +795,19 @@ class NamespacedStoredObject(StoredObject):
                      if x is not None]
 
     @classmethod
-    def modify(cls, key, func, callback=None):
+    def modify(cls, key, func, create_missing=False, callback=None):
         super(NamespacedStoredObject, cls).modify(
             cls.format_key(key),
             func,
+            create_missing=create_missing,
             callback=callback)
 
     @classmethod
-    def modify_many(cls, keys, func, callback=None):
+    def modify_many(cls, keys, func, create_missing=False, callback=None):
         super(NamespacedStoredObject, cls).modify_many(
             [cls.format_key(x) for x in keys],
             func,
+            create_missing=create_missing,
             callback=callback)
 
 class AbstractHashGenerator(object):
@@ -768,7 +823,6 @@ class NeonApiKey(object):
     @classmethod
     def id_generator(cls, size=24, 
             chars=string.ascii_lowercase + string.digits):
-        random.seed(time.time())
         return ''.join(random.choice(chars) for x in range(size))
 
     @classmethod
@@ -877,7 +931,7 @@ class NeonUserAccount(object):
 
     '''
     def __init__(self, a_id, api_key=None, default_size=(160,90)):
-        self.account_id = a_id
+        self.account_id = a_id # Account id chosen when account is created
         self.neon_api_key = NeonApiKey.generate(a_id) if api_key is None \
                             else api_key
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
@@ -1081,66 +1135,103 @@ class ExperimentStrategy(NamespacedStoredObject):
         '''
         return ExperimentStrategy.__name__
 
+class CDNHostingMetadataList(NamespacedStoredObject):
+    '''A list of CDNHostingMetadata objects.
 
-class CDNHostingMetadata(object):
+    Keyed by integration_id (in the AbstractPlatform)
     '''
-    Class to format the information to be stored in the platform.cdn_metadata
-    member.
+    def __init__(self, integration_id, cdns=None):
+        super(CDNHostingMetadataList, self).__init__(integration_id)
+        self.cdns = cdns or []
 
-    Currently on S3 hosting to customer bucket is well defined
-    '''
-    def __init__(self, host_type, cdn_prefixes):
-        self.host_type = host_type
-        self.cdn_prefixes = cdn_prefixes
-    
-    def to_json(self):
-        ''' to json '''
-        return json.dumps(self, default=lambda o: o.__dict__) 
-    
-    def to_dict(self):
-        return self.__dict__
+    def __iter__(self):
+        '''Iterate through the cdns.'''
+        return [x for x in self.cdns if x is not None].__iter__()
 
     @classmethod
-    def save_metadata(cls, api_key, i_id, hosting_metadata):
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
         '''
-        Save the hosting directive in the platform account
+        return CDNHostingMetadataList.__name__
 
-        @hosting_directive - dict of the hosting metadata object
-        '''
-        if i_id == "0":
-            accnt = NeonPlatform.get_account(api_key)
-        else:
-            raise Exception("To be implemented")
-        # NOTE: Its safer to use a dict than double encoded json   
-        if isinstance(hosting_metadata, dict):
-            accnt.cdn_metadata = hosting_metadata
-            return accnt.save()
-        else:
-            raise Exception("hosting_directive should be a dictionary")
+
+class CDNHostingMetadata(NamespacedStoredObject):
+    '''
+    Specify how to host the the images with one CDN platform.
+
+    Currently on S3 hosting to customer bucket is well defined
+
+    These objects are not stored directly in the database.  They are
+    actually stored in CDNHostingMetadataLists. If you try to save
+    them directly, you will get a NotImplementedError because
+    _baseclass_name is not implemented.
+    ''' 
+    
+    def __init__(self, key=None, cdn_prefixes=None, resize=False, 
+                 update_serving_urls=False):
+        self.cdn_prefixes = cdn_prefixes # List of url prefixes
+        
+        # If true, the images should be resized into all the desired
+        # renditions.
+        self.resize = resize
+
+        # Should the images be added to ThumbnailServingURL object?
+        self.update_serving_urls = update_serving_urls
 
 class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
     If the images are to be uploaded to S3 bucket use this formatter  
 
     '''
-    def __init__(self, access_key, secret_key, bucket_name, cdn_prefixes,
-                    folder_prefix):
+    def __init__(self, key=None, access_key=None, secret_key=None, 
+                 bucket_name=None, cdn_prefixes=None, folder_prefix=None,
+                 resize=False, update_serving_urls=False, do_salt=True):
         '''
-        @cdn_prefixes : list : list of cdn prefixes that the customer uses
+        Create the object
         '''
-        self.access_key = access_key
-        self.secret_key = secret_key
-        self.bucket_name = bucket_name
-        self.folder_prefix = folder_prefix
-        CDNHostingMetadata.__init__(self, "s3", cdn_prefixes)
+        super(S3CDNHostingMetadata, self).__init__(
+            key, cdn_prefixes, resize, update_serving_urls)
+        self.access_key = access_key # S3 access key
+        self.secret_key = secret_key # S3 secret access key
+        self.bucket_name = bucket_name # S3 bucket to host in
+        self.folder_prefix = folder_prefix # Folder prefix to host in
+
+        # Add a random named directory between folder prefix and the 
+        # image name? Useful for performance when serving.
+        self.do_salt = do_salt 
+
+class NeonCDNHostingMetadata(S3CDNHostingMetadata):
+    '''
+    Hosting on S3 using the Neon keys.
+    
+    This default hosting just uses pure S3, no cloudfront.
+    '''
+    def __init__(self, key=None,
+                 bucket_name='neon-image-cdn',
+                 cdn_prefixes=None,
+                 folder_prefix='',
+                 resize=True,
+                 update_serving_urls=True,
+                 do_salt=True):
+        super(NeonCDNHostingMetadata, self).__init__(
+            key,
+            bucket_name=bucket_name,
+            cdn_prefixes=(cdn_prefixes or ['n3.neon-images.com']),
+            folder_prefix=folder_prefix,
+            resize=resize,
+            update_serving_urls=update_serving_urls,
+            do_salt=do_salt)
 
 class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     '''
     Cloudinary images
     '''
 
-    def __init__(self):
-        CDNHostingMetadata.__init__(self, "cloudinary", [])
+    def __init__(self, key=None):
+        super(CloudinaryCDNHostingMetadata, self).__init__(
+            key,
+            resize=False,
+            update_serving_urls=False)
 
 class AbstractPlatform(object):
     ''' Abstract Platform/ Integration class '''
@@ -1154,15 +1245,10 @@ class AbstractPlatform(object):
         self.integration_id = None # Unique platform ID to 
         self.enabled = enabled # Account enabled for auto processing of videos 
 
-        # Indicates whose CDN the images are hosted on
-        # None = Neon hosts the images on its CDN
-        # else contains a json of CDNHostingDirective
-        self.cdn_metadata = None   
-
         # Will thumbnails be served by our system?
         self.serving_enabled = serving_enabled
 
-        # How is the A/B testing done, default to imageplatform
+        # What controller is used to serve the image? Default to imageplatform
         self.serving_controller = serving_controller 
 
     def generate_key(self, i_id):
@@ -1323,25 +1409,6 @@ class NeonPlatform(AbstractPlatform):
         # populate the object dictionary
         for key in data_dict.keys():
             obj.__dict__[key] = data_dict[key]
-        
-        try:
-            # create the cdnhostingmetadata object
-            if obj.cdn_metadata is not None:
-                if isinstance(obj.cdn_metadata, dict):
-                    cdn_dict = obj.cdn_metadata
-                else:
-                    _log.error("The object changed externally for %s" %
-                            obj.neon_api_key)
-                    return None
-
-                cdn_obj = CDNHostingMetadata("", "")
-                for key in cdn_dict.keys():
-                    cdn_obj.__dict__[key] = cdn_dict[key]
-                obj.cdn_metadata = cdn_obj
-        except Exception, e:
-            #Catch any exception
-            _log.error("Error creating CDN Metadata Object %s" % e)
-            return
         return obj
     
     @classmethod
@@ -1970,7 +2037,7 @@ class NeonApiRequest(NamespacedStoredObject):
     '''
 
     def __init__(self, job_id, api_key=None, vid=None, title=None, url=None, 
-            request_type=None, http_callback=None):
+            request_type=None, http_callback=None, default_thumbnail=None):
         super(NeonApiRequest, self).__init__(
             self._generate_subkey(job_id, api_key))
         self.job_id = job_id
@@ -1981,8 +2048,9 @@ class NeonApiRequest(NamespacedStoredObject):
         self.request_type = request_type
         # The url to send the callback response
         self.callback_url = http_callback
-        self.state = "submit" # submit / processing / success / fail 
+        self.state = RequestState.SUBMIT 
         self.integration_type = "neon"
+        self.default_thumbnail = default_thumbnail # URL of a default thumb
 
         #Save the request response
         self.response = {}  
@@ -1990,7 +2058,7 @@ class NeonApiRequest(NamespacedStoredObject):
         #API Method
         self.api_method = None
         self.api_param  = None
-        self.publish_date = None
+        self.publish_date = None # Timestamp in ms
 
     @classmethod
     def _generate_subkey(cls, job_id, api_key):
@@ -2027,6 +2095,12 @@ class NeonApiRequest(NamespacedStoredObject):
                     '_data': copy.deepcopy(obj_dict)
                     }
             return super(NeonApiRequest, cls)._create(key, obj_dict)
+
+    def get_default_thumbnail_type(self):
+        '''Return the thumbnail type that should be used for a default 
+        thumbnail in the request.
+        '''
+        return ThumbnailType.DEFAULT
 
     def add_response(self, frames, timecodes=None, urls=None, error=None):
         ''' add response to the api request '''
@@ -2081,23 +2155,99 @@ class NeonApiRequest(NamespacedStoredObject):
             func,
             callback=callback)
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def save_default_thumbnail(self, cdn_metadata=None):
+        '''Save the default thumbnail by attaching it to a video.
+
+        The video metadata for this request must be in the database already.
+
+        Inputs:
+        cdn_metadata - If known, the metadata to save to the cdn.
+                       Otherwise it will be looked up.
+        '''
+        try:
+            thumb_url = self.default_thumbnail
+        except AttributeError:
+            thumb_url = None
+
+        if thumb_url is None:
+            # Fallback to the old previous_thumbnail
+            
+            # TODO(sunil): remove this once the video api server only
+            # handles default thumbnail.
+            try:
+                thumb_url = self.previous_thumbnail
+            except AttributeError:
+                thumb_url = None
+
+        if not thumb_url:
+            # No default thumb to upload
+            return
+
+        thumb_type = self.get_default_thumbnail_type()
+
+        # Check to see if there is already a thumbnail that the system
+        # knows about (and thus was already uploaded)
+        video = yield tornado.gen.Task(
+            VideoMetadata.get,
+            InternalVideoID.generate(self.api_key,
+                                     self.video_id))
+        if video is None:
+            msg = ('VideoMetadata for job %s is missing. '
+                   'Cannot add thumbnail' % self.job_id)
+            _log.error(msg)
+            raise DBStateError(msg)
+
+        known_thumbs = yield tornado.gen.Task(
+            ThumbnailMetadata.get_many,
+            video.thumbnail_ids)
+        min_rank = 1
+        for thumb in known_thumbs:
+            if thumb.type == thumb_type:
+                if thumb_url in thumb.urls:
+                    # The exact thumbnail is already there
+                    return
+            
+                if thumb.rank < min_rank:
+                    min_rank = thumb.rank
+        cur_rank = min_rank - 1
+
+        # Upload the new thumbnail
+        meta = ThumbnailMetadata(
+            None,
+            ttype=thumb_type,
+            rank=cur_rank)
+        yield video.download_and_add_thumbnail(meta,
+                                               thumb_url,
+                                               cdn_metadata,
+                                               save_objects=True,
+                                               async=True)
+
 class BrightcoveApiRequest(NeonApiRequest):
     '''
     Brightcove API Request class
     '''
     def __init__(self, job_id, api_key=None, vid=None, title=None, url=None,
                  rtoken=None, wtoken=None, pid=None, http_callback=None,
-                 i_id=None):
-        super(BrightcoveApiRequest,self).__init__(job_id, api_key, vid, title,
-                                                  url,
-                                                  request_type='brightcove',
-                                                  http_callback=http_callback)
+                 i_id=None, default_thumbnail=None):
+        super(BrightcoveApiRequest,self).__init__(
+            job_id, api_key, vid, title, url,
+            request_type='brightcove',
+            http_callback=http_callback,
+            default_thumbnail=default_thumbnail)
         self.read_token = rtoken
         self.write_token = wtoken
         self.publisher_id = pid
         self.integration_id = i_id 
-        self.previous_thumbnail = None
+        self.previous_thumbnail = None # TODO(Sunil): Remove this
         self.autosync = False
+     
+    def get_default_thumbnail_type(self):
+        '''Return the thumbnail type that should be used for a default 
+        thumbnail in the request.
+        '''
+        return ThumbnailType.BRIGHTCOVE
 
 class OoyalaApiRequest(NeonApiRequest):
     '''
@@ -2105,16 +2255,23 @@ class OoyalaApiRequest(NeonApiRequest):
     '''
     def __init__(self, job_id, api_key=None, i_id=None, vid=None, title=None,
                  url=None, oo_api_key=None, oo_secret_key=None, p_thumb=None,
-                 http_callback=None):
-        super(OoyalaApiRequest, self).__init__(job_id, api_key, vid, title,
-                                               url,
-                                               request_type='ooyala',
-                                               http_callback=http_callback)
+                 http_callback=None, default_thumbnail=None):
+        super(OoyalaApiRequest, self).__init__(
+            job_id, api_key, vid, title, url,
+            request_type='ooyala',
+            http_callback=http_callback,
+            default_thumbnail=default_thumbnail)
         self.oo_api_key = oo_api_key
         self.oo_secret_key = oo_secret_key
         self.integration_id = i_id 
-        self.previous_thumbnail = p_thumb 
+        self.previous_thumbnail = p_thumb # TODO(Sunil): Remove this
         self.autosync = False
+
+    def get_default_thumbnail_type(self):
+        '''Return the thumbnail type that should be used for a default 
+        thumbnail in the request.
+        '''
+        return ThumbnailType.OOYALA
 
 class YoutubeApiRequest(NeonApiRequest):
     '''
@@ -2122,16 +2279,23 @@ class YoutubeApiRequest(NeonApiRequest):
     '''
     def __init__(self, job_id, api_key=None, vid=None, title=None, url=None,
                  access_token=None, refresh_token=None, expiry=None,
-                 http_callback=None):
-        super(YoutubeApiRequest,self).__init__(job_id, api_key, vid, title,
-                                               url,
-                                               request_type='youtube',
-                                               http_callback=http_callback)
+                 http_callback=None, default_thumbnail=None):
+        super(YoutubeApiRequest,self).__init__(
+            job_id, api_key, vid, title, url,
+            request_type='youtube',
+            http_callback=http_callback,
+            default_thumbnail=default_thumbnail)
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.integration_type = "youtube"
-        self.previous_thumbnail = None
+        self.previous_thumbnail = None # TODO(Sunil): Remove this
         self.expiry = expiry
+
+    def get_default_thumbnail_type(self):
+        '''Return the thumbnail type that should be used for a default 
+        thumbnail in the request.
+        '''
+        return ThumbnailType.YOUTUBE
 
 ###############################################################################
 ## Thumbnail store T_URL => TID => Metadata
@@ -2305,11 +2469,12 @@ class ThumbnailMetadata(StoredObject):
                  width=None, height=None, ttype=None,
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None,
-                 serving_frac=None):
+                 serving_frac=None, frameno=None, filtered=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
-        self.urls = urls  # List of all urls associated with single image
-        self.created_time = created # Timestamp when thumbnail was created 
+        self.urls = urls or []  # List of all urls associated with single image
+        self.created_time = created or datetime.datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S")# Timestamp when thumbnail was created 
         self.enabled = enabled #boolen, indicates if this thumbnail can be displayed/ tested with 
         self.chosen = chosen #boolean, indicates this thumbnail is chosen by the user as the primary one
         self.width = width
@@ -2318,6 +2483,8 @@ class ThumbnailMetadata(StoredObject):
         self.rank = 0 if not rank else rank  #int 
         self.model_score = model_score #string
         self.model_version = model_version #string
+        self.frameno = frameno #int Frame Number
+        self.filtered = filtered # String describing how it was filtered
         #TODO: remove refid. It's not necessary
         self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
         self.phash = phash # Perceptual hash of the image. None if unknown
@@ -2348,9 +2515,86 @@ class ThumbnailMetadata(StoredObject):
         ''' to dict for video response object
             replace key to thumbnail_id 
         '''
-        new_dict = self.__dict__
+        new_dict = copy.copy(self.__dict__)
         new_dict["thumbnail_id"] = new_dict.pop("key")
-        return new_dict  
+        return new_dict
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def add_image_data(self, image, cdn_metadata=None):
+        '''Incorporates image data to the ThumbnailMetadata object.
+
+        Also uploads the image to the CDNs and S3.
+
+        Inputs:
+        image - A PIL image
+        cdn_metadata - A list CDNHostingMetadata objects for how to upload the
+                       images. If this is None, it is looked up, which is slow.
+        
+        '''        
+        image = PILImageUtils.convert_to_rgb(image)
+        
+        # Update the image metadata
+        self.width = image.size[0]
+        self.height = image.size[1]
+        self.update_phash(image)
+
+        # Convert the image to JPG
+        fmt = 'jpeg'
+        filestream = StringIO()
+        image.save(filestream, fmt, quality=90) 
+        filestream.seek(0)
+        imgdata = filestream.read()
+
+        self.key = ThumbnailID.generate(imgdata, self.video_id)
+
+        # Figure out the S3 location,
+        # which is <API_KEY>/<VIDEO_ID>/<THUMB_ID>.jpg
+        s3key = re.sub('_', '/', self.key) + '.jpg'
+        s3_url = 'https://%s.s3.amazonaws.com/%s' % \
+          (api.cdnhosting.get_s3_hosting_bucket(), s3key)
+        self.urls.insert(0, s3_url)
+
+        # Upload the image to s3
+        # TODO(Sunil): Merge the primary hosting copy into the 
+        # CDNHostingMetadataList
+        yield api.cdnhosting.upload_image_to_s3(
+            s3key, imgdata, async=True)
+
+        # Create a redirect with a video based url
+        yield api.cdnhosting.create_s3_redirect(
+            s3key, '{video_prefix}/{type}{rank:d}.jpg'.format(
+                video_prefix=re.sub('_', '/', self.video_id),
+                type=self.type,
+                rank=self.rank),
+            async=True)
+
+        # Send the image to cloudinary
+        # TODO(Sunil): Have this yield the functions directly instead
+        # of going through the run_async function once cdnhosting is
+        # written asynchronously.
+        # TODO(Sunil): Merge the cloudinary hosting into the 
+        # CDNHostingMetadataList
+        cloudinary_hoster = api.cdnhosting.CDNHosting.create(
+            CloudinaryCDNHostingMetadata())
+        yield utils.botoutils.run_async(cloudinary_hoster.upload, s3_url,
+                                        self.key)
+
+        # Host the image on the CDN
+        if cdn_metadata is None:
+            # Lookup the cdn metadata
+            video_info = yield tornado.gen.Task(VideoMetadata.get,
+                                                self.video_id)
+            
+            cdn_metadata = yield tornado.gen.Task(CDNHostingMetadataList.get,
+                                                  video_info.integration_id)
+            if cdn_metadata is None:
+                # Default to hosting on the Neon CDN if we don't know about it
+                cdn_metadata = [NeonCDNHostingMetadata()]
+            
+        hosters = [api.cdnhosting.CDNHosting.create(x) for x in cdn_metadata]
+        yield [x.upload(image, self.key, async=True) for x 
+               in hosters]
 
     @classmethod
     def _create(cls, key, data_dict):
@@ -2470,7 +2714,7 @@ class VideoMetadata(StoredObject):
                  experiment_value_remaining=None,
                  serving_enabled=True):
         super(VideoMetadata, self).__init__(video_id) 
-        self.thumbnail_ids = tids 
+        self.thumbnail_ids = tids or []
         self.url = video_url 
         self.duration = duration
         self.video_valence = vid_valence 
@@ -2516,7 +2760,8 @@ class VideoMetadata(StoredObject):
         def almost_equal(a, b, threshold=0.001):
             return abs(a -b) <= threshold
 
-        tmds = yield tornado.gen.Task(ThumbnailMetadata.get_many, self.thumbnail_ids)
+        tmds = yield tornado.gen.Task(ThumbnailMetadata.get_many,
+                                      self.thumbnail_ids)
         tid = None
 
         if self.experiment_state == ExperimentState.COMPLETE:
@@ -2553,123 +2798,84 @@ class VideoMetadata(StoredObject):
 
         raise tornado.gen.Return(tid)
 
-    def save_thumbnail_to_s3_and_store_metadata(
-            self, image, score, keyname,
-            s3fname, ttype, rank=0, model_version=0,
-            cdn_metadata=None, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def add_thumbnail(self, thumb, image, cdn_metadata=None,
+                      save_objects=False):
+        '''Add thumbnail to the video.
 
+        Saves the thumbnail object, and the video object if
+        save_object is true.
+
+        Inputs:
+        @thumb: ThumbnailMetadata object. Should be incomplete
+                because image based data will be added along with 
+                information about the video. The object will be updated with
+                the proper key and other information
+        @image: PIL Image
+        @cdn_metadata: A list of CDNHostingMetadata objects for how to upload
+                       the images. If this is None, it is looked up, which is 
+                       slow.
+        @save_objects: If true, the database is updated. Otherwise, 
+                       just this object is updated along with the thumbnail
+                       object.
         '''
-        Save a thumbnail to s3 and its metadata in the DB
-        @image: Image object
-        @score: model score of the image
-        @keyname: the basename or filename of the image
+        thumb.video_id = self.key
 
-        @s3fname: s3 URI
-        @ttype: Thumbnail type
-        @rank: rank (int) of the thumbnail
+        yield thumb.add_image_data(image, cdn_metadata, async=True)
 
-        @return thumbnail metadata object
-        '''
-        i_vid = self.key #internal video id
+        # TODO(mdesnoyer): Use a transaction to make sure the changes
+        # to the two objects are atomic. For now, put in the thumbnail
+        # data and then update the video metadata.
+        if save_objects:
+            sucess = yield tornado.gen.Task(thumb.save)
+            if not sucess:
+                raise IOError("Could not save thumbnail")
 
-        if image.mode == "RGBA":
-            # Composite the image to a white background
-            new_image = Image.new("RGB", image.size, (255,255,255))
-            new_image.paste(image, mask=image)
-            image = new_image
-        elif image.mode != "RGB":
-            image = image.convert("RGB")
+            updated_video = yield tornado.gen.Task(
+                VideoMetadata.modify,
+                self.key,
+                lambda x: x.thumbnail_ids.append(thumb.key))
+            if updated_video is None:
+                # It wasn't in the database, so save this object
+                self.thumbnail_ids.append(thumb.key)
+                sucess = yield tornado.gen.Task(self.save)
+                if not sucess:
+                    raise IOError("Could not save video data")
+            else:
+                self.__dict__ = updated_video.__dict__
+        else:
+            self.thumbnail_ids.append(thumb.key)
 
-        fmt = 'jpeg'
-        filestream = StringIO()
-        image.save(filestream, fmt, quality=90) 
-        filestream.seek(0)
-        imgdata = filestream.read()
-        
-        #upload to the host-thumbnail s3 bucket
-        upload_to_s3_host_thumbnails(keyname, imgdata) 
+        raise tornado.gen.Return(thumb)
 
-        urls = []
-        tid = ThumbnailID.generate(imgdata, i_vid)
-
-        #If tid already exists, then skip saving metadata
-        #if ThumbnailMetadata.get(tid) is not None:
-        #    _log.warn('Already have thumbnail id: %s' % tid)
-        #    return
-
-        urls.append(s3fname)
-        created = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        width   = image.size[0]
-        height  = image.size[1] 
-
-        #populate thumbnails
-        tdata = ThumbnailMetadata(tid, i_vid, urls, created, width, height,
-                                  ttype, score, model_version, rank=rank)
-        tdata.update_phash(image)
-
-        #Add tid to video thumbnail list
-        self.thumbnail_ids.append(tid)
-
-        #Host this image on the Neon Image CDN in diff sizes
-        hoster = CDNHosting.create(cdn_metadata)
-        hoster.upload(image, tid)
-        
-        #Host this image on Cloudinary for dynamic resizing
-        cloudinary_hoster = CDNHosting.create(CloudinaryCDNHostingMetadata())
-        cloudinary_hoster.upload(s3fname, tid)
-
-        return tdata
+    
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def download_and_add_thumbnail(self, image_url, keyname,
-                                    s3url, ttype, rank=1, cdn_metadata=None):
+    def download_and_add_thumbnail(self, thumb, image_url, cdn_metadata=None,
+                                   save_objects=False):
         '''
-        Download the image and save its metadata. Used to save thumbnail
-        of custom type or previous thumbnail given in the Neon API
+        Download the image and add it to this video metadata
 
-        Note: s3bucket to upload to and the filename(keyname) of the thumbnail
-        to be speicified to this function.
-
+        Inputs:
+        @thumb: ThumbnailMetadata object. Should be incomplete
+                because image based data will be added along with 
+                information about the video. The object will be updated with
+                the proper key and other information
+        @image_url: url of the image to download
+        @cdn_metadata: A list CDNHostingMetadata objects for how to upload the
+                       images. If this is None, it is looked up, which is slow.
+        @save_objects: If true, the database is updated. Otherwise, 
+                       just this object is updated along with the thumbnail
+                       object.
         '''
-        score = None # no score assigned currently to uploaded thumbnails
-        http_client = tornado.httpclient.HTTPClient()
-        req = tornado.httpclient.HTTPRequest(url=image_url,
-                                             method="GET",
-                                             request_timeout=60.0,
-                                             connect_timeout=10.0)
-
-        response = yield tornado.gen.Task(utils.http.send_request, req)
-        if not response.error:
-            imgdata = response.body
-            image = Image.open(StringIO(imgdata))
-            tdata = self.save_thumbnail_to_s3_and_store_metadata(image, score,
-                                                keyname, s3url, ttype, rank,
-                                                cdn_metadata=cdn_metadata)
-            tid_save = yield tornado.gen.Task(tdata.save)
-            if tid_save:
-                raise tornado.gen.Return(tdata)
-            else:
-                _log.error("failed to save thumbnail %s" % tdata.key)
-                raise tornado.gen.Return(False)
-
-        else:
-            _log.error("failed to download the image")
-        raise tornado.gen.Return(None)
-
-    def add_custom_thumbnail(self, image_url, callback=None):
-        '''
-        Add a custom thumbnail for the video
-        '''
-
-        fname = "custom%s.jpeg" % int(time.time())
-        keyname = "%s/%s/%s" % (self.get_account_id(), self.job_id, fname)  
-        s3url = "https://%s.s3.amazonaws.com/%s" % (options.thumbnailBucket, keyname) 
-        np = NeonPlatform.get_account(self.get_account_id())
-        cdn_metadata = np.cdn_metadata
-        ttype = ThumbnailType.CUSTOMUPLOAD
-        return self.download_and_add_thumbnail(image_url, keyname, s3url, ttype,
-                cdn_metadata=cdn_metadata)
+        image = yield utils.imageutils.PILImageUtils.download_image(image_url,
+                                                                    async=True)
+        thumb.urls.append(image_url)
+        thumb = yield self.add_thumbnail(thumb, image, cdn_metadata,
+                                         save_objects, async=True)
+        raise tornado.gen.Return(thumb)
 
     @classmethod
     def get_video_request(cls, internal_video_id, callback=None):
@@ -2706,43 +2912,40 @@ class VideoMetadata(StoredObject):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def get_serving_url(self, staging=False):
+    def get_serving_url(self, staging=False, save=True):
         '''
         Get the serving URL of the video. If self.serving_url is not
         set, fetch the neon publisher id (TAI) and save the video object 
         with the serving_url set
-        '''
-        def _update_serving_url(vobj):
-            vobj.serving_url = self.serving_url
 
-        random.seed(int(time.time()))
+        save_url - If true, the url is saved to the database
+        '''
         subdomain_index = random.randrange(1, 4)
         platform_vid = InternalVideoID.to_external(self.get_id())
         serving_format = "http://i%s.neon-images.com/v1/client/%s/neonvid_%s.jpg"
 
-        if self.serving_url:
-            if staging:
-                # replace with staging id
-                nu = yield tornado.gen.Task(
-                        NeonUserAccount.get_account, self.get_account_id())
-                s_id = nu.staging_tracker_account_id
-                serving_url = serving_format % (subdomain_index, s_id, platform_vid)
-                raise tornado.gen.Return(serving_url)
-
+        if self.serving_url and not staging:
+            # Return the saved serving_url
             raise tornado.gen.Return(self.serving_url)
-        else:
-            # Fill in the Serving URL
-            nu = yield tornado.gen.Task(
-                    NeonUserAccount.get_account, self.get_account_id())
-            pub_id = nu.tracker_account_id
-            if staging:
-                pub_id = nu.staging_tracker_account_id
-                serving_url = serving_format % (subdomain_index, pub_id, platform_vid)
-                raise tornado.gen.Return(serving_url)
 
-            self.serving_url = serving_format % (subdomain_index, pub_id, platform_vid)
-            res = yield tornado.gen.Task(VideoMetadata.modify, self.key, _update_serving_url)
-            raise tornado.gen.Return(self.serving_url)
+        nu = yield tornado.gen.Task(
+                NeonUserAccount.get_account, self.get_account_id())
+        pub_id = nu.staging_tracker_account_id if staging else \
+          nu.tracker_account_id
+        serving_url = serving_format % (subdomain_index, pub_id,
+                                                platform_vid)
+
+        if not staging:
+            # Keep information about the serving url around
+            self.serving_url = serving_url
+            
+            def _update_serving_url(vobj):
+                vobj.serving_url = self.serving_url
+            if save:
+                yield tornado.gen.Task(VideoMetadata.modify, self.key,
+                                       _update_serving_url)
+
+        raise tornado.gen.Return(serving_url)
 
 class InMemoryCache(object):
 
@@ -2809,7 +3012,7 @@ class VideoResponse(object):
     def __init__(self, vid, job_id, status, i_type, i_id, title, duration,
             pub_date, cur_tid, thumbs, abtest=True, winner_thumbnail=None,
             serving_url=None):
-        self.video_id = vid
+        self.video_id = vid # External video id
         self.job_id = job_id 
         self.status = status
         self.integration_type = i_type

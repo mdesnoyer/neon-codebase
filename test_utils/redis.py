@@ -48,6 +48,10 @@ class RedisServer:
     def start(self):
         ''' Start on a random port and set supportServices.neondata.dbPort '''
 
+        # Clear the singleton instance
+        # This is required so that we can use a new connection(port) 
+        neondata.DBConnection.clear_singleton_instance()
+
         self.config_file = tempfile.NamedTemporaryFile()
         self.config_file.write('port %i\n' % self.port)
         self.config_file.flush()
@@ -85,9 +89,11 @@ class RedisServer:
         options._set('supportServices.neondata.dbPort', self.old_port)
         still_running = utils.ps.send_signal_and_wait(signal.SIGTERM,
                                                       [self.proc.pid],
-                                                      timeout=10)
+                                                      timeout=8)
         if still_running:
-            self.proc.kill()
+            utils.ps.send_signal_and_wait(signal.SIGKILL,
+                                          [self.proc.pid],
+                                          timeout=10)
         
         self.proc.wait()
         _log.info('Redis server on port %i stopped' % self.port)
