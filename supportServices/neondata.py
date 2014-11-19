@@ -1283,12 +1283,7 @@ class AbstractPlatform(object):
         # Will thumbnails be served by our system?
         self.serving_enabled = serving_enabled
 
-<<<<<<< HEAD
-        # How is the A/B testing done, default to imageplatform
-        # current values (imageplatform, bc_controller)
-=======
         # What controller is used to serve the image? Default to imageplatform
->>>>>>> working
         self.serving_controller = serving_controller 
 
     def generate_key(self, i_id):
@@ -2987,40 +2982,7 @@ class VideoMetadata(StoredObject):
                 yield tornado.gen.Task(VideoMetadata.modify, self.key,
                                        _update_serving_url)
 
-<<<<<<< HEAD
-    '''
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def get_serving_url(self, staging=False):
-        subdomain_index = random.randrange(0, 4)
-        platform_vid = InternalVideoID.to_external(self.get_id()) 
-        serving_format = "http://i%s.neon-images.com/v1/client/%s/neonvid_%s"
-        
-        if self.serving_url:
-            if staging:
-                # replace with staging id
-                nu = yield tornado.gen.Task(
-                        NeonUserAccount.get_account, self.get_account_id) 
-                s_id = nu.staging_tracker_account_id
-                self.serving_url = serving_format % (subdomain_index, s_id, platform_vid)
-            return self.serving_url
-        else:
-            # Fill in the Serving URL
-            nu = yield tornado.gen.Task(
-                    NeonUserAccount.get_account, self.get_account_id)
-            pub_id = nu.tracker_account_id
-            if staging:
-                pub_id = nu.staging_tracker_account_id
-                self.serving_url = serving_format % (subdomain_index, pub_id, platform_vid)
-                return self.serving_url
-            
-            self.serving_url = serving_format % (subdomain_index, pub_id, platform_vid)
-            res = yield tornado.gen.Task(self.save)
-            return self.serving_url
-    '''
-=======
         raise tornado.gen.Return(serving_url)
->>>>>>> working
 
 class InMemoryCache(object):
 

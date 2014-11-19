@@ -1844,20 +1844,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         '''
 
         p_vid = neondata.InternalVideoID.to_external(i_vid)
-<<<<<<< HEAD
-        platform_account = yield tornado.gen.Task(self.get_platform_account, itype, i_id)
         
-        if not platform_account:
-            _log.error("key=upload_video_custom_thumbnail msg=%s account not found" % itype)
-            self.send_json_response('{"error":"%s account not found"}' % itype, 400)
-            return
-     
-        # TODO: should we handle multiple thumb uploads ?
-        t_url = thumbs[0]["urls"][0]
-=======
-
         # Get the video object
->>>>>>> working
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
         if not vmdata:
             _log.error("Could not find video: %s" % i_vid)
