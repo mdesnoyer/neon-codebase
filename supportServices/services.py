@@ -1844,7 +1844,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         # Get the CDN metadata
         cdn_metadata = yield tornado.gen.Task(
-            neondata.CDNHostingMetadataList.get, i_id)
+            neondata.CDNHostingMetadataList.get,
+            neondata.CDNHostingMetadataList.create_key(vmdata.get_account_id(),
+                                                       i_id))
         if not cdn_metadata:
             _log.warn("Could not find hosting information for platform %s" %
                       i_id)

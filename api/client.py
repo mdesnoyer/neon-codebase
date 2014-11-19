@@ -415,7 +415,9 @@ class VideoProcessor(object):
 
         # Get the CDN Metadata
         cdn_metadata = neondata.CDNHostingMetadataList.get(
-            self.video_metadata.integration_id)
+            neondata.CDNHostingMetadataList.create_key(
+                self.video_metadata.get_account_id(),
+                self.video_metadata.integration_id))
         if cdn_metadata is None:
             _log.warn_n('No cdn metadata for integration %s. '
                         'Defaulting to Neon CDN'
