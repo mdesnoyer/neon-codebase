@@ -277,8 +277,7 @@ class TestVideoServer(AsyncHTTPTestCase):
         
         # verify request saved in DB
         job_id = json.loads(resp.body)['job_id']
-        req = neondata.NeonApiRequest.get_request(self.api_key, job_id)
-        api_request = neondata.NeonApiRequest.create(req)
+        api_request = neondata.NeonApiRequest.get(job_id, self.api_key)
         self.assertEqual(api_request.video_id, "neonapivid123")
 
     def test_neon_api_request_invalid_id(self):
@@ -321,8 +320,7 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.assertEqual(resp.code, 201)
         
         job_id = json.loads(resp.body)['job_id']
-        req = neondata.NeonApiRequest.get_request(self.api_key, job_id)
-        api_request = neondata.NeonApiRequest.create(req)
+        api_request = neondata.NeonApiRequest.get(job_id, self.api_key)
         self.assertEqual(api_request.video_id, "testid123")
 
     def test_empty_request(self):

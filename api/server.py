@@ -109,7 +109,8 @@ class RequestData(object):
 
 class SimpleThreadSafeDictQ(object):
     '''
-    Threadsafe Q implementation using a dictionary
+    Threadsafe Q implementation using a double ended queue and
+    a dictionary to look up the object in the queue directly
     '''
     
     def __init__(self, QItemType=RequestData):
@@ -131,14 +132,17 @@ class SimpleThreadSafeDictQ(object):
         '''
         @item: Instance of what ever the QItemType is defined as 
         
-        Returns the KEY that can be used to access the Q element directly
+        Returns : KEY that can be used to access the Q element directly
+                : None if the Queue already has the request element   
         '''
         if not isinstance(item, self.QItemType):
             raise Exception("Expects an obj of QItemType, check init method")
-        
-        ret = self.q.append((key,item))
-        self.qdict[key] = item
-        return ret
+        try:
+            self.qdict[key]
+        except KeyError, e:
+            ret = self.q.append((key,item))
+            self.qdict[key] = item
+            return ret
 
     def peek(self, key):
         '''
@@ -433,7 +437,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
 
             # Validate Request & Insert in to Queue (serialized/json)
             job_result = yield tornado.gen.Task(neondata.NeonApiRequest.get,
-                                api_request.api_key, api_request.job_id)
+                                api_request.job_id, api_request.api_key)
 
             if job_result is not None:
                 response_data = '{"error":"duplicate job", "job_id": "%s" }'\
