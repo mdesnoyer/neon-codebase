@@ -1447,7 +1447,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         #s3mocks to mock host_thumbnails_to_s3
         conn = boto_mock.MockConnection()
         conn.create_bucket('host-thumbnails')
-        conn.create_bucket('neon-image-cdn')
+        conn.create_bucket('n3.neon-images.com')
         mock_conntype.return_value = conn
         
         #cloudinary mock
@@ -1528,7 +1528,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
             re.sub('_', '/', c_thumb.key) + '.jpg'))
         self.assertIsNotNone(conn.get_bucket('host-thumbnails').get_key(
             "%s/%s/customupload0.jpg" % (self.api_key, vid)))
-        self.assertIsNotNone(conn.get_bucket('neon-image-cdn').get_key(
+        self.assertIsNotNone(conn.get_bucket('n3.neon-images.com').get_key(
             serving_key))
 
         # RGBA image

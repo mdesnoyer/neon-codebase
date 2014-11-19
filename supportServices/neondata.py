@@ -1233,7 +1233,7 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     This default hosting just uses pure S3, no cloudfront.
     '''
     def __init__(self, key=None,
-                 bucket_name='neon-image-cdn',
+                 bucket_name='n3.neon-images.com',
                  cdn_prefixes=None,
                  folder_prefix='',
                  resize=True,
