@@ -677,6 +677,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         bc_request.save()
 
         bc_found = NeonApiRequest.get('bc_job', 'api_key')
+        self.assertEquals(bc_found.key, 'request_api_key_bc_job')
         self.assertEquals(bc_request, bc_found)
         self.assertIsInstance(bc_found, neondata.BrightcoveApiRequest)
 
@@ -712,6 +713,9 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertIsInstance(obj, neondata.BrightcoveApiRequest)
         self.assertEquals(obj.read_token,
                           'rgkAluxK9pAC26XCRusctnSfWwzrujq9cTRdmrNpWU4.')
+        self.assertEquals(
+            obj.get_id(),
+            'dhfaagb0z0h6n685ntysas00_e38ef7abba4c9102b26feb90bc5df3a8')
 
 
 

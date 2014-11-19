@@ -623,7 +623,7 @@ static void create_stats_formatter(int num_of_counters, char * format_string, in
     int e=0;
     for(e=0; e < num_of_counters; e++) {
         if(add_comma == 1) {
-            used = sprintf(ptr, "%s", ",\"\%s\": \%llu");
+            used = sprintf(ptr, "%s", ",\"\%s\": \%llu\n");
             ptr += used;
         }
         else {
