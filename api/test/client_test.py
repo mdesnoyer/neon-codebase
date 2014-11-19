@@ -315,7 +315,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.mock_conn = self.s3_patcher.start()
         self.mock_conn.return_value = self.s3conn
         self.s3conn.create_bucket('host-thumbnails')
-        self.s3conn.create_bucket('neon-image-cdn')
+        self.s3conn.create_bucket('n3.neon-images.com')
 
         # Mock out the SQS service
         self.sqs_mocker = patch(
@@ -447,7 +447,8 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             self.assertRegexpMatches(serving_url, s3httpRe)
             serving_key = s3httpRe.search(serving_url).group(1)
             self.assertIsNotNone(
-                self.s3conn.get_bucket('neon-image-cdn').get_key(serving_key))
+                self.s3conn.get_bucket('n3.neon-images.com').get_key(
+                    serving_key))
                                 
 
         # Check the response, both that it was added to the callback
@@ -798,7 +799,7 @@ class SmokeTest(test_utils.neontest.TestCase):
         self.mock_conn = self.s3_patcher.start()
         self.mock_conn.return_value = self.s3conn
         self.s3conn.create_bucket('host-thumbnails')
-        self.s3conn.create_bucket('neon-image-cdn')
+        self.s3conn.create_bucket('n3.neon-images.com')
 
         # Mock out the SQS service
         self.sqs_mocker = patch(

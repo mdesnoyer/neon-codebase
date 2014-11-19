@@ -1095,7 +1095,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_lookup_cdn_info(self):
         # Create the necessary buckets so that we can write to them
-        self.s3conn.create_bucket('neon-image-cdn')
+        self.s3conn.create_bucket('n3.neon-images.com')
         self.s3conn.create_bucket('customer-bucket')
         self.s3conn.create_bucket('host-thumbnails')
         
@@ -1132,7 +1132,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.assertIsNotNone(self.s3conn.get_bucket('customer-bucket').
                              get_key('neontn%s_w480_h360.jpg'%thumb_info.key))
         # Make sure that some different size is found on the Neon CDN
-        self.assertIsNotNone(self.s3conn.get_bucket('neon-image-cdn').
+        self.assertIsNotNone(self.s3conn.get_bucket('n3.neon-images.com').
                              get_key('neontn%s_w160_h120.jpg'%thumb_info.key))
 
         # Check the redirect object
