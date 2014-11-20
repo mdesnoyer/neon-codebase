@@ -1,0 +1,262 @@
+{
+  "type" : "record",
+  "name" : "TrackerEvent",
+  "namespace" : "com.neon.Tracker",
+  "fields" : [ {
+    "name" : "pageId",
+    "type" : "string"
+  }, {
+    "name" : "trackerAccountId",
+    "type" : "string"
+  }, {
+    "name" : "trackerType",
+    "type" : {
+      "type" : "enum",
+      "name" : "TrackerType",
+      "symbols" : [ "BRIGHTCOVE", "OOYALA", "BCGALLERY", "IGN" ]
+    }
+  }, {
+    "name" : "pageURL",
+    "type" : "string"
+  }, {
+    "name" : "refURL",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "serverTime",
+    "type" : "long"
+  }, {
+    "name" : "clientTime",
+    "type" : "long"
+  }, {
+    "name" : "clientIP",
+    "type" : "string"
+  }, {
+    "name" : "neonUserId",
+    "type" : "string",
+    "default" : ""
+  }, {
+    "name" : "userAgent",
+    "type" : [ "null", "string" ]
+  }, {
+    "name" : "agentInfo",
+    "type" : [ "null", {
+      "type" : "record",
+      "name" : "AgentInfo",
+      "fields" : [ {
+        "name" : "os",
+        "type" : [ "null", {
+          "type" : "record",
+          "name" : "NmVers",
+          "fields" : [ {
+            "name" : "name",
+            "type" : [ "null", "string" ]
+          }, {
+            "name" : "version",
+            "type" : [ "null", "string" ]
+          } ]
+        } ]
+      }, {
+        "name" : "browser",
+        "type" : [ "null", "NmVers" ]
+      } ]
+    } ]
+  }, {
+    "name" : "ipGeoData",
+    "type" : {
+      "type" : "record",
+      "name" : "GeoData",
+      "fields" : [ {
+        "name" : "country",
+        "type" : [ "null", "string" ]
+      }, {
+        "name" : "city",
+        "type" : [ "null", "string" ]
+      }, {
+        "name" : "region",
+        "type" : [ "null", "string" ]
+      }, {
+        "name" : "zip",
+        "type" : [ "null", "string" ]
+      }, {
+        "name" : "lat",
+        "type" : [ "null", "float" ]
+      }, {
+        "name" : "lon",
+        "type" : [ "null", "float" ]
+      } ]
+    }
+  }, {
+    "name" : "eventType",
+    "type" : {
+      "type" : "enum",
+      "name" : "EventType",
+      "symbols" : [ "IMAGE_VISIBLE", "IMAGES_VISIBLE", "IMAGE_LOAD", "IMAGES_LOADED", "IMAGE_CLICK", "VIDEO_CLICK", "VIDEO_PLAY", "AD_PLAY", "VIDEO_VIEW_PERCENTAGE" ]
+    }
+  }, {
+    "name" : "eventData",
+    "type" : [ {
+      "type" : "record",
+      "name" : "ImageVisible",
+      "fields" : [ {
+        "name" : "thumbnailId",
+        "type" : "string"
+      } ]
+    }, {
+      "type" : "record",
+      "name" : "ImagesVisible",
+      "fields" : [ {
+        "name" : "isImagesVisible",
+        "type" : "boolean",
+        "default" : true
+      }, {
+        "name" : "thumbnailIds",
+        "type" : {
+          "type" : "array",
+          "items" : "string"
+        }
+      } ]
+    }, {
+      "type" : "record",
+      "name" : "ImageLoad",
+      "fields" : [ {
+        "name" : "thumbnailId",
+        "type" : "string"
+      }, {
+        "name" : "height",
+        "type" : "int"
+      }, {
+        "name" : "width",
+        "type" : "int"
+      } ]
+    }, {
+      "type" : "record",
+      "name" : "ImagesLoaded",
+      "fields" : [ {
+        "name" : "isImagesLoaded",
+        "type" : "boolean",
+        "default" : true
+      }, {
+        "name" : "images",
+        "type" : {
+          "type" : "array",
+          "items" : "ImageLoad"
+        }
+      } ]
+    }, {
+      "type" : "record",
+      "name" : "ImageClick",
+      "fields" : [ {
+        "name" : "isImageClick",
+        "type" : "boolean",
+        "default" : true
+      }, {
+        "name" : "thumbnailId",
+        "type" : "string"
+      }, {
+        "name" : "pageCoords",
+        "type" : {
+          "type" : "record",
+          "name" : "Coords",
+          "fields" : [ {
+            "name" : "x",
+            "type" : "float"
+          }, {
+            "name" : "y",
+            "type" : "float"
+          } ]
+        }
+      }, {
+        "name" : "windowCoords",
+        "type" : "Coords"
+      }, {
+        "name" : "imageCoords",
+        "type" : [ "null", "Coords" ],
+        "default" : null
+      } ]
+    }, {
+      "type" : "record",
+      "name" : "VideoClick",
+      "fields" : [ {
+        "name" : "isVideoClick",
+        "type" : "boolean",
+        "default" : true
+      }, {
+        "name" : "videoId",
+        "type" : "string"
+      }, {
+        "name" : "playerId",
+        "type" : [ "null", "string" ]
+      }, {
+        "name" : "thumbnailId",
+        "type" : [ "null", "string" ]
+      } ]
+    }, {
+      "type" : "record",
+      "name" : "VideoPlay",
+      "fields" : [ {
+        "name" : "isVideoPlay",
+        "type" : "boolean",
+        "default" : true
+      }, {
+        "name" : "videoId",
+        "type" : "string"
+      }, {
+        "name" : "playerId",
+        "type" : [ "null", "string" ]
+      }, {
+        "name" : "thumbnailId",
+        "type" : [ "null", "string" ]
+      }, {
+        "name" : "didAdPlay",
+        "type" : "boolean",
+        "default" : false
+      }, {
+        "name" : "autoplayDelta",
+        "type" : [ "null", "int" ]
+      }, {
+        "name" : "playCount",
+        "type" : "int"
+      } ]
+    }, {
+      "type" : "record",
+      "name" : "AdPlay",
+      "fields" : [ {
+        "name" : "isAdPlay",
+        "type" : "boolean",
+        "default" : true
+      }, {
+        "name" : "videoId",
+        "type" : [ "null", "string" ]
+      }, {
+        "name" : "playerId",
+        "type" : [ "null", "string" ]
+      }, {
+        "name" : "thumbnailId",
+        "type" : [ "null", "string" ]
+      }, {
+        "name" : "autoplayDelta",
+        "type" : [ "null", "int" ]
+      }, {
+        "name" : "playCount",
+        "type" : "int"
+      } ]
+    }, {
+      "type" : "record",
+      "name" : "VideoViewPercentage",
+      "fields" : [ {
+        "name" : "isVideoViewPercentage",
+        "type" : "boolean",
+        "default" : true
+      }, {
+        "name" : "videoId",
+        "type" : "string"
+      }, {
+        "name" : "playCount",
+        "type" : "int"
+      }, {
+        "name" : "percent",
+        "type" : "float"
+      } ]
+    } ]
+  } ]
+}

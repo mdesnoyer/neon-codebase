@@ -1,0 +1,4 @@
+jdb -classpath  target/neon-hbase-serializer-1.0-jar-with-dependencies.jar     com.neon.flume.NeonSerializerTest
+
+jdb -sourcepath src/main/java/com/neon/flume   -classpath  target/neon-hbase-serializer-1.0-jar-with-dependencies.jar     com.neon.flume.NeonSerializerTest
+

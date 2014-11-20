@@ -1,0 +1,106 @@
+package com.neon.flume;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.io.ByteArrayOutputStream;
+import java.util.HashMap;
+import java.util.Map;
+import java.net.URL;
+
+import org.apache.avro.AvroRuntimeException;
+import org.apache.avro.Schema;
+import org.apache.avro.file.CodecFactory;
+import org.apache.avro.file.DataFileWriter;
+import org.apache.avro.generic.GenericDatumWriter;
+import org.apache.avro.io.DatumWriter;
+
+import org.apache.flume.Context;
+import org.apache.flume.Event;
+import org.apache.flume.FlumeException;
+import org.hbase.async.AtomicIncrementRequest;
+import org.hbase.async.PutRequest;
+import org.apache.flume.conf.ComponentConfiguration;
+import org.apache.flume.sink.hbase.SimpleHbaseEventSerializer.KeyType;
+import org.apache.flume.sink.hbase.AsyncHbaseEventSerializer;
+
+import org.apache.avro.Schema;
+import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.generic.GenericDatumWriter;
+import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.io.DatumReader;
+import org.apache.avro.io.Decoder;
+import org.apache.avro.io.DecoderFactory;
+import org.apache.avro.io.Encoder;
+import org.apache.avro.io.EncoderFactory;
+
+import org.apache.flume.Event;
+import org.apache.flume.EventDeliveryException;
+import org.apache.flume.api.RpcClient;
+import org.apache.flume.api.RpcClientFactory;
+import org.apache.flume.event.EventBuilder;
+
+
+class NeonSerializerTest {   
+    
+
+
+    public static void test() throws Exception { 
+
+        Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
+
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        Encoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
+        GenericDatumWriter writer = new GenericDatumWriter(schema);
+
+        GenericRecord trackerEvent = new GenericData.Record(schema);
+        trackerEvent.put("name", "TrackerEvent");
+        trackerEvent.put("namespace", "com.neon.Tracker");
+
+
+        writer.write(trackerEvent, encoder);
+        encoder.flush();
+
+        byte[] encodedByteArray = outputStream.toByteArray();
+
+        // make avro container headers
+        Map<String, String> headers = new HashMap<String, String>();
+        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
+
+
+        Event event = EventBuilder.withBody(encodedByteArray, headers);
+
+
+        NeonSerializer serializer = new NeonSerializer();
+
+        serializer.setEvent(event);
+
+
+    }
+
+    
+    public static void main(String[] args) {
+        System.out.println("Hello World!"); 
+
+
+        try {
+
+            test();
+
+        }
+        catch(Exception e) {
+
+        }
+    
+    }
+}
+
+
+
+
+
+
