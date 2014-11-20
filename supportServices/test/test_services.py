@@ -1640,7 +1640,8 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         response = self.get_request(url, self.api_key)
         self.assertEqual(response.code, 200)
         resp = json.loads(response.body)
-        self.assertListEqual(resp['videoids'], vids)
+        r_vids = resp['videoids']
+        self.assertListEqual(sorted(r_vids), sorted(vids))
 
 ##### OOYALA PLATFORM TEST ######
 

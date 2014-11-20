@@ -150,7 +150,8 @@ class TestFairWeightedQ(test_utils.neontest.AsyncTestCase):
 
         for i in range(n):
             item = self.fwq.get()
-            key = json.loads(item)["_data"]["key"]
+            item = json.loads(item)
+            key = item["_data"]["key"]
             req = neondata.NeonApiRequest._create(key, item)
             self.assertEqual(req.video_id, 'vid%s' % i)
 
@@ -347,13 +348,12 @@ class TestVideoServer(AsyncHTTPTestCase):
         
     def test_requeue_handler(self):
         ''' requeue handler '''
-        self.add_request()
-        vals = {"api_key": self.api_key, 
-                    "video_url": "http://testurl/video.mp4", 
-                    "video_id": "testid123", "topn":2, 
-                    "callback_url": "http://callback_push_url", 
-                    "video_title": "test_title"}
-        jdata = json.dumps(vals)
+        resp = self.add_request()
+        
+        # on requeue, we use the json neonapirequest to requeue
+        jid = json.loads(resp.body)["job_id"]
+        api_request = neondata.NeonApiRequest.get(jid, self.api_key)
+        jdata = api_request.to_json()
         self.http_client.fetch(self.get_url('/requeue'),
                 callback=self.stop, method="POST", body=jdata)
         resp = self.wait()

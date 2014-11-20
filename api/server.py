@@ -316,9 +316,12 @@ class RequeueHandler(tornado.web.RequestHandler):
         try:
             _log.info("key=requeue_handler msg=requeing ")
             data = self.request.body
-            key = json.loads(data)["_data"]["key"]
+            data = json.loads(data)
+            key = data["_data"]["key"]
             api_request = neondata.NeonApiRequest._create(key, data)
-            global_request_queue.put(api_request)
+            ret = global_request_queue.put(api_request)
+            if ret is None:
+                _log.warn("requed request %s is already in the Q" % key)
             statemon.state.server_queue = global_request_queue.qsize()
         except Exception, e:
             _log.error("key=requeue_handler msg=error %s" %e)

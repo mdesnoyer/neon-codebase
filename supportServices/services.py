@@ -1779,8 +1779,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             return
 
         vids = platform_account.get_videos()
-        vidlist = "".join(vids)
-        self.send_json_response('{"videoids":[%s]}' % vidlist, 200)
+        if not vids:
+            vids = []
+        data = json.dumps({ "videoids" : vids})
+        self.send_json_response(data, 200)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
