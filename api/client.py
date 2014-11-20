@@ -89,7 +89,7 @@ define('serving_url_format',
         default="http://i%s.neon-images.com/v1/client/%s/neonvid_%s", type=str)
 define('max_videos_per_proc', default=100,
        help='Maximum number of videos a process will handle before respawning')
-define('dequeue_period', default=10,
+define('dequeue_period', default=10.0,
        help='Number of seconds between dequeues on a worker')
 
 
@@ -661,7 +661,7 @@ class VideoClient(multiprocessing.Process):
         ''' Blocking http call to global queue to dequeue work
             Change state to PROCESSING after dequeue
         '''
-        
+        _log.info("Dequeuing job [%s] " % (self.pid))
         headers = {'X-Neon-Auth' : properties.NEON_AUTH} 
         result = None
         req = tornado.httpclient.HTTPRequest(
@@ -717,7 +717,6 @@ class VideoClient(multiprocessing.Process):
         
         # Register a function to die cleanly on a sigterm
         atexit.register(self.stop)
-        signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
         
         while (not self.kill_received.is_set() and 
                self.videos_processed < options.max_videos_per_proc):
@@ -756,23 +755,23 @@ class VideoClient(multiprocessing.Process):
     def stop(self):
         self.kill_received.set()
 
-__workers = []   
-__master_pid = None
-__shutting_down = False
+_workers = []   
+_master_pid = None
+_shutting_down = False
 @atexit.register
 def shutdown_master_process():
-    if os.getpid() != __master_pid:
+    if os.getpid() != _master_pid:
         return
     
     _log.info('Shutting down')
-    __shutting_down = True
+    _shutting_down = True
 
     # Cleanup the workers
-    for worker in worker_procs:
-        worker.kill()
+    for worker in _workers:
+        worker.stop()
 
     # Wait for the workers and force kill if they take too long
-    for worker in worker_procs:
+    for worker in _workers:
         worker.join(1800.0) # 30min timeout
         if worker.is_alive():
             print 'Worker is still going. Force kill it'
@@ -780,10 +779,10 @@ def shutdown_master_process():
             utils.ps.send_signal_and_wait(signal.SIGKILL, [worker.pid])
     
 
-def main():
+if __name__ == "__main__":
     utils.neon.InitNeon()
 
-    __master_pid = os.getpid()
+    _master_pid = os.getpid()
 
     # Register a function that will shutdown the workers
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
@@ -793,26 +792,22 @@ def main():
         max(multiprocessing.cpu_count() - 1, 1))
 
     # Manage the workers 
-    while not __shutting_down:
+    while not _shutting_down:
         # Remove all the workers that are stopped
-        workers = [x for x in workers if x.is_alive()]
+        _workers = [x for x in _workers if x.is_alive()]
 
-        statemon.state.running_workers = len(workers)
+        statemon.state.running_workers = len(_workers)
 
         # Create new workers until we get to n_workers
-        while len(workers) < max_workers:
+        while len(_workers) < max_workers:
             vc = VideoClient(options.model_file, cv_semaphore)
-            workers.append(vc)
+            _workers.append(vc)
             vc.start()
 
         
         # Check if memory has been exceeded & exit
         cur_mem_usage = psutil.virtual_memory()[2] # in %
         if cur_mem_usage > 85:
-            __shutting_down = True
+            _shutting_down = True
 
         time.sleep(10)
-    
-
-if __name__ == "__main__":
-    main()
