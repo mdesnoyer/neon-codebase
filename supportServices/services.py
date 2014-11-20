@@ -1251,62 +1251,12 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         if bc:
             bc.read_token = rtoken
             bc.write_token = wtoken
-                
-            #Auto publish all the previous thumbnails in the account
+               
+            # if auto publish is being turned on   
             if bc.auto_update == False and autosync == True:
-                #self.autopublish_brightcove_videos(bc)
-                bplatform_account = bc
-                vids = bplatform_account.get_videos()
-                
-                # No videos in the account
-                if not vids:
-                    return
-                
-                keys = [neondata.InternalVideoID.generate(
-                            self.api_key, vid) for vid in vids]
-                video_results = yield tornado.gen.Task(
-                        neondata.VideoMetadata.get_many, keys)
-                tids = []
-                video_thumb_mappings = {} #vid => [thumbnail metadata ...]
-                update_videos = {} #vid => neon_tid
-                #for all videos in account where status is not active
-                for vresult in video_results:
-                    if vresult:
-                        tids.extend(vresult.thumbnail_ids)
-                        video_thumb_mappings[vresult.get_id()] = []
-                    
-                    #Get all the thumbnail data for videos that are done
-                    thumbnails = yield tornado.gen.Task(
-                            neondata.ThumbnailMetadata.get_many, tids)
-                    for thumb in thumbnails:
-                        if thumb:
-                            vid = thumb.video_id
-                            #neondata.InternalVideoID.to_external(thumb.video_id)
-                            tdata = thumb.to_dict_for_video_response()
-                            video_thumb_mappings[vid].append(tdata)
-                
-                # Check if Neon thumbnail is set as the top rank neon thumbnail
-                for vid,thumbs in video_thumb_mappings.iteritems():
-                    update = True
-                    neon_tid = None
-                    for thumb in thumbs:
-                        if thumb["chosen"] == True and thumb["type"] == 'neon':
-                            update = False
-                        if thumb["type"] == 'neon' and thumb["rank"] == 1:
-                            neon_tid = thumb["thumbnail_id"]
-                    
-                    if update and neon_tid is not None:
-                        update_videos[vid] = neon_tid
-                
-                #update thumbnail for videos without a current neon thumbnail
-                for vid, new_tid in update_videos.iteritems():
-                    result = yield tornado.gen.Task(
-                            bplatform_account.update_thumbnail, vid, new_tid)
-                    if not result:
-                        p_vid = neondata.InternalVideoID.to_external(vid)
-                        _log.error("key=autopublish msg=update thumbnail" 
-                                " failed for api_key=%s vid=%s tid=%s" 
-                                %(self.api_key, p_vid, new_tid))
+                self.send_json_response(
+                    '{"error": "autopublish feature has been deprecated"}', 400)
+                return
 
             bc.auto_update = autosync
             res = yield tornado.gen.Task(bc.save)
@@ -1318,8 +1268,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 self.send_json_response(data, 500)
         else:
             _log.error("key=update_brightcove_integration " 
-                    "msg=no such account %s integration id %s" %(self.api_key, i_id))
-            data = '{"error": "Account doesnt exists"}'
+                    "msg=no such account %s integration id %s"\
+                    % (self.api_key, i_id))
+            data = '{"error": "account doesnt exists"}'
             self.send_json_response(data, 400)
    
     ##################################################################

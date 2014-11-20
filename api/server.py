@@ -316,7 +316,8 @@ class RequeueHandler(tornado.web.RequestHandler):
         try:
             _log.info("key=requeue_handler msg=requeing ")
             data = self.request.body
-            api_request = neondata.NeonApiRequest.create(data)
+            key = json.loads(data)["_data"]["key"]
+            api_request = neondata.NeonApiRequest._create(key, data)
             global_request_queue.put(api_request)
             statemon.state.server_queue = global_request_queue.qsize()
         except Exception, e:

@@ -150,7 +150,8 @@ class TestFairWeightedQ(test_utils.neontest.AsyncTestCase):
 
         for i in range(n):
             item = self.fwq.get()
-            req = neondata.NeonApiRequest.create(item)
+            key = json.loads(item)["_data"]["key"]
+            req = neondata.NeonApiRequest._create(key, item)
             self.assertEqual(req.video_id, 'vid%s' % i)
 
     def test_fairweightedness_queue(self):

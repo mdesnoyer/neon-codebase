@@ -603,43 +603,6 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertFalse(platform.auto_update)
         self.assertEqual(platform.write_token, self.wtoken)
 
-    @unittest.skip('TODO(sunil): explain why this is turned off')
-    def test_autopublish_brightcove_account(self):
-        with options._set_bounded('supportServices.neondata.dbPort',
-                                  self.redis.port):
-
-            #Setup Side effect for the http clients
-            self.cp_mock_client().fetch.side_effect = \
-              self._success_http_side_effect 
-            self.cp_mock_async_client().fetch.side_effect = \
-              self._success_http_side_effect
-
-            #create neon account first & create brightcove account
-            json_video_response = self.create_brightcove_account()
-            video_response = json.loads(json_video_response)['items']
-            self.assertEqual(len(video_response), 5)
-
-            #update brightcove account
-            new_rtoken = ("newrtoken")
-            update_response = self.update_brightcove_account(new_rtoken)
-            self.assertEqual(update_response.code, 200)
-        
-            #auto publish test
-            reqs = self._create_neon_api_requests()
-            self._process_brightcove_neon_api_requests(reqs)
-            self._check_video_status_brightcove(
-                vstatus=neondata.RequestState.FINISHED)
-        
-            update_response = self.update_brightcove_account(autoupdate=True)
-            self.assertEqual(update_response.code, 200)
-
-            #Check Neon rank 1 thumbnail is the new thumbnail for the videos
-            vitems = json.loads(bcove_responses.find_all_videos_response)
-            videos = []
-            for item in vitems['items']:
-                videos.append(str(item['id']))                              
-            self._check_neon_default_chosen(videos)
-
     def test_brightcove_web_account_flow(self):
         #Create Neon Account --> Bcove Integration --> update Integration --> 
         #query videos --> autopublish --> verify autopublish
