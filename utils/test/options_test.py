@@ -16,7 +16,9 @@ import concurrent.futures
 import fake_filesystem
 import mock
 from mock import patch
+import multiprocessing
 import os
+import signal
 from StringIO import StringIO
 import options_test_module as test_mod
 import time
@@ -62,6 +64,119 @@ class TestAsyncOptions(tornado.testing.AsyncTestCase):
         self.io_loop.add_callback(self.lookup_int_callback, 128, self.stop)
 
         self.wait()
+
+class OptionSubprocess(multiprocessing.Process):
+    '''Subprocess that takes a name out of the in_q and returns the
+    value of that options in parser from the out_q
+    '''
+    def __init__(self, parser):
+        super(OptionSubprocess, self).__init__()
+        self.parser = parser
+        self.in_q = multiprocessing.Queue()
+        self.out_q = multiprocessing.Queue()
+
+    def run(self):
+        while True:
+            name = self.in_q.get(True, 5.0)
+            if name is None:
+                # Time to shutdown
+                break
+            self.out_q.put_nowait(self.parser.__getattr__(name))
+
+    def stop(self):
+        self.in_q.put_nowait(None)
+
+class TestMultiProcesses(unittest.TestCase):
+        
+    def setUp(self):
+        self.parser = utils.options.OptionParser()
+        self.filesystem = fake_filesystem.FakeFilesystem()
+        self.open_func = sys.modules['__builtin__'].open
+        sys.modules['__builtin__'].open = \
+          fake_filesystem.FakeFileOpen(self.filesystem)
+        self.filesystem.CreateDirectory('/dev')
+        open('/dev/null', 'a').close()
+
+        self.subproc = OptionSubprocess(self.parser)
+        self.subproc.start()
+
+    def tearDown(self):
+        sys.modules['__builtin__'].open = self.open_func
+        self.subproc.stop()
+        if self.subproc.is_alive():
+            try:
+                os.kill(self.subproc.pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+    def _get_value_in_subprocess(self, variable):
+        self.subproc.in_q.put_nowait(variable)
+        return self.subproc.out_q.get(True, 5.0)
+
+    def test_different_types(self):
+        self.parser.define('an_int', default=6, type=int)
+        self.assertEquals(self._get_value_in_subprocess('an_int'), 6)
+
+        self.parser.define('a_float', default=6.9, type=float)
+        self.assertAlmostEquals(self._get_value_in_subprocess('a_float'), 6.9)
+
+        self.parser.define('a_string', default='Hi joe')
+        self.assertEquals(self._get_value_in_subprocess('a_string'), 'Hi joe')
+
+    def test_change_values(self):
+        self.parser.define('an_int', default=6, type=int)
+        self.assertEquals(self._get_value_in_subprocess('an_int'), 6)
+        self.parser._set('an_int', 9)
+        self.assertEquals(self._get_value_in_subprocess('an_int'), 9)
+
+    def test_changing_config_file(self):
+        '''Test when the config file changes. We want to update the options.'''
+        self.parser.define('a_float', default=6.5, type=float)
+        self.parser.define('an_int', default=3, type=int)
+        self.parser.define('a_string', default='cow')
+
+        config_file = self.filesystem.CreateFile(
+            'my_config.yaml', 
+            contents='a_float: 10.8\nan_int: 6')
+
+        with patch('utils.options.os.path.getmtime',
+                   return_value=int(time.time())) :
+            self.parser.parse_options(['--config', 'my_config.yaml',
+                                       '--an_int', '10'])
+        
+        self.assertAlmostEqual(self.parser.a_float, 10.8)
+        self.assertAlmostEqual(self._get_value_in_subprocess('a_float'), 10.8)
+        self.assertEqual(self.parser.an_int, 10)
+        self.assertEqual(self._get_value_in_subprocess('an_int'), 10)
+        self.assertEqual(self.parser.a_string, 'cow')
+        self.assertEqual(self._get_value_in_subprocess('a_string'), 'cow')
+
+        # Simulate a file change
+        config_file.SetContents('a_float: 20.9\nan_int: 1')
+
+        with patch('utils.options.os.path.getmtime',
+                   return_value=int(time.time() + 10)):
+            self.parser._process_new_config_file(path='my_config.yaml')
+
+        # the int shouldn't change because the command line has precendence
+        self.assertAlmostEqual(self.parser.a_float, 20.9)
+        self.assertAlmostEqual(self._get_value_in_subprocess('a_float'), 20.9)
+        self.assertEqual(self.parser.an_int, 10)
+        self.assertEqual(self._get_value_in_subprocess('an_int'), 10)
+        self.assertEqual(self.parser.a_string, 'cow')
+        self.assertEqual(self._get_value_in_subprocess('a_string'), 'cow') 
+
+    def test_bounded_value(self):
+        self.parser.define('an_int', default=3, type=int)
+        self.assertEquals(self.parser.an_int, 3)
+        self.assertEquals(self._get_value_in_subprocess('an_int'), 3)
+
+        with self.parser._set_bounded('an_int', 9):
+            self.assertEquals(self.parser.an_int, 9)
+            self.assertEquals(self._get_value_in_subprocess('an_int'), 9)
+
+        self.assertEquals(self.parser.an_int, 3)
+        self.assertEquals(self._get_value_in_subprocess('an_int'), 3)
         
 
 class TestCommandLineParsing(unittest.TestCase):
@@ -71,6 +186,8 @@ class TestCommandLineParsing(unittest.TestCase):
         self.open_func = sys.modules['__builtin__'].open
         sys.modules['__builtin__'].open = \
           fake_filesystem.FakeFileOpen(self.filesystem)
+        self.filesystem.CreateDirectory('/dev')
+        open('/dev/null', 'a').close()
 
     def tearDown(self):
         sys.modules['__builtin__'].open = self.open_func
