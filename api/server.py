@@ -29,10 +29,10 @@ from utils import statemon
 #Tornado options
 from utils.options import define, options
 define("port", default=8081, help="run on the given port", type=int)
-MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
+define("test_key", default=:"3qswu22oabmnl8d8hqcuku14", help="test api key",
+        type=str)
 
 _log = logging.getLogger(__name__)
-
 DIRNAME = os.path.dirname(__file__)
 
 # Monitoring variables
@@ -43,18 +43,13 @@ statemon.define('queue_size_bytes', int) # size of the queue in bytes of video
 
 
 # Constants
-THUMBNAIL_RATE = "rate"
 TOP_THUMBNAILS = "topn"
-THUMBNAIL_SIZE = "size"
-ABTEST_THUMBNAILS = "abtest"
-THUMBNAIL_INTERVAL = "interval"
 CALLBACK_URL = "callback_url"
 VIDEO_ID = "video_id"
 VIDEO_DOWNLOAD_URL = "video_url"
 VIDEO_TITLE = "video_title"
 BCOVE_READ_TOKEN = "read_token"
 BCOVE_WRITE_TOKEN = "write_token"
-REQUEST_UUID_KEY = "job_id"
 API_KEY = "api_key"
 JOB_SUBMIT_TIME = "submit_time"
 MAX_THUMBNAILS = 25
@@ -62,6 +57,7 @@ NEON_AUTH = "secret_key"
 PUBLISHER_ID = "publisher_id"
 PREV_THUMBNAIL = "previous_thumbnail"
 INTEGRATION_ID = "integration_id"
+
 customer_priorities = {} 
 
 @utils.sync.optional_sync
@@ -273,7 +269,8 @@ class FairWeightedRequestQueue(object):
         pass
 
 def _verify_neon_auth(value):
-    #TODO: Implement the authentication token logic
+    # TODO: Implement the authentication token logic
+    # Probably not required since all dequeue requests are from within the VPC
     return True
 
 
@@ -322,6 +319,9 @@ class RequeueHandler(tornado.web.RequestHandler):
             ret = global_request_queue.put(api_request)
             if ret is None:
                 _log.warn("requed request %s is already in the Q" % key)
+                self.set_status(409)
+                self.write('{"error": "requeust already in the Q"}')
+                
             statemon.state.server_queue = global_request_queue.qsize()
         except Exception, e:
             _log.error("key=requeue_handler msg=error %s" %e)
@@ -336,9 +336,6 @@ class RequeueHandler(tornado.web.RequestHandler):
 class GetThumbnailsHandler(tornado.web.RequestHandler):
     ''' Thumbnail API handler '''
 
-    test_mode = False
-    parsed_params = {}
-    
     @tornado.web.asynchronous
     def send_json_response(self, data, status=200):
        
@@ -510,11 +507,31 @@ class TestCallback(tornado.web.RequestHandler):
         
         try:
             _log.info("key=testcallback msg=output: " + self.request.body)
-        except Exception,e:
+        except Exception, e:
             raise tornado.web.HTTPError(500)  
             _log.error("key=testcallback msg=error recieving message")
         
         self.finish()
+
+class HealthCheckHandler(tornado.web.RequestHandler):
+    ''' Health check for the Server'''
+    @tornado.web.asynchronous
+    @tornado.gen.engine
+    def get(self, *args, **kwargs):
+        test_account_key = options.test_key
+        
+        # Try to query the video Q
+        size = global_request_queue.qsize()
+        
+        # Ping the DB to see if its running
+        ret = yield tornado.gen.Task(neondata.NeonUserAccount.get,
+                test_account_key)
+        if ret:
+            self.set_status(200)
+            self.finish()
+        else:
+            self.set_status(500)
+            self.finish()
 
 ###########################################
 # Create Tornado server application
@@ -522,10 +539,11 @@ class TestCallback(tornado.web.RequestHandler):
 
 application = tornado.web.Application([
     (r'/api/v1/submitvideo/(.*)', GetThumbnailsHandler),
-    (r"/stats",StatsHandler),
-    (r"/dequeue",DequeueHandler),
-    (r"/requeue",RequeueHandler),
-    (r"/testcallback",TestCallback)
+    (r"/stats", StatsHandler),
+    (r"/dequeue", DequeueHandler),
+    (r"/requeue", RequeueHandler),
+    (r"/testcallback", TestCallback)
+    (r"/healthcheck", HealthCheckHandler)
 ])
 
 def main():

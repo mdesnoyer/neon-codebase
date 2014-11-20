@@ -357,6 +357,16 @@ class TestVideoServer(AsyncHTTPTestCase):
         self.http_client.fetch(self.get_url('/requeue'),
                 callback=self.stop, method="POST", body=jdata)
         resp = self.wait()
+        self.assertEqual(resp.code, 409)
+
+        # Dequeue and then Requeue
+        self.http_client.fetch(self.get_url('/dequeue'), 
+                callback=self.stop, method="GET", 
+                headers={'X-Neon-Auth' : NEON_AUTH})
+        resp = self.wait()
+        self.http_client.fetch(self.get_url('/requeue'),
+                callback=self.stop, method="POST", body=jdata)
+        resp = self.wait()
         self.assertEqual(resp.code, 200)
 
     def test_request_without_callback_url(self):
