@@ -20,10 +20,10 @@ add_subdirectory(imageservingplatform/neon_isp)
 include(ExternalProject)
 externalproject_add(Nginx
     PREFIX ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/Nginx
-    SOURCE_DIR ${PROJECT_SOURCE_DIR}/imageservingplatform/nginx-1.6.2/
+    SOURCE_DIR ${PROJECT_SOURCE_DIR}/imageservingplatform/nginx-1.4.7/
     UPDATE_COMMAND ""  # Stop it from updating because we want a static repo
     CONFIGURE_COMMAND
-    ${PROJECT_SOURCE_DIR}/imageservingplatform/nginx-1.6.2/configure
+    ${PROJECT_SOURCE_DIR}/imageservingplatform/nginx-1.4.7/configure
     --add-module=../neon_isp/ --with-http_realip_module
     --prefix=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     BUILD_COMMAND make
