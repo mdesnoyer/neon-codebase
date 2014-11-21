@@ -67,8 +67,7 @@ class TestDownloadImage(test_utils.neontest.AsyncTestCase):
         super(TestDownloadImage, self).setUp()
         self.image = imageutils.PILImageUtils.create_random_image(360, 480)
 
-        self.get_img_patcher = \
-          patch('utils.http.send_request')
+        self.get_img_patcher = patch('utils.http.send_request')
         self.get_img_mock = self.get_img_patcher.start()
         self.get_img_mock.side_effect = self._returnValidImage
 
@@ -99,16 +98,17 @@ class TestDownloadImage(test_utils.neontest.AsyncTestCase):
                     200,
                     error = tornado.httpclient.HTTPError(404))))
 
-        with self.assertRaises(tornado.httpclient.HTTPError):
-            with self.assertLogExists(logging.ERROR, 'Error retrieving image'):
+        with self.assertLogExists(logging.ERROR, 'Error retrieving image'):
+            with self.assertRaises(tornado.httpclient.HTTPError):
                 imageutils.PILImageUtils.download_image('url')
 
     @patch('utils.imageutils.Image')
     def test_image_ioerror(self, pil_mock):
         pil_mock.open.side_effect = [IOError()]
 
-        with self.assertRaises(IOError):
-            with self.assertLogExists(logging.ERROR, 'Invalid image at url'):
+        
+        with self.assertLogExists(logging.ERROR, 'Invalid image at url'):
+            with self.assertRaises(IOError):
                 imageutils.PILImageUtils.download_image('url')
 
     
@@ -116,16 +116,16 @@ class TestDownloadImage(test_utils.neontest.AsyncTestCase):
     def test_image_valueerror(self, pil_mock):
         pil_mock.open.side_effect = [ValueError()]
 
-        with self.assertRaises(ValueError):
-            with self.assertLogExists(logging.ERROR, 'Invalid image at url'):
+        with self.assertLogExists(logging.ERROR, 'Invalid image at url'):
+            with self.assertRaises(IOError):
                 imageutils.PILImageUtils.download_image('url')
 
     @patch('utils.imageutils.Image')
     def test_image_typeerror(self, pil_mock):
         pil_mock.open.side_effect = [TypeError()]
 
-        with self.assertRaises(TypeError):
-            with self.assertLogExists(logging.ERROR, 'Invalid image at url'):
+        with self.assertLogExists(logging.ERROR, 'Invalid image at url'):
+            with self.assertRaises(IOError):
                 imageutils.PILImageUtils.download_image('url')
                 
 if __name__ == '__main__':
