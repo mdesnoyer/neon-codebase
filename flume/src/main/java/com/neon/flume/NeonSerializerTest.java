@@ -1,5 +1,8 @@
 package com.neon.flume;
 
+
+import java.util.ArrayList;
+import java.util.List;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -16,6 +19,7 @@ import org.apache.avro.Schema;
 import org.apache.avro.file.CodecFactory;
 import org.apache.avro.file.DataFileWriter;
 import org.apache.avro.generic.GenericDatumWriter;
+import org.apache.avro.specific.SpecificDatumWriter;
 import org.apache.avro.io.DatumWriter;
 
 import org.apache.flume.Context;
@@ -49,37 +53,79 @@ class NeonSerializerTest {
     
 
 
-    public static void test() throws Exception { 
+    public static void fillWithDummies(TrackerEvent event) {
 
-        Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
+        event.setPageId("pageId_dummy");
+        event.setTrackerAccountId("trackerAccountId_dummy");
+        event.setTrackerType(com.neon.flume.TrackerType.IGN);
+        event.setPageURL ("pageUrl_dummy");
+        event.setRefURL ("refUrl_dummy");
+        event.setServerTime (new java.lang.Long(1000));
+        event.setClientTime (new java.lang.Long(1000) );
+        event.setClientIP("clientIp_dummy");
+        event.setNeonUserId ("neonUserId_dummy");
+        event.setUserAgent("userAgent_dummy");
+        event.setAgentInfo(new com.neon.flume.AgentInfo());
+        event.setIpGeoData(new com.neon.flume.GeoData()); 
+    }
+
+
+    public static void test_ImageVisible() throws Exception { 
+
+        //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
 
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        Encoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
-        GenericDatumWriter writer = new GenericDatumWriter(schema);
-
+        //Encoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
+        //GenericDatumWriter writer = new GenericDatumWriter(schema);
+        DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
+        DataFileWriter<TrackerEvent> streamWriter = new DataFileWriter<TrackerEvent>(writer);
+        
+        
+        /*
         GenericRecord trackerEvent = new GenericData.Record(schema);
         trackerEvent.put("name", "TrackerEvent");
         trackerEvent.put("namespace", "com.neon.Tracker");
+    */
+        TrackerEvent trackerEvent = new TrackerEvent(); 
+        fillWithDummies(trackerEvent);
 
+        ImageVisible i = new ImageVisible();
+        i.setThumbnailId("t1");
+        trackerEvent.setEventType(com.neon.flume.EventType.IMAGE_VISIBLE);
+        trackerEvent.setEventData(i);
 
-        writer.write(trackerEvent, encoder);
-        encoder.flush();
+        System.out.println(trackerEvent);
 
-        byte[] encodedByteArray = outputStream.toByteArray();
+        //writer.write(trackerEvent, encoder);
+        //encoder.flush();
+
+        streamWriter.create(trackerEvent.getSchema(), outputStream);
+        streamWriter.append(trackerEvent);
+        streamWriter.close();
+        byte[] encodedEvent = outputStream.toByteArray();
 
         // make avro container headers
         Map<String, String> headers = new HashMap<String, String>();
         headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
+        headers.put("timestamp", "2014-11-05T13:15:30Z");
 
-
-        Event event = EventBuilder.withBody(encodedByteArray, headers);
-
-
+        Event event = EventBuilder.withBody(encodedEvent, headers);
         NeonSerializer serializer = new NeonSerializer();
 
+        /*
+         *  Test 
+         */
         serializer.setEvent(event);
 
+        /*
+         * Test
+         */
+        List<PutRequest> puts = serializer.getActions();
 
+        /*
+         * Test
+         */
+        List<AtomicIncrementRequest> incs =serializer.getIncrements();
     }
 
     
@@ -89,11 +135,11 @@ class NeonSerializerTest {
 
         try {
 
-            test();
+            test_ImageVisible();
 
         }
         catch(Exception e) {
-
+            System.out.println("exception!!!!!!");
         }
     
     }
