@@ -48,11 +48,10 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     private byte[][] columnNames;
     private final List<PutRequest> actions = new ArrayList<PutRequest>();
     private final List<AtomicIncrementRequest> increments = new ArrayList<AtomicIncrementRequest>();
-    private byte[] currentRowKey;
-    private final byte[] eventCountCol = "eventCount".getBytes();
 
-    private final String timestampColumnName = new String("timestamp");
-    private final String counterColumnName = new String("counter");
+
+    byte imageVisibleColumnName[] = "IMAGE_VISIBLE".getBytes();
+    byte hourlyTimestampColumnName[] = "HOURLY_TIMESTAMP".getBytes();
 
     // event data 
     private TrackerEvent trackerEvent;
@@ -66,6 +65,7 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
         this.colFam = cf;
         trackerEvent = null;
         trackerEventTimestamp = null;
+        rowKey = null;
     }
  
     @Override
@@ -137,8 +137,8 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
 
         rowKey = img.getThumbnailId().toString();
         
-        // timestamps colum 
-        PutRequest req = new PutRequest(table, rowKey.getBytes(), colFam, columnNames[0], trackerEventTimestamp.getBytes());
+        // create a row  
+        PutRequest req = new PutRequest(table, rowKey.getBytes(), colFam, hourlyTimestampColumnName, trackerEventTimestamp.getBytes());
         actions.add(req);
     }
 
@@ -152,7 +152,16 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
         increments.clear();
         
         //Increment the number of events by one implicitly
-        increments.add(new AtomicIncrementRequest(table, rowKey.getBytes(), colFam, columnNames[1]));
+        switch(trackerEvent.getEventType())  {
+                     
+            case IMAGE_VISIBLE: 
+                increments.add(new AtomicIncrementRequest(table, rowKey.getBytes(), colFam, imageVisibleColumnName));
+                break;
+        
+            default:
+                return null;
+        }
+        
         return null;
     }
 

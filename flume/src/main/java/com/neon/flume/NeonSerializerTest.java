@@ -80,12 +80,10 @@ class NeonSerializerTest {
         DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
         DataFileWriter<TrackerEvent> streamWriter = new DataFileWriter<TrackerEvent>(writer);
         
+        //GenericRecord trackerEvent = new GenericData.Record(schema);
+        //trackerEvent.put("name", "TrackerEvent");
+        //trackerEvent.put("namespace", "com.neon.Tracker");
         
-        /*
-        GenericRecord trackerEvent = new GenericData.Record(schema);
-        trackerEvent.put("name", "TrackerEvent");
-        trackerEvent.put("namespace", "com.neon.Tracker");
-    */
         TrackerEvent trackerEvent = new TrackerEvent(); 
         fillWithDummies(trackerEvent);
 
@@ -107,7 +105,8 @@ class NeonSerializerTest {
         // make avro container headers
         Map<String, String> headers = new HashMap<String, String>();
         headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
-        headers.put("timestamp", "2014-11-05T13:15:30Z");
+        //headers.put("timestamp", "2014-11-05T13:15:30Z");
+        headers.put("timestamp", "1416612478");
 
         Event event = EventBuilder.withBody(encodedEvent, headers);
         NeonSerializer serializer = new NeonSerializer();
