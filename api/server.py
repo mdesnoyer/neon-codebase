@@ -7,6 +7,7 @@ if sys.path[0] <> base_path:
 
 from collections import deque
 import hashlib
+import json
 import logging
 import multiprocessing
 import os
@@ -29,7 +30,7 @@ from utils import statemon
 #Tornado options
 from utils.options import define, options
 define("port", default=8081, help="run on the given port", type=int)
-define("test_key", default=:"3qswu22oabmnl8d8hqcuku14", help="test api key",
+define("test_key", default="3qswu22oabmnl8d8hqcuku14", help="test api key",
         type=str)
 
 _log = logging.getLogger(__name__)
@@ -64,14 +65,17 @@ customer_priorities = {}
 @tornado.gen.coroutine
 def get_customer_priority(api_key):
     #TODO(Sunil): refresh contents every "x" mins
-    priority = 1
+    priority = 1 # by default return priority=1
     try:
         priority = customer_priorities[api_key]
     except KeyError, e:
         nu = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
                 api_key)
-        priority = nu.processing_priority
-        customer_priorities[api_key] = priority
+        if nu:
+            priority = nu.processing_priority
+            customer_priorities[api_key] = priority
+        else:
+            _log.error("Failed to fetch NeonUserAccount %s" % api_key)
 
     raise tornado.gen.Return(priority)
 

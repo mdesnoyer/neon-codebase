@@ -345,11 +345,20 @@ class TestVideoServer(AsyncHTTPTestCase):
             self.assertEqual(resp.code, 200)
         
         self.assertEqual(resp.body,'{}')
-        
+       
     def test_requeue_handler(self):
+        req = neondata.NeonApiRequest('job21', self.api_key,
+                    'vid1', 't', 't', 'r', 'h')
+        jdata = req.to_json()
+        self.http_client.fetch(self.get_url('/requeue'),
+                callback=self.stop, method="POST", body=jdata)
+        resp = self.wait()
+        self.assertEqual(resp.code, 200)
+
+    def test_requeue_handler_duplicate(self):
         ''' requeue handler '''
         resp = self.add_request()
-        
+
         # on requeue, we use the json neonapirequest to requeue
         jid = json.loads(resp.body)["job_id"]
         api_request = neondata.NeonApiRequest.get(jid, self.api_key)
@@ -358,16 +367,6 @@ class TestVideoServer(AsyncHTTPTestCase):
                 callback=self.stop, method="POST", body=jdata)
         resp = self.wait()
         self.assertEqual(resp.code, 409)
-
-        # Dequeue and then Requeue
-        self.http_client.fetch(self.get_url('/dequeue'), 
-                callback=self.stop, method="GET", 
-                headers={'X-Neon-Auth' : NEON_AUTH})
-        resp = self.wait()
-        self.http_client.fetch(self.get_url('/requeue'),
-                callback=self.stop, method="POST", body=jdata)
-        resp = self.wait()
-        self.assertEqual(resp.code, 200)
 
     def test_request_without_callback_url(self):
         vals = {"api_key": self.api_key, 
