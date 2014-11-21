@@ -34,8 +34,8 @@ fi
 
 cd ${CURDIR}
 
-# Get the list of directories/modules to cover
-COVER_DIRS=( `ls -d */ -1 | sed 's/\///g' | grep -v 'externalLibs' | grep -v 'lib' | grep -v 'bin'` )
-
-nosetests --with-coverage --with-xunit ${COVER_DIRS[@]/#/--cover-package } --cover-erase --exe --cover-xml || true
+coverage erase
+nosetests --exe --with-xunit --with-cov --cov-config .coveragerc || true
+coverage combine
+coverage xml
 pylint --rcfile .pylintrc -f parseable ${COVER_DIRS[*]} > pylint.out

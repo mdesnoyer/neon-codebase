@@ -441,9 +441,9 @@ class Mastermind(object):
             # A default thumbnail that comes from a partner source or
             # is explicitly set in the API
             if thumb.type not in [neondata.ThumbnailType.NEON,
-                                           neondata.ThumbnailType.CENTERFRAME,
-                                           neondata.ThumbnailType.RANDOM,
-                                           neondata.ThumbnailType.FILTERED]:
+                                  neondata.ThumbnailType.CENTERFRAME,
+                                  neondata.ThumbnailType.RANDOM,
+                                  neondata.ThumbnailType.FILTERED]:
                 if (default is None or 
                     default.type == neondata.ThumbnailType.DEFAULT 
                     or thumb.rank < default.rank):

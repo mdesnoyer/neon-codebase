@@ -69,7 +69,9 @@ class MockKey(object):
         self.content_encoding = None
         self.content_language = None
         self.content_type = None
+        self.policy = None
         self.last_modified = 'Wed, 06 Oct 2010 05:11:54 GMT'
+        self.redirect_destination = None
         self.BufferSize = 8192
 
     def __repr__(self):
@@ -107,6 +109,9 @@ class MockKey(object):
         if find_matching_headers('Content-Language', headers):
             self.content_language = merge_headers_by_name('Content-Language',
                                                           headers)
+        if find_matching_headers('x-amz-website-redirect-location', headers):
+            self.redirect_destination = merge_headers_by_name(
+                'x-amz-website-redirect-location', headers)
 
     # Simplistic partial implementation for headers: Just supports range GETs
     # of flavor 'Range: bytes=xyz-'.
@@ -137,17 +142,20 @@ class MockKey(object):
 
     def set_contents_from_file(self, fp, headers=None, replace=NOT_IMPL,
                                cb=NOT_IMPL, num_cb=NOT_IMPL,
-                               policy=NOT_IMPL, md5=NOT_IMPL,
+                               policy='bucket-owner-full-control',
+                               md5=NOT_IMPL,
                                res_upload_handler=NOT_IMPL,
                                encrypt_key=NOT_IMPL):
         self.data = fp.read()
         self.set_etag()
         self.size = len(self.data)
+        self.policy = policy
         self._handle_headers(headers)
         return self.size
 
     def set_contents_from_stream(self, fp, headers=None, replace=NOT_IMPL,
-                               cb=NOT_IMPL, num_cb=NOT_IMPL, policy=NOT_IMPL,
+                               cb=NOT_IMPL, num_cb=NOT_IMPL,
+                               policy='bucket-owner-full-control',
                                reduced_redundancy=NOT_IMPL, query_args=NOT_IMPL,
                                size=NOT_IMPL, encrypt_key=NOT_IMPL):
         self.data = ''
@@ -157,21 +165,25 @@ class MockKey(object):
           chunk = fp.read(self.BufferSize)
         self.set_etag()
         self.size = len(self.data)
+        self.policy = policy
         self._handle_headers(headers)
 
     def set_contents_from_string(self, s, headers=NOT_IMPL, replace=NOT_IMPL,
-                                 cb=NOT_IMPL, num_cb=NOT_IMPL, policy=NOT_IMPL,
+                                 cb=NOT_IMPL, num_cb=NOT_IMPL,
+                                 policy='bucket-owner-full-control',
                                  md5=NOT_IMPL, reduced_redundancy=NOT_IMPL,
                                  encrypt_key=NOT_IMPL):
         self.data = copy.copy(s)
         self.set_etag()
         self.size = len(s)
+        self.policy = policy
         self._handle_headers(headers)
         return self.size
 
     def set_contents_from_filename(self, filename, headers=None,
                                    replace=NOT_IMPL, cb=NOT_IMPL,
-                                   num_cb=NOT_IMPL, policy=NOT_IMPL,
+                                   num_cb=NOT_IMPL,
+                                   policy='bucket-owner-full-control',
                                    md5=NOT_IMPL, res_upload_handler=NOT_IMPL,
                                    encrypt_key=NOT_IMPL):
         fp = open(filename, 'rb')
@@ -250,6 +262,13 @@ class MockBucket(object):
             src_bucket_name).get_key(src_key_name)
         new_key.data = copy.copy(src_key.data)
         new_key.size = len(new_key.data)
+        new_key.policy = src_key.policy
+        new_key.etag = src_key.etag
+        new_key.content_encoding = src_key.content_encoding
+        new_key.content_language = src_key.content_language
+        new_key.content_type = src_key.content_type
+        new_key.last_modified = src_key.last_modified
+        new_key.redirect_destination = src_key.redirect_destination
         return new_key
 
     def disable_logging(self):

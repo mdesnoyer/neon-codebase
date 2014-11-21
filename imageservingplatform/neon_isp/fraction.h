@@ -14,7 +14,7 @@ public:
     Fraction();
     ~Fraction();
     
-    void Init(double floor, const rapidjson::Value& fa);
+    int Init(double floor, const rapidjson::Value& fa);
     void Shutdown();
     
     void   SetPct(double);
@@ -28,6 +28,10 @@ public:
     
 protected:
     
+    int InitSafe(double floor, const rapidjson::Value& fa);
+    void Dealloc();
+    
+    bool initialized;
     double threshold;
     double pct;
     const char * defaultURL;

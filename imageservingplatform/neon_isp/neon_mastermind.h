@@ -13,9 +13,19 @@ extern "C" {
 
 
 /*
+ *  Contains an error message in case of function call failure
+ */
+extern char * neon_mastermind_error;
+
+/*
  *  Initialization
  */
 NEON_BOOLEAN neon_mastermind_init();
+
+
+void
+neon_mastermind_shutdown();
+
 
 /*
  * Check if expiry is greater than current mastermind

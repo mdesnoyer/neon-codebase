@@ -14,8 +14,6 @@ public:
     
     Mastermind();
     ~Mastermind();
-    
-    static void InitStatic();
 
     // basic init with empty tables
     void Init();
@@ -61,6 +59,12 @@ public:
    
 
 protected:
+    
+    // this function reclaims all memory safely
+    void Dealloc();
+    void InitSafe(const char * mastermindFile, time_t previousMastermindExpiry);
+
+    bool initialized;
     
     static const std::string typeKey;
     static const std::string typeDirective;

@@ -37,3 +37,4 @@ impyla==0.8.1
 dateutils==0.6.6
 winpdb==1.4.8
 ipdb==0.8
+nose-cov==1.6

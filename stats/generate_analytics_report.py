@@ -219,8 +219,8 @@ def get_video_titles(video_ids):
             retval.append('')
             continue
     
-        api_request = neondata.NeonApiRequest.get(video_data.get_account_id(),
-                                                  video_data.job_id)
+        api_request = neondata.NeonApiRequest.get(video_data.job_id,
+                                                  video_data.get_account_id())
         if api_request is None:
             _log.error('Could not find job for video id %s' % video_id)
             retval.append('')

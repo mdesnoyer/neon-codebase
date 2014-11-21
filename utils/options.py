@@ -61,11 +61,13 @@ import boto.utils
 import contextlib
 import inspect
 import logging
+import multiprocessing
 import optparse
 import os.path
 import re
 import sys
 import threading
+import time
 import yaml
 
 #TODO(mdesnoyer): Add support for booleans
@@ -80,8 +82,10 @@ class Error(Exception):
 class OptionParser(object):
     '''A collection of options.'''
     def __init__(self):
-        self.__dict__['_options'] = {}
-        self.__dict__['lock'] = threading.RLock()
+        manager = multiprocessing.Manager()
+        self.__dict__['_manager'] = manager
+        self.__dict__['_options'] = manager.dict()
+        self.__dict__['lock'] = manager.RLock()
         self.__dict__['cmd_options'] = None
         self.__dict__['last_update'] = None
 
@@ -209,20 +213,18 @@ class OptionParser(object):
           do_stuff()
         '''
         old_val = self._options[global_name]._value
-        with self.__dict__['lock']:
-            self._options[global_name].set(value)
+        self._set(global_name, value)
 
         try:
             yield
         finally:
-            with self.__dict__['lock']:
-                self._options[global_name].set(old_val)
+            self._set(global_name, old_val)
 
     def _set(self, global_name, value):
         '''Sets the value of an option.
 
-        This should only be used in test setups, primarily so that
-        you can do:
+        Outside of this module, this should only be used in test setups,
+        primarily so that you can do:
         def setUp(self):
           self.old_variable = options.get('my.variable')
           options._set('my.variable', 45)
@@ -232,7 +234,10 @@ class OptionParser(object):
         '''
         with self.__dict__['lock']:
             try:
-                self._options[global_name].set(value)
+                option = self._options[global_name]
+                option.set(value)
+                # Register that the option changed with all the other processes
+                self._options[global_name] = option
             except KeyError:
                 _log.warn('Cannot set %s. It does not exist' % global_name)
 
@@ -287,8 +292,12 @@ class OptionParser(object):
 
     def _reset_options(self):
         '''Resets all the options with their default values.'''
-        for name, obj in self._options.iteritems():
-            obj.reset()
+        with self.__dict__['lock']:
+            for name in self._options.keys():
+                obj = self._options[name]
+                obj.reset()
+                # Register that the option changed with all the other processes
+                self._options[name] = obj
 
     def _register_command_line_options(self):
         '''Takes the options in self.cmd_options and registers them.'''
@@ -296,7 +305,7 @@ class OptionParser(object):
             if name == 'config':
                 continue
             if value is not None:
-                self._options[name].set(value)
+                self._set(name, value)
 
 
     def _parse_config_file(self, stream=None, path=None):
@@ -363,7 +372,7 @@ class OptionParser(object):
             try:
                 option = self._options[name]
                 if option._value is None:
-                    option.set(option.type(value))
+                    self._set(name, option.type(value))
             except KeyError:
                 _log.warn('Unknown option %s. Ignored' % name)
             except ValueError:
@@ -441,7 +450,7 @@ class ConfigPoller(threading.Thread):
                 _log.exception('Error processing config file: %s' % e)
 
             # Don't poll the file too much
-            threading.Event().wait(30)
+            time.sleep(2.0)
 
 
 options = OptionParser()

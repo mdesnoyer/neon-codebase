@@ -22,7 +22,7 @@ public:
     Publisher(const Publisher &  p);
     ~Publisher();
     
-    void Init(const char* pub, const char* acc);
+    int Init(const char* pub, const char* acc);
     
     void Shutdown();
     
