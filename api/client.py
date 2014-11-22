@@ -186,6 +186,7 @@ class VideoProcessor(object):
             api_request.save()
 
         except Exception as e:
+            _log.exception("Unexpected error [%s]: %s" % (self.pid, e))
             # Flag that the job failed for some internal reason
             statemon.state.increment('processing_error')
 
@@ -661,7 +662,7 @@ class VideoClient(multiprocessing.Process):
         ''' Blocking http call to global queue to dequeue work
             Change state to PROCESSING after dequeue
         '''
-        _log.info("Dequeuing job [%s] " % (self.pid))
+        _log.debug("Dequeuing job [%s] " % (self.pid))
         headers = {'X-Neon-Auth' : properties.NEON_AUTH} 
         result = None
         req = tornado.httpclient.HTTPRequest(
