@@ -186,7 +186,7 @@ class VideoProcessor(object):
             api_request.save()
 
         except Exception as e:
-            _log.exception("Unexpected error [%s]: %s" % (self.pid, e))
+            _log.exception("Unexpected error [%s]: %s" % (os.getpid(), e))
             # Flag that the job failed for some internal reason
             statemon.state.increment('processing_error')
 
