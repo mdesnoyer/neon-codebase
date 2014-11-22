@@ -1,9 +1,18 @@
+--Build--
 
- jdb -sourcepath /home/pierred/neon-codebase/flume/src/main/java/ -classpath  target/neon-hbase-serializer-1.0-jar-with-dependencies.jar  com.neon.flume.NeonSerializerTest
+mvn clean
+mvn generate-sources
+mvn compile 
+mvn package
 
 
+--Debugger--
 
- stop at com.neon.flume.NeonSerializerTest:65
+jdb -sourcepath /home/pierred/neon-codebase/flume/src/main/java/ -classpath  target/neon-hbase-serializer-1.0-jar-with-dependencies.jar  com.neon.flume.NeonSerializerTest
+
+
+breakpoint example semantics
+stop at com.neon.flume.NeonSerializerTest:65
 
 
 
