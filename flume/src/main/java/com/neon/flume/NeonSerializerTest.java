@@ -111,6 +111,10 @@ class NeonSerializerTest {
         Event event = EventBuilder.withBody(encodedEvent, headers);
         NeonSerializer serializer = new NeonSerializer();
 
+        String table = "table";
+        String columnFamily = "columFamily";
+        serializer.initialize(table.getBytes(), columnFamily.getBytes());
+
         /*
          *  Test 
          */
