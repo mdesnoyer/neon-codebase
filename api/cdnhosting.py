@@ -34,13 +34,17 @@ import utils.sync
 import logging
 _log = logging.getLogger(__name__)
 
+from utils.options import define, options
+define('hosting_bucket', default='host-thumbnails',
+       help='Bucket that will host images in S3')
+
 @utils.sync.optional_sync
 @tornado.gen.coroutine
 def upload_image_to_s3(
         keyname,
         data,
         bucket=None,
-        bucket_name=properties.S3_IMAGE_HOST_BUCKET_NAME,
+        bucket_name=options.hosting_bucket,
         access_key=properties.S3_ACCESS_KEY,
         secret_key=properties.S3_SECRET_KEY,
         *args, **kwargs):
@@ -67,6 +71,8 @@ def upload_image_to_s3(
             s3conn = S3Connection(access_key, secret_key)
             bucket = yield utils.botoutils.run_async(s3conn.get_bucket,
                                                      bucket_name)
+        else:
+            bucket_name = bucket.name
 
         key = bucket.new_key(keyname)
 
@@ -90,7 +96,7 @@ def upload_image_to_s3(
 # TODO(Sunil): Change this to use the options instead of properties
 def get_s3_hosting_bucket():
     '''Returns the bucket that hosts the images.'''
-    return properties.S3_IMAGE_HOST_BUCKET_NAME
+    return options.hosting_bucket
 
 @utils.sync.optional_sync
 @tornado.gen.coroutine
@@ -229,8 +235,6 @@ class AWSHosting(CDNHosting):
         super(AWSHosting, self).__init__(cdn_metadata)
         self.neon_bucket = isinstance(
             cdn_metadata, supportServices.neondata.NeonCDNHostingMetadata)
-        _log.info('access_key: %s, secret: %s' % (cdn_metadata.access_key,
-                                   cdn_metadata.secret_key))
         self.s3conn = S3Connection(cdn_metadata.access_key,
                                    cdn_metadata.secret_key)
         self.s3bucket_name = cdn_metadata.bucket_name
