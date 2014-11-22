@@ -1,5 +1,6 @@
 package com.neon.flume;
 
+import  com.neon.Tracker.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -57,7 +58,7 @@ class NeonSerializerTest {
 
         event.setPageId("pageId_dummy");
         event.setTrackerAccountId("trackerAccountId_dummy");
-        event.setTrackerType(com.neon.flume.TrackerType.IGN);
+        event.setTrackerType(com.neon.Tracker.TrackerType.IGN);
         event.setPageURL ("pageUrl_dummy");
         event.setRefURL ("refUrl_dummy");
         event.setServerTime (new java.lang.Long(1000));
@@ -65,8 +66,8 @@ class NeonSerializerTest {
         event.setClientIP("clientIp_dummy");
         event.setNeonUserId ("neonUserId_dummy");
         event.setUserAgent("userAgent_dummy");
-        event.setAgentInfo(new com.neon.flume.AgentInfo());
-        event.setIpGeoData(new com.neon.flume.GeoData()); 
+        event.setAgentInfo(new com.neon.Tracker.AgentInfo());
+        event.setIpGeoData(new com.neon.Tracker.GeoData()); 
     }
 
 
@@ -89,7 +90,7 @@ class NeonSerializerTest {
 
         ImageVisible i = new ImageVisible();
         i.setThumbnailId("t1");
-        trackerEvent.setEventType(com.neon.flume.EventType.IMAGE_VISIBLE);
+        trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_VISIBLE);
         trackerEvent.setEventData(i);
 
         System.out.println(trackerEvent);
