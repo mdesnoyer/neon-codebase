@@ -42,11 +42,10 @@ import org.apache.flume.sink.hbase.AsyncHbaseEventSerializer;
 
 public class NeonSerializer implements AsyncHbaseEventSerializer 
 {
-    private byte[][] columnNames;
     private final List<PutRequest> actions = new ArrayList<PutRequest>();
     private final List<AtomicIncrementRequest> increments = new ArrayList<AtomicIncrementRequest>();
 
-    // hbase table to store all events
+    // hbase tables to store all events
     private byte[] thumbnailFirstTable = "THUMBNAIL_TIMESTAMP_EVENTS".getBytes();
     private byte[] timestampFirstTable = "TIMESTAMP_THUMBNAIL_EVENTS".getBytes();
 
@@ -163,7 +162,6 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     @Override
     public void cleanUp() 
     {
-        columnNames = null;
         trackerEvent = null;
     }
  
