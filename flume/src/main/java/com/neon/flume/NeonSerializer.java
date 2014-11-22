@@ -56,7 +56,7 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     byte imageClickColumnName[] = "IMAGE_CLICK".getBytes();
         
 
-    // event data i
+    // event-based  
     private String eventTimestamp;
     private TrackerEvent trackerEvent;
     private String rowKey;
@@ -162,6 +162,8 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     @Override
     public void cleanUp() 
     {
+        trackerEvent = null;
+        eventTimestamp = null;
         trackerEvent = null;
     }
  
