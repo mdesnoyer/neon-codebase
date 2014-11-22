@@ -25,7 +25,7 @@ import tornado.httpclient
 import utils.logs
 import utils.neon
 import utils.sync
-_log = utils.logs.FileLogger(__name__)
+_log = logging.getLogger(__name__)
 
 HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']    
 DEFAULT_EXPIRATION_WINDOW = 15
@@ -34,8 +34,6 @@ API_VERSION = 'v2'
 DEFAULT_BASE_URL = 'api.ooyala.com'
 DEFAULT_CACHE_BASE_URL = 'cdn-api.ooyala.com'
 API_URL = 'http://%s'%DEFAULT_BASE_URL
-
-logging.basicConfig(format='',level=logging.INFO)
 
 class OoyalaAPI(object):
     def __init__(self, 
