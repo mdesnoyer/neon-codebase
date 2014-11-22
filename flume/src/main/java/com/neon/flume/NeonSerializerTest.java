@@ -139,7 +139,7 @@ class NeonSerializerTest {
         try {
 
             test_ImageVisible();
-            System.out.println("\n\nTest sucessful");
+            System.out.println("\n\nTest sucessfull");
         }
         catch(Exception e) {
             System.out.println("Test failure: exception: " + e.toString());
