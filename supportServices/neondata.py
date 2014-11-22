@@ -2495,7 +2495,7 @@ class ThumbnailMetadata(StoredObject):
                  width=None, height=None, ttype=None,
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None,
-                 serving_frac=None, frameno=None, filtered=None):
+                 serving_frac=None, frameno=None, filtered=None, ctr=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
         self.urls = urls or []  # List of all urls associated with single image
@@ -2518,6 +2518,9 @@ class ThumbnailMetadata(StoredObject):
         # Fraction of traffic currently being served by this thumbnail.
         # =None indicates that Mastermind doesn't know of the fraction yet
         self.serving_frac = serving_frac 
+
+        # The current click through rate seen for this thumbnail
+        self.ctr = ctr
         
         # NOTE: If you add more fields here, modify the merge code in
         # api/client, Add unit test to check this

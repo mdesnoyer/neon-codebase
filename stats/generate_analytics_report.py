@@ -43,6 +43,8 @@ define("output", default=None, type=str,
        help="Output file. If not set, outputs to STDOUT")
 define("min_impressions", default=1000,
        help="Minimum number of impressions for a thumbnail for it to be included.")
+define("baseline_type", default="centerframe",
+       help="Thumbnail type to treat as baseline")
 
 _log = logging.getLogger(__name__)
 
@@ -192,7 +194,7 @@ def calc_per_video_stats(counts):
     retval = {}
     baseline = None
     for key, stat in counts.items():
-        if not key[0].startswith('neon'):
+        if key[0] == options.baseline_type:
             baseline = stat
             break
 
@@ -291,9 +293,9 @@ def main():
         # <acting impressions>,<acting conversions>
         agg_counts = agg_counts.unstack().swaplevel(0, 1, axis=1).sortlevel(
             axis=1)
-        base_type = [x for x in agg_counts.columns.levels[0] if x != 'neon'][0]
-        agg_counts = pandas.concat([agg_counts[base_type], agg_counts['neon']],
-                                   axis=1, join='inner').dropna()
+        agg_counts = pandas.concat(
+            [agg_counts[options.baseline_type], agg_counts['neon']],
+            axis=1, join='inner').dropna()
 
         # Calculate the ab metrics
         cur_averages = dict(
