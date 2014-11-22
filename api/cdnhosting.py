@@ -111,10 +111,11 @@ def create_s3_redirect(dest_key, src_key, dest_bucket=None,
     if dest_bucket is None:
         dest_bucket = get_s3_hosting_bucket()
 
+
     if src_bucket == dest_bucket:
-        redirect_loc = dest_key
+        redirect_loc = "/%s" % dest_key
     else:
-        redirect_loc = "https://%s.s3.amazonaws.com/%s" % (
+        redirect_loc = "https://s3.amazonaws.com/%s/%s" % (
             dest_bucket, dest_key)
 
     s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
@@ -250,7 +251,7 @@ class AWSHosting(CDNHosting):
         if self.cdn_prefixes and len(self.cdn_prefixes) > 0:
             cdn_prefix = random.choice(self.cdn_prefixes)
         else:
-            cdn_prefix = "%s.s3.amazonaws.com" % self.s3bucket_name
+            cdn_prefix = "s3.amazonaws.com/%s" % self.s3bucket_name
 
 
         # Build the key name

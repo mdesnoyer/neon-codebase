@@ -419,9 +419,9 @@ class VideoProcessor(object):
                 self.video_metadata.get_account_id(),
                 self.video_metadata.integration_id))
         if cdn_metadata is None:
-            _log.warn_n('No cdn metadata for integration %s. '
+            _log.warn_n('No cdn metadata for account %s integration %s. '
                         'Defaulting to Neon CDN'
-                        % self.video_metadata.integration_id, 10)
+                        % (api_key, self.video_metadata.integration_id), 10)
             cdn_metadata = [neondata.NeonCDNHostingMetadata()]
 
         # Attach the thumbnails to the video. This will upload the

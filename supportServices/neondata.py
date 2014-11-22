@@ -2580,7 +2580,7 @@ class ThumbnailMetadata(StoredObject):
         # Figure out the S3 location,
         # which is <API_KEY>/<VIDEO_ID>/<THUMB_ID>.jpg
         s3key = re.sub('_', '/', self.key) + '.jpg'
-        s3_url = 'https://%s.s3.amazonaws.com/%s' % \
+        s3_url = 'https://s3.amazonaws.com/%s/%s' % \
           (api.cdnhosting.get_s3_hosting_bucket(), s3key)
         self.urls.insert(0, s3_url)
 

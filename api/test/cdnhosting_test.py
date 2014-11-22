@@ -127,18 +127,20 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
                 ]
 
         self.assertEqual(self.s3conn.get_bucket('my-bucket').get_key(
-            'src/samebuc.jpg').redirect_destination, 'dest/image.jpg')
+            'src/samebuc.jpg').redirect_destination,
+            '/dest/image.jpg')
         self.assertEqual(self.s3conn.get_bucket('obucket').get_key(
             'src/diffbuc.jpg').redirect_destination,
-            'https://my-bucket.s3.amazonaws.com/dest/image.jpg')
+            'https://s3.amazonaws.com/my-bucket/dest/image.jpg')
         self.assertEqual(self.s3conn.get_bucket('host-bucket').get_key(
-            'src/bothdefault.jpg').redirect_destination, 'dest/image.jpg')
+            'src/bothdefault.jpg').redirect_destination,
+            '/dest/image.jpg')
         self.assertEqual(self.s3conn.get_bucket('mine').get_key(
             'src/destdefault.jpg').redirect_destination,
-            'https://host-bucket.s3.amazonaws.com/dest/image.jpg')
+            'https://s3.amazonaws.com/host-bucket/dest/image.jpg')
         self.assertEqual(self.s3conn.get_bucket('host-bucket').get_key(
             'src/srcdefault.jpg').redirect_destination,
-            'https://mine.s3.amazonaws.com/dest/image.jpg')
+            'https://s3.amazonaws.com/mine/dest/image.jpg')
 
     @tornado.testing.gen_test
     def test_permissions_error_s3_redirect(self):
@@ -169,7 +171,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
 
         metadata = neondata.CloudinaryCDNHostingMetadata()
         cd = api.cdnhosting.CDNHosting.create(metadata)
-        im = 'https://host-thumbnails.s3.amazonaws.com/image.jpg'
+        im = 'https://s3.amazonaws.com/host-thumbnails/image.jpg'
         tid = 'bfea94933dc752a2def8a6d28f9ac4c2'
         mresponse = MagicMock()
         mresponse.read.return_value = mock_response
