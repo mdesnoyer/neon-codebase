@@ -133,16 +133,16 @@ class NeonSerializerTest {
 
     
     public static void main(String[] args) {
-        System.out.println("Hello World!"); 
+        System.out.println("\n\nTest Starting"); 
 
 
         try {
 
             test_ImageVisible();
-
+            System.out.println("\n\nTest sucessful");
         }
         catch(Exception e) {
-            System.out.println("exception!!!!!!");
+            System.out.println("Test failure: exception: " + e.toString());
         }
     
     }

@@ -42,37 +42,39 @@ import org.apache.flume.sink.hbase.AsyncHbaseEventSerializer;
 
 public class NeonSerializer implements AsyncHbaseEventSerializer 
 {
-    private byte[] table;
-    private byte[] colFam;
-    private Event currentEvent;
     private byte[][] columnNames;
     private final List<PutRequest> actions = new ArrayList<PutRequest>();
     private final List<AtomicIncrementRequest> increments = new ArrayList<AtomicIncrementRequest>();
 
+    // hbase table to store all events
+    private byte[] thumbnailFirstTable = "THUMBNAIL_TIMESTAMP_EVENTS".getBytes();
+    private byte[] timestampFirstTable = "TIMESTAMP_THUMBNAIL_EVENTS".getBytes();
 
+    // column family to store counters, one for each event type
+    private byte[] columnFamily = "THUMBNAIL_EVENTS_TYPES".getBytes();
     byte imageVisibleColumnName[] = "IMAGE_VISIBLE".getBytes();
-    byte hourlyTimestampColumnName[] = "HOURLY_TIMESTAMP".getBytes();
+    byte imageLoadColumnName[] = "IMAGE_LOAD".getBytes();
+    byte imageClickColumnName[] = "IMAGE_CLICK".getBytes();
+        
 
-    // event data 
+    // event data i
+    private String eventTimestamp;
     private TrackerEvent trackerEvent;
-    private String trackerEventTimestamp;
     private String rowKey;
 
     @Override
     public void initialize(byte[] table, byte[] cf) 
     {
-        this.table = table;
-        this.colFam = cf;
         trackerEvent = null;
-        trackerEventTimestamp = null;
+        eventTimestamp = null;
         rowKey = null;
     }
- 
+
     @Override
     public void setEvent(Event event) 
     {
-        this.currentEvent = event;
-
+        trackerEvent = null;
+        
         try {
 
             // obtain the timestamps of event
@@ -80,11 +82,11 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
             long timestamp = Long.valueOf(t).longValue();
 
             // remove minutes and seconds precision
-            timestamp %= 3600;
-            trackerEventTimestamp = Long.toString(timestamp); 
+            timestamp /= 3600;
+            eventTimestamp = Long.toString(timestamp); 
 
             // obtain the tracker event
-            SeekableByteArrayInput input = new SeekableByteArrayInput(currentEvent.getBody() );  
+            SeekableByteArrayInput input = new SeekableByteArrayInput(event.getBody());  
             DatumReader<TrackerEvent> datumReader = new SpecificDatumReader<TrackerEvent>(TrackerEvent.class);
             DataFileReader<TrackerEvent> dataFileReader = new DataFileReader<TrackerEvent>(input, datumReader);
 
@@ -111,42 +113,15 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     @Override
     public List<PutRequest> getActions() 
     {
-        // if this event was dropped previously do nothing
-        if(this.currentEvent == null)
+            // no row creation
             return null;
+    } 
  
-        actions.clear();
-
-        switch(trackerEvent.getEventType())  {
-
-            case IMAGE_VISIBLE: 
-                ImageVisible data = (ImageVisible) trackerEvent.getEventData();
-                handleImageVisibleEvent(data);
-                break;
-
-            default:
-                this.currentEvent = null;
-                return null;
-        }
-
-        return actions;
-    }
- 
-
-    private void handleImageVisibleEvent(ImageVisible img) {
-
-        rowKey = img.getThumbnailId().toString();
-        
-        // create a row  
-        PutRequest req = new PutRequest(table, rowKey.getBytes(), colFam, hourlyTimestampColumnName, trackerEventTimestamp.getBytes());
-        actions.add(req);
-    }
-
     @Override
     public List<AtomicIncrementRequest> getIncrements() 
     {
         // if this event was dropped in previously do nothing 
-        if(this.currentEvent == null)
+        if(trackerEvent == null)
             return null;
 
         increments.clear();
@@ -155,38 +130,39 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
         switch(trackerEvent.getEventType())  {
                      
             case IMAGE_VISIBLE: 
-                increments.add(new AtomicIncrementRequest(table, rowKey.getBytes(), colFam, imageVisibleColumnName));
+                ImageVisible imgVis = (ImageVisible) trackerEvent.getEventData();
+                handleIncrement(imgVis.getThumbnailId().toString(), imageVisibleColumnName);
                 break;
-        
+       
+            case IMAGE_CLICK: 
+                ImageClick imgClk = (ImageClick) trackerEvent.getEventData();
+                handleIncrement(imgClk.getThumbnailId().toString(), imageClickColumnName);
+                break;
+
             default:
                 return null;
         }
         
-        return null;
+        return increments; 
     }
 
-    /*
-    private Schema loadFromUrl(String schemaUrl) throws IOException {
-        Schema.Parser parser = new Schema.Parser();
-      
-        InputStream is = null;
-        try {
-            is = new URL(schemaUrl).openStream();
-            return parser.parse(is);
-        } finally {
-            if (is != null) {
-                is.close();
-        }
-      }
+    // this method depends on hbase to create a row automatically on first increment request
+    private void handleIncrement(String tid, byte[] columnName) 
+    {
+        // increment counter in table with thumbnail first composite key
+        String key = tid  + "_" + eventTimestamp;
+        increments.add(new AtomicIncrementRequest(thumbnailFirstTable, key.getBytes(), columnFamily, columnName));        
+ 
+        // increment counter in table with timestamp first composite key
+        key = eventTimestamp + "_" + tid;
+        increments.add(new AtomicIncrementRequest(timestampFirstTable, key.getBytes(), columnFamily,  columnName));
     }
-   */
+
+
 
     @Override
     public void cleanUp() 
     {
-        table = null;
-        colFam = null;
-        currentEvent = null;
         columnNames = null;
         trackerEvent = null;
     }
@@ -194,34 +170,11 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     @Override
     public void configure(Context context) 
     {
-        
-        //Get the column names from the configuration
-        String cols = new String(context.getString("columns"));
-        String[] names = cols.split(",");
-        columnNames = new byte[names.length][];
-        int i = 0;
-        
-        for(String name : names) 
-        {
-            columnNames[i++] = name.getBytes();
-        }
+        // config hard-coded
     }
  
     @Override
     public void configure(ComponentConfiguration conf) {}
-
-
-   /* 
-    private boolean schemaFetchAllowed() {
-
-        long elapsed = System.nanoTime() - lastSchemaFetchTime;
-
-        if(elapsed >= minimumNanoTimeBetweenFetch)
-            return true;
-        
-        return false;
-    }
-   */
 
 }
 
