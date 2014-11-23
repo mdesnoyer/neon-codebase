@@ -364,7 +364,8 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
                                         rank=0,
                                         model_score=2.3,
                                         model_version='model1',
-                                        frameno=6),
+                                        frameno=6,
+                                        filtered=''),
              utils.imageutils.PILImageUtils.create_random_image(480, 640)),
              (neondata.ThumbnailMetadata(None,
                                          ttype=neondata.ThumbnailType.NEON,
@@ -424,11 +425,20 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         n_thumbs = sorted(n_thumbs, key= lambda x: x.rank)
         self.assertEquals(n_thumbs[0].frameno, 6)
         self.assertEquals(n_thumbs[1].frameno, 69)
+        self.assertEquals(n_thumbs[0].video_id, self.video_id)
+        self.assertEquals(n_thumbs[1].video_id, self.video_id)
         self.assertIsNotNone(n_thumbs[0].phash)
         self.assertIsNotNone(n_thumbs[0].key)
         self.assertEquals(n_thumbs[0].urls, [
             'https://s3.amazonaws.com/host-thumbnails/%s.jpg' %
             re.sub('_', '/', n_thumbs[0].key)])
+        self.assertEquals(n_thumbs[0].width, 640)
+        self.assertEquals(n_thumbs[0].height, 480)
+        self.assertIsNotNone(n_thumbs[0].created_time)
+        self.assertAlmostEqual(n_thumbs[0].model_score, 2.3)
+        self.assertEquals(n_thumbs[0].model_version, 'model1')
+        self.assertEquals(n_thumbs[0].filtered, '')
+        
 
         # Check that there are thumbnails in s3
         for thumb in thumbs:

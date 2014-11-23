@@ -448,6 +448,7 @@ class VideoProcessor(object):
                 # There was already an entry for this thumb, so update
                 urlset = set(new_thumb.urls + old_thumb.urls)
                 old_thumb.urls = [x for x in urlset]
+                old_thumb.video_id = new_thumb.video_id
                 old_thumb.width = new_thumb.width
                 old_thumb.height = new_thumb.height
                 old_thumb.type = new_thumb.type
