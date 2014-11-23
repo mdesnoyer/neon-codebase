@@ -237,7 +237,7 @@ class VideoProcessor(object):
 
     def process_video(self, video_file, n_thumbs=1):
         ''' process all the frames from the partial video downloaded '''
-        _log.info('Starting to process video %s' % self.video_url)
+        _log.info('Starting to search video %s' % self.video_url)
         start_process = time.time()
 
         try:
@@ -319,7 +319,7 @@ class VideoProcessor(object):
         self._get_random_frame(video_file)
 
         statemon.state.increment('processed_video')
-        _log.info('Finished processing video %s' % self.video_url)
+        _log.info('Sucessfully finished searching video %s' % self.video_url)
 
     def _get_center_frame(self, video_file, nframes=None):
         '''approximation of brightcove logic 
@@ -535,6 +535,8 @@ class VideoProcessor(object):
         # Send callbacks and notifications
         self.send_client_callback_response(video_id, cb_request)
         self.send_notifiction_response(api_request)
+
+        _log.info('Sucessfully finished finalized video %s' % self.video_url)
         
 
     def build_callback_request(self):
