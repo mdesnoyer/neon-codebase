@@ -2075,6 +2075,22 @@ class HealthCheckHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
         '''Handle a test tracking request.'''
+        if "video_server" in  self.request.uri:
+            # TODO(Sunil): Make a call to video server health check
+            client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
+                            % options.video_server 
+            http_client = tornado.httpclient.AsyncHTTPClient()
+            req = tornado.httpclient.HTTPRequest(url=client_url,
+                                                 method="GET",
+                                                 request_timeout=5.0)
+            result = yield Tornado.gen.Task(http_client.fetch, req)
+            if result.error:
+                self.set_status(502)
+                self.write('{"error": "videoserver healthcheck fails"}') 
+            else:
+                self.set_status(200)
+            self.finish()
+            return
 
         self.write("<html> Server OK </html>")
         self.finish()
@@ -2084,7 +2100,7 @@ class HealthCheckHandler(tornado.web.RequestHandler):
 ################################################################
 
 application = tornado.web.Application([
-        (r"/healthcheck", HealthCheckHandler),
+        (r"/healthcheck(.*)", HealthCheckHandler),
         (r'/api/v1/accounts(.*)', CMSAPIHandler),
         (r'/api/v1/jobs(.*)', CMSAPIHandler),
         (r'/api/v1/brightcovecontroller(.*)', BcoveHandler)],

@@ -95,6 +95,11 @@ class TestSimpleThreadSafeDictQ(test_utils.neontest.TestCase):
             val = self.sq.peek(i)
             self.assertEqual(val, i)
 
+    def test_inserting_duplicate(self):
+        k = 1    
+        self.assertTrue(self.sq.put(k, k))
+        self.assertFalse(self.sq.put(k, k))
+
     def test_q_with_multiple_threads(self):
 
         # start 100 threads to insert items
@@ -354,6 +359,12 @@ class TestVideoServer(AsyncHTTPTestCase):
                 callback=self.stop, method="POST", body=jdata)
         resp = self.wait()
         self.assertEqual(resp.code, 200)
+        
+        # invalid request
+        self.http_client.fetch(self.get_url('/requeue'),
+                callback=self.stop, method="POST", body='{}')
+        resp = self.wait()
+        self.assertEqual(resp.code, 400)
 
     def test_requeue_handler_duplicate(self):
         ''' requeue handler '''

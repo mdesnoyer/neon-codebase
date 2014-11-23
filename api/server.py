@@ -137,12 +137,15 @@ class SimpleThreadSafeDictQ(object):
         '''
         if not isinstance(item, self.QItemType):
             raise Exception("Expects an obj of QItemType, check init method")
+
+        # Don't insert the element in the Q if its already present 
         try:
             self.qdict[key]
+            return False
         except KeyError, e:
-            ret = self.q.append((key,item))
+            self.q.append((key,item))
             self.qdict[key] = item
-            return ret
+            return True 
 
     def peek(self, key):
         '''
@@ -202,10 +205,12 @@ class FairWeightedRequestQueue(object):
         pindex = min(p, len(self.pqs))
         key = api_request.key
         item = RequestData(key, api_request)
-        self.pqs[pindex].put(key, item)
+        ret = self.pqs[pindex].put(key, item)
 
         # Spin off a thread to set the metadata
         self._schedule_metadata_thread(pindex, key)
+
+        raise tornado.gen.Return(ret)
 
     def get(self):
         # pick a random number in the interval (0, max_priority)
@@ -222,14 +227,6 @@ class FairWeightedRequestQueue(object):
                         return item.get_request_json()
         # Empty Q
         return None
-
-    def _get_all_items(self):
-        '''
-        Only to be used by the test methods
-        '''
-        pindex = self._get_priority_qindex()
-        item = self.pqs[pindex].peek(key)
-        return item
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -252,6 +249,8 @@ class FairWeightedRequestQueue(object):
                 headers = result.headers
                 nbytes = int(headers.get('Content-Length'))
                 statemon.state.increment('queue_size_bytes', nbytes)
+                _log.info("Request %s had video file of size %s",
+                        item.get_request_json(), nbytes)
                 # add video size 
                 item.set_video_size(nbytes)
 
@@ -316,10 +315,17 @@ class RequeueHandler(tornado.web.RequestHandler):
         
         try:
             _log.info("key=requeue_handler msg=requeing ")
-            data = self.request.body
-            data = json.loads(data)
-            key = data["_data"]["key"]
-            api_request = neondata.NeonApiRequest._create(key, data)
+            jdata = self.request.body
+            data = json.loads(jdata)
+            try:
+                key = data["_data"]["key"]
+                api_request = neondata.NeonApiRequest._create(key, data)
+            except KeyError, e:
+                _log.error("Inavlid format for request json data")
+                self.set_status(400)
+                self.finish()
+                return
+
             ret = global_request_queue.put(api_request)
             if ret is None:
                 _log.warn("requed request %s is already in the Q" % key)
