@@ -445,26 +445,23 @@ class VideoProcessor(object):
         def _merge_thumbnails(t_objs):
             for new_thumb, garb in self.thumbnails:
                 old_thumb = t_objs[new_thumb.key]
-                if old_thumb is not None:
-                    # There was already an entry for this thumb, so update
-                    urlset = set(new_thumb.urls + old_thumb.urls)
-                    old_thumb.urls = [x for x in urlset]
-                    old_thumb.width = new_thumb.width
-                    old_thumb.height = new_thumb.height
-                    old_thumb.type = new_thumb.type
-                    old_thumb.model_score = new_thumb.model_score
-                    old_thumb.model_version = new_thumb.model_version
-                    old_thumb.rank = new_thumb.rank
-                    old_thumb.phash = new_thumb.phash
-                    old_thumb.frameno = new_thumb.frameno
-                    old_thumb.filtered = new_thumb.filtered
-                else:
-                    # Create the new entry
-                    t_objs[new_thumb.key] = new_thumb
+                # There was already an entry for this thumb, so update
+                urlset = set(new_thumb.urls + old_thumb.urls)
+                old_thumb.urls = [x for x in urlset]
+                old_thumb.width = new_thumb.width
+                old_thumb.height = new_thumb.height
+                old_thumb.type = new_thumb.type
+                old_thumb.model_score = new_thumb.model_score
+                old_thumb.model_version = new_thumb.model_version
+                old_thumb.rank = new_thumb.rank
+                old_thumb.phash = new_thumb.phash
+                old_thumb.frameno = new_thumb.frameno
+                old_thumb.filtered = new_thumb.filtered
         try:
             new_thumb_dict = neondata.ThumbnailMetadata.modify_many(
                 [x[0].key for x in self.thumbnails],
-                _merge_thumbnails)
+                _merge_thumbnails,
+                create_missing=True)
             if len(self.thumbnails) > 0 and len(new_thumb_dict) == 0:
                 raise DBError("Couldn't change some thumbs")
         except Exception, e:
@@ -607,7 +604,7 @@ class VideoProcessor(object):
         api_key = self.job_params[properties.API_KEY] 
         video_id = self.job_params[properties.VIDEO_ID]
         title = self.job_params[properties.VIDEO_TITLE]
-        i_id = self.job_params[properties.INTEGRATION_ID]
+        i_id = self.video_metadata.integration_id
         job_id  = self.job_params[properties.REQUEST_UUID_KEY]
         account = neondata.NeonUserAccount.get_account(api_key)
         if account is None:

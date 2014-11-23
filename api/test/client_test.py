@@ -346,7 +346,6 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
-            'integration_id' : 'int1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
             'video_url' : 'http://video.mp4'
@@ -405,7 +404,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertAlmostEquals(video_data.duration, 130.0)
         self.assertEquals(video_data.frame_size, [640, 480])
         self.assertEquals(video_data.url, 'http://video.mp4')
-        self.assertEquals(video_data.integration_id, 'int1')
+        self.assertEquals(video_data.integration_id, 0)
         self.assertEquals(video_data.model_version, 'test_version')
         self.assertTrue(video_data.serving_enabled)
         self.assertIsNotNone(video_data.serving_url)
@@ -539,7 +538,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertAlmostEquals(video_data.duration, 130.0)
         self.assertEquals(video_data.frame_size, [640, 480])
         self.assertEquals(video_data.url, 'http://video.mp4')
-        self.assertEquals(video_data.integration_id, 'int1')
+        self.assertEquals(video_data.integration_id, 0)
         self.assertEquals(video_data.model_version, 'test_version')
         self.assertTrue(video_data.serving_enabled)
         self.assertIsNotNone(video_data.serving_url)
@@ -900,7 +899,6 @@ class SmokeTest(test_utils.neontest.TestCase):
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
-            'integration_id' : 'int1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
             'video_url' : 'http://video.mp4'
@@ -941,7 +939,6 @@ class SmokeTest(test_utils.neontest.TestCase):
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
-            'integration_id' : 'int1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
             'video_url' : 'http://video.mp4'
@@ -968,7 +965,6 @@ class SmokeTest(test_utils.neontest.TestCase):
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
-            'integration_id' : 'int1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
             'video_url' : 'http://video.mp4'
