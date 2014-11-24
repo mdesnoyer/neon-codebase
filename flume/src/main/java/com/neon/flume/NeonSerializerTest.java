@@ -145,11 +145,11 @@ class NeonSerializerTest {
         Coords c = new Coords();
         c.setX(1.0F);
         c.setY(1.0F);
-        trackerEvent.setPageCoords(c);
+        i.setPageCoords(c);
         c = new Coords();
         c.setX(1.0F);
         c.setY(1.0F);
-        trackerEvent.setWindowCoords(c);
+        i.setWindowCoords(c);
     
         // needed
         i.setThumbnailId("t1");
