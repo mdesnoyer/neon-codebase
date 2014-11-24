@@ -76,7 +76,7 @@ class NeonSerializerTest {
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
 
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        Encoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
         DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
        
         TrackerEvent trackerEvent = new TrackerEvent(); 
@@ -125,7 +125,7 @@ class NeonSerializerTest {
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
 
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        Encoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
         DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
        
         TrackerEvent trackerEvent = new TrackerEvent(); 
