@@ -298,7 +298,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     self.get_video_status("ooyala", i_id, video_ids, video_state)
                 
                 elif itype == "youtube_integrations":
-                    self.get_youtube_videos(i_id)
+                    self.send_json_response("not supported yet", 400)
+                   
+            elif method == "videoids":
+                self.get_all_video_ids(itype, i_id)
+            
             else:
                 _log.warning(('key=account_handler '
                               'msg=Invalid method in request %s method %s') 
@@ -1247,62 +1251,12 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         if bc:
             bc.read_token = rtoken
             bc.write_token = wtoken
-                
-            #Auto publish all the previous thumbnails in the account
+               
+            # if auto publish is being turned on   
             if bc.auto_update == False and autosync == True:
-                #self.autopublish_brightcove_videos(bc)
-                bplatform_account = bc
-                vids = bplatform_account.get_videos()
-                
-                # No videos in the account
-                if not vids:
-                    return
-                
-                keys = [neondata.InternalVideoID.generate(
-                            self.api_key, vid) for vid in vids]
-                video_results = yield tornado.gen.Task(
-                        neondata.VideoMetadata.get_many, keys)
-                tids = []
-                video_thumb_mappings = {} #vid => [thumbnail metadata ...]
-                update_videos = {} #vid => neon_tid
-                #for all videos in account where status is not active
-                for vresult in video_results:
-                    if vresult:
-                        tids.extend(vresult.thumbnail_ids)
-                        video_thumb_mappings[vresult.get_id()] = []
-                    
-                    #Get all the thumbnail data for videos that are done
-                    thumbnails = yield tornado.gen.Task(
-                            neondata.ThumbnailMetadata.get_many, tids)
-                    for thumb in thumbnails:
-                        if thumb:
-                            vid = thumb.video_id
-                            #neondata.InternalVideoID.to_external(thumb.video_id)
-                            tdata = thumb.to_dict_for_video_response()
-                            video_thumb_mappings[vid].append(tdata)
-                
-                # Check if Neon thumbnail is set as the top rank neon thumbnail
-                for vid,thumbs in video_thumb_mappings.iteritems():
-                    update = True
-                    neon_tid = None
-                    for thumb in thumbs:
-                        if thumb["chosen"] == True and thumb["type"] == 'neon':
-                            update = False
-                        if thumb["type"] == 'neon' and thumb["rank"] == 1:
-                            neon_tid = thumb["thumbnail_id"]
-                    
-                    if update and neon_tid is not None:
-                        update_videos[vid] = neon_tid
-                
-                #update thumbnail for videos without a current neon thumbnail
-                for vid, new_tid in update_videos.iteritems():
-                    result = yield tornado.gen.Task(
-                            bplatform_account.update_thumbnail, vid, new_tid)
-                    if not result:
-                        p_vid = neondata.InternalVideoID.to_external(vid)
-                        _log.error("key=autopublish msg=update thumbnail" 
-                                " failed for api_key=%s vid=%s tid=%s" 
-                                %(self.api_key, p_vid, new_tid))
+                self.send_json_response(
+                    '{"error": "autopublish feature has been deprecated"}', 400)
+                return
 
             bc.auto_update = autosync
             res = yield tornado.gen.Task(bc.save)
@@ -1314,8 +1268,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 self.send_json_response(data, 500)
         else:
             _log.error("key=update_brightcove_integration " 
-                    "msg=no such account %s integration id %s" %(self.api_key, i_id))
-            data = '{"error": "Account doesnt exists"}'
+                    "msg=no such account %s integration id %s"\
+                    % (self.api_key, i_id))
+            data = '{"error": "account doesnt exists"}'
             self.send_json_response(data, 400)
    
     ##################################################################
@@ -1810,6 +1765,24 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     #    '''
     #    pass
 
+    
+    # Get all the video ids
+    @tornado.gen.engine
+    def get_all_video_ids(self, itype, i_id):
+        '''
+        Get all the video ids from an account
+        '''
+        platform_account = yield tornado.gen.Task(self.get_platform_account, itype, i_id)
+        if not platform_account:
+            _log.error("key=upload_video_custom_thumbnail msg=%s account not found" % itype)
+            self.send_json_response('{"error":"%s account not found"}' % itype, 400)
+            return
+
+        vids = platform_account.get_videos()
+        if not vids:
+            vids = []
+        data = json.dumps({ "videoids" : vids})
+        self.send_json_response(data, 200)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -1824,7 +1797,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         '''
 
         p_vid = neondata.InternalVideoID.to_external(i_vid)
-
+        
         # Get the video object
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
         if not vmdata:
@@ -2102,6 +2075,22 @@ class HealthCheckHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
         '''Handle a test tracking request.'''
+        if "video_server" in  self.request.uri:
+            # TODO(Sunil): Make a call to video server health check
+            client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
+                            % options.video_server 
+            http_client = tornado.httpclient.AsyncHTTPClient()
+            req = tornado.httpclient.HTTPRequest(url=client_url,
+                                                 method="GET",
+                                                 request_timeout=5.0)
+            result = yield Tornado.gen.Task(http_client.fetch, req)
+            if result.error:
+                self.set_status(502)
+                self.write('{"error": "videoserver healthcheck fails"}') 
+            else:
+                self.set_status(200)
+            self.finish()
+            return
 
         self.write("<html> Server OK </html>")
         self.finish()
@@ -2111,7 +2100,7 @@ class HealthCheckHandler(tornado.web.RequestHandler):
 ################################################################
 
 application = tornado.web.Application([
-        (r"/healthcheck", HealthCheckHandler),
+        (r"/healthcheck(.*)", HealthCheckHandler),
         (r'/api/v1/accounts(.*)', CMSAPIHandler),
         (r'/api/v1/jobs(.*)', CMSAPIHandler),
         (r'/api/v1/brightcovecontroller(.*)', BcoveHandler)],

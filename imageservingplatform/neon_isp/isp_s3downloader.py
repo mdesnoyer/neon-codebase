@@ -8,6 +8,7 @@ NOTE: The s3 credentials come from IAM role
 '''
 
 import boto.s3.connection
+import hashlib
 import re
 import sys
 from boto.s3.key import Key
@@ -65,6 +66,10 @@ if __name__ == '__main__':
     try:
         # This overwrites the destination file
         k.get_contents_to_filename(destination)
+        # TODO (Sunil/Pierre) : test and refactor md5 check
+        #downloaded_md5 = hashlib.md5(open(destination).read()).hexdigest()
+        #if downloaded_md5 != k.md5:
+        #    print "Error MD5 mismatch of the s3file and downloaded file"
     except Exception, e:
         #TODO: more friendly exception messages
         print "Error downloading or writing the file", e
