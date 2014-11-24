@@ -157,9 +157,9 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
 
             case IMAGES_VISIBLE:
                 ImagesVisible imgsVis = (ImagesVisible) trackerEvent.getEventData();
-                Iterator ivIterator = imgsVis.thumbnailIds.iterator();
+                Iterator<String> ivIterator = imgsVis.thumbnailIds.iterator();
                 while(ivIterator.hasNext()) {
-                    String tid = ivIterator.next().toString();
+                    String tid = ivIterator.next();
                     handleIncrement(tid, imageVisibleColumnName);
                 }
                 break;
@@ -175,7 +175,7 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
 
             case IMAGES_LOADED:
                 ImagesLoaded imgLded = (ImagesLoaded) trackerEvent.getEventData();
-                Iterator ilIterator = imgLded.images.iterator();
+                Iterator<ImageLoad> ilIterator = imgLded.images.iterator();
                 while(ilIterator.hasNext()) {
                     String tid = ilIterator.next().getThumbnailId();
                     handleIncrement(tid, imageLoadColumnName);
