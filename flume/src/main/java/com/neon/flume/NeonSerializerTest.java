@@ -131,7 +131,7 @@ class NeonSerializerTest {
         TrackerEvent trackerEvent = new TrackerEvent(); 
         fillWithDummies(trackerEvent);
 
-        ImageVisible i = new ImageClick();
+        ImageClick i = new ImageClick();
         i.setThumbnailId("t1");
         trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_CLICK);
         trackerEvent.setEventData(i);
