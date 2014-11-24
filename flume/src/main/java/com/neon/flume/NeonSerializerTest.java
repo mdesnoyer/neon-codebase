@@ -147,8 +147,8 @@ class NeonSerializerTest {
         c.setY(1.0F);
         trackerEvent.setPageCoords(c);
         c = new Coords();
-        c.setX(1.0);
-        c.setY(1.0);
+        c.setX(1.0F);
+        c.setY(1.0F);
         trackerEvent.setWindowCoords(c);
     
         // needed
