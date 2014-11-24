@@ -151,27 +151,27 @@ class NeonSerializerTest {
         ImageClick i = new ImageClick();
         
         // dummies
-        event.setPageId("pageId_dummy");
-        event.setTrackerAccountId("trackerAccountId_dummy");
-        event.setTrackerType(com.neon.Tracker.TrackerType.IGN);
-        event.setPageURL ("pageUrl_dummy");
-        event.setRefURL ("refUrl_dummy");
-        event.setServerTime (new java.lang.Long(1000));
-        event.setClientTime (new java.lang.Long(1000) );
-        event.setClientIP("clientIp_dummy");
-        event.setNeonUserId ("neonUserId_dummy");
-        event.setUserAgent("userAgent_dummy");
-        event.setAgentInfo(new com.neon.Tracker.AgentInfo());
-        event.setIpGeoData(new com.neon.Tracker.GeoData()); 
-        event.setIsImageClick(true);
+        trackerEvent.setPageId("pageId_dummy");
+        trackerEvent.setTrackerAccountId("trackerAccountId_dummy");
+        trackerEvent.setTrackerType(com.neon.Tracker.TrackerType.IGN);
+        trackerEvent.setPageURL ("pageUrl_dummy");
+        trackerEvent.setRefURL ("refUrl_dummy");
+        trackerEvent.setServerTime (new java.lang.Long(1000));
+        trackerEvent.setClientTime (new java.lang.Long(1000) );
+        trackerEvent.setClientIP("clientIp_dummy");
+        trackerEvent.setNeonUserId ("neonUserId_dummy");
+        trackerEvent.setUserAgent("userAgent_dummy");
+        trackerEvent.setAgentInfo(new com.neon.Tracker.AgentInfo());
+        trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
+        trackerEvent.setIsImageClick(true);
         Coords c = new Coords();
         c.setX(1.0);
         c.setY(1.0);
-        event.setPageCoords(c);
+        trackerEvent.setPageCoords(c);
         c = new Coords();
         c.setX(1.0);
         c.setY(1.0);
-        event.setWindowCoords(c);
+        trackerEvent.setWindowCoords(c);
     
         // needed
         i.setThumbnailId("t1");
