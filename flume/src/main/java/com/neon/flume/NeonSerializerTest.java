@@ -120,7 +120,7 @@ class NeonSerializerTest {
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
     }
 
-public static void test_ImageClick() throws Exception { 
+    public static void test_ImageClick() throws Exception { 
 
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
 
@@ -179,7 +179,8 @@ public static void test_ImageClick() throws Exception {
         try {
 
             test_ImageVisible();
-            System.out.println("\n\nTest sucessful");
+            test_ImageClick();
+            System.out.println("\n\nTest successful");
         }
         catch(Exception e) {
             System.out.println("Test failure: exception: " + e.toString());
