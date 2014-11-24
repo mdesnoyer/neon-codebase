@@ -81,7 +81,7 @@ class NeonSerializerTest {
         DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
        
         TrackerEvent trackerEvent = new TrackerEvent(); 
-        fillWithDummies(trackerEvent);
+        //fillWithDummies(trackerEvent);
 
         ImageVisible i = new ImageVisible();
         i.setThumbnailId("t1");
@@ -130,7 +130,7 @@ class NeonSerializerTest {
         DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
        
         TrackerEvent trackerEvent = new TrackerEvent(); 
-        fillWithDummies(trackerEvent);
+        //fillWithDummies(trackerEvent);
 
         ImageClick i = new ImageClick();
         i.setThumbnailId("t1");
