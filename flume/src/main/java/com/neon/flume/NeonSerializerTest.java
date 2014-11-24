@@ -81,9 +81,25 @@ class NeonSerializerTest {
         DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
        
         TrackerEvent trackerEvent = new TrackerEvent(); 
-        //fillWithDummies(trackerEvent);
+        fillWithDummies(trackerEvent);
 
         ImageVisible i = new ImageVisible();
+        
+        // dummies
+        event.setPageId("pageId_dummy");
+        event.setTrackerAccountId("trackerAccountId_dummy");
+        event.setTrackerType(com.neon.Tracker.TrackerType.IGN);
+        event.setPageURL ("pageUrl_dummy");
+        event.setRefURL ("refUrl_dummy");
+        event.setServerTime (new java.lang.Long(1000));
+        event.setClientTime (new java.lang.Long(1000) );
+        event.setClientIP("clientIp_dummy");
+        event.setNeonUserId ("neonUserId_dummy");
+        event.setUserAgent("userAgent_dummy");
+        event.setAgentInfo(new com.neon.Tracker.AgentInfo());
+        event.setIpGeoData(new com.neon.Tracker.GeoData()); 
+        
+        // needed fields
         i.setThumbnailId("t1");
         trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_VISIBLE);
         trackerEvent.setEventData(i);
@@ -133,6 +149,31 @@ class NeonSerializerTest {
         //fillWithDummies(trackerEvent);
 
         ImageClick i = new ImageClick();
+        
+        // dummies
+        event.setPageId("pageId_dummy");
+        event.setTrackerAccountId("trackerAccountId_dummy");
+        event.setTrackerType(com.neon.Tracker.TrackerType.IGN);
+        event.setPageURL ("pageUrl_dummy");
+        event.setRefURL ("refUrl_dummy");
+        event.setServerTime (new java.lang.Long(1000));
+        event.setClientTime (new java.lang.Long(1000) );
+        event.setClientIP("clientIp_dummy");
+        event.setNeonUserId ("neonUserId_dummy");
+        event.setUserAgent("userAgent_dummy");
+        event.setAgentInfo(new com.neon.Tracker.AgentInfo());
+        event.setIpGeoData(new com.neon.Tracker.GeoData()); 
+        event.setIsImageClick(true);
+        Coords c = new Coords();
+        c.setX(1.0);
+        c.setY(1.0);
+        event.setPageCoords(c);
+        c = new Coords();
+        c.setX(1.0);
+        c.setY(1.0);
+        event.setWindowCoords(c);
+    
+        // needed
         i.setThumbnailId("t1");
         trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_CLICK);
         trackerEvent.setEventData(i);
