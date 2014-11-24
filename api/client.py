@@ -422,7 +422,7 @@ class VideoProcessor(object):
         # Get the CDN Metadata
         cdn_metadata = neondata.CDNHostingMetadataList.get(
             neondata.CDNHostingMetadataList.create_key(
-                self.video_metadata.get_account_id(),
+                api_key,
                 self.video_metadata.integration_id))
         if cdn_metadata is None:
             _log.warn_n('No cdn metadata for account %s integration %s. '
@@ -793,7 +793,7 @@ if __name__ == "__main__":
     # Register a function that will shutdown the workers
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
 
-    max_workers = multiprocessing.cpu_count() + 2
+    max_workers = multiprocessing.cpu_count() + 1
     cv_semaphore = multiprocessing.BoundedSemaphore(
         max(multiprocessing.cpu_count() - 1, 1))
 
