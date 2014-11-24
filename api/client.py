@@ -138,6 +138,10 @@ class VideoProcessor(object):
         self.base_filename = self.job_params['api_key'] + "/" + \
                 self.job_params['job_id']
 
+        self.n_thumbs = int(self.job_params.get('topn', None) or
+                            self.job_params.get('api_param', None) or 5)
+        self.n_thumbs = max(self.n_thumbs, 1)
+
         self.cv_semaphore = cv_semaphore
 
         integration_id = self.job_params['integration_id'] \
@@ -165,11 +169,7 @@ class VideoProcessor(object):
             self.download_video_file()
 
             #Process the video
-            n_thumbs = 5
-            if self.job_params.has_key('topn'):
-                n_thumbs = int(self.job_params['topn'] or n_thumbs)
-            elif self.job_params.has_key('api_param'):
-                n_thumbs = int(self.job_params['api_param'] or n_thumbs)
+            n_thumbs = max(self.n_thumbs, 5)
 
             with self.cv_semaphore:
                 self.process_video(self.tempfile.name, n_thumbs=n_thumbs)
@@ -558,9 +558,12 @@ class VideoProcessor(object):
         response_body["framenos"] = [
             x[0].frameno for x in self.thumbnails 
             if x[0].type == neondata.ThumbnailType.NEON]
+        response_body["framenos"] = response_body["framenos"][:self.n_thumbs]
         response_body["thumbnails"] = [
             x[0].urls[0] for x in self.thumbnails 
             if x[0].type == neondata.ThumbnailType.NEON]
+        response_body["thumbnails"] = \
+          response_body["thumbnails"][:self.n_thumbs]
         response_body["timestamp"] = str(time.time())
         response_body["serving_url"] = self.video_metadata.get_serving_url()
 

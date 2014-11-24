@@ -302,11 +302,17 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         neondata.NeonPlatform('acct1', self.api_key).save()
 
         self.video_id = '%s_vid1' % self.api_key
-        neondata.BrightcoveApiRequest('job1', self.api_key, 'vid1',
-                                      'some fun video',
-                                      'http://video.mp4', None, None, 'pubid',
-                                      'http://callback.com', 'int1',
-                                      'http://default_thumb.jpg').save()
+        api_request = neondata.BrightcoveApiRequest('job1', self.api_key,
+                                                    'vid1',
+                                                    'some fun video',
+                                                    'http://video.mp4',
+                                                    None, None, 'pubid',
+                                                    'http://callback.com',
+                                                    '0',
+                                                    'http://default_thumb.jpg')
+        api_request.api_param = '1'
+        api_request.api_method = 'topn'
+        api_request.save()
 
         # Mock out s3
         self.s3conn = boto_mock.MockConnection()
@@ -341,14 +347,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.cloundinary_mock = self.cloundinary_patcher.start()
 
         # Setup the processor object
-        job = {
-            'api_key': self.api_key,
-            'video_id' : 'vid1',
-            'job_id' : 'job1',
-            'video_title': 'some fun video',
-            'callback_url': 'http://callback.com',
-            'video_url' : 'http://video.mp4'
-            }
+        job = api_request.__dict__
         self.vprocessor = api.client.VideoProcessor(
             job,
             MagicMock(),
@@ -404,7 +403,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertAlmostEquals(video_data.duration, 130.0)
         self.assertEquals(video_data.frame_size, [640, 480])
         self.assertEquals(video_data.url, 'http://video.mp4')
-        self.assertEquals(video_data.integration_id, 0)
+        self.assertEquals(video_data.integration_id, '0')
         self.assertEquals(video_data.model_version, 'test_version')
         self.assertTrue(video_data.serving_enabled)
         self.assertIsNotNone(video_data.serving_url)
@@ -464,8 +463,8 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         expected_response = {
             'job_id' : 'job1',
             'video_id' : video_data.key,
-            'framenos' : [6, 69],
-            'thumbnails' : [n_thumbs[0].urls[0], n_thumbs[1].urls[0]],
+            'framenos' : [6],
+            'thumbnails' : [n_thumbs[0].urls[0]],
             'serving_url' : video_data.serving_url
             }
         self.assertDictContainsSubset(expected_response,
@@ -547,7 +546,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertAlmostEquals(video_data.duration, 130.0)
         self.assertEquals(video_data.frame_size, [640, 480])
         self.assertEquals(video_data.url, 'http://video.mp4')
-        self.assertEquals(video_data.integration_id, 0)
+        self.assertEquals(video_data.integration_id, '0')
         self.assertEquals(video_data.model_version, 'test_version')
         self.assertTrue(video_data.serving_enabled)
         self.assertIsNotNone(video_data.serving_url)
