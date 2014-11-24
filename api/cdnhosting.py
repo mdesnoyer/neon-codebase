@@ -34,13 +34,17 @@ import utils.sync
 import logging
 _log = logging.getLogger(__name__)
 
+from utils.options import define, options
+define('hosting_bucket', default='host-thumbnails',
+       help='Bucket that will host images in S3')
+
 @utils.sync.optional_sync
 @tornado.gen.coroutine
 def upload_image_to_s3(
         keyname,
         data,
         bucket=None,
-        bucket_name=properties.S3_IMAGE_HOST_BUCKET_NAME,
+        bucket_name=options.hosting_bucket,
         access_key=properties.S3_ACCESS_KEY,
         secret_key=properties.S3_SECRET_KEY,
         *args, **kwargs):
@@ -67,6 +71,8 @@ def upload_image_to_s3(
             s3conn = S3Connection(access_key, secret_key)
             bucket = yield utils.botoutils.run_async(s3conn.get_bucket,
                                                      bucket_name)
+        else:
+            bucket_name = bucket.name
 
         key = bucket.new_key(keyname)
 
@@ -90,7 +96,7 @@ def upload_image_to_s3(
 # TODO(Sunil): Change this to use the options instead of properties
 def get_s3_hosting_bucket():
     '''Returns the bucket that hosts the images.'''
-    return properties.S3_IMAGE_HOST_BUCKET_NAME
+    return options.hosting_bucket
 
 @utils.sync.optional_sync
 @tornado.gen.coroutine
@@ -111,10 +117,11 @@ def create_s3_redirect(dest_key, src_key, dest_bucket=None,
     if dest_bucket is None:
         dest_bucket = get_s3_hosting_bucket()
 
+
     if src_bucket == dest_bucket:
-        redirect_loc = dest_key
+        redirect_loc = "/%s" % dest_key
     else:
-        redirect_loc = "https://%s.s3.amazonaws.com/%s" % (
+        redirect_loc = "https://s3.amazonaws.com/%s/%s" % (
             dest_bucket, dest_key)
 
     s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
@@ -250,7 +257,7 @@ class AWSHosting(CDNHosting):
         if self.cdn_prefixes and len(self.cdn_prefixes) > 0:
             cdn_prefix = random.choice(self.cdn_prefixes)
         else:
-            cdn_prefix = "%s.s3.amazonaws.com" % self.s3bucket_name
+            cdn_prefix = "s3.amazonaws.com/%s" % self.s3bucket_name
 
 
         # Build the key name

@@ -373,7 +373,7 @@ class Mastermind(object):
             pass
 
         self._modify_video_state(video_id, experiment_state, value_left,
-                                 new_directive)
+                                 new_directive, video_info)
         
         self.serving_directive[video_id] = ((video_info.account_id,
                                              video_id),
@@ -757,14 +757,14 @@ class Mastermind(object):
         return None
 
     def _modify_video_state(self, video_id, experiment_state, value_left,
-                            new_directive):
+                            new_directive, video_info):
         '''Modifies the database with the current state of the video.'''
 
         # Update the serving percentages in the database
         self._incr_pending_modify(1)
         self.modify_pool.submit(
             _modify_many_serving_fracs,
-            self, video_id, new_directive)
+            self, video_id, new_directive, video_info)
         
         self._incr_pending_modify(1)
         self.modify_pool.submit(
@@ -772,27 +772,31 @@ class Mastermind(object):
             self, video_id, experiment_state, value_left)
 
 
-def _modify_many_serving_fracs(mastermind, video_id, new_directive):
+def _modify_many_serving_fracs(mastermind, video_id, new_directive,
+                               video_info):
     try:
-        thumb_ids, new_fracs = zip(
-            *[('_'.join([video_id, thumb_id]), frac)
+        ctrs = dict([(x.id, float(x.conv) / max(x.imp, 1)) for x in 
+                     video_info.thumbnails])
+        thumb_ids, new_fracs, new_ctrs = zip(
+            *[('_'.join([video_id, thumb_id]), frac, ctrs[thumb_id])
               for thumb_id, frac in new_directive.iteritems()])
         neondata.ThumbnailMetadata.modify_many(
             thumb_ids,
-            lambda x: _set_serving_fracs(thumb_ids, new_fracs, x))
+            lambda x: _set_serving_fracs(thumb_ids, new_fracs, new_ctrs, x))
         mastermind._incr_pending_modify(-1)
     except Exception as e:
         _log.exception('Unhandled exception when updating thumbs %s' % e)
         raise
 
 
-def _set_serving_fracs(thumb_ids, new_fracs, thumb_objs):
+def _set_serving_fracs(thumb_ids, new_fracs, new_ctrs, thumb_objs):
     '''Function to be used by modify_many in order to set the serving
     fractions for a set of thumbnails'''
-    for thumb_id, new_frac in zip(thumb_ids, new_fracs):
+    for thumb_id, new_frac, new_ctr in zip(thumb_ids, new_fracs, new_ctrs):
         obj = thumb_objs[thumb_id]
         if obj is not None:
             obj.serving_frac = new_frac
+            obj.ctr = new_ctr
 
 def _modify_video_info(mastermind, video_id, experiment_state, value_left):
 

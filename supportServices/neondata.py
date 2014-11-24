@@ -1242,7 +1242,7 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     This default hosting just uses pure S3, no cloudfront.
     '''
     def __init__(self, key=None,
-                 bucket_name='neon-image-cdn',
+                 bucket_name='n3.neon-images.com',
                  cdn_prefixes=None,
                  folder_prefix='',
                  resize=True,
@@ -2504,7 +2504,7 @@ class ThumbnailMetadata(StoredObject):
                  width=None, height=None, ttype=None,
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None,
-                 serving_frac=None, frameno=None, filtered=None):
+                 serving_frac=None, frameno=None, filtered=None, ctr=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
         self.urls = urls or []  # List of all urls associated with single image
@@ -2527,6 +2527,9 @@ class ThumbnailMetadata(StoredObject):
         # Fraction of traffic currently being served by this thumbnail.
         # =None indicates that Mastermind doesn't know of the fraction yet
         self.serving_frac = serving_frac 
+
+        # The current click through rate seen for this thumbnail
+        self.ctr = ctr
         
         # NOTE: If you add more fields here, modify the merge code in
         # api/client, Add unit test to check this
@@ -2586,7 +2589,7 @@ class ThumbnailMetadata(StoredObject):
         # Figure out the S3 location,
         # which is <API_KEY>/<VIDEO_ID>/<THUMB_ID>.jpg
         s3key = re.sub('_', '/', self.key) + '.jpg'
-        s3_url = 'https://%s.s3.amazonaws.com/%s' % \
+        s3_url = 'https://s3.amazonaws.com/%s/%s' % \
           (api.cdnhosting.get_s3_hosting_bucket(), s3key)
         self.urls.insert(0, s3_url)
 

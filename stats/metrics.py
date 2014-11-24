@@ -132,6 +132,26 @@ def calc_aggregate_click_based_metrics(data):
      (Mean lift (Positive value is good), p_value, lower 95% confidence bound,
      upper 95% confidence bound)
     '''
+    raw_counts = np.sum(data, axis=0)
+
+    np_data = np.array(data)
+    extra_clicks = np_data[:,3] - np.multiply(np_data[:,2],
+                                              np.divide(np_data[:,1],
+                                                        np_data[:,0]))
+
+    lift = raw_counts[0] / (raw_counts[2] * raw_counts[1]) * \
+      np.sum(extra_clicks)
+
+    return (lift,
+            None,
+            None,
+            None)
+    
+
+    # The following is the naive approach which suffers pretty heavily
+    # from Simpson's paradox because the the traffic going to each
+    # case could be significantly different.
+    '''
     counts = np.sum(data, axis=0)
 
     p_base = float(counts[1]) / counts[0]
@@ -152,3 +172,4 @@ def calc_aggregate_click_based_metrics(data):
             p_value,
             low/p_base,
             up/p_base)
+    '''

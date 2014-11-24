@@ -1297,6 +1297,11 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
                          neondata.ExperimentState.COMPLETE)
         self.assertLess(video.experiment_value_remaining,
                         0.05)
+        ctrs = dict([(x.key, x.ctr) for x in thumbs])
+        self.assertAlmostEqual(ctrs['acct1_vid1_bc'], 10./5000)
+        self.assertAlmostEqual(ctrs['acct1_vid1_n1'], 50./5000)
+        self.assertAlmostEqual(ctrs['acct1_vid1_n2'], 200./5000)
+        self.assertAlmostEqual(ctrs['acct1_vid1_ctr'], 20./5000)
 
     def test_db_override_thumb(self):
         self.mastermind.update_experiment_strategy(

@@ -89,7 +89,7 @@ define('serving_url_format',
         default="http://i%s.neon-images.com/v1/client/%s/neonvid_%s", type=str)
 define('max_videos_per_proc', default=100,
        help='Maximum number of videos a process will handle before respawning')
-define('dequeue_period', default=10,
+define('dequeue_period', default=10.0,
        help='Number of seconds between dequeues on a worker')
 
 
@@ -186,6 +186,7 @@ class VideoProcessor(object):
             api_request.save()
 
         except Exception as e:
+            _log.error("Unexpected error [%s]: %s" % (os.getpid(), e))
             # Flag that the job failed for some internal reason
             statemon.state.increment('processing_error')
 
@@ -236,7 +237,7 @@ class VideoProcessor(object):
 
     def process_video(self, video_file, n_thumbs=1):
         ''' process all the frames from the partial video downloaded '''
-        _log.info('Starting to process video %s' % self.video_url)
+        _log.info('Starting to search video %s' % self.video_url)
         start_process = time.time()
 
         try:
@@ -318,7 +319,7 @@ class VideoProcessor(object):
         self._get_random_frame(video_file)
 
         statemon.state.increment('processed_video')
-        _log.info('Finished processing video %s' % self.video_url)
+        _log.info('Sucessfully finished searching video %s' % self.video_url)
 
     def _get_center_frame(self, video_file, nframes=None):
         '''approximation of brightcove logic 
@@ -419,9 +420,9 @@ class VideoProcessor(object):
                 self.video_metadata.get_account_id(),
                 self.video_metadata.integration_id))
         if cdn_metadata is None:
-            _log.warn_n('No cdn metadata for integration %s. '
+            _log.warn_n('No cdn metadata for account %s integration %s. '
                         'Defaulting to Neon CDN'
-                        % self.video_metadata.integration_id, 10)
+                        % (api_key, self.video_metadata.integration_id), 10)
             cdn_metadata = [neondata.NeonCDNHostingMetadata()]
 
         # Attach the thumbnails to the video. This will upload the
@@ -444,26 +445,24 @@ class VideoProcessor(object):
         def _merge_thumbnails(t_objs):
             for new_thumb, garb in self.thumbnails:
                 old_thumb = t_objs[new_thumb.key]
-                if old_thumb is not None:
-                    # There was already an entry for this thumb, so update
-                    urlset = set(new_thumb.urls + old_thumb.urls)
-                    old_thumb.urls = [x for x in urlset]
-                    old_thumb.width = new_thumb.width
-                    old_thumb.height = new_thumb.height
-                    old_thumb.type = new_thumb.type
-                    old_thumb.model_score = new_thumb.model_score
-                    old_thumb.model_version = new_thumb.model_version
-                    old_thumb.rank = new_thumb.rank
-                    old_thumb.phash = new_thumb.phash
-                    old_thumb.frameno = new_thumb.frameno
-                    old_thumb.filtered = new_thumb.filtered
-                else:
-                    # Create the new entry
-                    t_objs[new_thumb.key] = new_thumb
+                # There was already an entry for this thumb, so update
+                urlset = set(new_thumb.urls + old_thumb.urls)
+                old_thumb.urls = [x for x in urlset]
+                old_thumb.video_id = new_thumb.video_id
+                old_thumb.width = new_thumb.width
+                old_thumb.height = new_thumb.height
+                old_thumb.type = new_thumb.type
+                old_thumb.model_score = new_thumb.model_score
+                old_thumb.model_version = new_thumb.model_version
+                old_thumb.rank = new_thumb.rank
+                old_thumb.phash = new_thumb.phash
+                old_thumb.frameno = new_thumb.frameno
+                old_thumb.filtered = new_thumb.filtered
         try:
             new_thumb_dict = neondata.ThumbnailMetadata.modify_many(
                 [x[0].key for x in self.thumbnails],
-                _merge_thumbnails)
+                _merge_thumbnails,
+                create_missing=True)
             if len(self.thumbnails) > 0 and len(new_thumb_dict) == 0:
                 raise DBError("Couldn't change some thumbs")
         except Exception, e:
@@ -537,6 +536,8 @@ class VideoProcessor(object):
         # Send callbacks and notifications
         self.send_client_callback_response(video_id, cb_request)
         self.send_notifiction_response(api_request)
+
+        _log.info('Sucessfully finished finalized video %s' % self.video_url)
         
 
     def build_callback_request(self):
@@ -606,7 +607,7 @@ class VideoProcessor(object):
         api_key = self.job_params[properties.API_KEY] 
         video_id = self.job_params[properties.VIDEO_ID]
         title = self.job_params[properties.VIDEO_TITLE]
-        i_id = self.job_params[properties.INTEGRATION_ID]
+        i_id = self.video_metadata.integration_id
         job_id  = self.job_params[properties.REQUEST_UUID_KEY]
         account = neondata.NeonUserAccount.get_account(api_key)
         if account is None:
@@ -661,7 +662,7 @@ class VideoClient(multiprocessing.Process):
         ''' Blocking http call to global queue to dequeue work
             Change state to PROCESSING after dequeue
         '''
-        
+        _log.debug("Dequeuing job [%s] " % (self.pid))
         headers = {'X-Neon-Auth' : properties.NEON_AUTH} 
         result = None
         req = tornado.httpclient.HTTPRequest(
@@ -717,7 +718,6 @@ class VideoClient(multiprocessing.Process):
         
         # Register a function to die cleanly on a sigterm
         atexit.register(self.stop)
-        signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
         
         while (not self.kill_received.is_set() and 
                self.videos_processed < options.max_videos_per_proc):
@@ -756,23 +756,23 @@ class VideoClient(multiprocessing.Process):
     def stop(self):
         self.kill_received.set()
 
-__workers = []   
-__master_pid = None
-__shutting_down = False
+_workers = []   
+_master_pid = None
+_shutting_down = False
 @atexit.register
 def shutdown_master_process():
-    if os.getpid() != __master_pid:
+    if os.getpid() != _master_pid:
         return
     
     _log.info('Shutting down')
-    __shutting_down = True
+    _shutting_down = True
 
     # Cleanup the workers
-    for worker in worker_procs:
-        worker.kill()
+    for worker in _workers:
+        worker.stop()
 
     # Wait for the workers and force kill if they take too long
-    for worker in worker_procs:
+    for worker in _workers:
         worker.join(1800.0) # 30min timeout
         if worker.is_alive():
             print 'Worker is still going. Force kill it'
@@ -780,10 +780,10 @@ def shutdown_master_process():
             utils.ps.send_signal_and_wait(signal.SIGKILL, [worker.pid])
     
 
-def main():
+if __name__ == "__main__":
     utils.neon.InitNeon()
 
-    __master_pid = os.getpid()
+    _master_pid = os.getpid()
 
     # Register a function that will shutdown the workers
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
@@ -793,26 +793,22 @@ def main():
         max(multiprocessing.cpu_count() - 1, 1))
 
     # Manage the workers 
-    while not __shutting_down:
+    while not _shutting_down:
         # Remove all the workers that are stopped
-        workers = [x for x in workers if x.is_alive()]
+        _workers = [x for x in _workers if x.is_alive()]
 
-        statemon.state.running_workers = len(workers)
+        statemon.state.running_workers = len(_workers)
 
         # Create new workers until we get to n_workers
-        while len(workers) < max_workers:
+        while len(_workers) < max_workers:
             vc = VideoClient(options.model_file, cv_semaphore)
-            workers.append(vc)
+            _workers.append(vc)
             vc.start()
 
         
         # Check if memory has been exceeded & exit
         cur_mem_usage = psutil.virtual_memory()[2] # in %
         if cur_mem_usage > 85:
-            __shutting_down = True
+            _shutting_down = True
 
         time.sleep(10)
-    
-
-if __name__ == "__main__":
-    main()
