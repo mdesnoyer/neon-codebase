@@ -114,10 +114,6 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
             trackerEvent = null;
             throw new FlumeException(e.toString());
         }
-        
-        if(trackerEvent == null) {
-            throw new FlumeException("unable to decode tracker event");
-        }
     }
  
     /*
@@ -172,6 +168,7 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
             case IMAGE_LOAD:
                 ImageLoad imgLd = (ImageLoad) trackerEvent.getEventData();
                 handleIncrement(imgLd.getThumbnailId().toString(), imageLoadColumnName);
+                break;
 
             case IMAGES_LOADED:
                 ImagesLoaded imgLded = (ImagesLoaded) trackerEvent.getEventData();
@@ -180,8 +177,9 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
                     String tid = ilIterator.next().getThumbnailId().toString();
                     handleIncrement(tid, imageLoadColumnName);
                 }
+                break;
                 
-            // any unsupported event types result in no-ops
+            // any unsupported event types, which result in no-ops
             default:
                 return increments;
         }
