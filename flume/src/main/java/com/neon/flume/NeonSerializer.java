@@ -158,6 +158,17 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
                 ImageLoad imgLd = (ImageLoad) trackerEvent.getEventData();
                 handleIncrement(imgLd.getThumbnailId().toString(), imageLoadColumnName);
 
+            case IMAGES_LOADED:
+                ImagesLoaded imgLded = (ImagesLoaded) trackerEvent.getEventData();
+                Iterator iterator = imgLded.images.iterator();
+                while(iterator.hasNext()) {
+                    String tid = iterator.next().getThumbnailId();
+                    handleIncrement(tid, imageLoadColumnName);
+                }
+                
+                
+                handleIncrement(imgLd.getThumbnailId().toString(), imageLoadColumnName);
+                
             // any unsupported event types result in no-ops
             default:
                 return increments;
