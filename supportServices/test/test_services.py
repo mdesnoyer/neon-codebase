@@ -1512,7 +1512,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(c_thumb.type, neondata.ThumbnailType.CUSTOMUPLOAD)
         self.assertIsNotNone(c_thumb.phash)
         self.assertEqual(c_thumb.urls, 
-                         ['https://host-thumbnails.s3.amazonaws.com/%s.jpg' %
+                         ['https://s3.amazonaws.com/host-thumbnails/%s.jpg' %
                           re.sub('_', '/', c_thumb.key),
                           'http://custom_thumbnail.jpg'])
         

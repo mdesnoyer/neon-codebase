@@ -1122,7 +1122,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.assertEqual(thumb_info.type, ThumbnailType.NEON)
         self.assertEqual(thumb_info.rank, 3)
         self.assertEqual(thumb_info.urls,
-                         ['https://host-thumbnails.s3.amazonaws.com/%s.jpg' %
+                         ['https://s3.amazonaws.com/host-thumbnails/%s.jpg' %
                           re.sub('_', '/', thumb_info.key)])
 
         # Make sure that the image was uploaded to s3 properly
@@ -1139,7 +1139,8 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         redirect = self.s3conn.get_bucket('host-thumbnails').get_key(
             'acct1/vid1/neon3.jpg')
         self.assertIsNotNone(redirect)
-        self.assertEqual(redirect.redirect_destination, primary_hosting_key)
+        self.assertEqual(redirect.redirect_destination,
+                         '/' + primary_hosting_key)
 
         # Check cloundinary
         self.cloundinary_mock().upload.assert_called_with(thumb_info.urls[0],
@@ -1175,7 +1176,8 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         redirect = self.s3conn.get_bucket('host-thumbnails').get_key(
             'acct1/vid1/customupload-1.jpg')
         self.assertIsNotNone(redirect)
-        self.assertEqual(redirect.redirect_destination, primary_hosting_key)
+        self.assertEqual(redirect.redirect_destination,
+                         '/' + primary_hosting_key)
 
         # Check the database
         self.assertEqual(VideoMetadata.get('acct1_vid1').thumbnail_ids,
@@ -1237,7 +1239,8 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         redirect = self.s3conn.get_bucket('host-thumbnails').get_key(
             'acct1/vid1/customupload-1.jpg')
         self.assertIsNotNone(redirect)
-        self.assertEqual(redirect.redirect_destination, primary_hosting_key)
+        self.assertEqual(redirect.redirect_destination,
+                         '/' + primary_hosting_key)
 
         # Check the database is empty
         self.assertIsNone(VideoMetadata.get('acct1_vid1'))
