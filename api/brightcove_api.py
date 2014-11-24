@@ -12,7 +12,6 @@ if sys.path[0] <> base_path:
 import datetime
 from poster.encode import multipart_encode
 import poster.encode
-import properties
 from PIL import Image
 from StringIO import StringIO
 import supportServices.neondata 
@@ -577,7 +576,7 @@ class BrightcoveApi(object):
             if prev_thumbnail is not None:
                 _log.debug("key=format_neon_api_request "
                         " msg=brightcove prev thumbnail not set")
-            request_body[properties.PREV_THUMBNAIL] = prev_thumbnail
+            request_body['default_thumbnail'] = prev_thumbnail
         else:
             return
         

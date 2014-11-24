@@ -46,14 +46,23 @@ class TestScheduler(test_utils.neontest.TestCase):
         self.max_interval = 10
 
         # Add a video
-        v1 = neondata.VideoMetadata('int_vid1', tids=['A', 'B'])
+        req = neondata.NeonApiRequest("job1", "testapikey", "vid1", "", "", "", "")
+        req.state = "serving_active"
+        req.save()
+        v1 = neondata.VideoMetadata('testapikey_vid1', ['A', 'B'], 'job1')
         v1.save()
         t1 = neondata.ThumbnailMetadata('A', v1.key, [])
         t2 = neondata.ThumbnailMetadata('B', v1.key, [])
-        neondata.ThumbnailMetadata.save_all([t1, t2])
-        
+        t3 = neondata.ThumbnailMetadata('C', v1.key, [])
+        neondata.ThumbnailMetadata.save_all([t1, t2, t3])
+
+        # mock check testing
+        m_check = MagicMock()
+        m_check.return_value = True
+        self.controller._check_testing_with_bcontroller = m_check
+
         self.controller.apply_directive(
-            ("int_vid1", [('B', 0.2), ('A', 0.8)]),
+            ("testapikey_vid1", [('B', 0.2), ('A', 0.8)]),
             self.max_interval)
         
     def tearDown(self):
@@ -102,6 +111,21 @@ class TestScheduler(test_utils.neontest.TestCase):
         Verify the ordering of tasks after intial setup
         '''
         self._test_add_tasks()
+        
+        # Add a new thumbnail 
+        v1 = neondata.VideoMetadata.get('testapikey_vid1')
+        v1.thumbnail_ids.append('C')
+        v1.save()
+
+        self.controller.apply_directive(
+            ("testapikey_vid1", [('B', 0.2), ('A', 0.6), ('C', 0.2)]),
+            self.max_interval)
+        
+        expected_order = ["ThumbnailChangeTask_B", "ThumbnailChangeTask_C",
+                "ThumbnailChangeTask_A", "TimesliceEndTask"]
+
+        task_map = self.get_video_task_map()
+        self._verify_tasks(task_map, expected_order)
 
     def _test_add_tasks(self):
         ' check schedule event timings for all tests and task types'
@@ -114,8 +138,12 @@ class TestScheduler(test_utils.neontest.TestCase):
         cushion_time = self.controller.cushion_time
         abtest_start = self.controller.timeslice - cushion_time
 
-        expected_order = ["ThumbnailChangeTask_A", "ThumbnailChangeTask_B",
+        expected_order = ["ThumbnailChangeTask_B",
                 "ThumbnailChangeTask_A", "TimesliceEndTask"]
+
+        self._verify_tasks(task_map, expected_order)
+
+    def _verify_tasks(self, task_map, expected_order):
 
         for vid,tasks in task_map.iteritems():
             task_order = []
@@ -192,8 +220,44 @@ class TestScheduler(test_utils.neontest.TestCase):
         ts = self.controller.timeslice
         expected_result = None 
         self.assertEqual(time_slices, expected_result)
+    
+    def test_thumbnail_change_scheduler(self):
+        controller = controllers.brightcove_controller.BrightcoveABController()
+        
+        # Mock out the apply_directive function
+        controller.apply_directive = MagicMock()
 
+        video_id = 'vid0'
+        distribution = [(u'thumb1', 0.7), (u'thumb2', 0.2), (u'thumb3', 0.1)] 
+        controller.thumbnail_change_scheduler(video_id, distribution) 
+        change_tids = []
+        for dist in distribution:
+            task, priority = controller.taskmgr.pop_task()
+            # ignore end task
+            if task.__class__.__name__ != "TimesliceEndTask": 
+                change_tids.append(task.tid)
 
+        self.assertListEqual(sorted(change_tids), ['thumb1', 'thumb2', 'thumb3'])
+
+    def test_apply_directive(self):
+       
+        # Apply a change with different tids
+        self.controller.apply_directive(("testapikey_vid1", [('B', 1)]), 
+                              self.max_interval)
+        
+        expected_order = ["ThumbnailChangeTask_A", "TimesliceEndTask"]
+        task_map = self.get_video_task_map()
+        self._verify_tasks(task_map, expected_order)
+        
+        # Apply the same directive again and verify change scheduler wasn't called
+        # Mock method
+        self.controller.thumbnail_change_scheduler = MagicMock()
+        self.controller.apply_directive(("testapikey_vid1", [('B', 1)]), 
+                              self.max_interval)
+        self.assertEqual(
+                self.controller.thumbnail_change_scheduler._mock_call_count, 0)
+
+        
 class TestBrightcoveController(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestBrightcoveController, self).setUp()
@@ -250,22 +314,6 @@ class TestBrightcoveController(test_utils.neontest.TestCase):
                                   'Error getting directive file'):
             self.controller.load_directives()
         self.assertFalse(self.controller.apply_directive.called)
-
-    def test_thumbnail_change_scheduler(self):
-        video_id = 'vid0'
-        distribution = [(u'thumb1', 0.7), (u'thumb2', 0.2), (u'thumb3', 0.1)] 
-        self.controller.thumbnail_change_scheduler(video_id, distribution) 
-
-        # Verify that the tasks are in the Q and 
-        # the ordering of them.Random.seed() ensures the same ordering for tests
-        change_tids = []
-        for dist in distribution:
-            task, priority = self.controller.taskmgr.pop_task()
-            # ignore end task
-            if task.__class__.__name__ != "TimesliceEndTask": 
-                change_tids.append(task.tid)
-
-        self.assertListEqual(change_tids, ['thumb3', 'thumb2', 'thumb1'])
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,3 +1,10 @@
+'''
+Neon video server
+
+Keeps the thumbnail api requests made in to the Neon system via CMS API
+The video clients consume the requests from this Q
+'''
+
 #!/usr/bin/env python
 import os.path
 import sys
@@ -5,20 +12,25 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0, base_path)
 
-
+from collections import deque
 import hashlib
+import json
 import logging
 import multiprocessing
 import os
-import properties
 import Queue
+import random
 import re
+import redis
 from supportServices import neondata
 import time
 import tornado.httpserver
+import tornado.gen
 import tornado.ioloop
 import tornado.web
 import tornado.escape
+import threading
+import utils.http
 import utils.neon
 import utils.ps
 from utils import statemon
@@ -26,51 +38,260 @@ from utils import statemon
 #Tornado options
 from utils.options import define, options
 define("port", default=8081, help="run on the given port", type=int)
-MAX_WAIT_SECONDS_BEFORE_SHUTDOWN = 3
+define("test_key", default="3qswu22oabmnl8d8hqcuku14", help="test api key",
+        type=str)
 
 _log = logging.getLogger(__name__)
-
 DIRNAME = os.path.dirname(__file__)
 
-#Monitoring variables
+# Monitoring variables
 statemon.define('server_queue', int)
 statemon.define('duplicate_requests', int)
 statemon.define('dequeue_requests', int)
+statemon.define('queue_size_bytes', int) # size of the queue in bytes of video
 
-#=============== Global Handlers ======================================#
 
-def check_remote_ip(request):
-    is_remote = False
-    if request.headers.has_key('X-Real-Ip'):
-        real_ip = request.headers['X-Real-Ip']
-        if re.search('^10.*',real_ip) is None:
-            if re.search('^127.*',real_ip) is None:
-                is_remote = True
-            else:
-                pass
+# Constants
+TOP_THUMBNAILS = "topn"
+CALLBACK_URL = "callback_url"
+VIDEO_ID = "video_id"
+VIDEO_DOWNLOAD_URL = "video_url"
+VIDEO_TITLE = "video_title"
+BCOVE_READ_TOKEN = "read_token"
+BCOVE_WRITE_TOKEN = "write_token"
+API_KEY = "api_key"
+JOB_SUBMIT_TIME = "submit_time"
+MAX_THUMBNAILS = 25
+NEON_AUTH = "secret_key"
+PUBLISHER_ID = "publisher_id"
+INTEGRATION_ID = "integration_id"
+
+customer_priorities = {} 
+
+@utils.sync.optional_sync
+@tornado.gen.coroutine
+def get_customer_priority(api_key):
+    #TODO(Sunil): refresh contents every "x" mins
+    priority = 1 # by default return priority=1
+    try:
+        priority = customer_priorities[api_key]
+    except KeyError, e:
+        nu = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
+                api_key)
+        if nu:
+            priority = nu.processing_priority
+            customer_priorities[api_key] = priority
         else:
-            pass
-    return is_remote
+            _log.error("Failed to fetch NeonUserAccount %s" % api_key)
+
+    raise tornado.gen.Return(priority)
+
+class RequestData(object):
+    '''
+    Instance of this classs is stored in the Q
+    '''
+
+    def __init__(self, key, api_request):
+        '''
+        @api_request: NeonApiRequest Object
+        '''
+        self.key = key
+        self.api_request = api_request
+        self.video_size = None # in bytes
+
+    def get_key(self):
+        return self.key
+    
+    def get_video_url(self):
+        return self.api_request.video_url
+
+    def get_request_json(self):
+        return self.api_request.to_json()
+
+    def get_video_size(self):
+        return self.video_size
+
+    def set_video_size(self, val):
+        self.video_size = val
+
+class SimpleThreadSafeDictQ(object):
+    '''
+    Threadsafe Q implementation using a double ended queue and
+    a dictionary to look up the object in the queue directly
+    '''
+    
+    def __init__(self, QItemType=RequestData):
+        self.QItemType = QItemType
+        self.qdict = {}
+        self.q = deque()
+        self._lock = threading.RLock()
+
+    def _get_lock(self):
+        return self._lock
+
+    def is_empty(self):
+        return self.size() == 0
+
+    def size(self):
+        return len(self.q)
+
+    def put(self, key, item):
+        '''
+        @item: Instance of what ever the QItemType is defined as 
+        
+        Returns : KEY that can be used to access the Q element directly
+                : None if the Queue already has the request element   
+        '''
+        if not isinstance(item, self.QItemType):
+            raise Exception("Expects an obj of QItemType, check init method")
+
+        # Don't insert the element in the Q if its already present 
+        try:
+            self.qdict[key]
+            return False
+        except KeyError, e:
+            self.q.append((key,item))
+            self.qdict[key] = item
+            return True 
+
+    def peek(self, key):
+        '''
+        '''
+        with self._lock:
+            try:
+                return self.qdict[key]
+            except KeyError, e:
+                return None
+
+    def get(self):
+        with self._lock:
+            try:
+                key, item = self.q.popleft()    
+                self.qdict.pop(key)
+                return item
+
+            except KeyError, e:
+                return
+            
+            except IndexError, e:
+                return
+
+class FairWeightedRequestQueue(object):
+    '''
+    FairWeighted requeust Q
+
+    '''
+    def __init__(self, nqueues=2, weights='pow2'):
+        # Queues that hold objects of type RequestData
+        self.pqs = [SimpleThreadSafeDictQ(RequestData) for x in range(nqueues)]
+        self.max_priority = 1.0
+        self.cumulative_priorities = []
+        if weights == 'pow2':
+            self.cumulative_priorities.append(1)
+            for i in range(nqueues):
+                if i >0:
+                    self.max_priority += 1.0/2**(i) 
+                    self.cumulative_priorities.append(self.max_priority)
+        else:
+            raise Exception("unsupported weight scheme")
+    
+    def _get_priority_qindex(self):
+        p = random.uniform(0, self.max_priority)
+        for index in range(len(self.pqs)):
+            if p < self.cumulative_priorities[index]:
+                return index
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def put(self, api_request):
+        # Based on customer priority put in the appropriate Q
+        p = yield tornado.gen.Task(get_customer_priority, api_request.api_key)
+        
+        # if priority > # of queues, then consider all priorities > len(Qs) as
+        # the lowest priority
+        pindex = min(p, len(self.pqs))
+        key = api_request.key
+        item = RequestData(key, api_request)
+        ret = self.pqs[pindex].put(key, item)
+
+        # Spin off a thread to set the metadata
+        self._schedule_metadata_thread(pindex, key)
+
+        raise tornado.gen.Return(ret)
+
+    def get(self):
+        # pick a random number in the interval (0, max_priority)
+        pindex = self._get_priority_qindex()
+        item = self.pqs[pindex].get()
+        if item:
+            return item.get_request_json()
+        else:
+            # check other Qs
+            for i in range(len(self.pqs)):
+                if i != pindex:
+                    item = self.pqs[i].get()
+                    if item:
+                        return item.get_request_json()
+        # Empty Q
+        return None
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _add_metadata(self, pqid, key):
+        '''
+        Add metadata to the Q item
+        '''
+        pq = self.pqs[pqid]
+        item = pq.peek(key)
+        # if the item still exists in the Q
+        if item:
+            video_url = item.get_video_url()
+
+            # Get content length of the video
+            req = tornado.httpclient.HTTPRequest(method='HEAD',
+                            url=video_url, request_timeout=5.0) 
+            result = yield tornado.gen.Task(utils.http.send_request, req)
+
+            if not result.error:
+                headers = result.headers
+                nbytes = int(headers.get('Content-Length'))
+                statemon.state.increment('queue_size_bytes', nbytes)
+                _log.info("Request %s had video file of size %s",
+                        item.get_request_json(), nbytes)
+                # add video size 
+                item.set_video_size(nbytes)
+
+            # On error do nothing currently
+
+    @tornado.gen.coroutine
+    def _schedule_metadata_thread(self, pqid, key):
+        t = threading.Thread(target=self._add_metadata, args=(pqid, key,))
+        t.setDaemon(True)
+        t.start()
+
+    def qsize(self):
+        sz = 0
+        for i in range(len(self.pqs)):
+            sz += self.pqs[i].size()
+        return sz
+
+    def _handle_default_thumbnail(self):
+        pass
 
 def _verify_neon_auth(value):
-    #TODO: Implement the authentication token logic
+    # TODO: Implement the authentication token logic
+    # Probably not required since all dequeue requests are from within the VPC
     return True
 
-## ===================== API ===========================================#
-## Internal Handlers and not be exposed externally
-## ===================== API ===========================================#
+
+#### GLOBALS #####
+global_request_queue = FairWeightedRequestQueue()
 
 class StatsHandler(tornado.web.RequestHandler):
     ''' Qsize handler '''
     def get(self, *args, **kwargs):
-        size = -1
-        try:
-            size = global_api_work_queue.qsize() #Doesn't work on mac osX
-        except Exception, e:
-            pass
-
-        if check_remote_ip(self.request) == False:
-            self.write("Qsize = " + str(size) )
+        size = global_request_queue.qsize()
+        self.write(size)
         self.finish()
 
 class DequeueHandler(tornado.web.RequestHandler):
@@ -82,21 +303,16 @@ class DequeueHandler(tornado.web.RequestHandler):
         else:
             raise tornado.web.HTTPError(400)
         
-        try:
-            statemon.state.increment('dequeue_requests')
-            statemon.state.server_queue = global_api_work_queue.qsize()
-            element = global_api_work_queue.get_nowait()
+        statemon.state.increment('dequeue_requests')
+        statemon.state.server_queue = global_request_queue.qsize()
+        element = global_request_queue.get()
+        if element:
             #send http response
             h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
             self.write(str(element))
-        
-        except Queue.Empty:
+        else: 
             #Send Queue empty message as a string {}
             self.write("{}")
-
-        except Exception,e:
-            _log.error("key=dequeue_handler msg=error from work queue")
-            raise tornado.web.HTTPError(500)
 
         self.finish()
 
@@ -106,12 +322,26 @@ class RequeueHandler(tornado.web.RequestHandler):
         
         try:
             _log.info("key=requeue_handler msg=requeing ")
-            data = self.request.body
-            #TODO Verify data Format
-            global_api_work_queue.put(data)
-            statemon.state.server_queue = global_api_work_queue.qsize()
-        except Exception,e:
-            _log.error("key=requeue_handler msg=error " + e.__str__())
+            jdata = self.request.body
+            data = json.loads(jdata)
+            try:
+                key = data["_data"]["key"]
+                api_request = neondata.NeonApiRequest._create(key, data)
+            except KeyError, e:
+                _log.error("Inavlid format for request json data")
+                self.set_status(400)
+                self.finish()
+                return
+
+            ret = global_request_queue.put(api_request)
+            if not ret:
+                _log.warn("requed request %s is already in the Q" % key)
+                self.set_status(409)
+                self.write('{"error": "requeust already in the Q"}')
+                
+            statemon.state.server_queue = global_request_queue.qsize()
+        except Exception, e:
+            _log.error("key=requeue_handler msg=error %s" %e)
             raise tornado.web.HTTPError(500)
 
         self.finish()
@@ -119,103 +349,23 @@ class RequeueHandler(tornado.web.RequestHandler):
 ## ===================== API ===========================================#
 # External Handlers
 ## ===================== API ===========================================#
-class JobStatusHandler(tornado.web.RequestHandler):
-    """ JOB Status Handler  """
-    @tornado.web.asynchronous
-    def get(self, *args, **kwargs):
-       
-        def db_callback(result):
-            self.set_header("Content-Type", "application/json")
-            if not result:
-                self.set_status(400)
-                resp = '{"status":"no such job"}'
-                self.write(resp)
-                self.finish()
-                return
-
-            self.write(result.to_json())
-            self.finish()
-
-        try:
-            api_key = self.get_argument(properties.API_KEY)
-            job_id  = self.get_argument(properties.REQUEST_UUID_KEY)
-            neondata.NeonApiRequest.get(job_id, api_key, db_callback)
-
-        except Exception,e:
-            _log.error("key=jobstatus_handler msg=exception " + e.__str__())
-            raise tornado.web.HTTPError(400)
 
 class GetThumbnailsHandler(tornado.web.RequestHandler):
     ''' Thumbnail API handler '''
 
-    test_mode = False
-    parsed_params = {}
+    @tornado.web.asynchronous
+    def send_json_response(self, data, status=200):
+       
+        self.set_header("Content-Type", "application/json")
+        self.set_status(status)
+        self.write(data)
+        self.finish()
 
     @tornado.web.asynchronous
     @tornado.gen.engine
     def post(self, *args, **kwargs):
-        #TODO: Refactor to have a single exit point, add counters
-
-        #insert job in to user account
-        def update_account(result):
-            if not result:
-                _log.error("key=thumbnail_handler update account " 
-                            "  msg=video not added to account")
-                self.write(response_data)
-                self.set_status(201)
-                self.finish()
-            else:
-                self.set_status(201)
-                self.write(response_data)
-                self.finish()
-
-        def get_yt_account(result):
-
-            #For brightcove account, its saved
-            if result:
-                if "youtubeaccount" in result:
-                    #yt = Youtube.create(result)
-                    #yt.add_video(vid, job_id)
-                    #yt.save(update_account)
-                    self.write("NOT YET IMPL")
-                    self.finish()
-                    return
-            else:
-                _log.error("key=thumbnail_handler update yt account" 
-                        " msg=account not found or api key error")
-                self.set_status(502)
-                self.finish()
-                return
-               
-        def get_platform(nplatform):
-            if nplatform:
-                nplatform.add_video(vid, job_id)
-                nplatform.save(update_account)
-            else:
-                _log.error("key=thumbnail_handler update platform account" 
-                        " msg=account not found or api key error")
-                self.write("ccount not found or api key error")
-                self.set_status(502)
-                self.finish()
-                return
-
-        #DB Callback
-        def saved_request(result):
-            if not result:
-                _log.error("key=thumbnail_handler  msg=request save failed: ")
-                self.set_status(502)
-                self.finish()
-            else:
-                if request_type == 'youtube':
-                    neondata.YoutubePlatform.get_account(api_key,
-                                                         get_yt_account) #i_id ?  
-                elif request_type == 'neon':
-                    neondata.NeonPlatform.get_account(api_key,
-                                                      get_platform) 
-                else:
-                    self.set_status(201)
-                    self.write(response_data)
-                    self.finish()
+        # insert job in to user account
+        
         try:
             params = tornado.escape.json_decode(self.request.body)
             uri = self.request.uri
@@ -223,80 +373,78 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             api_request = None 
             http_callback = None
             
-            #Verify essential parameters
+            # Verify essential parameters
             try:
-                api_key = params[properties.API_KEY]
-                vid = params[properties.VIDEO_ID]
-                title = params[properties.VIDEO_TITLE]
-                url = params[properties.VIDEO_DOWNLOAD_URL]
-            except KeyError, e:
-                raise Exception("params not set") #convert to custom exception
+                api_key = params[API_KEY]
+                vid = params[VIDEO_ID]
+                if not re.match('^[a-zA-Z0-9-]+$', vid):
+                    self.send_json_response(
+                        '{"error":"video id contains invalid characters"}', 400)
+                    return
 
+                title = params[VIDEO_TITLE]
+                url = params[VIDEO_DOWNLOAD_URL]
+                
+                #TODO: Handle default thumbnail
+
+            except KeyError, e:
+                self.send_json_response('{"error":"params not set"}', 400)
+                return
            
             # Treat http_callback as an optional parameter
             try:
-                http_callback = params[properties.CALLBACK_URL]
+                http_callback = params[CALLBACK_URL]
             except KeyError, e:
                 pass
 
-            #compare with supported api methods
-            if params.has_key(properties.TOP_THUMBNAILS):
+            # compare with supported api methods
+            if params.has_key(TOP_THUMBNAILS):
                 api_method = "topn"
-                api_param = min(int(params[properties.TOP_THUMBNAILS]),
-                        properties.MAX_THUMBNAILS)
-            elif params.has_key(properties.THUMBNAIL_RATE):
-                api_method = "rate"
-                api_param = params[properties.THUMBNAIL_RATE]
+                api_param = min(int(params[TOP_THUMBNAILS]),
+                        MAX_THUMBNAILS)
             else:
-                #DEFAULT
-                raise Exception("api method not supported")
+                self.send_json_response('{"error":"api method not supported"}', 400)
+                return
            
-            #Generate JOB ID  
-            #Use Params that can change to generate UUID, support same
-            #video to be processed with diff params
+            # Generate JOB ID  
+            # Use Params that can change to generate UUID, support same
+            # video to be processed with diff params
             intermediate = api_key + str(vid) + api_method + str(api_param) 
             job_id = hashlib.md5(intermediate).hexdigest()
           
-            #Identify Request Type
+            # Identify Request Type
             if "brightcove" in self.request.uri:
-                pub_id  = params[properties.PUBLISHER_ID] #publisher id
-                p_thumb = params[properties.PREV_THUMBNAIL]
-                rtoken = params[properties.BCOVE_READ_TOKEN]
-                wtoken = params[properties.BCOVE_WRITE_TOKEN]
+                pub_id  = params[PUBLISHER_ID] #publisher id
+                p_thumb = params["default_thumbnail"]
+                rtoken = params[BCOVE_READ_TOKEN]
+                wtoken = params[BCOVE_WRITE_TOKEN]
                 autosync = params["autosync"]
                 request_type = "brightcove"
-                i_id = params[properties.INTEGRATION_ID]
+                i_id = params[INTEGRATION_ID]
                 api_request = neondata.BrightcoveApiRequest(
                     job_id, api_key, vid, title, url,
-                    rtoken, wtoken, pub_id, http_callback, i_id)
-                api_request.previous_thumbnail = p_thumb 
+                    rtoken, wtoken, pub_id, http_callback, i_id,
+                    default_thumbnail=p_thumb)
                 api_request.autosync = autosync
 
-            elif "youtube" in self.request.uri:
-                request_type = "youtube"
-                access_token = params["access_token"]
-                refresh_token = params["refresh_token"]
-                expiry = params["token_expiry"]
-                autosync = params["autosync"]
-                api_request = neondata.YoutubeApiRequest(job_id, api_key, vid, 
-                                                         title, url,
-                                                         access_token,
-                                                         refresh_token, 
-                                                         expiry, http_callback)
-                api_request.previous_thumbnail = "http://img.youtube.com/vi/" + vid + "maxresdefault.jpg"
-            
             elif "ooyala" in self.request.uri:
                 request_type = "ooyala"
                 oo_api_key = params["oo_api_key"]
                 oo_secret_key = params["oo_secret_key"]
                 autosync = params["autosync"]
-                i_id = params[properties.INTEGRATION_ID]
-                p_thumb = params[properties.PREV_THUMBNAIL]
-                api_request = neondata.OoyalaApiRequest(job_id, api_key, 
-                                                        i_id, vid, title, url,
-                                                        oo_api_key,
-                                                        oo_secret_key, 
-                                                        p_thumb, http_callback)
+                i_id = params[INTEGRATION_ID]
+                p_thumb = params["default_thumbnail"]
+                api_request = neondata.OoyalaApiRequest(
+                    job_id,
+                    api_key, 
+                    i_id,
+                    vid,
+                    title,
+                    url,
+                    oo_api_key,
+                    oo_secret_key, 
+                    http_callback,
+                    default_thumbnail=p_thumb)
                 api_request.autosync = autosync
 
             else:
@@ -306,32 +454,29 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                                                       request_type,
                                                       http_callback)
             
-            #API Method
+            # API Method
             api_request.set_api_method(api_method, api_param)
             api_request.submit_time = str(time.time())
             api_request.state = neondata.RequestState.SUBMIT
 
-            #Validate Request & Insert in to Queue (serialized/json)
-            #job_result = None #NeonApiRequest.blocking_conn.get(api_request.key)
-            job_result = yield tornado.gen.Task(
-                neondata.NeonApiRequest.get,
-                api_request.job_id,
-                api_request.api_key)
+            # Validate Request & Insert in to Queue (serialized/json)
+            job_result = yield tornado.gen.Task(neondata.NeonApiRequest.get,
+                                api_request.job_id, api_request.api_key)
+
             if job_result is not None:
-                response_data = '{"error":"duplicate job", "job_id": "%s" }'%job_result.job_id 
+                response_data = '{"error":"duplicate job", "job_id": "%s" }'\
+                                 % job_result.job_id 
                 self.write(response_data)
                 self.set_status(409)
                 self.finish()
                 statemon.state.increment('duplicate_requests')
                 return
             
-            #TODO: insert in to work queue after saving request in db
-            #TODO (2): keep a video id queue in db for hot swapping the Q
             json_data = api_request.to_json()
-            global_api_work_queue.put(json_data)
-            statemon.state.server_queue = global_api_work_queue.qsize()
+            global_request_queue.put(api_request)
+            statemon.state.server_queue = global_request_queue.qsize()
             
-            #Response for the submission of request
+            # Response for the submission of request
             response_data = "{\"job_id\":\"" + job_id + "\"}"
             
             result = yield tornado.gen.Task(api_request.save)
@@ -340,20 +485,39 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 _log.error("key=thumbnail_handler  msg=request save failed: ")
                 self.set_status(502)
             else:
-                if request_type == 'youtube':
-                    neondata.YoutubePlatform.get_account(
-                        api_key, get_yt_account) #i_id ?  
-                elif request_type == 'neon':
-                    neondata.NeonPlatform.get_account(api_key, get_platform) 
+                
+                # Only if this is a Neon request, save it to the DB. Other platform requests
+                # get added on request creation cron 
+                if request_type == 'neon':
+                    nplatform = yield tornado.gen.Task(neondata.NeonPlatform.get_account, api_key)
+                    if nplatform:
+                        # TODO:refactor after moving platform accounts to stored
+                        # object (atomic save) 
+                        nplatform.add_video(vid, job_id)
+                        res = yield tornado.gen.Task(nplatform.save)
+                        if res:
+                            self.write(response_data)
+                            self.set_status(201)
+                            self.finish()
+                        else:
+                            _log.error("key=thumbnail_handler update account " 
+                                        "  msg=video not added to account")
+                    else:
+                        _log.error("account not found or api key error")
+                        self.send_json_response('{}', 400)
+
                 else:
                     self.set_status(201)
                     self.write(response_data)
                     self.finish()
 
+        except ValueError, e:
+            self.send_json_response('{"error":"%s"}' % e, 400)
+            return
+
         except Exception, e:
             _log.exception("key=thumbnail_handler msg= %s"%e)
-            self.set_status(400)
-            self.finish("<html><body>Bad Request " + e.__str__() + " </body></html>")
+            self.send_json_response('{"error":"%s"}' % e, 500)
             return
 
 ###########################################
@@ -366,25 +530,50 @@ class TestCallback(tornado.web.RequestHandler):
         
         try:
             _log.info("key=testcallback msg=output: " + self.request.body)
-        except Exception,e:
+        except Exception, e:
             raise tornado.web.HTTPError(500)  
             _log.error("key=testcallback msg=error recieving message")
         
         self.finish()
 
+class HealthCheckHandler(tornado.web.RequestHandler):
+    ''' Health check for the Server'''
+    @tornado.web.asynchronous
+    @tornado.gen.engine
+    def get(self, *args, **kwargs):
+        test_account_key = options.test_key
+        
+        # Try to query the video Q
+        size = global_request_queue.qsize()
+        
+        # Ping the DB to see if its running
+        try:
+            ret = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
+                test_account_key)
+            if ret:
+                self.set_status(200)
+                self.finish()
+                return
+            # if not ret, return 503. yes we can talk to the db but since we
+            # couldn't fetch the test accout,  the DB could be in inconsistent
+            # state
+        except redis.ConnectionError, e:
+            self.write("Error connecting to the video database")
+        
+        self.set_status(503)
+        self.finish()
+
 ###########################################
 # Create Tornado server application
 ###########################################
-global_api_work_queue = multiprocessing.Queue()
 
 application = tornado.web.Application([
     (r'/api/v1/submitvideo/(.*)', GetThumbnailsHandler),
-    (r"/stats",StatsHandler),
-    (r"/dequeue",DequeueHandler),
-    (r"/requeue",RequeueHandler),
-    (r"/testcallback",TestCallback),
-    (r'/api/v1/jobstatus',JobStatusHandler),
-    #(r'/api/v1/getresults',GetResultsHandler),    
+    (r"/stats", StatsHandler),
+    (r"/dequeue", DequeueHandler),
+    (r"/requeue", RequeueHandler),
+    (r"/testcallback", TestCallback),
+    (r"/healthcheck", HealthCheckHandler)
 ])
 
 def main():
