@@ -4,10 +4,14 @@ import  com.neon.Tracker.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Iterator;
 import java.util.regex.*;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
+import java.text.SimpleDateFormat;
+import java.text.DateFormat;
+import java.util.Date;
 
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
@@ -23,6 +27,7 @@ import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.Decoder;
+import org.apache.avro.io.BinaryDecoder;
 import org.apache.avro.io.DecoderFactory;
 import org.apache.avro.io.Encoder;
 import org.apache.avro.io.EncoderFactory;
@@ -34,10 +39,10 @@ import org.apache.flume.FlumeException;
 import org.apache.flume.conf.ComponentConfiguration;
 import org.apache.flume.sink.hbase.SimpleHbaseEventSerializer.KeyType;
 import org.apache.flume.sink.hbase.AsyncHbaseEventSerializer;
- 
+
 import org.hbase.async.AtomicIncrementRequest;
 import org.hbase.async.PutRequest;
- 
+
 public class NeonSerializer implements AsyncHbaseEventSerializer 
 {
     // to hold hbase operations 
@@ -59,7 +64,6 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     
     private byte imageClickColumnName[] = "IMAGE_CLICK".getBytes();
         
-
     // event-based  
     private String eventTimestamp = null;
     private TrackerEvent trackerEvent = null;
