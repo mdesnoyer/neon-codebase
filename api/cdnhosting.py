@@ -37,6 +37,12 @@ _log = logging.getLogger(__name__)
 from utils.options import define, options
 define('hosting_bucket', default='host-thumbnails',
        help='Bucket that will host images in S3')
+define('cloudinary_name', default='neon-labs',
+       help='Account name in cloudinary')
+define('cloudinary_api_key', default='433154993476843',
+       help='Cloudinary api key')
+define('cloudinary_api_secret', default='n0E7427lrS1Fe_9HLbtykf9CdtA',
+       help='Cloudinary secret api key')
 
 @utils.sync.optional_sync
 @tornado.gen.coroutine
@@ -45,8 +51,8 @@ def upload_image_to_s3(
         data,
         bucket=None,
         bucket_name=options.hosting_bucket,
-        access_key=properties.S3_ACCESS_KEY,
-        secret_key=properties.S3_SECRET_KEY,
+        access_key=None,
+        secret_key=None,
         *args, **kwargs):
     '''
     Upload image to s3 bucket 'host-thumbnails' 
@@ -54,8 +60,6 @@ def upload_image_to_s3(
     This is the bucket where the primary copy of thumbnails are stored.
     ThumbnailMetadata structure stores these thumbnails
     CMS API returns these urls to be populated in the Neon UI
-    
-    Uses AWS keys from the properties file
 
     @keyname: the basename of the file or name relative to bucket 
     @data: string data (of image) to be uploaded to S3 
@@ -93,7 +97,6 @@ def upload_image_to_s3(
                     (bucket_name, keyname, e))
         raise IOError(str(e))
 
-# TODO(Sunil): Change this to use the options instead of properties
 def get_s3_hosting_bucket():
     '''Returns the bucket that hosts the images.'''
     return options.hosting_bucket
@@ -124,7 +127,7 @@ def create_s3_redirect(dest_key, src_key, dest_bucket=None,
         redirect_loc = "https://s3.amazonaws.com/%s/%s" % (
             dest_bucket, dest_key)
 
-    s3conn = S3Connection(properties.S3_ACCESS_KEY, properties.S3_SECRET_KEY)
+    s3conn = S3Connection()
     try:
         bucket = yield utils.botoutils.run_async(s3conn.get_bucket, src_bucket)
         key = bucket.new_key(src_key)
@@ -342,7 +345,7 @@ class CloudinaryHosting(CDNHosting):
 
     def make_request(self, params, imdata=None, headers=None):
         api_url  = "https://api.cloudinary.com/v1_1/%s/image/upload" %\
-                     properties.CLOUDINARY_NAME          
+                     options.cloudinary_name          
         
         encoded_params = urllib.urlencode(params)
         request = urllib2.Request(api_url, encoded_params)
@@ -375,10 +378,10 @@ class CloudinaryHosting(CDNHosting):
 
     def sign_request(self, params):
 
-        api_secret = properties.CLOUDINARY_API_SECRET
+        api_secret = options.cloudinary_api_secret
 
         params["signature"] = self.api_sign_request(params, api_secret)
-        params["api_key"] = properties.CLOUDINARY_API_KEY
+        params["api_key"] = options.cloudinary_api_key
         
         return params
       

@@ -320,7 +320,7 @@ class TestVideoServer(AsyncHTTPTestCase):
                     "publisher_id" : "pubid",
                     "read_token": "rtoken",
                     "write_token": "wtoken",
-                    "previous_thumbnail": "http://prev_thumb"
+                    "default_thumbnail": "http://prev_thumb"
                     }
         url = self.get_url('/api/v1/submitvideo/brightcove')
         resp = self.make_api_request(vals, url)
@@ -329,6 +329,20 @@ class TestVideoServer(AsyncHTTPTestCase):
         job_id = json.loads(resp.body)['job_id']
         api_request = neondata.NeonApiRequest.get(job_id, self.api_key)
         self.assertEqual(api_request.video_id, "testid123")
+    
+    def test_brightcove_request_invalid(self):
+
+        i_id = "i125"
+        bp = neondata.BrightcovePlatform("testaccountneonapi", i_id,
+                self.api_key)
+        bp.save()
+        vals = {"api_key": self.api_key, 
+                    "video_url": "http://testurl/video.mp4", 
+                    "video_id": "testid123", "topn":2, 
+                    "callback_url": "http://callback_push_url"}
+        url = self.get_url('/api/v1/submitvideo/brightcove')
+        resp = self.make_api_request(vals, url)
+        self.assertEqual(resp.code, 400)
 
     def test_empty_request(self):
         ''' test empty request '''
@@ -342,7 +356,7 @@ class TestVideoServer(AsyncHTTPTestCase):
 
         resp = self.add_request()
         self.assertEqual(resp.code, 201)
-        h = {'X-Neon-Auth' : NEON_AUTH} 
+        h = {'X-Neon-Auth' : 'secret_token'} 
         for i in range(10): #dequeue a bunch 
             self.http_client.fetch(self.get_url('/dequeue'), 
                 callback=self.stop, method="GET", headers=h)

@@ -37,7 +37,6 @@ import utils.neon
 import logging
 _log = logging.getLogger(__name__)
 
-import api.properties
 import bcove_responses
 import ooyala_responses
 

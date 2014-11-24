@@ -19,7 +19,6 @@ if sys.path[0] != __base_path__:
 
 import api.client
 import api.cdnhosting
-import api.properties
 from boto.s3.connection import S3Connection
 import boto.exception
 import json
@@ -487,7 +486,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
                           'http://www.neon-lab.com/api/accounts/acct1/events') 
         data = urlparse.parse_qs(request_saw.body)
         self.assertEquals(data['api_key'][0],
-                          api.properties.NOTIFICATION_API_KEY)
+                          options.get('api.client.notification_api_key'))
         self.assertEquals(data['event'][0], 'processing_complete')
         video_dict = json.loads(data['video'][0])
         self.assertEquals(video_dict['video_id'], 'vid1')
@@ -790,7 +789,7 @@ class SmokeTest(test_utils.neontest.TestCase):
         self.video_id = '%s_vid1' % self.api_key
         neondata.OoyalaApiRequest('job1', self.api_key, 'int1', 'vid1',
                                   'some fun video',
-                                  'http://video.mp4', None, None, 'pubid',
+                                  'http://video.mp4', None, None,
                                   'http://callback.com',
                                   'http://default_thumb.jpg').save()
 

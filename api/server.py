@@ -64,7 +64,6 @@ JOB_SUBMIT_TIME = "submit_time"
 MAX_THUMBNAILS = 25
 NEON_AUTH = "secret_key"
 PUBLISHER_ID = "publisher_id"
-PREV_THUMBNAIL = "previous_thumbnail"
 INTEGRATION_ID = "integration_id"
 
 customer_priorities = {} 
@@ -416,7 +415,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             # Identify Request Type
             if "brightcove" in self.request.uri:
                 pub_id  = params[PUBLISHER_ID] #publisher id
-                p_thumb = params[PREV_THUMBNAIL]
+                p_thumb = params["default_thumbnail"]
                 rtoken = params[BCOVE_READ_TOKEN]
                 wtoken = params[BCOVE_WRITE_TOKEN]
                 autosync = params["autosync"]
@@ -424,8 +423,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 i_id = params[INTEGRATION_ID]
                 api_request = neondata.BrightcoveApiRequest(
                     job_id, api_key, vid, title, url,
-                    rtoken, wtoken, pub_id, http_callback, i_id)
-                api_request.previous_thumbnail = p_thumb 
+                    rtoken, wtoken, pub_id, http_callback, i_id,
+                    default_thumbnail=p_thumb)
                 api_request.autosync = autosync
 
             elif "ooyala" in self.request.uri:
@@ -434,12 +433,18 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 oo_secret_key = params["oo_secret_key"]
                 autosync = params["autosync"]
                 i_id = params[INTEGRATION_ID]
-                p_thumb = params[PREV_THUMBNAIL]
-                api_request = neondata.OoyalaApiRequest(job_id, api_key, 
-                                                        i_id, vid, title, url,
-                                                        oo_api_key,
-                                                        oo_secret_key, 
-                                                        p_thumb, http_callback)
+                p_thumb = params["default_thumbnail"]
+                api_request = neondata.OoyalaApiRequest(
+                    job_id,
+                    api_key, 
+                    i_id,
+                    vid,
+                    title,
+                    url,
+                    oo_api_key,
+                    oo_secret_key, 
+                    http_callback,
+                    default_thumbnail=p_thumb)
                 api_request.autosync = autosync
 
             else:

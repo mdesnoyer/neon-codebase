@@ -692,13 +692,13 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         oo_request = neondata.OoyalaApiRequest(
             'oo_job', 'api_key', 'i_id', 'vid0', 'title',
-            'url', 'oo_api_key', 'oo_secret_key', 'p_thumb',
+            'url', 'oo_api_key', 'oo_secret_key',
             'callback_url', 'default_thumbnail')
         oo_request.save()
 
         self.assertEquals(oo_request, NeonApiRequest.get('oo_job', 'api_key'))
 
-        yt_request = neondata.OoyalaApiRequest(
+        yt_request = neondata.YoutubeApiRequest(
             'yt_job', 'api_key', 'vid0', 'title',
             'url', 'access_token', 'request_token', 'expiry',
             'callback_url', 'default_thumbnail')

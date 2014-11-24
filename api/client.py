@@ -25,7 +25,6 @@ if sys.path[0] != __base_path__:
 
 import api.brightcove_api
 import api.ooyala_api
-from api import properties
 import atexit
 import boto.exception
 import cv2
@@ -83,14 +82,18 @@ statemon.define('running_workers', int)
 # ======== Parameters  =======================#
 from utils.options import define, options
 define('model_file', default=None, help='File that contains the model')
-define('video_server', default="http://localhost:8081", type=str,
-       help="video server")
+define('video_server', default="localhost:8081", type=str,
+       help="host:port of the video processing server")
 define('serving_url_format',
         default="http://i%s.neon-images.com/v1/client/%s/neonvid_%s", type=str)
 define('max_videos_per_proc', default=100,
        help='Maximum number of videos a process will handle before respawning')
 define('dequeue_period', default=10.0,
        help='Number of seconds between dequeues on a worker')
+define('notification_api_key', default='icAxBCbwo--owZaFED8hWA',
+       help='Api key for the notifications')
+define('server_auth', default='secret_token',
+       help='Secret token for talking with the video processing server')
 
 
 class VideoError(Exception): pass
@@ -123,7 +126,7 @@ class VideoProcessor(object):
 
         self.timeout = 300.0 #long running tasks ## -- is this necessary ???
         self.job_params = params
-        self.video_url = self.job_params[properties.VIDEO_DOWNLOAD_URL]
+        self.video_url = self.job_params['video_url']
         vsuffix = self.video_url.split('/')[-1]  #get the video file extension
         vsuffix = vsuffix.strip("!@#$%^&*[]^()+~")
         self.tempfile = tempfile.NamedTemporaryFile(
@@ -132,20 +135,20 @@ class VideoProcessor(object):
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
             Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
 
-        self.base_filename = self.job_params[properties.API_KEY] + "/" + \
-                self.job_params[properties.REQUEST_UUID_KEY]
+        self.base_filename = self.job_params['api_key'] + "/" + \
+                self.job_params['job_id']
 
         self.cv_semaphore = cv_semaphore
 
-        integration_id = self.job_params[properties.INTEGRATION_ID] \
-          if self.job_params.has_key(properties.INTEGRATION_ID) else 0
+        integration_id = self.job_params['integration_id'] \
+          if self.job_params.has_key('integration_id') else 0
         self.video_metadata = neondata.VideoMetadata(
             neondata.InternalVideoID.generate(
-                self.job_params[properties.API_KEY],
-                self.job_params[properties.VIDEO_ID]),
+                self.job_params['api_key'],
+                self.job_params['video_id']),
             model_version=model_version,
-            request_id=self.job_params[properties.REQUEST_UUID_KEY],
-            video_url=self.job_params[properties.VIDEO_DOWNLOAD_URL],
+            request_id=self.job_params['job_id'],
+            video_url=self.job_params['video_url'],
             i_id=integration_id)
     
         #Video vars
@@ -163,8 +166,10 @@ class VideoProcessor(object):
 
             #Process the video
             n_thumbs = 5
-            if self.job_params.has_key(properties.TOP_THUMBNAILS):
-                n_thumbs = int(self.job_params[properties.TOP_THUMBNAILS])
+            if self.job_params.has_key('topn'):
+                n_thumbs = int(self.job_params['topn'] or n_thumbs)
+            elif self.job_params.has_key('api_param'):
+                n_thumbs = int(self.job_params['api_param'] or n_thumbs)
 
             with self.cv_semaphore:
                 self.process_video(self.tempfile.name, n_thumbs=n_thumbs)
@@ -180,8 +185,8 @@ class VideoProcessor(object):
             # TODO(sunil): Make this an atomic modify operation once
             # neondata is refactored.
             api_request = neondata.NeonApiRequest.get(
-                self.job_params[properties.REQUEST_UUID_KEY],
-                self.job_params[properties.API_KEY])
+                self.job_params['job_id'],
+                self.job_params['api_key'])
             api_request.state = neondata.RequestState.FAILED
             api_request.save()
 
@@ -193,8 +198,8 @@ class VideoProcessor(object):
             # TODO(sunil): Make this an atomic modify operation once
             # neondata is refactored.
             api_request = neondata.NeonApiRequest.get(
-                self.job_params[properties.REQUEST_UUID_KEY],
-                self.job_params[properties.API_KEY])
+                self.job_params['job_id'],
+                self.job_params['api_key'])
             api_request.state = neondata.RequestState.INT_ERROR
             api_request.save()
        
@@ -403,9 +408,9 @@ class VideoProcessor(object):
         This updates the database and does any callbacks necessary.
         '''
         
-        api_key = self.job_params[properties.API_KEY]  
-        job_id  = self.job_params[properties.REQUEST_UUID_KEY]
-        video_id = self.job_params[properties.VIDEO_ID]
+        api_key = self.job_params['api_key']  
+        job_id  = self.job_params['job_id']
+        video_id = self.job_params['video_id']
         
         # get api request object
         api_request = neondata.NeonApiRequest.get(job_id, api_key)
@@ -563,7 +568,7 @@ class VideoProcessor(object):
         body = tornado.escape.json_encode(response_body)
         h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
         cb_response_request = tornado.httpclient.HTTPRequest(
-                                url=self.job_params[properties.CALLBACK_URL], 
+                                url=self.job_params['callback_url'], 
                                 method="POST",
                                 headers=h, 
                                 body=body, 
@@ -604,11 +609,11 @@ class VideoProcessor(object):
         Send Notification to endpoint
         '''
 
-        api_key = self.job_params[properties.API_KEY] 
-        video_id = self.job_params[properties.VIDEO_ID]
-        title = self.job_params[properties.VIDEO_TITLE]
+        api_key = self.job_params['api_key'] 
+        video_id = self.job_params['video_id']
+        title = self.job_params['video_title']
         i_id = self.video_metadata.integration_id
-        job_id  = self.job_params[properties.REQUEST_UUID_KEY]
+        job_id  = self.job_params['job_id']
         account = neondata.NeonUserAccount.get_account(api_key)
         if account is None:
             _log.error('Could not get the account for api key %s' %
@@ -629,7 +634,7 @@ class VideoProcessor(object):
         notification_url = \
           'http://www.neon-lab.com/api/accounts/%s/events' % account.account_id
         request_dict = {}
-        request_dict["api_key"] = properties.NOTIFICATION_API_KEY
+        request_dict["api_key"] = options.notification_api_key
         request_dict["video"] = vr.to_json()
         request_dict["event"] = "processing_complete"
         request = tornado.httpclient.HTTPRequest(
@@ -651,7 +656,7 @@ class VideoClient(multiprocessing.Process):
         super(VideoClient, self).__init__()
         self.model_file = model_file
         self.kill_received = multiprocessing.Event()
-        self.dequeue_url = options.video_server + "/dequeue"
+        self.dequeue_url = 'http://%s/dequeue' % options.video_server
         self.state = "start"
         self.model_version = None
         self.model = None
@@ -663,7 +668,7 @@ class VideoClient(multiprocessing.Process):
             Change state to PROCESSING after dequeue
         '''
         _log.debug("Dequeuing job [%s] " % (self.pid))
-        headers = {'X-Neon-Auth' : properties.NEON_AUTH} 
+        headers = {'X-Neon-Auth' : options.server_auth} 
         result = None
         req = tornado.httpclient.HTTPRequest(
                                             url=self.dequeue_url,
@@ -680,8 +685,8 @@ class VideoClient(multiprocessing.Process):
                 try:
                     job_params = tornado.escape.json_decode(result)
                     #Change Job State
-                    api_key = job_params[properties.API_KEY]
-                    job_id  = job_params[properties.REQUEST_UUID_KEY]
+                    api_key = job_params['api_key']
+                    job_id  = job_params['job_id']
                     api_request = neondata.NeonApiRequest.get(job_id, api_key)
                     if api_request.state == neondata.RequestState.SUBMIT:
                         api_request.state = neondata.RequestState.PROCESSING
