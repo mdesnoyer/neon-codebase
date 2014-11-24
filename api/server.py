@@ -260,7 +260,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             #Identify Request Type
             if "brightcove" in self.request.uri:
                 pub_id  = params[properties.PUBLISHER_ID] #publisher id
-                p_thumb = params[properties.PREV_THUMBNAIL]
+                p_thumb = params["default_thumbnail"]
                 rtoken = params[properties.BCOVE_READ_TOKEN]
                 wtoken = params[properties.BCOVE_WRITE_TOKEN]
                 autosync = params["autosync"]
@@ -268,8 +268,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 i_id = params[properties.INTEGRATION_ID]
                 api_request = neondata.BrightcoveApiRequest(
                     job_id, api_key, vid, title, url,
-                    rtoken, wtoken, pub_id, http_callback, i_id)
-                api_request.previous_thumbnail = p_thumb 
+                    rtoken, wtoken, pub_id, http_callback, i_id,
+                    default_thumbnail=p_thumb)
                 api_request.autosync = autosync
 
             elif "youtube" in self.request.uri:
@@ -291,12 +291,18 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 oo_secret_key = params["oo_secret_key"]
                 autosync = params["autosync"]
                 i_id = params[properties.INTEGRATION_ID]
-                p_thumb = params[properties.PREV_THUMBNAIL]
-                api_request = neondata.OoyalaApiRequest(job_id, api_key, 
-                                                        i_id, vid, title, url,
-                                                        oo_api_key,
-                                                        oo_secret_key, 
-                                                        p_thumb, http_callback)
+                p_thumb = params["default_thumbnail"]
+                api_request = neondata.OoyalaApiRequest(
+                    job_id,
+                    api_key, 
+                    i_id,
+                    vid,
+                    title,
+                    url,
+                    oo_api_key,
+                    oo_secret_key, 
+                    http_callback,
+                    default_thumbnail=p_thumb)
                 api_request.autosync = autosync
 
             else:
