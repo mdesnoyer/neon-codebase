@@ -535,7 +535,7 @@ class OoyalaAPI(object):
             if prev_thumbnail is not None:
                 _log.debug("key=format_neon_api_request "
                         " msg=ooyala preview thumbnail not set")
-            request_body[properties.PREV_THUMBNAIL] = prev_thumbnail
+            request_body['default_thumbnail'] = prev_thumbnail
         else:
             return
         

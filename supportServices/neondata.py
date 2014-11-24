@@ -2266,7 +2266,6 @@ class BrightcoveApiRequest(NeonApiRequest):
         self.write_token = wtoken
         self.publisher_id = pid
         self.integration_id = i_id 
-        self.previous_thumbnail = None # TODO(Sunil): Remove this
         self.autosync = False
      
     def get_default_thumbnail_type(self):
@@ -2280,7 +2279,7 @@ class OoyalaApiRequest(NeonApiRequest):
     Ooyala API Request class
     '''
     def __init__(self, job_id, api_key=None, i_id=None, vid=None, title=None,
-                 url=None, oo_api_key=None, oo_secret_key=None, p_thumb=None,
+                 url=None, oo_api_key=None, oo_secret_key=None,
                  http_callback=None, default_thumbnail=None):
         super(OoyalaApiRequest, self).__init__(
             job_id, api_key, vid, title, url,
@@ -2290,7 +2289,6 @@ class OoyalaApiRequest(NeonApiRequest):
         self.oo_api_key = oo_api_key
         self.oo_secret_key = oo_secret_key
         self.integration_id = i_id 
-        self.previous_thumbnail = p_thumb # TODO(Sunil): Remove this
         self.autosync = False
 
     def get_default_thumbnail_type(self):
