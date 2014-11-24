@@ -53,25 +53,6 @@ import org.apache.flume.event.EventBuilder;
 
 class NeonSerializerTest {   
     
-
-
-    public static void fillWithDummies(TrackerEvent event) {
-
-        event.setPageId("pageId_dummy");
-        event.setTrackerAccountId("trackerAccountId_dummy");
-        event.setTrackerType(com.neon.Tracker.TrackerType.IGN);
-        event.setPageURL ("pageUrl_dummy");
-        event.setRefURL ("refUrl_dummy");
-        event.setServerTime (new java.lang.Long(1000));
-        event.setClientTime (new java.lang.Long(1000) );
-        event.setClientIP("clientIp_dummy");
-        event.setNeonUserId ("neonUserId_dummy");
-        event.setUserAgent("userAgent_dummy");
-        event.setAgentInfo(new com.neon.Tracker.AgentInfo());
-        event.setIpGeoData(new com.neon.Tracker.GeoData()); 
-    }
-
-
     public static void test_ImageVisible() throws Exception { 
 
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
@@ -81,7 +62,6 @@ class NeonSerializerTest {
         DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
        
         TrackerEvent trackerEvent = new TrackerEvent(); 
-        fillWithDummies(trackerEvent);
 
         ImageVisible i = new ImageVisible();
         
@@ -146,7 +126,6 @@ class NeonSerializerTest {
         DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
        
         TrackerEvent trackerEvent = new TrackerEvent(); 
-        //fillWithDummies(trackerEvent);
 
         ImageClick i = new ImageClick();
         
@@ -163,10 +142,9 @@ class NeonSerializerTest {
         trackerEvent.setUserAgent("userAgent_dummy");
         trackerEvent.setAgentInfo(new com.neon.Tracker.AgentInfo());
         trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
-        trackerEvent.setIsImageClick(true);
         Coords c = new Coords();
-        c.setX(1.0);
-        c.setY(1.0);
+        c.setX(1.0F);
+        c.setY(1.0F);
         trackerEvent.setPageCoords(c);
         c = new Coords();
         c.setX(1.0);
