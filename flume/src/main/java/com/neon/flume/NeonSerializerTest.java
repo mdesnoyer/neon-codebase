@@ -144,7 +144,7 @@ class NeonSerializerTest {
         trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
         
         // needed fields
-        java.util.List<java.lang.CharSequence> tids = new java.util.List<java.lang.CharSequence>();
+        java.util.List<java.lang.CharSequence> tids = new ArrayList<java.lang.CharSequence>();
         i.setThumbnailIds(tids);
         i.thumbnailIds.add(new String("tid1"));
         i.thumbnailIds.add(new String("tid2"));
