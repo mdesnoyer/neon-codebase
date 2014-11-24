@@ -31,36 +31,39 @@ import org.apache.avro.file.SeekableByteArrayInput;
 import org.apache.flume.Context;
 import org.apache.flume.Event;
 import org.apache.flume.FlumeException;
-import org.hbase.async.AtomicIncrementRequest;
-import org.hbase.async.PutRequest;
 import org.apache.flume.conf.ComponentConfiguration;
 import org.apache.flume.sink.hbase.SimpleHbaseEventSerializer.KeyType;
 import org.apache.flume.sink.hbase.AsyncHbaseEventSerializer;
  
-//import com.google.common.base.Charsets;
-
-
-
+import org.hbase.async.AtomicIncrementRequest;
+import org.hbase.async.PutRequest;
+ 
 public class NeonSerializer implements AsyncHbaseEventSerializer 
 {
+    // to hold hbase operations 
     private final List<PutRequest> actions = new ArrayList<PutRequest>();
     private final List<AtomicIncrementRequest> increments = new ArrayList<AtomicIncrementRequest>();
 
-    // hbase tables to store all events
+    // hbase tables
     private byte[] thumbnailFirstTable = "THUMBNAIL_TIMESTAMP_EVENTS".getBytes();
     private byte[] timestampFirstTable = "TIMESTAMP_THUMBNAIL_EVENTS".getBytes();
 
     // column family to store counters, one for each event type
     private byte[] columnFamily = "THUMBNAIL_EVENTS_TYPES".getBytes();
-    byte imageVisibleColumnName[] = "IMAGE_VISIBLE".getBytes();
-    byte imageLoadColumnName[] = "IMAGE_LOAD".getBytes();
-    byte imageClickColumnName[] = "IMAGE_CLICK".getBytes();
+    
+    // column for the counter of IMAGE_VISIBLE and IMAGES_VISIBLE events
+    private byte imageVisibleColumnName[] = "IMAGE_VISIBLE".getBytes();
+    
+    // column for the counter of IMAGE_LOAD and IMAGES_LOADED events
+    private byte imageLoadColumnName[] = "IMAGE_LOAD".getBytes();
+    
+    private byte imageClickColumnName[] = "IMAGE_CLICK".getBytes();
         
 
     // event-based  
-    private String eventTimestamp;
-    private TrackerEvent trackerEvent;
-    private String rowKey;
+    private String eventTimestamp = null;
+    private TrackerEvent trackerEvent = null;
+    private String rowKey = null;
 
     @Override
     public void initialize(byte[] table, byte[] cf) 
@@ -73,92 +76,98 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     @Override
     public void setEvent(Event event) 
     {
-        trackerEvent = null;
-        
-        try {
+      trackerEvent = null;
+      
+      try {
+          // obtain the timestamp of event
+          String t = event.getHeaders().get("timestamp");
+          
+          // currently this is received in milliseconds
+          long timestamp = Long.valueOf(t).longValue();
+          
+          // convert to readable format
+          Date date = new Date(timestamp);
+          DateFormat format = new SimpleDateFormat("YYYY-MM-dd'T'HH");
+          byte[] formattedTimestamp = format.format(date).getBytes();
+          eventTimestamp = new String(formattedTimestamp);
 
-            // obtain the timestamps of event
-            String t = event.getHeaders().get("timestamp");
-            long timestamp = Long.valueOf(t).longValue();
-
-            // remove minutes and seconds precision
-            timestamp /= 3600;
-            eventTimestamp = Long.toString(timestamp); 
-
-            // obtain the tracker event
-            SeekableByteArrayInput input = new SeekableByteArrayInput(event.getBody());  
-            DatumReader<TrackerEvent> datumReader = new SpecificDatumReader<TrackerEvent>(TrackerEvent.class);
-            DataFileReader<TrackerEvent> dataFileReader = new DataFileReader<TrackerEvent>(input, datumReader);
-
-            // if no tracker event, drop event
-            if(dataFileReader.hasNext() == false) {
-                trackerEvent = null;
-                return;
-            }
-
-            // save tracker event for next calls to getActions(), getIncrements()
-            trackerEvent = dataFileReader.next(trackerEvent);
-            System.out.println(trackerEvent);    
+           // decode the tracker event
+           DatumReader<TrackerEvent> datumReader = new SpecificDatumReader<TrackerEvent>(TrackerEvent.class);
+           BinaryDecoder binaryDecoder = DecoderFactory.get().binaryDecoder(event.getBody(), null);
+           trackerEvent = datumReader.read(null, binaryDecoder);
         }
         catch(IOException e) {
             trackerEvent = null;
-            return;
+            throw new FlumeException(e.toString());
         }
         catch(Exception e) {
             trackerEvent = null;
-            return;
+            throw new FlumeException(e.toString());
+        }
+        
+        if(trackerEvent == null) {
+            throw new FlumeException("unable to decode tracker event");
         }
     }
  
     @Override
     public List<PutRequest> getActions() 
     {
-            // no row creation
-            return null;
+        // no-ops here
+        actions.clear();
+        return actions;
     } 
  
     @Override
     public List<AtomicIncrementRequest> getIncrements() 
     {
-        // if this event was dropped in previously do nothing 
-        if(trackerEvent == null)
-            return null;
-
         increments.clear();
-        
-        //Increment the number of events by one implicitly
+
+        // if this event was dropped previously, do nothing 
+        if(trackerEvent == null) {
+            return increments;
+        }
+
+        // extract and process each thumbnails in this event
         switch(trackerEvent.getEventType())  {
-                     
-            case IMAGE_VISIBLE: 
+
+            case IMAGE_VISIBLE:
                 ImageVisible imgVis = (ImageVisible) trackerEvent.getEventData();
                 handleIncrement(imgVis.getThumbnailId().toString(), imageVisibleColumnName);
                 break;
-       
-            case IMAGE_CLICK: 
+
+            case IMAGES_VISIBLE:
+                ImagesVisible imgsVis = (ImagesVisible) trackerEvent.getEventData();
+                Iterator iterator = imgsVis.thumbnailIds.iterator();
+                while(iterator.hasNext()) {
+                    String tid = iterator.next().toString();
+                    handleIncrement(tid, imageVisibleColumnName);
+                }
+                break;
+
+            case IMAGE_CLICK:
                 ImageClick imgClk = (ImageClick) trackerEvent.getEventData();
                 handleIncrement(imgClk.getThumbnailId().toString(), imageClickColumnName);
                 break;
 
+            // any unsupported event types result in no-ops
             default:
-                return null;
+                return increments;
         }
-        
-        return increments; 
+        return increments;
     }
 
     // this method depends on hbase to create a row automatically on first increment request
     private void handleIncrement(String tid, byte[] columnName) 
     {
-        // increment counter in table with thumbnail first composite key
+        // increment counter in table which begins with thumbnail first composite key
         String key = tid  + "_" + eventTimestamp;
-        increments.add(new AtomicIncrementRequest(thumbnailFirstTable, key.getBytes(), columnFamily, columnName));        
- 
-        // increment counter in table with timestamp first composite key
+        increments.add(new AtomicIncrementRequest(thumbnailFirstTable, key.getBytes(), columnFamily, columnName));
+
+        // increment counter in table which begins with timestamp first composite key
         key = eventTimestamp + "_" + tid;
         increments.add(new AtomicIncrementRequest(timestampFirstTable, key.getBytes(), columnFamily,  columnName));
     }
-
-
 
     @Override
     public void cleanUp() 
@@ -169,10 +178,7 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     }
  
     @Override
-    public void configure(Context context) 
-    {
-        // config hard-coded
-    }
+    public void configure(Context context) {}
  
     @Override
     public void configure(ComponentConfiguration conf) {}
