@@ -793,7 +793,7 @@ if __name__ == "__main__":
     # Register a function that will shutdown the workers
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
 
-    max_workers = multiprocessing.cpu_count() + 1
+    max_workers = multiprocessing.cpu_count()
     cv_semaphore = multiprocessing.BoundedSemaphore(
         max(multiprocessing.cpu_count() - 1, 1))
 
