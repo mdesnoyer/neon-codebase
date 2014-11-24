@@ -1,3 +1,10 @@
+'''
+Neon video server
+
+Keeps the thumbnail api requests made in to the Neon system via CMS API
+The video clients consume the requests from this Q
+'''
+
 #!/usr/bin/env python
 import os.path
 import sys
@@ -14,6 +21,7 @@ import os
 import Queue
 import random
 import re
+import redis
 from supportServices import neondata
 import time
 import tornado.httpserver
@@ -327,7 +335,7 @@ class RequeueHandler(tornado.web.RequestHandler):
                 return
 
             ret = global_request_queue.put(api_request)
-            if ret is None:
+            if not ret:
                 _log.warn("requed request %s is already in the Q" % key)
                 self.set_status(409)
                 self.write('{"error": "requeust already in the Q"}')
@@ -534,14 +542,21 @@ class HealthCheckHandler(tornado.web.RequestHandler):
         size = global_request_queue.qsize()
         
         # Ping the DB to see if its running
-        ret = yield tornado.gen.Task(neondata.NeonUserAccount.get,
+        try:
+            ret = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
                 test_account_key)
-        if ret:
-            self.set_status(200)
-            self.finish()
-        else:
-            self.set_status(500)
-            self.finish()
+            if ret:
+                self.set_status(200)
+                self.finish()
+                return
+            # if not ret, return 503. yes we can talk to the db but since we
+            # couldn't fetch the test accout,  the DB could be in inconsistent
+            # state
+        except redis.ConnectionError, e:
+            self.write("Error connecting to the video database")
+        
+        self.set_status(503)
+        self.finish()
 
 ###########################################
 # Create Tornado server application
@@ -552,7 +567,7 @@ application = tornado.web.Application([
     (r"/stats", StatsHandler),
     (r"/dequeue", DequeueHandler),
     (r"/requeue", RequeueHandler),
-    (r"/testcallback", TestCallback)
+    (r"/testcallback", TestCallback),
     (r"/healthcheck", HealthCheckHandler)
 ])
 

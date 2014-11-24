@@ -386,6 +386,24 @@ class TestVideoServer(AsyncHTTPTestCase):
                     "video_title": "test_title"}
         resp = self.make_api_request(vals)
         self.assertEqual(resp.code, 201)
+
+    def test_healthcheck(self):
+        ''' Health check handler of server '''
+
+        nuser = neondata.NeonUserAccount("acc1")
+        nuser.save()
+        with options._set_bounded('api.server.test_key', nuser.neon_api_key):
+            self.http_client.fetch(self.get_url('/healthcheck'),
+                    callback=self.stop, method="GET", headers={})
+            resp = self.wait()
+            self.assertEqual(resp.code, 200)
+
+        # shut down redis and ensure you get a 503 from healthcheck fail
+        self.redis.stop()
+        self.http_client.fetch(self.get_url('/healthcheck'),
+                callback=self.stop, method="GET", headers={})
+        resp = self.wait()
+        self.assertEqual(resp.code, 503)
         
 class VideoServerSmokeTest(test_utils.neontest.AsyncTestCase):
     def setUp(self):
