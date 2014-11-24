@@ -76,10 +76,9 @@ class NeonSerializerTest {
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
 
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        //Encoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
-        //GenericDatumWriter writer = new GenericDatumWriter(schema);
+        Encoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
         DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
-        DataFileWriter<TrackerEvent> streamWriter = new DataFileWriter<TrackerEvent>(writer);
+        //DataFileWriter<TrackerEvent> streamWriter = new DataFileWriter<TrackerEvent>(writer);
         
         //GenericRecord trackerEvent = new GenericData.Record(schema);
         //trackerEvent.put("name", "TrackerEvent");
@@ -95,19 +94,18 @@ class NeonSerializerTest {
 
         System.out.println(trackerEvent);
 
-        //writer.write(trackerEvent, encoder);
-        //encoder.flush();
+        writer.write(trackerEvent, encoder);
+        encoder.flush();
 
-        streamWriter.create(trackerEvent.getSchema(), outputStream);
-        streamWriter.append(trackerEvent);
-        streamWriter.close();
+        //streamWriter.create(trackerEvent.getSchema(), outputStream);
+        //streamWriter.append(trackerEvent);
+        //streamWriter.close();
         byte[] encodedEvent = outputStream.toByteArray();
 
         // make avro container headers
         Map<String, String> headers = new HashMap<String, String>();
         headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
-        //headers.put("timestamp", "2014-11-05T13:15:30Z");
-        headers.put("timestamp", "1416612478");
+        headers.put("timestamp", "1416612478000");  // milli seconds
 
         Event event = EventBuilder.withBody(encodedEvent, headers);
         NeonSerializer serializer = new NeonSerializer();
