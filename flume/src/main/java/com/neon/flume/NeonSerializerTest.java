@@ -145,7 +145,7 @@ class NeonSerializerTest {
         
         // needed fields
         java.util.List<java.lang.CharSequence> tids = new java.util.List<java.lang.CharSequence>();
-        i.setThumbnailIds(tids)
+        i.setThumbnailIds(tids);
         i.thumbnailIds.add(new String("tid1"));
         i.thumbnailIds.add(new String("tid2"));
         trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGES_VISIBLE);
