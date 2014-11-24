@@ -144,8 +144,8 @@ class NeonSerializerTest {
         trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
         
         // needed fields
-        i.thumbnailIds.add("tid1");
-        i.thumbnailIds.add("tid2");
+        i.thumbnailIds.add(new String("tid1"));
+        i.thumbnailIds.add(new String("tid2"));
         trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGES_VISIBLE);
         trackerEvent.setEventData(i);
 
