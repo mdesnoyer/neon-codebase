@@ -77,6 +77,12 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
         rowKey = null;
     }
 
+    /*
+    *  Sink calls this method first on any event.  This is where we decode the 
+    *  event and keep a ref to it.  The sink will call us next with getActions() 
+    *  and getIncrements().  A failure to decode sets a null object, so that we 
+    *  simply return empty results in these calls.
+    */
     @Override
     public void setEvent(Event event) 
     {
@@ -114,6 +120,11 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
         }
     }
  
+    /*
+    *  Sink calls this method second to get any row creation operations needed.
+    *  We have no row creations to do in this application so we return an empty
+    *  list.
+    */
     @Override
     public List<PutRequest> getActions() 
     {
@@ -122,6 +133,10 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
         return actions;
     } 
  
+    /*
+    *  Sink calls this method third to get any increment operations needed.
+    *  Note that the sink will coalesce these increment ops for performance.
+    */
     @Override
     public List<AtomicIncrementRequest> getIncrements() 
     {
@@ -165,9 +180,6 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
                     String tid = iterator.next().getThumbnailId();
                     handleIncrement(tid, imageLoadColumnName);
                 }
-                
-                
-                handleIncrement(imgLd.getThumbnailId().toString(), imageLoadColumnName);
                 
             // any unsupported event types result in no-ops
             default:
