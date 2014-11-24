@@ -117,6 +117,71 @@ class NeonSerializerTest {
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
     }
 
+    public static void test_ImagesVisible() throws Exception { 
+
+        //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
+
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
+        DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
+       
+        TrackerEvent trackerEvent = new TrackerEvent(); 
+
+        ImagesVisible i = new ImagesVisible();
+        
+        // dummies
+        trackerEvent.setPageId("pageId_dummy");
+        trackerEvent.setTrackerAccountId("trackerAccountId_dummy");
+        trackerEvent.setTrackerType(com.neon.Tracker.TrackerType.IGN);
+        trackerEvent.setPageURL ("pageUrl_dummy");
+        trackerEvent.setRefURL ("refUrl_dummy");
+        trackerEvent.setServerTime (new java.lang.Long(1000));
+        trackerEvent.setClientTime (new java.lang.Long(1000) );
+        trackerEvent.setClientIP("clientIp_dummy");
+        trackerEvent.setNeonUserId ("neonUserId_dummy");
+        trackerEvent.setUserAgent("userAgent_dummy");
+        trackerEvent.setAgentInfo(new com.neon.Tracker.AgentInfo());
+        trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
+        
+        // needed fields
+        i.thumbnailIds.add(new CharSequence("tid1"));
+        i.thumbnailIds.add(new CharSequence("tid2"));
+        trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGES_VISIBLE);
+        trackerEvent.setEventData(i);
+
+        writer.write(trackerEvent, encoder);
+        encoder.flush();
+
+        byte[] encodedEvent = outputStream.toByteArray();
+
+        // make avro container headers
+        Map<String, String> headers = new HashMap<String, String>();
+        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
+        headers.put("timestamp", "1416612478000");  // milli seconds
+
+        Event event = EventBuilder.withBody(encodedEvent, headers);
+        NeonSerializer serializer = new NeonSerializer();
+
+        String table = "table";
+        String columnFamily = "columFamily";
+        serializer.initialize(table.getBytes(), columnFamily.getBytes());
+
+        /*
+         *  Test 
+         */
+        serializer.setEvent(event);
+
+        /*
+         * Test
+         */
+        List<PutRequest> puts = serializer.getActions();
+
+        /*
+         * Test
+         */
+        List<AtomicIncrementRequest> incs =serializer.getIncrements();
+    }
+
     public static void test_ImageClick() throws Exception { 
 
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
