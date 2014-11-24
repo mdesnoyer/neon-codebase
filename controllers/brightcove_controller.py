@@ -24,8 +24,8 @@ from multiprocessing.pool import ThreadPool
 import random
 import re
 from supportServices.neondata import VideoMetadata, ThumbnailMetadata, \
-     AbstractPlatform, InternalVideoID, ThumbnailID, BrightcovePlatform, \
-     NeonApiRequest
+      AbstractPlatform, InternalVideoID, ThumbnailID, BrightcovePlatform, \
+      NeonApiRequest
 import time
 import threading
 import tornado
@@ -139,7 +139,7 @@ class ThumbnailChangeTask(AbstractTask):
         super(ThumbnailChangeTask, self).__init__(video_id)
         self.tid = new_tid
         self.service_url = options.service_url + \
-                "/api/v1/brightcovecontroller/%s/updatethumbnail/%s" \
+                "api/v1/brightcovecontroller/%s/updatethumbnail/%s" \
                 %(account_id, video_id)
         self.nosave = nosave
 
@@ -245,8 +245,8 @@ class VideoTaskInfo(object):
         ''' remove task '''
         try:
             self.tasks.remove(task)
-        except Exception,e:
-            _log.exception('key=VideoTaskInfo msg=remove task exception %s' %e)
+        except Exception, e:
+            pass
 
     def add_task(self, task):
         ''' Add task '''
@@ -296,6 +296,25 @@ class TaskManager(object):
             self.taskQ.remove_task(task)
 
         vtinfo.tasks = []
+    
+    def check_video_exists(self, vid):
+        try:
+            self.video_map[vid]
+            return True
+        except KeyError:
+            pass
+        return False
+    
+    def check_distribution_change(self, vid, distribution):
+        try:
+            dist = self.get_thumbnail_distribution(vid)
+            tids1 = [d[0] for d in dist]
+            tids2 = [d[0] for d in distribution]
+            return set(tids1) != set(tids2)
+        except KeyError:
+            pass
+
+        return True
 
     def add_video_info(self, vid, tdist):
         ''' Add video info '''
@@ -339,6 +358,8 @@ class TaskManager(object):
 class BrightcoveABController(object):
     ''' Brightcove AB controller '''
 
+    random.seed(25110)
+    
     # a thumbnail shall not be scheduled to last less than 10 minutes
     # in the overall video rotation period 
     MIN_THUMBNAIL_DURATION = 10 * 60 
@@ -411,7 +432,6 @@ class BrightcoveABController(object):
         lines = key.get_contents_as_string().split('\n')
         for line in lines[1:]:
             if line == "end":
-                _log.info('read entire directive file')
                 continue
 
             record = json.loads(line)
@@ -420,14 +440,6 @@ class BrightcoveABController(object):
                 directive = (
                     record['vid'],
                     [(x['tid'], x['pct']) for x in record['fractions']])
-
-                # See if it is a new directive
-                try:
-                    old_directive = self.directives[record['vid']]
-                    if old_directive == directive:
-                        continue
-                except KeyError:
-                    pass
 
                 # There is a new directive so apply it
                 self.apply_directive(directive, max_update_delay)
@@ -451,6 +463,9 @@ class BrightcoveABController(object):
 
     def apply_directive(self, directive, max_update_delay=0):
         '''Apply a directive to a controller.
+        
+        Allow current directive cycle to continue even if %s change on it.
+        Apply new directive only if the thumbnail ids being tested with change
 
         Inputs:
         directive - The directive as (video_id, [(thumb_id, fraction)])
@@ -458,24 +473,40 @@ class BrightcoveABController(object):
         '''
 
         video_id, distribution = directive
-        _log.info('New directive for video %s: %s' % (video_id,
-                                                      distribution))
+        #_log.info('New directive for video %s: %s' % (video_id,
+        #                                              distribution))
 
         internal_account_id = video_id.split('_')[0]
         
+        # NOTE: (In the spirit of limited release, only test for PPG now)
+        if internal_account_id not in ["6d3d519b15600c372a1f6735711d956e"]:
+            return
+    
         # Check if the account is enabled for ABTesting and controller type
         # is BC controller
         if self._check_testing_with_bcontroller(internal_account_id):
-
+            
             # Check that video state is "active" or "serving_active" 
             # if yes, then we should A/B Test 
-            
             request = VideoMetadata.get_video_request(video_id)
             if request.state in ["active", "serving_active"]:
                 self.monitored_videos.add(video_id)
+                self.directives[video_id] = directive
+                if self.taskmgr.check_video_exists(video_id):
+                    # only schedule if distribution has changed 
+                    if self.taskmgr.check_distribution_change(video_id, 
+                                distribution):
+                        self.thumbnail_change_scheduler(video_id, 
+                                            distribution,
+                                            max_update_delay)
+                else:
+                    self.thumbnail_change_scheduler(video_id, 
+                                            distribution,
+                                            max_update_delay)
+            
+                # Add lastest distribution to the map
                 self.taskmgr.add_video_info(video_id, distribution)
-                self.thumbnail_change_scheduler(video_id, distribution,
-                                                max_update_delay)
+
 
     def start(self):
         '''Starts running the brightcove controller on the current thread.
@@ -502,12 +533,16 @@ class BrightcoveABController(object):
         cur_time = time.time()
 
         # create a task for each thumbnail
+        prev_offset = random.randint(0, 30) # stagger videos
         for t in time_dist:
             # thumbnail tuple is in format (thumb id, time slice)  
-            taskA = ThumbnailChangeTask(account_id, video_id, t[0])
-            # schedule it in the future, now + time slicei
-            tslice = cur_time + t[1]
-            self.taskmgr.add_task(taskA, int(tslice))
+            task = ThumbnailChangeTask(account_id, video_id, t[0])
+            # schedule it in the future, now + time slice
+            tslice = cur_time + prev_offset
+            prev_offset = t[1]
+            self.taskmgr.add_task(task, int(tslice))
+            _log.info("Added ThumbnailChangeTask for vid %s tid %s time %s"
+                        % (video_id, t[0], tslice))
         
         # TODO (Sunil) : Add a CheckThumbnail task, skipping this for now
         
@@ -515,6 +550,8 @@ class BrightcoveABController(object):
         task_time_slice = TimesliceEndTask(video_id, self) 
         time_to_exec_task = cur_time + sum([tup[1] for tup in time_dist])
         self.taskmgr.add_task(task_time_slice, time_to_exec_task)
+        _log.info("Added TimesliceEndTask for vid %s time %s"
+                        % (video_id, time_to_exec_task))
 
     @classmethod
     def enforce_minimum_time_slice(cls, ts):
