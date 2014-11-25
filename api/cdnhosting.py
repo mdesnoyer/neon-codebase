@@ -104,7 +104,7 @@ def get_s3_hosting_bucket():
 @utils.sync.optional_sync
 @tornado.gen.coroutine
 def create_s3_redirect(dest_key, src_key, dest_bucket=None, 
-                       src_bucket=None):
+                       src_bucket=None, content_type=None):
     '''Creates a 301 redirect in s3 that points to another location.
 
     Inputs:
@@ -127,6 +127,10 @@ def create_s3_redirect(dest_key, src_key, dest_bucket=None,
         redirect_loc = "https://s3.amazonaws.com/%s/%s" % (
             dest_bucket, dest_key)
 
+    headers = {'x-amz-website-redirect-location' : redirect_loc}
+    if content_type is not None:
+        headers['Content-Type'] = content_type
+
     s3conn = S3Connection()
     try:
         bucket = yield utils.botoutils.run_async(s3conn.get_bucket, src_bucket)
@@ -134,7 +138,7 @@ def create_s3_redirect(dest_key, src_key, dest_bucket=None,
         yield utils.botoutils.run_async(
             key.set_contents_from_string, 
             '',
-            headers={'x-amz-website-redirect-location' : redirect_loc},
+            headers=headers,
             policy='public-read')
     except BotoServerError as e:
         _log.error('AWS Server error when creating a redirect s3://%s/%s -> '

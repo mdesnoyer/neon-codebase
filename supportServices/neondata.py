@@ -2598,10 +2598,12 @@ class ThumbnailMetadata(StoredObject):
 
         # Create a redirect with a video based url
         yield api.cdnhosting.create_s3_redirect(
-            s3key, '{video_prefix}/{type}{rank:d}.jpg'.format(
+            s3key,
+            '{video_prefix}/{type}{rank:d}.jpg'.format(
                 video_prefix=re.sub('_', '/', self.video_id),
                 type=self.type,
                 rank=self.rank),
+            content_type='image/jpeg',
             async=True)
 
         # Send the image to cloudinary
