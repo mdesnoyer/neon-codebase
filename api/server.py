@@ -288,14 +288,6 @@ def _verify_neon_auth(value):
 #### GLOBALS #####
 global_request_queue = FairWeightedRequestQueue()
 
-'''
-class StatsHandler(tornado.web.RequestHandler):
-    ''' Qsize handler '''
-    def get(self, *args, **kwargs):
-        size = global_request_queue.qsize()
-        self.write(size)
-        self.finish()
-'''
 
 class DequeueHandler(tornado.web.RequestHandler):
     """ DEQUEUE JOB Handler - The queue stores data in json format already """
