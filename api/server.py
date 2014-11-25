@@ -106,7 +106,8 @@ class RequestData(object):
         return self.api_request.video_url
 
     def get_request_json(self):
-        return self.api_request.to_json()
+        jdata = json.dumps(self.api_request.__dict__)
+        return jdata 
 
     def get_video_size(self):
         return self.video_size
@@ -287,12 +288,14 @@ def _verify_neon_auth(value):
 #### GLOBALS #####
 global_request_queue = FairWeightedRequestQueue()
 
+'''
 class StatsHandler(tornado.web.RequestHandler):
     ''' Qsize handler '''
     def get(self, *args, **kwargs):
         size = global_request_queue.qsize()
         self.write(size)
         self.finish()
+'''
 
 class DequeueHandler(tornado.web.RequestHandler):
     """ DEQUEUE JOB Handler - The queue stores data in json format already """
@@ -569,7 +572,7 @@ class HealthCheckHandler(tornado.web.RequestHandler):
 
 application = tornado.web.Application([
     (r'/api/v1/submitvideo/(.*)', GetThumbnailsHandler),
-    (r"/stats", StatsHandler),
+    #(r"/stats", StatsHandler),
     (r"/dequeue", DequeueHandler),
     (r"/requeue", RequeueHandler),
     (r"/testcallback", TestCallback),

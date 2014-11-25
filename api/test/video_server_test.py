@@ -156,9 +156,8 @@ class TestFairWeightedQ(test_utils.neontest.AsyncTestCase):
         for i in range(n):
             item = self.fwq.get()
             item = json.loads(item)
-            key = item["_data"]["key"]
-            req = neondata.NeonApiRequest._create(key, item)
-            self.assertEqual(req.video_id, 'vid%s' % i)
+            vid = item["video_id"]
+            self.assertEqual(vid, 'vid%s' % i)
 
     def test_fairweightedness_queue(self):
         distribution = [self.fwq._get_priority_qindex() for i in range(100)]
@@ -486,7 +485,7 @@ class VideoServerSmokeTest(test_utils.neontest.AsyncTestCase):
         
         gt.join(timeout=5.0)
 
-        items_put_json = [r.to_json() for r in items_put]
+        items_put_json = [json.dumps(r.__dict__) for r in items_put]
         for i in range(len(items_put) - len(items_get)):
             items_get.append(self.fwq.get())
         
