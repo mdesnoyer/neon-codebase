@@ -339,6 +339,8 @@ class NeonSerializerTest {
         TrackerEvent trackerEvent = new TrackerEvent(); 
 
         ImagesLoaded i = new ImagesLoaded();
+        java.util.List<ImageLoad> im = new ArrayList<ImageLoad>();
+        i.setImages(im);
         
         // dummies
         trackerEvent.setPageId("pageId_dummy");
