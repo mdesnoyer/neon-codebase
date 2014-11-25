@@ -417,6 +417,7 @@ class VideoProcessor(object):
 
         reprocess = False 
         if api_request.state == neondata.RequestState.REPROCESS:
+            _log.info('Reprocessing %s' % self.video_url)
             reprocess = True
 
         # Get the CDN Metadata
@@ -696,7 +697,8 @@ class VideoClient(multiprocessing.Process):
                         api_request.model_version = self.model_version
                         api_request.save()
                     _log.info("key=worker [%s] msg=processing request %s for "
-                              "%s " % (self.pid, job_id, api_key))
+                              "%s. State: %s " % (self.pid, job_id, api_key,
+                                                  api_request.state))
                 except Exception,e:
                     _log.error("key=worker [%s] msg=db error %s" %(
                         self.pid, e.message))
