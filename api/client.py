@@ -801,22 +801,25 @@ if __name__ == "__main__":
         max(multiprocessing.cpu_count() - 1, 1))
 
     # Manage the workers 
-    while not _shutting_down:
-        # Remove all the workers that are stopped
-        _workers = [x for x in _workers if x.is_alive()]
+    try:
+        while not _shutting_down:
+            # Remove all the workers that are stopped
+            _workers = [x for x in _workers if x.is_alive()]
 
-        statemon.state.running_workers = len(_workers)
+            statemon.state.running_workers = len(_workers)
 
-        # Create new workers until we get to n_workers
-        while len(_workers) < max_workers:
-            vc = VideoClient(options.model_file, cv_semaphore)
-            _workers.append(vc)
-            vc.start()
+            # Create new workers until we get to n_workers
+            while len(_workers) < max_workers:
+                vc = VideoClient(options.model_file, cv_semaphore)
+                _workers.append(vc)
+                vc.start()
 
         
-        # Check if memory has been exceeded & exit
-        cur_mem_usage = psutil.virtual_memory()[2] # in %
-        if cur_mem_usage > 85:
-            _shutting_down = True
+            # Check if memory has been exceeded & exit
+            cur_mem_usage = psutil.virtual_memory()[2] # in %
+            if cur_mem_usage > 85:
+                _shutting_down = True
 
-        time.sleep(10)
+            time.sleep(10)
+    except Exception as e:
+        _log.exception('Unexpected error managing the workers: %s' % e)
