@@ -80,7 +80,7 @@ class NeonSerializerTest {
         trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
         
         // needed fields
-        i.setThumbnailId("t1");
+        i.setThumbnailId("image_visible_t1");
         trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_VISIBLE);
         trackerEvent.setEventData(i);
 
@@ -146,8 +146,8 @@ class NeonSerializerTest {
         // needed fields
         java.util.List<java.lang.CharSequence> tids = new ArrayList<java.lang.CharSequence>();
         i.setThumbnailIds(tids);
-        i.thumbnailIds.add(new String("tid1"));
-        i.thumbnailIds.add(new String("tid2"));
+        i.thumbnailIds.add(new String("images_visible_tid1"));
+        i.thumbnailIds.add(new String("images_visible_tid2"));
         trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGES_VISIBLE);
         trackerEvent.setEventData(i);
 
@@ -219,7 +219,7 @@ class NeonSerializerTest {
         i.setWindowCoords(c);
     
         // needed
-        i.setThumbnailId("t1");
+        i.setThumbnailId("image_click_t1");
         trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_CLICK);
         trackerEvent.setEventData(i);
 
@@ -287,7 +287,7 @@ class NeonSerializerTest {
         trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
        
         // needed
-        i.setThumbnailId("tid1");
+        i.setThumbnailId("image_load_tid1");
         trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_LOAD);
         trackerEvent.setEventData(i);
 
@@ -358,11 +358,11 @@ class NeonSerializerTest {
        
         // needed
         ImageLoad img = new ImageLoad();
-        img.setThumbnailId("tid1");
+        img.setThumbnailId("images_loaded_tid1");
         i.images.add(img);
         
         img = new ImageLoad();
-        img.setThumbnailId("tid2");
+        img.setThumbnailId("images_loaded_tid2");
         i.images.add(img);
         
         trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGES_LOADED);
