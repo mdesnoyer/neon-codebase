@@ -129,7 +129,7 @@ def create_s3_redirect(dest_key, src_key, dest_bucket=None,
 
     headers = {'x-amz-website-redirect-location' : redirect_loc}
     if content_type is not None:
-        headers['Content-Type'] ="image/jpeg"
+        headers['Content-Type'] = content_type
 
     s3conn = S3Connection()
     try:
