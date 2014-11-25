@@ -365,7 +365,7 @@ class NeonSerializerTest {
         img.setThumbnailId("tid2");
         i.images.add(img);
         
-        trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_LOAD);
+        trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGES_LOADED);
         trackerEvent.setEventData(i);
 
         writer.write(trackerEvent, encoder);
