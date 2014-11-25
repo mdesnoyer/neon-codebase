@@ -145,7 +145,7 @@ class VideoProcessor(object):
         self.cv_semaphore = cv_semaphore
 
         integration_id = self.job_params['integration_id'] \
-          if self.job_params.has_key('integration_id') else 0
+          if self.job_params.has_key('integration_id') else '0'
         self.video_metadata = neondata.VideoMetadata(
             neondata.InternalVideoID.generate(
                 self.job_params['api_key'],

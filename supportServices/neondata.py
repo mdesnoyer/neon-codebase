@@ -1164,8 +1164,7 @@ class CDNHostingMetadataList(NamespacedStoredObject):
     @classmethod
     def create_key(cls, api_key, integration_id):
         '''Create a key for using in this table'''
-        return '_'.join([api_key or 'None',
-                         integration_id or 'None'])
+        return '%s_%s' % (api_key, integration_id)
 
     @classmethod
     def _baseclass_name(cls):
