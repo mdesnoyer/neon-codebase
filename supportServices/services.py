@@ -29,6 +29,7 @@ import tornado.httpclient
 import traceback
 import utils.neon
 import utils.logs
+import utils.http
 
 from StringIO import StringIO
 from supportServices import neondata
@@ -567,7 +568,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                              request_timeout=30.0,
                                              connect_timeout=10.0)
         
-        result = yield tornado.gen.Task(http_client.fetch, req)
+        result = yield tornado.gen.Task(utils.http.send_request, req)
         
         if result.code == 409:
             job_id = json.loads(result.body)["job_id"]
@@ -679,7 +680,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                              request_timeout=30.0,
                                              connect_timeout=10.0)
         
-        result = yield tornado.gen.Task(http_client.fetch, req)
+        result = yield tornado.gen.Task(utils.http.send_request, req)
         
         if result.code == 409:
             data = '{"error":"url already processed","video_id":"%s"}'%video_id

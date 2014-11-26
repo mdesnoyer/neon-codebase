@@ -1,6 +1,11 @@
 #!/usr/bin/env python
-'''Script that manually reqeues the jobs that are still processing
+'''
+Script that manually reqeues the jobs that are still processing
 according to the database
+
+NOTE: Use this script only to requeue all requests that have failed
+to process. It will requeue request that are in the following state
+SUBMIT, PROCESSING, FAILED, Requeue 
 
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright 2013 Neon Labs
@@ -22,26 +27,33 @@ define('host', default='localhost',
        help='Host where the video processing server is')
 define('port', default=8081, type=int,
        help='Port where the video processing server is')
+define('api_key', default=None, type=None, help='account api key')
 
 _log = logging.getLogger(__name__)
 
 def main():
     db_connection = neondata.DBConnection('NeonApiRequest')
+    if options.api_key is None:
+        _log.error('API key is None, Please give an API key')
+        return
 
-    # Get the request keys
-    keys = db_connection.blocking_conn.keys('request_*')
+    # TODO: Add a method at account level to retreive all keys
+    # Get the request keys for the given API Key
+    keys = db_connection.blocking_conn.keys('request_%s*' % options.api_key)
     for key in keys:
-        request_json = db_connection.blocking_conn.get(key)
-        request = neondata.NeonApiRequest.create(request_json)
+        job_id = key.split('_')[-1]        
+        request = neondata.NeonApiRequest.get(job_id, options.api_key)
+        if request:
+            #If request state is submitted, being processed, Requeued or Failed
+            if request.state in [neondata.RequestState.SUBMIT, neondata.RequestState.PROCESSING, 
+                    neondata.RequestState.REQUEUED, neondata.RequestState.FAILED]:
+                url = 'http://%s:%s/requeue' % (options.host, options.port)
+                response = urllib2.urlopen(url, request.to_json())
 
-        #If request state is submitted, being processed, Requeued or Failed
-        if request.state in [neondata.RequestState.SUBMIT, neondata.RequestState.PROCESSING, 
-                neondata.RequestState.REQUEUED, neondata.RequestState.FAILED]:
-            url = 'http://%s:%s/requeue' % (options.host, options.port)
-            response = urllib2.urlopen(url, request.to_json())
-
-            if response.code != 200:
-                _log.error('Could not requeue %s' % request.__dict__)
+                if response.code != 200:
+                    _log.error('Could not requeue %s' % request.__dict__)
+        else:
+            _log.error("DB Error for key %s" % key)
 
 if __name__ == "__main__":
     utils.neon.InitNeon()

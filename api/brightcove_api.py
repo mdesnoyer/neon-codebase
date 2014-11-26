@@ -884,10 +884,8 @@ class BrightcoveApi(object):
             for item in items:
                 vid = str(item['id'])                              
                 title = item['name']
-                video_download_url = item['FLVURL']
+                video_download_url = self.get_video_url_to_download(item)
                 
-                #TODO: Try searching for highest renedition to get quality thumb
-
                 #NOTE: If a video doesn't have a thumbnail 
                 #Perhaps a signle renedition video or a live feed
                 if not item.has_key('videoStillURL'):
@@ -937,7 +935,7 @@ class BrightcoveApi(object):
                 for item in items:
                     vid = str(item['id'])                              
                     title = item['name']
-                    video_download_url = item['FLVURL']
+                    video_download_url = self.get_video_url_to_download(item)
                     prev_thumbnail = item['videoStillURL'] #item['thumbnailURL']
                     keys.append("key"+vid)
                     self.format_neon_api_request(vid,
