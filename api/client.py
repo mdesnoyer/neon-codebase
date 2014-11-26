@@ -280,12 +280,21 @@ class VideoProcessor(object):
         if duration > 3600:
             statemon.state.increment('video_duration_60m')
 
+        # Decide the time buffer at the beginning and end of the video
+        # to ignore.
+        if duration < 30:
+            ignore_time = 2.0
+        else:
+            ignore_time = 5.0
+
         try:
             results, self.sec_to_extract = \
               self.model.choose_thumbnails(
                   mov,
                   n=n_thumbs,
-                  start_time=self.sec_to_extract,
+                  start_time=ignore_time,
+                  end_buffer_time=ignore_time,
+                  thumb_min_dist=5.0,
                   video_name=self.video_url)
         except model.VideoReadError:
             _log.error("Error using OpenCV to read video. Trying ffvideo")
@@ -417,6 +426,7 @@ class VideoProcessor(object):
 
         reprocess = False 
         if api_request.state == neondata.RequestState.REPROCESS:
+            _log.info('Reprocessing %s' % self.video_url)
             reprocess = True
 
         # Get the CDN Metadata
@@ -542,7 +552,8 @@ class VideoProcessor(object):
         self.send_client_callback_response(video_id, cb_request)
         self.send_notifiction_response(api_request)
 
-        _log.info('Sucessfully finished finalized video %s' % self.video_url)
+        _log.info('Sucessfully finalized video %s. Is has video id %s' % 
+                  (self.video_url, self.video_metadata.key))
         
 
     def build_callback_request(self):
@@ -696,7 +707,8 @@ class VideoClient(multiprocessing.Process):
                         api_request.model_version = self.model_version
                         api_request.save()
                     _log.info("key=worker [%s] msg=processing request %s for "
-                              "%s " % (self.pid, job_id, api_key))
+                              "%s. State: %s " % (self.pid, job_id, api_key,
+                                                  api_request.state))
                 except Exception,e:
                     _log.error("key=worker [%s] msg=db error %s" %(
                         self.pid, e.message))

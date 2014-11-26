@@ -56,6 +56,7 @@ import urllib2
 import unittest
 import utils
 from utils.imageutils import PILImageUtils
+import utils.neon
 from utils.options import define, options
 import utils.ps
 from utils import statemon
@@ -195,7 +196,17 @@ class TestVideoClient(test_utils.neontest.TestCase):
         Verify execution of the process_all call in ProcessVideo
         '''
         vprocessor = self.setup_video_processor("neon")
-        vprocessor.process_video(self.test_video_file)
+        vprocessor.process_video(self.test_video_file, n_thumbs=5)
+
+        # Check that the model was called correctly
+        self.assertTrue(self.model.choose_thumbnails.called)
+        cargs, kwargs = self.model.choose_thumbnails.call_args
+        self.assertEquals(kwargs, {'n':5,
+                                   'start_time': 2.0,
+                                   'end_buffer_time': 2.0,
+                                   'thumb_min_dist': 5.0,
+                                   'video_name':  'http://brightcove.vo.llnwd.net/e1/uds/pd/2294876105001/2294876105001_2369427498001_shutterstock-v2602466.mp4'})
+        self.assertEquals(len(cargs), 1)
 
         #verify video metadata has been populated
         self.assertEqual(vprocessor.video_metadata.duration, 8.8)
@@ -786,11 +797,14 @@ class SmokeTest(test_utils.neontest.TestCase):
         neondata.NeonPlatform('acct1', self.api_key).save()
 
         self.video_id = '%s_vid1' % self.api_key
-        neondata.OoyalaApiRequest('job1', self.api_key, 'int1', 'vid1',
-                                  'some fun video',
-                                  'http://video.mp4', None, None,
-                                  'http://callback.com',
-                                  'http://default_thumb.jpg').save()
+        self.api_request = neondata.OoyalaApiRequest(
+            'job1', self.api_key,
+            'int1', 'vid1',
+            'some fun video',
+            'http://video.mp4', None, None,
+            'http://callback.com',
+            'http://default_thumb.jpg')
+        self.api_request.save()
 
         # Mock out the video download
         self.test_video_file = os.path.join(os.path.dirname(__file__), 
@@ -885,7 +899,8 @@ class SmokeTest(test_utils.neontest.TestCase):
                 while (neondata.NeonApiRequest.get(job['job_id'],
                                                    job['api_key']).state in 
                        [neondata.RequestState.SUBMIT,
-                        neondata.RequestState.PROCESSING]):
+                        neondata.RequestState.PROCESSING,
+                        neondata.RequestState.REPROCESS]):
                     # See if we timeout
                     self.assertLess(time.time() - start_time, 5.0,
                                     'Timed out while running the smoke test')
@@ -939,6 +954,61 @@ class SmokeTest(test_utils.neontest.TestCase):
             len([x for x in thumbs if 
                  x.type == neondata.ThumbnailType.CENTERFRAME]), 1)
 
+    def test_reprocessing_smoke(self):
+        self.api_request.state = neondata.RequestState.REPROCESS
+        self.api_request.save()
+
+        # Add the results from the previous run to the database
+        thumbs = [
+            neondata.ThumbnailMetadata(
+                '%s_thumb1' % self.video_id,
+                self.video_id,
+                model_score=3.0,
+                ttype=neondata.ThumbnailType.NEON,
+                model_version='old_model',
+                frameno=167,
+                rank=0),
+            neondata.ThumbnailMetadata(
+                '%s_thumb2' % self.video_id,
+                self.video_id,
+                ttype=neondata.ThumbnailType.RANDOM,
+                rank=0),
+            neondata.ThumbnailMetadata(
+                '%s_thumb3' % self.video_id,
+                self.video_id,
+                ttype=neondata.ThumbnailType.OOYALA,
+                rank=0)]
+        neondata.ThumbnailMetadata.save_all(thumbs)
+        video_meta = neondata.VideoMetadata(
+            self.video_id,
+            tids = [x.key for x in thumbs],
+            duration=97.0,
+            model_version='old_model')
+        video_meta.serving_url = 'my_serving_url.jpg'
+        video_meta.save()
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
+
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.FINISHED)
+
+        # Check the video data
+        video_meta = neondata.VideoMetadata.get(self.video_id)
+        self.assertGreater(len(video_meta.thumbnail_ids), 0)
+        self.assertEquals(video_meta.model_version, 'my_model')
+        self.assertNotIn('%s_thumb1' % self.video_id, video_meta.thumbnail_ids)
+        self.assertNotIn('%s_thumb2' % self.video_id, video_meta.thumbnail_ids)
+        self.assertIn('%s_thumb3' % self.video_id, video_meta.thumbnail_ids)
+        
     def test_video_processing_error(self):
         self.video_download_mock.side_effect = [
             urllib2.URLError('Oops')]
@@ -994,4 +1064,5 @@ class SmokeTest(test_utils.neontest.TestCase):
              
 
 if __name__ == '__main__':
+    utils.neon.InitNeon()
     unittest.main()
