@@ -75,8 +75,8 @@ class Model(object):
 
         a and b are numpy images in BGR format.
         '''
-        dist = np.linalg.norm(self.gist.generate(a) -
-                              self.gist.generate(b))
+        dist = np.linalg.norm(self.gist.transform(a) -
+                              self.gist.transform(b))
         return dist <= 0.6
 
     def filter_duplicates(self, image_list, n=None, tup_idx=0):

@@ -12,157 +12,125 @@ import logging
 import numpy as np
 import os
 import pyflann
+import sklearn.base
+from sklearn.utils import check_arrays, atleast2d_or_csr
 import tempfile
 import utils.obj
+from . import error
 
 _log = logging.getLogger(__name__)
 
-class Predictor(object):
-    '''An abstract valence predictor.
+def save_predictor(predictor, filename):
+    '''Save the model to a file.'''
+    with open(filename, 'wb') as f:
+        pickle.dump(predictor, f, 2)
 
-    This class should be specialized for specific models
+def load_predictor(filename):
+    '''Loads a model from a file.
+
+    Inputs:
+    filename - The model to load
+
     '''
-    def __init__(self, feature_generator):
-        self.feature_generator = feature_generator
-        self.__version__ = 2
+    with open(filename, 'rb') as f:
+        return pickle.load(f)
 
-    def __str__(self):
-        return utils.obj.full_object_str(self)
-
-    def add_feature_vector(self, features, score, metadata=None):
-        '''Adds a veature vector to train on.
-
-        Inputs:
-        features - a 1D numpy vector of the feature vector
-        score - score of this example.
-        metadata - metadata to attach to this example
-        '''
-        raise NotImplementedError()
-
-    def add_image(self, image, score, metadata=None):
-        '''Add an image to train on.
-
-        Inputs:
-        image - numpy array of the image in BGR format (aka OpenCV)
-        score - floating point valence score
-        metadata - metadata to attach to this example
-        '''
-        self.add_feature_vector(self.feature_generator.generate(image),
-                                score,
-                                metadata=metadata)
-
-    def add_images(self, data):
-        '''Adds multiple images to the model.
-
-        Input:
-        data - iteration of (image, score) tuples
-        '''
-        for image, score in data:
-            self.add_image(image, score)
-
-    def train(self):
-        '''Train on any images that were previously added to the predictor.'''
-        raise NotImplementedError()
-
-    def predict(self, image):
-        '''Predicts the valence score of an image.
-
-        Inputs:
-        image - numpy array of the image
-        
-        Returns: predicted valence score
-
-        Raises: NotTrainedError if it has been called before train() has.
-        '''
-        raise NotImplementedError()
-
-    def reset(self):
-        '''Resets the predictor by removing all the data/model.'''
-        raise NotImplementedError()
-
-    def hash_type(self, hashobj):
-        '''Updates a hash object with data about the type.'''
-        hashobj.update(self.__class__.__name__)
-        self.feature_generator.hash_type(hashobj)
-
-class KFlannPredictor(Predictor):
+class KFlannPredictor(sklearn.base.BaseEstimator,
+                      sklearn.base.RegressorMixin):
     '''Approximate k nearest neighbour using flann.'''
     
-    def __init__(self, feature_generator, k=3, target_precision=0.95,
-                 seed=802374, max_images_per_video=6):
-        super(KFlannPredictor, self).__init__(feature_generator)
+    def __init__(self, k=3, target_precision=0.95,
+                 seed=802374):
+        super(KFlannPredictor, self).__init__()
 
         self.k = k
         self.target_precision = target_precision
         self.seed = seed
-        self.max_images_per_video = max_images_per_video
 
         self.reset()
 
     def reset(self):
-        self.is_trained = False
-
-        self.data = []
-        self.scores = []
-        self.metadata = []
-        self.video_ids = []
+        self.data = None
+        self.scores = None
+        self.metadata = None
         self.flann = pyflann.FLANN()
         self.params = None
 
+    def __key(self):
+        return (super(KFlannPredictor, self).__key(), self.k)
+
     def __str__(self):
         return utils.obj.full_object_str(self,
-                                         exclude=['data', 'scores', 'metadata',
-                                                  'video_ids'])
+                                     exclude=['data', 'scores', 'metadata'])
 
-    def add_feature_vector(self, features, score, metadata=None,
-                           video_id=None):
-        if self.is_trained:
-            raise AlreadyTrainedError()
-        self.scores.append(score)
-        self.data.append(features)
-        self.metadata.append(metadata)
-        self.video_ids.append(hash(video_id))
+    def fit(X, y, metadata=None):
+        self.data, self.scores = self.data = check_arrays((X, y))
+        self.metadata = metadata
 
-    def train(self):
-        _log.info('Training predictor with %i examples.' % len(self.data))
+        n_examples = self.data.shape[0]
+        
+        _log.info('Training predictor with %i examples.' % n_examples)
 
         sample_fraction = 0.20
-        if len(self.data) > 10000:
+        if n_examples > 10000:
             sample_fraction=0.05
         self.params = self.flann.build_index(
-            np.array(self.data),
+            self.data,
             algorithm='autotuned',
             target_precision=self.target_precision,
             build_weight=0.01,
             memory_weight=0.5,
             sample_fraction=sample_fraction,
             random_seed=self.seed,
-            log_level='info')
+            log_level='warn')
         _log.info('Built index with parameters: %s' % self.params)
-        self.is_trained = True
 
-    def predict(self, image, video_id=None):
-        if not self.is_trained:
-            raise NotTrainedError()
+    def predict(self, X, exclusion_key=None):
+        '''Predict the score for each datapoint.
 
-        if video_id is None:
-            return self.score_neighbours(self.get_neighbours(image, k=self.k))
+        Inputs:
+        X - A n_example x n_features array
+        exclusion_key - If set, the prediction won't include entries where
+                        the metadata is equal to the exclusion key
+
+        Returns:
+        An generator for the scores.
+        '''
+        if self.data is None:
+            raise error.NotTrainedError()
+
+        X = atleast2d_or_csr(X)
+
+        return (self._predict_one(row, exclusion_key=exclusion_key)
+                for row in X)
+
+    def _predict_one(self, x, exclusion_key=None):
+        '''Predict the score for a single entry.'''
+
+        if exclusion_key is None or self.metadata is None:
+            return self.score_neighbors(self.get_neighbours(x, k=self.k))
 
         # If we don't want to include images from the same
         # video, we need to ask for extra neighbours. This
         # should only happen in training a higher order predictor/classifier.
-        k = self.k + self.max_images_per_video
-        video_hash = hash(video_id)
-
-        neighbours = self.get_neighbours(image, k=k)
         valid_neighbours = []
-        for neighbour in neighbours:
-            if len(valid_neighbours) == self.k:
-                break
+        k = self.k
+        while len(valid_neighbours) < self.k:
+            # We didn't get enough entries last time, so exponentially increase
+            valid_neighbours = []
+            k *= 2
+
+            neighbours = self.get_neighbours(x, k=k)
+            valid_neighbours = []
+            for neighbour in neighbours:
+                if len(valid_neighbours) == self.k:
+                    break
             
-            if neighbour[3] <> video_hash:
-                valid_neighbours.append(neighbour)
-        return self.score_neighbours(valid_neighbours)
+                if neighbour[2] <> exclusion_key:
+                    valid_neighbours.append(neighbour)
+                    
+        return self.predictor.score_neighbors(valid_neighbours)
+        
 
     def score_neighbours(self, neighbours):
         '''Returns the score for k neighbours.'''
@@ -173,25 +141,27 @@ class KFlannPredictor(Predictor):
         dists = np.array([1.0/x[1] for x in neighbours])
         return np.dot(scores, dists) / np.sum(dists)
 
-    def get_neighbours(self, image, k=3):
+    def get_neighbours(self, x, k=3):
         '''Retrieve N neighbours of an image.
 
         Inputs:
-        image - numpy array of the image in opencv format
+        x - feature vector for an image
         n - number of neighbours to return
 
         Outputs:
-        Returns a list of [(score, dist, metadata, video_id)]
+        Returns a list of [(score, dist, metadata)]
 
         '''
-        features = self.feature_generator.generate(image)
-        idx, dists = self.flann.nn_index(features, k,
+        idx, dists = self.flann.nn_index(x, k,
                                          checks=self.params['checks'])
         if k == 1:
             # When k=1, the dimensions get squeezed
-            return [(self.scores[idx[0]], dists[0], self.metadata[idx[0]])]
+            return [(self.scores[idx[0]], dists[0],
+                     None if self.metadata is None else self.metadata[idx[0]])]
         
-        return [(self.scores[i], dist, self.metadata[i])
+        return [(self.scores[i],
+                 dist,
+                 None if self.metadata is None else self.metadata[i])
                 for i, dist in zip(idx[0], dists[0])]
 
     def __getstate__(self):
@@ -227,17 +197,3 @@ class KFlannPredictor(Predictor):
         state['flann'] = new_flann
 
         self.__dict__ = state
-
-# -------------- Start Exception Definitions --------------#
-
-class Error(Exception):
-    '''Base class for exceptions in this module.'''
-    pass
-
-class NotTrainedError(Error):
-    def __init__(self, message = ''):
-        Error.__init__(self, "The model isn't trained yet: %s" % message)
-
-class AlreadyTrainedError(Error):
-    def __init__(self, message = ''):
-        Error.__init__(self, "The model is already trained: %s" % message)

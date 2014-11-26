@@ -168,7 +168,7 @@ class Predictor(predictor.Predictor):
         Returns a list of [(score, dist, metadata)]
 
         '''
-        features = [self.feature_generator.generate(image)]
+        features = [self.feature_generator.transform(image)]
         svm_features = self._np2svmlight(features)
 
         # Decide which cluster the example is in

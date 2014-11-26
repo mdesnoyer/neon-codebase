@@ -19,8 +19,8 @@ if __name__ == '__main__':
 
     gist = features.GistGenerator()
 
-    featuresA = gist.generate(cv2.imread(args[0]))
-    featuresB = gist.generate(cv2.imread(args[1]))
+    featuresA = gist.transform(cv2.imread(args[0]))
+    featuresB = gist.transform(cv2.imread(args[1]))
 
     dist = scipy.spatial.distance.cdist([featuresA], [featuresB])
 
