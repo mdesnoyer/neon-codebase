@@ -27,33 +27,29 @@ define('host', default='localhost',
        help='Host where the video processing server is')
 define('port', default=8081, type=int,
        help='Port where the video processing server is')
-define('api_key', default=None, type=None, help='account api key')
+define('api_key', default=None, type=str, help='account api key')
 
 _log = logging.getLogger(__name__)
 
 def main():
-    db_connection = neondata.DBConnection('NeonApiRequest')
-    if options.api_key is None:
-        _log.error('API key is None, Please give an API key')
-        return
+    requests = neondata.NeonApiRequest.get_all()
+    if options.api_key is not None:
+        requests = [x for x in requests if x.api_key == options.api_key]
+            
+    for request in requests:
+        if request.state in [neondata.RequestState.SUBMIT,
+                             neondata.RequestState.PROCESSING, 
+                             neondata.RequestState.REQUEUED,
+                             neondata.RequestState.FAILED]:
+            url = 'http://%s:%s/requeue' % (options.host, options.port)
+            response = urllib2.urlopen(url, request.to_json())
 
-    # TODO: Add a method at account level to retreive all keys
-    # Get the request keys for the given API Key
-    keys = db_connection.blocking_conn.keys('request_%s*' % options.api_key)
-    for key in keys:
-        job_id = key.split('_')[-1]        
-        request = neondata.NeonApiRequest.get(job_id, options.api_key)
-        if request:
-            #If request state is submitted, being processed, Requeued or Failed
-            if request.state in [neondata.RequestState.SUBMIT, neondata.RequestState.PROCESSING, 
-                    neondata.RequestState.REQUEUED, neondata.RequestState.FAILED]:
-                url = 'http://%s:%s/requeue' % (options.host, options.port)
-                response = urllib2.urlopen(url, request.to_json())
-
-                if response.code != 200:
-                    _log.error('Could not requeue %s' % request.__dict__)
-        else:
-            _log.error("DB Error for key %s" % key)
+            if response.code != 200:
+                _log.error('Could not requeue %s for account %s' %
+                           (request.job_id, request.api_key))
+            else:
+                _log.info('Requeued request %s for account %s' %
+                          (request.job_id, request.api_key))
 
 if __name__ == "__main__":
     utils.neon.InitNeon()
