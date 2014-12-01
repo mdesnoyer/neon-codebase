@@ -40,16 +40,20 @@ def main():
         if request.state in [neondata.RequestState.SUBMIT,
                              neondata.RequestState.PROCESSING, 
                              neondata.RequestState.REQUEUED,
-                             neondata.RequestState.FAILED]:
+                             neondata.RequestState.INT_ERROR]:
             url = 'http://%s:%s/requeue' % (options.host, options.port)
-            response = urllib2.urlopen(url, request.to_json())
 
-            if response.code != 200:
-                _log.error('Could not requeue %s for account %s' %
-                           (request.job_id, request.api_key))
-            else:
-                _log.info('Requeued request %s for account %s' %
+            try:
+                response = urllib2.urlopen(url, request.to_json())
+                if response.code == 200:
+                    _log.info('Requeued request %s for account %s' %
                           (request.job_id, request.api_key))
+                else:
+                    _log.error('Could not requeue %s for account %s' %
+                               (request.job_id, request.api_key))
+            except urllib2.HTTPError as e:
+                _log.error('Could not requeue %s for account %s: %s' %
+                               (request.job_id, request.api_key, e))
 
 if __name__ == "__main__":
     utils.neon.InitNeon()
