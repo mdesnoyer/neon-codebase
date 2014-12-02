@@ -1765,7 +1765,8 @@ class BcoveHandler(tornado.web.RequestHandler):
 
 class HealthCheckHandler(tornado.web.RequestHandler):
     '''Handler for health check ''' 
-    
+
+    @tornado.gen.engine
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
         '''Handle a test tracking request.'''
