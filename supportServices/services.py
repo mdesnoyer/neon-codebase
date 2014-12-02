@@ -1770,8 +1770,8 @@ class HealthCheckHandler(tornado.web.RequestHandler):
     def get(self, *args, **kwargs):
         '''Handle a test tracking request.'''
         if "video_server" in  self.request.uri:
-            # TODO(Sunil): Make a call to video server health check
-            client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
+            # Make a call to video server health check
+            client_url = 'http://%s:8081/healthcheck'\
                             % options.video_server 
             http_client = tornado.httpclient.AsyncHTTPClient()
             req = tornado.httpclient.HTTPRequest(url=client_url,
