@@ -67,6 +67,7 @@ statemon.define('processing_error', int)
 statemon.define('dequeue_error', int)
 statemon.define('save_tmdata_error', int)
 statemon.define('save_vmdata_error', int)
+statemon.define('modify_request_error', int)
 statemon.define('customer_callback_schedule_error', int)
 statemon.define('no_thumbs', int)
 statemon.define('model_load_error', int)
@@ -117,7 +118,8 @@ class VideoProcessor(object):
 
     retry_codes = [403, 500, 502, 503, 504]
 
-    def __init__(self, params, model, model_version, cv_semaphore):
+    def __init__(self, params, model, model_version, cv_semaphore,
+                 reprocess=False):
         '''
         @input
         params: dict of request
@@ -126,6 +128,7 @@ class VideoProcessor(object):
 
         self.timeout = 300.0 #long running tasks ## -- is this necessary ???
         self.job_params = params
+        self.reprocess = reprocess
         self.video_url = self.job_params['video_url']
         vsuffix = self.video_url.split('/')[-1]  #get the video file extension
         vsuffix = vsuffix.strip("!@#$%^&*[]^()+~")
@@ -182,26 +185,26 @@ class VideoProcessor(object):
             # Flag that the job failed getting the data
             statemon.state.increment('processing_error')
 
-            # TODO(sunil): Make this an atomic modify operation once
-            # neondata is refactored.
-            api_request = neondata.NeonApiRequest.get(
+            def _write_failure(request):
+                request.state = neondata.RequestState.FAILED
+                request.fail_count += 1
+            api_request = neondata.NeonApiRequest.modify(
                 self.job_params['job_id'],
-                self.job_params['api_key'])
-            api_request.state = neondata.RequestState.FAILED
-            api_request.save()
+                self.job_params['api_key'],
+                _write_failure)
 
         except Exception as e:
             _log.error("Unexpected error [%s]: %s" % (os.getpid(), e))
             # Flag that the job failed for some internal reason
             statemon.state.increment('processing_error')
-
-            # TODO(sunil): Make this an atomic modify operation once
-            # neondata is refactored.
-            api_request = neondata.NeonApiRequest.get(
+            
+            def _write_failure(request):
+                request.state = neondata.RequestState.INT_ERROR
+                request.fail_count += 1
+            api_request = neondata.NeonApiRequest.modify(
                 self.job_params['job_id'],
-                self.job_params['api_key'])
-            api_request.state = neondata.RequestState.INT_ERROR
-            api_request.save()
+                self.job_params['api_key'],
+                _write_failure)
        
         finally:
             #Delete the temp video file which was downloaded
@@ -422,12 +425,29 @@ class VideoProcessor(object):
         video_id = self.job_params['video_id']
         
         # get api request object
-        api_request = neondata.NeonApiRequest.get(job_id, api_key)
-
-        reprocess = False 
-        if api_request.state == neondata.RequestState.REPROCESS:
-            _log.info('Reprocessing %s' % self.video_url)
-            reprocess = True
+        somebody_else_finished = [False]
+        def _flag_for_finalize(req):
+            if req.state in [neondata.RequestState.PROCESSING,
+                             neondata.RequestState.SUBMIT,
+                             neondata.RequestState.REQUEUED,
+                             neondata.RequestState.REPROCESS]:
+                req.state = neondata.RequestState.FINALIZING
+            else:
+                somebody_else_finished[0] = True
+        try:
+            api_request = neondata.NeonApiRequest.modify(job_id, api_key,
+                                                         _flag_for_finalize)
+            if api_request is None:
+                raise DBError('Api Request finalizing failed.It was not there')
+        except Exception, e:
+            _log.error("Error writing request state to database: %s" % e)
+            statemon.state.increment('modify_request_error')
+            raise DBError("Error modifying api request")
+        
+        if somebody_else_finished[0]:
+            _log.info('Video %s was already processed by another worker' %
+                      self.video_url)
+            return
 
         # Get the CDN Metadata
         cdn_metadata = neondata.CDNHostingMetadataList.get(
@@ -488,7 +508,7 @@ class VideoProcessor(object):
         def _merge_video_data(video_obj):
             # If we are reprocessing, then we don't keep the random,
             # centerframe or neon thumbnails
-            if reprocess:
+            if self.reprocess:
                 thumbs = neondata.ThumbnailMetadata.get_many(
                     video_obj.thumbnail_ids)
                 keep_thumbs = [x.key for x in thumbs if x.type not in [
@@ -536,17 +556,20 @@ class VideoProcessor(object):
         cb_request = self.build_callback_request()
 
         # Tell the database that the request is done
-        # TODO(sunil): Once NeonApiRequest is StoredObject, make this a modify
-        api_request.state = neondata.RequestState.FINISHED
-        api_request.publish_date = time.time() *1000.0
-        api_request.response = tornado.escape.json_decode(cb_request.body)
+        def _flag_request_done_in_db(request):
+            request.state = neondata.RequestState.FINISHED
+            request.publish_date = time.time() *1000.0
+            request.response = tornado.escape.json_decode(cb_request.body)
         try:
-            sucess = api_request.save()
+            sucess = neondata.NeonApiRequest.modify(api_request.job_id,
+                                                    api_request.api_key,
+                                                    _flag_request_done_in_db)
             if not sucess:
-                raise DBError('Api Request save failed')
+                raise DBError('Api Request finished failed. It was not there')
         except Exception, e:
             _log.error("Error writing request state to database: %s" % e)
-            raise DBError("Error writing video data to database")
+            statemon.state.increment('modify_request_error')
+            raise DBError("Error finishing api request")
 
         # Send callbacks and notifications
         self.send_client_callback_response(video_id, cb_request)
@@ -701,21 +724,44 @@ class VideoClient(multiprocessing.Process):
                     #Change Job State
                     api_key = job_params['api_key']
                     job_id  = job_params['job_id']
-                    api_request = neondata.NeonApiRequest.get(job_id, api_key)
-                    if api_request.state == neondata.RequestState.SUBMIT:
-                        api_request.state = neondata.RequestState.PROCESSING
-                        api_request.model_version = self.model_version
-                        api_request.save()
+                    job_params['reprocess'] = False
+                    def _change_job_state(request):
+                        if request.state in [neondata.RequestState.SUBMIT,
+                                             neondata.RequestState.REPROCESS,
+                                             neondata.RequestState.REQUEUED]:
+                            if request.state in [
+                                    neondata.RequestState.REPROCESS,
+                                    neondata.RequestState.REQUEUED]:
+                                _log.info('Reprocessing job %s for account %s'
+                                          % (job_id, api_key))
+                                job_params['reprocess'] = True
+                            request.state = \
+                                neondata.RequestState.PROCESSING
+                            request.model_version = self.model_version
+                                
+                    api_request = neondata.NeonApiRequest.modify(
+                        job_id, api_key, _change_job_state)
+                    if api_request is None:
+                        _log.error('Could not get job %s for %s' %
+                                   (job_id, api_key))
+                        statemon.state.increment('dequeue_error')
+                        return False
+                    if api_request.state != neondata.RequestState.PROCESSING:
+                        _log.info('Job %s for account %s ignored' %
+                                  (job_id, api_key))
+                        return False
                     _log.info("key=worker [%s] msg=processing request %s for "
-                              "%s. State: %s " % (self.pid, job_id, api_key,
-                                                  api_request.state))
+                              "%s." % (self.pid, job_id, api_key))
+                    return job_params
                 except Exception,e:
                     _log.error("key=worker [%s] msg=db error %s" %(
                         self.pid, e.message))
+                    return False
             return result
         else:
             _log.error("Dequeue Error")
             statemon.state.increment('dequeue_error')
+        return False
 
     ##### Model Methods #####
 
@@ -756,10 +802,10 @@ class VideoClient(multiprocessing.Process):
             # there's a memory problem so we load the model for every
             # job.
             self.load_model()
-            jparams = json.loads(job)
-            vprocessor = VideoProcessor(jparams, self.model,
+            vprocessor = VideoProcessor(job, self.model,
                                         self.model_version,
-                                        self.cv_semaphore)
+                                        self.cv_semaphore,
+                                        job['reprocess'])
             vprocessor.start()
             self.videos_processed += 1
 

@@ -313,17 +313,19 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         neondata.NeonPlatform('acct1', self.api_key).save()
 
         self.video_id = '%s_vid1' % self.api_key
-        api_request = neondata.BrightcoveApiRequest('job1', self.api_key,
-                                                    'vid1',
-                                                    'some fun video',
-                                                    'http://video.mp4',
-                                                    None, None, 'pubid',
-                                                    'http://callback.com',
-                                                    '0',
-                                                    'http://default_thumb.jpg')
-        api_request.api_param = '1'
-        api_request.api_method = 'topn'
-        api_request.save()
+        self.api_request = neondata.BrightcoveApiRequest(
+            'job1', self.api_key,
+            'vid1',
+            'some fun video',
+            'http://video.mp4',
+            None, None, 'pubid',
+            'http://callback.com',
+            '0',
+            'http://default_thumb.jpg')
+        self.api_request.api_param = '1'
+        self.api_request.api_method = 'topn'
+        self.api_request.state = neondata.RequestState.PROCESSING
+        self.api_request.save()
 
         # Mock out s3
         self.s3conn = boto_mock.MockConnection()
@@ -337,7 +339,8 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.sqs_mocker = patch(
             'api.client.utils.sqsmanager.CustomerCallbackManager')
         self.mock_sqs_manager = self.sqs_mocker.start()
-        self.mock_sqs_manager().add_callback_response.side_effect = [True]
+        self.mock_sqs_manager().add_callback_response.side_effect = \
+          lambda x,y,z: True
 
         # Mock out the image download
         self.im_download_mocker = patch(
@@ -358,7 +361,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.cloundinary_mock = self.cloundinary_patcher.start()
 
         # Setup the processor object
-        job = api_request.__dict__
+        job = self.api_request.__dict__
         self.vprocessor = api.client.VideoProcessor(
             job,
             MagicMock(),
@@ -534,15 +537,17 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         video_meta.serving_url = 'my_serving_url.jpg'
         video_meta.save()
 
-        # Identify that the request is being reprocessed
+        # Write the request to the db
         api_request = neondata.BrightcoveApiRequest(
             'job1', self.api_key, 'vid1',
             'some fun video',
             'http://video.mp4', None, None, 'pubid',
             'http://callback.com', 'int1',
             'http://default_thumb.jpg')
-        api_request.state = neondata.RequestState.REPROCESS
+        api_request.state = neondata.RequestState.PROCESSING
         api_request.save()
+
+        self.vprocessor.reprocess = True
 
         self.vprocessor.finalize_response()
 
@@ -679,6 +684,9 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             with self.assertRaises(api.client.DBError):
                 self.vprocessor.finalize_response()
 
+        self.api_request.state = neondata.RequestState.PROCESSING
+        self.api_request.save()
+
         with self.assertLogExists(logging.ERROR,
                                   'Error writing thumbnail data'):
             with self.assertRaises(api.client.DBError):
@@ -695,6 +703,9 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
                                   'Error writing video data'):
             with self.assertRaises(api.client.DBError):
                 self.vprocessor.finalize_response()
+
+        self.api_request.state = neondata.RequestState.PROCESSING
+        self.api_request.save()
 
         with self.assertLogExists(logging.ERROR,
                                   'Error writing video data'):
@@ -728,33 +739,69 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertIn('random_frame.jpg', db_thumb.urls)
         self.assertEquals(len(db_thumb.urls), 2)
 
-    @patch('api.client.neondata.NeonApiRequest.get')
+    @patch('api.client.neondata.NeonApiRequest.modify')
     def test_api_request_update_fail(self, api_request_mock):
-        save_mock = MagicMock()
-        save_mock.side_effect = [
+        api_request_mock.side_effect = [
+            # Connection error on setting finalizing state
+            redis.ConnectionError("Connection Error"), 
+            # Api request missing on setting finalizing state
+            None,
+            #  Connection error on setting finished state
+            self.api_request,
             redis.ConnectionError("Connection Error"),
-            False
+            # Api request missing on setting finished state
+            self.api_request,
+            None,
         ]
+
+        with self.assertLogExists(logging.ERROR,
+                                  'Error writing request state'):
+            with self.assertRaises(api.client.DBError):
+                self.vprocessor.finalize_response()
+
+        with self.assertLogExists(logging.ERROR,
+                                  'Api Request finalizing failed'):
+            with self.assertRaises(api.client.DBError):
+                self.vprocessor.finalize_response()
         
-        api_request = neondata.BrightcoveApiRequest(
-            'job1', self.api_key, 'vid1',
-            'some fun video',
-            'http://video.mp4', None, None, 'pubid',
-            'http://callback.com', 'int1',
-            'http://default_thumb.jpg')
-        api_request.save = save_mock
-        api_request_mock.return_value = api_request
-
         with self.assertLogExists(logging.ERROR,
                                   'Error writing request state'):
             with self.assertRaises(api.client.DBError):
                 self.vprocessor.finalize_response()
 
         with self.assertLogExists(logging.ERROR,
-                                  'Error writing request state'):
+                                  'Api Request finished failed'):
             with self.assertRaises(api.client.DBError):
                 self.vprocessor.finalize_response()
 
+    def test_somebody_else_processed(self):
+
+        # Try when somebody else was sucessful
+        for state in [neondata.RequestState.FINISHED,
+                      neondata.RequestState.FINALIZING,
+                      neondata.RequestState.SERVING,
+                      neondata.RequestState.ACTIVE]:
+            
+            self.api_request.state = state
+            self.api_request.save()
+            with self.assertLogExists(logging.INFO, 'already processed'):
+                self.vprocessor.finalize_response()
+            self.assertEquals(
+                neondata.NeonApiRequest.get('job1', self.api_key).state,
+                state)
+
+        # Try when the current run should continue
+        for state in [neondata.RequestState.SUBMIT,
+                      neondata.RequestState.REQUEUED,
+                      neondata.RequestState.REPROCESS]:
+            self.api_request.state = state
+            self.api_request.save()
+            with self.assertLogNotExists(logging.INFO, 'already processed'):
+                self.vprocessor.finalize_response()
+            self.assertEquals(
+                neondata.NeonApiRequest.get('job1', self.api_key).state,
+                neondata.RequestState.FINISHED)
+        
 
     def test_callback_response_error(self):
         self.mock_sqs_manager().add_callback_response.side_effect = [
@@ -771,6 +818,9 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         request_saw = cargs[0]
         self.assertEquals(request_saw.url, 
                           'http://www.neon-lab.com/api/accounts/acct1/events')
+
+        self.api_request.state = neondata.RequestState.PROCESSING
+        self.api_request.save()
 
         with self.assertLogExists(logging.ERROR, 'Callback schedule failed'):
             self.vprocessor.finalize_response()
@@ -1059,8 +1109,24 @@ class SmokeTest(test_utils.neontest.TestCase):
         self.assertEquals(
             statemon.state.get('api.client.save_vmdata_error'),
             1)
+
+    def test_no_need_to_process(self):
+        self.api_request.state = neondata.RequestState.SERVING
+        self.api_request.save()
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
         
-        
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.SERVING)
              
 
 if __name__ == '__main__':
