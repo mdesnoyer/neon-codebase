@@ -2003,7 +2003,7 @@ class OoyalaPlatform(AbstractPlatform):
         #Verify that new_thumb data is not empty 
         if new_thumb is not None:
             res = yield tornado.gen.Task(ThumbnailMetadata.save_all,
-                                            modified_thumbs)  
+                                         modified_thumbs)  
             if not res:
                 _log.error("key=update_thumbnail msg=ThumbnailMetadata save_all"
                                 " failed for %s" %new_tid)

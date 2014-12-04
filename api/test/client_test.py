@@ -224,6 +224,30 @@ class TestVideoClient(test_utils.neontest.TestCase):
         self.assertNotIn(float('-inf'), 
                          [x[0].model_score for x in vprocessor.thumbnails])
 
+    def test_somebody_else_processed_first(self):
+        # Try when somebody else was sucessful
+        for state in [neondata.RequestState.FINISHED,
+                      neondata.RequestState.SERVING,
+                      neondata.RequestState.ACTIVE]:
+            vprocessor = self.setup_video_processor('neon')
+            self.api_request.state = state
+            self.api_request.save()
+            with self.assertRaises(api.client.OtherWorkerCompleted):
+                vprocessor.process_video(self.test_video_file, n_thumbs=5)
+
+        # Try when the current run should continue
+        for state in [neondata.RequestState.SUBMIT,
+                      neondata.RequestState.REQUEUED,
+                      neondata.RequestState.REPROCESS,
+                      neondata.RequestState.FAILED,
+                      neondata.RequestState.INT_ERROR,
+                      neondata.RequestState.FINALIZING]:
+            vprocessor = self.setup_video_processor('neon')
+            self.api_request.state = state
+            self.api_request.save()
+            vprocessor.process_video(self.test_video_file, n_thumbs=5)
+            self.assertGreater(len(vprocessor.thumbnails), 0)
+
     def test_missing_video_file(self):
         vprocessor = self.setup_video_processor("neon")
 
@@ -784,7 +808,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             
             self.api_request.state = state
             self.api_request.save()
-            with self.assertLogExists(logging.INFO, 'already processed'):
+            with self.assertRaises(api.client.OtherWorkerCompleted):
                 self.vprocessor.finalize_response()
             self.assertEquals(
                 neondata.NeonApiRequest.get('job1', self.api_key).state,
@@ -793,11 +817,12 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         # Try when the current run should continue
         for state in [neondata.RequestState.SUBMIT,
                       neondata.RequestState.REQUEUED,
-                      neondata.RequestState.REPROCESS]:
+                      neondata.RequestState.REPROCESS,
+                      neondata.RequestState.FAILED,
+                      neondata.RequestState.INT_ERROR]:
             self.api_request.state = state
             self.api_request.save()
-            with self.assertLogNotExists(logging.INFO, 'already processed'):
-                self.vprocessor.finalize_response()
+            self.vprocessor.finalize_response()
             self.assertEquals(
                 neondata.NeonApiRequest.get('job1', self.api_key).state,
                 neondata.RequestState.FINISHED)

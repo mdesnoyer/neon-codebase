@@ -13,6 +13,7 @@ if sys.path[0] <> base_path:
     sys.path.insert(0, base_path)
 
 from collections import deque
+import datetime
 import hashlib
 import json
 import logging
@@ -40,6 +41,8 @@ from utils.options import define, options
 define("port", default=8081, help="run on the given port", type=int)
 define("test_key", default="3qswu22oabmnl8d8hqcuku14", help="test api key",
         type=str)
+define("max_retries", default=3,
+       help="Maximum number of video processing retries")
 
 _log = logging.getLogger(__name__)
 DIRNAME = os.path.dirname(__file__)
@@ -65,6 +68,9 @@ MAX_THUMBNAILS = 25
 NEON_AUTH = "secret_key"
 PUBLISHER_ID = "publisher_id"
 INTEGRATION_ID = "integration_id"
+
+class JobException(Exception): pass
+class JobFailed(JobException): pass
 
 customer_priorities = {} 
 
@@ -104,10 +110,6 @@ class RequestData(object):
     
     def get_video_url(self):
         return self.api_request.video_url
-
-    def get_request_json(self):
-        jdata = json.dumps(self.api_request.__dict__)
-        return jdata 
 
     def get_video_size(self):
         return self.video_size
@@ -206,7 +208,7 @@ class FairWeightedRequestQueue(object):
     @tornado.gen.coroutine
     def put(self, api_request):
         # Based on customer priority put in the appropriate Q
-        p = yield tornado.gen.Task(get_customer_priority, api_request.api_key)
+        p = yield get_customer_priority(api_request.api_key, async=True)
         
         # if priority > # of queues, then consider all priorities > len(Qs) as
         # the lowest priority
@@ -215,24 +217,26 @@ class FairWeightedRequestQueue(object):
         item = RequestData(key, api_request)
         ret = self.pqs[pindex].put(key, item)
 
-        # Spin off a thread to set the metadata
-        self._schedule_metadata_thread(pindex, key)
+        # TODO(Sunil): Remove the complexity of looking up the
+        # metadata in the queue.
+        yield self._add_metadata(pindex, key, async=True)
 
         raise tornado.gen.Return(ret)
 
     def get(self):
+        '''Returns a RequestData object from the queue or None if it is empty.'''
         # pick a random number in the interval (0, max_priority)
         pindex = self._get_priority_qindex()
         item = self.pqs[pindex].get()
         if item:
-            return item.get_request_json()
+            return item
         else:
             # check other Qs
             for i in range(len(self.pqs)):
                 if i != pindex:
                     item = self.pqs[i].get()
                     if item:
-                        return item.get_request_json()
+                        return item
         # Empty Q
         return None
 
@@ -255,20 +259,15 @@ class FairWeightedRequestQueue(object):
 
             if not result.error:
                 headers = result.headers
-                nbytes = int(headers.get('Content-Length'))
-                statemon.state.increment('queue_size_bytes', nbytes)
-                _log.info("Request %s had video file of size %s",
-                        item.get_request_json(), nbytes)
-                # add video size 
-                item.set_video_size(nbytes)
+                nbytes = int(headers.get('Content-Length', 0))
+                if nbytes > 0:
+                    statemon.state.increment('queue_size_bytes', nbytes)
+                    _log.info("Request %s had video file of size %s",
+                              item, nbytes)
+                    # add video size 
+                    item.set_video_size(nbytes)
 
             # On error do nothing currently
-
-    @tornado.gen.coroutine
-    def _schedule_metadata_thread(self, pqid, key):
-        t = threading.Thread(target=self._add_metadata, args=(pqid, key,))
-        t.setDaemon(True)
-        t.start()
 
     def qsize(self):
         sz = 0
@@ -285,12 +284,208 @@ def _verify_neon_auth(value):
     return True
 
 
-#### GLOBALS #####
-global_request_queue = FairWeightedRequestQueue()
+class JobManager(object):
+    '''Class that manages jobs to run and/or are currently running.'''
+    def __init__(self, job_check_interval=60.0, base_time=30.0):
+        '''Create the job manager.
 
+        Inputs:
+        job_check_interval - Interval in seconds to check the running job status
+        base_time - Base time in seconds for events to be requeued
+        '''
+        self.q = FairWeightedRequestQueue()
+        self.base_time = base_time
+        self.io_loop = tornado.ioloop.IOLoop.current()
+        self.job_check_timer = tornado.ioloop.PeriodicCallback(
+            self.check_running_jobs, job_check_interval * 1000)
+        self.job_check_timer.start()
+
+        # List of ((job_id, api_key), timeout_date) tuples for jobs that may
+        # be running.
+        self._lock = threading.RLock()
+        self.running_jobs = [] 
+
+    def is_healthy(self):
+        '''Returns true if the job management is healthy.'''
+        #TODO(Sunil): Write this function so that it actually checks
+        #the state or take the check out of the health checker
+        return True
+
+    def get_job(self):
+        '''Return a RequestData job, or None if there isn't one.'''
+        job = self.q.get()
+        statemon.state.server_queue = self.q.qsize()
+        if job:
+            # Set a timeout to be 2x the video length assuming an SD
+            # video of 800 kbps or 15 min if we don't know
+            # the length of the video.
+            approx_video_length = self.base_time*15.0
+            if job.video_size:
+                approx_video_length = job.video_size * 8.0 / 1024 / 800
+            deadline = datetime.datetime.now() + datetime.timedelta(
+                seconds=approx_video_length*2.0)
+            with self._lock:
+                self.running_jobs.append(
+                    ((job.api_request.job_id, job.api_request.api_key),
+                     deadline))
+        return job
+
+    @tornado.gen.coroutine
+    def check_running_jobs(self):
+        '''Checks the running jobs to see if they should be requeued.
+
+        If they failed or have timed out, requeue them.
+        '''
+        with self._lock:
+            jobs = self.running_jobs
+            self.running_jobs = []
+
+        # Now walk through all the jobs and deal with them as necessary
+        requests = yield tornado.gen.Task(
+            neondata.NeonApiRequest.get_many,
+            [x[0] for x in jobs])
+        for job, request in zip(jobs, requests):
+            job_id, api_key = job[0]
+            deadline = job[1]
+
+            delay = None
+
+            if request.state in [neondata.RequestState.FINISHED,
+                                 neondata.RequestState.SERVING,
+                                 neondata.RequestState.ACTIVE,
+                                 neondata.RequestState.SERVING_AND_ACTIVE]:
+                # The job finished sucessfully
+                continue
+            elif request.state in [neondata.RequestState.FAILED,
+                                   neondata.RequestState.INT_ERROR]:
+                # Requeue the job with a large exponential backoff
+                delay = self.base_time * (1 << (request.fail_count + 2))
+
+            elif (datetime.datetime.now() > deadline and
+                  request.state in [neondata.RequestState.REQUEUED,
+                                    neondata.RequestState.REPROCESS,
+                                    neondata.RequestState.PROCESSING,
+                                    neondata.RequestState.SUBMIT,
+                                    neondata.RequestState.FINALIZING]):
+                _log.error('Job %s from account %s timed out' %
+                           (job_id, api_key))
+                
+                # Requeue with a small exponential backoff and flag
+                # the error in the database.
+                delay = self.base_time *  (1 << request.fail_count)
+                def _inc_fail_count(db_request):
+                    db_request.fail_count += 1
+                    db_request.state = neondata.RequestState.INT_ERROR
+                request = yield tornado.gen.Task(
+                    neondata.NeonApiRequest.modify, job_id, api_key,
+                    _inc_fail_count)
+            else:
+              # We're still watching the job
+              with self._lock:
+                  self.running_jobs.append(job)
+                    
+            if delay is not None:
+                self.io_loop.add_callback(lambda: self.io_loop.call_later(
+                    delay, self._no_exceptions_requeue_job, job_id, api_key))
+
+    @tornado.gen.coroutine
+    def _no_exceptions_requeue_job(self, job_id, api_key):
+        try:
+            yield self.requeue_job(job_id, api_key)
+        except JobFailed:
+            pass
+        except Exception as e:
+            _log.exception('Unexpected exception when requeueing job %s' % e)
+
+    @tornado.gen.coroutine
+    def requeue_job(self, job_id, api_key):
+        '''Requeue a job.
+
+        Returns False if the job is already in the queue
+        '''
+
+        def _flag_requeue(request):
+            if request.state in [neondata.RequestState.FINISHED,
+                                 neondata.RequestState.SERVING,
+                                 neondata.RequestState.ACTIVE,
+                                 neondata.RequestState.SERVING_AND_ACTIVE,
+                                 neondata.RequestState.REPROCESS]:
+                request.state = neondata.RequestState.REPROCESS
+                request.fail_count = 0
+            elif request.fail_count >= options.max_retries:
+                return
+            else:
+                request.state = neondata.RequestState.REQUEUED
+
+        api_request = yield tornado.gen.Task(
+            neondata.NeonApiRequest.modify,
+            job_id,
+            api_key,
+            _flag_requeue)
+
+        if api_request.fail_count >= options.max_retries:
+            msg = ('Failed processing job %s for account %s too '
+                   'many times' % (job_id, api_key))
+            _log.error(msg)
+            raise JobFailed(msg)
+        retval = yield self.add_job(api_request)
+        raise tornado.gen.Return(retval)
+
+    @tornado.gen.coroutine
+    def reprocess_job(self, job_id, api_key):
+        '''Reprocess a job whether or not it had failed before.
+
+        Returns False if the job is already in the queue.
+        '''
+        def _flag_reprocess(request):
+            request.state = neondata.RequestState.REPROCESS
+            request.fail_count = 0
+
+        api_request = yield tornado.gen.Task(
+            neondata.NeonApiRequest.modify,
+            job_id,
+            api_key,
+            _flag_reprocess)
+
+        retval = yield self.add_job(api_request)
+        raise tornado.gen.Return(retval)
+
+    @tornado.gen.coroutine
+    def add_job(self, api_request):
+        '''Add the NeonApiRequest to the queue.
+        
+        Returns False if the job is already in the queue.
+        '''
+        retval = yield self.q.put(api_request, async=True)
+        statemon.state.server_queue = self.q.qsize()
+        _log.info('Add job %s for account %s to the queue' % 
+                  (api_request.job_id, api_request.api_key))
+        raise tornado.gen.Return(retval)
+
+    @tornado.gen.coroutine
+    def requeue_all_pending_jobs(self):
+        '''Look into the database and requeue all pending jobs.
+
+        This should only be called at the beginning of the program.
+        '''
+        requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_all)
+        for request in requests:
+            if (request.fail_count < options.max_retries and
+                request.state in [neondata.RequestState.SUBMIT,
+                                  neondata.RequestState.PROCESSING,
+                                  neondata.RequestState.FINALIZING,
+                                  neondata.RequestState.REQUEUED,
+                                  neondata.RequestState.REPROCESS,
+                                  neondata.RequestState.FAILED,
+                                  neondata.RequestState.INT_ERROR]):
+                yield self.reprocess_job(request.job_id, request.api_key)
 
 class DequeueHandler(tornado.web.RequestHandler):
-    """ DEQUEUE JOB Handler - The queue stores data in json format already """
+    """ DEQUEUE JOB Handler """
+    def initialize(self, job_manager):
+        super(DequeueHandler, self).initialize()
+        self.job_manager = job_manager
+    
     def get(self, *args, **kwargs):
         if self.request.headers.has_key('X-Neon-Auth'):
             if not _verify_neon_auth(self.request.headers.get('X-Neon-Auth')):
@@ -299,12 +494,11 @@ class DequeueHandler(tornado.web.RequestHandler):
             raise tornado.web.HTTPError(400)
         
         statemon.state.increment('dequeue_requests')
-        statemon.state.server_queue = global_request_queue.qsize()
-        element = global_request_queue.get()
-        if element:
+        job = self.job_manager.get_job()
+        if job:
             #send http response
             h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
-            self.write(str(element))
+            self.write(json.dumps(job.api_request.__dict__))
         else: 
             #Send Queue empty message as a string {}
             self.write("{}")
@@ -313,10 +507,22 @@ class DequeueHandler(tornado.web.RequestHandler):
 
 class RequeueHandler(tornado.web.RequestHandler):
     """ REQUEUE JOB Handler"""
+    def initialize(self, job_manager, reprocess=False):
+        '''Initialize the handler.
+
+        Inputs:
+        job_manager - JobManager object
+        reprocess - If true, requests will be flagged for reprocessing 
+                    irrespective of their state and/or number of errors.
+        '''
+        super(RequeueHandler, self).initialize()
+        self.job_manager = job_manager
+        self.reprocess = reprocess
+
+    @tornado.gen.coroutine
     def post(self, *args, **kwargs):
         
         try:
-            _log.info("key=requeue_handler msg=requeing ")
             jdata = self.request.body
             data = json.loads(jdata)
             try:
@@ -327,14 +533,26 @@ class RequeueHandler(tornado.web.RequestHandler):
                 self.set_status(400)
                 self.finish()
                 return
+            
+            _log.info("key=requeue_handler msg=requeing job %s" % key)
 
-            ret = global_request_queue.put(api_request)
+            if self.reprocess:
+                ret = yield self.job_manager.reprocess_job(api_request.job_id,
+                                                           api_request.api_key)
+            else:
+                ret = yield self.job_manager.requeue_job(api_request.job_id,
+                                                         api_request.api_key)
             if not ret:
                 _log.warn("requed request %s is already in the Q" % key)
                 self.set_status(409)
                 self.write('{"error": "requeust already in the Q"}')
+
+        except JobFailed, e:
+            self.set_status(409)
+            self.write('{"error": "Request has failed too many times. '
+                       'If you want to force it to be tried again, call '
+                       '/reprocess"}')
                 
-            statemon.state.server_queue = global_request_queue.qsize()
         except Exception, e:
             _log.error("key=requeue_handler msg=error %s" %e)
             raise tornado.web.HTTPError(500)
@@ -348,7 +566,10 @@ class RequeueHandler(tornado.web.RequestHandler):
 class GetThumbnailsHandler(tornado.web.RequestHandler):
     ''' Thumbnail API handler '''
 
-    @tornado.web.asynchronous
+    def initialize(self, job_manager):
+        super(GetThumbnailsHandler, self).initialize()
+        self.job_manager = job_manager
+
     def send_json_response(self, data, status=200):
        
         self.set_header("Content-Type", "application/json")
@@ -356,8 +577,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
         self.write(data)
         self.finish()
 
-    @tornado.web.asynchronous
-    @tornado.gen.engine
+    @tornado.gen.coroutine
     def post(self, *args, **kwargs):
         # insert job in to user account
         
@@ -455,8 +675,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             api_request.state = neondata.RequestState.SUBMIT
 
             # Validate Request & Insert in to Queue (serialized/json)
-            job_result = yield tornado.gen.Task(neondata.NeonApiRequest.get,
-                                api_request.job_id, api_request.api_key)
+            job_result = yield tornado.gen.Task(
+                neondata.NeonApiRequest.get,
+                api_request.job_id, api_request.api_key)
 
             if job_result is not None:
                 response_data = '{"error":"duplicate job", "job_id": "%s" }'\
@@ -467,10 +688,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 statemon.state.increment('duplicate_requests')
                 return
             
-            json_data = api_request.to_json()
-            global_request_queue.put(api_request)
-            statemon.state.server_queue = global_request_queue.qsize()
-            
             # Response for the submission of request
             response_data = "{\"job_id\":\"" + job_id + "\"}"
             
@@ -480,14 +697,18 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 _log.error("key=thumbnail_handler  msg=request save failed: ")
                 self.set_status(502)
             else:
+                # Add the job to the queue
+                yield self.job_manager.add_job(api_request)
                 
-                # Only if this is a Neon request, save it to the DB. Other platform requests
-                # get added on request creation cron 
+                # Only if this is a Neon request, save it to the
+                # DB. Other platform requests get added on request
+                # creation cron
                 if request_type == 'neon':
-                    nplatform = yield tornado.gen.Task(neondata.NeonPlatform.get_account, api_key)
+                    nplatform = yield tornado.gen.Task(
+                        neondata.NeonPlatform.get_account, api_key)
                     if nplatform:
-                        # TODO:refactor after moving platform accounts to stored
-                        # object (atomic save) 
+                        # TODO:refactor after moving platform accounts
+                        # to stored object (atomic save)
                         nplatform.add_video(vid, job_id)
                         res = yield tornado.gen.Task(nplatform.save)
                         if res:
@@ -533,13 +754,20 @@ class TestCallback(tornado.web.RequestHandler):
 
 class HealthCheckHandler(tornado.web.RequestHandler):
     ''' Health check for the Server'''
-    @tornado.web.asynchronous
-    @tornado.gen.engine
+    def initialize(self, job_manager):
+        super(HealthCheckHandler, self).initialize()
+        self.job_manager = job_manager
+    
+    @tornado.gen.coroutine
     def get(self, *args, **kwargs):
         test_account_key = options.test_key
         
-        # Try to query the video Q
-        size = global_request_queue.qsize()
+        # Check the job manager
+        if not self.job_manager.is_healthy():
+            self.write("Job manager is unhealthy")
+            self.set_status(503)
+            self.finish()
+            return
         
         # Ping the DB to see if its running
         try:
@@ -562,22 +790,37 @@ class HealthCheckHandler(tornado.web.RequestHandler):
 # Create Tornado server application
 ###########################################
 
-application = tornado.web.Application([
-    (r'/api/v1/submitvideo/(.*)', GetThumbnailsHandler),
-    #(r"/stats", StatsHandler),
-    (r"/dequeue", DequeueHandler),
-    (r"/requeue", RequeueHandler),
-    (r"/testcallback", TestCallback),
-    (r"/healthcheck", HealthCheckHandler)
-])
+class Server(object):
+    def __init__(self):
+        self.job_manager = JobManager()
+        self.application = tornado.web.Application([
+            (r'/api/v1/submitvideo/(.*)', GetThumbnailsHandler,
+             dict(job_manager=self.job_manager)),
+            #(r"/stats", StatsHandler),
+            (r"/dequeue", DequeueHandler, dict(job_manager=self.job_manager)),
+            (r"/requeue", RequeueHandler, dict(job_manager=self.job_manager,
+                                                 reprocess=False)),
+            (r"/reprocess", RequeueHandler, dict(job_manager=self.job_manager,
+                                                 reprocess=True)),
+            (r"/testcallback", TestCallback),
+            (r"/healthcheck", HealthCheckHandler,
+             dict(job_manager=self.job_manager))
+            ])
+
+    def run():
+        server = tornado.httpserver.HTTPServer(self.application)
+        utils.ps.register_tornado_shutdown(server)
+        server.listen(options.port)
+
+        io_loop = tornado.ioloop.IOLoop.current()
+        io_loop.add_callback(self.job_manager.requeue_all_pending_jobs)
+        io_loop.start()
+        
 
 def main():
     utils.neon.InitNeon()
-    global server
-    server = tornado.httpserver.HTTPServer(application)
-    utils.ps.register_tornado_shutdown(server)
-    server.listen(options.port)
-    tornado.ioloop.IOLoop.current().start()
+    server = Server()
+    server.run()
 
 # ============= MAIN ======================== #
 if __name__ == "__main__":

@@ -79,6 +79,8 @@ statemon.define('video_duration_60m', int)
 statemon.define('video_read_error', int)
 statemon.define('extract_frame_error', int)
 statemon.define('running_workers', int)
+statemon.define('workers_cv_processing', int)
+statemon.define('other_worker_completed', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -95,6 +97,8 @@ define('notification_api_key', default='icAxBCbwo--owZaFED8hWA',
        help='Api key for the notifications')
 define('server_auth', default='secret_token',
        help='Secret token for talking with the video processing server')
+define('extra_workers', default=0,
+       help='Number of extra workers to allow downloads to happen in the background')
 
 
 class VideoError(Exception): pass
@@ -103,6 +107,9 @@ class VideoReadError(VideoError, IOError): pass
 class VideoDownloadError(VideoError, IOError): pass  
 class DBError(IOError): pass
 class CallbackError(IOError): pass
+
+# For when another worker completed the video
+class OtherWorkerCompleted(Exception): pass 
     
 
 ###########################################################################
@@ -175,11 +182,21 @@ class VideoProcessor(object):
             n_thumbs = max(self.n_thumbs, 5)
 
             with self.cv_semaphore:
-                self.process_video(self.tempfile.name, n_thumbs=n_thumbs)
+                statemon.state.increment('workers_cv_processing')
+                try:
+                    self.process_video(self.tempfile.name, n_thumbs=n_thumbs)
+                finally:
+                    statemon.state.decrement('workers_cv_processing')
 
             #finalize response, if success send client and notification
             #response
             self.finalize_response()
+
+        except OtherWorkerCompleted as e:
+            statemon.state.increment('other_worker_completed')
+            _log.info('Job %s for account %s was already completed' %
+                      (self.job_params['job_id'], self.job_params['api_key']))
+            return
 
         except VideoError as e:
             # Flag that the job failed getting the data
@@ -245,6 +262,17 @@ class VideoProcessor(object):
 
     def process_video(self, video_file, n_thumbs=1):
         ''' process all the frames from the partial video downloaded '''
+        # The video might have finished by somebody else so double
+        # check that we still want to process it.
+        api_request = neondata.NeonApiRequest.get(self.job_params['job_id'],
+                                                  self.job_params['api_key'])
+        if api_request and api_request.state in [
+                neondata.RequestState.FINISHED,
+                neondata.RequestState.SERVING,
+                neondata.RequestState.ACTIVE,
+                neondata.RequestState.SERVING_AND_ACTIVE]:
+            raise OtherWorkerCompleted()
+        
         _log.info('Starting to search video %s' % self.video_url)
         start_process = time.time()
 
@@ -430,7 +458,9 @@ class VideoProcessor(object):
             if req.state in [neondata.RequestState.PROCESSING,
                              neondata.RequestState.SUBMIT,
                              neondata.RequestState.REQUEUED,
-                             neondata.RequestState.REPROCESS]:
+                             neondata.RequestState.REPROCESS,
+                             neondata.RequestState.FAILED,
+                             neondata.RequestState.INT_ERROR]:
                 req.state = neondata.RequestState.FINALIZING
             else:
                 somebody_else_finished[0] = True
@@ -445,9 +475,7 @@ class VideoProcessor(object):
             raise DBError("Error modifying api request")
         
         if somebody_else_finished[0]:
-            _log.info('Video %s was already processed by another worker' %
-                      self.video_url)
-            return
+            raise OtherWorkerCompleted()
 
         # Get the CDN Metadata
         cdn_metadata = neondata.CDNHostingMetadataList.get(
@@ -730,8 +758,7 @@ class VideoClient(multiprocessing.Process):
                                              neondata.RequestState.REPROCESS,
                                              neondata.RequestState.REQUEUED]:
                             if request.state in [
-                                    neondata.RequestState.REPROCESS,
-                                    neondata.RequestState.REQUEUED]:
+                                    neondata.RequestState.REPROCESS]:
                                 _log.info('Reprocessing job %s for account %s'
                                           % (job_id, api_key))
                                 job_params['reprocess'] = True
@@ -854,9 +881,8 @@ if __name__ == "__main__":
     # Register a function that will shutdown the workers
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
 
-    max_workers = multiprocessing.cpu_count()
-    cv_semaphore = multiprocessing.BoundedSemaphore(
-        max(multiprocessing.cpu_count() - 1, 1))
+    cv_slots = max(multiprocessing.cpu_count() - 1, 1)
+    cv_semaphore = multiprocessing.BoundedSemaphore(cv_slots)
 
     # Manage the workers 
     try:
@@ -867,7 +893,7 @@ if __name__ == "__main__":
             statemon.state.running_workers = len(_workers)
 
             # Create new workers until we get to n_workers
-            while len(_workers) < max_workers:
+            while len(_workers) < (cv_slots + options.extra_workers):
                 vc = VideoClient(options.model_file, cv_semaphore)
                 _workers.append(vc)
                 vc.start()
