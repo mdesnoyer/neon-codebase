@@ -795,7 +795,7 @@ class NamespacedStoredObject(StoredObject):
 
     @classmethod
     def modify(cls, key, func, create_missing=False, callback=None):
-        super(NamespacedStoredObject, cls).modify(
+        return super(NamespacedStoredObject, cls).modify(
             cls.format_key(key),
             func,
             create_missing=create_missing,
@@ -803,7 +803,7 @@ class NamespacedStoredObject(StoredObject):
 
     @classmethod
     def modify_many(cls, keys, func, create_missing=False, callback=None):
-        super(NamespacedStoredObject, cls).modify_many(
+        return super(NamespacedStoredObject, cls).modify_many(
             [cls.format_key(x) for x in keys],
             func,
             create_missing=create_missing,
@@ -2003,7 +2003,7 @@ class OoyalaPlatform(AbstractPlatform):
         #Verify that new_thumb data is not empty 
         if new_thumb is not None:
             res = yield tornado.gen.Task(ThumbnailMetadata.save_all,
-                                            modified_thumbs)  
+                                         modified_thumbs)  
             if not res:
                 _log.error("key=update_thumbnail msg=ThumbnailMetadata save_all"
                                 " failed for %s" %new_tid)
@@ -2050,6 +2050,7 @@ class RequestState(object):
 
     SUBMIT     = "submit"
     PROCESSING = "processing"
+    FINALIZING = "finalizing" # In the process of finalizing the request
     REQUEUED   = "requeued"
     FAILED     = "failed" # Failed due to video url issue/ network issue
     FINISHED   = "finished"
@@ -2082,7 +2083,9 @@ class NeonApiRequest(NamespacedStoredObject):
         self.request_type = request_type
         # The url to send the callback response
         self.callback_url = http_callback
-        self.state = RequestState.SUBMIT 
+        self.state = RequestState.SUBMIT
+        self.fail_count = 0 # Number of failed processing tries
+        
         self.integration_type = "neon"
         self.default_thumbnail = default_thumbnail # URL of a default thumb
 
@@ -2171,8 +2174,8 @@ class NeonApiRequest(NamespacedStoredObject):
             callback=callback)
 
     @classmethod
-    def modify(cls, api_key, job_id, func, callback=None):
-        super(NeonApiRequest, cls).modify(
+    def modify(cls, job_id, api_key, func, callback=None):
+        return super(NeonApiRequest, cls).modify(
             cls._generate_subkey(job_id, api_key),
             func,
             callback=callback)
@@ -2183,7 +2186,7 @@ class NeonApiRequest(NamespacedStoredObject):
 
         Each key must be a tuple of (job_id, api_key)
         '''
-        super(NeonApiRequest, cls).modify_many(
+        return super(NeonApiRequest, cls).modify_many(
             [cls._generate_subkey(job_id, api_key) for 
              job_id, api_key in keys],
             func,

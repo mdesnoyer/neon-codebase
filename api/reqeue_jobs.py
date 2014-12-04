@@ -40,6 +40,7 @@ def main():
         if request.state in [neondata.RequestState.SUBMIT,
                              neondata.RequestState.PROCESSING, 
                              neondata.RequestState.REQUEUED,
+                             neondata.RequestState.FAILED,
                              neondata.RequestState.INT_ERROR]:
             url = 'http://%s:%s/requeue' % (options.host, options.port)
 
