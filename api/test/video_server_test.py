@@ -734,8 +734,9 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
             j = self.job_manager.get_job()
             if j is None:
                 break
-            self.assertEquals(j.api_request.state,
-                              neondata.RequestState.REPROCESS)
+            self.assertIn(j.api_request.state,
+                          [neondata.RequestState.REQUEUED,
+                           neondata.RequestState.REPROCESS])
             jobs_found.append(j)
         self.assertItemsEqual([x.api_request.job_id for x in jobs_found],
                               ['job%i' % i for i in range(7)])

@@ -485,7 +485,7 @@ class JobManager(object):
                                   neondata.RequestState.REPROCESS,
                                   neondata.RequestState.FAILED,
                                   neondata.RequestState.INT_ERROR]):
-                yield self.reprocess_job(request.job_id, request.api_key)
+                yield self.requeue_job(request.job_id, request.api_key)
 
 class DequeueHandler(tornado.web.RequestHandler):
     """ DEQUEUE JOB Handler """
