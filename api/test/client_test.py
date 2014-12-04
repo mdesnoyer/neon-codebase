@@ -202,9 +202,10 @@ class TestVideoClient(test_utils.neontest.TestCase):
         self.assertTrue(self.model.choose_thumbnails.called)
         cargs, kwargs = self.model.choose_thumbnails.call_args
         self.assertEquals(kwargs, {'n':5,
-                                   'start_time': 2.0,
-                                   'end_buffer_time': 2.0,
-                                   'thumb_min_dist': 5.0,
+                                   'start_time': 0.0,
+                                   'end_buffer_time': 0.0,
+                                   'thumb_min_dist': 1.0,
+                                   'processing_time_ratio': 1.2,
                                    'video_name':  'http://brightcove.vo.llnwd.net/e1/uds/pd/2294876105001/2294876105001_2369427498001_shutterstock-v2602466.mp4'})
         self.assertEquals(len(cargs), 1)
 

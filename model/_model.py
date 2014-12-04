@@ -112,20 +112,24 @@ class Model(object):
     def choose_thumbnails(self, video, n=1, start_time=0.0,
                           end_buffer_time=0.0,
                           thumb_min_dist=5.0,
+                          processing_time_ratio=1.0,
                           video_name=''):
         # Clear the gist cache
         self.gist.reset()
         
-        return self.choose_thumbnails_bisect(video,
-                                             n=n,
-                                             start_time=start_time,
-                                             end_buffer_time=end_buffer_time,
-                                             thumb_min_dist=thumb_min_dist,
-                                             video_name=video_name)
+        return self.choose_thumbnails_bisect(
+            video,
+            n=n,
+            start_time=start_time,
+            end_buffer_time=end_buffer_time,
+            thumb_min_dist=thumb_min_dist,
+            processing_time_ratio=processing_time_ratio,
+            video_name=video_name)
 
     def choose_thumbnails_bisect(self, video, n=1, start_time=0.0,
                                  end_buffer_time=0.0,
                                  thumb_min_dist=5.0,
+                                 processing_time_ratio=1.0,
                                  video_name=''):
         ''' Selects the top n thumnails from a video.  Uses a bisection search
         method.
@@ -137,6 +141,8 @@ class Model(object):
         end_buffer_time - The time in seconds to ignore at the end of the video
         thumb_min_dist - Returned thumbnails must be at least this number of
                          seconds apart.
+        processing_time_ratio - Ratio of processing time allowed relative to 
+                                the video length.
         video_name - Name of the video for logging purposes
 
         Returns: ([(image,score,frame_no,timecode,attribute)],end_time)
@@ -213,7 +219,7 @@ class Model(object):
         fps = video.get(cv2.cv.CV_CAP_PROP_FPS) or 30.0
         num_frames = int(video.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
         video_time = float(num_frames) / fps
-        max_processing_time = video_time
+        max_processing_time = processing_time_ratio * video_time
         start_processing_time = time.time()
         _log.info('Processing video %s' % video_name)
         _log.info('Number of frames: %d. FPS: %f' % (num_frames, fps))
