@@ -1,16 +1,15 @@
+#!/usr/bin/env python
 '''
 Neon video server
 
 Keeps the thumbnail api requests made in to the Neon system via CMS API
 The video clients consume the requests from this Q
 '''
-
-#!/usr/bin/env python
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0, base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 from collections import deque
 import datetime
@@ -286,7 +285,7 @@ def _verify_neon_auth(value):
 
 class JobManager(object):
     '''Class that manages jobs to run and/or are currently running.'''
-    def __init__(self, job_check_interval=60.0, base_time=30.0):
+    def __init__(self, job_check_interval=10.0, base_time=30.0):
         '''Create the job manager.
 
         Inputs:
@@ -336,6 +335,7 @@ class JobManager(object):
 
         If they failed or have timed out, requeue them.
         '''
+        _log.debug('Checking on %i running jobs' % len(self.running_jobs))
         with self._lock:
             jobs = self.running_jobs
             self.running_jobs = []
@@ -468,6 +468,7 @@ class JobManager(object):
 
         This should only be called at the beginning of the program.
         '''
+        _log.info('Requeuing pending jobs from db')
         requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_all)
         for request in requests:
             if (request.fail_count < options.max_retries and
@@ -807,7 +808,7 @@ class Server(object):
              dict(job_manager=self.job_manager))
             ])
 
-    def run():
+    def run(self):
         server = tornado.httpserver.HTTPServer(self.application)
         utils.ps.register_tornado_shutdown(server)
         server.listen(options.port)
