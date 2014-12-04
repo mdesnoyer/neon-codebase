@@ -218,7 +218,10 @@ class FairWeightedRequestQueue(object):
 
         # TODO(Sunil): Remove the complexity of looking up the
         # metadata in the queue.
-        yield self._add_metadata(pindex, key, async=True)
+        try:
+            yield self._add_metadata(pindex, key, async=True)
+        except tornado.web.HTTPError as e:
+            pass
 
         raise tornado.gen.Return(ret)
 
@@ -360,6 +363,8 @@ class JobManager(object):
                                    neondata.RequestState.INT_ERROR]:
                 # Requeue the job with a large exponential backoff
                 delay = self.base_time * (1 << (request.fail_count + 2))
+                _log.warn('Job %s for account %s failed and will be retried'
+                          % (job_id, api_key))
 
             elif (datetime.datetime.now() > deadline and
                   request.state in [neondata.RequestState.REQUEUED,
@@ -385,8 +390,9 @@ class JobManager(object):
                   self.running_jobs.append(job)
                     
             if delay is not None:
-                self.io_loop.add_callback(lambda: self.io_loop.call_later(
-                    delay, self._no_exceptions_requeue_job, job_id, api_key))
+                self.io_loop.add_callback(lambda x: self.io_loop.call_later(
+                    x, self._no_exceptions_requeue_job, job_id, api_key),
+                    float(delay))
 
     @tornado.gen.coroutine
     def _no_exceptions_requeue_job(self, job_id, api_key):
@@ -479,7 +485,7 @@ class JobManager(object):
                                   neondata.RequestState.REPROCESS,
                                   neondata.RequestState.FAILED,
                                   neondata.RequestState.INT_ERROR]):
-                yield self.reprocess_job(request.job_id, request.api_key)
+                yield self.requeue_job(request.job_id, request.api_key)
 
 class DequeueHandler(tornado.web.RequestHandler):
     """ DEQUEUE JOB Handler """

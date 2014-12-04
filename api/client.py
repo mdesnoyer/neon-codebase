@@ -313,10 +313,15 @@ class VideoProcessor(object):
 
         # Decide the time buffer at the beginning and end of the video
         # to ignore.
-        if duration < 30:
+        if duration < 10:
+            ignore_time = 0.0
+            thumb_min_dist = 1.0
+        elif duration < 30:
             ignore_time = 2.0
+            thumb_min_dist = 3.0
         else:
             ignore_time = 5.0
+            thumb_min_dist = 5.0
 
         try:
             results, self.sec_to_extract = \
@@ -325,7 +330,8 @@ class VideoProcessor(object):
                   n=n_thumbs,
                   start_time=ignore_time,
                   end_buffer_time=ignore_time,
-                  thumb_min_dist=5.0,
+                  thumb_min_dist=thumb_min_dist,
+                  processing_time_ratio=1.2,
                   video_name=self.video_url)
         except model.VideoReadError:
             _log.error("Error using OpenCV to read video. Trying ffvideo")
