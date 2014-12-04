@@ -1641,6 +1641,15 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         resp = json.loads(response.body)
         r_vids = resp['videoids']
         self.assertListEqual(sorted(r_vids), sorted(vids))
+    
+    def test_healthcheck(self):
+        url = self.get_url("/healthcheck")
+        response = self.get_request(url, self.api_key)
+        self.assertEqual(response.code, 200)
+        
+        url = self.get_url("/healthcheck/video_server")
+        response = self.get_request(url, self.api_key)
+        self.assertEqual(response.code, 200)
 
 ##### OOYALA PLATFORM TEST ######
 

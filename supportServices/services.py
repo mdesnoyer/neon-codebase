@@ -552,7 +552,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         request_body["video_title"] = \
                 video_url.split('//')[-1] if video_title is None else video_title 
         request_body["video_url"] = video_url
-        request_body["previous_thumbnail"] = default_thumbnail 
+        request_body["default_thumbnail"] = default_thumbnail 
         client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
                         % options.video_server 
         if options.local == 1:
@@ -856,7 +856,12 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     placeholder_url = placeholder_images[im_index] 
                     t_urls.append(placeholder_url)
                 else:
-                    t_urls.append(request.previous_thumbnail)
+                    # Newer API request objects don't have prev thumb
+                    # hence add a fallback
+                    try:
+                        t_urls.append(request.previous_thumbnail)
+                    except AttributeError, e:
+                        t_urls.append(request.default_thumbnail)
 
                 tm = neondata.ThumbnailMetadata(
                     0, #Create TID 0 as a temp id for previous thumbnail
