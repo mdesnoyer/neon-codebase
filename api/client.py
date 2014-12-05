@@ -99,6 +99,8 @@ define('server_auth', default='secret_token',
        help='Secret token for talking with the video processing server')
 define('extra_workers', default=0,
        help='Number of extra workers to allow downloads to happen in the background')
+define('video_temp_dir', default=None,
+       help='Temporary directory to download videos to')
 
 
 class VideoError(Exception): pass
@@ -140,7 +142,7 @@ class VideoProcessor(object):
         vsuffix = self.video_url.split('/')[-1]  #get the video file extension
         vsuffix = vsuffix.strip("!@#$%^&*[]^()+~")
         self.tempfile = tempfile.NamedTemporaryFile(
-                                    suffix='_%s' % vsuffix, delete=True)
+            suffix='_%s' % vsuffix, delete=True, dir=options.video_temp_dir)
         self.headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
             Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
@@ -313,10 +315,15 @@ class VideoProcessor(object):
 
         # Decide the time buffer at the beginning and end of the video
         # to ignore.
-        if duration < 30:
+        if duration < 10:
+            ignore_time = 0.0
+            thumb_min_dist = 1.0
+        elif duration < 30:
             ignore_time = 2.0
+            thumb_min_dist = 3.0
         else:
             ignore_time = 5.0
+            thumb_min_dist = 5.0
 
         try:
             results, self.sec_to_extract = \
@@ -325,7 +332,8 @@ class VideoProcessor(object):
                   n=n_thumbs,
                   start_time=ignore_time,
                   end_buffer_time=ignore_time,
-                  thumb_min_dist=5.0,
+                  thumb_min_dist=thumb_min_dist,
+                  processing_time_ratio=1.2,
                   video_name=self.video_url)
         except model.VideoReadError:
             _log.error("Error using OpenCV to read video. Trying ffvideo")
