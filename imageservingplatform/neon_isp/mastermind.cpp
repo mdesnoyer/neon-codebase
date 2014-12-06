@@ -352,7 +352,9 @@ Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpir
     if(ret != 0) {
         // add a counter here
     }
-    
+
+    parseFile = 0;
+
     initialized = true;
 }
 
