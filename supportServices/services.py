@@ -1809,11 +1809,10 @@ class HealthCheckHandler(tornado.web.RequestHandler):
             # Make a call to video server health check
             client_url = 'http://%s:8081/healthcheck'\
                             % options.video_server 
-            http_client = tornado.httpclient.AsyncHTTPClient()
             req = tornado.httpclient.HTTPRequest(url=client_url,
                                                  method="GET",
                                                  request_timeout=5.0)
-            result = yield Tornado.gen.Task(http_client.fetch, req)
+            result = yield tornado.gen.Task(utils.http.send_request, req)
             if result.error:
                 self.set_status(502)
                 self.write('{"error": "videoserver healthcheck fails"}') 
