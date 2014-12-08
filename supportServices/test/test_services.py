@@ -1644,7 +1644,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertListEqual(sorted(r_vids), sorted(vids))
    
     @patch('supportServices.services.utils.http') 
-    def test_healthcheck(self):
+    def test_healthcheck(self, mock_http):
         url = self.get_url("/healthcheck")
         response = self.get_request(url, self.api_key)
         self.assertEqual(response.code, 200)
