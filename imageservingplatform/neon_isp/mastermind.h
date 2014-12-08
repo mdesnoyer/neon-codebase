@@ -2,6 +2,7 @@
 #define _NEON_MASTERMIND_CPP
 
 #include <time.h>
+#include <stdio.h>
 #include "rapidjson/document.h"
 #include "publisherHashtable.h"
 #include "directiveHashtable.h"
@@ -65,7 +66,8 @@ protected:
     void InitSafe(const char * mastermindFile, time_t previousMastermindExpiry);
 
     bool initialized;
-    
+    FILE * parseFile;
+
     static const std::string typeKey;
     static const std::string typeDirective;
     static const std::string typePublisher;

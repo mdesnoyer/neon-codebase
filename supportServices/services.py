@@ -239,91 +239,102 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         _log.info("Request %r" %self.request)
         uri_parts = self.request.uri.split('/')
 
-        #NOTE: compare string in parts[-1] since get args aren't cleaned up
-        if "accounts" in self.request.uri:
-            #Get account id
-            try:
-                a_id = uri_parts[4]
-                itype = uri_parts[5]
-                i_id = uri_parts[6]
-                method = uri_parts[7]
-            except Exception, e:
-                _log.error("key=get request msg=  %s" %e)
-                self.set_status(400)
-                self.finish()
-                return
-            
-            #Verify Account
-            is_verified = yield tornado.gen.Task(self.verify_account, a_id)
-            if not is_verified:
-                return
-
-            if method == "status":
-                #self.get_account_status(itype,i_id)
-                self.send_json_response('{"error":"not yet impl"}', 200)
-
-            elif method == "tracker_account_id":
-                self.get_tracker_account_id()
-
-            elif method == "abteststate":
-                video_id = uri_parts[-1].split('?')[0]
-                self.get_abtest_state(video_id)
-
-            elif method == "videos" or "videos" in method:
-                video_state = None
-                #NOTE: Video ids here are external video ids
-                ids = self.get_argument('video_ids', None)
-                video_ids = None if ids is None else ids.split(',')
-               
-                #NOTE: Clean up the parsing 
-                if len(uri_parts) == 9:
-                    video_state = uri_parts[-1].split('?')[0]
-                    if video_state not in ["processing", "recommended",
-                            "published", "failed"]:
-                            
-                            # Check if there was a "/" 
-                            if len(video_state) < 2: 
-                                vide_state = None
-                            else:
-                                # Check if param after videos is a videoId 
-                                video_ids = [uri_parts[-1]]
-                                video_state = None
-
-                if itype  == "neon_integrations":
-                    self.get_video_status("neon", i_id, video_ids, video_state)
-            
-                elif itype  == "brightcove_integrations":
-                    self.get_video_status("brightcove", i_id, video_ids, video_state)
-
-                elif itype == "ooyala_integrations":
-                    self.get_video_status("ooyala", i_id, video_ids, video_state)
+        try:
+            #NOTE: compare string in parts[-1] since get args aren't cleaned up
+            if "accounts" in self.request.uri:
+                #Get account id
+                try:
+                    a_id = uri_parts[4]
+                    itype = uri_parts[5]
+                    i_id = uri_parts[6]
+                    method = uri_parts[7]
+                except Exception, e:
+                    _log.error("key=get request msg=  %s" %e)
+                    self.send_json_response(
+                        '{"error":"malformed request, check API doc"}', 400)
+                    return
                 
-                elif itype == "youtube_integrations":
-                    self.send_json_response("not supported yet", 400)
+                #Verify Account
+                is_verified = yield tornado.gen.Task(self.verify_account, a_id)
+                if not is_verified:
+                    return
+
+                if method == "status":
+                    #self.get_account_status(itype,i_id)
+                    self.send_json_response('{"error":"not yet impl"}', 200)
+                    return
+
+                elif method == "tracker_account_id":
+                    self.get_tracker_account_id()
+
+                elif method == "abteststate":
+                    video_id = uri_parts[-1].split('?')[0]
+                    self.get_abtest_state(video_id)
+
+                elif method == "videos" or "videos" in method:
+                    video_state = None
+                    #NOTE: Video ids here are external video ids
+                    ids = self.get_argument('video_ids', None)
+                    video_ids = None if ids is None else ids.split(',')
                    
-            elif method == "videoids":
-                self.get_all_video_ids(itype, i_id)
-            
+                    #NOTE: Clean up the parsing 
+                    if len(uri_parts) == 9:
+                        video_state = uri_parts[-1].split('?')[0]
+                        if video_state not in ["processing", "recommended",
+                                "published", "failed"]:
+                                
+                                # Check if there was a "/" 
+                                if len(video_state) < 2: 
+                                    vide_state = None
+                                else:
+                                    # Check if param after videos is a videoId 
+                                    video_ids = [uri_parts[-1]]
+                                    video_state = None
+
+                    if itype  == "neon_integrations":
+                        self.get_video_status("neon", i_id, video_ids, video_state)
+                
+                    elif itype  == "brightcove_integrations":
+                        self.get_video_status("brightcove", i_id, video_ids, video_state)
+
+                    elif itype == "ooyala_integrations":
+                        self.get_video_status("ooyala", i_id, video_ids, video_state)
+                    
+                    elif itype == "youtube_integrations":
+                        self.send_json_response("not supported yet", 400)
+                       
+                elif method == "videoids":
+                    self.get_all_video_ids(itype, i_id)
+                
+                else:
+                    _log.warning(('key=account_handler '
+                                  'msg=Invalid method in request %s method %s') 
+                                  % (self.request.uri, method))
+                    self.send_json_response("API not supported", 400)
+
+            elif "jobs" in self.request.uri:
+                try:
+                    job_id = uri_parts[4].split("?")[0]
+                    self.get_job_status(job_id)
+                    return
+                except:
+                    self.send_json_response("invalid api call", 400)
+                    return
+
             else:
                 _log.warning(('key=account_handler '
-                              'msg=Invalid method in request %s method %s') 
-                              % (self.request.uri, method))
+                              'msg=Account missing in request %s')
+                              % self.request.uri)
                 self.send_json_response("API not supported", 400)
+        
+        except Exception, e:
+            # Catch all block to send a generic message on internal failure
+            # and friendly logging in to the error log 
+            _log.exception("Internal Error: %s" % e)
+            self.send_json_response('{"error":"Neon CMS API internal failure"}',
+                    500)
+            return
 
-        elif "jobs" in self.request.uri:
-            try:
-                job_id = uri_parts[4].split("?")[0]
-                self.get_job_status(job_id)
-                return
-            except:
-                self.send_json_response("invalid api call", 400)
-                return
-
-        else:
-            _log.warning(('key=account_handler '
-                          'msg=Account missing in request %s')
-                          % self.request.uri)
-            self.send_json_response("API not supported", 400)
 
     @tornado.web.asynchronous
     def post(self, *args, **kwargs):
@@ -339,58 +350,67 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             itype = uri_parts[5]
             i_id = uri_parts[6]
             method = uri_parts[7]
-        except Exception,e:
+        except Exception, e:
             pass
-      
-        #POST /accounts ##Crete neon user account
-        if a_id is None and itype is None:
-            #len(ur_parts) == 4
-            try:
-                a_id = self.get_argument("account_id") 
-                self.create_account_and_neon_integration(a_id)
-            except:
-                data = '{"error":"account id not specified"}'
-                self.send_json_response(data, 400)                
-            return
-
-        #Account creation
-        if method is None:
-            #POST /accounts/:account_id/brightcove_integrations
-            if "brightcove_integrations" in self.request.uri:
-                self.create_brightcove_integration()
-        
-            #POST /accounts/:account_id/youtube_integrations
-            elif "youtube_integrations" in self.request.uri:
-                self.create_youtube_integration()
-            
-            elif "ooyala_integrations" in self.request.uri:
-                self.create_ooyala_integration()
-
-        #Video Request creation   
-        elif method == 'create_video_request':
-            if i_id is None:
-                data = '{"error":"integration id not specified"}'
-                self.send_json_response(data, 400)
+     
+        try: 
+            #POST /accounts ##Crete neon user account
+            if a_id is None and itype is None:
+                #len(ur_parts) == 4
+                try:
+                    a_id = self.get_argument("account_id") 
+                    self.create_account_and_neon_integration(a_id)
+                except:
+                    data = '{"error":"account id not specified"}'
+                    self.send_json_response(data, 400)                
                 return
 
-            if "brightcove_integrations" == itype:
-                self.create_brightcove_video_request(i_id)
-            elif "youtube_integrations" == itype:
-                self.create_youtube_video_request(i_id)
-            elif "neon_integrations" == itype:
-                self.create_neon_video_request_from_ui(i_id)
-            #elif "ooyala_integrations" == itype:
-            #    self.create_ooyala_video_request(i_id)
+            #Account creation
+            if method is None:
+                #POST /accounts/:account_id/brightcove_integrations
+                if "brightcove_integrations" in self.request.uri:
+                    self.create_brightcove_integration()
+            
+                #POST /accounts/:account_id/youtube_integrations
+                elif "youtube_integrations" in self.request.uri:
+                    self.create_youtube_integration()
+                
+                elif "ooyala_integrations" in self.request.uri:
+                    self.create_ooyala_integration()
+
+            #Video Request creation   
+            elif method == 'create_video_request':
+                if i_id is None:
+                    data = '{"error":"integration id not specified"}'
+                    self.send_json_response(data, 400)
+                    return
+
+                if "brightcove_integrations" == itype:
+                    self.create_brightcove_video_request(i_id)
+                elif "youtube_integrations" == itype:
+                    self.create_youtube_video_request(i_id)
+                elif "neon_integrations" == itype:
+                    self.create_neon_video_request_from_ui(i_id)
+                #elif "ooyala_integrations" == itype:
+                #    self.create_ooyala_video_request(i_id)
+                else:
+                    self.method_not_supported()
+
+            elif method == "create_thumbnail_api_request":
+                self.create_neon_thumbnail_api_request()
+            elif method == "reprocess_video_request":
+                #TODO(Sunil): Implement this endpoint
+                self.method_not_supported()
             else:
                 self.method_not_supported()
+            
+        except Exception, e:
 
-        elif method == "create_thumbnail_api_request":
-            self.create_neon_thumbnail_api_request()
-        elif method == "reprocess_video_request":
-            #TODO(Sunil): Implement this endpoint
-            self.method_not_supported()
-        else:
-            self.method_not_supported()
+            # Catch all block to send a generic message on internal failure
+            # and friendly logging in to the error log 
+            _log.exception("Internal Error: %s" % e)
+            self.send_json_response('{"error":"Neon CMS API internal failure"}',
+                    500)
 
 
     @tornado.web.asynchronous
@@ -408,95 +428,105 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             itype = uri_parts[5]
             i_id = uri_parts[6]
             method = uri_parts[7]
-        except Exception,e:
+        except Exception, e:
             pass
 
-        #Update Accounts
-        if method is None or method == "update":
-            if "brightcove_integrations" == itype:
-                self.update_brightcove_integration(i_id)
-            elif "youtube_integrations" == itype:
-                self.update_youtube_account(i_id)
-            elif "ooyala_integrations" == itype:
-                self.update_ooyala_integration(i_id)
-            elif itype is None:
-                #Update basic neon account
-                self.method_not_supported()
-            else:
-                self.method_not_supported()
+        try:
 
-        #Update the thumbnail property
-        elif method == "thumbnails":
-            tid = uri_parts[-1].split('?')[0]
-            self.update_thumbnail_property(tid)
-        
-        #Update the thumbnail
-        elif method == "videos":
-            if len(uri_parts) == 9:
-                vid = uri_parts[-1]
-                if vid == "null":
-                    self.send_json_response('{"error": "video id null" }', 400)
-                    return
-
-                i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
-                try:
-                    # Get video property to be updated
-                    # (change current_thumbnail, upload custom thumb, abtest)
-                    new_tid = self.get_argument('current_thumbnail', None)
-                    abtest = self.get_argument('abtest', None)
-                    
-                    if abtest is not None:
-                        state = InputSanitizer.to_bool(abtest)
-                        self.update_video_abtest_state(i_vid, state)
-                        return
-
-                    elif new_tid is None and abtest is None:
-                        # custom thumbnail upload
-                        thumbs = json.loads(self.get_argument('thumbnails'))
-                        thumb_urls = [x['urls'][0] for x in thumbs 
-                                      if x['type'] == 'custom_upload'] 
-                        return self.upload_video_custom_thumbnails(
-                            i_id, i_vid,
-                            thumb_urls,
-                            async=True)
-                        return
-                except IOError, e:
-                    data = '{"error": "internal error adding custom thumb"}'
-                    self.send_json_response(data, 500)
-                except tornado.web.MissingArgumentError, e:
-                    data = '{"error": "missing thumbnail_id or thumbnails argument"}'
-                    self.send_json_response(data, 400)
-                    return
-                except Exception, e:
-                    _log.exception('Unexpected exception: %s' % e)
-                    data = '{"error": "internal error"}'
-                    self.send_json_response(data, 500)
-
+            #Update Accounts
+            if method is None or method == "update":
                 if "brightcove_integrations" == itype:
-                    self.update_video_brightcove(i_id, i_vid, new_tid)
-                    return
-
+                    self.update_brightcove_integration(i_id)
                 elif "youtube_integrations" == itype:
-                    self.update_youtube_video(i_id, i_vid)
-                    return
-                
+                    self.update_youtube_account(i_id)
                 elif "ooyala_integrations" == itype:
-                    #Temp support for both arguments
-                    if new_tid is None:
-                        self.get_argument('current_thumbnail', None)
-                        if new_tid is None:
-                            data = '{"error": "missing thumbnail_id argument"}'
-                            self.send_json_response(data, 400)
+                    self.update_ooyala_integration(i_id)
+                elif itype is None:
+                    #Update basic neon account
+                    self.method_not_supported()
+                else:
+                    self.method_not_supported()
+
+            #Update the thumbnail property
+            elif method == "thumbnails":
+                tid = uri_parts[-1].split('?')[0]
+                self.update_thumbnail_property(tid)
+            
+            #Update the thumbnail
+            elif method == "videos":
+                if len(uri_parts) == 9:
+                    vid = uri_parts[-1]
+                    if vid == "null":
+                        self.send_json_response('{"error": "video id null" }', 400)
+                        return
+
+                    i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
+                    try:
+                        # Get video property to be updated
+                        # (change current_thumbnail, upload custom thumb, abtest)
+                        new_tid = self.get_argument('current_thumbnail', None)
+                        abtest = self.get_argument('abtest', None)
+                        
+                        if abtest is not None:
+                            state = InputSanitizer.to_bool(abtest)
+                            self.update_video_abtest_state(i_vid, state)
                             return
-                    self.update_video_ooyala(i_id, i_vid, new_tid)
+
+                        elif new_tid is None and abtest is None:
+                            # custom thumbnail upload
+                            thumbs = json.loads(self.get_argument('thumbnails'))
+                            thumb_urls = [x['urls'][0] for x in thumbs 
+                                          if x['type'] == 'custom_upload'] 
+                            return self.upload_video_custom_thumbnails(
+                                i_id, i_vid,
+                                thumb_urls,
+                                async=True)
+                            return
+                    except IOError, e:
+                        data = '{"error": "internal error adding custom thumb"}'
+                        self.send_json_response(data, 500)
+                    except tornado.web.MissingArgumentError, e:
+                        data = '{"error": "missing thumbnail_id or thumbnails argument"}'
+                        self.send_json_response(data, 400)
+                        return
+                    except Exception, e:
+                        _log.exception('Unexpected exception: %s' % e)
+                        data = '{"error": "internal error"}'
+                        self.send_json_response(data, 500)
+
+                    if "brightcove_integrations" == itype:
+                        self.update_video_brightcove(i_id, i_vid, new_tid)
+                        return
+
+                    elif "youtube_integrations" == itype:
+                        self.update_youtube_video(i_id, i_vid)
+                        return
+                    
+                    elif "ooyala_integrations" == itype:
+                        #Temp support for both arguments
+                        if new_tid is None:
+                            self.get_argument('current_thumbnail', None)
+                            if new_tid is None:
+                                data = '{"error": "missing thumbnail_id argument"}'
+                                self.send_json_response(data, 400)
+                                return
+                        self.update_video_ooyala(i_id, i_vid, new_tid)
+                        return
+                else:
+                    self.method_not_supported()
                     return
             else:
-                self.method_not_supported()
-                return
-        else:
-            _log.error("Method not supported")
-            self.set_status(400)
-            self.finish()
+                _log.error("Method not supported")
+                self.set_status(400)
+                self.finish()
+        
+        except Exception, e:
+
+            # Catch all block to send a generic message on internal failure
+            # and friendly logging in to the error log 
+            _log.exception("Internal Error: %s" % e)
+            self.send_json_response('{"error":"Neon CMS API internal failure"}',
+                    500)
     
     ############## User defined methods ###########
 
@@ -530,7 +560,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         if req:
             
             self.send_json_response(json.dumps(req,
-                                               default=lambda o: o.__dict__))
+                                    default=lambda o: o.__dict__))
             return
 
         self.send_json_response('{"error":"job not found"}', 400)
@@ -552,7 +582,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         request_body["video_title"] = \
                 video_url.split('//')[-1] if video_title is None else video_title 
         request_body["video_url"] = video_url
-        request_body["previous_thumbnail"] = default_thumbnail 
+        request_body["default_thumbnail"] = default_thumbnail 
         client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
                         % options.video_server 
         if options.local == 1:
@@ -856,7 +886,12 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     placeholder_url = placeholder_images[im_index] 
                     t_urls.append(placeholder_url)
                 else:
-                    t_urls.append(request.previous_thumbnail)
+                    # Newer API request objects don't have prev thumb
+                    # hence add a fallback
+                    try:
+                        t_urls.append(request.previous_thumbnail)
+                    except AttributeError, e:
+                        t_urls.append(request.default_thumbnail)
 
                 tm = neondata.ThumbnailMetadata(
                     0, #Create TID 0 as a temp id for previous thumbnail
@@ -1765,19 +1800,19 @@ class BcoveHandler(tornado.web.RequestHandler):
 
 class HealthCheckHandler(tornado.web.RequestHandler):
     '''Handler for health check ''' 
-    
+
+    @tornado.gen.engine
     @tornado.web.asynchronous
     def get(self, *args, **kwargs):
         '''Handle a test tracking request.'''
         if "video_server" in  self.request.uri:
-            # TODO(Sunil): Make a call to video server health check
-            client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
+            # Make a call to video server health check
+            client_url = 'http://%s:8081/healthcheck'\
                             % options.video_server 
-            http_client = tornado.httpclient.AsyncHTTPClient()
             req = tornado.httpclient.HTTPRequest(url=client_url,
                                                  method="GET",
                                                  request_timeout=5.0)
-            result = yield Tornado.gen.Task(http_client.fetch, req)
+            result = yield tornado.gen.Task(utils.http.send_request, req)
             if result.error:
                 self.set_status(502)
                 self.write('{"error": "videoserver healthcheck fails"}') 
