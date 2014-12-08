@@ -149,6 +149,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.cp_mock_client = self.cp_sync_patcher.start()
         self.cp_mock_async_client = self.cp_async_patcher.start()
 
+        self.api_key = "" # filled later
         self.a_id = "unittester-0"
         self.rtoken = "rtoken"
         self.wtoken = "wtoken"
@@ -1641,6 +1642,22 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         resp = json.loads(response.body)
         r_vids = resp['videoids']
         self.assertListEqual(sorted(r_vids), sorted(vids))
+   
+    @patch('supportServices.services.utils.http') 
+    def test_healthcheck(self, mock_http):
+        url = self.get_url("/healthcheck")
+        response = self.get_request(url, self.api_key)
+        self.assertEqual(response.code, 200)
+       
+        request = tornado.httpclient.HTTPRequest(url="http://test")
+        response = tornado.httpclient.HTTPResponse(
+                    request, 200, buffer=StringIO())
+        mock_http.send_request.side_effect = lambda x, callback:\
+            callback(response)
+
+        url = self.get_url("/healthcheck/video_server")
+        response = self.get_request(url, self.api_key)
+        self.assertEqual(response.code, 200)
 
 ##### OOYALA PLATFORM TEST ######
 

@@ -2924,8 +2924,11 @@ class VideoMetadata(StoredObject):
         ''' get video request data '''
         if not callback:
             vm = cls.get(internal_video_id)
-            api_key = vm.key.split('_')[0]
-            return NeonApiRequest.get(vm.job_id, api_key)
+            if vm:
+                api_key = vm.key.split('_')[0]
+                return NeonApiRequest.get(vm.job_id, api_key)
+            else:
+                return None
         else:
             raise AttributeError("Callbacks not allowed")
 
