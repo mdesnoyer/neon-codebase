@@ -28,6 +28,7 @@ Mastermind::Mastermind()
     publisherTable = 0;
     directiveTable = 0;
     expiry = 0;
+    parseFile = 0;
     initialized = false;
 }
 
@@ -36,6 +37,7 @@ Mastermind::~Mastermind()
 {
     publisherTable = 0;
     directiveTable = 0;
+    parseFile = 0;
     initialized = false;
 }
 
@@ -194,6 +196,11 @@ Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
         error = new NeonException("Mastermind::Init: unspecified exception");
     }
 
+    if(parseFile != 0) {
+        fclose(parseFile);
+        parseFile = 0;
+    }
+
     Dealloc();
     throw error;
 }
@@ -208,15 +215,17 @@ Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpir
         throw new NeonException("Mastermind::Init: calling Init on mastermind object already initialized");
     }
 
+
     int lineNumber = 1;
 
     if(mastermindFile == 0)
         throw new NeonException("Mastermind::Init: mastermind file name is null");
     
     errno = 0;
-    FILE * f = fopen(mastermindFile, "r");
+    parseFile = 0;
+    parseFile = fopen(mastermindFile, "r");
     
-    if(f == 0) {
+    if(parseFile == 0) {
         throw new NeonException("Mastermind::Init: cannot open mastermind file name "
         "\"%s\" for reading, errno = %d", mastermindFile, errno);
     }
@@ -225,7 +234,7 @@ Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpir
      *  check expiry
      */
     
-    char * line = fgets(lineBuffer, MaxLineBufferSize, f);
+    char * line = fgets(lineBuffer, MaxLineBufferSize, parseFile);
     
     if(line == 0)
         throw new NeonException("Mastermind::Init: expiry line missing in mastermind file");
@@ -260,7 +269,7 @@ Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpir
         lineBuffer[MaxLineBufferSize-1] = 0;
         
         // get a line frorm file
-        line = fgets(lineBuffer, MaxLineBufferSize, f);
+        line = fgets(lineBuffer, MaxLineBufferSize, parseFile);
         lineNumber++;
         
         // error, end of file but no end marker detected before
@@ -324,7 +333,7 @@ Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpir
                                 "end marker, line in file is: %s", line);
     
     // make sure this is the last line by trying to read another
-    line = fgets(lineBuffer, MaxLineBufferSize, f);
+    line = fgets(lineBuffer, MaxLineBufferSize, parseFile);
     
     // more stuff was read after the end marker, which is invalid
     if(line != 0)
@@ -338,12 +347,14 @@ Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpir
    
     neon_stats[MASTERMIND_PARSE_SUCCESS]++;
 
-    int ret = fclose(f);
+    int ret = fclose(parseFile);
     
     if(ret != 0) {
         // add a counter here
     }
-    
+
+    parseFile = 0;
+
     initialized = true;
 }
 
