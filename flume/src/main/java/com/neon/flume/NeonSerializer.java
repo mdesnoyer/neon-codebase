@@ -62,7 +62,8 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     // column for the counter of IMAGE_LOAD and IMAGES_LOADED events
     private static final byte IMAGE_LOAD_COLUMN_NAME[] = "IMAGE_LOAD".getBytes();
     
-    private byte IMAGE_CLICK_COLUMN_NAME[] = "IMAGE_CLICK".getBytes();
+    // column for the counter of IMAGE_CLICK events
+    private static final byte IMAGE_CLICK_COLUMN_NAME[] = "IMAGE_CLICK".getBytes();
         
     // event-based  
     private String eventTimestamp = null;
