@@ -50,8 +50,8 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     private final List<AtomicIncrementRequest> increments = new ArrayList<AtomicIncrementRequest>();
 
     // hbase tables
-    private byte[] thumbnailFirstTable = "THUMBNAIL_TIMESTAMP_EVENTS".getBytes();
-    private byte[] timestampFirstTable = "TIMESTAMP_THUMBNAIL_EVENTS".getBytes();
+    private static final byte[] THUMBNAIL_FIRST_TABLE = "THUMBNAIL_TIMESTAMP_EVENTS".getBytes();
+    private static final byte[] TIMESTAMP_FIRST_TABLE = "TIMESTAMP_THUMBNAIL_EVENTS".getBytes();
 
     // column family to store counters, one for each event type
     private byte[] columnFamily = "THUMBNAIL_EVENTS_TYPES".getBytes();
@@ -153,11 +153,8 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
 
             case IMAGES_VISIBLE:
                 ImagesVisible imgsVis = (ImagesVisible) trackerEvent.getEventData();
-                Iterator<CharSequence> ivIterator = imgsVis.thumbnailIds.iterator();
-                while(ivIterator.hasNext()) {
-                    String tid = ivIterator.next().toString();
-                    handleIncrement(tid, imageVisibleColumnName);
-                }
+                for(CharSequence tid: imgsVis.thumbnailIds)
+                    handleIncrement(tid.toString(), imageVisibleColumnName);
                 break;
 
             case IMAGE_CLICK:
@@ -172,14 +169,11 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
 
             case IMAGES_LOADED:
                 ImagesLoaded imgLded = (ImagesLoaded) trackerEvent.getEventData();
-                Iterator<ImageLoad> ilIterator = imgLded.images.iterator();
-                while(ilIterator.hasNext()) {
-                    String tid = ilIterator.next().getThumbnailId().toString();
-                    handleIncrement(tid, imageLoadColumnName);
-                }
+                for(CharSequence tid: imgLded.thumbnailIds)
+                    handleIncrement(tid.toString(), imageLoadColumnName);
                 break;
                 
-            // any unsupported event types, which result in no-ops
+            // event types we're not insterested in result in no-ops
             default:
                 return increments;
         }
@@ -191,11 +185,11 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     {
         // increment counter in table which begins with thumbnail first composite key
         String key = tid  + "_" + eventTimestamp;
-        increments.add(new AtomicIncrementRequest(thumbnailFirstTable, key.getBytes(), columnFamily, columnName));
+        increments.add(new AtomicIncrementRequest(THUMBNAIL_FIRST_TABLE, key.getBytes(), columnFamily, columnName));
 
         // increment counter in table which begins with timestamp first composite key
         key = eventTimestamp + "_" + tid;
-        increments.add(new AtomicIncrementRequest(timestampFirstTable, key.getBytes(), columnFamily,  columnName));
+        increments.add(new AtomicIncrementRequest(TIMESTAMP_FIRST_TABLE, key.getBytes(), columnFamily,  columnName));
     }
 
     @Override
