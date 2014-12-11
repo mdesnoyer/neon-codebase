@@ -24,10 +24,6 @@ import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.io.DatumReader;
 import org.apache.avro.specific.SpecificDatumReader;
 import org.apache.avro.Schema;
-//import org.apache.avro.generic.GenericData;
-//import org.apache.avro.generic.GenericDatumReader;
-//import org.apache.avro.generic.GenericDatumWriter;
-//import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.generic.*;
 import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.Decoder;
@@ -75,7 +71,6 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
     public static final String AVRO_SCHEMA_URL_HEADER = "flume.avro.schema.url";
 
     private Schema schema = null;
-    //private String schemaUrl = null;
     private Map<String, Schema> schemaCache = new HashMap<String, Schema>();
 
     // event-based  
@@ -119,32 +114,6 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
           // fetch needed schema for decoding either from cache or S3  
           String url = event.getHeaders().get(AVRO_SCHEMA_URL_HEADER);
 
-          /*
-          // the schema of this event is different than previous, fetch and use it.
-          if(url.equals(schemaUrl) == false) {
-
-              // log this new schema fetch, unless it is the initial 
-              // system start case where schemaUrl is null
-              if(schemaUrl != null) {
-                 // log this
-              }
-
-              // fetch from S3
-              Schema s = loadFromUrl(url);
-        
-              // if success then this is the new schema we use and its related url
-              if(s != null) {
-                 schema = s;
-                 schemaUrl = url;
-              }
-            
-              // unable to fetch this new schema, perhaps next time.  Let's log and 
-              // end the handling of this event.
-              else {
-                  throw new FlumeException("NeonDynamicSerializer: Unable to fetch new avro schema from S3: url " + url);   
-              }
-          }
-*/
           // see if we have the schema already
           schema = schemaCache.get(url);
           
@@ -168,7 +137,6 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
 
           // decode the tracker event
           DatumReader<GenericRecord> reader = new GenericDatumReader<GenericRecord>();    
-          //DataFileStream<GenericRecord> dataFileReader = new DataFileStream<GenericRecord>(, reader);
           binaryDecoder = DecoderFactory.get().binaryDecoder(event.getBody(), null);
           reader.setSchema(schema);
           trackerEvent = reader.read(null, binaryDecoder);
@@ -176,7 +144,7 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
         }
         catch(IOException e) {
             trackerEvent = null;
-            logger.error("unable to parse event: " + e.toString());
+            logger.error("unable to parse event due to io: " + e.toString());
         }
         catch(Exception e) {
             trackerEvent = null;
@@ -192,7 +160,7 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
     @Override
     public List<PutRequest> getActions() 
     {
-        // no-ops here
+        // always no-ops here
         actions.clear();
         return actions;
     } 
@@ -257,7 +225,7 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
     // this method depends on hbase to create a row automatically on first increment request
     private void handleIncrement(String tid, byte[] columnName) 
     {
-        // nothing added if tid malformed
+        // discard if tid malformed
         if(isMalformedThumbnailId(tid, columnName)) {
             logger.error("thumbnail id is malformed: " + tid + " for column family " + columnName.toString());
             return;
@@ -293,6 +261,8 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
         if(tid.equals(""))
             return false;
     
+        // we may add more checks in the future
+
         return true;
     }
 
