@@ -1,7 +1,5 @@
 package com.neon.flume;
 
-import  com.neon.Tracker.*;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Iterator;
@@ -70,7 +68,6 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
 
     public static final String AVRO_SCHEMA_URL_HEADER = "flume.avro.schema.url";
 
-    private Schema schema = null;
     private Map<String, Schema> schemaCache = new HashMap<String, Schema>();
 
     // event-based  
@@ -78,13 +75,16 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
     private GenericRecord trackerEvent = null;
     private String rowKey = null;
     private BinaryDecoder binaryDecoder = null;
+    private Schema schema = null;
 
     @Override
     public void initialize(byte[] table, byte[] cf) 
     {
-        trackerEvent = null;
         eventTimestamp = null;
+        trackerEvent = null;
         rowKey = null;
+        binaryDecoder = null;
+        schema = null;
     }
 
     /*
@@ -147,7 +147,7 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
           trackerEvent = reader.read(null, binaryDecoder);
 
           if(trackerEvent == null) 
-              logger.error("unable to parse avro event, event dropped");
+              logger.error("unable to parse  event");
             
         }
         catch(IOException e) {
@@ -189,7 +189,7 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
 
         try {
 
-            // extract and process each thumbnails in this event
+            // extract event type and process it as generically as possible
             GenericEnumSymbol eventType = (GenericEnumSymbol) trackerEvent.get("eventType");
             String type = eventType.toString();
             GenericRecord eventData = (GenericRecord) trackerEvent.get("eventData");         
@@ -230,7 +230,6 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
         return increments;
     }
 
-    // this method depends on hbase to create a row automatically on first increment request
     private void handleIncrement(String tid, byte[] columnName) 
     {
         // discard if tid malformed
@@ -275,7 +274,6 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
 
         return true;
     }
-
 
     @Override
     public void cleanUp() 
