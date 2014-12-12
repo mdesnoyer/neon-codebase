@@ -234,10 +234,8 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
     private void handleIncrement(String tid, byte[] columnName) 
     {
         // discard if tid malformed
-        if(isMalformedThumbnailId(tid, columnName)) {
-            logger.error("thumbnail id is malformed: " + tid + " for column family " + columnName.toString());
+        if(isMalformedThumbnailId(tid, columnName)) 
             return;
-        }
 
         // increment counter in table which begins with thumbnail first composite key
         String key = tid  + "_" + eventTimestamp;
@@ -263,11 +261,15 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
 
     private static boolean isMalformedThumbnailId(String tid, byte[] columnName) {
 
-        if(tid == null)
+        if(tid == null) {
+            logger.error("thumbnail id is null for column family " + columnName.toString());
             return false;
+        }
 
-        if(tid.equals(""))
+        if(tid.equals("")) {
+            logger.error("thumbnail id is empty string for column family " + columnName.toString());
             return false;
+        }
     
         // we may add more checks in the future
 
