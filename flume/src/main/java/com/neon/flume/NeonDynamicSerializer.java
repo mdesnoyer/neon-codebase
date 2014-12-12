@@ -101,7 +101,12 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
       try {
           // obtain the timestamp of event
           String t = event.getHeaders().get("timestamp");
-          
+         
+          if(t == null || t.equals("")) {
+              logger.error("unable to obtain timestamp header, event dropped"); 
+              return;
+          }
+
           // currently this is received in milliseconds
           long timestamp = Long.valueOf(t).longValue();
           
@@ -141,6 +146,9 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
           reader.setSchema(schema);
           trackerEvent = reader.read(null, binaryDecoder);
 
+          if(trackerEvent == null) 
+              logger.error("unable to parse avro event, event dropped");
+            
         }
         catch(IOException e) {
             trackerEvent = null;
@@ -181,7 +189,7 @@ public class NeonDynamicSerializer implements AsyncHbaseEventSerializer
 
         try {
 
-            // extract and process each thumbnails in this eventA
+            // extract and process each thumbnails in this event
             GenericEnumSymbol eventType = (GenericEnumSymbol) trackerEvent.get("eventType");
             String type = eventType.toString();
             GenericRecord eventData = (GenericRecord) trackerEvent.get("eventData");         
