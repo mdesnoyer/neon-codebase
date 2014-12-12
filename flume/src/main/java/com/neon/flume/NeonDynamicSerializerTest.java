@@ -55,14 +55,10 @@ class NeonDynamicSerializerTest {
     
     public static void test_ImageVisible() throws Exception { 
 
-        //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
-
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
         DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
-       
         TrackerEvent trackerEvent = new TrackerEvent(); 
-
         ImageVisible i = new ImageVisible();
         
         // dummies
@@ -405,16 +401,129 @@ class NeonDynamicSerializerTest {
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
     }
     
+    public static void test_cached_schema_reuse() {
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
+        DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
+        TrackerEvent trackerEvent = new TrackerEvent(); 
+        ImageVisible i = new ImageVisible();
+        
+        // dummies
+        trackerEvent.setPageId("pageId_dummy");
+        trackerEvent.setTrackerAccountId("trackerAccountId_dummy");
+        trackerEvent.setTrackerType(com.neon.Tracker.TrackerType.IGN);
+        trackerEvent.setPageURL ("pageUrl_dummy");
+        trackerEvent.setRefURL ("refUrl_dummy");
+        trackerEvent.setServerTime (new java.lang.Long(1000));
+        trackerEvent.setClientTime (new java.lang.Long(1000) );
+        trackerEvent.setClientIP("clientIp_dummy");
+        trackerEvent.setNeonUserId ("neonUserId_dummy");
+        trackerEvent.setUserAgent("userAgent_dummy");
+        trackerEvent.setAgentInfo(new com.neon.Tracker.AgentInfo());
+        trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
+        
+        // needed fields
+        i.setThumbnailId("image_visible_t1");
+        trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_VISIBLE);
+        trackerEvent.setEventData(i);
+
+        writer.write(trackerEvent, encoder);
+        encoder.flush();
+
+        byte[] encodedEvent = outputStream.toByteArray();
+
+        // make avro container headers
+        Map<String, String> headers = new HashMap<String, String>();
+        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
+        headers.put("timestamp", "1416612478000");  // milli seconds
+
+        Event event = EventBuilder.withBody(encodedEvent, headers);
+        NeonDynamicSerializer serializer = new NeonDynamicSerializer();
+
+        String table = "table";
+        String columnFamily = "columFamily";
+        serializer.initialize(table.getBytes(), columnFamily.getBytes());
+        
+        serializer.setEvent(event);
+        List<PutRequest> puts = serializer.getActions();
+        List<AtomicIncrementRequest> incs =serializer.getIncrements();
+
+        serializer.setEvent(event);
+        List<PutRequest> puts = serializer.getActions();
+        List<AtomicIncrementRequest> incs =serializer.getIncrements();
+    }
+
+    public static void test_new_schema_fetch_and_use() {
+        
+    }
+    
+    /*
+    *   negative testing
+    */ 
+    public static void test_schema_unavailable() {
+    ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
+        DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
+        TrackerEvent trackerEvent = new TrackerEvent(); 
+        ImageVisible i = new ImageVisible();
+        
+        // dummies
+        trackerEvent.setPageId("pageId_dummy");
+        trackerEvent.setTrackerAccountId("trackerAccountId_dummy");
+        trackerEvent.setTrackerType(com.neon.Tracker.TrackerType.IGN);
+        trackerEvent.setPageURL ("pageUrl_dummy");
+        trackerEvent.setRefURL ("refUrl_dummy");
+        trackerEvent.setServerTime (new java.lang.Long(1000));
+        trackerEvent.setClientTime (new java.lang.Long(1000) );
+        trackerEvent.setClientIP("clientIp_dummy");
+        trackerEvent.setNeonUserId ("neonUserId_dummy");
+        trackerEvent.setUserAgent("userAgent_dummy");
+        trackerEvent.setAgentInfo(new com.neon.Tracker.AgentInfo());
+        trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
+        
+        // needed fields
+        i.setThumbnailId("image_visible_t1");
+        trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_VISIBLE);
+        trackerEvent.setEventData(i);
+
+        writer.write(trackerEvent, encoder);
+        encoder.flush();
+
+        byte[] encodedEvent = outputStream.toByteArray();
+
+        // make avro container headers
+        Map<String, String> headers = new HashMap<String, String>();
+        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/bad.avsc" );
+        headers.put("timestamp", "1416612478000");  // milli seconds
+
+        Event event = EventBuilder.withBody(encodedEvent, headers);
+        NeonDynamicSerializer serializer = new NeonDynamicSerializer();
+
+        String table = "table";
+        String columnFamily = "columFamily";
+        serializer.initialize(table.getBytes(), columnFamily.getBytes());
+        
+        serializer.setEvent(event);
+        List<PutRequest> puts = serializer.getActions();
+        List<AtomicIncrementRequest> incs =serializer.getIncrements();
+    }
+    
     public static void main(String[] args) {
         System.out.println("\n\nTest Starting"); 
 
         try {
-
+            // features testing
             test_ImageVisible();
             test_ImagesVisible();
             test_ImageClick();
             test_ImageLoad();
             test_ImagesLoaded();
+            
+            test_cached_schema_reuse();
+            test_new_schema_fetch_and_use();
+            
+            // negative testing
+            test_schema_unavailable();
             
             System.out.println("\n\nTest successful");
         }
