@@ -148,10 +148,11 @@ public class NeonResolvingSerializer implements AsyncHbaseEventSerializer
           }
 
           // decode the tracker event
-          resolver = ResolvingDecoder.resolve(writerSchema, readerSchema);
+          //resolver = ResolvingDecoder.resolve(writerSchema, readerSchema);
           ByteArrayInputStream in = new ByteArrayInputStream(event.getBody());
           Decoder decoder = DecoderFactory.defaultFactory().createBinaryDecoder(in, null);
-          ResolvingDecoder resolvingDecoder = new ResolvingDecoder(resolver, decoder); 
+          //ResolvingDecoder resolvingDecoder = new ResolvingDecoder(resolver, decoder); 
+          ResolvingDecoder resolvingDecoder = ResolvingDecoder.resolvingDecoder(writerSchema, readerSchema, decoder);
           GenericDatumReader<Record> datumReader = new GenericDatumReader<Record>(readerSchema);
           GenericData.Record trackerEvent = new GenericData.Record(readerSchema);
           datumReader.read(trackerEvent, resolvingDecoder);
