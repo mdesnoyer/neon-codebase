@@ -73,9 +73,7 @@ public class NeonResolvingSerializer implements AsyncHbaseEventSerializer
 
     private Map<String, Schema> schemaCache = new HashMap<String, Schema>();
 
-    private final Schema readerSchema = null;
-    private Schema writerSchema = null;
-    private String writerSchemaUrl = null;
+    private final Schema readerSchema = TrackerSchema.getSchema();
     private Object resolver = null;
 
     // event-based  
@@ -86,11 +84,11 @@ public class NeonResolvingSerializer implements AsyncHbaseEventSerializer
     @Override
     public void initialize(byte[] table, byte[] cf) 
     {
-        readerSchema = TracketSchema.getSchema();
+        resolver = null;
+        
         eventTimestamp = null;
         trackerEvent = null;
         rowKey = null;
-        schema = null;
     }
 
     /*
@@ -126,24 +124,24 @@ public class NeonResolvingSerializer implements AsyncHbaseEventSerializer
           String url = event.getHeaders().get(AVRO_SCHEMA_URL_HEADER);
 
           // see if we have the schema already
-          schema = schemaCache.get(url);
+          Schema writerSchema = schemaCache.get(url);
           
-          if (schema == null) {
+          if (writerSchema == null) {
 
               // try getting schema from S3 then
-              schema = loadFromUrl(url);
+              writerSchema = loadFromUrl(url);
           
-              if(schema == null) {
+              if(writerSchema == null) {
                   // unable to fetch needed schema, drop event
-                  logger.error("unable to fetch schema, event dropped. url " + url);
+                  logger.error("unable to fetch writer schema, event dropped. url " + url);
                   return;
               }
 
               if(logger.isInfoEnabled())
-                  logger.info("added new schema to cache: url " + url);
+                  logger.info("added new writer schema to cache: url " + url);
 
               // add to schema cache      
-              schemaCache.put(url, schema);
+              schemaCache.put(url, writerSchema);
           }
 
           // decode the tracker event
