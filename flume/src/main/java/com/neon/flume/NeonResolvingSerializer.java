@@ -1,5 +1,7 @@
 package com.neon.flume;
 
+import  com.neon.Tracker.*;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Iterator;
@@ -29,6 +31,7 @@ import org.apache.avro.io.BinaryDecoder;
 import org.apache.avro.io.DecoderFactory;
 import org.apache.avro.io.Encoder;
 import org.apache.avro.io.EncoderFactory;
+import org.apache.avro.io.ResolvingDecoder;
 import org.apache.avro.file.SeekableByteArrayInput;
 
 import org.apache.flume.Context;
@@ -70,20 +73,23 @@ public class NeonResolvingSerializer implements AsyncHbaseEventSerializer
 
     private Map<String, Schema> schemaCache = new HashMap<String, Schema>();
 
+    private final Schema readerSchema = null;
+    private Schema writerSchema = null;
+    private String writerSchemaUrl = null;
+    private Object resolver = null;
+
     // event-based  
     private String eventTimestamp = null;
     private GenericRecord trackerEvent = null;
     private String rowKey = null;
-    private BinaryDecoder binaryDecoder = null;
-    private Schema schema = null;
-
+ 
     @Override
     public void initialize(byte[] table, byte[] cf) 
     {
+        readerSchema = TracketSchema.getSchema();
         eventTimestamp = null;
         trackerEvent = null;
         rowKey = null;
-        binaryDecoder = null;
         schema = null;
     }
 
@@ -141,14 +147,13 @@ public class NeonResolvingSerializer implements AsyncHbaseEventSerializer
           }
 
           // decode the tracker event
-          DatumReader<GenericRecord> reader = new GenericDatumReader<GenericRecord>();    
-          binaryDecoder = DecoderFactory.get().binaryDecoder(event.getBody(), null);
-          reader.setSchema(schema);
-          trackerEvent = reader.read(null, binaryDecoder);
-
-          if(trackerEvent == null) 
-              logger.error("unable to parse  event");
-            
+          resolver = ResolvingDecoder.resolve(writerSchema, readerSchema);
+          ByteArrayInputStream in = new ByteArrayInputStream(event.getBody());
+          Decoder decoder = DecoderFactory.defaultFactory().createBinaryDecoder(in, null);
+          ResolvingDecoder resolvingDecoder = new ResolvingDecoder(resolver, decoder); 
+          GenericDatumReader<Record> datumReader = new GenericDatumReader<Record>(readerSchema);
+          GenericData.Record trackerEvent = new GenericData.Record(readerSchema);
+          datumReader.read(trackerEvent, resolvingDecoder);
         }
         catch(IOException e) {
             trackerEvent = null;
