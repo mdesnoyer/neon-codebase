@@ -449,8 +449,8 @@ class NeonGenericSerializerTest {
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
 
         serializer.setEvent(event);
-        List<PutRequest> puts = serializer.getActions();
-        List<AtomicIncrementRequest> incs =serializer.getIncrements();
+        puts = serializer.getActions();
+        incs =serializer.getIncrements();
     }
 
     public static void test_new_schema_fetch_and_use() {
