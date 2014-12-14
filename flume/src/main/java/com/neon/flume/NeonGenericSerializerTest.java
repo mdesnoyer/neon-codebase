@@ -527,6 +527,9 @@ class NeonGenericSerializerTest {
             
             System.out.println("\n\nTest successful");
         }
+        catch(IOException e) {
+            System.out.println("Test failure: io exception: " + e.toString());
+        }
         catch(Exception e) {
             System.out.println("Test failure: exception: " + e.toString());
         }
