@@ -41,10 +41,10 @@ import org.apache.flume.sink.hbase.AsyncHbaseEventSerializer;
 import org.hbase.async.AtomicIncrementRequest;
 import org.hbase.async.PutRequest;
 
-public class NeonDynamicSerializer implements AsyncHbaseEventSerializer 
+public class NeonResolvingSerializer implements AsyncHbaseEventSerializer 
 {
 
-    final static Logger logger = Logger.getLogger(NeonDynamicSerializer.class);
+    final static Logger logger = Logger.getLogger(NeonGenericSerializer.class);
 
     // to hold hbase operations 
     private final List<PutRequest> actions = new ArrayList<PutRequest>();

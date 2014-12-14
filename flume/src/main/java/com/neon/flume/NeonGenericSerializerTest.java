@@ -51,7 +51,7 @@ import org.apache.flume.api.RpcClientFactory;
 import org.apache.flume.event.EventBuilder;
 
 
-class NeonDynamicSerializerTest {   
+class NeonGenericSerializerTest {   
     
     public static void test_ImageVisible() throws Exception { 
 
@@ -95,7 +95,7 @@ class NeonDynamicSerializerTest {
         headers.put("timestamp", "1416612478000");  // milli seconds
 
         Event event = EventBuilder.withBody(encodedEvent, headers);
-        NeonDynamicSerializer serializer = new NeonDynamicSerializer();
+        NeonGenericSerializer serializer = new NeonGenericSerializer();
 
         String table = "table";
         String columnFamily = "columFamily";
@@ -162,7 +162,7 @@ class NeonDynamicSerializerTest {
         headers.put("timestamp", "1416612478000");  // milli seconds
 
         Event event = EventBuilder.withBody(encodedEvent, headers);
-        NeonDynamicSerializer serializer = new NeonDynamicSerializer();
+        NeonGenericSerializer serializer = new NeonGenericSerializer();
 
         String table = "table";
         String columnFamily = "columFamily";
@@ -234,7 +234,7 @@ class NeonDynamicSerializerTest {
         headers.put("timestamp", "1416612478000");  // milli seconds
 
         Event event = EventBuilder.withBody(encodedEvent, headers);
-        NeonDynamicSerializer serializer = new NeonDynamicSerializer();
+        NeonGenericSerializer serializer = new NeonGenericSerializer();
         
         /*
         *  Test
@@ -302,7 +302,7 @@ class NeonDynamicSerializerTest {
         headers.put("timestamp", "1416612478000");  // milli seconds
 
         Event event = EventBuilder.withBody(encodedEvent, headers);
-        NeonDynamicSerializer serializer = new NeonDynamicSerializer();
+        NeonGenericSerializer serializer = new NeonGenericSerializer();
         
         /*
         *  Test
@@ -379,7 +379,7 @@ class NeonDynamicSerializerTest {
         headers.put("timestamp", "1416612478000");  // milli seconds
 
         Event event = EventBuilder.withBody(encodedEvent, headers);
-        NeonDynamicSerializer serializer = new NeonDynamicSerializer();
+        NeonGenericSerializer serializer = new NeonGenericSerializer();
         
         /*
         *  Test
