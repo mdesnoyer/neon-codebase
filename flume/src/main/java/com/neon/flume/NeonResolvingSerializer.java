@@ -29,6 +29,7 @@ import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.generic.GenericData.Record;
 import org.apache.avro.generic.*;
 import org.apache.avro.io.DatumReader;
+import org.apache.avro.io.DecoderFactory
 import org.apache.avro.io.Decoder;
 import org.apache.avro.io.BinaryDecoder;
 import org.apache.avro.io.DecoderFactory;
@@ -76,7 +77,7 @@ public class NeonResolvingSerializer implements AsyncHbaseEventSerializer
 
     private Map<String, Schema> schemaCache = new HashMap<String, Schema>();
 
-    private final Schema readerSchema = TrackerEvent.getSchema();
+    private final Schema readerSchema = null; // TrackerEvent.getSchema();
     private Object resolver = null;
 
     // event-based  
@@ -87,7 +88,7 @@ public class NeonResolvingSerializer implements AsyncHbaseEventSerializer
     @Override
     public void initialize(byte[] table, byte[] cf) 
     {
-        resolver = null;
+        readerSchema = TrackerEvent().getSchema();
         
         eventTimestamp = null;
         trackerEvent = null;
@@ -152,7 +153,7 @@ public class NeonResolvingSerializer implements AsyncHbaseEventSerializer
           ByteArrayInputStream in = new ByteArrayInputStream(event.getBody());
           Decoder decoder = DecoderFactory.defaultFactory().createBinaryDecoder(in, null);
           //ResolvingDecoder resolvingDecoder = new ResolvingDecoder(resolver, decoder); 
-          ResolvingDecoder resolvingDecoder = ResolvingDecoder.resolvingDecoder(writerSchema, readerSchema, decoder);
+          ResolvingDecoder resolvingDecoder = DecoderFactory.resolvingDecoder(writerSchema, readerSchema, decoder);
           GenericDatumReader<Record> datumReader = new GenericDatumReader<Record>(readerSchema);
           GenericData.Record trackerEvent = new GenericData.Record(readerSchema);
           datumReader.read(trackerEvent, resolvingDecoder);
