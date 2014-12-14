@@ -75,7 +75,7 @@ public class NeonResolvingSerializer implements AsyncHbaseEventSerializer
 
     private Map<String, Schema> schemaCache = new HashMap<String, Schema>();
 
-    private final Schema readerSchema = TrackerSchema.getSchema();
+    private final Schema readerSchema = TrackerEvent.getSchema();
     private Object resolver = null;
 
     // event-based  
