@@ -438,7 +438,7 @@ class NeonGenericSerializerTest {
         headers.put("timestamp", "1416612478000");  // milli seconds
 
         Event event = EventBuilder.withBody(encodedEvent, headers);
-        NeonDynamicSerializer serializer = new NeonDynamicSerializer();
+        NeonGenericSerializer serializer = new NeonGenericSerializer();
 
         String table = "table";
         String columnFamily = "columFamily";
@@ -497,7 +497,7 @@ class NeonGenericSerializerTest {
         headers.put("timestamp", "1416612478000");  // milli seconds
 
         Event event = EventBuilder.withBody(encodedEvent, headers);
-        NeonDynamicSerializer serializer = new NeonDynamicSerializer();
+        NeonGenericSerializer serializer = new NeonGenericSerializer();
 
         String table = "table";
         String columnFamily = "columFamily";
