@@ -8,6 +8,8 @@ import java.util.Iterator;
 import java.util.regex.*;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.text.DateFormat;
