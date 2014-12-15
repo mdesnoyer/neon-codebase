@@ -262,17 +262,17 @@ public class NeonGenericSerializer implements AsyncHbaseEventSerializer
 
         if(tid == null) {
             logger.error("thumbnail id is null for column family " + columnName.toString());
-            return false;
+            return true;
         }
 
         if(tid.equals("")) {
             logger.error("thumbnail id is empty string for column family " + columnName.toString());
-            return false;
+            return true;
         }
     
         // we may add more checks in the future
 
-        return true;
+        return false;
     }
 
     @Override
