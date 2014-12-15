@@ -140,19 +140,15 @@ class NeonGenericSerializerTest {
         trackerEvent.put("eventType", eventType);
         
         GenericData.Record agentInfo = new GenericData.Record(writerSchema);
-        trackerEvent.put("agentInfo", agentInfo);
+        trackerEvent.put("agentInfo", null);
         
         GenericData.Record geoDtata = new GenericData.Record(writerSchema);
         trackerEvent.put("ipGeoData", geoDtata); 
         
         Schema.Field eventData = writerSchema.getField("eventData");
         Schema eventDataSchema = eventData.schema();
-        //Schema imgSchema = eventDataSchema.getField("ImageVisible").schema();
-        
         int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageVisible");
         GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
-        
-        
         img.put("thumbnailId", new Utf8("image_visible_t1"));
         trackerEvent.put("eventData", img); 
         
