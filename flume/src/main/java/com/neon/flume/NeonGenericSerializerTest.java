@@ -425,11 +425,12 @@ class NeonGenericSerializerTest {
         
         // needed fields
         i.setThumbnailId("image_visible_t1");
+        i.put("dummy", new org.apache.avro.util.Utf8("dum"));
         trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_VISIBLE);
         trackerEvent.setEventData(i);
 
-        GenericRecord rec = (GenericRecord) i;
-        i.put("dummy", new org.apache.avro.util.Utf8("dum"));
+        //GenericRecord rec = (GenericRecord) i;
+        //i.put("dummy", new org.apache.avro.util.Utf8("dum"));
     
         try {
             writer.write(trackerEvent, encoder);
