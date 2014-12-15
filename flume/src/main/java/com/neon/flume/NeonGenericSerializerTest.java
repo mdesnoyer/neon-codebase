@@ -129,8 +129,8 @@ class NeonGenericSerializerTest {
         trackerEvent.put ("pageURL", new Utf8("pageUrl_dummy"));
         trackerEvent.put ("refURL", new Utf8("refUrl_dummy"));
         
-        trackerEvent.put("serverTime", 1000);
-        trackerEvent.put("clientTime", 1000);
+        trackerEvent.put("serverTime", 1000L);
+        trackerEvent.put("clientTime", 1000L);
         
         trackerEvent.put("clientIP", new Utf8("clientIp_dummy"));
         trackerEvent.put ("neonUserId", new Utf8("neonUserId_dummy"));
