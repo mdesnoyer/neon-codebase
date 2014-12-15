@@ -429,7 +429,7 @@ class NeonGenericSerializerTest {
         trackerEvent.setEventData(i);
 
         GenericRecord rec = (GenericRecord) i;
-        rec.put("dummy", new org.apache.avro.util.Utf8("dum"));
+        i.put("dummy", new org.apache.avro.util.Utf8("dum"));
     
         try {
             writer.write(trackerEvent, encoder);
