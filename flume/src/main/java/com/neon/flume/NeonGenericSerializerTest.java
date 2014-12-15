@@ -122,7 +122,10 @@ class NeonGenericSerializerTest {
         trackerEvent.put("pageId", new Utf8("pageId_dummy"));
         trackerEvent.put("trackerAccountId", new Utf8("trackerAccountId_dummy"));
         //trackerEvent.put(com.neon.Tracker.TrackerType.IGN);
-        trackerEvent.put("TrackerType", new Utf8("IGN"));
+        
+        GenericData.EnumSymbol trackerType = new GenericData.EnumSymbol(writerSchema, "IGN");
+        trackerEvent.put("trackerType", trackerType);
+        
         trackerEvent.put ("pageURL", new Utf8("pageUrl_dummy"));
         trackerEvent.put ("refURL", new Utf8("refUrl_dummy"));
         
@@ -133,7 +136,7 @@ class NeonGenericSerializerTest {
         trackerEvent.put ("neonUserId", new Utf8("neonUserId_dummy"));
         trackerEvent.put("userAgent", new Utf8("userAgent_dummy"));
         
-        GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "IGN");
+        GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "IMAGE_VISIBLE");
         trackerEvent.put("eventType", eventType);
         
         GenericData.Record agentInfo = new GenericData.Record(writerSchema);
