@@ -118,7 +118,7 @@ class NeonGenericSerializerTest {
         writerSchema = new TrackerEvent().getSchema();
         GenericData.Record tracketEvent = new GenericData.Record(writerSchema);
         
-        trackerEvent.put("pageId", new Utf8("pageId_dummy");
+        trackerEvent.put("pageId", new Utf8("pageId_dummy"));
     
 
 /*
