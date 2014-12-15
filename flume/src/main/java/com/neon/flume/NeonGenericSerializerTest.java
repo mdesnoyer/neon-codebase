@@ -32,7 +32,7 @@ import org.apache.flume.conf.ComponentConfiguration;
 import org.apache.flume.sink.hbase.SimpleHbaseEventSerializer.KeyType;
 import org.apache.flume.sink.hbase.AsyncHbaseEventSerializer;
 
-import org.apache.avro.Schema
+import org.apache.avro.Schema;
 import org.apache.avro.util.Utf8;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericDatumReader;
