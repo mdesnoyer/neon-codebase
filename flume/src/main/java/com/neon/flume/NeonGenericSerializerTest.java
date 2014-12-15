@@ -566,7 +566,7 @@ class NeonGenericSerializerTest {
 
         try {
             // features testing
-            test_ImageVisible();
+            test_ImageVisible_Generic();
             test_ImagesVisible();
           
             test_new_schema_fetch_and_use();
