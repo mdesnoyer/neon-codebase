@@ -156,7 +156,7 @@ class NeonGenericSerializerTest {
 
         writer.write(trackerEvent, encoder);
         encoder.flush();
-
+*/
         byte[] encodedEvent = outputStream.toByteArray();
 
         // make avro container headers
@@ -171,11 +171,10 @@ class NeonGenericSerializerTest {
         String columnFamily = "columFamily";
         serializer.initialize(table.getBytes(), columnFamily.getBytes());
 
-      
         serializer.setEvent(event);
         List<PutRequest> puts = serializer.getActions();
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
-*/
+
     }
 
     public static void test_ImagesVisible() throws Exception { 
