@@ -32,7 +32,8 @@ import org.apache.flume.conf.ComponentConfiguration;
 import org.apache.flume.sink.hbase.SimpleHbaseEventSerializer.KeyType;
 import org.apache.flume.sink.hbase.AsyncHbaseEventSerializer;
 
-import org.apache.avro.Schema;
+import org.apache.avro.Schema
+import org.apache.avro.util.Utf8;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericDatumWriter;
@@ -115,7 +116,7 @@ class NeonGenericSerializerTest {
 
     public static void test_ImageVisible_Generic() throws Exception { 
 
-        writerSchema = new TrackerEvent().getSchema();
+        Scherma writerSchema = new TrackerEvent().getSchema();
         GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
         
         trackerEvent.put("pageId", new Utf8("pageId_dummy"));
