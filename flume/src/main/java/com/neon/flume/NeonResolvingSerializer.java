@@ -157,7 +157,7 @@ public class NeonResolvingSerializer implements AsyncHbaseEventSerializer
           ResolvingDecoder resolvingDecoder = DecoderFactory.get().resolvingDecoder(writerSchema, readerSchema, decoder);
           GenericDatumReader<Record> datumReader = new GenericDatumReader<Record>(readerSchema);
           GenericData.Record trackerEvent = new GenericData.Record(readerSchema);
-          trackerEvent = datumReader.read(null, resolvingDecoder);
+          trackerEvent = datumReader.read(trackerEvent, resolvingDecoder);
         }
         catch(IOException e) {
             trackerEvent = null;
