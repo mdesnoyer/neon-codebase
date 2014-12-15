@@ -157,7 +157,7 @@ class NeonGenericSerializerTest {
         writer.write(trackerEvent, encoder);
         encoder.flush();
 */
-        byte[] encodedEvent = outputStream.toByteArray();
+        byte[] encodedEvent = out.toByteArray();
 
         // make avro container headers
         Map<String, String> headers = new HashMap<String, String>();
