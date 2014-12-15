@@ -402,11 +402,29 @@ class NeonGenericSerializerTest {
     }
     
     public static void test_new_schema_fetch_and_use() {
+        Schema schema = null;
+        Schema.Parser parser = new Schema.Parser();
+        InputStream is = null;
+        try {
+            is = new URL("https://s3.amazonaws.com/neon-test/neon_serializer_future_tracker_event_schema.avsc").openStream();
+            schema = parser.parse(is);
+        } finally {
+            if (is != null) {
+                is.close();
+            }
+
+        ByteArrayOutputStream os = new ByteArrayOutputStream();
+        DatumWriter<GenericRecord> writer = new GenericDatumWriter<GenericRecord>(schema);
+        DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<GenericRecord>(writer);
+        dataFileWriter.create(schema, os);
+        GenericRecord trackerEvent = new GenericData.Record(schema);
         
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        
+        //ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
-        DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
-        TrackerEvent trackerEvent = new TrackerEvent(); 
+        //DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
+        //TrackerEvent trackerEvent = new TrackerEvent(); 
+        
         ImageVisible i = new ImageVisible();
         
         // dummies
