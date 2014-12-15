@@ -113,6 +113,64 @@ class NeonGenericSerializerTest {
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
     }
 
+    public static void test_ImageVisible_Generic() throws Exception { 
+
+        writerSchema = new TrackerEvent().getSchema();
+        GenericData.Record tracketEvent = new GenericData.Record(writerSchema);
+        
+        trackerEvent.put("pageId", new Utf8("pageId_dummy");
+    
+
+/*
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
+        DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
+        TrackerEvent trackerEvent = new TrackerEvent(); 
+        ImageVisible i = new ImageVisible();
+        
+        // dummies
+        trackerEvent.setPageId("pageId_dummy");
+        trackerEvent.setTrackerAccountId("trackerAccountId_dummy");
+        trackerEvent.setTrackerType(com.neon.Tracker.TrackerType.IGN);
+        trackerEvent.setPageURL ("pageUrl_dummy");
+        trackerEvent.setRefURL ("refUrl_dummy");
+        trackerEvent.setServerTime (new java.lang.Long(1000));
+        trackerEvent.setClientTime (new java.lang.Long(1000) );
+        trackerEvent.setClientIP("clientIp_dummy");
+        trackerEvent.setNeonUserId ("neonUserId_dummy");
+        trackerEvent.setUserAgent("userAgent_dummy");
+        trackerEvent.setAgentInfo(new com.neon.Tracker.AgentInfo());
+        trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
+        
+        // needed fields
+        i.setThumbnailId("image_visible_t1");
+        trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_VISIBLE);
+        trackerEvent.setEventData(i);
+
+        writer.write(trackerEvent, encoder);
+        encoder.flush();
+
+        byte[] encodedEvent = outputStream.toByteArray();
+
+        // make avro container headers
+        Map<String, String> headers = new HashMap<String, String>();
+        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
+        headers.put("timestamp", "1416612478000");  // milli seconds
+
+        Event event = EventBuilder.withBody(encodedEvent, headers);
+        NeonGenericSerializer serializer = new NeonGenericSerializer();
+
+        String table = "table";
+        String columnFamily = "columFamily";
+        serializer.initialize(table.getBytes(), columnFamily.getBytes());
+
+      
+        serializer.setEvent(event);
+        List<PutRequest> puts = serializer.getActions();
+        List<AtomicIncrementRequest> incs =serializer.getIncrements();
+*/
+    }
+
     public static void test_ImagesVisible() throws Exception { 
 
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
@@ -482,6 +540,19 @@ class NeonGenericSerializerTest {
 
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
 */
+    }
+    
+    private Schema loadFromUrl(String schemaUrl) throws IOException {
+        Schema.Parser parser = new Schema.Parser();
+        InputStream is = null;
+        try {
+            is = new URL(schemaUrl).openStream();
+            return parser.parse(is);
+        } finally {
+            if (is != null) {
+                is.close();
+            }
+        }
     }
     
     public static void main(String[] args) {
