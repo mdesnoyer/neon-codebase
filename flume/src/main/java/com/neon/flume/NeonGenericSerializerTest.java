@@ -142,8 +142,15 @@ class NeonGenericSerializerTest {
         GenericData.Record agentInfo = new GenericData.Record(writerSchema);
         trackerEvent.put("agentInfo", null);
         
-        GenericData.Record geoDtata = new GenericData.Record(writerSchema);
+        //GenericData.Record geoDtata = new GenericData.Record(writerSchema);
+        Schema.Field geoDataField = writerSchema.getField("ipGeoData");
+        GenericRecord geoData = new GenericData.Record(geoDataField.schema());
+        geoData.put("country", new Utf8("usa"));
+        
         trackerEvent.put("ipGeoData", geoDtata); 
+        
+        
+        
         
         Schema.Field eventData = writerSchema.getField("eventData");
         Schema eventDataSchema = eventData.schema();
