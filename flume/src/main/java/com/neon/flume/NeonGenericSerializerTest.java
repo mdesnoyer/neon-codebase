@@ -154,7 +154,8 @@ class NeonGenericSerializerTest {
 
         // make avro container headers
         Map<String, String> headers = new HashMap<String, String>();
-        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
+        //headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
+        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-test/neon_serializer_future_tracker_event_schema.avsc");
         headers.put("timestamp", "1416612478000");  // milli seconds
 
         Event event = EventBuilder.withBody(encodedEvent, headers);
@@ -402,6 +403,8 @@ class NeonGenericSerializerTest {
     }
     
     public static void test_new_schema_fetch_and_use() {
+       
+       /*
         Schema schema = null;
         Schema.Parser parser = new Schema.Parser();
         InputStream is = null;
@@ -472,7 +475,7 @@ class NeonGenericSerializerTest {
         String table = "table";
         String columnFamily = "columFamily";
         serializer.initialize(table.getBytes(), columnFamily.getBytes());
-
+*/
         /*
          *  Test 
          */
