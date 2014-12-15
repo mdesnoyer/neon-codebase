@@ -141,7 +141,7 @@ class NeonGenericSerializerTest {
         trackerEvent.put("ipGeoData", geoDtata); 
         
         GenericData.Record img = new GenericData.Record(writerSchema);
-        img.put("thumbnailId", image_visible_t1");
+        img.put("thumbnailId", new Utf8("image_visible_t1"));
         trackerEvent.put("eventData", img); 
         
         ByteArrayOutputStream out = new ByteArrayOutputStream();
