@@ -431,9 +431,15 @@ class NeonGenericSerializerTest {
         GenericRecord rec = (GenericRecord) i;
         i.put("dummy", "dum");
     
-        writer.write(trackerEvent, encoder);
-        encoder.flush();
-
+        try {
+            writer.write(trackerEvent, encoder);
+            encoder.flush();
+        }
+        catch(IOException e) {
+         
+        }
+        
+        
         byte[] encodedEvent = outputStream.toByteArray();
 
         // make avro container headers
