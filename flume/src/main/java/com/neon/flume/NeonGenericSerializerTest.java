@@ -429,7 +429,7 @@ class NeonGenericSerializerTest {
         trackerEvent.setEventData(i);
 
         GenericRecord rec = (GenericRecord) i;
-        i.put("dummy", "dum");
+        rec.put("dummy", "dum");
     
         try {
             writer.write(trackerEvent, encoder);
