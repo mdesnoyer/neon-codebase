@@ -116,7 +116,7 @@ class NeonGenericSerializerTest {
 
     public static void test_ImageVisible_Generic() throws Exception { 
 
-        Scherma writerSchema = new TrackerEvent().getSchema();
+        Schema writerSchema = new TrackerEvent().getSchema();
         GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
         
         trackerEvent.put("pageId", new Utf8("pageId_dummy"));
