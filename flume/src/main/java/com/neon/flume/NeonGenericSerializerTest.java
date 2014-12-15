@@ -130,7 +130,7 @@ class NeonGenericSerializerTest {
         trackerEvent.put("clientTime", 1000);
         
         trackerEvent.put("clientIP", new Utf8("clientIp_dummy"));
-        trackerEvent.put ("neonUserId", new Utf8(neonUserId_dummy"));
+        trackerEvent.put ("neonUserId", new Utf8("neonUserId_dummy"));
         trackerEvent.put("userAgent", new Utf8("userAgent_dummy"));
         
         GenericData.Record agentInfo = new GenericData.Record(writerSchema);
