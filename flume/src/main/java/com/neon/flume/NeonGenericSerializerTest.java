@@ -120,6 +120,28 @@ class NeonGenericSerializerTest {
         GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
         
         trackerEvent.put("pageId", new Utf8("pageId_dummy"));
+        trackerEvent.put("trackerAccountId", new Utf8("trackerAccountId_dummy"));
+        //trackerEvent.put(com.neon.Tracker.TrackerType.IGN);
+        trackerEvent.put("TrackerType", new Utf8("IGN"));
+        trackerEvent.put ("pageURL", new Utf8("pageUrl_dummy"));
+        trackerEvent.put ("refURL", new Utf8("refUrl_dummy"));
+        
+        trackerEvent.put("serverTime", 1000);
+        trackerEvent.put("clientTime", 1000);
+        
+        trackerEvent.put("clientIP", new Utf8("clientIp_dummy"));
+        trackerEvent.put ("neonUserId", new Utf8(neonUserId_dummy"));
+        trackerEvent.put("userAgent", new Utf8("userAgent_dummy"));
+        
+        GenericData.Record agentInfo = new GenericData.Record(writerSchema);
+        trackerEvent.put("agentInfo", agentInfo);
+        
+        GenericData.Record geoDtata = new GenericData.Record(writerSchema);
+        trackerEvent.put("ipGeoData", geoDtata); 
+        
+        
+        
+        
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         //Encoder encoder = new BinaryEncoder(out); 
         BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
