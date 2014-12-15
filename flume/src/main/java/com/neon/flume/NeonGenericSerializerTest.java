@@ -132,6 +132,7 @@ class NeonGenericSerializerTest {
         trackerEvent.put("clientIP", new Utf8("clientIp_dummy"));
         trackerEvent.put ("neonUserId", new Utf8("neonUserId_dummy"));
         trackerEvent.put("userAgent", new Utf8("userAgent_dummy"));
+        trackerEvent.put("eventType", new Utf8("IMAGE_VISIBLE"));
         
         GenericData.Record agentInfo = new GenericData.Record(writerSchema);
         trackerEvent.put("agentInfo", agentInfo);
@@ -139,8 +140,9 @@ class NeonGenericSerializerTest {
         GenericData.Record geoDtata = new GenericData.Record(writerSchema);
         trackerEvent.put("ipGeoData", geoDtata); 
         
-        
-        
+        GenericData.Record img = new GenericData.Record(writerSchema);
+        img.put("thumbnailId", image_visible_t1");
+        trackerEvent.put("eventData", img); 
         
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         //Encoder encoder = new BinaryEncoder(out); 
