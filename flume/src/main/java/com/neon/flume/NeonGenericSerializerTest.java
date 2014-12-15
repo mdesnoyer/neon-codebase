@@ -147,9 +147,12 @@ class NeonGenericSerializerTest {
         
         Schema.Field eventData = writerSchema.getField("eventData");
         Schema eventDataSchema = eventData.schema();
-        Schema imgSchema = eventDataSchema.getField("ImageVisible").schema();
+        //Schema imgSchema = eventDataSchema.getField("ImageVisible").schema();
         
-        GenericData.Record img = new GenericData.Record(imgSchema);
+        GenericRecord img = new GenericRecord(imgSchema);
+        
+        
+        
         img.put("thumbnailId", new Utf8("image_visible_t1"));
         trackerEvent.put("eventData", img); 
         
