@@ -116,10 +116,16 @@ class NeonGenericSerializerTest {
     public static void test_ImageVisible_Generic() throws Exception { 
 
         writerSchema = new TrackerEvent().getSchema();
-        GenericData.Record tracketEvent = new GenericData.Record(writerSchema);
+        GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
         
         trackerEvent.put("pageId", new Utf8("pageId_dummy"));
-    
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        //Encoder encoder = new BinaryEncoder(out); 
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
+        GenericDatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<GenericRecord>(writerSchema);
+            
+        datumWriter.write(trackerEvent, encoder);
+        encoder.flush();
 
 /*
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
