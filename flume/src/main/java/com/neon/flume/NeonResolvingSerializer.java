@@ -88,7 +88,7 @@ public class NeonResolvingSerializer implements AsyncHbaseEventSerializer
     @Override
     public void initialize(byte[] table, byte[] cf) 
     {
-        readerSchema = TrackerEvent().getSchema();
+        readerSchema = new TrackerEvent().getSchema();
         
         eventTimestamp = null;
         trackerEvent = null;
