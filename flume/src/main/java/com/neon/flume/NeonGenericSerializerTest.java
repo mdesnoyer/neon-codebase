@@ -475,21 +475,13 @@ class NeonGenericSerializerTest {
         String table = "table";
         String columnFamily = "columFamily";
         serializer.initialize(table.getBytes(), columnFamily.getBytes());
-*/
-        /*
-         *  Test 
-         */
+
         serializer.setEvent(event);
 
-        /*
-         * Test
-         */
         List<PutRequest> puts = serializer.getActions();
 
-        /*
-         * Test
-         */
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
+*/
     }
     
     public static void main(String[] args) {
@@ -498,6 +490,7 @@ class NeonGenericSerializerTest {
         try {
             // features testing
             test_ImageVisible();
+            test_ImagesVisible();
           
             test_new_schema_fetch_and_use();
             System.out.println("\n\nTest successful");
