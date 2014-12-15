@@ -147,7 +147,7 @@ class NeonGenericSerializerTest {
         GenericRecord geoData = new GenericData.Record(geoDataField.schema());
         geoData.put("country", new Utf8("usa"));
         
-        trackerEvent.put("ipGeoData", geoDtata); 
+        trackerEvent.put("ipGeoData", geoData); 
         
         
         
