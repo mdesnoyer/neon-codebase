@@ -304,7 +304,7 @@ public class NeonGenericSerializerTest {
         Schema imgSchema = eventDataSchema.getTypes().get(i);
         GenericRecord img = new GenericData.Record(imgSchema);
         
-        Schema.Field thumbs = writerSchema.getField("thumbnailIds");
+        Schema.Field thumbs = imgSchema.getField("thumbnailIds");
         GenericArray<String> values = new GenericData.Array<String>(2, thumbs.schema());
         
         values.add(0, videoId_1);
