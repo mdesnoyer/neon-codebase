@@ -66,6 +66,8 @@ public class NeonGenericSerializerTest {
     
     @Test
     public void test_ImageVisible_Base() throws Exception { 
+        
+        String videoId = "test_ImageVisible_Base";
     
         Schema writerSchema = new TrackerEvent().getSchema();
         GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
@@ -102,7 +104,7 @@ public class NeonGenericSerializerTest {
         Schema eventDataSchema = eventData.schema();
         int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageVisible");
         GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
-        img.put("thumbnailId", new Utf8("test_ImageVisible_Base"));
+        img.put("thumbnailId", new Utf8(videoId));
         trackerEvent.put("eventData", img); 
         
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -135,10 +137,9 @@ public class NeonGenericSerializerTest {
         *   Test 
         */
         List<PutRequest> puts = serializer.getActions();
-        
         // should be zero size
-        if(puts.size() != 0) 
-            throw new Exception("");
+        assertTrue(puts.size() == 0); 
+            
         
         /*
         *   Test 
@@ -148,12 +149,17 @@ public class NeonGenericSerializerTest {
         DateFormat format = new SimpleDateFormat("YYYY-MM-dd'T'HH");
         byte[] formattedTimestamp = format.format(date).getBytes();
         String eventTimestamp = new String(formattedTimestamp);
-    
+        
         List<AtomicIncrementRequest> incs = serializer.getIncrements();
         
         // should be zero size
-        if(incs.size() != 2) 
-            throw new Exception("");
+        assertTrue(incs.size() == 2);
+        
+        AtomicIncrementRequest req = incs.get(0);
+        assertTrue(req.key().equals(videoId + eventTimestamp));
+        
+        AtomicIncrementRequest req = incs.get(1);
+        assertTrue(req.key().equals(eventTimestamp + videoId));
     }
 
     @Test
