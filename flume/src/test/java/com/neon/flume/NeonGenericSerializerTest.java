@@ -368,7 +368,7 @@ public class NeonGenericSerializerTest {
     }
 
 @Test
-    public void test_ImageLoad_Base() throws Exception { 
+    public void test_ImageLoad() throws Exception { 
         
         String videoId = "test_ImageLoad";
     
@@ -385,6 +385,10 @@ public class NeonGenericSerializerTest {
         int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageLoad");
         GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
         img.put("thumbnailId", new Utf8(videoId));
+        
+        img.put("height", "1");
+        img.put("width", "1");
+        
         trackerEvent.put("eventData", img); 
         
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -489,7 +493,7 @@ public class NeonGenericSerializerTest {
             
             serializer.test_ImageVisible_Base();
             serializer.test_ImageClick();
-            serializer.test_ImageLoad_Base();
+            serializer.test_ImageLoad();
            
             // testing changes in schemas
             serializer = new NeonGenericSerializerTest();
