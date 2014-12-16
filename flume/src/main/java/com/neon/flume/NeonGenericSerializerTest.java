@@ -14,6 +14,9 @@ import java.io.ByteArrayOutputStream;
 import java.util.HashMap;
 import java.util.Map;
 import java.net.URL;
+import java.text.SimpleDateFormat;
+import java.text.DateFormat;
+import java.util.Date;
 
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
@@ -69,8 +72,8 @@ class NeonGenericSerializerTest {
         trackerEvent.put ("pageURL", new Utf8("pageUrl_dummy"));
         trackerEvent.put ("refURL", new Utf8("refUrl_dummy"));
         
-        trackerEvent.put("serverTime", 1000L);
-        trackerEvent.put("clientTime", 1000L);
+        trackerEvent.put("serverTime", 1418689680L);
+        trackerEvent.put("clientTime", 1418689680L);
         
         trackerEvent.put("clientIP", new Utf8("clientIp_dummy"));
         trackerEvent.put ("neonUserId", new Utf8("neonUserId_dummy"));
@@ -115,10 +118,30 @@ class NeonGenericSerializerTest {
         String columnFamily = "columFamily";
         serializer.initialize(table.getBytes(), columnFamily.getBytes());
 
+        /*
+        *   Test 
+        */
         serializer.setEvent(event);
+        
+        /*
+        *   Test 
+        */
         List<PutRequest> puts = serializer.getActions();
-        List<AtomicIncrementRequest> incs =serializer.getIncrements();
-
+        
+        // should be zero size
+        
+        /*
+        *   Test 
+        */
+    /*
+        long timestamp = 1416612478000L;
+        Date date = new Date(timestamp);
+        DateFormat format = new SimpleDateFormat("YYYY-MM-dd'T'HH");
+        byte[] formattedTimestamp = format.format(date).getBytes();
+        String eventTimestamp = new String(formattedTimestamp);
+    
+        List<AtomicIncrementRequest> incs = serializer.getIncrements();
+     */  
     }
 
     public static void test_ImageVisible_New_Field() throws Exception { 
