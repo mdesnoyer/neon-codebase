@@ -60,7 +60,8 @@ import org.apache.flume.event.EventBuilder;
 
 class NeonGenericSerializerTest {   
     
-    public static void test_ImageVisible_Base() throws Exception { 
+    @Test
+    public void test_ImageVisible_Base() throws Exception { 
     
         Schema writerSchema = new TrackerEvent().getSchema();
         GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
@@ -151,7 +152,8 @@ class NeonGenericSerializerTest {
             throw new Exception("");
     }
 
-    public static void test_ImageVisible_New_Field() throws Exception { 
+    @Test
+    public void test_ImageVisible_New_Field() throws Exception { 
 
         String schemaUrl = "https://s3.amazonaws.com/neon-test/test_tracker_event_schema_added_field.avsc";
         Schema writerSchema = loadFromUrl(schemaUrl);
@@ -220,8 +222,8 @@ class NeonGenericSerializerTest {
 
     }
 
-    
-    public static void test_ImageVisible_New_Field_in_EventData() throws Exception { 
+    @Test
+    public void test_ImageVisible_New_Field_in_EventData() throws Exception { 
 
         String schemaUrl = "https://s3.amazonaws.com/neon-test/test_tracker_event_schema_added_event_data_record.avsc";
         Schema writerSchema = loadFromUrl(schemaUrl);
