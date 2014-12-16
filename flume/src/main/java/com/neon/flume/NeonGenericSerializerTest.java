@@ -54,67 +54,7 @@ import org.apache.flume.event.EventBuilder;
 
 class NeonGenericSerializerTest {   
     
-    public static void test_ImageVisible() throws Exception { 
-
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
-        DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
-        TrackerEvent trackerEvent = new TrackerEvent(); 
-        ImageVisible i = new ImageVisible();
-        
-        // dummies
-        trackerEvent.setPageId("pageId_dummy");
-        trackerEvent.setTrackerAccountId("trackerAccountId_dummy");
-        trackerEvent.setTrackerType(com.neon.Tracker.TrackerType.IGN);
-        trackerEvent.setPageURL ("pageUrl_dummy");
-        trackerEvent.setRefURL ("refUrl_dummy");
-        trackerEvent.setServerTime (new java.lang.Long(1000));
-        trackerEvent.setClientTime (new java.lang.Long(1000) );
-        trackerEvent.setClientIP("clientIp_dummy");
-        trackerEvent.setNeonUserId ("neonUserId_dummy");
-        trackerEvent.setUserAgent("userAgent_dummy");
-        trackerEvent.setAgentInfo(new com.neon.Tracker.AgentInfo());
-        trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
-        
-        // needed fields
-        i.setThumbnailId("image_visible_t1");
-        trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_VISIBLE);
-        trackerEvent.setEventData(i);
-
-        writer.write(trackerEvent, encoder);
-        encoder.flush();
-
-        byte[] encodedEvent = outputStream.toByteArray();
-
-        // make avro container headers
-        Map<String, String> headers = new HashMap<String, String>();
-        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
-        headers.put("timestamp", "1416612478000");  // milli seconds
-
-        Event event = EventBuilder.withBody(encodedEvent, headers);
-        NeonGenericSerializer serializer = new NeonGenericSerializer();
-
-        String table = "table";
-        String columnFamily = "columFamily";
-        serializer.initialize(table.getBytes(), columnFamily.getBytes());
-
-        /*
-         *  Test 
-         */
-        serializer.setEvent(event);
-
-        /*
-         * Test
-         */
-        List<PutRequest> puts = serializer.getActions();
-
-        /*
-         * Test
-         */
-        List<AtomicIncrementRequest> incs =serializer.getIncrements();
-    }
-
-    public static void test_ImageVisible_Generic() throws Exception { 
+    public static void test_ImageVisible_Base() throws Exception { 
 
         Schema writerSchema = new TrackerEvent().getSchema();
         GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
@@ -141,16 +81,11 @@ class NeonGenericSerializerTest {
         
         GenericData.Record agentInfo = new GenericData.Record(writerSchema);
         trackerEvent.put("agentInfo", null);
-        
-        //GenericData.Record geoDtata = new GenericData.Record(writerSchema);
+    
         Schema.Field geoDataField = writerSchema.getField("ipGeoData");
         GenericRecord geoData = new GenericData.Record(geoDataField.schema());
         geoData.put("country", new Utf8("usa"));
-        
         trackerEvent.put("ipGeoData", geoData); 
-        
-        
-        
         
         Schema.Field eventData = writerSchema.getField("eventData");
         Schema eventDataSchema = eventData.schema();
@@ -160,42 +95,12 @@ class NeonGenericSerializerTest {
         trackerEvent.put("eventData", img); 
         
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        //Encoder encoder = new BinaryEncoder(out); 
         BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
         GenericDatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<GenericRecord>(writerSchema);
             
         datumWriter.write(trackerEvent, encoder);
         encoder.flush();
 
-/*
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
-        DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
-        TrackerEvent trackerEvent = new TrackerEvent(); 
-        ImageVisible i = new ImageVisible();
-        
-        // dummies
-        trackerEvent.setPageId("pageId_dummy");
-        trackerEvent.setTrackerAccountId("trackerAccountId_dummy");
-        trackerEvent.setTrackerType(com.neon.Tracker.TrackerType.IGN);
-        trackerEvent.setPageURL ("pageUrl_dummy");
-        trackerEvent.setRefURL ("refUrl_dummy");
-        trackerEvent.setServerTime (new java.lang.Long(1000));
-        trackerEvent.setClientTime (new java.lang.Long(1000) );
-        trackerEvent.setClientIP("clientIp_dummy");
-        trackerEvent.setNeonUserId ("neonUserId_dummy");
-        trackerEvent.setUserAgent("userAgent_dummy");
-        trackerEvent.setAgentInfo(new com.neon.Tracker.AgentInfo());
-        trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
-        
-        // needed fields
-        i.setThumbnailId("image_visible_t1");
-        trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_VISIBLE);
-        trackerEvent.setEventData(i);
-
-        writer.write(trackerEvent, encoder);
-        encoder.flush();
-*/
         byte[] encodedEvent = out.toByteArray();
 
         // make avro container headers
@@ -216,117 +121,55 @@ class NeonGenericSerializerTest {
 
     }
 
-    public static void test_ImagesVisible() throws Exception { 
+    public static void test_ImageVisible_New_Field() throws Exception { 
 
-        //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
-
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
-        DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
-       
-        TrackerEvent trackerEvent = new TrackerEvent(); 
-
-        ImagesVisible i = new ImagesVisible();
+        Schema writerSchema = loadFromUrl("https://s3.amazonaws.com/neon-test/test_tracker_event_schema_added_field.avsc");
+        GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
         
-        // dummies
-        trackerEvent.setPageId("pageId_dummy");
-        trackerEvent.setTrackerAccountId("trackerAccountId_dummy");
-        trackerEvent.setTrackerType(com.neon.Tracker.TrackerType.IGN);
-        trackerEvent.setPageURL ("pageUrl_dummy");
-        trackerEvent.setRefURL ("refUrl_dummy");
-        trackerEvent.setServerTime (new java.lang.Long(1000));
-        trackerEvent.setClientTime (new java.lang.Long(1000) );
-        trackerEvent.setClientIP("clientIp_dummy");
-        trackerEvent.setNeonUserId ("neonUserId_dummy");
-        trackerEvent.setUserAgent("userAgent_dummy");
-        trackerEvent.setAgentInfo(new com.neon.Tracker.AgentInfo());
-        trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
+        trackerEvent.put("pageId", new Utf8("pageId_dummy"));
+        trackerEvent.put("trackerAccountId", new Utf8("trackerAccountId_dummy"));
+        //trackerEvent.put(com.neon.Tracker.TrackerType.IGN);
         
-        // needed fields
-        java.util.List<java.lang.CharSequence> tids = new ArrayList<java.lang.CharSequence>();
-        i.setThumbnailIds(tids);
-        i.thumbnailIds.add(new String("images_visible_tid1"));
-        i.thumbnailIds.add(new String("images_visible_tid2"));
-        trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGES_VISIBLE);
-        trackerEvent.setEventData(i);
-
-        writer.write(trackerEvent, encoder);
-        encoder.flush();
-
-        byte[] encodedEvent = outputStream.toByteArray();
-
-        // make avro container headers
-        Map<String, String> headers = new HashMap<String, String>();
-        //headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
-        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-test/neon_serializer_future_tracker_event_schema.avsc");
-        headers.put("timestamp", "1416612478000");  // milli seconds
-
-        Event event = EventBuilder.withBody(encodedEvent, headers);
-        NeonGenericSerializer serializer = new NeonGenericSerializer();
-
-        String table = "table";
-        String columnFamily = "columFamily";
-        serializer.initialize(table.getBytes(), columnFamily.getBytes());
-
-        /*
-         *  Test 
-         */
-        serializer.setEvent(event);
-
-        /*
-         * Test
-         */
-        List<PutRequest> puts = serializer.getActions();
-
-        /*
-         * Test
-         */
-        List<AtomicIncrementRequest> incs =serializer.getIncrements();
-    }
-
-    public static void test_ImageClick() throws Exception { 
-
-        //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
-
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
-        DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
-       
-        TrackerEvent trackerEvent = new TrackerEvent(); 
-
-        ImageClick i = new ImageClick();
+        GenericData.EnumSymbol trackerType = new GenericData.EnumSymbol(writerSchema, "IGN");
+        trackerEvent.put("trackerType", trackerType);
         
-        // dummies
-        trackerEvent.setPageId("pageId_dummy");
-        trackerEvent.setTrackerAccountId("trackerAccountId_dummy");
-        trackerEvent.setTrackerType(com.neon.Tracker.TrackerType.IGN);
-        trackerEvent.setPageURL ("pageUrl_dummy");
-        trackerEvent.setRefURL ("refUrl_dummy");
-        trackerEvent.setServerTime (new java.lang.Long(1000));
-        trackerEvent.setClientTime (new java.lang.Long(1000) );
-        trackerEvent.setClientIP("clientIp_dummy");
-        trackerEvent.setNeonUserId ("neonUserId_dummy");
-        trackerEvent.setUserAgent("userAgent_dummy");
-        trackerEvent.setAgentInfo(new com.neon.Tracker.AgentInfo());
-        trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
-        Coords c = new Coords();
-        c.setX(1.0F);
-        c.setY(1.0F);
-        i.setPageCoords(c);
-        c = new Coords();
-        c.setX(1.0F);
-        c.setY(1.0F);
-        i.setWindowCoords(c);
+        trackerEvent.put ("pageURL", new Utf8("pageUrl_dummy"));
+        trackerEvent.put ("refURL", new Utf8("refUrl_dummy"));
+        trackerEvent.put ("dummyNewField", new Utf8("dummy"));
+        
+        trackerEvent.put("serverTime", 1000L);
+        trackerEvent.put("clientTime", 1000L);
+        
+        trackerEvent.put("clientIP", new Utf8("clientIp_dummy"));
+        trackerEvent.put ("neonUserId", new Utf8("neonUserId_dummy"));
+        trackerEvent.put("userAgent", new Utf8("userAgent_dummy"));
+        
+        GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "IMAGE_VISIBLE");
+        trackerEvent.put("eventType", eventType);
+        
+        GenericData.Record agentInfo = new GenericData.Record(writerSchema);
+        trackerEvent.put("agentInfo", null);
     
-        // needed
-        i.setThumbnailId("image_click_t1");
-        trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_CLICK);
-        trackerEvent.setEventData(i);
-
-        writer.write(trackerEvent, encoder);
+        Schema.Field geoDataField = writerSchema.getField("ipGeoData");
+        GenericRecord geoData = new GenericData.Record(geoDataField.schema());
+        geoData.put("country", new Utf8("usa"));
+        trackerEvent.put("ipGeoData", geoData); 
+        
+        Schema.Field eventData = writerSchema.getField("eventData");
+        Schema eventDataSchema = eventData.schema();
+        int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageVisible");
+        GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
+        img.put("thumbnailId", new Utf8("image_visible_t1"));
+        trackerEvent.put("eventData", img); 
+        
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
+        GenericDatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<GenericRecord>(writerSchema);
+            
+        datumWriter.write(trackerEvent, encoder);
         encoder.flush();
 
-        byte[] encodedEvent = outputStream.toByteArray();
+        byte[] encodedEvent = out.toByteArray();
 
         // make avro container headers
         Map<String, String> headers = new HashMap<String, String>();
@@ -335,66 +178,66 @@ class NeonGenericSerializerTest {
 
         Event event = EventBuilder.withBody(encodedEvent, headers);
         NeonGenericSerializer serializer = new NeonGenericSerializer();
-        
-        /*
-        *  Test
-        */ 
+
         String table = "table";
         String columnFamily = "columFamily";
-         // initialize disregard params
         serializer.initialize(table.getBytes(), columnFamily.getBytes());
 
-        /*
-         *  Test 
-         */
         serializer.setEvent(event);
-
-        /*
-         * Test
-         */
         List<PutRequest> puts = serializer.getActions();
-
-        /*
-         * Test
-         */
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
+
     }
+
     
-    public static void test_ImageLoad() throws Exception { 
+    public static void test_ImageVisible_New_Field_in_EventData() throws Exception { 
 
-        //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
-
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
-        DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
-       
-        TrackerEvent trackerEvent = new TrackerEvent(); 
-
-        ImageLoad i = new ImageLoad();
+        Schema writerSchema = loadFromUrl("https://s3.amazonaws.com/neon-test/test_tracker_event_schema_added_event_data_record.avsc");
+        GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
         
-        // dummies
-        trackerEvent.setPageId("pageId_dummy");
-        trackerEvent.setTrackerAccountId("trackerAccountId_dummy");
-        trackerEvent.setTrackerType(com.neon.Tracker.TrackerType.IGN);
-        trackerEvent.setPageURL ("pageUrl_dummy");
-        trackerEvent.setRefURL ("refUrl_dummy");
-        trackerEvent.setServerTime (new java.lang.Long(1000));
-        trackerEvent.setClientTime (new java.lang.Long(1000) );
-        trackerEvent.setClientIP("clientIp_dummy");
-        trackerEvent.setNeonUserId ("neonUserId_dummy");
-        trackerEvent.setUserAgent("userAgent_dummy");
-        trackerEvent.setAgentInfo(new com.neon.Tracker.AgentInfo());
-        trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
-       
-        // needed
-        i.setThumbnailId("image_load_tid1");
-        trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_LOAD);
-        trackerEvent.setEventData(i);
-
-        writer.write(trackerEvent, encoder);
+        trackerEvent.put("pageId", new Utf8("pageId_dummy"));
+        trackerEvent.put("trackerAccountId", new Utf8("trackerAccountId_dummy"));
+        //trackerEvent.put(com.neon.Tracker.TrackerType.IGN);
+        
+        GenericData.EnumSymbol trackerType = new GenericData.EnumSymbol(writerSchema, "IGN");
+        trackerEvent.put("trackerType", trackerType);
+        
+        trackerEvent.put ("pageURL", new Utf8("pageUrl_dummy"));
+        trackerEvent.put ("refURL", new Utf8("refUrl_dummy"));
+        
+        trackerEvent.put("serverTime", 1000L);
+        trackerEvent.put("clientTime", 1000L);
+        
+        trackerEvent.put("clientIP", new Utf8("clientIp_dummy"));
+        trackerEvent.put ("neonUserId", new Utf8("neonUserId_dummy"));
+        trackerEvent.put("userAgent", new Utf8("userAgent_dummy"));
+        
+        GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "IMAGE_VISIBLE");
+        trackerEvent.put("eventType", eventType);
+        
+        GenericData.Record agentInfo = new GenericData.Record(writerSchema);
+        trackerEvent.put("agentInfo", null);
+    
+        Schema.Field geoDataField = writerSchema.getField("ipGeoData");
+        GenericRecord geoData = new GenericData.Record(geoDataField.schema());
+        geoData.put("country", new Utf8("usa"));
+        trackerEvent.put("ipGeoData", geoData); 
+        
+        Schema.Field eventData = writerSchema.getField("eventData");
+        Schema eventDataSchema = eventData.schema();
+        int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageVisible");
+        GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
+        img.put("thumbnailId", new Utf8("image_visible_t1"));
+        trackerEvent.put("eventData", img); 
+        
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
+        GenericDatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<GenericRecord>(writerSchema);
+            
+        datumWriter.write(trackerEvent, encoder);
         encoder.flush();
 
-        byte[] encodedEvent = outputStream.toByteArray();
+        byte[] encodedEvent = out.toByteArray();
 
         // make avro container headers
         Map<String, String> headers = new HashMap<String, String>();
@@ -403,190 +246,17 @@ class NeonGenericSerializerTest {
 
         Event event = EventBuilder.withBody(encodedEvent, headers);
         NeonGenericSerializer serializer = new NeonGenericSerializer();
-        
-        /*
-        *  Test
-        */ 
-        String table = "table";
-        String columnFamily = "columFamily";
-         // initialize disregard params
-        serializer.initialize(table.getBytes(), columnFamily.getBytes());
-
-        /*
-         *  Test 
-         */
-        serializer.setEvent(event);
-
-        /*
-         * Test
-         */
-        List<PutRequest> puts = serializer.getActions();
-
-        /*
-         * Test
-         */
-        List<AtomicIncrementRequest> incs =serializer.getIncrements();
-    }
-    
-    public static void test_ImagesLoaded() throws Exception { 
-
-        //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
-
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
-        DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
-       
-        TrackerEvent trackerEvent = new TrackerEvent(); 
-
-        ImagesLoaded i = new ImagesLoaded();
-        java.util.List<ImageLoad> im = new ArrayList<ImageLoad>();
-        i.setImages(im);
-        
-        // dummies
-        trackerEvent.setPageId("pageId_dummy");
-        trackerEvent.setTrackerAccountId("trackerAccountId_dummy");
-        trackerEvent.setTrackerType(com.neon.Tracker.TrackerType.IGN);
-        trackerEvent.setPageURL ("pageUrl_dummy");
-        trackerEvent.setRefURL ("refUrl_dummy");
-        trackerEvent.setServerTime (new java.lang.Long(1000));
-        trackerEvent.setClientTime (new java.lang.Long(1000) );
-        trackerEvent.setClientIP("clientIp_dummy");
-        trackerEvent.setNeonUserId ("neonUserId_dummy");
-        trackerEvent.setUserAgent("userAgent_dummy");
-        trackerEvent.setAgentInfo(new com.neon.Tracker.AgentInfo());
-        trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
-       
-        // needed
-        ImageLoad img = new ImageLoad();
-        img.setThumbnailId("images_loaded_tid1");
-        i.images.add(img);
-        
-        img = new ImageLoad();
-        img.setThumbnailId("images_loaded_tid2");
-        i.images.add(img);
-        
-        trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGES_LOADED);
-        trackerEvent.setEventData(i);
-
-        writer.write(trackerEvent, encoder);
-        encoder.flush();
-
-        byte[] encodedEvent = outputStream.toByteArray();
-
-        // make avro container headers
-        Map<String, String> headers = new HashMap<String, String>();
-        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
-        headers.put("timestamp", "1416612478000");  // milli seconds
-
-        Event event = EventBuilder.withBody(encodedEvent, headers);
-        NeonGenericSerializer serializer = new NeonGenericSerializer();
-        
-        /*
-        *  Test
-        */ 
-        String table = "table";
-        String columnFamily = "columFamily";
-         // initialize disregard params
-        serializer.initialize(table.getBytes(), columnFamily.getBytes());
-
-        /*
-         *  Test 
-         */
-        serializer.setEvent(event);
-
-        /*
-         * Test
-         */
-        List<PutRequest> puts = serializer.getActions();
-
-        /*
-         * Test
-         */
-        List<AtomicIncrementRequest> incs =serializer.getIncrements();
-    }
-    
-    public static void test_new_schema_fetch_and_use() {
-       
-       /*
-        Schema schema = null;
-        Schema.Parser parser = new Schema.Parser();
-        InputStream is = null;
-        try {
-            is = new URL("https://s3.amazonaws.com/neon-test/neon_serializer_future_tracker_event_schema.avsc").openStream();
-            schema = parser.parse(is);
-        } finally {
-            if (is != null) {
-                is.close();
-            }
-
-        ByteArrayOutputStream os = new ByteArrayOutputStream();
-        DatumWriter<GenericRecord> writer = new GenericDatumWriter<GenericRecord>(schema);
-        DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<GenericRecord>(writer);
-        dataFileWriter.create(schema, os);
-        GenericRecord trackerEvent = new GenericData.Record(schema);
-        
-        
-        //ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
-        //DatumWriter<TrackerEvent> writer = new SpecificDatumWriter<TrackerEvent>(TrackerEvent.class);
-        //TrackerEvent trackerEvent = new TrackerEvent(); 
-        
-        ImageVisible i = new ImageVisible();
-        
-        // dummies
-        trackerEvent.setPageId("pageId_dummy");
-        trackerEvent.setTrackerAccountId("trackerAccountId_dummy");
-        trackerEvent.setTrackerType(com.neon.Tracker.TrackerType.IGN);
-        trackerEvent.setPageURL ("pageUrl_dummy");
-        trackerEvent.setRefURL ("refUrl_dummy");
-        trackerEvent.setServerTime (new java.lang.Long(1000));
-        trackerEvent.setClientTime (new java.lang.Long(1000) );
-        trackerEvent.setClientIP("clientIp_dummy");
-        trackerEvent.setNeonUserId ("neonUserId_dummy");
-        trackerEvent.setUserAgent("userAgent_dummy");
-        trackerEvent.setAgentInfo(new com.neon.Tracker.AgentInfo());
-        trackerEvent.setIpGeoData(new com.neon.Tracker.GeoData()); 
-        
-        // needed fields
-        i.setThumbnailId("image_visible_t1");
-        i.put("dummy", new org.apache.avro.util.Utf8("dum"));
-        trackerEvent.setEventType(com.neon.Tracker.EventType.IMAGE_VISIBLE);
-        trackerEvent.setEventData(i);
-
-        //GenericRecord rec = (GenericRecord) i;
-        //i.put("dummy", new org.apache.avro.util.Utf8("dum"));
-    
-        try {
-            writer.write(trackerEvent, encoder);
-            encoder.flush();
-        }
-        catch(IOException e) {
-         
-        }
-        
-        
-        byte[] encodedEvent = outputStream.toByteArray();
-
-        // make avro container headers
-        Map<String, String> headers = new HashMap<String, String>();
-        headers.put("flume.avro.schema.url","https://s3.amazonaws.com/neon-test/neon_serializer_future_tracker_event_schema.avsc" );
-        headers.put("timestamp", "1416612478000");  // milli seconds
-
-        Event event = EventBuilder.withBody(encodedEvent, headers);
-        NeonGenericSerializer serializer = new NeonGenericSerializer();
 
         String table = "table";
         String columnFamily = "columFamily";
         serializer.initialize(table.getBytes(), columnFamily.getBytes());
 
         serializer.setEvent(event);
-
         List<PutRequest> puts = serializer.getActions();
-
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
-*/
+
     }
-    
+
     private Schema loadFromUrl(String schemaUrl) throws IOException {
         Schema.Parser parser = new Schema.Parser();
         InputStream is = null;
@@ -606,9 +276,9 @@ class NeonGenericSerializerTest {
         try {
             // features testing
             test_ImageVisible_Generic();
-            test_ImagesVisible();
-          
-            test_new_schema_fetch_and_use();
+            test_ImageVisible_New_Field();
+            test_ImageVisible_New_Field_in_EventData();
+            
             System.out.println("\n\nTest successful");
         }
         catch(IOException e) {
