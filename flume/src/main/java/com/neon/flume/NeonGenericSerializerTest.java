@@ -91,7 +91,7 @@ class NeonGenericSerializerTest {
         Schema eventDataSchema = eventData.schema();
         int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageVisible");
         GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
-        img.put("thumbnailId", new Utf8("image_visible_t1"));
+        img.put("thumbnailId", new Utf8("test_ImageVisible_Base"));
         trackerEvent.put("eventData", img); 
         
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -159,7 +159,7 @@ class NeonGenericSerializerTest {
         Schema eventDataSchema = eventData.schema();
         int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageVisible");
         GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
-        img.put("thumbnailId", new Utf8("image_visible_t1"));
+        img.put("thumbnailId", new Utf8("test_ImageVisible_New_Field"));
         trackerEvent.put("eventData", img); 
         
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -227,7 +227,7 @@ class NeonGenericSerializerTest {
         Schema eventDataSchema = eventData.schema();
         int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageVisible");
         GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
-        img.put("thumbnailId", new Utf8("image_visible_t1"));
+        img.put("thumbnailId", new Utf8("test_ImageVisible_New_Field_in_EventData"));
         trackerEvent.put("eventData", img); 
         
         ByteArrayOutputStream out = new ByteArrayOutputStream();
