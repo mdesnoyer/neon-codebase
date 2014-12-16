@@ -123,7 +123,8 @@ class NeonGenericSerializerTest {
 
     public static void test_ImageVisible_New_Field() throws Exception { 
 
-        Schema writerSchema = loadFromUrl("https://s3.amazonaws.com/neon-test/test_tracker_event_schema_added_field.avsc");
+        String schemaUrl = "https://s3.amazonaws.com/neon-test/test_tracker_event_schema_added_field.avsc";
+        Schema writerSchema = loadFromUrl(schemaUrl);
         GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
         
         trackerEvent.put("pageId", new Utf8("pageId_dummy"));
@@ -173,7 +174,7 @@ class NeonGenericSerializerTest {
 
         // make avro container headers
         Map<String, String> headers = new HashMap<String, String>();
-        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
+        headers.put("flume.avro.schema.url",schemaUrl );
         headers.put("timestamp", "1416612478000");  // milli seconds
 
         Event event = EventBuilder.withBody(encodedEvent, headers);
@@ -192,7 +193,8 @@ class NeonGenericSerializerTest {
     
     public static void test_ImageVisible_New_Field_in_EventData() throws Exception { 
 
-        Schema writerSchema = loadFromUrl("https://s3.amazonaws.com/neon-test/test_tracker_event_schema_added_event_data_record.avsc");
+        String schemaUrl = "https://s3.amazonaws.com/neon-test/test_tracker_event_schema_added_event_data_record.avsc";
+        Schema writerSchema = loadFromUrl(schemaUrl);
         GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
         
         trackerEvent.put("pageId", new Utf8("pageId_dummy"));
@@ -241,7 +243,7 @@ class NeonGenericSerializerTest {
 
         // make avro container headers
         Map<String, String> headers = new HashMap<String, String>();
-        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
+        headers.put("flume.avro.schema.url",schemaUrl );
         headers.put("timestamp", "1416612478000");  // milli seconds
 
         Event event = EventBuilder.withBody(encodedEvent, headers);
