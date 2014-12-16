@@ -21,7 +21,6 @@ import org.apache.avro.file.DataFileReader;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.io.DatumReader;
 import org.apache.avro.specific.SpecificDatumReader;
-import org.apache.avro.Schema;
 import org.apache.avro.generic.*;
 import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.Decoder;
@@ -43,7 +42,6 @@ import org.hbase.async.PutRequest;
 
 public class NeonGenericSerializer implements AsyncHbaseEventSerializer 
 {
-
     final static Logger logger = Logger.getLogger(NeonGenericSerializer.class);
 
     // to hold hbase operations 
@@ -97,7 +95,6 @@ public class NeonGenericSerializer implements AsyncHbaseEventSerializer
     public void setEvent(Event event) 
     {
       trackerEvent = null;
-      
       try {
           // obtain the timestamp of event
           String t = event.getHeaders().get("timestamp");
@@ -123,7 +120,6 @@ public class NeonGenericSerializer implements AsyncHbaseEventSerializer
           schema = schemaCache.get(url);
           
           if (schema == null) {
-
               // try getting schema from S3 then
               schema = loadFromUrl(url);
           
@@ -188,7 +184,6 @@ public class NeonGenericSerializer implements AsyncHbaseEventSerializer
         }
 
         try {
-
             // extract event type and process it as generically as possible
             GenericEnumSymbol eventType = (GenericEnumSymbol) trackerEvent.get("eventType");
             String type = eventType.toString();
@@ -235,7 +230,7 @@ public class NeonGenericSerializer implements AsyncHbaseEventSerializer
         // discard if tid malformed
         if(isMalformedThumbnailId(tid, columnName)) 
             return;
-
+            
         // increment counter in table which begins with thumbnail first composite key
         String key = tid  + "_" + eventTimestamp;
         increments.add(new AtomicIncrementRequest(THUMBNAIL_FIRST_TABLE, key.getBytes(), COLUMN_FAMILY, columnName));
