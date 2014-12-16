@@ -259,7 +259,7 @@ class NeonGenericSerializerTest {
 
     }
 
-    private Schema loadFromUrl(String schemaUrl) throws IOException {
+    private static Schema loadFromUrl(String schemaUrl) throws IOException {
         Schema.Parser parser = new Schema.Parser();
         InputStream is = null;
         try {
@@ -277,7 +277,7 @@ class NeonGenericSerializerTest {
 
         try {
             // features testing
-            test_ImageVisible_Generic();
+            test_ImageVisible_Base();
             test_ImageVisible_New_Field();
             test_ImageVisible_New_Field_in_EventData();
             
