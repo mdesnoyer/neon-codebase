@@ -309,6 +309,7 @@ public class NeonGenericSerializerTest {
         coords.put("x", 1.0);
         coords.put("y", 1.0);
         
+        img.put("isImageClick", true);
         img.put("thumbnailId", videoId);
         img.put("pageCoords", coords);
         trackerEvent.put("eventData", img); 
