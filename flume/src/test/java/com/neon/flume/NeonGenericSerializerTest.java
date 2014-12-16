@@ -308,15 +308,9 @@ public class NeonGenericSerializerTest {
         values.add(0, videoId_1);
         values.add(1, videoId_2);
         img.put("thumbnailIds", values);
-        
         img.put("isImagesVisible", true);
         
-        img.put("thumbnailId", new Utf8(videoId));
         trackerEvent.put("eventData", img); 
-        
-        
-        
-        
         
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
@@ -359,12 +353,12 @@ public class NeonGenericSerializerTest {
         assertTrue(incs.size() == 2);
         
         AtomicIncrementRequest req = incs.get(0);
-        String key = videoId + "_" + eventTimestamp;
+        String key = videoId_1 + "_" + eventTimestamp;
         assertTrue(Arrays.equals(req.key(), key.getBytes()));
         assertTrue(req.getAmount() == 1);
         
         req = incs.get(1);
-        key = eventTimestamp + "_" + videoId;
+        key = eventTimestamp + "_" + videoId_1;
         assertTrue(Arrays.equals(req.key(), key.getBytes()));
         assertTrue(req.getAmount() == 1);
     }
