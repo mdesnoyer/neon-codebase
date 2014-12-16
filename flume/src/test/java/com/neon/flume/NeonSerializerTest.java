@@ -53,7 +53,8 @@ import org.apache.flume.event.EventBuilder;
 
 class NeonSerializerTest {   
     
-    public static void test_ImageVisible() throws Exception { 
+    @Test
+    public void test_ImageVisible() throws Exception { 
 
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
 
@@ -117,7 +118,8 @@ class NeonSerializerTest {
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
     }
 
-    public static void test_ImagesVisible() throws Exception { 
+    @Test
+    public void test_ImagesVisible() throws Exception { 
 
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
 
@@ -184,7 +186,8 @@ class NeonSerializerTest {
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
     }
 
-    public static void test_ImageClick() throws Exception { 
+    @Test
+    public void test_ImageClick() throws Exception { 
 
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
 
@@ -260,7 +263,8 @@ class NeonSerializerTest {
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
     }
     
-    public static void test_ImageLoad() throws Exception { 
+    @Test
+    public void test_ImageLoad() throws Exception { 
 
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
 
@@ -328,7 +332,8 @@ class NeonSerializerTest {
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
     }
     
-    public static void test_ImagesLoaded() throws Exception { 
+    @Test
+    public void test_ImagesLoaded() throws Exception { 
 
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
 
