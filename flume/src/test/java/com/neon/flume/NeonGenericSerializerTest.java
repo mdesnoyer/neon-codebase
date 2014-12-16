@@ -308,10 +308,12 @@ class NeonGenericSerializerTest {
         System.out.println("\n\nTest Starting"); 
 
         try {
+            NeonGenericSerializerTest serializer = new NeonGenericSerializerTest();
+            
             // features testing
-            test_ImageVisible_Base();
-            test_ImageVisible_New_Field();
-            test_ImageVisible_New_Field_in_EventData();
+            serializer.test_ImageVisible_Base();
+            serializer.test_ImageVisible_New_Field();
+            serializer.test_ImageVisible_New_Field_in_EventData();
             
             System.out.println("\n\nTest successful");
         }
