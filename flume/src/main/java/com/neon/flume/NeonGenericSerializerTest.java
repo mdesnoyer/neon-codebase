@@ -58,7 +58,7 @@ import org.apache.flume.event.EventBuilder;
 class NeonGenericSerializerTest {   
     
     public static void test_ImageVisible_Base() throws Exception { 
-
+    
         Schema writerSchema = new TrackerEvent().getSchema();
         GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
         
@@ -129,11 +129,12 @@ class NeonGenericSerializerTest {
         List<PutRequest> puts = serializer.getActions();
         
         // should be zero size
+        if(puts.size() != 0) 
+            throw new Exception("");
         
         /*
         *   Test 
         */
-    /*
         long timestamp = 1416612478000L;
         Date date = new Date(timestamp);
         DateFormat format = new SimpleDateFormat("YYYY-MM-dd'T'HH");
@@ -141,7 +142,10 @@ class NeonGenericSerializerTest {
         String eventTimestamp = new String(formattedTimestamp);
     
         List<AtomicIncrementRequest> incs = serializer.getIncrements();
-     */  
+        
+        // should be zero size
+        if(incs.size() != 2) 
+            throw new Exception("");
     }
 
     public static void test_ImageVisible_New_Field() throws Exception { 
