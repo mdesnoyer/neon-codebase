@@ -60,6 +60,10 @@ import org.apache.flume.event.EventBuilder;
 
 class NeonGenericSerializerTest {   
     
+    public NeonGenericSerializerTest() {
+        
+    }
+    
     @Test
     public void test_ImageVisible_Base() throws Exception { 
     
