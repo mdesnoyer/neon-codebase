@@ -51,7 +51,11 @@ import org.apache.flume.api.RpcClientFactory;
 import org.apache.flume.event.EventBuilder;
 
 
-class NeonResolvingSerializerTest {   
+public class NeonResolvingSerializerTest {   
+    
+    public NeonResolvingSerializerTest() {
+        
+    }
     
     public static void test_ImageVisible() throws Exception { 
 
