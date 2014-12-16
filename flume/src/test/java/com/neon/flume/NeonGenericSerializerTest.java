@@ -27,6 +27,7 @@ import org.apache.avro.Schema;
 import org.apache.avro.file.CodecFactory;
 import org.apache.avro.file.DataFileWriter;
 import org.apache.avro.generic.GenericDatumWriter;
+import org.apache.avro.generic.*;
 import org.apache.avro.specific.SpecificDatumWriter;
 import org.apache.avro.io.DatumWriter;
 
@@ -304,8 +305,8 @@ public class NeonGenericSerializerTest {
         
         GenericArray<String> values = new GenericData.Array<String>();
         
-        values.add(0, "videoId_1");
-        values.add(1, "videoId_2");
+        values.add(0, videoId_1);
+        values.add(1, videoId_2);
         img.put("thumbnailIds", values);
         
         img.put("isImagesVisible", true);
