@@ -150,6 +150,9 @@ public class NeonGenericSerializerTest {
         GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "IMAGE_VISIBLE");
         trackerEvent.put("eventType", eventType);
         
+        // test
+        trackerEvent.put ("dummyNewField", new Utf8("dummyNewField"));
+        
         Schema.Field eventData = writerSchema.getField("eventData");
         Schema eventDataSchema = eventData.schema();
         int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageVisible");
