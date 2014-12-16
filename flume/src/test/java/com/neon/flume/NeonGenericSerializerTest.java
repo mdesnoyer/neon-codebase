@@ -299,10 +299,11 @@ public class NeonGenericSerializerTest {
         Schema.Field eventData = writerSchema.getField("eventData");
         Schema eventDataSchema = eventData.schema();
         int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageClick");
-        GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
+        Schema imgSchema = eventDataSchema.getTypes().get(i);
+        GenericRecord img = new GenericData.Record(imgSchema);
         
         //img.put("thumbnailId", new Utf8(videoId));
-        Schema.Field pageCoords = eventDataSchema.getField("pageCoords");
+        Schema.Field pageCoords = imgSchema.getField("pageCoords");
         Schema pageCoordsSchema = pageCoords.schema();
         GenericRecord coords = new GenericData.Record(pageCoordsSchema);
         coords.put("x", 1.0);
