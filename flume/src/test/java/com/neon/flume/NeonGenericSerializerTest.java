@@ -578,6 +578,7 @@ public class NeonGenericSerializerTest {
             serializer.test_ImageVisible_Base();
             serializer.test_ImageClick();
             serializer.test_ImageLoad();
+            serializer.test_ImageVisibles();
            
             // testing changes in schemas
             serializer = new NeonGenericSerializerTest();
