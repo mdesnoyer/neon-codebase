@@ -56,6 +56,11 @@ import org.apache.flume.event.EventBuilder;
 
 class NeonSerializerTest {   
     
+    public NeonSerializerTest() {
+        
+    }
+    
+    
     @Test
     public void test_ImageVisible() throws Exception { 
 
