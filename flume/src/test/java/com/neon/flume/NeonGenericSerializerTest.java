@@ -129,22 +129,15 @@ public class NeonGenericSerializerTest {
         String columnFamily = "columFamily";
         serializer.initialize(table.getBytes(), columnFamily.getBytes());
 
-        /*
-        *   Test 
-        */
+        // Test
         serializer.setEvent(event);
         
-        /*
-        *   Test 
-        */
+        // Test
         List<PutRequest> puts = serializer.getActions();
         // should be zero size
         assertTrue(puts.size() == 0); 
-            
         
-        /*
-        *   Test 
-        */
+        // Test 
         long timestamp = 1416612478000L;
         Date date = new Date(timestamp);
         DateFormat format = new SimpleDateFormat("YYYY-MM-dd'T'HH");
@@ -168,6 +161,8 @@ public class NeonGenericSerializerTest {
 
     @Test
     public void test_ImageVisible_New_Field() throws Exception { 
+
+        String videoId = "test_ImageVisible_New_Field";
 
         String schemaUrl = "https://s3.amazonaws.com/neon-test/test_tracker_event_schema_added_field.avsc";
         Schema writerSchema = loadFromUrl(schemaUrl);
@@ -206,7 +201,7 @@ public class NeonGenericSerializerTest {
         Schema eventDataSchema = eventData.schema();
         int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageVisible");
         GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
-        img.put("thumbnailId", new Utf8("test_ImageVisible_New_Field"));
+        img.put("thumbnailId", new Utf8(videoId));
         trackerEvent.put("eventData", img); 
         
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -230,10 +225,34 @@ public class NeonGenericSerializerTest {
         String columnFamily = "columFamily";
         serializer.initialize(table.getBytes(), columnFamily.getBytes());
 
+        // Test 
         serializer.setEvent(event);
+    
+        // Test
         List<PutRequest> puts = serializer.getActions();
-        List<AtomicIncrementRequest> incs =serializer.getIncrements();
-
+        // should be zero size
+        assertTrue(puts.size() == 0); 
+        
+        // Test 
+        long timestamp = 1416612478000L;
+        Date date = new Date(timestamp);
+        DateFormat format = new SimpleDateFormat("YYYY-MM-dd'T'HH");
+        byte[] formattedTimestamp = format.format(date).getBytes();
+        String eventTimestamp = new String(formattedTimestamp);
+        
+        List<AtomicIncrementRequest> incs = serializer.getIncrements();
+        
+        assertTrue(incs.size() == 2);
+        
+        AtomicIncrementRequest req = incs.get(0);
+        String key = videoId + "_" + eventTimestamp;
+        assertTrue(Arrays.equals(req.key(), key.getBytes()));
+        assertTrue(req.getAmount() == 1);
+        
+        req = incs.get(1);
+        key = eventTimestamp + "_" + videoId;
+        assertTrue(Arrays.equals(req.key(), key.getBytes()));
+        assertTrue(req.getAmount() == 1);
     }
 
     @Test
