@@ -386,8 +386,8 @@ public class NeonGenericSerializerTest {
         GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
         img.put("thumbnailId", new Utf8(videoId));
         
-        img.put("height", "1");
-        img.put("width", "1");
+        img.put("height", 1);
+        img.put("width", 1);
         
         trackerEvent.put("eventData", img); 
         
