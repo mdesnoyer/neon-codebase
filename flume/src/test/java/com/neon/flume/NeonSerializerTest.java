@@ -54,7 +54,7 @@ import org.apache.flume.api.RpcClientFactory;
 import org.apache.flume.event.EventBuilder;
 
 
-class NeonSerializerTest {   
+public class NeonSerializerTest {   
     
     public NeonSerializerTest() {
         
