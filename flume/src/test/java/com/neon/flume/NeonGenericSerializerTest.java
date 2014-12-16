@@ -301,9 +301,11 @@ public class NeonGenericSerializerTest {
         Schema.Field eventData = writerSchema.getField("eventData");
         Schema eventDataSchema = eventData.schema();
         int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageVisibles");
-        GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
+        Schema imgSchema = eventDataSchema.getTypes().get(i)
+        GenericRecord img = new GenericData.Record(imgSchema);
         
-        GenericArray<String> values = new GenericData.Array<String>();
+        Schema.Field thumbs = writerSchema.getField("thumbnailIds");
+        GenericArray<String> values = new GenericData.Array<String>(2, thumbs.Schema());
         
         values.add(0, videoId_1);
         values.add(1, videoId_2);
