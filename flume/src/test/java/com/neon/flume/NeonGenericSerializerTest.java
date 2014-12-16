@@ -364,8 +364,8 @@ public class NeonGenericSerializerTest {
         assertTrue(Arrays.equals(req.key(), key.getBytes()));
         assertTrue(req.getAmount() == 1);
         
-        AtomicIncrementRequest req = incs.get(2);
-        String key = videoId_2 + "_" + eventTimestamp;
+        req = incs.get(2);
+        key = videoId_2 + "_" + eventTimestamp;
         assertTrue(Arrays.equals(req.key(), key.getBytes()));
         assertTrue(req.getAmount() == 1);
         
