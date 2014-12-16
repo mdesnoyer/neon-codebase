@@ -413,7 +413,7 @@ public class NeonGenericSerializerTest {
             NeonGenericSerializerTest serializer = new NeonGenericSerializerTest();
             
             serializer.test_ImageVisible_Base();
-            test_ImageClick();
+            serializer.test_ImageClick();
            
             // testing changes in schemas
             serializer = new NeonGenericSerializerTest();
