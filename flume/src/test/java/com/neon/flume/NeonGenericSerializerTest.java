@@ -295,7 +295,7 @@ public class NeonGenericSerializerTest {
         
         dummyFill(trackerEvent, writerSchema);
         
-        GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "IMAGE_VISIBLES");
+        GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "IMAGES_VISIBLE");
         trackerEvent.put("eventType", eventType);
         
         Schema.Field eventData = writerSchema.getField("eventData");
