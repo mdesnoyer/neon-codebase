@@ -320,7 +320,6 @@ public class NeonGenericSerializerTest {
         GenericRecord geoData = new GenericData.Record(geoDataField.schema());
         geoData.put("country", new Utf8("usa"));
         trackerEvent.put("ipGeoData", geoData); 
-        
     }
     
     public static void main(String[] args) {
@@ -330,11 +329,8 @@ public class NeonGenericSerializerTest {
             NeonGenericSerializerTest serializer = new NeonGenericSerializerTest();
             
             serializer.test_ImageVisible_Base();
-            
-            
-            
-            
-            
+           
+           
             // testing changes in schemas
             serializer = new NeonGenericSerializerTest();
             serializer.test_ImageVisible_Base();
