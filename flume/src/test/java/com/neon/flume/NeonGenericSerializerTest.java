@@ -152,13 +152,14 @@ public class NeonGenericSerializerTest {
         
         List<AtomicIncrementRequest> incs = serializer.getIncrements();
         
-        // should be zero size
         assertTrue(incs.size() == 2);
         
         AtomicIncrementRequest req = incs.get(0);
         assertTrue(req.key().equals(videoId + eventTimestamp));
+        assertTrue(req.getAmount() == 1);
         
-        AtomicIncrementRequest req = incs.get(1);
+        req = incs.get(1);
+        assertTrue(req.getAmount() == 1);
         assertTrue(req.key().equals(eventTimestamp + videoId));
     }
 
