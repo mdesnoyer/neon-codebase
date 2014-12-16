@@ -306,8 +306,8 @@ public class NeonGenericSerializerTest {
         Schema.Field pageCoords = imgSchema.getField("pageCoords");
         Schema pageCoordsSchema = pageCoords.schema();
         GenericRecord coords = new GenericData.Record(pageCoordsSchema);
-        coords.put("x", 1.0);
-        coords.put("y", 1.0);
+        coords.put("x", 1.0F);
+        coords.put("y", 1.0F);
         
         img.put("isImageClick", true);
         img.put("thumbnailId", videoId);
