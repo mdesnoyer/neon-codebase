@@ -73,33 +73,10 @@ public class NeonGenericSerializerTest {
         Schema writerSchema = new TrackerEvent().getSchema();
         GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
         
-        trackerEvent.put("pageId", new Utf8("pageId_dummy"));
-        trackerEvent.put("trackerAccountId", new Utf8("trackerAccountId_dummy"));
-        //trackerEvent.put(com.neon.Tracker.TrackerType.IGN);
-        
-        GenericData.EnumSymbol trackerType = new GenericData.EnumSymbol(writerSchema, "IGN");
-        trackerEvent.put("trackerType", trackerType);
-        
-        trackerEvent.put ("pageURL", new Utf8("pageUrl_dummy"));
-        trackerEvent.put ("refURL", new Utf8("refUrl_dummy"));
-        
-        trackerEvent.put("serverTime", 1418689680L);
-        trackerEvent.put("clientTime", 1418689680L);
-        
-        trackerEvent.put("clientIP", new Utf8("clientIp_dummy"));
-        trackerEvent.put ("neonUserId", new Utf8("neonUserId_dummy"));
-        trackerEvent.put("userAgent", new Utf8("userAgent_dummy"));
+        dummyFill(trackerEvent, writerSchema);
         
         GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "IMAGE_VISIBLE");
         trackerEvent.put("eventType", eventType);
-        
-        GenericData.Record agentInfo = new GenericData.Record(writerSchema);
-        trackerEvent.put("agentInfo", null);
-    
-        Schema.Field geoDataField = writerSchema.getField("ipGeoData");
-        GenericRecord geoData = new GenericData.Record(geoDataField.schema());
-        geoData.put("country", new Utf8("usa"));
-        trackerEvent.put("ipGeoData", geoData); 
         
         Schema.Field eventData = writerSchema.getField("eventData");
         Schema eventDataSchema = eventData.schema();
@@ -168,34 +145,10 @@ public class NeonGenericSerializerTest {
         Schema writerSchema = loadFromUrl(schemaUrl);
         GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
         
-        trackerEvent.put("pageId", new Utf8("pageId_dummy"));
-        trackerEvent.put("trackerAccountId", new Utf8("trackerAccountId_dummy"));
-        //trackerEvent.put(com.neon.Tracker.TrackerType.IGN);
-        
-        GenericData.EnumSymbol trackerType = new GenericData.EnumSymbol(writerSchema, "IGN");
-        trackerEvent.put("trackerType", trackerType);
-        
-        trackerEvent.put ("pageURL", new Utf8("pageUrl_dummy"));
-        trackerEvent.put ("refURL", new Utf8("refUrl_dummy"));
-        trackerEvent.put ("dummyNewField", new Utf8("dummy"));
-        
-        trackerEvent.put("serverTime", 1000L);
-        trackerEvent.put("clientTime", 1000L);
-        
-        trackerEvent.put("clientIP", new Utf8("clientIp_dummy"));
-        trackerEvent.put ("neonUserId", new Utf8("neonUserId_dummy"));
-        trackerEvent.put("userAgent", new Utf8("userAgent_dummy"));
+        dummyFill(trackerEvent, writerSchema);
         
         GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "IMAGE_VISIBLE");
         trackerEvent.put("eventType", eventType);
-        
-        GenericData.Record agentInfo = new GenericData.Record(writerSchema);
-        trackerEvent.put("agentInfo", null);
-    
-        Schema.Field geoDataField = writerSchema.getField("ipGeoData");
-        GenericRecord geoData = new GenericData.Record(geoDataField.schema());
-        geoData.put("country", new Utf8("usa"));
-        trackerEvent.put("ipGeoData", geoData); 
         
         Schema.Field eventData = writerSchema.getField("eventData");
         Schema eventDataSchema = eventData.schema();
@@ -266,35 +219,9 @@ public class NeonGenericSerializerTest {
         
         dummyFill(trackerEvent, writerSchema);
         
-    /*    
-        trackerEvent.put("pageId", new Utf8("pageId_dummy"));
-        trackerEvent.put("trackerAccountId", new Utf8("trackerAccountId_dummy"));
-    
-        GenericData.EnumSymbol trackerType = new GenericData.EnumSymbol(writerSchema, "IGN");
-        trackerEvent.put("trackerType", trackerType);
-      
-        trackerEvent.put ("pageURL", new Utf8("pageUrl_dummy"));
-        trackerEvent.put ("refURL", new Utf8("refUrl_dummy"));
-        
-        trackerEvent.put("serverTime", 1000L);
-        trackerEvent.put("clientTime", 1000L);
-        
-        trackerEvent.put("clientIP", new Utf8("clientIp_dummy"));
-        trackerEvent.put ("neonUserId", new Utf8("neonUserId_dummy"));
-        trackerEvent.put("userAgent", new Utf8("userAgent_dummy"));
-    */    
         GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "IMAGE_VISIBLE");
         trackerEvent.put("eventType", eventType);
-        
-    /*
-        GenericData.Record agentInfo = new GenericData.Record(writerSchema);
-        trackerEvent.put("agentInfo", null);
-    
-        Schema.Field geoDataField = writerSchema.getField("ipGeoData");
-        GenericRecord geoData = new GenericData.Record(geoDataField.schema());
-        geoData.put("country", new Utf8("usa"));
-        trackerEvent.put("ipGeoData", geoData); 
-    */   
+         
         Schema.Field eventData = writerSchema.getField("eventData");
         Schema eventDataSchema = eventData.schema();
         int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageVisible");
