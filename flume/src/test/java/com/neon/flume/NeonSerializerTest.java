@@ -417,12 +417,12 @@ class NeonSerializerTest {
         System.out.println("\n\nTest Starting"); 
 
         try {
-
-            test_ImageVisible();
-            test_ImagesVisible();
-            test_ImageClick();
-            test_ImageLoad();
-            test_ImagesLoaded();
+            NeonSerializerTest serializer = new NeonSerializerTest();
+            serializer.test_ImageVisible();
+            serializer.test_ImagesVisible();
+            serializer.test_ImageClick();
+            serializer.test_ImageLoad();
+            serializer.test_ImagesLoaded();
             
             System.out.println("\n\nTest successful");
         }
