@@ -64,8 +64,11 @@ public class NeonGenericSerializer implements AsyncHbaseEventSerializer
     // column for the counter of IMAGE_CLICK events
     private static final byte[] IMAGE_CLICK_COLUMN_NAME = "IMAGE_CLICK".getBytes();
 
+    // tracker event header of the schema in use 
     public static final String AVRO_SCHEMA_URL_HEADER = "flume.avro.schema.url";
 
+    // any schemas in the wild that we have to process are saved in this cache 
+    // for use later 
     private Map<String, Schema> schemaCache = new HashMap<String, Schema>();
 
     // event-based  
