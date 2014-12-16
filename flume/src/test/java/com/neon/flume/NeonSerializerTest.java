@@ -2,6 +2,9 @@ package com.neon.flume;
 
 import  com.neon.Tracker.*;
 
+import org.junit.* ;
+import static org.junit.Assert.* ;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.io.File;
