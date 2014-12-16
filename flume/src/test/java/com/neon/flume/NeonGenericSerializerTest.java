@@ -302,7 +302,7 @@ public class NeonGenericSerializerTest {
         int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageVisibles");
         GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
         
-        GenericArray<String> values = new GenericData.Array<String>;
+        GenericArray<String> values = new GenericData.Array<String>();
         
         values.add(0, "videoId_1");
         values.add(1, "videoId_2");
