@@ -566,7 +566,7 @@ public class NeonGenericSerializerTest {
         
         // make a couple of imageLoad 
         i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageLoad");
-        Schema imagesLoadedSchema = eventDataSchema.getTypes().get(i);
+        Schema imageLoadSchema = eventDataSchema.getTypes().get(i);
         GenericRecord imgLoad_1 = new GenericData.Record(imageLoadSchema);
         
         imgLoad_1.put("thumbnailId", new Utf8(videoId_1));
@@ -580,9 +580,13 @@ public class NeonGenericSerializerTest {
         img.put("width", 1);
         */
         
+        // assemble all parts together
         images.add(0, imgLoad_1);
+        
+        //
         imagesLoad.put("images", images);
         
+        //
         trackerEvent.put("eventData", imagesLoad); 
         
         ByteArrayOutputStream out = new ByteArrayOutputStream();
