@@ -562,10 +562,10 @@ public class NeonGenericSerializerTest {
         // make arrays of imageLoad
         Schema.Field imagesField = imagesLoadSchema.getField("images");
         Schema imagesSchema = imagesField.schema();
-        GenericRecord images = new GenericData.Record(imagesSchema);
+        GenericArray<GenericRecord> images = (GenericArray<GenericRecord>) new GenericData.Record(imagesSchema);
         
         // make a couple of imageLoad 
-        int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageLoad");
+        i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageLoad");
         Schema imageLoadSchema = eventDataSchema.getTypes().get(i);
         GenericRecord imgLoad_1 = new GenericData.Record(imageLoadSchema);
         
@@ -583,7 +583,7 @@ public class NeonGenericSerializerTest {
         images.add(0, imgLoad_1);
         imagesLoad.put("images", images);
         
-        trackerEvent.put("eventData", img); 
+        trackerEvent.put("eventData", imagesLoad); 
         
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
