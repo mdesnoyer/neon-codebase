@@ -580,7 +580,7 @@ public class NeonGenericSerializerTest {
         
         // assemble all parts together
         images.add(0, imgLoad_1);
-        
+        images.add(1, imgLoad_2);
         //
         imagesLoad.put("images", images);
         
@@ -625,7 +625,7 @@ public class NeonGenericSerializerTest {
         
         List<AtomicIncrementRequest> incs = serializer.getIncrements();
        
-        assertTrue(incs.size() == 2);
+        assertTrue(incs.size() == 4);
         
         AtomicIncrementRequest req = incs.get(0);
         String key = videoId_1 + "_" + eventTimestamp;
@@ -637,12 +637,12 @@ public class NeonGenericSerializerTest {
         assertTrue(Arrays.equals(req.key(), key.getBytes()));
         assertTrue(req.getAmount() == 1);
         
-        req = incs.get(0);
+        req = incs.get(2);
         key = videoId_2 + "_" + eventTimestamp;
         assertTrue(Arrays.equals(req.key(), key.getBytes()));
         assertTrue(req.getAmount() == 1);
         
-        req = incs.get(1);
+        req = incs.get(3);
         key = eventTimestamp + "_" + videoId_2;
         assertTrue(Arrays.equals(req.key(), key.getBytes()));
         assertTrue(req.getAmount() == 1);
