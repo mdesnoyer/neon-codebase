@@ -285,7 +285,7 @@ public class NeonGenericSerializerTest {
     }
     
     @Test
-    public void test_ImageVisibles() throws Exception { 
+    public void test_ImagesVisible() throws Exception { 
         
         String videoId_1 = "test_ImageVisibles_1";
         String videoId_2 = "test_ImageVisibles_2";
@@ -590,7 +590,7 @@ public class NeonGenericSerializerTest {
             serializer.test_ImageVisible_Base();
             serializer.test_ImageClick();
             serializer.test_ImageLoad();
-            serializer.test_ImageVisibles();
+            serializer.test_ImagesVisible();
            
             // testing changes in schemas
             serializer = new NeonGenericSerializerTest();
