@@ -10,6 +10,7 @@ from boto.s3.key import Key
 import logging
 from optparse import OptionParser
 import os.path
+import re
 
 _log = logging.getLogger(__name__)
 
@@ -23,8 +24,18 @@ def main(options):
         raise IOError('%s does not exist' % options.private_file)
     if not os.path.exists(options.public_file):
         raise IOError('%s does not exist' % options.public_file)
-    key_name = (options.key_name or 
-                os.path.basename(options.public_file).partition('.')[0])
+
+    if options.is_cert:
+        key_name = (options.key_name or
+                    re.compile('cert-([0-9A-Z]+)\.pem').search(
+                        options.public_file).group(1))
+        pub_name = 'cert-%s.pem' % key_name
+        priv_name = 'pk-%s.pem' % key_name
+    else:
+        key_name = (options.key_name or 
+                    os.path.basename(options.public_file).partition('.')[0])
+        pub_name = '%s.pub' % key_name
+        priv_name = '%s.pem' % key_name
 
     _log.info('Uploading to bucket %s' % options.s3_bucket)
     bucket = s3conn.lookup(options.s3_bucket)
@@ -32,8 +43,8 @@ def main(options):
         bucket = s3conn.create_bucket(options.s3_bucket)
 
     _log.info('Uploading key %s' % key_name)
-    pubKey = Key(bucket=bucket, name='%s.pub' % key_name)
-    privateKey = Key(bucket=bucket, name='%s.pem' % key_name)
+    pubKey = Key(bucket=bucket, name=pub_name)
+    privateKey = Key(bucket=bucket, name=priv_name)
     if pubKey.exists() or privateKey.exists():
         _log.fatal('Key %s already exists on the server. Aborting' % key_name)
         return
@@ -54,6 +65,8 @@ if __name__ == "__main__":
                       help='Input private key file')
     parser.add_option('--public_file', default=None,
                       help='Input public key file')
+    parser.add_option('--is_cert', default=False, action='store_true',
+                      help='Are we uploading X.509 cert files')
     parser.add_option('--key_name', default=None,
                       help=('Name for the key in S3. Defaults to the '
                             'basename of the public file without the suffix.'))
