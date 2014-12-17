@@ -1,7 +1,5 @@
 package com.neon.flume;
 
-import  com.neon.Tracker.*;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Iterator;
@@ -12,7 +10,10 @@ import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.text.DateFormat;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 
+import org.apache.log4j.Logger;
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
 import org.apache.avro.file.CodecFactory;
@@ -20,11 +21,7 @@ import org.apache.avro.file.DataFileReader;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.io.DatumReader;
 import org.apache.avro.specific.SpecificDatumReader;
-import org.apache.avro.Schema;
-import org.apache.avro.generic.GenericData;
-import org.apache.avro.generic.GenericDatumReader;
-import org.apache.avro.generic.GenericDatumWriter;
-import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.generic.*;
 import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.Decoder;
 import org.apache.avro.io.BinaryDecoder;
@@ -43,8 +40,10 @@ import org.apache.flume.sink.hbase.AsyncHbaseEventSerializer;
 import org.hbase.async.AtomicIncrementRequest;
 import org.hbase.async.PutRequest;
 
-public class NeonSerializer implements AsyncHbaseEventSerializer 
+public class NeonGenericSerializer implements AsyncHbaseEventSerializer 
 {
+    final static Logger logger = Logger.getLogger(NeonGenericSerializer.class);
+
     // to hold hbase operations 
     private final List<PutRequest> actions = new ArrayList<PutRequest>();
     private final List<AtomicIncrementRequest> increments = new ArrayList<AtomicIncrementRequest>();
@@ -64,18 +63,29 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     
     // column for the counter of IMAGE_CLICK events
     private static final byte[] IMAGE_CLICK_COLUMN_NAME = "IMAGE_CLICK".getBytes();
-        
+
+    // tracker event header of the schema in use 
+    public static final String AVRO_SCHEMA_URL_HEADER = "flume.avro.schema.url";
+
+    // any schemas in the wild that we have to process are saved in this cache 
+    // for use later 
+    private Map<String, Schema> schemaCache = new HashMap<String, Schema>();
+
     // event-based  
     private String eventTimestamp = null;
-    private TrackerEvent trackerEvent = null;
+    private GenericRecord trackerEvent = null;
     private String rowKey = null;
+    private BinaryDecoder binaryDecoder = null;
+    private Schema schema = null;
 
     @Override
     public void initialize(byte[] table, byte[] cf) 
     {
-        trackerEvent = null;
         eventTimestamp = null;
+        trackerEvent = null;
         rowKey = null;
+        binaryDecoder = null;
+        schema = null;
     }
 
     /*
@@ -88,11 +98,15 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     public void setEvent(Event event) 
     {
       trackerEvent = null;
-      
       try {
           // obtain the timestamp of event
           String t = event.getHeaders().get("timestamp");
-          
+         
+          if(t == null || t.equals("")) {
+              logger.error("unable to obtain timestamp header, event dropped"); 
+              return;
+          }
+
           // currently this is received in milliseconds
           long timestamp = Long.valueOf(t).longValue();
           
@@ -102,18 +116,46 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
           byte[] formattedTimestamp = format.format(date).getBytes();
           eventTimestamp = new String(formattedTimestamp);
 
-           // decode the tracker event
-           DatumReader<TrackerEvent> datumReader = new SpecificDatumReader<TrackerEvent>(TrackerEvent.class);
-           BinaryDecoder binaryDecoder = DecoderFactory.get().binaryDecoder(event.getBody(), null);
-           trackerEvent = datumReader.read(null, binaryDecoder);
+          // fetch needed schema for decoding either from cache or S3  
+          String url = event.getHeaders().get(AVRO_SCHEMA_URL_HEADER);
+
+          // see if we have the schema already
+          schema = schemaCache.get(url);
+          
+          if (schema == null) {
+              // try getting schema from S3 then
+              schema = loadFromUrl(url);
+          
+              if(schema == null) {
+                  // unable to fetch needed schema, drop event
+                  logger.error("unable to fetch schema, event dropped. url " + url);
+                  return;
+              }
+
+              if(logger.isInfoEnabled())
+                  logger.info("added new schema to cache: url " + url);
+
+              // add to schema cache      
+              schemaCache.put(url, schema);
+          }
+
+          // decode the tracker event
+          DatumReader<GenericRecord> reader = new GenericDatumReader<GenericRecord>();    
+          binaryDecoder = DecoderFactory.get().binaryDecoder(event.getBody(), null);
+          reader.setSchema(schema);
+          trackerEvent = reader.read(null, binaryDecoder);
+
+          if(trackerEvent == null) 
+              logger.error("unable to parse  event");
+            
         }
         catch(IOException e) {
             trackerEvent = null;
-            throw new FlumeException(e.toString());
+            logger.error("unable to parse event due to io: " + e.toString());
         }
         catch(Exception e) {
             trackerEvent = null;
-            throw new FlumeException(e.toString());
+            logger.error("unable to parse event: " +e.toString());
         }
     }
  
@@ -125,7 +167,7 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     @Override
     public List<PutRequest> getActions() 
     {
-        // no-ops here
+        // always no-ops here
         actions.clear();
         return actions;
     } 
@@ -144,46 +186,54 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
             return increments;
         }
 
-        // extract and process each thumbnails in this event
-        switch(trackerEvent.getEventType())  {
+        try {
+            // extract event type and process it as generically as possible
+            GenericEnumSymbol eventType = (GenericEnumSymbol) trackerEvent.get("eventType");
+            String type = eventType.toString();
+            GenericRecord eventData = (GenericRecord) trackerEvent.get("eventData");         
+        
+            if(type.equals("IMAGE_VISIBLE")) {
+                    handleIncrement(eventData.get("thumbnailId").toString(), IMAGE_VISIBLE_COLUMN_NAME);
+            }
 
-            case IMAGE_VISIBLE:
-                ImageVisible imgVis = (ImageVisible) trackerEvent.getEventData();
-                handleIncrement(imgVis.getThumbnailId().toString(), IMAGE_VISIBLE_COLUMN_NAME);
-                break;
-
-            case IMAGES_VISIBLE:
-                ImagesVisible imgsVis = (ImagesVisible) trackerEvent.getEventData();
-                for(CharSequence tid: imgsVis.thumbnailIds)
+            else if (type.equals("IMAGES_VISIBLE")) {
+                // array of string type
+                GenericArray thumbs = (GenericArray) eventData.get("thumbnailIds");
+                for(Object tid: thumbs) 
                     handleIncrement(tid.toString(), IMAGE_VISIBLE_COLUMN_NAME);
-                break;
-
-            case IMAGE_CLICK:
-                ImageClick imgClk = (ImageClick) trackerEvent.getEventData();
-                handleIncrement(imgClk.getThumbnailId().toString(), IMAGE_CLICK_COLUMN_NAME);
-                break;
-                
-            case IMAGE_LOAD:
-                ImageLoad imgLd = (ImageLoad) trackerEvent.getEventData();
-                handleIncrement(imgLd.getThumbnailId().toString(), IMAGE_LOAD_COLUMN_NAME);
-                break;
-
-            case IMAGES_LOADED:
-                ImagesLoaded imgLded = (ImagesLoaded) trackerEvent.getEventData();
-                for(ImageLoad img: imgLded.images)
-                    handleIncrement(img.getThumbnailId().toString(), IMAGE_LOAD_COLUMN_NAME);
-                break;
-                
-            // event types we're not insterested in result in no-ops
-            default:
-                return increments;
+            }
+            
+            else if (type.equals("IMAGE_CLICK")) {
+                handleIncrement(eventData.get("thumbnailId").toString(), IMAGE_CLICK_COLUMN_NAME); 
+            }
+            
+            else if (type.equals("IMAGE_LOAD")) {
+                handleIncrement(eventData.get("thumbnailId").toString(), IMAGE_LOAD_COLUMN_NAME); 
+            }
+            
+            else if (type.equals("IMAGES_LOADED")) {
+                GenericArray<GenericRecord> images = (GenericArray<GenericRecord>) eventData.get("images");
+                for(GenericRecord img: images) {
+                    String tid = img.get("thumbnailId").toString();
+                    handleIncrement(tid, IMAGE_LOAD_COLUMN_NAME);
+                }
+            }
         }
+        catch(Exception e) {
+            trackerEvent = null;
+            increments.clear();
+            logger.error("error while extracting thumbnail ids, event dropped.  " + e.toString());      
+        }
+
         return increments;
     }
 
-    // this method depends on hbase to create a row automatically on first increment request
     private void handleIncrement(String tid, byte[] columnName) 
     {
+        // discard if tid malformed
+        if(isMalformedThumbnailId(tid, columnName)) 
+            return;
+            
         // increment counter in table which begins with thumbnail first composite key
         String key = tid  + "_" + eventTimestamp;
         increments.add(new AtomicIncrementRequest(THUMBNAIL_FIRST_TABLE, key.getBytes(), COLUMN_FAMILY, columnName));
@@ -191,6 +241,36 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
         // increment counter in table which begins with timestamp first composite key
         key = eventTimestamp + "_" + tid;
         increments.add(new AtomicIncrementRequest(TIMESTAMP_FIRST_TABLE, key.getBytes(), COLUMN_FAMILY,  columnName));
+    }
+
+    private Schema loadFromUrl(String schemaUrl) throws IOException {
+        Schema.Parser parser = new Schema.Parser();
+        InputStream is = null;
+        try {
+            is = new URL(schemaUrl).openStream();
+            return parser.parse(is);
+        } finally {
+            if (is != null) {
+                is.close();
+            }
+        }
+    }
+
+    private static boolean isMalformedThumbnailId(String tid, byte[] columnName) {
+
+        if(tid == null) {
+            logger.error("thumbnail id is null for column family " + columnName.toString());
+            return true;
+        }
+
+        if(tid.equals("")) {
+            logger.error("thumbnail id is empty string for column family " + columnName.toString());
+            return true;
+        }
+    
+        // we may add more checks in the future
+
+        return false;
     }
 
     @Override
