@@ -562,7 +562,7 @@ public class NeonGenericSerializerTest {
         // make arrays of imageLoad
         Schema.Field imagesField = imagesLoadedSchema.getField("images");
         Schema imagesSchema = imagesField.schema();
-        Generic.Array<GenericRecord> images = new Generic.Array<GenericRecord>(2,imagesSchema);
+        GenericArray<GenericRecord> images = new GenericData.Array<GenericRecord>(2,imagesSchema);
         
         // make a couple of imageLoad 
         i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageLoad");
