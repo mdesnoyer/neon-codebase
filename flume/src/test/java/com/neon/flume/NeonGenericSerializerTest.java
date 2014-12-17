@@ -463,7 +463,7 @@ public class NeonGenericSerializerTest {
         assertTrue(req.getAmount() == 1);
     }
 
-@Test
+    @Test
     public void test_ImageLoad() throws Exception { 
         
         String videoId = "test_ImageLoad";
@@ -484,6 +484,104 @@ public class NeonGenericSerializerTest {
         
         img.put("height", 1);
         img.put("width", 1);
+        
+        trackerEvent.put("eventData", img); 
+        
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
+        GenericDatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<GenericRecord>(writerSchema);
+            
+        datumWriter.write(trackerEvent, encoder);
+        encoder.flush();
+
+        byte[] encodedEvent = out.toByteArray();
+
+        // make avro container headers
+        Map<String, String> headers = new HashMap<String, String>();
+        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
+        headers.put("timestamp", "1416612478000");  // milli seconds
+
+        Event event = EventBuilder.withBody(encodedEvent, headers);
+        NeonGenericSerializer serializer = new NeonGenericSerializer();
+
+        String table = "table";
+        String columnFamily = "columFamily";
+        serializer.initialize(table.getBytes(), columnFamily.getBytes());
+
+        // Test
+        serializer.setEvent(event);
+        
+        // Test
+        List<PutRequest> puts = serializer.getActions();
+        // should be zero size
+        assertTrue(puts.size() == 0); 
+        
+        // Test 
+        long timestamp = 1416612478000L;
+        Date date = new Date(timestamp);
+        DateFormat format = new SimpleDateFormat("YYYY-MM-dd'T'HH");
+        byte[] formattedTimestamp = format.format(date).getBytes();
+        String eventTimestamp = new String(formattedTimestamp);
+        
+        List<AtomicIncrementRequest> incs = serializer.getIncrements();
+        
+        assertTrue(incs.size() == 2);
+        
+        AtomicIncrementRequest req = incs.get(0);
+        String key = videoId + "_" + eventTimestamp;
+        assertTrue(Arrays.equals(req.key(), key.getBytes()));
+        assertTrue(req.getAmount() == 1);
+        
+        req = incs.get(1);
+        key = eventTimestamp + "_" + videoId;
+        assertTrue(Arrays.equals(req.key(), key.getBytes()));
+        assertTrue(req.getAmount() == 1);
+    }
+
+    @Test
+    public void test_ImagesLoad() throws Exception { 
+        
+        String videoId_1 = "test_ImagesLoad_1";
+        String videoId_2 = "test_ImagesLoad_2";
+    
+        Schema writerSchema = new TrackerEvent().getSchema();
+        GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
+        
+        dummyFill(trackerEvent, writerSchema);
+        
+        GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "IMAGES_LOAD");
+        trackerEvent.put("eventType", eventType);
+        
+        Schema.Field eventData = writerSchema.getField("eventData");
+        Schema eventDataSchema = eventData.schema();
+        int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImagesLoad");
+        Schema imagesLoadSchema = eventDataSchema.getTypes().get(i);
+        GenericRecord imagesLoad = new GenericData.Record(imagesLoadSchema);
+        imagesLoad.put("isImagesLoaded", true);
+        
+        // make arrays of imageLoad
+        Schema.Field imagesField = imagesLoadSchema.getField("images");
+        Schema imagesSchema = imagesField.schema();
+        GenericRecord images = new GenericData.Record(imagesSchema);
+        
+        // make a couple of imageLoad 
+        int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageLoad");
+        Schema imageLoadSchema = eventDataSchema.getTypes().get(i);
+        GenericRecord imgLoad_1 = new GenericData.Record(imageLoadSchema);
+        
+        imgLoad_1.put("thumbnailId", new Utf8(videoId_1));
+        imgLoad_1.put("height", 1);
+        imgLoad_1.put("width", 1);
+        
+        /*
+        GenericRecord imgLoad_2 = new GenericData.Record(eventDataSchema.getTypes().get(i));
+        img.put("thumbnailId", new Utf8(videoId_2));
+        img.put("height", 1);
+        img.put("width", 1);
+        */
+        
+        images.add(0, imgLoad_1);
+        imagesLoad.put("images", images);
         
         trackerEvent.put("eventData", img); 
         
