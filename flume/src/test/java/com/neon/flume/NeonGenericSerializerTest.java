@@ -554,19 +554,19 @@ public class NeonGenericSerializerTest {
         
         Schema.Field eventData = writerSchema.getField("eventData");
         Schema eventDataSchema = eventData.schema();
-        int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImagesLoad");
-        Schema imagesLoadSchema = eventDataSchema.getTypes().get(i);
-        GenericRecord imagesLoad = new GenericData.Record(imagesLoadSchema);
+        int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImagesLoaded");
+        Schema imagesLoadedSchema = eventDataSchema.getTypes().get(i);
+        GenericRecord imagesLoad = new GenericData.Record(imagesLoadedSchema);
         imagesLoad.put("isImagesLoaded", true);
         
         // make arrays of imageLoad
-        Schema.Field imagesField = imagesLoadSchema.getField("images");
+        Schema.Field imagesField = imagesLoadedSchema.getField("images");
         Schema imagesSchema = imagesField.schema();
         GenericArray<GenericRecord> images = (GenericArray<GenericRecord>) new GenericData.Record(imagesSchema);
         
         // make a couple of imageLoad 
         i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageLoad");
-        Schema imageLoadSchema = eventDataSchema.getTypes().get(i);
+        Schema imagesLoadedSchema = eventDataSchema.getTypes().get(i);
         GenericRecord imgLoad_1 = new GenericData.Record(imageLoadSchema);
         
         imgLoad_1.put("thumbnailId", new Utf8(videoId_1));
