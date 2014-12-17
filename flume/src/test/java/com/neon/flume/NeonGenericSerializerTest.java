@@ -62,9 +62,7 @@ import org.apache.flume.event.EventBuilder;
 
 public class NeonGenericSerializerTest {   
     
-    public NeonGenericSerializerTest() {
-        
-    }
+    public NeonGenericSerializerTest() {}
     
     @Test
     public void test_ImageVisible_Base() throws Exception { 
@@ -377,8 +375,6 @@ public class NeonGenericSerializerTest {
         
     }
     
-    
-
     @Test
     public void test_ImageClick() throws Exception { 
         
@@ -578,13 +574,14 @@ public class NeonGenericSerializerTest {
         imgLoad_2.put("height", 1);
         imgLoad_2.put("width", 1);
         
-        // assemble all parts together
+        // put imageLoad records in array
         images.add(0, imgLoad_1);
         images.add(1, imgLoad_2);
-        //
+        
+        // put array into ImagesLoaded record
         imagesLoad.put("images", images);
         
-        //
+        // ImagesLoaded record into tracker event
         trackerEvent.put("eventData", imagesLoad); 
         
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -647,7 +644,6 @@ public class NeonGenericSerializerTest {
         assertTrue(Arrays.equals(req.key(), key.getBytes()));
         assertTrue(req.getAmount() == 1);
     }
-
 
     /*
     *   Utils
@@ -717,7 +713,6 @@ public class NeonGenericSerializerTest {
         catch(Exception e) {
             System.out.println("Test failure: exception: " + e.toString());
         }
-    
     }
 }
 
