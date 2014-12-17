@@ -567,18 +567,16 @@ public class NeonGenericSerializerTest {
         // make a couple of imageLoad 
         i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageLoad");
         Schema imageLoadSchema = eventDataSchema.getTypes().get(i);
-        GenericRecord imgLoad_1 = new GenericData.Record(imageLoadSchema);
         
+        GenericRecord imgLoad_1 = new GenericData.Record(imageLoadSchema);
         imgLoad_1.put("thumbnailId", new Utf8(videoId_1));
         imgLoad_1.put("height", 1);
         imgLoad_1.put("width", 1);
         
-        /*
-        GenericRecord imgLoad_2 = new GenericData.Record(eventDataSchema.getTypes().get(i));
-        img.put("thumbnailId", new Utf8(videoId_2));
-        img.put("height", 1);
-        img.put("width", 1);
-        */
+        GenericRecord imgLoad_2 = new GenericData.Record(imageLoadSchema);
+        imgLoad_2.put("thumbnailId", new Utf8(videoId_2));
+        imgLoad_2.put("height", 1);
+        imgLoad_2.put("width", 1);
         
         // assemble all parts together
         images.add(0, imgLoad_1);
@@ -626,19 +624,28 @@ public class NeonGenericSerializerTest {
         String eventTimestamp = new String(formattedTimestamp);
         
         List<AtomicIncrementRequest> incs = serializer.getIncrements();
-       /* 
+       
         assertTrue(incs.size() == 2);
         
         AtomicIncrementRequest req = incs.get(0);
-        String key = videoId + "_" + eventTimestamp;
+        String key = videoId_1 + "_" + eventTimestamp;
         assertTrue(Arrays.equals(req.key(), key.getBytes()));
         assertTrue(req.getAmount() == 1);
         
         req = incs.get(1);
-        key = eventTimestamp + "_" + videoId;
+        key = eventTimestamp + "_" + videoId_1;
         assertTrue(Arrays.equals(req.key(), key.getBytes()));
         assertTrue(req.getAmount() == 1);
-        */
+        
+        req = incs.get(0);
+        key = videoId_2 + "_" + eventTimestamp;
+        assertTrue(Arrays.equals(req.key(), key.getBytes()));
+        assertTrue(req.getAmount() == 1);
+        
+        req = incs.get(1);
+        key = eventTimestamp + "_" + videoId_2;
+        assertTrue(Arrays.equals(req.key(), key.getBytes()));
+        assertTrue(req.getAmount() == 1);
     }
 
 
