@@ -539,7 +539,7 @@ public class NeonGenericSerializerTest {
     }
 
     @Test
-    public void test_ImagesLoad() throws Exception { 
+    public void test_ImagesLoaded() throws Exception { 
         
         String videoId_1 = "test_ImagesLoad_1";
         String videoId_2 = "test_ImagesLoad_2";
@@ -562,7 +562,7 @@ public class NeonGenericSerializerTest {
         // make arrays of imageLoad
         Schema.Field imagesField = imagesLoadedSchema.getField("images");
         Schema imagesSchema = imagesField.schema();
-        GenericArray<GenericRecord> images = (GenericArray<GenericRecord>) new GenericData.Record(imagesSchema);
+        GenericArray<GenericRecord> images = new GenericArray<GenericRecord>(imagesSchema);
         
         // make a couple of imageLoad 
         i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageLoad");
@@ -691,9 +691,10 @@ public class NeonGenericSerializerTest {
             NeonGenericSerializerTest serializer = new NeonGenericSerializerTest();
             
             serializer.test_ImageVisible_Base();
+            serializer.test_ImagesVisible();
             serializer.test_ImageClick();
             serializer.test_ImageLoad();
-            serializer.test_ImagesVisible();
+            serializer.test_ImagesLoaded();
            
             // testing changes in schemas
             serializer = new NeonGenericSerializerTest();
