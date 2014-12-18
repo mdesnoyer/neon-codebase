@@ -64,11 +64,14 @@ class ThumbnailInfo(object):
         'phash',
         'model_score',
         'id',
-        'imp',
-        'conv'
+        'base_imp',
+        'incr_imp',
+        'base_conv',
+        'incr_conv'
         ]
         
-    def __init__(self, metadata, impressions=0, conversions=0):
+    def __init__(self, metadata, base_impressions=0, incremental_impressions=0,
+                 base_conversions=0, incremental_conversions=0):
         # These entries are from the neondata.ThumbnailMetadata
         self.enabled = metadata.enabled
         self.type = str(metadata.type)
@@ -88,8 +91,10 @@ class ThumbnailInfo(object):
             self.id = self.id[2]
 
         # These fields are from the statistics
-        self.imp = impressions # no. of impressions
-        self.conv = conversions # no. of conv
+        self.base_imp = base_impressions
+        self.incr_imp = incremental_impressions
+        self.base_conv = base_conversions
+        self.incr_conv = incremental_conversions
 
     def __str__(self):
         return str({
@@ -100,8 +105,10 @@ class ThumbnailInfo(object):
             'phash': self.phash,
             'model_score' : self.model_score,
             'id': self.id,
-            'imp': self.imp,
-            'conv': self.conv})
+            'base_imp': self.base_imp,
+            'incr_imp': self.incr_imp,
+            'base_conv': self.base_conv,
+            'incr_conv': self.incr_conv})
 
     def __repr__(self):
         return str(self)
@@ -114,8 +121,8 @@ class ThumbnailInfo(object):
                     self.phash,
                     self.model_score,
                     self.id,
-                    self.imp,
-                    self.conv),
+                    self.get_impressions(),
+                    self.get_conversions()),
                    (other.enabled,
                     other.type,
                     other.chosen,
@@ -123,8 +130,14 @@ class ThumbnailInfo(object):
                     other.phash,
                     other.model_score,
                     other.id,
-                    other.imp,
-                    other.conv))
+                    other.get_impressions(),
+                    other.get_conversions()))
+
+    def get_impressions(self):
+        return self.base_imp + self.incr_imp
+
+    def get_conversions(self):
+        return self.base_conv + self.incr_conv
 
     def update_stats(self, other_info):
         '''Updates the statistics from another ThumbnailInfo.'''
@@ -133,8 +146,10 @@ class ThumbnailInfo(object):
                        (self.id, other_info.id))
             return self
 
-        self.imp = other_info.imp
-        self.conv = other_info.conv
+        self.base_imp = other_info.base_imp
+        self.incr_imp = other_info.incr_imp
+        self.base_conv = other_info.base_conv
+        self.incr_conv = other_info.incr_conv
         return self
 
 class Mastermind(object):
@@ -292,19 +307,29 @@ class Mastermind(object):
     def update_stats_info(self, data):
         '''Update the stats info from a ground truth in the database.
 
+        Any of the stats entries can be None, in which case they are
+        not updated.
+
         Inputs:
         data - generator that creates a stream of 
-               (video_id, thumb_id, impressions, conv, plays)
+               (video_id, thumb_id, base_impr, incr_impr, base_conv, incr_conv)
         
         '''
-        for video_id, thumb_id, imp, conv in data:
+        for video_id, thumb_id, base_imp, incr_imp, base_conv, incr_conv in \
+          data:
             with self.lock:
                 # Load up all the data
                 thumb = self._find_thumb(video_id, thumb_id)
                 if thumb is None:
                     continue
-                thumb.imp = float(imp)
-                thumb.conv = float(conv)
+                if base_imp is not None:
+                    thumb.base_imp = float(base_imp)
+                if incr_imp is not None:
+                    thumb.incr_imp = float(incr_imp)
+                if base_conv is not None:
+                    thumb.base_conv = float(base_conv)
+                if incr_conv is not None:
+                    thumb.incr_conv = float(incr_conv)
 
                 self._calculate_new_serving_directive(video_id)
 
@@ -574,11 +599,12 @@ class Mastermind(object):
         # Now determine the serving percentages for each valid bandit
         # based on a prior of its model score and its measured ctr.
         bandit_ids = [x.id for x in valid_bandits]
-        conv = dict([(x.id, self._get_prior_conversions(x) + x.conv)
+        conv = dict([(x.id, self._get_prior_conversions(x) +
+                      x.get_conversions())
                 for x in valid_bandits])
         imp = dict([(x.id, Mastermind.PRIOR_IMPRESSION_SIZE * 
                              (1 - Mastermind.PRIOR_CTR) + 
-                             x.imp - conv[x.id])
+                             x.get_impressions() - conv[x.id])
                              for x in valid_bandits])
 
         # Run the monte carlo series
@@ -589,12 +615,12 @@ class Mastermind(object):
                                       for x in bandit_ids]
         if non_exp_thumb is not None:
             conv = self._get_prior_conversions(non_exp_thumb) + \
-              non_exp_thumb.conv
+              non_exp_thumb.get_conversions()
             mc_series.append(
                 spstats.beta.rvs(conv,
                                  Mastermind.PRIOR_IMPRESSION_SIZE * 
                                  (1 - Mastermind.PRIOR_CTR) + 
-                                 non_exp_thumb.imp - conv,
+                                 non_exp_thumb.get_impressions() - conv,
                                  size=MC_SAMPLES))
 
         win_frac = np.array(np.bincount(np.argmax(mc_series, axis=0)),
@@ -605,9 +631,9 @@ class Mastermind(object):
         winner_idx = np.argmax(win_frac)
 
         # Determine the number of real impressions for each entry in win_frac
-        impressions = [x.imp for x in valid_bandits]
+        impressions = [x.get_impressions() for x in valid_bandits]
         if non_exp_thumb is not None:
-            impressions.append(non_exp_thumb.imp)
+            impressions.append(non_exp_thumb.get_impressions())
 
         # Determine the value remaining. This is equivalent to
         # determing that one of the other arms might beat the winner
@@ -775,7 +801,8 @@ class Mastermind(object):
 def _modify_many_serving_fracs(mastermind, video_id, new_directive,
                                video_info):
     try:
-        ctrs = dict([(x.id, float(x.conv) / max(x.imp, 1)) for x in 
+        ctrs = dict([(x.id, float(x.get_conversions()) / 
+                      max(x.get_impressions(), 1)) for x in 
                      video_info.thumbnails])
         thumb_ids, new_fracs, new_ctrs = zip(
             *[('_'.join([video_id, thumb_id]), frac, ctrs[thumb_id])

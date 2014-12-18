@@ -31,12 +31,14 @@ import unittest
 _log = logging.getLogger(__name__)
 
 def build_thumb(metadata=neondata.ThumbnailMetadata(None, None),
-                impressions=0, conversions=0, phash=None):
+                base_impressions=0, incremental_impressions=0,
+                base_conversions=0, incremental_conversions=0, phash=None):
     if phash is None:
         metadata.phash = numpy.random.randint(1<<30)
     else:
         metadata.phash = phash
-    return ThumbnailInfo(metadata, impressions, conversions)
+    return ThumbnailInfo(metadata, base_impressions, incremental_impressions,
+                         base_conversions, incremental_conversions)
 
 #TODO(mdesnoyer) what happens when a video is removed from the db?!?
 
@@ -46,25 +48,35 @@ class TestObjects(test_utils.neontest.TestCase):
             'acct1', True,
             [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                            ttype='neon', model_score=5.8),
-                                           phash=32)])
+                                           phash=32,
+                                           incremental_impressions=56,
+                                           base_impressions=9849,
+                                           incremental_conversions=98,
+                                           base_conversions=4986)])
 
         video_info_2 = VideoInfo(
             'acct1', True,
             [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                            ttype='neon', model_score=5.8),
-                                           phash=32)])
+                                           phash=32,
+                                           incremental_impressions=56,
+                                           base_impressions=9849,
+                                           incremental_conversions=98,
+                                           base_conversions=4986)])
 
         self.assertEqual(video_info_1, video_info_2)
         self.assertEqual(repr(video_info_1), repr(video_info_2))
 
     def test_update_stats_with_wrong_id(self):
-        thumb1 = ThumbnailInfo(ThumbnailMetadata('t1', 'v1'), impressions=300)
-        thumb2 = ThumbnailInfo(ThumbnailMetadata('t2', 'v1'), impressions=400)
+        thumb1 = ThumbnailInfo(ThumbnailMetadata('t1', 'v1'),
+                               base_impressions=300)
+        thumb2 = ThumbnailInfo(ThumbnailMetadata('t2', 'v1'),
+                               base_impressions=400)
 
         with self.assertLogExists(logging.ERROR,
                                   "Two thumbnail ids don't match"):
             self.assertEqual(thumb1.update_stats(thumb2), thumb1)
-        self.assertEqual(thumb1.imp, 300)
+        self.assertEqual(thumb1.get_impressions(), 300)
     
 class TestCurrentServingDirective(test_utils.neontest.TestCase):
     def setUp(self):
@@ -268,9 +280,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertEqual(directive, {'bc': 0.99, 'ctr': 0.0, 'n1': 0.01})
 
         # When the baseline wins, it should be shown for 100%
-        video_info.thumbnails[1].conv = 5000
-        video_info.thumbnails[1].imp = 5000
-        video_info.thumbnails[2].imp = 1000
+        video_info.thumbnails[1].base_conv = 5000
+        video_info.thumbnails[1].base_imp = 5000
+        video_info.thumbnails[2].base_imp = 1000
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'bc': 1.0, 'ctr': 0.0, 'n1': 0.0})
@@ -292,18 +304,18 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertEqual(directive, {'bc': 0.99, 'ctr': 0.0, 'n1': 0.01})
 
         # When the baseline wins, it should be shown for all 100%
-        video_info.thumbnails[1].imp = 1000
-        video_info.thumbnails[2].conv = 5000
-        video_info.thumbnails[2].imp = 5000
+        video_info.thumbnails[1].base_imp = 1000
+        video_info.thumbnails[2].base_conv = 5000
+        video_info.thumbnails[2].base_imp = 5000
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'bc': 0.0, 'ctr': 0.0, 'n1': 1.0})
 
         # If the default one wins, we show the baseline for the holdback
-        video_info.thumbnails[2].conv = 0
-        video_info.thumbnails[2].imp = 1000
-        video_info.thumbnails[1].conv = 5000
-        video_info.thumbnails[1].imp = 5000
+        video_info.thumbnails[2].base_conv = 0
+        video_info.thumbnails[2].base_imp = 1000
+        video_info.thumbnails[1].base_conv = 5000
+        video_info.thumbnails[1].base_imp = 5000
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'bc': 0.98, 'ctr': 0.0, 'n1': 0.02})
@@ -384,7 +396,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                 self.assertIsNone(
                     self.mastermind._calculate_current_serving_directive(
                         video_info))
-        print self.mastermind._calculate_current_serving_directive(video_info)
+                
         # Now add a baseline and it should be shown all the time
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr', 'vid1',
@@ -653,8 +665,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         def _set_winner(thumb_name):
             for thumb in video_info.thumbnails:
-                thumb.conv = 5000 if thumb.id == thumb_name else 0
-                thumb.imp = 5000 if thumb.id == thumb_name else 1000
+                thumb.base_conv = 5000 if thumb.id == thumb_name else 0
+                thumb.base_imp = 5000 if thumb.id == thumb_name else 1000
 
         _set_winner('n2')
 
@@ -717,8 +729,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         def _set_winner(thumb_name):
             for thumb in video_info.thumbnails:
-                thumb.conv = 5000 if thumb.id == thumb_name else 0
-                thumb.imp = 5000 if thumb.id == thumb_name else 1000
+                thumb.base_conv = 5000 if thumb.id == thumb_name else 0
+                thumb.base_imp = 5000 if thumb.id == thumb_name else 1000
 
         _set_winner('n2')
         # There is no editor choice, so show the winner for 100%
@@ -783,14 +795,14 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                          ['n2', 'ctr', 'bc', 'n1'])
 
         # Add some stats where n2 starts to bubble up but doesn't win
-        video_info.thumbnails[0].imp = 1000
-        video_info.thumbnails[0].conv = 10
-        video_info.thumbnails[1].imp = 1000
-        video_info.thumbnails[1].conv = 20
-        video_info.thumbnails[2].imp = 1000
-        video_info.thumbnails[2].conv = 10
-        video_info.thumbnails[3].imp = 1000
-        video_info.thumbnails[3].conv = 10
+        video_info.thumbnails[0].base_imp = 1000
+        video_info.thumbnails[0].base_conv = 10
+        video_info.thumbnails[1].base_imp = 1000
+        video_info.thumbnails[1].base_conv = 20
+        video_info.thumbnails[2].base_imp = 1000
+        video_info.thumbnails[2].base_conv = 10
+        video_info.thumbnails[3].base_imp = 1000
+        video_info.thumbnails[3].base_conv = 10
 
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
@@ -810,7 +822,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1', True,
             [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                            ttype='neon', model_score=5.8),
-                         impressions=50, conversions=20),
+                         base_impressions=50, base_conversions=20),
              build_thumb(ThumbnailMetadata('n2', 'vid1',
                                            ttype='neon', model_score=3.5)),
              build_thumb(ThumbnailMetadata('ctr', 'vid1',
@@ -827,8 +839,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         # Now test with a large enough number that floating point
         # numbers go to zero
-        video_info.thumbnails[0].imp=499
-        video_info.thumbnails[0].conv=200
+        video_info.thumbnails[0].base_imp=499
+        video_info.thumbnails[0].base_conv=200
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertAlmostEqual(sum(directive.values()), 1.0)
@@ -895,15 +907,15 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1', True,
             [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                            ttype='neon', model_score=5.8),
-                         impressions=3000, conversions=900),
+                         base_impressions=3000, base_conversions=900),
              build_thumb(ThumbnailMetadata('n2', 'vid1',
                                            ttype='neon', model_score=3.5)),
              build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                            ttype='centerframe'),
-                         impressions=10, conversions=4),
+                         base_impressions=10, base_conversions=4),
              build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                            ttype='brightcove'),
-                         impressions=600, conversions=150)])
+                         base_impressions=600, base_conversions=150)])
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         
@@ -924,15 +936,15 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1', True,
             [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                            ttype='neon', model_score=5.8),
-                         impressions=6000, conversions=2),
+                         base_impressions=6000, base_conversions=2),
              build_thumb(ThumbnailMetadata('n2', 'vid1',
                                            ttype='neon', model_score=3.5)),
              build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                            ttype='centerframe'),
-                         impressions=350, conversions=1),
+                         base_impressions=350, base_conversions=1),
              build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                            ttype='brightcove'),
-                         impressions=600, conversions=2)])
+                         base_impressions=600, base_conversions=2)])
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         
@@ -1141,11 +1153,38 @@ class TestStatUpdating(test_utils.neontest.TestCase):
         
     def test_initial_stats_update(self):
         self.mastermind.update_stats_info([
-            ('acct1_vid1', 'acct1_vid1_v1t1', 1000, 5),
-            ('acct1_vid1', 'acct1_vid1_v1t2', 1000, 100),
-            ('acct1_vid2', 'acct1_vid2_v2t1', 10, 5),
-            ('acct1_vid2', 'acct1_vid2_v2t2', 1000, 100),
-            ('acct1_vid2', 'acct1_vid2_v2t3', 1000, 100)])
+            ('acct1_vid1', 'acct1_vid1_v1t1', 1000, 0, 5, 0),
+            ('acct1_vid1', 'acct1_vid1_v1t2', 1000, 0, 100, 0),
+            ('acct1_vid2', 'acct1_vid2_v2t1', 10, 0, 5, 0),
+            ('acct1_vid2', 'acct1_vid2_v2t2', 1000, 0, 100, 0),
+            ('acct1_vid2', 'acct1_vid2_v2t3', 1000, 0, 100, 0)])
+
+        directives = dict([x for x in self.mastermind.get_directives()])
+        self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
+                              [('acct1_vid1_v1t1', 0.01),
+                               ('acct1_vid1_v1t2', 0.99)])
+        for val in [x[1] for x in directives[('acct1', 'acct1_vid2')]]:
+            self.assertGreater(val, 0.0)
+
+    def test_incremental_stats_update(self):
+        # Initial stats
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_v1t1', 100, 0, 1, 0),
+            ('acct1_vid1', 'acct1_vid1_v1t2', 100, 0, 2, 0),
+            ('acct1_vid2', 'acct1_vid2_v2t1', 10, 0, 5, 0),
+            ('acct1_vid2', 'acct1_vid2_v2t2', 100, 0, 1, 0),
+            ('acct1_vid2', 'acct1_vid2_v2t3', 100, 0, 2, 0)])
+        directives = dict([x for x in self.mastermind.get_directives()])
+        for val in [x[1] for x in directives.values()]:
+            self.assertGreater(val, 0.0)
+
+        # Do an incremental update
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_v1t1', None, 900, None, 4),
+            ('acct1_vid1', 'acct1_vid1_v1t2', None, 900, None, 98),
+            ('acct1_vid2', 'acct1_vid2_v2t1', None, 0, None, 0),
+            ('acct1_vid2', 'acct1_vid2_v2t2', None, 900, None, 98),
+            ('acct1_vid2', 'acct1_vid2_v2t3', None, 900, None, 98)])
 
         directives = dict([x for x in self.mastermind.get_directives()])
         self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
@@ -1157,15 +1196,15 @@ class TestStatUpdating(test_utils.neontest.TestCase):
     def test_decimal_from_db(self):
         self.mastermind.update_stats_info([
             ('acct1_vid1', 'acct1_vid1_v1t1', decimal.Decimal(1000),
-             decimal.Decimal(5)),
+             None, decimal.Decimal(5), None),
             ('acct1_vid1', 'acct1_vid1_v1t2', decimal.Decimal(1000),
-             decimal.Decimal(100)),
+             None, decimal.Decimal(100), None),
             ('acct1_vid2', 'acct1_vid2_v2t1', decimal.Decimal(10),
-             decimal.Decimal(5)),
+             None, decimal.Decimal(5), None),
             ('acct1_vid2', 'acct1_vid2_v2t2', decimal.Decimal(1000),
-             decimal.Decimal(100)),
+             None, decimal.Decimal(100), None),
             ('acct1_vid2', 'acct1_vid2_v2t3', decimal.Decimal(1000),
-             decimal.Decimal(100))])
+             None, decimal.Decimal(99), decimal.Decimal(1))])
 
         directives = dict([x for x in self.mastermind.get_directives()])
         self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
@@ -1179,7 +1218,7 @@ class TestStatUpdating(test_utils.neontest.TestCase):
                                   'Could not find information for video'):
         
             self.mastermind.update_stats_info([
-                ('acct1_unknown', 'v1t1', 1000, 5)
+                ('acct1_unknown', 'v1t1', 1000, None, 5, None)
                 ])
 
     def test_update_stats_for_unknown_thumb(self):
@@ -1187,7 +1226,7 @@ class TestStatUpdating(test_utils.neontest.TestCase):
                                   'Could not find information for thumbnail'):
         
             self.mastermind.update_stats_info([
-                ('acct1_vid1', 'v1t_where', 1000, 5)
+                ('acct1_vid1', 'v1t_where', 1000, None, 5, None)
                 ])
 
 class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
@@ -1280,10 +1319,10 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
 
     def test_db_experiment_finished(self):
         self.mastermind.update_stats_info([
-            ('acct1_vid1', 'n2', 5000, 200),
-            ('acct1_vid1', 'n1', 5000, 50),
-            ('acct1_vid1', 'bc', 5000, 10),
-            ('acct1_vid1', 'ctr', 5000, 20)])
+            ('acct1_vid1', 'n2', 5000, 0, 200, 0),
+            ('acct1_vid1', 'n1', 5000, 0, 50, 0),
+            ('acct1_vid1', 'bc', 5000, 0, 10, 0),
+            ('acct1_vid1', 'ctr', 5000, 0, 20, 0)])
         self._wait_for_db_updates()
 
         video = VideoMetadata.get('acct1_vid1')
