@@ -993,7 +993,7 @@ public class NeonGenericSerializerTest {
             serializer.test_empty_thumbnail_id();
             
             // tracker event with empty thumbnail ids array
-            serializer.test_empty_thumbnail_array
+            serializer.test_empty_thumbnail_array();
             
             // tracker event with unsupported event type
             serializer.test_ad_play_event();
