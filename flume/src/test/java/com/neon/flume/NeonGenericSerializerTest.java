@@ -700,8 +700,10 @@ public class NeonGenericSerializerTest {
 
 
         try {
+            /*
+            *  Basic functionlity testing
+            */
             NeonGenericSerializerTest serializer = new NeonGenericSerializerTest();
-            
             serializer.test_ImageVisible_Base();
             serializer.test_ImagesVisible();
             serializer.test_ImageClick();
@@ -710,9 +712,30 @@ public class NeonGenericSerializerTest {
            
             // testing changes in schemas
             serializer = new NeonGenericSerializerTest();
+            
+            // base case 
             serializer.test_ImageVisible_Base();
+            
+            // new schema fetch with an added, unrelated field
+            // https://s3.amazonaws.com/neon-test/test_tracker_event_schema_added_field.avsc
             serializer.test_ImageVisible_New_Field();
+            
+            // new schema fetch with an added, unrelated event type
+            // https://s3.amazonaws.com/neon-test/test_tracker_event_schema_added_event_data_record.avsc
             serializer.test_ImageVisible_New_Field_in_EventData();
+            
+            /*
+            *  Negative testing
+            */ 
+            
+            // tracker event with empty thumbnail ids array
+            
+            // tracker event with empty string thumb id
+            
+            // tracker event with unsupported event type
+            
+            // tracker event with empty timestamp
+            
             
             System.out.println("\n\nTest successful");
         }
