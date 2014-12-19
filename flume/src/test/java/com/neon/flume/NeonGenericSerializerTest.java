@@ -712,8 +712,16 @@ public class NeonGenericSerializerTest {
            
             // testing changes in schemas
             serializer = new NeonGenericSerializerTest();
+            
+            // base case 
             serializer.test_ImageVisible_Base();
+            
+            // new schema fetch with an added, unrelated field
+            // https://s3.amazonaws.com/neon-test/test_tracker_event_schema_added_field.avsc
             serializer.test_ImageVisible_New_Field();
+            
+            // new schema fetch with an added, unrelated event type
+            // https://s3.amazonaws.com/neon-test/test_tracker_event_schema_added_event_data_record.avsc
             serializer.test_ImageVisible_New_Field_in_EventData();
             
             /*
