@@ -524,10 +524,17 @@ class StoredObject(object):
         return self.key
 
     @classmethod
-    def get(cls, key, callback=None):
+    def get(cls, key, create_default=False, log_missing=True,
+            callback=None):
         '''Retrieve this object from the database.
 
-        Returns the object or None if it couldn't be found
+        Inputs:
+        key - Key for the object to retrieve
+        create_default - If true, then if the object is not in the database, 
+                         return a default version. Otherwise return None.
+        log_missing - Log if the object is missing in the database.
+
+        Returns the object
         '''
         db_connection = DBConnection.get(cls)
 
@@ -536,28 +543,42 @@ class StoredObject(object):
                 obj = cls._create(key, json.loads(result))
                 callback(obj)
             else:
-                callback(None)
+                if log_missing:
+                    _log.warn('No %s for id %s in db' % (cls.__name__, key))
+                if create_default:
+                    callback(cls(key))
+                else:
+                    callback(None)
 
         if callback:
             db_connection.conn.get(key, cb)
         else:
             jdata = db_connection.blocking_conn.get(key)
             if jdata is None:
-                return None
+                if log_missing:
+                    _log.warn('No %s for %s' % (cls.__name__, key))
+                if create_default:
+                    return cls(key)
+                else:
+                    return None
             return cls._create(key, json.loads(jdata))
 
     @classmethod
-    def get_many(cls, keys, callback=None):
+    def get_many(cls, keys, create_default=False, log_missing=True,
+                 callback=None):
         ''' Get many objects of the same type simultaneously
 
         This is more efficient than one at a time.
 
         Inputs:
         keys - List of keys to get
+        create_default - If true, then if the object is not in the database, 
+                         return a default version. Otherwise return None.
+        log_missing - Log if the object is missing in the database.
         callback - Optional callback function to call
 
         Returns:
-        A list of cls objects or None if it wasn't there, one for each key
+        A list of cls objects or None depending on create_default settings
         '''
         #MGET raises an exception for wrong number of args if keys = []
         if len(keys) == 0:
@@ -569,28 +590,28 @@ class StoredObject(object):
 
         db_connection = DBConnection.get(cls)
 
-        def process(results):
+        def _process(results):
             mappings = [] 
             for key, item in zip(keys, results):
                 if item:
                     obj = cls._create(key, json.loads(item))
                 else:
-                    obj = None
-                mappings.append(obj)
-            callback(mappings)
-
-        if callback:
-            db_connection.conn.mget(keys, process)
-        else:
-            mappings = [] 
-            items = db_connection.blocking_conn.mget(keys)
-            for key, item in zip(keys, items):
-                if item:
-                    obj = cls._create(key, json.loads(item))
-                else:
-                    obj = None
+                    if log_missing:
+                        _log.warn('No %s for %s' % (cls.__name__, key))
+                    if create_default:
+                        obj = cls(key)
+                    else:
+                        obj = None
                 mappings.append(obj)
             return mappings
+
+        if callback:
+            db_connection.conn.mget(
+                keys,
+                callback=lambda items:callback(_process(items)))
+        else:
+            items = db_connection.blocking_conn.mget(keys)
+            return _process(items)
 
     
     @classmethod
@@ -747,20 +768,25 @@ class NamespacedStoredObject(StoredObject):
             return '%s_%s' % (cls._baseclass_name().lower(), key)
 
     @classmethod
-    def get(cls, key, callback=None):
+    def get(cls, key, create_default=False, log_missing=True, callback=None):
         '''Return the object for a given key.'''
         return super(NamespacedStoredObject, cls).get(
             cls.format_key(key),
+            create_default=create_default,
+            log_missing=log_missing,
             callback=callback)
 
     @classmethod
-    def get_many(cls, keys, callback=None):
+    def get_many(cls, keys, create_default=False, log_missing=True,
+                 callback=None):
         '''Returns the list of objects from a list of keys.
 
         Each key must be a tuple
         '''
         return super(NamespacedStoredObject, cls).get_many(
             [cls.format_key(x) for x in keys],
+            create_default=create_default,
+            log_missing=log_missing,
             callback=callback)
 
     @classmethod
@@ -807,6 +833,31 @@ class NamespacedStoredObject(StoredObject):
             [cls.format_key(x) for x in keys],
             func,
             create_missing=create_missing,
+            callback=callback)
+
+class DefaultedStoredObject(NamespacedStoredObject):
+    '''Namespaced object where a get-like operation will never returns None.
+
+    Instead of None, a default object is returned, so a subclass should
+    specify a reasonable default constructor
+    '''
+    def __init__(self, key):
+        super(DefaultedStoredObject, self).__init__(key)
+
+    @classmethod
+    def get(cls, key, log_missing=True, callback=None):
+        return super(DefaultedStoredObject, cls).get(
+            key,
+            create_default=True,
+            log_missing=log_missing,
+            callback=callback)
+
+    @classmethod
+    def get_many(cls, keys, log_missing=True, callback=None):
+        return super(DefaultedStoredObject, cls).get_many(
+            keys,
+            create_default=True,
+            log_missing=log_missing,
             callback=callback)
 
 class AbstractHashGenerator(object):
@@ -1073,7 +1124,7 @@ class NeonUserAccount(object):
             return na.tracker_account_id  
 
 
-class ExperimentStrategy(NamespacedStoredObject):
+class ExperimentStrategy(DefaultedStoredObject):
     '''Stores information about the experimental strategy to use.
 
     Keyed by account_id (aka api_key)
@@ -1085,7 +1136,7 @@ class ExperimentStrategy(NamespacedStoredObject):
                  holdback_frac=0.01,
                  only_exp_if_chosen=False,
                  always_show_baseline=True,
-                 baseline_type=ThumbnailType.CENTERFRAME,
+                 baseline_type=ThumbnailType.RANDOM,
                  chosen_thumb_overrides=False,
                  override_when_done=True,
                  experiment_type=MULTIARMED_BANDIT,
@@ -1142,35 +1193,6 @@ class ExperimentStrategy(NamespacedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return ExperimentStrategy.__name__
-
-    @classmethod
-    def get(cls, key, callback=None):
-        if callback:
-            def _cb(obj):
-                if obj is None:
-                    _log.warn('No %s for %s' % (cls, key))
-                    callback(cls(key))
-                else:
-                    callback(obj)
-                
-            super(ExperimentStrategy, cls).get(key, callback=_cb)
-        else:
-          obj = super(ExperimentStrategy, cls).get(key)
-          if obj is None:
-            _log.warn('No %s for %s' % (cls, key))
-            return cls(key)
-          return obj
-
-    @classmethod
-    def get_many(cls, keys, callback=None):
-      if callback:
-        def _cb(objs):
-          callback([obj or cls(k) for k, obj in zip(keys, objs)])
-
-        super(ExperimentStrategy, cls).get_many(keys, callback=_cb)
-      else:
-        objs = super(ExperimentStrategy, cls).get_many(keys)
-        return [x or cls(k) for k, x in zip(keys, objs)]
         
 
 class CDNHostingMetadataList(NamespacedStoredObject):
@@ -2186,14 +2208,15 @@ class NeonApiRequest(NamespacedStoredObject):
         #TODO:validate supported methods
 
     @classmethod
-    def get(cls, job_id, api_key, callback=None):
+    def get(cls, job_id, api_key, log_missing=True, callback=None):
         ''' get instance '''
         return super(NeonApiRequest, cls).get(
             cls._generate_subkey(job_id, api_key),
+            log_missing=log_missing,
             callback=callback)
 
     @classmethod
-    def get_many(cls, keys, callback=None):
+    def get_many(cls, keys, log_missing=True, callback=None):
         '''Returns the list of objects from a list of keys.
 
         Each key must be a tuple of (job_id, api_key)
@@ -2201,6 +2224,7 @@ class NeonApiRequest(NamespacedStoredObject):
         return super(NeonApiRequest, cls).get_many(
             [cls._generate_subkey(job_id, api_key) for 
              job_id, api_key in keys],
+            log_missing=log_missing,
             callback=callback)
 
     @classmethod
