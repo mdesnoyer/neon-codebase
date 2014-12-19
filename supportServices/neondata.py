@@ -1147,23 +1147,30 @@ class ExperimentStrategy(NamespacedStoredObject):
     def get(cls, key, callback=None):
         if callback:
             def _cb(obj):
-                callback(obj or ExperimentStrategy())
+                if obj is None:
+                    _log.warn('No %s for %s' % (cls, key))
+                    callback(cls(key))
+                else:
+                    callback(obj)
                 
             super(ExperimentStrategy, cls).get(key, callback=_cb)
         else:
           obj = super(ExperimentStrategy, cls).get(key)
-          return obj or ExperimentStrategy()
+          if obj is None:
+            _log.warn('No %s for %s' % (cls, key))
+            return cls(key)
+          return obj
 
     @classmethod
     def get_many(cls, keys, callback=None):
       if callback:
         def _cb(objs):
-          callback([x or ExperimentStrategy() for x in objs])
+          callback([obj or cls(k) for k, obj in zip(keys, objs)])
 
         super(ExperimentStrategy, cls).get_many(keys, callback=_cb)
       else:
         objs = super(ExperimentStrategy, cls).get_many(keys)
-        return [x or ExperimentStrategy() for x in objs]
+        return [x or cls(k) for k, x in zip(keys, objs)]
         
 
 class CDNHostingMetadataList(NamespacedStoredObject):
