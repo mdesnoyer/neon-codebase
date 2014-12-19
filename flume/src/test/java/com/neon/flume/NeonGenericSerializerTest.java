@@ -798,7 +798,7 @@ public class NeonGenericSerializerTest {
         
         
         img.put("thumbnailId", new Utf8(videoId));
-        img.put("autoplayDelta", new Utf8("dummy"));
+        img.put("autoplayDelta", 1);
         img.put("isAdPlay", true);
         img.put("videoId", new Utf8("dummy"));
         img.put("playerId", new Utf8("dummy"));
