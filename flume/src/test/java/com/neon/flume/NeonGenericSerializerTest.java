@@ -700,8 +700,10 @@ public class NeonGenericSerializerTest {
 
 
         try {
+            /*
+            *  Basic functionlity testing
+            */
             NeonGenericSerializerTest serializer = new NeonGenericSerializerTest();
-            
             serializer.test_ImageVisible_Base();
             serializer.test_ImagesVisible();
             serializer.test_ImageClick();
@@ -713,6 +715,19 @@ public class NeonGenericSerializerTest {
             serializer.test_ImageVisible_Base();
             serializer.test_ImageVisible_New_Field();
             serializer.test_ImageVisible_New_Field_in_EventData();
+            
+            /*
+            *  Negative testing
+            */ 
+            
+            // tracker event with empty thumbnail ids array
+            
+            // tracker event with empty string thumb id
+            
+            // tracker event with unsupported event type
+            
+            // tracker event with empty timestamp
+            
             
             System.out.println("\n\nTest successful");
         }
