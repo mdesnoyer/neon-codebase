@@ -647,6 +647,267 @@ public class NeonGenericSerializerTest {
         assertTrue(req.getAmount() == 1);
     }
 
+    @Test
+    public void test_empty_thumbnail_id() throws Exception { 
+        
+        String videoId = "";
+    
+        Schema writerSchema = new TrackerEvent().getSchema();
+        GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
+        
+        dummyFill(trackerEvent, writerSchema);
+        
+        GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "IMAGE_VISIBLE");
+        trackerEvent.put("eventType", eventType);
+        
+        Schema.Field eventData = writerSchema.getField("eventData");
+        Schema eventDataSchema = eventData.schema();
+        int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageVisible");
+        GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
+        img.put("thumbnailId", new Utf8(videoId));
+        trackerEvent.put("eventData", img); 
+        
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
+        GenericDatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<GenericRecord>(writerSchema);
+            
+        datumWriter.write(trackerEvent, encoder);
+        encoder.flush();
+
+        byte[] encodedEvent = out.toByteArray();
+
+        // make avro container headers
+        Map<String, String> headers = new HashMap<String, String>();
+        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
+        headers.put("timestamp", "1416612478000");  // milli seconds
+
+        Event event = EventBuilder.withBody(encodedEvent, headers);
+        NeonGenericSerializer serializer = new NeonGenericSerializer();
+
+        String table = "table";
+        String columnFamily = "columFamily";
+        serializer.initialize(table.getBytes(), columnFamily.getBytes());
+
+        // Test
+        serializer.setEvent(event);
+        
+        // Test
+        List<PutRequest> puts = serializer.getActions();
+        // should be zero size
+        assertTrue(puts.size() == 0); 
+        
+        // Test 
+        long timestamp = 1416612478000L;
+        Date date = new Date(timestamp);
+        DateFormat format = new SimpleDateFormat("YYYY-MM-dd'T'HH");
+        byte[] formattedTimestamp = format.format(date).getBytes();
+        String eventTimestamp = new String(formattedTimestamp);
+        
+        List<AtomicIncrementRequest> incs = serializer.getIncrements();
+        
+        assertTrue(incs.size() == 0);
+    }
+    
+    @Test
+    public void test_empty_thumbnail_array() throws Exception { 
+        
+        String videoId_1 = "test_ImageVisibles_1";
+        String videoId_2 = "test_ImageVisibles_2";
+    
+        Schema writerSchema = new TrackerEvent().getSchema();
+        GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
+        
+        dummyFill(trackerEvent, writerSchema);
+        
+        GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "IMAGES_VISIBLE");
+        trackerEvent.put("eventType", eventType);
+        
+        Schema.Field eventData = writerSchema.getField("eventData");
+        Schema eventDataSchema = eventData.schema();
+        int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImagesVisible");
+        Schema imgSchema = eventDataSchema.getTypes().get(i);
+        GenericRecord img = new GenericData.Record(imgSchema);
+        
+        Schema.Field thumbs = imgSchema.getField("thumbnailIds");
+        GenericArray<String> values = new GenericData.Array<String>(2, thumbs.schema());
+        
+        // add empty array
+        img.put("thumbnailIds", values);
+        img.put("isImagesVisible", true);
+        
+        trackerEvent.put("eventData", img); 
+        
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
+        GenericDatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<GenericRecord>(writerSchema);
+            
+        datumWriter.write(trackerEvent, encoder);
+        encoder.flush();
+
+        byte[] encodedEvent = out.toByteArray();
+
+        // make avro container headers
+        Map<String, String> headers = new HashMap<String, String>();
+        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
+        headers.put("timestamp", "1416612478000");  // milli seconds
+
+        Event event = EventBuilder.withBody(encodedEvent, headers);
+        NeonGenericSerializer serializer = new NeonGenericSerializer();
+
+        String table = "table";
+        String columnFamily = "columFamily";
+        serializer.initialize(table.getBytes(), columnFamily.getBytes());
+
+        // Test
+        serializer.setEvent(event);
+        
+        // Test
+        List<PutRequest> puts = serializer.getActions();
+        // should be zero size
+        assertTrue(puts.size() == 0); 
+        
+        // Test 
+        long timestamp = 1416612478000L;
+        Date date = new Date(timestamp);
+        DateFormat format = new SimpleDateFormat("YYYY-MM-dd'T'HH");
+        byte[] formattedTimestamp = format.format(date).getBytes();
+        String eventTimestamp = new String(formattedTimestamp);
+        
+        List<AtomicIncrementRequest> incs = serializer.getIncrements();
+        
+        assertTrue(incs.size() == 0);
+    }
+    
+    @Test
+    public void test_ad_play_event() throws Exception { 
+        
+        String videoId = "test_AdPlay";
+    
+        Schema writerSchema = new TrackerEvent().getSchema();
+        GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
+        
+        dummyFill(trackerEvent, writerSchema);
+        
+        GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "AdPlay");
+        trackerEvent.put("eventType", eventType);
+        
+        Schema.Field eventData = writerSchema.getField("eventData");
+        Schema eventDataSchema = eventData.schema();
+        int i = eventDataSchema.getIndexNamed("com.neon.Tracker.AdPlay");
+        GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
+        
+        
+        img.put("thumbnailId", new Utf8(videoId));
+        img.put("autoplayDelta", new Utf8("dummy"));
+        img.put("isAdPlay", true);
+        img.put("videoId", new Utf8("dummy"));
+        img.put("playerId", new Utf8("dummy"));
+        img.put("playCount", 1);
+        
+        trackerEvent.put("eventData", img); 
+        
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
+        GenericDatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<GenericRecord>(writerSchema);
+            
+        datumWriter.write(trackerEvent, encoder);
+        encoder.flush();
+
+        byte[] encodedEvent = out.toByteArray();
+
+        // make avro container headers
+        Map<String, String> headers = new HashMap<String, String>();
+        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
+        headers.put("timestamp", "1416612478000");  // milli seconds
+
+        Event event = EventBuilder.withBody(encodedEvent, headers);
+        NeonGenericSerializer serializer = new NeonGenericSerializer();
+
+        String table = "table";
+        String columnFamily = "columFamily";
+        serializer.initialize(table.getBytes(), columnFamily.getBytes());
+
+        // Test
+        serializer.setEvent(event);
+        
+        // Test
+        List<PutRequest> puts = serializer.getActions();
+        // should be zero size
+        assertTrue(puts.size() == 0); 
+        
+        // Test 
+        long timestamp = 1416612478000L;
+        Date date = new Date(timestamp);
+        DateFormat format = new SimpleDateFormat("YYYY-MM-dd'T'HH");
+        byte[] formattedTimestamp = format.format(date).getBytes();
+        String eventTimestamp = new String(formattedTimestamp);
+        
+        List<AtomicIncrementRequest> incs = serializer.getIncrements();
+        
+        assertTrue(incs.size() == 0);
+    }
+    
+    @Test
+    public void test_empty_timestamp() throws Exception { 
+        
+        String videoId = "test_ImageVisible_Base";
+    
+        Schema writerSchema = new TrackerEvent().getSchema();
+        GenericData.Record trackerEvent = new GenericData.Record(writerSchema);
+        
+        dummyFill(trackerEvent, writerSchema);
+        
+        GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "IMAGE_VISIBLE");
+        trackerEvent.put("eventType", eventType);
+        
+        Schema.Field eventData = writerSchema.getField("eventData");
+        Schema eventDataSchema = eventData.schema();
+        int i = eventDataSchema.getIndexNamed("com.neon.Tracker.ImageVisible");
+        GenericRecord img = new GenericData.Record(eventDataSchema.getTypes().get(i));
+        img.put("thumbnailId", new Utf8(videoId));
+        trackerEvent.put("eventData", img); 
+        
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
+        GenericDatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<GenericRecord>(writerSchema);
+            
+        datumWriter.write(trackerEvent, encoder);
+        encoder.flush();
+
+        byte[] encodedEvent = out.toByteArray();
+
+        // make avro container headers
+        Map<String, String> headers = new HashMap<String, String>();
+        headers.put("flume.avro.schema.url"," https://s3.amazonaws.com/neon-avro-schema/3325be34d95af2ca7d2db2b327e93408.avsc" );
+        headers.put("timestamp", "");  // milli seconds
+
+        Event event = EventBuilder.withBody(encodedEvent, headers);
+        NeonGenericSerializer serializer = new NeonGenericSerializer();
+
+        String table = "table";
+        String columnFamily = "columFamily";
+        serializer.initialize(table.getBytes(), columnFamily.getBytes());
+
+        // Test
+        serializer.setEvent(event);
+        
+        // Test
+        List<PutRequest> puts = serializer.getActions();
+        // should be zero size
+        assertTrue(puts.size() == 0); 
+        
+        // Test 
+        long timestamp = 1416612478000L;
+        Date date = new Date(timestamp);
+        DateFormat format = new SimpleDateFormat("YYYY-MM-dd'T'HH");
+        byte[] formattedTimestamp = format.format(date).getBytes();
+        String eventTimestamp = new String(formattedTimestamp);
+        
+        List<AtomicIncrementRequest> incs = serializer.getIncrements();
+        
+        assertTrue(incs.size() == 0);
+    }
+    
     /*
     *   Utils
     */
@@ -727,15 +988,18 @@ public class NeonGenericSerializerTest {
             /*
             *  Negative testing
             */ 
+            // tracker event with empty string thumb id
+            serializer = new NeonGenericSerializerTest();
+            serializer.test_empty_thumbnail_id();
             
             // tracker event with empty thumbnail ids array
-            
-            // tracker event with empty string thumb id
+            serializer.test_empty_thumbnail_array
             
             // tracker event with unsupported event type
+            serializer.test_ad_play_event();
             
             // tracker event with empty timestamp
-            
+            serializer.test_empty_timestamp();
             
             System.out.println("\n\nTest successful");
         }
