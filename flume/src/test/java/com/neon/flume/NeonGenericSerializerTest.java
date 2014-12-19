@@ -5,6 +5,8 @@ import  com.neon.Tracker.*;
 import org.junit.* ;
 import static org.junit.Assert.* ;
 
+import org.apache.log4j.Logger;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -688,7 +690,14 @@ public class NeonGenericSerializerTest {
     }
     
     public static void main(String[] args) {
+
+        
+        Logger logger = Logger.getLogger(NeonGenericSerializerTest.class);
+        
+        
         System.out.println("\n\nTest Starting"); 
+        logger.info("Start of testing");
+
 
         try {
             NeonGenericSerializerTest serializer = new NeonGenericSerializerTest();
@@ -709,10 +718,13 @@ public class NeonGenericSerializerTest {
         }
         catch(IOException e) {
             System.out.println("Test failure: io exception: " + e.toString());
+            logger.error("Test failure due to io exception");
         }
         catch(Exception e) {
             System.out.println("Test failure: exception: " + e.toString());
         }
+
+         logger.debug("End of testing");
     }
 }
 
