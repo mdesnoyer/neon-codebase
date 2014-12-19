@@ -18,6 +18,7 @@ from boto.emr.connection import EmrConnection
 import boto
 import cPickle as pickle
 import datetime
+import happybase
 import impala.dbapi
 import impala.error
 import json
@@ -26,9 +27,11 @@ from mastermind.core import VideoInfo, ThumbnailInfo, Mastermind
 import signal
 import socket
 import stats.cluster
+import struct
 from supportServices import neondata
 import tempfile
 import time
+import thrift
 import threading
 import tornado.ioloop
 import utils.neon
@@ -44,6 +47,14 @@ define('stats_port', type=int, default=21050,
        help='Port to the stats database')
 define('stats_db_polling_delay', default=247, type=float,
        help='Number of seconds between polls of the stats db')
+
+# Incremental stats database options. It is hbase
+define('incr_stats_host', default='localhost',
+       help='Host to connect to the hbase server with incremental stats updates')
+define('incr_stats_table', default='TIMESTAMP_THUMBNAIL_EVENT_COUNTS',
+       help='Table name to use in the incremental stats db')
+define('incr_stats_col_family', default='evts',
+       help='Column family to grab in the incremental stats db')
 
 # Video db options
 define('video_db_polling_delay', default=261, type=float,
@@ -63,6 +74,7 @@ define('expiry_buffer', type=int, default=30,
 statemon.define('time_since_stats_update', float) # Time since the last update
 statemon.define('time_since_publish', float) # Time since the last publish
 statemon.define('statsdb_error', int)
+statemon.define('incr_statsdb_error', int)
 statemon.define('videodb_error', int)
 statemon.define('publish_error', int)
 statemon.define('serving_urls_missing', int)
@@ -105,6 +117,27 @@ class VideoIdCache(object):
                     with self._lock:
                         self.cache[thumb_id] = video_id
             return video_id
+
+class ExperimentStrategyCache(object):
+    '''Cache to map from a video id to an experiment strategy.'''
+    def __init__(self):
+        self.cache = {} # video_id -> experiment_strategy
+        self._lock = threading.RLock()
+
+    def from_video_id(self, video_id):
+        try:
+            with self._lock:
+                strategy = self.cache[video_id]
+        except KeyError:
+            video = neondata.VideoMetadata.get(video_id)
+            if video is None:
+                _log.error('Could not find video %s' % video_id)
+                return None
+            strategy = neondata.ExperimentStrategy.get(video.get_account_id())
+            if strategy is not None:
+                with self._lock:
+                    self.cache[video_id] = strategy
+        return strategy
 
 class VideoDBWatcher(threading.Thread):
     '''This thread polls the video database for changes.'''
@@ -259,23 +292,7 @@ class StatsDBWatcher(threading.Thread):
         cursor = conn.cursor()
 
         _log.info('Polling the stats database')
-        
-        # See if there are any new entries
-        curtime = datetime.datetime.utcnow()
-        cursor.execute(
-            ('SELECT max(serverTime) FROM videoplays WHERE '
-             'yr >= {yr:d} or (yr = {yr:d} and mnth >= {mnth:d})').format(
-            mnth=curtime.month, yr=curtime.year))
-        result = cursor.fetchall()
-        if len(result) == 0 or result[0][0] is None:
-            _log.error('Cannot determine when the database was last updated')
-            statemon.state.increment('statsdb_error')
-            self.is_loaded.set()
-            return
-        cur_update = datetime.datetime.utcfromtimestamp(result[0][0])
-        statemon.state.time_since_stats_update = (
-            datetime.datetime.now() - cur_update).total_seconds()
-        if self.last_update is None or cur_update > self.last_update:
+        if self._is_newer_batch_data():
             _log.info('Found a newer entry in the stats database from %s. '
                       'Processing' % cur_update.isoformat())
             last_month = cur_update - datetime.timedelta(weeks=4)
@@ -335,9 +352,104 @@ class StatsDBWatcher(threading.Thread):
                         for x in cursor]
                     
                 self.mastermind.update_stats_info(data)
+        else:
+            col_map = {
+                neondata.MetricType.LOADS: 0,
+                neondata.MetricType.VIEWS: 1,
+                neondata.MetricType.CLICKS: 2,
+                neondata.MetricType.PLAYS: 3
+                }
+            strategy_cache = ExperimentStrategyCache()
+            for thumb_id, incr_counts in self._get_incremental_stat_data():
+                video_id = self.video_id_cache.find_video_id(thumb_id)
+                if video_id is None:
+                    continue
+                strategy = strategy_cache.from_video_id(video_id)
+                if strategy is None:
+                    
+                
                     
         self.last_update = cur_update
         self.is_loaded.set()
+
+    def _is_newer_batch_data(self, impala_conn):
+        '''Returns true if there is newer batch data.
+
+        Inputs:
+        impala_conn - Connection to impala
+        '''
+
+        cursor = impala_conn.cursor()
+        
+        curtime = datetime.datetime.utcnow()
+        cursor.execute(
+            ('SELECT max(serverTime) FROM videoplays WHERE '
+             'yr >= {yr:d} or (yr = {yr:d} and mnth >= {mnth:d})').format(
+            mnth=curtime.month, yr=curtime.year))
+        result = cursor.fetchall()
+        if len(result) == 0 or result[0][0] is None:
+            _log.error('Cannot determine when the database was last updated')
+            statemon.state.increment('statsdb_error')
+            self.is_loaded.set()
+            raise IOError('Bad batch database')
+            
+        cur_update = datetime.datetime.utcfromtimestamp(result[0][0])
+        statemon.state.time_since_stats_update = (
+            datetime.datetime.now() - cur_update).total_seconds()
+
+        is_newer = self.last_update is None or cur_update > self.last_update
+        self.last_update = cur_update
+        return is_newer
+        
+
+    def _get_incremental_stat_data(self):
+        '''Looks up the incremental stats data from the database.
+
+        Returns: dictionary of thumbnail_id => 
+                        [incr_loads, incr_views, incr_clicks, incr_plays]
+        '''
+        retval = {} 
+        try:
+            conn = happybase.Connection(options.incr_stats_host)
+            table = conn.table(options.incr_stats_table)
+            col_family = options.incr_stats_col_family
+            col_map = {
+                '%s:iv' % col_family : 0,
+                '%s:il' % col_family : 1,
+                '%s:ic' % col_family : 2,
+                '%s:vp' % col_family : 3}
+            row_start = None
+            if self.last_update is not None:
+                row_start = self.last_update.strftime('%Y-%m-%dT%H')
+            
+            for key, row in table.scan(row_start=row_start,
+                                       columns=[col_family]):
+                thumb_id = key.partition('_')[2]
+                if thumb_id == '':
+                    _log.warn_n('Invalid thumbnail id in key %s' % key, 100)
+                    continue
+
+                counts = retval.get(thumb_id, [0, 0, 0, 0])
+                for col_name, byte_val in row:
+                    try:
+                        int_val = struct.unpack('>q', byte_val)
+                        counts[col_map[col_name]] += int_val
+                    except ValueError as e:
+                        _log.warn_n('Invalid value found in key %s col %s: %s'
+                                    % (key, col_name, byte_val),
+                                    100)
+                    except KeyError as e:
+                        _log.error_n('Unexpected column in the database for '
+                                     'row %s: %s' % (key, col_name), 100)
+
+                retval[thumb_id] = counts
+        except thrift.TException as e:
+            _log.error('Error connecting to incremental stats database: %s'
+                       % e)
+            statemon.state.increment('incr_statsdb_error')
+
+        return retval            
+            
 
     def _find_cluster_ip(self):
         '''Finds the private ip of the stats cluster.'''

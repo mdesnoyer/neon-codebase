@@ -1143,6 +1143,29 @@ class ExperimentStrategy(NamespacedStoredObject):
         '''
         return ExperimentStrategy.__name__
 
+    @classmethod
+    def get(cls, key, callback=None):
+        if callback:
+            def _cb(obj):
+                callback(obj or ExperimentStrategy())
+                
+            super(ExperimentStrategy, cls).get(key, callback=_cb)
+        else:
+          obj = super(ExperimentStrategy, cls).get(key)
+          return obj or ExperimentStrategy()
+
+    @classmethod
+    def get_many(cls, keys, callback=None):
+      if callback:
+        def _cb(objs):
+          callback([x or ExperimentStrategy() for x in objs])
+
+        super(ExperimentStrategy, cls).get_many(keys, callback=_cb)
+      else:
+        objs = super(ExperimentStrategy, cls).get_many(keys)
+        return [x or ExperimentStrategy() for x in objs]
+        
+
 class CDNHostingMetadataList(NamespacedStoredObject):
     '''A list of CDNHostingMetadata objects.
 
