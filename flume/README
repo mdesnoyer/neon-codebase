@@ -1,0 +1,32 @@
+
+This code is the result of Flume experimentation.  The main issue to solve was the fact that the 
+tracker schema may change during a deployment, resulting in the flume collector having a 
+obsolete schema for a period of time. 
+
+
+NeonSerializer.java
+
+This class compiles the schema in use in an adjacent top level directory. While this is the most 
+robust and performing way of parsing an event, this class will probably break if a new schema 
+comes along in deployment.
+
+
+NeonGenericSerializer.java
+
+This is the current solution to the schema change issue.  This class fetches any new schema from 
+S3 to parse any event that comes along.  The processed schema is then kept in a cache for reuse.
+Events are handled in the most generic way possible and is the best performing solution so far. 
+This class will de facto handle any schema changes as long as the fields of interest are present
+and keep the the same types, mostly strings.  Any schema additions of unrelated fields are permitted
+and will not disrupt handling. 
+
+
+NeonResolvingSerializer.java
+
+This solution was experimented with but not completed. This solution uses the avro facility of
+resolving schema differences on the fly.  This solution is very taxing from a performance
+standpoint.  Furthermore, the resolving performance tax must be paid for each event as there is
+no easy way currently to differentiate the schema the code was compiled with and future schemas
+ that may come along.  At this time the class is unfinished and kept for future reference.  
+
+
