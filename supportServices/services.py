@@ -213,15 +213,15 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         # Loose comparison
         if "brightcove" in i_type:
             platform_account = yield tornado.gen.Task(
-                                        neondata.BrightcovePlatform.get_account,
+                                        neondata.BrightcovePlatform.get,
                                         self.api_key, i_id)
         elif "ooyala" in i_type:
             platform_account = yield tornado.gen.Task(
-                                        neondata.OoyalaPlatform.get_account,
+                                        neondata.OoyalaPlatform.get,
                                         self.api_key, i_id)
         elif "neon" in i_type: 
             platform_account = yield tornado.gen.Task(
-                                        neondata.NeonPlatform.get_account,
+                                        neondata.NeonPlatform.get,
                                         self.api_key)
 
         callback(platform_account)
@@ -1078,7 +1078,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             data = '{"error": "video_id not set"}'
             self.send_json_response(data, 400)
             
-        neondata.BrightcovePlatform.get_account(self.api_key,
+        neondata.BrightcovePlatform.get(self.api_key,
                                                 i_id,
                                                 get_account_callback)
         
@@ -1090,7 +1090,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         
         p_vid = neondata.InternalVideoID.to_external(i_vid)
         #Get account/integration
-        ba = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,
+        ba = yield tornado.gen.Task(neondata.BrightcovePlatform.get,
                 self.api_key,i_id)
 
         if not ba:
@@ -1291,7 +1291,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             return
 
         uri_parts = self.request.uri.split('/')
-        bc = yield tornado.gen.Task(neondata.BrightcovePlatform.get_account,
+        bc = yield tornado.gen.Task(neondata.BrightcovePlatform.get,
                                     self.api_key, i_id)
         if bc:
             bc.read_token = rtoken
@@ -1438,7 +1438,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         uri_parts = self.request.uri.split('/')
 
-        oo = yield tornado.gen.Task(neondata.OoyalaPlatform.get_account,
+        oo = yield tornado.gen.Task(neondata.OoyalaPlatform.get,
                                     self.api_key, i_id)
         if oo:
             oo.partner_code = partner_code
@@ -1466,7 +1466,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         p_vid = neondata.InternalVideoID.to_external(i_vid)
         
         #Get account/integration
-        oo = yield tornado.gen.Task(neondata.OoyalaPlatform.get_account,
+        oo = yield tornado.gen.Task(neondata.OoyalaPlatform.get,
                 self.api_key, i_id)
         if not oo:
             _log.error("key=update_video_ooyala" 
@@ -1773,7 +1773,7 @@ class BcoveHandler(tornado.web.RequestHandler):
         if vmdata:
             i_id = vmdata.integration_id
             ba  = yield tornado.gen.Task(
-                  neondata.BrightcovePlatform.get_account, self.a_id, i_id)
+                  neondata.BrightcovePlatform.get, self.a_id, i_id)
             if ba:
                 bcove_vid = neondata.InternalVideoID.to_external(
                             self.internal_video_id)

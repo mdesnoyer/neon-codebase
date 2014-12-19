@@ -500,6 +500,7 @@ class VideoProcessor(object):
         # thumbnails to the appropriate CDNs.
         if len(filter(lambda x: x[0].type == neondata.ThumbnailType.NEON,
                       self.thumbnails)) < 1:
+            # TODO (Sunil): Video to be marked as failed or int err ? 
             statemon.state.increment('no_thumbs')
             _log.warn("No thumbnails extracted for video %s url %s"\
                     % (self.video_metadata.key, self.video_metadata.url))

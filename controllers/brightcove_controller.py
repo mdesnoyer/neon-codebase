@@ -203,7 +203,7 @@ class ThumbnailCheckTask(AbstractTask):
                        "msg=Could not find video id: %s" % self.video_id)
             statemon.state.increment('thumbchecktask_fail')
             return
-        platform = BrightcovePlatform.get_account(video.get_account_id(),
+        platform = BrightcovePlatform.get(video.get_account_id(),
                                                   video.integration_id)
         if platform is None:
             _log.error("key=ThumbnailCheckTask "

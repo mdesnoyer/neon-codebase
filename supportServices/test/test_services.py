@@ -581,7 +581,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(len(video_response), 5)
 
         # Verify actual contents
-        platform = neondata.BrightcovePlatform.get_account(self.api_key,
+        platform = neondata.BrightcovePlatform.get(self.api_key,
                                                            self.b_id)
         self.assertFalse(platform.abtest) # Should default to False
         self.assertEqual(platform.neon_api_key, self.api_key)
@@ -597,7 +597,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         new_rtoken = ("newrtoken")
         update_response = self.update_brightcove_account(new_rtoken)
         self.assertEqual(update_response.code, 200)
-        platform = neondata.BrightcovePlatform.get_account(self.api_key,
+        platform = neondata.BrightcovePlatform.get(self.api_key,
                                                            self.b_id)
         self.assertEqual(platform.read_token, "newrtoken")
         self.assertFalse(platform.auto_update)
@@ -1012,7 +1012,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertIsNotNone(job_id)
         
         # add video to account
-        np = neondata.NeonPlatform.get_account(api_key)
+        np = neondata.NeonPlatform.get(api_key)
         np.add_video(vid, job_id)
         np.save()
 
@@ -1049,7 +1049,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertIsNotNone(job_id)
         
         # add video to account
-        np = neondata.NeonPlatform.get_account(api_key)
+        np = neondata.NeonPlatform.get(api_key)
         np.add_video(vid, job_id)
         np.save()
         
@@ -1097,7 +1097,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         '''
 
         self.api_key = self.create_neon_account()
-        nplatform = neondata.NeonPlatform.get_account(self.api_key)
+        nplatform = neondata.NeonPlatform.get(self.api_key)
         nvids = 10 
         api_requests = [] 
         for i in range(nvids):
@@ -1182,7 +1182,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
     def _setup_neon_account_and_request_object(self, vid="testvideo1",
                                             job_id = "j1"):
         self.api_key = self.create_neon_account()
-        nplatform = neondata.NeonPlatform.get_account(self.api_key)
+        nplatform = neondata.NeonPlatform.get(self.api_key)
         title = "title"
         video_download_url = "http://video.mp4" 
         api_request = neondata.NeonApiRequest(job_id, self.api_key, vid,
@@ -1266,7 +1266,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         '''
 
         self.api_key = self.create_neon_account()
-        nplatform = neondata.NeonPlatform.get_account(self.api_key)
+        nplatform = neondata.NeonPlatform.get(self.api_key)
         vid = "testvideo1"
         title = "title"
         video_download_url = "http://video.mp4" 
@@ -1878,7 +1878,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         self.create_ooyala_account()
 
         #Get ooyala account 
-        oo_account = neondata.OoyalaPlatform.get_account(self.api_key,
+        oo_account = neondata.OoyalaPlatform.get(self.api_key,
                                                          self.i_id)
         
         #create feed request
@@ -1888,7 +1888,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         '''
         Mock process the neon api requests
         '''
-        oo_account = neondata.OoyalaPlatform.get_account(self.api_key,
+        oo_account = neondata.OoyalaPlatform.get(self.api_key,
                                                          self.i_id)
         api_request_keys = []
         for vid, job_id in oo_account.videos.iteritems():
@@ -1917,7 +1917,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         self.assertTrue(strategy.only_exp_if_chosen)
 
         #Assert the job ids in the ooyala account
-        oo_account = neondata.OoyalaPlatform.get_account(self.api_key, self.i_id)
+        oo_account = neondata.OoyalaPlatform.get(self.api_key, self.i_id)
         self.assertTrue(len(oo_account.videos) >0)
 
     def _test_ooyala_signup_flow(self):
@@ -1965,7 +1965,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         self._create_request_from_feed()
         self._process_ooyala_neon_api_requests()
         
-        oo_account = neondata.OoyalaPlatform.get_account(self.api_key,
+        oo_account = neondata.OoyalaPlatform.get(self.api_key,
                                                          self.i_id)
         
         new_tids = [] 
@@ -1992,7 +1992,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         response = self.put_request(url, vals, self.api_key, jsonheader=True)
         self.assertEqual(response.code, 200)
 
-        oo_account = neondata.OoyalaPlatform.get_account(self.api_key,
+        oo_account = neondata.OoyalaPlatform.get(self.api_key,
                                                          self.i_id)
         self.assertEqual(oo_account.ooyala_api_key, 'okey') 
        

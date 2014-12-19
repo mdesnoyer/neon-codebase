@@ -81,7 +81,7 @@ def get_customer_priority(api_key):
     try:
         priority = customer_priorities[api_key]
     except KeyError, e:
-        nu = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
+        nu = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                 api_key)
         if nu:
             priority = nu.processing_priority
@@ -712,7 +712,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 # creation cron
                 if request_type == 'neon':
                     nplatform = yield tornado.gen.Task(
-                        neondata.NeonPlatform.get_account, api_key)
+                        neondata.NeonPlatform.get, api_key)
                     if nplatform:
                         # TODO:refactor after moving platform accounts
                         # to stored object (atomic save)
@@ -778,7 +778,7 @@ class HealthCheckHandler(tornado.web.RequestHandler):
         
         # Ping the DB to see if its running
         try:
-            ret = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
+            ret = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                 test_account_key)
             if ret:
                 self.set_status(200)
