@@ -1012,7 +1012,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertIsNotNone(job_id)
         
         # add video to account
-        np = neondata.NeonPlatform.get(api_key)
+        np = neondata.NeonPlatform.get(api_key, '0')
         np.add_video(vid, job_id)
         np.save()
 
@@ -1049,7 +1049,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertIsNotNone(job_id)
         
         # add video to account
-        np = neondata.NeonPlatform.get(api_key)
+        np = neondata.NeonPlatform.get(api_key, '0')
         np.add_video(vid, job_id)
         np.save()
         
@@ -1097,7 +1097,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         '''
 
         self.api_key = self.create_neon_account()
-        nplatform = neondata.NeonPlatform.get(self.api_key)
+        nplatform = neondata.NeonPlatform.get(self.api_key, '0')
         nvids = 10 
         api_requests = [] 
         for i in range(nvids):
@@ -1182,7 +1182,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
     def _setup_neon_account_and_request_object(self, vid="testvideo1",
                                             job_id = "j1"):
         self.api_key = self.create_neon_account()
-        nplatform = neondata.NeonPlatform.get(self.api_key)
+        nplatform = neondata.NeonPlatform.get(self.api_key, '0')
         title = "title"
         video_download_url = "http://video.mp4" 
         api_request = neondata.NeonApiRequest(job_id, self.api_key, vid,
@@ -1266,7 +1266,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         '''
 
         self.api_key = self.create_neon_account()
-        nplatform = neondata.NeonPlatform.get(self.api_key)
+        nplatform = neondata.NeonPlatform.get(self.api_key, '0')
         vid = "testvideo1"
         title = "title"
         video_download_url = "http://video.mp4" 
