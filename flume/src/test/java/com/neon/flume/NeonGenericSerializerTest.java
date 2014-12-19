@@ -788,7 +788,7 @@ public class NeonGenericSerializerTest {
         
         dummyFill(trackerEvent, writerSchema);
         
-        GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "AdPlay");
+        GenericData.EnumSymbol eventType = new GenericData.EnumSymbol(writerSchema, "AD_PLAY");
         trackerEvent.put("eventType", eventType);
         
         Schema.Field eventData = writerSchema.getField("eventData");
