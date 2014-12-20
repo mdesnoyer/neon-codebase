@@ -1434,7 +1434,7 @@ class NeonPlatform(AbstractPlatform):
         # By default integration ID 0 represents 
         # Neon Platform Integration (access via neon api)
         
-        super(NeonPlatform, self).__init__(api_key, '0')
+        super(NeonPlatform, self).__init__(api_key, '0', abtest)
         self.account_id = a_id
         self.neon_api_key = api_key 
    

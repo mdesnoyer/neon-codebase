@@ -222,7 +222,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         elif "neon" in i_type: 
             platform_account = yield tornado.gen.Task(
                                         neondata.NeonPlatform.get,
-                                        self.api_key)
+                                        self.api_key, '0')
 
         callback(platform_account)
 
@@ -1130,7 +1130,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         nuser_data = yield tornado.gen.Task(
                     neondata.NeonUserAccount.get_account, a_id)
         if not nuser_data:
-            nplatform = neondata.NeonPlatform(a_id, api_key)
+            nplatform = neondata.NeonPlatform(a_id, '0', api_key)
             user.add_platform(nplatform)
             res = yield tornado.gen.Task(user.save_platform, nplatform) 
             if res:
