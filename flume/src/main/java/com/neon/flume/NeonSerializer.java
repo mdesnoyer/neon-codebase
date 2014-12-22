@@ -50,19 +50,20 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     private final List<AtomicIncrementRequest> increments = new ArrayList<AtomicIncrementRequest>();
 
     // hbase tables
-    private byte[] thumbnailFirstTable = "THUMBNAIL_TIMESTAMP_EVENTS".getBytes();
-    private byte[] timestampFirstTable = "TIMESTAMP_THUMBNAIL_EVENTS".getBytes();
+    private static final byte[] THUMBNAIL_FIRST_TABLE = "THUMBNAIL_TIMESTAMP_EVENTS".getBytes();
+    private static final byte[] TIMESTAMP_FIRST_TABLE = "TIMESTAMP_THUMBNAIL_EVENTS".getBytes();
 
     // column family to store counters, one for each event type
-    private byte[] columnFamily = "THUMBNAIL_EVENTS_TYPES".getBytes();
+    private static final byte[] COLUMN_FAMILY = "THUMBNAIL_EVENTS_TYPES".getBytes();
     
     // column for the counter of IMAGE_VISIBLE and IMAGES_VISIBLE events
-    private byte imageVisibleColumnName[] = "IMAGE_VISIBLE".getBytes();
+    private static final byte[] IMAGE_VISIBLE_COLUMN_NAME = "IMAGE_VISIBLE".getBytes();
     
     // column for the counter of IMAGE_LOAD and IMAGES_LOADED events
-    private byte imageLoadColumnName[] = "IMAGE_LOAD".getBytes();
+    private static final byte[] IMAGE_LOAD_COLUMN_NAME = "IMAGE_LOAD".getBytes();
     
-    private byte imageClickColumnName[] = "IMAGE_CLICK".getBytes();
+    // column for the counter of IMAGE_CLICK events
+    private static final byte[] IMAGE_CLICK_COLUMN_NAME = "IMAGE_CLICK".getBytes();
         
     // event-based  
     private String eventTimestamp = null;
@@ -148,38 +149,32 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
 
             case IMAGE_VISIBLE:
                 ImageVisible imgVis = (ImageVisible) trackerEvent.getEventData();
-                handleIncrement(imgVis.getThumbnailId().toString(), imageVisibleColumnName);
+                handleIncrement(imgVis.getThumbnailId().toString(), IMAGE_VISIBLE_COLUMN_NAME);
                 break;
 
             case IMAGES_VISIBLE:
                 ImagesVisible imgsVis = (ImagesVisible) trackerEvent.getEventData();
-                Iterator<CharSequence> ivIterator = imgsVis.thumbnailIds.iterator();
-                while(ivIterator.hasNext()) {
-                    String tid = ivIterator.next().toString();
-                    handleIncrement(tid, imageVisibleColumnName);
-                }
+                for(CharSequence tid: imgsVis.thumbnailIds)
+                    handleIncrement(tid.toString(), IMAGE_VISIBLE_COLUMN_NAME);
                 break;
 
             case IMAGE_CLICK:
                 ImageClick imgClk = (ImageClick) trackerEvent.getEventData();
-                handleIncrement(imgClk.getThumbnailId().toString(), imageClickColumnName);
+                handleIncrement(imgClk.getThumbnailId().toString(), IMAGE_CLICK_COLUMN_NAME);
                 break;
                 
             case IMAGE_LOAD:
                 ImageLoad imgLd = (ImageLoad) trackerEvent.getEventData();
-                handleIncrement(imgLd.getThumbnailId().toString(), imageLoadColumnName);
+                handleIncrement(imgLd.getThumbnailId().toString(), IMAGE_LOAD_COLUMN_NAME);
                 break;
 
             case IMAGES_LOADED:
                 ImagesLoaded imgLded = (ImagesLoaded) trackerEvent.getEventData();
-                Iterator<ImageLoad> ilIterator = imgLded.images.iterator();
-                while(ilIterator.hasNext()) {
-                    String tid = ilIterator.next().getThumbnailId().toString();
-                    handleIncrement(tid, imageLoadColumnName);
-                }
+                for(ImageLoad img: imgLded.images)
+                    handleIncrement(img.getThumbnailId().toString(), IMAGE_LOAD_COLUMN_NAME);
                 break;
                 
-            // any unsupported event types, which result in no-ops
+            // event types we're not insterested in result in no-ops
             default:
                 return increments;
         }
@@ -191,11 +186,11 @@ public class NeonSerializer implements AsyncHbaseEventSerializer
     {
         // increment counter in table which begins with thumbnail first composite key
         String key = tid  + "_" + eventTimestamp;
-        increments.add(new AtomicIncrementRequest(thumbnailFirstTable, key.getBytes(), columnFamily, columnName));
+        increments.add(new AtomicIncrementRequest(THUMBNAIL_FIRST_TABLE, key.getBytes(), COLUMN_FAMILY, columnName));
 
         // increment counter in table which begins with timestamp first composite key
         key = eventTimestamp + "_" + tid;
-        increments.add(new AtomicIncrementRequest(timestampFirstTable, key.getBytes(), columnFamily,  columnName));
+        increments.add(new AtomicIncrementRequest(TIMESTAMP_FIRST_TABLE, key.getBytes(), COLUMN_FAMILY,  columnName));
     }
 
     @Override

@@ -73,16 +73,17 @@ def get_thumbnail_ids():
     retval = [x[0] for x in cursor if tidRe.match(x[0])]
     return retval
 
-def collect_stats(thumb_info,
-        impression_metric=MetricTypes.LOADS,
-        conversion_metric=MetricTypes.CLICKS):
+def collect_stats(thumb_info, video_info,
+                  impression_metric=MetricTypes.LOADS,
+                  conversion_metric=MetricTypes.CLICKS):
     '''Grabs the stats counts from the database and some calculations.
 
     Inputs:
     thumb_info - thumbnail_id -> ThumbnailMetadata
+    video_info - video_id -> VideoMetadata
 
-    Returns: A panda DataFrame with index of (video_id, type)
-    and columns of (impression_count, conversion_count, CTR, extra conversions, lift, pvalue)
+    Returns: A panda DataFrame with index of (integration_id, video_id, type,
+    rank) and columns of (impression_count, conversion_count, CTR, extra conversions, lift, pvalue)
     '''
     query_dict = {} # Thumbnail_id -> (impression_count, conversion_count)
 
@@ -132,10 +133,16 @@ def collect_stats(thumb_info,
     for video_id, type_map in merge_video_stats(thumb_info,
                                                 query_dict).iteritems():
         for key, stat in calc_per_video_stats(type_map).items():
-            video_data[(video_id, key[0], key[1])] = dict(zip(names, stat))
+            integration_id = 'UKNOWN'
+            try:
+                integration_id = video_info[video_id].integration_id
+            except KeyError: pass
+            video_data[(integration_id, video_id, key[0], key[1])] = \
+              dict(zip(names, stat))
 
     index = pandas.MultiIndex.from_tuples(video_data.keys(),
-                                          names=['video_id', 'type', 'rank'])
+                                          names=['integration_id', 'video_id',
+                                                 'type', 'rank'])
     retval= pandas.DataFrame(video_data.values(),
                              index=index,
                              columns=names)
@@ -215,66 +222,35 @@ def get_video_titles(video_ids):
     '''Returns the video titles for a list of video id'''
     retval = []
     video_datas = neondata.VideoMetadata.get_many(video_ids)
+
+    request_keys = [(x.job_id, x.get_account_id()) for x in video_datas if 
+                    x is not None]
+    requests = neondata.NeonApiRequest.get_many(request_keys)
+    requests = dict([(x.job_id, x) for x in requests if x is not None])
+    
     for video_data, video_id in zip(video_datas, video_ids):
         if video_data is None:
             _log.error('Could not find title for video id %s' % video_id)
             retval.append('')
             continue
     
-        api_request = neondata.NeonApiRequest.get(video_data.job_id,
-                                                  video_data.get_account_id())
+        api_request = requests.get(video_data.job_id, None)
         if api_request is None:
             _log.error('Could not find job for video id %s' % video_id)
             retval.append('')
             continue
         retval.append(api_request.video_title)
     return retval
-        
-def main():
-    _log.info('Getting metadata about the thumbnails.')
-    thumbnail_info = neondata.ThumbnailMetadata.get_many(get_thumbnail_ids())
-    thumbnail_info = dict([(x.key, x) for x in thumbnail_info
-                           if x is not None])
 
-    _log.info('Getting urls and video titles')
-    titles = get_video_titles([x.video_id for x in thumbnail_info.values() if
-	                       x.video_id is not None])
-    urls = dict(
-        [((x.video_id, x.type, x.rank if x.type =='neon' else 0),
-          [x.urls[0] if x.urls is not None else x.url, title]) 
-         for x, title in zip(thumbnail_info.values(), titles)])
-    url_index = pandas.MultiIndex.from_tuples(
-        urls.keys(), names=['video_id', 'type', 'rank'])
-    urls = pandas.DataFrame(
-        urls.values(), index=url_index,
-        columns=pandas.MultiIndex.from_tuples([('', 'url'), ('', 'title')]))
-    urls.sortlevel()
-    
-    # Collect the count data for the metrics we care about. This will
-    # index by video_id and type
-    _log.info('Calculating per video statistics')
-    video_stats = {
-        'CTR (Loads)' : collect_stats(thumbnail_info, MetricTypes.LOADS,
-                                       MetricTypes.CLICKS),
-        'CTR (Views)' : collect_stats(thumbnail_info, MetricTypes.VIEWS,
-                                       MetricTypes.CLICKS),
-        'PTR (Loads)' : collect_stats(thumbnail_info, MetricTypes.LOADS,
-                                       MetricTypes.PLAYS),
-        'PTR (Views)' : collect_stats(thumbnail_info, MetricTypes.VIEWS,
-                                       MetricTypes.PLAYS),
-        'VTR' : collect_stats(thumbnail_info, MetricTypes.LOADS,
-                               MetricTypes.VIEWS),           
-        }
-    video_data = pandas.concat(video_stats.values(),
-                               keys=video_stats.keys(),
-                               axis=1).dropna()
-    
-    video_data = pandas.concat([video_data, urls], join='inner',
-                               keys=['data', 'metadata'], axis=1)
-    video_data = video_data.sortlevel()
-    
+def calculate_aggregate_stats(video_stats):
+    '''Calculates the aggregates stats for some videos.
 
-    _log.info('Calculating aggregate statistics')
+    Inputs:
+    video_stats - Dictionary of stat_type -> DataFrame indexed by (integration_id, video_id, type, rank)
+
+    Outputs:
+    DataFrame indexed by stat_type on one dimension and stat_name on the other
+    '''
     agg_stat_names = ['Mean Lift', 'P Value', 'Lower 95%',
                       'Upper 95%', 'Random Effects Error']
     agg_data = {}
@@ -286,7 +262,7 @@ def main():
         agg_counts = video_stat.loc[:, ['impr', 'conv']]
 
         # Aggregate all the neon counts
-        agg_counts = agg_counts.groupby(level=[0,1]).sum().fillna(0)
+        agg_counts = agg_counts.groupby(level=[0,1,2]).sum().fillna(0)
 
         # Reshape the data into the format so that each row is
         # <base impressions>,<base conversions>,
@@ -314,11 +290,86 @@ def main():
 
     agg_data = pandas.DataFrame(agg_data)
     agg_data = agg_data.sortlevel()
+    return agg_data
+    
+        
+def main():
+    _log.info('Getting metadata about the thumbnails.')
+    thumbnail_info = neondata.ThumbnailMetadata.get_many(get_thumbnail_ids())
+    thumbnail_info = dict([(x.key, x) for x in thumbnail_info
+                           if x is not None])
 
+    _log.info('Getting metadata about the videos.')
+    video_info = neondata.VideoMetadata.get_many(
+        set([x.video_id for x in thumbnail_info.itervalues()]))
+    video_info = dict([(x.key, x) for x in video_info if x is not None])
+
+    _log.info('Getting urls and video titles')
+    titles = get_video_titles([x.video_id for x in thumbnail_info.values() if
+	                       x.video_id is not None])
+    urls = dict(
+        [((video_info[x.video_id].integration_id, x.video_id, x.type, x.rank
+           if x.type =='neon' else 0),
+          [x.urls[0] if x.urls is not None else x.url,
+           title]) 
+         for x, title in zip(thumbnail_info.values(), titles)])
+    url_index = pandas.MultiIndex.from_tuples(
+        urls.keys(), names=['integration_id', 'video_id', 'type', 'rank'])
+    urls = pandas.DataFrame(
+        urls.values(), index=url_index,
+        columns=pandas.MultiIndex.from_tuples([('', 'url'), ('', 'title')]))
+    urls.sortlevel()
+    
+    # Collect the count data for the metrics we care about. This will
+    # index by integration id, video_id, type and rank
+    _log.info('Calculating per video statistics')
+    video_stats = {
+        'CTR (Loads)' : collect_stats(thumbnail_info, video_info,
+                                      MetricTypes.LOADS,
+                                      MetricTypes.CLICKS),
+        'CTR (Views)' : collect_stats(thumbnail_info, video_info,
+                                      MetricTypes.VIEWS,
+                                      MetricTypes.CLICKS),
+        'PTR (Loads)' : collect_stats(thumbnail_info, video_info,
+                                      MetricTypes.LOADS,
+                                      MetricTypes.PLAYS),
+        'PTR (Views)' : collect_stats(thumbnail_info, video_info,
+                                      MetricTypes.VIEWS,
+                                      MetricTypes.PLAYS),
+        'VTR' : collect_stats(thumbnail_info, video_info,
+                              MetricTypes.LOADS,
+                              MetricTypes.VIEWS),           
+        }
+    video_data = pandas.concat(video_stats.values(),
+                               keys=video_stats.keys(),
+                               axis=1).dropna()
+    
+    video_data = pandas.concat([video_data, urls], join='inner',
+                               keys=['data', 'metadata'], axis=1)
+    video_data = video_data.sortlevel()
+    
+
+    _log.info('Calculating aggregate statistics')
+    aggregate_sheets = {}
+    aggregate_sheets['Overall'] = calculate_aggregate_stats(video_stats)
+    integration_stats = {}
+    for stat_name, data_frame in video_stats.iteritems():
+        for integration_id, data in data_frame.groupby(level=[0]):
+            if integration_id not in integration_stats:
+                integration_stats[integration_id] = {}
+    
+            integration_stats[integration_id][stat_name] = data
+    for integration_id, data_dict in integration_stats.iteritems():
+        try:
+            aggregate_sheets['Aggregate %s' % integration_id] = \
+              calculate_aggregate_stats(data_dict)
+        except Exception as e:
+            _log.exception('Error: %s' % e)
     
     with pandas.ExcelWriter(options.output) as writer:
         video_data.to_excel(writer, sheet_name='Per Video Stats')
-        agg_data.to_excel(writer, sheet_name='Aggregate Stats')
+        for sheet_name, data in aggregate_sheets.iteritems():
+            data.to_excel(writer, sheet_name=sheet_name)
 
 
 if __name__ == "__main__":
