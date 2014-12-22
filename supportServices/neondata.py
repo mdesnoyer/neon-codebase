@@ -22,7 +22,7 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] <> base_path:
     sys.path.insert(0,base_path)
 
-#import api.cdnhosting
+import api.cdnhosting
 from api import ooyala_api
 import base64
 import binascii
@@ -496,6 +496,8 @@ class StoredObject(object):
                 # type in the databse, so assume that the class is cls
                 classtype = cls
                 data_dict = obj_dict
+            
+            # create basic object using the "default" constructor
             obj = classtype(key)
 
             #populate the object dictionary
@@ -1325,6 +1327,16 @@ class AbstractPlatform(NamespacedStoredObject):
                 }
             return super(AbstractPlatform, cls)._create(key, obj_dict)
 
+    def save(self, callback=None):
+        # since we need a default constructor with empty strings for the 
+        # eval magic to work, check here to ensure apikey and i_id aren't empty
+        # since the key is generated based on them
+        if self.neon_api_key == '' or self.integration_id == '':
+            raise Exception('Invalid initialization of AbstractPlatform or its\
+                    subclass object. api_key and i_id should not be empty')
+
+        super(AbstractPlatform, self).save(callback)
+
     @classmethod
     def get(cls, api_key, i_id, callback=None):
         ''' get instance '''
@@ -1451,8 +1463,9 @@ class NeonPlatform(AbstractPlatform):
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
     
-    def __init__(self, a_id, i_id='', api_key='', p_id=None, rtoken=None, wtoken=None,
-                auto_update=False, last_process_date=None, abtest=False):
+    def __init__(self, a_id, i_id='', api_key='', p_id=None, 
+                rtoken=None, wtoken=None, auto_update=False,
+                last_process_date=None, abtest=False):
 
         ''' On every request, the job id is saved '''
         super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)

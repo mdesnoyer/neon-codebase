@@ -43,6 +43,9 @@ define("thumbnailBucket", default="host-thumbnails", type=str,
 define("port", default=8083, help="run on the given port", type=int)
 define("local", default=0, help="call local service", type=int)
 define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
+define("max_videoid_size", default=128, help="max vid size", type=int)
+# max tid size = vid_size + 40(md5 hexdigest)
+define("max_tid_size", default=168, help="max tid size", type=int)
 
 import logging
 _log = logging.getLogger(__name__)
@@ -396,6 +399,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 else:
                     self.method_not_supported()
 
+            # Create thumbnail API
             elif method == "create_thumbnail_api_request":
                 self.create_neon_thumbnail_api_request()
             elif method == "reprocess_video_request":
@@ -622,6 +626,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         Endpoint for API calls to submit a video request
         '''
         video_id = self.get_argument('video_id', None)
+        if len(video_id) > options.max_videoid_size:
+            self.send_json_response(
+                '{"error":"video id greater than 128 chars"}', 400)
+            return    
+
         video_url = self.get_argument('video_url', "")
         video_url = video_url.replace("www.dropbox.com", 
                                 "dl.dropboxusercontent.com")
