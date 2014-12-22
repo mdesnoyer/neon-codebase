@@ -14,19 +14,23 @@ comes along in deployment.
 NeonGenericSerializer.java
 
 This is the current solution to the schema change issue.  This class fetches any new schema from 
-S3 to parse any event that comes along.  The processed schema is then kept in a cache for reuse.
+S3 to parse any event that comes along.  The processed schema is then kept in a cache for reuse. There
+are no a priori, compile-time schema requirements.
+
 Events are handled in the most generic way possible and is the best performing solution so far. 
-This class will de facto handle any schema changes as long as the fields of interest are present
-and keep the the same types, mostly strings.  Any schema additions of unrelated fields are permitted
-and will not disrupt handling. 
+This class exploits the fact that tracker events are described with basic primitives types such as strings,
+which are accessible with a simple key-value scheme.  Even our specifically defined record types can be 
+accessed with a simple generic record type providing key-value access. This class will de facto handle any 
+schema changes as long as the fields of interest are present and remain unchanged in type and hierarchy.  
+Any schema additions of unrelated fields are permitted and will not disrupt handling of existing fields. 
 
 
 NeonResolvingSerializer.java
 
 This solution was experimented with but not completed. This solution uses the avro facility of
-resolving schema differences on the fly.  This solution is very taxing from a performance
-standpoint.  Furthermore, the resolving performance tax must be paid for each event as there is
-no easy way currently to differentiate the schema the code was compiled with and future schemas
- that may come along.  At this time the class is unfinished and kept for future reference.  
-
+resolving schema differences on the fly.  This solution is unacceptably taxing from a performance
+standpoint at scale.  Furthermore, the resolving performance tax may have to be paid even for an unchanged 
+schema since there is no cheap way as of now to differentiate between a compiled-in schema and a changed one 
+received from the wild.  Therefore all schemas, even the same one, may have to be resolved field-wise every 
+time one way or another.  
 
