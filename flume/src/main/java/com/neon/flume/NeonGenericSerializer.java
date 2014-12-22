@@ -49,20 +49,20 @@ public class NeonGenericSerializer implements AsyncHbaseEventSerializer
     private final List<AtomicIncrementRequest> increments = new ArrayList<AtomicIncrementRequest>();
 
     // hbase tables
-    private static final byte[] THUMBNAIL_FIRST_TABLE = "THUMBNAIL_TIMESTAMP_EVENTS".getBytes();
-    private static final byte[] TIMESTAMP_FIRST_TABLE = "TIMESTAMP_THUMBNAIL_EVENTS".getBytes();
+    private static final byte[] THUMBNAIL_FIRST_TABLE = "THUMBNAIL_TIMESTAMP_EVENT_COUNTS".getBytes();
+    private static final byte[] TIMESTAMP_FIRST_TABLE = "TIMESTAMP_THUMBNAIL_EVENT_COUNTS".getBytes();
 
     // column family to store counters, one for each event type
-    private static final byte[] COLUMN_FAMILY = "THUMBNAIL_EVENTS_TYPES".getBytes();
+    private static final byte[] COLUMN_FAMILY = "evts".getBytes();
     
     // column for the counter of IMAGE_VISIBLE and IMAGES_VISIBLE events
-    private static final byte[] IMAGE_VISIBLE_COLUMN_NAME = "IMAGE_VISIBLE".getBytes();
+    private static final byte[] IMAGE_VISIBLE_COLUMN_NAME = "iv".getBytes();
     
     // column for the counter of IMAGE_LOAD and IMAGES_LOADED events
-    private static final byte[] IMAGE_LOAD_COLUMN_NAME = "IMAGE_LOAD".getBytes();
+    private static final byte[] IMAGE_LOAD_COLUMN_NAME = "il".getBytes();
     
     // column for the counter of IMAGE_CLICK events
-    private static final byte[] IMAGE_CLICK_COLUMN_NAME = "IMAGE_CLICK".getBytes();
+    private static final byte[] IMAGE_CLICK_COLUMN_NAME = "ic".getBytes();
 
     // tracker event header of the schema in use 
     public static final String AVRO_SCHEMA_URL_HEADER = "flume.avro.schema.url";
