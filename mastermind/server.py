@@ -32,6 +32,7 @@ from supportServices import neondata
 import tempfile
 import time
 import thrift
+import thrift.Thrift
 import threading
 import tornado.ioloop
 import utils.neon
@@ -51,8 +52,6 @@ define('stats_db_polling_delay', default=247, type=float,
 # Incremental stats database options. It is hbase
 define('incr_stats_host', default='localhost',
        help='Host to connect to the hbase server with incremental stats updates')
-define('incr_stats_table', default='TIMESTAMP_THUMBNAIL_EVENT_COUNTS',
-       help='Table name to use in the incremental stats db')
 define('incr_stats_col_family', default='evts',
        help='Column family to grab in the incremental stats db')
 
@@ -119,25 +118,32 @@ class VideoIdCache(object):
             return video_id
 
 class ExperimentStrategyCache(object):
-    '''Cache to map from a video id to an experiment strategy.'''
+    '''Cache to map from an account_id to an experiment strategy.'''
     def __init__(self):
-        self.cache = {} # video_id -> experiment_strategy
+        self.cache = {} # account_id -> experiment_strategy
         self._lock = threading.RLock()
 
-    def from_video_id(self, video_id):
+    def get(self, account_id):
+        '''Return the experiment strategy for a given account.'''
         try:
             with self._lock:
-                strategy = self.cache[video_id]
+                strategy = self.cache[account_id]
         except KeyError:
-            video = neondata.VideoMetadata.get(video_id)
-            if video is None:
-                _log.error('Could not find video %s' % video_id)
-                return None
-            strategy = neondata.ExperimentStrategy.get(video.get_account_id())
-            if strategy is not None:
-                with self._lock:
-                    self.cache[video_id] = strategy
+            strategy = neondata.ExperimentStrategy.get(account_id)
+            with self._lock:
+                self.cache[account_id] = strategy
         return strategy
+
+    def from_video_id(self, video_id):
+        '''Return the experiment strategy for a given video.
+        '''
+        video = neondata.VideoMetadata(video_id)
+        return self.get(video.get_account_id())
+
+    def from_thumb_id(self, thumb_id):
+        '''Return the experiment strategy for a given thumb.'''
+        thumb = neondata.ThumbnailMetadata(thumb_id)
+        return self.get(thumb.get_account_id())
 
 class VideoDBWatcher(threading.Thread):
     '''This thread polls the video database for changes.'''
@@ -240,6 +246,11 @@ class VideoDBWatcher(threading.Thread):
         
         self.is_loaded.set()
 
+def hourtimestamp(dt):
+    'Converts a datetime to a timestamp and rounds down to the nearest hour'
+    return (dt.replace(minute=0, second=0, microsecond=0) - 
+            datetime.datetime(1970, 1, 1)).total_seconds()
+
 class StatsDBWatcher(threading.Thread):
     '''This thread polls the stats database for changes.'''
     def __init__(self, mastermind, video_id_cache=VideoIdCache(),
@@ -278,6 +289,8 @@ class StatsDBWatcher(threading.Thread):
             self._stopped.wait(options.stats_db_polling_delay)
 
     def _process_db_data(self):
+        strategy_cache = ExperimentStrategyCache()
+        
         stats_host = self._find_cluster_ip()
         _log.info('Statistics database is at host=%s port=%i' %
                   (stats_host, options.stats_port))
@@ -292,10 +305,10 @@ class StatsDBWatcher(threading.Thread):
         cursor = conn.cursor()
 
         _log.info('Polling the stats database')
-        if self._is_newer_batch_data():
+        if self._is_newer_batch_data(conn):
             _log.info('Found a newer entry in the stats database from %s. '
-                      'Processing' % cur_update.isoformat())
-            last_month = cur_update - datetime.timedelta(weeks=4)
+                      'Processing' % self.last_update.isoformat())
+            last_month = self.last_update - datetime.timedelta(weeks=4)
             col_map = {
                 neondata.MetricType.LOADS: 'imloadclienttime',
                 neondata.MetricType.VIEWS: 'imvisclienttime',
@@ -312,11 +325,7 @@ class StatsDBWatcher(threading.Thread):
                     continue
 
                 # Build the query for all the data in the last month
-                strategy = neondata.ExperimentStrategy.get(tai_info.value)
-                if strategy is None:
-                    _log.error('Could not find experimental strategy for '
-                               'account %s. Skipping' % tai_info.value)
-                    continue
+                strategy = strategy_cache.get(tai_info.value)
                 if strategy.conversion_type == neondata.MetricType.PLAYS:
                     query = (
                         ("select thumbnail_id, count({imp_type}), "
@@ -325,11 +334,13 @@ class StatsDBWatcher(threading.Thread):
                          "videoplayclienttime is not null) as int)) "
                          "from EventSequences where tai='{tai}' and "
                          "{imp_type} is not null "
+                         "and servertime < {update_hour:f} "
                          "and (yr >= {yr:d} or "
                          "(yr = {yr:d} and mnth >= {mnth:d})) "
                          "group by thumbnail_id").format(
                             imp_type=col_map[strategy.impression_type],
                             tai=tai_info.get_tai(),
+                            update_hour=hourtimestamp(self.last_update),
                             yr=last_month.year,
                             mnth=last_month.month))
                 else:
@@ -338,42 +349,48 @@ class StatsDBWatcher(threading.Thread):
                          "count({conv_type}) "
                          "from EventSequences where tai='{tai}' and "
                          "{imp_type} is not null "
+                         "and servertime < {update_hour:f} "
                          "and yr >= {yr:d} and mnth >= {mnth:d} "
                          "group by thumbnail_id").format(
                             imp_type=col_map[strategy.impression_type],
                             conv_type=col_map[strategy.conversion_type],
                             tai=tai_info.get_tai(),
+                            update_hour=hourtimestamp(self.last_update),
                             yr=last_month.year,
                             mnth=last_month.month))
                 cursor.execute(query)
 
-                data = [(self.video_id_cache.find_video_id(x[0]), x[0], x[1],
-                         x[2])
-                        for x in cursor]
+                data = []
+                for thumb_id, base_imp, base_conv in cursor:
+                    incr_counts = self._get_incremental_stat_data(
+                        thumb_id=thumb_id,
+                        strategy_cache=strategy_cache)[thumb_id]
+                    data.append((self.video_id_cache.find_video_id(thumb_id),
+                                 thumb_id,
+                                 base_imp,
+                                 incr_counts[0],
+                                 base_conv,
+                                 incr_counts[1]))
                     
                 self.mastermind.update_stats_info(data)
         else:
-            col_map = {
-                neondata.MetricType.LOADS: 0,
-                neondata.MetricType.VIEWS: 1,
-                neondata.MetricType.CLICKS: 2,
-                neondata.MetricType.PLAYS: 3
-                }
-            strategy_cache = ExperimentStrategyCache()
-            for thumb_id, incr_counts in self._get_incremental_stat_data():
-                video_id = self.video_id_cache.find_video_id(thumb_id)
-                if video_id is None:
-                    continue
-                strategy = strategy_cache.from_video_id(video_id)
-                if strategy is None:
+            self.mastermind.update_stats_info([
+                (self.video_id_cache.find_video_id(thumb_id),
+                 thumb_id,
+                 None, # base impression
+                 counts[0], # incr impressions
+                 None, # base conversions
+                 counts[1]) # incr conversions
+                 for thumb_id, counts in 
+                 self._get_incremental_stat_data(strategy_cache=strategy_cache)
+                 .iteritems()])
                     
-                
-                    
-        self.last_update = cur_update
         self.is_loaded.set()
 
     def _is_newer_batch_data(self, impala_conn):
         '''Returns true if there is newer batch data.
+
+        Also resets the self.last_update parameter
 
         Inputs:
         impala_conn - Connection to impala
@@ -401,52 +418,96 @@ class StatsDBWatcher(threading.Thread):
         self.last_update = cur_update
         return is_newer
         
-
-    def _get_incremental_stat_data(self):
+ 
+    def _get_incremental_stat_data(self, thumb_id=None, strategy_cache=None):
         '''Looks up the incremental stats data from the database.
 
-        Returns: dictionary of thumbnail_id => 
-                        [incr_loads, incr_views, incr_clicks, incr_plays]
+        Inputs:
+        thumb_id - If set, only those counts for this thumb will be returned
+        strategy_cache - Cache for retrieving the ExperimentStrategy objects.
+
+        Returns: dictionary of thumbnail_id =>  [incr_imp, incr_conv]
         '''
+        if strategy_cache is None:
+            strategy_cache = ExperimentStrategyCache()
         retval = {} 
+        if thumb_id is not None:
+            retval[thumb_id] = [0, 0]
         try:
             conn = happybase.Connection(options.incr_stats_host)
-            table = conn.table(options.incr_stats_table)
             col_family = options.incr_stats_col_family
             col_map = {
-                '%s:iv' % col_family : 0,
-                '%s:il' % col_family : 1,
-                '%s:ic' % col_family : 2,
-                '%s:vp' % col_family : 3}
+                neondata.MetricType.LOADS : '%s:il' % col_family,
+                neondata.MetricType.VIEWS : '%s:iv' % col_family,
+                neondata.MetricType.CLICKS : '%s:ic' % col_family,
+                neondata.MetricType.PLAYS : '%s:vp' % col_family}
+                
             row_start = None
-            if self.last_update is not None:
-                row_start = self.last_update.strftime('%Y-%m-%dT%H')
+            row_end = None
+            table = None
+            if thumb_id is None:
+                # We want all the data from a given time onwards for all
+                # thumbnails
+                table = conn.table('TIMESTAMP_THUMBNAIL_EVENT_COUNTS')
+                if self.last_update is not None:
+                    # There is a time to start at
+                    row_start = self.last_update.strftime('%Y-%m-%dT%H')
+            else:
+                # We only want data from a specific thumb
+                table = conn.table('THUMBNAIL_TIMESTAMP_EVENT_COUNTS')
+                row_end = thumb_id + 'a'
+                if self.last_update is None:
+                    row_start = thumb_id
+                else:
+                    row_start = '_'.join([
+                        thumb_id, self.last_update.strftime('%Y-%m-%dT%H')])
             
             for key, row in table.scan(row_start=row_start,
+                                       row_end=row_end,
                                        columns=[col_family]):
-                thumb_id = key.partition('_')[2]
-                if thumb_id == '':
+                if thumb_id is None:
+                    tid = key.partition('_')[2]
+                else:
+                    tid = thumb_id
+                if tid == '':
                     _log.warn_n('Invalid thumbnail id in key %s' % key, 100)
                     continue
 
-                counts = retval.get(thumb_id, [0, 0, 0, 0])
-                for col_name, byte_val in row:
-                    try:
-                        int_val = struct.unpack('>q', byte_val)
-                        counts[col_map[col_name]] += int_val
-                    except ValueError as e:
-                        _log.warn_n('Invalid value found in key %s col %s: %s'
-                                    % (key, col_name, byte_val),
-                                    100)
-                    except KeyError as e:
-                        _log.error_n('Unexpected column in the database for '
-                                     'row %s: %s' % (key, col_name), 100)
+                strategy = strategy_cache.from_thumb_id(tid)
 
-                retval[thumb_id] = counts
-        except thrift.TException as e:
+                counts = retval.get(tid, [0, 0])
+
+                try:
+                    impr_col = col_map[strategy.impression_type]
+                    conv_col = col_map[strategy.conversion_type]
+                except KeyError as e:
+                    _log.error_n('Unexpected event type in the experiment '
+                                 'strategy for account %s: %s' % 
+                                 (strategy.get_id(), e), 100)
+                    continue
+
+                try:
+                    
+                    incr_imp = struct.unpack('>q', row[impr_col])[0]
+                    incr_conv = struct.unpack('>q', row[conv_col])[0]
+                    counts[0] += incr_imp
+                    counts[1] += incr_conv
+                except ValueError as e:
+                    _log.warn_n('Invalid value found for key %s: %s' %
+                                (key, e), 100)
+                    continue
+                except KeyError as e:
+                    _log.warn_n('Column is missing from key %s: %s' %
+                                 (key, e), 100)
+                    continue
+
+                retval[tid] = counts
+        except thrift.Thrift.TException as e:
             _log.error('Error connecting to incremental stats database: %s'
                        % e)
             statemon.state.increment('incr_statsdb_error')
+            if thumb_id is not None:
+                retval[thumb_id] = [None, None]
 
         return retval            
             

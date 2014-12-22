@@ -1195,7 +1195,7 @@ class ExperimentStrategy(DefaultedStoredObject):
         return ExperimentStrategy.__name__
         
 
-class CDNHostingMetadataList(NamespacedStoredObject):
+class CDNHostingMetadataList(DefaultedStoredObject):
     '''A list of CDNHostingMetadata objects.
 
     Keyed by (api_key, integration_id). Use the create_key method to
@@ -1207,7 +1207,10 @@ class CDNHostingMetadataList(NamespacedStoredObject):
         if self.get_id() and len(self.get_id().split('_')) != 2:
             raise ValueError('Invalid key %s. Must be generated using '
                              'create_key()' % self.get_id())
-        self.cdns = cdns or []
+        if cdns is None:
+            self.cdns = [NeonCDNHostingMetadata()]
+        else:
+            self.cdns = cdns
 
     def __iter__(self):
         '''Iterate through the cdns.'''
@@ -2594,7 +2597,7 @@ class ThumbnailMetadata(StoredObject):
 
     def get_account_id(self):
         ''' get the internal account id. aka api key '''
-        return self.video_id.split('_')[0]
+        return self.key.split('_')[0]
     
     def get_metadata(self):
         ''' get a dictionary of the thumbnail metadata
