@@ -134,12 +134,6 @@ class ExperimentStrategyCache(object):
                 self.cache[account_id] = strategy
         return strategy
 
-    def from_video_id(self, video_id):
-        '''Return the experiment strategy for a given video.
-        '''
-        video = neondata.VideoMetadata(video_id)
-        return self.get(video.get_account_id())
-
     def from_thumb_id(self, thumb_id):
         '''Return the experiment strategy for a given thumb.'''
         thumb = neondata.ThumbnailMetadata(thumb_id)
@@ -363,8 +357,8 @@ class StatsDBWatcher(threading.Thread):
                 data = []
                 for thumb_id, base_imp, base_conv in cursor:
                     incr_counts = self._get_incremental_stat_data(
-                        thumb_id=thumb_id,
-                        strategy_cache=strategy_cache)[thumb_id]
+                        strategy_cache,
+                        thumb_id=thumb_id)[thumb_id]
                     data.append((self.video_id_cache.find_video_id(thumb_id),
                                  thumb_id,
                                  base_imp,
@@ -382,7 +376,7 @@ class StatsDBWatcher(threading.Thread):
                  None, # base conversions
                  counts[1]) # incr conversions
                  for thumb_id, counts in 
-                 self._get_incremental_stat_data(strategy_cache=strategy_cache)
+                 self._get_incremental_stat_data(strategy_cache)
                  .iteritems()])
                     
         self.is_loaded.set()
@@ -419,7 +413,7 @@ class StatsDBWatcher(threading.Thread):
         return is_newer
         
  
-    def _get_incremental_stat_data(self, thumb_id=None, strategy_cache=None):
+    def _get_incremental_stat_data(self, strategy_cache, thumb_id=None):
         '''Looks up the incremental stats data from the database.
 
         Inputs:
@@ -428,8 +422,6 @@ class StatsDBWatcher(threading.Thread):
 
         Returns: dictionary of thumbnail_id =>  [incr_imp, incr_conv]
         '''
-        if strategy_cache is None:
-            strategy_cache = ExperimentStrategyCache()
         retval = {} 
         if thumb_id is not None:
             retval[thumb_id] = [0, 0]
@@ -488,17 +480,15 @@ class StatsDBWatcher(threading.Thread):
 
                 try:
                     
-                    incr_imp = struct.unpack('>q', row[impr_col])[0]
-                    incr_conv = struct.unpack('>q', row[conv_col])[0]
+                    incr_imp = struct.unpack('>q',
+                                             row.get(impr_col, '\x00'*8))[0]
+                    incr_conv = struct.unpack('>q',
+                                              row.get(conv_col,'\x00'*8))[0]
                     counts[0] += incr_imp
                     counts[1] += incr_conv
-                except ValueError as e:
+                except struct.error as e:
                     _log.warn_n('Invalid value found for key %s: %s' %
                                 (key, e), 100)
-                    continue
-                except KeyError as e:
-                    _log.warn_n('Column is missing from key %s: %s' %
-                                 (key, e), 100)
                     continue
 
                 retval[tid] = counts

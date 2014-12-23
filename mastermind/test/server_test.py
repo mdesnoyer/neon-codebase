@@ -18,6 +18,7 @@ import datetime as date
 import dateutil.parser
 import fake_filesystem
 import fake_tempfile
+import happybase
 import impala.error
 import json
 import logging
@@ -604,7 +605,8 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         # hour back.
         cursor = self.ramdb.cursor()
         cursor.execute('REPLACE INTO VideoPlays '
-        '(serverTime, mnth, yr) values (1405375746.324, 6, 2033)')
+                       '(serverTime, mnth, yr) values '
+                       '(1405375746.324, 6, 2033)')
         cursor.executemany('REPLACE INTO EventSequences '
         '(thumbnail_id, imvisclienttime, imclickclienttime, servertime, mnth, '
         'yr, tai) '
@@ -742,7 +744,136 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
                                ('vid21', 'tid21', 3, 0, 0, 0)])
         self.assertTrue(self.watcher.is_loaded)
 
+    def test_hbase_down_impala_up(self, datamock):
+        # hbase connection attempt fails
+        self.hbase_conn.side_effect = [
+            thrift.transport.TTransport.TTransportException(
+                None, 'Could not connect')]
+
+        # Fill out the database
+        datamock.TrackerAccountIDMapper.get_all.return_value = [
+            neondata.TrackerAccountIDMapper('tai1', 'acct1', PROD)
+            ]
+        datamock.TrackerAccountIDMapper.PRODUCTION = PROD
+        datamock.TrackerAccountIDMapper.STAGING = STAGING
+        datamock.MetricType = neondata.MetricType
+        datamock.ExperimentStrategy.get.side_effect = \
+          lambda x: neondata.ExperimentStrategy(x)
+        datamock.ThumbnailMetadata.get_video_id.return_value = 'vid11'
+
+        # Add entries to the batch database.
+        cursor = self.ramdb.cursor()
+        cursor.execute('REPLACE INTO VideoPlays '
+                       '(serverTime, mnth, yr) values '
+                       '(1405375746.324, 6, 2033)')
+        cursor.executemany('REPLACE INTO EventSequences '
+        '(thumbnail_id, imvisclienttime, imclickclienttime, servertime, mnth, '
+        'yr, tai) '
+        'VALUES (?,?,?,?,?,?,?)', [
+            ('tid11', 1405372146, None, 1405372146, 6, 2033, 'tai1'),
+            ('tid11', 1405372146, 1405372146, 1405372146, 6, 2033, 'tai1')])
+        self.ramdb.commit()
+
+        # Check the stats db
+        with self.assertLogExists(logging.INFO, 'Polling the stats database'):
+            with self.assertLogExists(logging.INFO, 'Found a newer'):
+                with self.assertLogExists(logging.ERROR,
+                                          'Error connecting to incremental '
+                                          'stats'):
+                    self.watcher._process_db_data()
+
+        # Make sure the data got to mastermind
+        self.assertEqual(self.mastermind.update_stats_info.call_count, 1)
+        self.assertItemsEqual(self._get_all_stat_updates(),
+                              [('vid11', 'tid11', 2, None, 1, None)])
+        self.assertTrue(self.watcher.is_loaded)
+
+    def test_missing_table_in_hbase(self, datamock):
+        self.hbase_conn().table.side_effect = [
+            happybase.hbase.ttypes.IOError('oops table missing')]
+        happybase.hbase.ttypes.IOError
+
+        # Fill out the database
+        datamock.MetricType = neondata.MetricType
+        datamock.ExperimentStrategy.get.side_effect = \
+          lambda x: neondata.ExperimentStrategy(x)
+        datamock.ThumbnailMetadata.get_video_id.return_value = 'vid11'
+
+        # Add entries to the batch database.
+        cursor = self.ramdb.cursor()
+        self.watcher.last_update = date.datetime.utcnow()
+        cursor.execute('REPLACE INTO VideoPlays '
+                       '(serverTime, mnth, yr) values '
+                       '(1405375746.324, 6, 2033)')
+        self.ramdb.commit()
+
+        # Check the stats db
+        with self.assertLogExists(logging.INFO, 'Polling the stats database'):
+            with self.assertLogExists(logging.ERROR,
+                                      'Error connecting to incremental '
+                                      'stats'):
+                self.watcher._process_db_data()
+
+        # Make sure the data got to mastermind
+        self.assertEqual(self.mastermind.update_stats_info.call_count, 1)
+        self.assertItemsEqual(self._get_all_stat_updates(), [])
+        self.assertTrue(self.watcher.is_loaded)
+
+    def test_missing_cols_in_hbase_db(self, datamock):
+        datamock.ExperimentStrategy.get.side_effect = \
+          lambda x: neondata.ExperimentStrategy(x)
+        datamock.ThumbnailMetadata.get_video_id.return_value = 'vid11'
+        datamock.MetricType = neondata.MetricType
+
+        # Skip filling the batch db
+        self.watcher.last_update = date.datetime.utcnow()
+        cursor = self.ramdb.cursor()
+        cursor.execute('REPLACE INTO VideoPlays '
+                       '(serverTime, mnth, yr) values '
+                       '(1405375746.324, 6, 2033)')
+        self.ramdb.commit()
+
+        # There is only an impression column in the database
+        self._add_hbase_entry(1405375626, 'tid11', iv=2)
+        self._add_hbase_entry(1405379226, 'tid11', ic=1)
+
+        self.watcher._process_db_data()
+
+        # The conversion increment should be 0 in this case
+        self.assertEqual(self.mastermind.update_stats_info.call_count, 1)
+        self.assertItemsEqual(self._get_all_stat_updates(),
+                              [('vid11', 'tid11', None, 2, None, 1)])
+        self.assertTrue(self.watcher.is_loaded)
+
+    def test_bad_entry_in_hbase(self, datamock):
+        datamock.ExperimentStrategy.get.side_effect = \
+          lambda x: neondata.ExperimentStrategy(x)
+        datamock.ThumbnailMetadata.get_video_id.return_value = 'vid11'
+        datamock.MetricType = neondata.MetricType
+
+        # Skip filling the batch db
+        self.watcher.last_update = date.datetime.utcnow()
+        cursor = self.ramdb.cursor()
+        cursor.execute('REPLACE INTO VideoPlays '
+                       '(serverTime, mnth, yr) values '
+                       '(1405375746.324, 6, 2033)')
+        self.ramdb.commit()
+
+        # The data is malformed in the db. It must be 8 bytes
+        self.timethumb_table.data['2014-07-14T22_tid11'] = { 
+            'evts:iv' : '\x00\x08'}
+
+        with self.assertLogExists(logging.WARNING,
+                                  'Invalid value found'):
+            self.watcher._process_db_data()
+
+        # The conversion increment should be 0 in this case
+        self.assertEqual(self.mastermind.update_stats_info.call_count, 1)
+        self.assertItemsEqual(self._get_all_stat_updates(), [])
+        self.assertTrue(self.watcher.is_loaded)
+
     def test_cannot_find_cluster(self, datamock):
+        
         self.cluster_mock().find_cluster.side_effect = [
             stats.cluster.ClusterInfoError()
             ]
@@ -751,6 +882,7 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
             with self.assertLogExists(logging.ERROR,
                                       'Could not find the cluster'):
                 self.watcher._process_db_data()
+        self.assertEqual(self.mastermind.update_stats_info.call_count, 0)
 
 class TestDirectivePublisher(test_utils.neontest.TestCase):
     def setUp(self):
@@ -1043,11 +1175,12 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         '''
         api_key = "apikey"
         i_vids = []; request_keys = []
-        def add_video(i):    
+        def add_video(i, state=neondata.RequestState.SUBMIT):    
             jid = 'job%s' % i
             vid = 'vid%s' % i 
             i_vid = "%s_%s" % (api_key, vid)
-            nar = neondata.NeonApiRequest(jid, api_key, vid, 't', 't', 'r', 'h')
+            nar = neondata.NeonApiRequest(jid, api_key, vid)
+            nar.state = state
             vm = neondata.VideoMetadata(i_vid, [], jid, 'v0.mp4')
             nar.save()
             vm.save()
@@ -1058,6 +1191,8 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         # Add videos
         for i in range(5):
             add_video(i)
+
+        add_video(11, state=neondata.RequestState.ACTIVE)
 
         # Check initial state in the map
         for i_vid in i_vids:
@@ -1071,7 +1206,11 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
 
             reqs = neondata.NeonApiRequest.get_many(request_keys)
             for req in reqs:
-                self.assertEqual(req.state, neondata.RequestState.SERVING)
+                if req.job_id == 'job11':
+                    self.assertEqual(req.state,
+                                     neondata.RequestState.SERVING_AND_ACTIVE)
+                else:
+                    self.assertEqual(req.state, neondata.RequestState.SERVING)
         
         validate()
 
@@ -1122,6 +1261,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
                        imclickclienttime DOUBLE,
                        adplayclienttime DOUBLE,
                        videoplayclienttime DOUBLE,
+                       serverTime DOUBLE, 
                        mnth INT,
                        yr INT,
                        tai varchar(64))''')
@@ -1132,6 +1272,19 @@ class SmokeTesting(test_utils.neontest.TestCase):
           patch('mastermind.server.impala.dbapi.connect')
         self.sqllite_mock = self.sqlite_connect_patcher.start()
         self.sqllite_mock.side_effect = connect2db
+
+        #patch hbase connection
+        self.hbase_patcher = patch('mastermind.server.happybase.Connection')
+        self.hbase_conn = self.hbase_patcher.start()
+        self.timethumb_table = MockHBaseCountTable()
+        self.thumbtime_table = MockHBaseCountTable()
+        def _pick_table(name):
+            if name == 'TIMESTAMP_THUMBNAIL_EVENT_COUNTS':
+                return self.timethumb_table
+            elif name == 'THUMBNAIL_TIMESTAMP_EVENT_COUNTS':
+                return self.thumbtime_table
+            raise thrift.Thrift.TException('Unknown table')
+        self.hbase_conn().table.side_effect = _pick_table
 
         # Patch the cluster lookup
         self.cluster_patcher = patch('mastermind.server.stats.cluster.Cluster')
@@ -1152,6 +1305,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
     def tearDown(self):
         neondata.DBConnection.clear_singleton_instance()
         mastermind.server.tempfile = self.real_tempfile
+        self.hbase_patcher.stop()
         self.cluster_patcher.stop()
         self.s3_patcher.stop()
         self.sqlite_connect_patcher.stop()
@@ -1171,7 +1325,21 @@ class SmokeTesting(test_utils.neontest.TestCase):
         if os.path.exists(f):
             os.remove(f)
         del self.mastermind
+        self.directive_publisher.join(2)
+        self.video_watcher.join(2)
+        self.stats_watcher.join(2)
         super(SmokeTesting, self).tearDown()
+
+    def _add_hbase_entry(self, timestamp, thumb_id, il=None, iv=None, ic=None,
+                         vp=None):
+        tstamp = date.datetime.utcfromtimestamp(timestamp).strftime(
+            '%Y-%m-%dT%H')
+        self.timethumb_table.insert_event_row(
+            '%s_%s' % (tstamp, thumb_id),
+            il, iv, ic, vp)
+        self.thumbtime_table.insert_event_row(
+            '%s_%s' % (thumb_id, tstamp),
+            il, iv, ic, vp)
 
     def test_integration(self):
         # This is purely a smoke test to see if anything breaks when
@@ -1212,13 +1380,20 @@ class SmokeTesting(test_utils.neontest.TestCase):
         cursor.execute('''REPLACE INTO VideoPlays
         (serverTime, mnth, yr) values (1405372146.32, 6, 2033)''')
         cursor.executemany('''REPLACE INTO EventSequences
-        (thumbnail_id, imvisclienttime, imclickclienttime, mnth, yr, tai)
-        VALUES (?,?,?,?,?,?)''', [
-            ('key1_vid1_t1', 1405372146, None, 6, 2033, 'tai1'),
-            ('key1_vid1_t1', 1405372146, 1405372146, 6, 2033, 'tai1'),
-            ('key1_vid1_t2', 1405372146, None, 6, 2033, 'tai1'),
-            ('key1_vid1_t2', None, 1405372146, 6, 2033, 'tai1')])
+        (thumbnail_id, imvisclienttime, imclickclienttime, servertime, mnth, 
+        yr, tai)
+        VALUES (?,?,?,?,?,?,?)''', [
+            ('key1_vid1_t1', 1405372146, 1405372146, None, 6, 2033, 'tai1'),
+            ('key1_vid1_t1', 1405372146, 1405372146, 1405372146, 6, 2033,
+             'tai1'),
+            ('key1_vid1_t2', 1405372146, 1405372146, None, 6, 2033, 'tai1'),
+            ('key1_vid1_t2', None, 1405372146, 1405372146, 6, 2033, 'tai1')])
         self.ramdb.commit()
+
+        # Add entries to the hbase incremental database
+        self._add_hbase_entry(1405375626, 'key1_vid1_t1', iv=1, ic=0)
+        self._add_hbase_entry(1405372146, 'key1_vid1_t1', iv=3, ic=1)
+        self._add_hbase_entry(1405372146, 'key1_vid1_t2', iv=1, ic=1)
 
         # Now start all the threads
         self.video_watcher.start()

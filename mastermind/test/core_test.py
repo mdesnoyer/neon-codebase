@@ -111,7 +111,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                ttype='neon',
                                                model_score='3.5')),
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                               ttype='centerframe')),
+                                               ttype='random')),
                  build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                                ttype='brightcove'))]))[1]
 
@@ -168,7 +168,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # Now add a baseline thumb
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                          ttype='centerframe')))
+                                          ttype='random')))
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertGreater(directive['ctr'], 0.0)
@@ -212,7 +212,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('n2', 'vid1',
                                                ttype='neon', model_score=3.5)),
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                               ttype='centerframe'))]))[1]
+                                               ttype='random'))]))[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2':0.01, 'ctr':0.99 })
 
     def test_finding_baseline_thumb(self):
@@ -230,7 +230,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # Now we add a baseline of highish rank
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr1', 'vid1', rank=3,
-                                          ttype='centerframe')))
+                                          ttype='random')))
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'n1': 0.01, 'ctr1': 0.99 })
@@ -238,28 +238,28 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # Finally add a lower rank baseline
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr2', 'vid1', rank=1,
-                                          ttype='centerframe')))
+                                          ttype='random')))
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'n1': 0.01, 'ctr1': 0.0, 'ctr2': 0.99})
 
     def test_baseline_is_different_type(self):
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', baseline_type='random'))
+            'acct1', ExperimentStrategy('acct1', baseline_type='centerframe'))
 
-        # The center frame is not shown if it's not the baseline type
+        # The random frame is not shown if it's not the baseline type
         video_info = VideoInfo('acct1', True, [])
         video_info.thumbnails.append(
-            build_thumb(ThumbnailMetadata('ctr', 'vid1', ttype='centerframe')))
+            build_thumb(ThumbnailMetadata('ctr', 'vid1', ttype='random')))
         with self.assertLogExists(logging.ERROR,
                                   'No valid thumbnails for video'):
             self.assertIsNone(
                 self.mastermind._calculate_current_serving_directive(
                     video_info))
 
-        # Add a random thumb and it should be shown because it is the baseline
+        # Add a center thumb and it should be shown because it is the baseline
         video_info.thumbnails.append(
-            build_thumb(ThumbnailMetadata('rnd', 'vid1', ttype='random')))
+            build_thumb(ThumbnailMetadata('rnd', 'vid1', ttype='centerframe')))
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'rnd': 1.0, 'ctr': 0.0})
@@ -270,7 +270,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         video_info = VideoInfo('acct1', True, [])
         video_info.thumbnails.append(
-            build_thumb(ThumbnailMetadata('ctr', 'vid1', ttype='centerframe')))
+            build_thumb(ThumbnailMetadata('ctr', 'vid1', ttype='random')))
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('bc', 'vid1', ttype='brightcove')))
         video_info.thumbnails.append(
@@ -294,7 +294,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         video_info = VideoInfo('acct1', True, [])
         video_info.thumbnails.append(
-            build_thumb(ThumbnailMetadata('ctr', 'vid1', ttype='centerframe')))
+            build_thumb(ThumbnailMetadata('ctr', 'vid1', ttype='random')))
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('bc', 'vid1', ttype='brightcove')))
         video_info.thumbnails.append(
@@ -332,7 +332,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
              build_thumb(ThumbnailMetadata('n2', 'vid1', rank=3,
                                            ttype='neon', model_score=3.1)),
              build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                           ttype='centerframe')),
+                                           ttype='random')),
              build_thumb(ThumbnailMetadata('bc1', 'vid1', chosen=True,
                                            ttype='brightcove'))])
 
@@ -400,7 +400,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # Now add a baseline and it should be shown all the time
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                          ttype='centerframe')))
+                                          ttype='random')))
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'ctr':1.0 })
@@ -427,7 +427,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                 [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                                ttype='neon', model_score=5.8)),
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                               ttype='centerframe')),
+                                               ttype='random')),
                  build_thumb(ThumbnailMetadata('bc1', 'vid1', rank=1,
                                                ttype='brightcove')),
                  build_thumb(ThumbnailMetadata('bc2', 'vid1', rank=2,
@@ -445,7 +445,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                 [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                                ttype='neon', model_score=5.8)),
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                               ttype='centerframe'),
+                                               ttype='random'),
                                                phash=64),
                  build_thumb(ThumbnailMetadata('bc1', 'vid1', rank=1,
                                                ttype='brightcove')),
@@ -467,7 +467,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('n2', 'vid1', chosen=True,
                                                ttype='neon', model_score=3.5)),
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                               ttype='centerframe')),
+                                               ttype='random')),
                  build_thumb(ThumbnailMetadata('bc', 'vid1',
                                                ttype='brightcove'))]))[1]
         
@@ -488,7 +488,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
               build_thumb(ThumbnailMetadata('n2', 'vid1',
                                             ttype='neon', model_score=3.5)),
               build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                            ttype='centerframe')),
+                                            ttype='random')),
               build_thumb(ThumbnailMetadata('bc', 'vid1',
                                             ttype='brightcove'))])
 
@@ -541,7 +541,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # The baseline thumb will be shown because nothing was chosen
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                          ttype='centerframe')))
+                                          ttype='random')))
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.0, 'ctr': 1.0})
@@ -580,7 +580,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             [ build_thumb(ThumbnailMetadata('n1', 'vid1',
                                            ttype='neon', model_score=5.8)),
               build_thumb(ThumbnailMetadata('ctr', 'vid1', enabled=False,
-                                            ttype='centerframe')),
+                                            ttype='random')),
               build_thumb(ThumbnailMetadata('bc', 'vid1', enabled=False,
                                             ttype='brightcove'))])
         with self.assertLogExists(logging.WARNING,
@@ -614,7 +614,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
              build_thumb(ThumbnailMetadata('n2', 'vid1',
                                            ttype='neon', model_score=3.5)),
              build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                           ttype='centerframe')),
+                                           ttype='random')),
              build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                            ttype='brightcove'))])
 
@@ -679,7 +679,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # Now add a baseline, which should be shown as the holdback
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                          ttype='centerframe')))
+                                          ttype='random')))
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.98, 'ctr': 0.02})
@@ -741,7 +741,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # Now add a baseline, which should be shown as the majority
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                          ttype='centerframe')))
+                                          ttype='random')))
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2': 0.01, 'ctr': 0.99})
@@ -786,7 +786,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('n2', 'vid1',
                                                ttype='neon', model_score=3.5)),
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                               ttype='centerframe')),
+                                               ttype='random')),
                  build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                                ttype='brightcove'))])
         directive = self.mastermind._calculate_current_serving_directive(
@@ -826,7 +826,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
              build_thumb(ThumbnailMetadata('n2', 'vid1',
                                            ttype='neon', model_score=3.5)),
              build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                           ttype='centerframe')),
+                                           ttype='random')),
              build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                            ttype='brightcove'))])
         directive = self.mastermind._calculate_current_serving_directive(
@@ -883,7 +883,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                ttype='neon',
                                                model_score='3.3')),
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                               ttype='centerframe')),
+                                               ttype='random')),
                  build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                                ttype='brightcove'))]))[1]
         self.assertEqual(
@@ -911,7 +911,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
              build_thumb(ThumbnailMetadata('n2', 'vid1',
                                            ttype='neon', model_score=3.5)),
              build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                           ttype='centerframe'),
+                                           ttype='random'),
                          base_impressions=10, base_conversions=4),
              build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                            ttype='brightcove'),
@@ -940,7 +940,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
              build_thumb(ThumbnailMetadata('n2', 'vid1',
                                            ttype='neon', model_score=3.5)),
              build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                           ttype='centerframe'),
+                                           ttype='random'),
                          base_impressions=350, base_conversions=1),
              build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                            ttype='brightcove'),
@@ -971,7 +971,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
             [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
-                               ttype='centerframe'),
+                               ttype='random'),
              ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1',
                                ttype='neon')], True)
         logging.getLogger('mastermind.core').reset_sample_counters()
@@ -1000,7 +1000,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.mastermind.update_video_info(
             VideoMetadata('acct2_vid1'),
             [ThumbnailMetadata('acct1_vid1_tid1', 'acct2_vid1',
-                               ttype='centerframe'),
+                               ttype='random'),
              ThumbnailMetadata('acct1_vid1_tid2', 'acct2_vid1',
                                ttype='neon')], True)
 
@@ -1036,7 +1036,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
             [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
-                               ttype='centerframe'),
+                               ttype='random'),
              ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1',
                                ttype='neon')], True)
         directives = [x for x in self.mastermind.get_directives()]
@@ -1050,7 +1050,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
             [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
-                               ttype='centerframe'),
+                               ttype='random'),
              ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1',
                                ttype='neon', rank=1),
              ThumbnailMetadata('acct1_vid1_tid3', 'acct1_vid1',
@@ -1070,7 +1070,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def test_remove_thumbs(self):
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
-            [ThumbnailMetadata('tid1', 'acct1_vid1', ttype='centerframe')],
+            [ThumbnailMetadata('tid1', 'acct1_vid1', ttype='random')],
              True)
         directives = [x for x in self.mastermind.get_directives()]
         self.assertEqual(len(directives), 1)
@@ -1081,7 +1081,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
             [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
-                               ttype='centerframe'),
+                               ttype='random'),
              ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1', ttype='neon')],
              testing_enabled=False)
         directives = [x for x in self.mastermind.get_directives()]
@@ -1094,7 +1094,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1', testing_enabled=False),
             [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
-                               ttype='centerframe'),
+                               ttype='random'),
              ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1', ttype='neon')],
              testing_enabled=True)
         directives = [x for x in self.mastermind.get_directives()]
@@ -1108,7 +1108,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
             [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
-                               ttype='centerframe', enabled=False),
+                               ttype='random', enabled=False),
              ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1', ttype='neon',
                                enabled=False)],
              testing_enabled=True)
@@ -1136,12 +1136,12 @@ class TestStatUpdating(test_utils.neontest.TestCase):
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
             [ThumbnailMetadata('acct1_vid1_v1t1', 'acct1_vid1',
-                               ttype='centerframe'),
+                               ttype='random'),
              ThumbnailMetadata('acct1_vid1_v1t2', 'acct1_vid1', ttype='neon')])
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid2'),
             [ThumbnailMetadata('acct1_vid2_v2t1', 'acct1_vid2',
-                               ttype='centerframe'),
+                               ttype='random'),
              ThumbnailMetadata('acct1_vid2_v2t2', 'acct1_vid2',
                                ttype='neon', rank=0),
              ThumbnailMetadata('acct1_vid2_v2t3', 'acct1_vid2',
@@ -1250,7 +1250,7 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
             ThumbnailMetadata('acct1_vid1_n2', 'acct1_vid1',
                               ttype='neon', model_score=3.5),
             ThumbnailMetadata('acct1_vid1_ctr', 'acct1_vid1',
-                              ttype='centerframe'),
+                              ttype='random'),
             ThumbnailMetadata('acct1_vid1_bc', 'acct1_vid1', chosen=True,
                               ttype='brightcove')]
         
@@ -1359,5 +1359,5 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
                          neondata.ExperimentState.OVERRIDE)    
 
 if __name__ == '__main__':
-    utils.neon.InitNeonTest()
+    utils.neon.InitNeon()
     test_utils.neontest.main()
