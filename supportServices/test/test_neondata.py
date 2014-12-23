@@ -356,14 +356,12 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             (ExperimentStrategy('key'), get_func),
             (NeonUserAccount('key', 'api'),
              lambda x: x.get_account('api')),
-            (NeonPlatform('key', 'api'),
+            (NeonPlatform('key', '0', 'api'),
              lambda x: x.get('api', '0')),
             (BrightcovePlatform('a', 'i', 'api'),
              lambda x: x.get('api', 'i')),
             (OoyalaPlatform('a', 'i', 'api', 'b', 'c', 'd', 'e'),
              lambda x: x.get('api', 'i'))]
-            #(YoutubePlatform('a', 'i', 'api'),
-            # lambda x: x.get('api', 'i')),]
 
         for obj, read_func in obj_types:
             # Start by saving the object

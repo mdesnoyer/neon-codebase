@@ -1333,7 +1333,7 @@ class AbstractPlatform(NamespacedStoredObject):
         # since the key is generated based on them
         if self.neon_api_key == '' or self.integration_id == '':
             raise Exception('Invalid initialization of AbstractPlatform or its\
-                    subclass object. api_key and i_id should not be empty')
+                subclass object. api_key and i_id should not be empty')
 
         super(AbstractPlatform, self).save(callback)
 
