@@ -113,6 +113,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     
     def prepare(self):
         ''' Called before every request is processed '''
+        
+        _log.info("Request %r" % self.request)
        
         # If POST or PUT, then decode the json arguments
         if not self.request.method == "GET":
@@ -239,7 +241,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 /:integration_id/videos
         '''
         
-        _log.info("Request %r" %self.request)
         uri_parts = self.request.uri.split('/')
 
         try:
@@ -250,7 +251,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     a_id = uri_parts[4]
                     itype = uri_parts[5]
                     i_id = uri_parts[6]
-                    method = uri_parts[7]
+                    method = ''
+                    if len(uri_parts) >= 8:
+                        method = uri_parts[7]
                 except Exception, e:
                     _log.error("key=get request msg=  %s" %e)
                     self.send_json_response(
@@ -262,7 +265,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 if not is_verified:
                     return
 
-                if method == "status":
+                # return the object from the DB
+                if method == '':
+                    self.get_account_info(itype, i_id)
+                    #self.send_json_response('{"error":"not yet impl"}', 200)
+                    return
+
+                elif method == "status":
                     #self.get_account_status(itype,i_id)
                     self.send_json_response('{"error":"not yet impl"}', 200)
                     return
@@ -533,6 +542,18 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     500)
     
     ############## User defined methods ###########
+
+    @tornado.gen.engine 
+    def get_account_info(self, i_type, i_id):
+        platform_account = yield tornado.gen.Task(self.get_platform_account, 
+                            i_type, i_id)
+       
+        if platform_account:
+            # TODO: Filter output in the future.
+            self.send_json_response(platform_account.to_json(), 200)
+        else:
+            data = '{"error":"account not found"}'
+            self.send_json_response(data, 400)
 
     def get_tracker_account_id(self):
         '''

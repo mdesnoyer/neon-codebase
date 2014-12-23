@@ -513,7 +513,8 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
     def test_invalid_get_rest_uri(self):
         ''' test uri parsing, invalid requests '''
         api_key = self.create_neon_account()
-
+        
+        
         url = self.get_url('/api/v1/accounts/')
         resp = self.get_request(url, api_key)
         self.assertEqual(resp.code, 400)
@@ -551,6 +552,28 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         resp = self.put_request(url, {}, api_key)
         self.assertEqual(resp.code, 400)
 
+    def test_get_account_info(self):
+        
+        self.create_brightcove_account()
+        url = self.get_url('/api/v1/accounts/%s/neon_integrations'\
+                            '/0' % self.a_id)
+        resp = self.get_request(url, self.api_key)
+        self.assertEqual(resp.code, 200)
+        data = json.loads(resp.body)
+        self.assertEqual(data['neon_api_key'], self.api_key)
+        self.assertEqual(data['integration_id'], '0')
+
+        self.cp_mock_client().fetch.side_effect = \
+          self._success_http_side_effect 
+        self.cp_mock_async_client().fetch.side_effect = \
+          self._success_http_side_effect
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations'\
+                            '/%s' % (self.a_id, self.b_id))
+        resp = self.get_request(url, self.api_key)
+        self.assertEqual(resp.code, 200)
+        data = json.loads(resp.body)
+        self.assertEqual(data['neon_api_key'], self.api_key)
+        self.assertEqual(data['integration_id'], self.b_id)
 
     def test_create_update_brightcove_account(self):
         ''' updation of brightcove account '''
@@ -566,12 +589,8 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertFalse(strategy.only_exp_if_chosen)
 
         #Setup Side effect for the http clients
-        #self.bapi_mock_client().fetch.side_effect = \
-        #  self._success_http_side_effect
         self.cp_mock_client().fetch.side_effect = \
           self._success_http_side_effect 
-        #self.bapi_mock_async_client().fetch.side_effect = \
-        #  self._success_http_side_effect
         self.cp_mock_async_client().fetch.side_effect = \
           self._success_http_side_effect
 
@@ -582,7 +601,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
 
         # Verify actual contents
         platform = neondata.BrightcovePlatform.get(self.api_key,
-                                                           self.b_id)
+                                                    self.b_id)
         self.assertFalse(platform.abtest) # Should default to False
         self.assertEqual(platform.neon_api_key, self.api_key)
         self.assertEqual(platform.integration_id, self.b_id)
