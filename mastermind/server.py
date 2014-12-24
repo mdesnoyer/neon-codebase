@@ -601,6 +601,7 @@ class DirectivePublisher(threading.Thread):
         self.activity_watcher = activity_watcher
 
         self.last_publish_time = datetime.datetime.utcnow()
+        self._update_publish_timer = None
         self._update_time_since_publish()
 
         self.lock = threading.RLock()
@@ -611,6 +612,11 @@ class DirectivePublisher(threading.Thread):
         # we grab the reference to the S3Connection on initialization
         # instead of relying on the import statement.
         self.S3Connection = S3Connection
+
+    def __del__(self):
+        if self._update_publish_timer and self._update_publish_timer.is_alive():
+            self._update_publish_timer.cancel()
+        super(DirectivePublisher, self).__del__()
 
     def run(self):
         self._stopped.clear()
@@ -654,9 +660,10 @@ class DirectivePublisher(threading.Thread):
             datetime.datetime.utcnow() -
             self.last_publish_time).total_seconds()
 
-        timer = threading.Timer(10.0, self._update_time_since_publish)
-        timer.daemon = True
-        timer.start()
+        self._update_publish_timer = threading.Timer(
+            10.0, self._update_time_since_publish)
+        self._update_publish_timer.daemon = True
+        self._update_publish_timer.start()
     
     def _add_video_id_to_serving_map(self, vid):
         try:
