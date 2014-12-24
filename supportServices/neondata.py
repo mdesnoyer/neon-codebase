@@ -2597,7 +2597,7 @@ class ThumbnailMetadata(StoredObject):
 
     def get_account_id(self):
         ''' get the internal account id. aka api key '''
-        return self.key.split('_')[0]
+        return self.video_id.split('_')[0]
     
     def get_metadata(self):
         ''' get a dictionary of the thumbnail metadata

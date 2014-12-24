@@ -253,12 +253,12 @@ class StatsDBWatcher(threading.Thread):
         self.mastermind = mastermind
         self.video_id_cache = video_id_cache
         self.last_update = None
+        self.impala_conn = None
         self.daemon = True
         self.activity_watcher = activity_watcher
 
         # Is the initial data loaded
         self.is_loaded = threading.Event()
-
         self._stopped = threading.Event()
 
     def wait_until_loaded(self):
@@ -282,26 +282,28 @@ class StatsDBWatcher(threading.Thread):
             # Now we wait so that we don't hit the database too much.
             self._stopped.wait(options.stats_db_polling_delay)
 
-    def _process_db_data(self):
-        strategy_cache = ExperimentStrategyCache()
-        
-        stats_host = self._find_cluster_ip()
-        _log.info('Statistics database is at host=%s port=%i' %
-                  (stats_host, options.stats_port))
+    def _connect_to_stats_db(self):
+        '''Connects to the stats impala database.'''
         try:
-            conn = impala.dbapi.connect(host=stats_host,
-                                        port=options.stats_port)
+            stats_host = self._find_cluster_ip()
+            _log.info('Statistics database is at host=%s port=%i' %
+                  (stats_host, options.stats_port))
+            self.impala_conn = impala.dbapi.connect(host=stats_host,
+                                                    port=options.stats_port)
+            return self.impala_conn
         except Exception as e:
             _log.exception('Error connecting to stats db: %s' % e)
             statemon.state.increment('statsdb_error')
-            return
+            raise
 
-        cursor = conn.cursor()
+    def _process_db_data(self):
+        strategy_cache = ExperimentStrategyCache()
 
         _log.info('Polling the stats database')
-        if self._is_newer_batch_data(conn):
+        if self._is_newer_batch_data():
             _log.info('Found a newer entry in the stats database from %s. '
                       'Processing' % self.last_update.isoformat())
+            cursor = self.impala_conn.cursor()
             last_month = self.last_update - datetime.timedelta(weeks=4)
             col_map = {
                 neondata.MetricType.LOADS: 'imloadclienttime',
@@ -381,16 +383,18 @@ class StatsDBWatcher(threading.Thread):
                     
         self.is_loaded.set()
 
-    def _is_newer_batch_data(self, impala_conn):
+    def _is_newer_batch_data(self):
         '''Returns true if there is newer batch data.
 
-        Also resets the self.last_update parameter
-
-        Inputs:
-        impala_conn - Connection to impala
+        Also resets the self.last_update parameter if the impala database 
+        could be reached.
         '''
-
-        cursor = impala_conn.cursor()
+        try:
+            self._connect_to_stats_db()
+        except Exception as e:
+            return False
+        
+        cursor = self.impala_conn.cursor()
         
         curtime = datetime.datetime.utcnow()
         cursor.execute(
@@ -402,7 +406,7 @@ class StatsDBWatcher(threading.Thread):
             _log.error('Cannot determine when the database was last updated')
             statemon.state.increment('statsdb_error')
             self.is_loaded.set()
-            raise IOError('Bad batch database')
+            return False
             
         cur_update = datetime.datetime.utcfromtimestamp(result[0][0])
         statemon.state.time_since_stats_update = (
@@ -496,8 +500,6 @@ class StatsDBWatcher(threading.Thread):
             _log.error('Error connecting to incremental stats database: %s'
                        % e)
             statemon.state.increment('incr_statsdb_error')
-            if thumb_id is not None:
-                retval[thumb_id] = [None, None]
 
         return retval            
             

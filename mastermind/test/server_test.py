@@ -494,7 +494,6 @@ class MockHBaseCountTable(object):
         self.insert_row(key, col_map)
         
 
-@patch('mastermind.server.neondata')
 class TestStatsDBWatcher(test_utils.neontest.TestCase):    
     def setUp(self):
         self.mastermind = MagicMock()
@@ -523,6 +522,20 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
                        'tai varchar(64))')
         self.ramdb.commit()
 
+        # Patch neondata and fill with some basic entries
+        self.neondata_patcher = patch('mastermind.server.neondata')
+        self.datamock = self.neondata_patcher.start()
+        self.datamock.TrackerAccountIDMapper.get_all.return_value = [
+            neondata.TrackerAccountIDMapper('tai1', 'acct1', PROD)]
+        self.datamock.TrackerAccountIDMapper.PRODUCTION = PROD
+        self.datamock.TrackerAccountIDMapper.STAGING = STAGING
+        self.datamock.MetricType = neondata.MetricType
+        self.datamock.ExperimentStrategy.get.side_effect = \
+          lambda x: neondata.ExperimentStrategy(x)
+        tid_map = {'tid11' : 'vid11', 'tid12' : 'vid12', 'tid21' : 'vid21'}
+        self.datamock.ThumbnailMetadata.get_video_id.side_effect = \
+          lambda tid: tid_map[tid]
+
         #patch impala connect
         self.sqlite_connect_patcher = \
           patch('mastermind.server.impala.dbapi.connect')
@@ -548,6 +561,7 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         self.cluster_mock = self.cluster_patcher.start()
 
     def tearDown(self):
+        self.neondata_patcher.stop()
         self.cluster_patcher.stop()
         self.hbase_patcher.stop()
         neondata.DBConnection.clear_singleton_instance()
@@ -583,22 +597,13 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
             '%s_%s' % (thumb_id, tstamp),
             il, iv, ic, vp)
 
-    def test_working_db(self, datamock):
+    def test_working_db(self):
         # Mock out the calls to the video database
-        datamock.TrackerAccountIDMapper.get_all.return_value = [
+        self.datamock.TrackerAccountIDMapper.get_all.return_value = [
             neondata.TrackerAccountIDMapper('tai1', 'acct1', STAGING),
             neondata.TrackerAccountIDMapper('tai11', 'acct2', PROD),
             neondata.TrackerAccountIDMapper('tai2', 'acct1', PROD)
             ]
-        datamock.TrackerAccountIDMapper.PRODUCTION = PROD
-        datamock.TrackerAccountIDMapper.STAGING = STAGING
-        datamock.MetricType = neondata.MetricType
-        datamock.ExperimentStrategy.get.side_effect = \
-          lambda x: neondata.ExperimentStrategy(x)
-
-        tid_map = {'tid11' : 'vid11', 'tid12' : 'vid12', 'tid21' : 'vid21'}
-        datamock.ThumbnailMetadata.get_video_id.side_effect = \
-          lambda tid: tid_map[tid]
 
         # Add entries to the batch database. The most recent entries
         # are in the current hour, whereas the older entries are an
@@ -651,13 +656,13 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
                               [('vid11', 'tid11', None, 1, None, 0)])
         self.assertTrue(self.watcher.is_loaded)
 
-    def test_stat_db_connection_error(self, datamock):
+    def test_stat_db_connection_error(self):
         self.sqllite_mock.side_effect=impala.error.Error('some error')
 
         with self.assertLogExists(logging.ERROR, 'Error connecting to stats'):
             self.watcher._process_db_data()
 
-    def test_stats_db_no_videoplay_data(self, datamock):
+    def test_stats_db_no_videoplay_data(self):
         cursor = self.ramdb.cursor()
         cursor.executemany('REPLACE INTO EventSequences '
         '(thumbnail_id, imvisclienttime, imclickclienttime, mnth, yr, tai) '
@@ -674,34 +679,26 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.ERROR, 
                                   ('Cannot determine when the database was '
                                    'last updated')):
-            with self.assertRaises(IOError):
-                self.watcher._process_db_data()
+            self.watcher._process_db_data()
 
         # Make sure that there was no stats update
-        self.assertEqual(self.mastermind.update_stats_info.call_count, 0)
+        self.assertEqual(self.mastermind.update_stats_info.call_count, 1)
+        self.assertItemsEqual(self._get_all_stat_updates(), [])
 
         # Make sure the job is flagged as ready
         self.assertTrue(self.watcher.is_loaded)
 
-    def test_stats_db_batch_count_plays(self, datamock):
+    def test_stats_db_batch_count_plays(self):
         # Mock out the calls to the video database
-        datamock.TrackerAccountIDMapper.get_all.return_value = [
+        self.datamock.TrackerAccountIDMapper.get_all.return_value = [
             neondata.TrackerAccountIDMapper('tai1', 'acct1', STAGING),
             neondata.TrackerAccountIDMapper('tai11', 'acct2', PROD),
             neondata.TrackerAccountIDMapper('tai2', 'acct1', PROD)
             ]
-        datamock.TrackerAccountIDMapper.PRODUCTION = PROD
-        datamock.TrackerAccountIDMapper.STAGING = STAGING
-        datamock.MetricType.PLAYS = neondata.MetricType.PLAYS
-        datamock.MetricType = neondata.MetricType
-        datamock.ExperimentStrategy.get.side_effect = \
+        self.datamock.ExperimentStrategy.get.side_effect = \
           lambda x: neondata.ExperimentStrategy(x,
               impression_type=neondata.MetricType.LOADS,
               conversion_type=neondata.MetricType.PLAYS)
-        
-        tid_map = {'tid11' : 'vid11', 'tid12' : 'vid12', 'tid21' : 'vid21'}
-        datamock.ThumbnailMetadata.get_video_id.side_effect = \
-          lambda tid: tid_map[tid]
 
         # Add entries to the database
         cursor = self.ramdb.cursor()
@@ -744,22 +741,11 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
                                ('vid21', 'tid21', 3, 0, 0, 0)])
         self.assertTrue(self.watcher.is_loaded)
 
-    def test_hbase_down_impala_up(self, datamock):
+    def test_hbase_down_impala_up(self):
         # hbase connection attempt fails
         self.hbase_conn.side_effect = [
             thrift.transport.TTransport.TTransportException(
                 None, 'Could not connect')]
-
-        # Fill out the database
-        datamock.TrackerAccountIDMapper.get_all.return_value = [
-            neondata.TrackerAccountIDMapper('tai1', 'acct1', PROD)
-            ]
-        datamock.TrackerAccountIDMapper.PRODUCTION = PROD
-        datamock.TrackerAccountIDMapper.STAGING = STAGING
-        datamock.MetricType = neondata.MetricType
-        datamock.ExperimentStrategy.get.side_effect = \
-          lambda x: neondata.ExperimentStrategy(x)
-        datamock.ThumbnailMetadata.get_video_id.return_value = 'vid11'
 
         # Add entries to the batch database.
         cursor = self.ramdb.cursor()
@@ -782,24 +768,20 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
                                           'stats'):
                     self.watcher._process_db_data()
 
-        # Make sure the data got to mastermind
+        # Make sure the data got to mastermind. Since we got an update
+        # to the base, we want to set the incremental amount to 0 to
+        # be conservative.
         self.assertEqual(self.mastermind.update_stats_info.call_count, 1)
         self.assertItemsEqual(self._get_all_stat_updates(),
-                              [('vid11', 'tid11', 2, None, 1, None)])
+                              [('vid11', 'tid11', 2, 0, 1, 0)])
         self.assertTrue(self.watcher.is_loaded)
 
-    def test_missing_table_in_hbase(self, datamock):
+    def test_missing_table_in_hbase(self):
         self.hbase_conn().table.side_effect = [
             happybase.hbase.ttypes.IOError('oops table missing')]
         happybase.hbase.ttypes.IOError
 
-        # Fill out the database
-        datamock.MetricType = neondata.MetricType
-        datamock.ExperimentStrategy.get.side_effect = \
-          lambda x: neondata.ExperimentStrategy(x)
-        datamock.ThumbnailMetadata.get_video_id.return_value = 'vid11'
-
-        # Add entries to the batch database.
+        # Force there to be no impala update
         cursor = self.ramdb.cursor()
         self.watcher.last_update = date.datetime.utcnow()
         cursor.execute('REPLACE INTO VideoPlays '
@@ -819,12 +801,7 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         self.assertItemsEqual(self._get_all_stat_updates(), [])
         self.assertTrue(self.watcher.is_loaded)
 
-    def test_missing_cols_in_hbase_db(self, datamock):
-        datamock.ExperimentStrategy.get.side_effect = \
-          lambda x: neondata.ExperimentStrategy(x)
-        datamock.ThumbnailMetadata.get_video_id.return_value = 'vid11'
-        datamock.MetricType = neondata.MetricType
-
+    def test_missing_cols_in_hbase_db(self):
         # Skip filling the batch db
         self.watcher.last_update = date.datetime.utcnow()
         cursor = self.ramdb.cursor()
@@ -845,11 +822,7 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
                               [('vid11', 'tid11', None, 2, None, 1)])
         self.assertTrue(self.watcher.is_loaded)
 
-    def test_bad_entry_in_hbase(self, datamock):
-        datamock.ExperimentStrategy.get.side_effect = \
-          lambda x: neondata.ExperimentStrategy(x)
-        datamock.ThumbnailMetadata.get_video_id.return_value = 'vid11'
-        datamock.MetricType = neondata.MetricType
+    def test_bad_entry_in_hbase(self):
 
         # Skip filling the batch db
         self.watcher.last_update = date.datetime.utcnow()
@@ -863,8 +836,7 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         self.timethumb_table.data['2014-07-14T22_tid11'] = { 
             'evts:iv' : '\x00\x08'}
 
-        with self.assertLogExists(logging.WARNING,
-                                  'Invalid value found'):
+        with self.assertLogExists(logging.WARNING, 'Invalid value found'):
             self.watcher._process_db_data()
 
         # The conversion increment should be 0 in this case
@@ -872,17 +844,80 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         self.assertItemsEqual(self._get_all_stat_updates(), [])
         self.assertTrue(self.watcher.is_loaded)
 
-    def test_cannot_find_cluster(self, datamock):
-        
+    def test_cannot_find_cluster_on_boot(self):
         self.cluster_mock().find_cluster.side_effect = [
             stats.cluster.ClusterInfoError()
             ]
+        self._add_hbase_entry(1405375746, 'tid11', iv=2, ic=1)
+        
+        with self.assertLogExists(logging.ERROR,
+                                  'Could not find the cluster'):
+            self.watcher._process_db_data()
 
-        with self.assertRaises(stats.cluster.ClusterInfoError):
+        # Hbase should still be used
+        self.assertEqual(self.mastermind.update_stats_info.call_count, 1)
+        self.assertItemsEqual(self._get_all_stat_updates(),
+                              [('vid11', 'tid11', None, 2, None, 1)])
+
+    def test_cannot_find_cluster_or_hbase_on_boot(self):
+        self.cluster_mock().find_cluster.side_effect = [
+            stats.cluster.ClusterInfoError()
+            ]
+        self.hbase_conn.side_effect = [
+            thrift.transport.TTransport.TTransportException(
+                None, 'Could not connect')]
+
+        with self.assertLogExists(logging.ERROR,
+                                  'Could not find the cluster'):
             with self.assertLogExists(logging.ERROR,
-                                      'Could not find the cluster'):
+                                      'Error connecting to incremental '
+                                      'stats'):
                 self.watcher._process_db_data()
-        self.assertEqual(self.mastermind.update_stats_info.call_count, 0)
+
+        self.assertEqual(self.mastermind.update_stats_info.call_count, 1)
+        self.assertItemsEqual(self._get_all_stat_updates(), [])
+
+    def test_impala_goes_down_after_boot(self):
+
+        # Add entries to the batch database.
+        cursor = self.ramdb.cursor()
+        cursor.execute('REPLACE INTO VideoPlays '
+                       '(serverTime, mnth, yr) values '
+                       '(1405375746.324, 6, 2033)')
+        cursor.executemany('REPLACE INTO EventSequences '
+        '(thumbnail_id, imvisclienttime, imclickclienttime, servertime, mnth, '
+        'yr, tai) '
+        'VALUES (?,?,?,?,?,?,?)', [
+            ('tid11', 1405372146, None, 1405372146, 6, 2033, 'tai1'),
+            ('tid11', 1405372146, 1405372146, 1405372146, 6, 2033, 'tai1')])
+        self.ramdb.commit()
+
+        self._add_hbase_entry(1405372146, 'tid11', iv=4, ic=2)
+        self._add_hbase_entry(1405379226, 'tid11', iv=3, ic=1)
+
+        # Do the boot process, which reads from impala
+        with self.assertLogExists(logging.INFO, 'Polling the stats database'):
+            with self.assertLogExists(logging.INFO, 'Found a newer'):
+                self.watcher._process_db_data()
+
+        # Make sure the data got to mastermind
+        self.assertEqual(self.mastermind.update_stats_info.call_count, 1)
+        self.assertItemsEqual(self._get_all_stat_updates(),
+                              [('vid11', 'tid11', 2, 3, 1, 1)])
+        self.assertTrue(self.watcher.is_loaded)
+
+        # Now impala goes down and we should still get the incremental
+        # update from hbase.
+        self.mastermind.update_stats_info.reset_mock()
+        self.cluster_mock().find_cluster.side_effect = [
+            stats.cluster.ClusterInfoError()
+            ]
+        self._add_hbase_entry(1405465626, 'tid11', iv=10, ic=3)
+        with self.assertLogExists(logging.ERROR, 'Could not find the cluster'):
+            self.watcher._process_db_data()
+        self.assertEqual(self.mastermind.update_stats_info.call_count, 1)
+        self.assertItemsEqual(self._get_all_stat_updates(),
+                              [('vid11', 'tid11', None, 13, None, 4)])
 
 class TestDirectivePublisher(test_utils.neontest.TestCase):
     def setUp(self):

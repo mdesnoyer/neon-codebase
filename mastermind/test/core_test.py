@@ -1356,7 +1356,40 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
                                      'acct1_vid1_n2':0.0,
                                      'acct1_vid1_ctr':0.0})
         self.assertEqual(video.experiment_state,
-                         neondata.ExperimentState.OVERRIDE)    
+                         neondata.ExperimentState.OVERRIDE)   
+
+class TestModifyDatabase(test_utils.neontest.TestCase):
+    def setUp(self):
+        self.neondata_patcher = patch('mastermind.core.neondata')
+        self.datamock = self.neondata_patcher.start()
+        super(TestModifyDatabase, self).setUp()
+
+    def tearDown(self):
+        self.neondata_patcher.stop()
+        super(TestModifyDatabase, self).tearDown()
+
+    def test_unexpected_exception_video_modify(self):
+        self.datamock.VideoMetadata.modify.side_effect = [
+            IOError('Some weird error')]
+        with self.assertLogExists(logging.ERROR,
+                                  'Unhandled exception when updating video'):
+            with self.assertRaises(IOError):
+                mastermind.core._modify_video_info(None, 'vid1', 'state', 7.6)
+
+    def test_unexpected_exception_serving_frac_modify(self):
+        self.datamock.ThumbnailMetadata.modify_many.side_effect = [
+            IOError('Some weird error')]
+        with self.assertLogExists(logging.ERROR,
+                                  'Unhandled exception when updating thumbs'):
+            with self.assertRaises(IOError):
+                mastermind.core._modify_many_serving_fracs(
+                    None,
+                    'vid1',
+                    {'t1': 0.0, 't2': 0.99},
+                    mastermind.core.VideoInfo(
+                        'acct1', True, 
+                        [build_thumb(ThumbnailMetadata('t1', 'vid1')),
+                         build_thumb(ThumbnailMetadata('t2', 'vid1'))]))
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
