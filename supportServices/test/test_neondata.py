@@ -726,6 +726,24 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             obj.get_id(),
             'dhfaagb0z0h6n685ntysas00_e38ef7abba4c9102b26feb90bc5df3a8')
 
+    def test_defaulted_get(self):
+        strategy = ExperimentStrategy('in_db',
+                                      max_neon_thumbs=7,
+                                      only_exp_if_chosen=True)
+        strategy.save()
+
+        with self.assertLogNotExists(logging.WARN, 'No ExperimentStrategy'):
+            self.assertEquals(strategy, ExperimentStrategy.get('in_db'))
+
+        with self.assertLogExists(logging.WARN, 'No ExperimentStrategy'):
+            self.assertEquals(ExperimentStrategy('not_in_db'),
+                              ExperimentStrategy.get('not_in_db'))
+
+        with self.assertLogNotExists(logging.WARN, 'No ExperimentStrategy'):
+            self.assertEquals(ExperimentStrategy('not_in_db'),
+                              ExperimentStrategy.get('not_in_db',
+                                                     log_missing=False))
+
 
 
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
