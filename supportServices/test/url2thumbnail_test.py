@@ -24,6 +24,7 @@ import tornado.httpclient
 import tornado.ioloop
 import unittest
 from utils import imageutils
+import utils.neon
 
 _log = logging.getLogger(__name__)
 
@@ -242,7 +243,7 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
         index = URL2ThumbnailIndex()
         index.build_index_from_neondata()
 
-        v3 = neondata.ThumbnailMetadata.get(
+        v3 = neondata.VideoMetadata.get(
             neondata.InternalVideoID.generate('api2', 'v3'))
         t5 = neondata.ThumbnailMetadata(
              't5', v3.key, ['five.jpg'],
@@ -280,7 +281,7 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
                          't6')
 
     def test_same_image_in_different_account(self):
-        v3 = neondata.ThumbnailMetadata.get(
+        v3 = neondata.VideoMetadata.get(
             neondata.InternalVideoID.generate('api2', 'v3'))
         v3.thumbnail_ids.append('t5')
         v3.save()
@@ -402,4 +403,5 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
     
 
 if __name__ == '__main__':
+    utils.neon.InitNeon()
     test_utils.neontest.main()
