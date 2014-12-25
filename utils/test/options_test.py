@@ -41,6 +41,10 @@ class TestAsyncOptions(tornado.testing.AsyncTestCase):
         super(TestAsyncOptions, self).setUp()
         self.parser = utils.options.OptionParser()
 
+    def tearDown(self):
+        del self.parser
+        super(TestAsyncOptions, self).tearDown()
+
     @tornado.gen.engine
     def lookup_int_callback(self, ntimes, callback=None):
         '''Function used by test_lots_of_callbacks.'''
@@ -101,6 +105,7 @@ class TestMultiProcesses(unittest.TestCase):
         self.subproc.start()
 
     def tearDown(self):
+        del self.parser
         sys.modules['__builtin__'].open = self.open_func
         self.subproc.stop()
         if self.subproc.is_alive():
@@ -190,6 +195,7 @@ class TestCommandLineParsing(unittest.TestCase):
         open('/dev/null', 'a').close()
 
     def tearDown(self):
+        del self.parser
         sys.modules['__builtin__'].open = self.open_func
 
     def test_define_twice(self):
@@ -383,6 +389,7 @@ class TestS3ConfigFiles(unittest.TestCase):
 
     def tearDown(self):
         boto.connect_s3 = self.connect_func
+        del self.parser
 
     def test_good_connection(self):
         self.parser.define('an_int', default=6, type=int)
