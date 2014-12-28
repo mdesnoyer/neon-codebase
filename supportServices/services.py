@@ -201,6 +201,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     def method_not_supported(self):
         ''' unsupported method response'''
         data = '{"error":"api method not supported or REST URI is incorrect"}'
+        _log.warn('Received invalid method %s', self.request.uri)
         self.send_json_response(data, 400)
 
     @tornado.gen.coroutine
@@ -451,6 +452,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 if len(uri_parts) == 9:
                     vid = uri_parts[-1]
                     if vid == "null":
+                        _log.warn('vid is null')
                         self.send_json_response('{"error": "video id null" }',
                                                 400)
                         return
@@ -483,6 +485,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                         self.send_json_response(data, 500)
                     except tornado.web.MissingArgumentError, e:
                         data = '{"error": "missing thumbnail_id or thumbnails argument"}'
+                        _log.warn('Missing argument %s' % e) 
                         self.send_json_response(data, 400)
                         return
                     except Exception, e:
