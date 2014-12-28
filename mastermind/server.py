@@ -369,7 +369,10 @@ class StatsDBWatcher(threading.Thread):
                                  incr_counts[1]))
                     
                 self.mastermind.update_stats_info(data)
+            _log.info('Finished processing batch stats update')
         else:
+            _log.info('Looking for incremental stats update from host %s' %
+                      options.incr_stats_host)
             self.mastermind.update_stats_info([
                 (self.video_id_cache.find_video_id(thumb_id),
                  thumb_id,
