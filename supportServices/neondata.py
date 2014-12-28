@@ -1722,7 +1722,8 @@ class BrightcovePlatform(AbstractPlatform):
         self.get_api().create_brightcove_request_by_tag(self.integration_id)
 
 
-    def verify_token_and_create_requests_for_video(self, n, callback=None):
+    @tornado.gen.coroutine
+    def verify_token_and_create_requests_for_video(self, n):
         ''' Method to verify brightcove token on account creation 
             And create requests for processing
             @return: Callback returns job id, along with brightcove vid metadata
@@ -1730,12 +1731,9 @@ class BrightcovePlatform(AbstractPlatform):
 
         vserver = options.video_server
         bc = self.get_api(vserver)
-        if callback:
-            bc.async_verify_token_and_create_requests(self.integration_id,
-                                                      n,
-                                                      callback)
-        else:
-            return bc.verify_token_and_create_requests(self.integration_id,n)
+        val = yield bc.verify_token_and_create_requests(
+            self.integration_id, n)
+        raise tornado.gen.Return(val)
 
     def sync_individual_video_metadata(self):
         ''' sync video metadata from bcove individually using 

@@ -31,6 +31,7 @@ import tornado.httpclient
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 import unittest
 import urllib
+import utils.neon
 
 from utils.options import define, options
 
@@ -744,4 +745,5 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
         
 
 if __name__ == '__main__':
+    utils.neon.InitNeon()
     unittest.main()

@@ -166,8 +166,6 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         random.seed(19449)
         
     def tearDown(self):
-        #self.bapi_sync_patcher.stop()
-        #self.bapi_async_patcher.stop()
         self.cp_sync_patcher.stop()
         self.cp_async_patcher.stop()
         self.redis.stop()
@@ -330,7 +328,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         #create a neon account first
         self.api_key = self.create_neon_account()
         self.assertEqual(self.api_key, 
-                neondata.NeonApiKey.get_api_key(self.a_id))
+                         neondata.NeonApiKey.get_api_key(self.a_id))
 
         url = self.get_url('/api/v1/accounts/' + self.a_id + \
                             '/brightcove_integrations')
