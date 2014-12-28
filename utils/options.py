@@ -108,6 +108,7 @@ class OptionParser(object):
         timer = self.__dict__['_config_poll_timer']
         if timer is not None and time.is_alive():
             timer.cancel()
+        print 'deleted'
 
     def __getattr__(self, name):
         with self.__dict__['lock']:
@@ -194,12 +195,14 @@ class OptionParser(object):
 
     def _poll_config_file(self):
         '''Polls the config file to see if it has changed.'''
+        print 'polling'
         try:
             if self.cmd_options is not None:
                 self._process_new_config_file(
                     path = self.cmd_options.config)
         except Exception as e:
-            _log.exception('Error processing config file: %s' % e)
+            _log.exception('Error processing config file %s: %s' % 
+                           (self.cmd_options.config, e))
 
         # Schedule the next time to poll the config file
         self.__dict__['_config_poll_timer'] = threading.Timer(
