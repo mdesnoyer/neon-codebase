@@ -442,7 +442,7 @@ class StatsDBWatcher(threading.Thread):
                 neondata.MetricType.PLAYS : '%s:vp' % col_family}
                 
             row_start = None
-            row_end = None
+            row_stop = None
             table = None
             if thumb_id is None:
                 # We want all the data from a given time onwards for all
@@ -454,7 +454,7 @@ class StatsDBWatcher(threading.Thread):
             else:
                 # We only want data from a specific thumb
                 table = conn.table('THUMBNAIL_TIMESTAMP_EVENT_COUNTS')
-                row_end = thumb_id + 'a'
+                row_stop = thumb_id + 'a'
                 if self.last_update is None:
                     row_start = thumb_id
                 else:
@@ -462,7 +462,7 @@ class StatsDBWatcher(threading.Thread):
                         thumb_id, self.last_update.strftime('%Y-%m-%dT%H')])
             
             for key, row in table.scan(row_start=row_start,
-                                       row_end=row_end,
+                                       row_stop=row_stop,
                                        columns=[col_family]):
                 if thumb_id is None:
                     tid = key.partition('_')[2]

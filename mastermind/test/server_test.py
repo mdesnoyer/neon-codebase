@@ -446,13 +446,13 @@ class MockHBaseCountTable(object):
     def __init__(self):
         self.data = {} # key => {colname=> cell integer}
 
-    def scan(self, row_start=None, row_end=None, columns=None):
+    def scan(self, row_start=None, row_stop=None, columns=None):
         '''Function that simulates scanning a table.'''
         rows = sorted(self.data.items(), key=lambda x: x[0])
         for key, cols in rows:
             if row_start is not None and key < row_start:
                 continue
-            if row_end is not None and key >= row_end:
+            if row_stop is not None and key >= row_stop:
                 break
 
             filtered_cols = {}
