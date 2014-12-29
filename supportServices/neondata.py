@@ -31,6 +31,7 @@ import concurrent.futures
 import contextlib
 import copy
 import datetime
+import errno
 import hashlib
 import json
 import logging
@@ -2672,8 +2673,16 @@ class ThumbnailMetadata(StoredObject):
         # CDNHostingMetadataList
         cloudinary_hoster = api.cdnhosting.CDNHosting.create(
             CloudinaryCDNHostingMetadata())
-        yield utils.botoutils.run_async(cloudinary_hoster.upload, s3_url,
-                                        self.key)
+        for i in range(5):
+            try:
+                yield utils.botoutils.run_async(cloudinary_hoster.upload,
+                                                s3_url,
+                                                self.key)
+                break
+            except IOError as e:
+                if e.errno != errno.EAGAIN or i == 4:
+                    raise
+                _log.warn('Retrying cloudinary upload of %s' % s3_url)
 
         # Host the image on the CDN
         if cdn_metadata is None:
