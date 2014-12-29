@@ -1567,6 +1567,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             yield thumb_futures
         except Exception as e:
             data = '{"error": "Invalid image link or failed to download image"}'
+            _log.exception('Error downloading the image %s: %s' %
+                           (thumb_urls, e))
             self.send_json_response(data, 400)
             return
         new_tids = [x.key for x in new_thumbs]
