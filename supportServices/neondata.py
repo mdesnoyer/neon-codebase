@@ -882,14 +882,21 @@ class NeonApiKey(object):
         
     @classmethod
     def generate(cls, a_id):
-        ''' generate api key hash'''
+        ''' generate api key hash
+            if present in DB, then return it
+        '''
         api_key = NeonApiKey.id_generator()
         
         #save api key mapping
         db_connection = DBConnection.get(cls)
         key = NeonApiKey.format_key(a_id)
-        if db_connection.blocking_conn.set(key, api_key):
-            return api_key
+        
+        _api_key = cls.get_api_key(a_id)
+        if _api_key:
+            return _api_key 
+        else:
+            if db_connection.blocking_conn.set(key, api_key):
+                return api_key
 
     @classmethod
     def get_api_key(cls, a_id, callback=None):
@@ -982,8 +989,7 @@ class NeonUserAccount(object):
     '''
     def __init__(self, a_id, api_key=None, default_size=(160,90)):
         self.account_id = a_id # Account id chosen when account is created
-        self.neon_api_key = NeonApiKey.generate(a_id) if api_key is None \
-                            else api_key
+        self.neon_api_key = self.get_api_key()
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
         self.staging_tracker_account_id = \
@@ -997,6 +1003,14 @@ class NeonUserAccount(object):
         
         # Priority Q number for processing, currently supports {0,1}
         self.processing_priority = 1
+    
+    def get_api_key(self):
+        '''
+        Get the API key for the account, If already in the DB the generate method
+        returns it
+        '''
+        # TODO: Refactor when converted to Namespaced object
+        return NeonApiKey.generate(self.account_id) 
 
     def get_processing_priority(self):
         return self.processing_priority
