@@ -313,7 +313,8 @@ class CloudinaryHosting(CDNHosting):
     http://res.cloudinary.com/neon-labs/image/upload/w_120,h_90/{NEON_TID}.jpg
 
     '''
-
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def upload(self, image, tid):
         '''
         image: s3 url of the image
@@ -344,15 +345,17 @@ class CloudinaryHosting(CDNHosting):
             raise NotImplementedError("No support for upload raw images yet")
         else:
             params['file'] = image
-            return self.make_request(params, None, headers)
+            yield self.make_request(params, None, headers, async=True)
 
-
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def make_request(self, params, imdata=None, headers=None):
         api_url  = "https://api.cloudinary.com/v1_1/%s/image/upload" %\
                      options.cloudinary_name          
         
         encoded_params = urllib.urlencode(params)
-        request = urllib2.Request(api_url, encoded_params)
+        request = tornado.httpclient.HTTPRequest(api_url, 'POST',
+                                                 body=encoded_params)
         
         #if imdata:
             #body = imdata #"".join([data for data in imdata])
@@ -360,25 +363,16 @@ class CloudinaryHosting(CDNHosting):
             #                           body, headers)
         
         try:
-            response = urllib2.urlopen(request)
-            body = response.read()
-            resp = json.loads(body)
-            if not resp.has_key('error'):
-                return resp['url']
-            else:
-                # There was an error uploading the image
-                _log.error("Error uploading image to cloudinary %s" %\
-                            params['public_id'])
-                return 
+            yield tornado.gen.Task(utils.http.send_request, request) 
 
         except socket.error, e:
             _log.error("Socket error uploading image to cloudinary %s" %\
                         params['public_id'])
-            return
-        except urllib2.HTTPError, e:
+            raise IOError('Error connecting to cloudinary')
+        except tornado.httpclient.HTTPError, e:
             _log.error("http error uploading image to cloudinary %s" %\
                         params['public_id'])
-            return
+            raise IOError('Error uploading to cloudinary')
 
     def sign_request(self, params):
 

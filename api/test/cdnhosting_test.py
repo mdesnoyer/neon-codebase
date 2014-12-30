@@ -26,7 +26,6 @@ from utils.imageutils import PILImageUtils
 
 _log = logging.getLogger(__name__)
 
-#TODO(Sunil): Make this test async once cdnhosting is
 class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     ''' 
     Test the ability to host images on an aws cdn (aka S3)
@@ -164,7 +163,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
                 yield api.cdnhosting.create_s3_redirect('dest.jpg', 'src.jpg',
                                                         async=True)
 
-    @patch('api.cdnhosting.urllib2')
+    @patch('api.cdnhosting.utils.http.send_request')
     def test_cloudinary_hosting(self, mock_http):
         
         mock_response = '{"public_id":"bfea94933dc752a2def8a6d28f9ac4c2","version":1406671711,"signature":"26bd2ffa2b301b9a14507d152325d7692c0d4957","width":480,"height":268,"format":"jpg","resource_type":"image","created_at":"2014-07-29T22:08:19Z","bytes":74827,"type":"upload","etag":"99fd609b49a802fdef7e2952a5e75dc3","url":"http://res.cloudinary.com/neon-labs/image/upload/v1406671711/bfea94933dc752a2def8a6d28f9ac4c2.jpg","secure_url":"https://res.cloudinary.com/neon-labs/image/upload/v1406671711/bfea94933dc752a2def8a6d28f9ac4c2.jpg"}'
@@ -173,11 +172,16 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         cd = api.cdnhosting.CDNHosting.create(metadata)
         im = 'https://s3.amazonaws.com/host-thumbnails/image.jpg'
         tid = 'bfea94933dc752a2def8a6d28f9ac4c2'
-        mresponse = MagicMock()
-        mresponse.read.return_value = mock_response
-        mock_http.urlopen.return_value = mresponse 
-        uploaded_url = cd.upload(im, tid)
-        self.assertEqual(uploaded_url, json.loads(mock_response)['url'])
+        mresponse = tornado.httpclient.HTTPResponse(
+            tornado.httpclient.HTTPRequest('http://cloudinary.com'), 
+            200, buffer=StringIO(mock_response))
+        mock_http.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x, 200,
+                                            buffer=StringIO(mock_response)))
+        cd.upload(im, tid)
+        self.assertEquals(mock_http.call_count, 1)
+        # TODO(sunil): Check the contents of the request that was seen
+        # to make sure it is what was expected.
 
     # TODO(Sunil): Add error testing for the uploads of cloudinary
 
