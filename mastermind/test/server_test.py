@@ -939,13 +939,18 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         mastermind.server.tempfile = fake_tempfile.FakeTempfileModule(
             self.filesystem)
 
+        # Mock out neondata
+        self.neondata_patcher = patch('mastermind.server.neondata')
+        self.datamock = self.neondata_patcher.start()
+        self.datamock.RequestState = neondata.RequestState
+
         self.mastermind = mastermind.core.Mastermind()
         self.publisher = mastermind.server.DirectivePublisher(
             self.mastermind)
         logging.getLogger('mastermind.server').reset_sample_counters()
 
     def tearDown(self):
-        neondata.DBConnection.clear_singleton_instance()
+        self.neondata_patcher.stop()
         mastermind.server.tempfile = self.real_tempfile
         self.s3_patcher.stop()
         del self.mastermind
@@ -1209,25 +1214,25 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         Test the update_request_state logic
         '''
         api_key = "apikey"
-        i_vids = []; request_keys = []
+        i_vids = [];
+        requests = {}
         def add_video(i, state=neondata.RequestState.SUBMIT):    
             jid = 'job%s' % i
             vid = 'vid%s' % i 
             i_vid = "%s_%s" % (api_key, vid)
             nar = neondata.NeonApiRequest(jid, api_key, vid)
             nar.state = state
-            vm = neondata.VideoMetadata(i_vid, [], jid, 'v0.mp4')
-            nar.save()
-            vm.save()
-            request_keys.append((jid, api_key))
+            nar.save = MagicMock()
+            requests[i_vid] = nar
             i_vids.append(i_vid)
             self.publisher._add_video_id_to_serving_map(i_vid)
 
         # Add videos
         for i in range(5):
             add_video(i)
-
         add_video(11, state=neondata.RequestState.ACTIVE)
+        self.datamock.VideoMetadata.get_video_requests.side_effect = \
+          lambda vids: [requests.get(vid, None) for vid in vids]
 
         # Check initial state in the map
         for i_vid in i_vids:
@@ -1239,8 +1244,8 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             for i_vid in i_vids:
                 self.assertTrue(self.publisher.video_id_serving_map[i_vid])
 
-            reqs = neondata.NeonApiRequest.get_many(request_keys)
-            for req in reqs:
+            for req in requests.values():
+                self.assertEqual(req.save.call_count, 1)
                 if req.job_id == 'job11':
                     self.assertEqual(req.state,
                                      neondata.RequestState.SERVING_AND_ACTIVE)

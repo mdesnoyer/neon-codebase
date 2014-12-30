@@ -481,6 +481,10 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
 class QueueSmokeTest(test_utils.neontest.TestCase):
     def setUp(self):
         super(QueueSmokeTest, self).setUp()
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start() 
+        random.seed(234895)
+        
         self.fwq = server.FairWeightedRequestQueue(nqueues=2)
         self.nuser1 = neondata.NeonUserAccount("acc1")
         self.nuser1.save()
@@ -501,6 +505,7 @@ class QueueSmokeTest(test_utils.neontest.TestCase):
 
     def tearDown(self):
         self.send_request_patcher.stop()
+        self.redis.stop()
         super(QueueSmokeTest, self).tearDown()
 
     def test_many_puts_gets(self):

@@ -675,7 +675,8 @@ class DirectivePublisher(threading.Thread):
             # new video is inserted, by default its serving state
             # should be false. i.e request state not updated
             self.video_id_serving_map[vid] = False
-        
+
+    # TODO(Sunil): Do these updates asynchronously
     def _update_request_state_to_serving(self):
         ''' update all the new video's serving state 
             i.e ISP URLs are ready

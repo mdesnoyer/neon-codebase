@@ -67,9 +67,9 @@ _log = logging.getLogger(__name__)
 define("thumbnailBucket", default="host-thumbnails", type=str,
         help="S3 bucket to Host thumbnails ")
 
-define("accountDB", default="127.0.0.1", type=str, help="")
-define("videoDB", default="127.0.0.1", type=str, help="")
-define("thumbnailDB", default="127.0.0.1", type=str ,help="")
+define("accountDB", default="0.0.0.0", type=str, help="")
+define("videoDB", default="0.0.0.0", type=str, help="")
+define("thumbnailDB", default="0.0.0.0", type=str ,help="")
 define("dbPort", default=6379, type=int, help="redis port")
 define("watchdogInterval", default=3, type=int, 
         help="interval for watchdog thread")

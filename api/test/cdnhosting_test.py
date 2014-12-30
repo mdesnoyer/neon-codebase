@@ -38,12 +38,21 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.s3conn.create_bucket('hosting-bucket')
         self.bucket = self.s3conn.get_bucket('hosting-bucket')
 
+        # Mock neondata
+        self.neondata_patcher = patch('api.cdnhosting.supportServices.neondata')
+        self.datamock = self.neondata_patcher.start()
+        self.datamock.S3CDNHostingMetadata = neondata.S3CDNHostingMetadata
+        self.datamock.CloudinaryCDNHostingMetadata = \
+          neondata.CloudinaryCDNHostingMetadata
+        self.datamock.NeonCDNHostingMetadata = neondata.NeonCDNHostingMetadata
+
         random.seed(1654984)
 
         self.image = PILImageUtils.create_random_image(480, 640)
         super(TestAWSHosting, self).setUp()
 
     def tearDown(self):
+        self.neondata_patcher.stop()
         self.s3_patcher.stop()
         super(TestAWSHosting, self).tearDown()
 
@@ -65,8 +74,8 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.assertNotEqual(s3_key.policy, 'public-read')
 
         # Make sure that the serving urls weren't added
-        self.assertIsNone(
-            neondata.ThumbnailServingURLs.get('acct1_vid1_tid1'))
+        self.assertEquals(self.datamock.ThumbnailServingURLs.modify.call_count,
+                          0)
 
 
     @tornado.testing.gen_test
