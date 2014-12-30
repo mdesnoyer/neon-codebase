@@ -2678,7 +2678,7 @@ class ThumbnailMetadata(StoredObject):
                 #yield utils.botoutils.run_async(cloudinary_hoster.upload,
                 #                                s3_url,
                 #                                self.key)
-                cloudinary_hoster.upload(s3_url, self.key)
+                cloudinary_hoster.upload(s3_url, self.key )
                 break
             except IOError as e:
                 if e.errno != errno.EAGAIN or i == 4:
