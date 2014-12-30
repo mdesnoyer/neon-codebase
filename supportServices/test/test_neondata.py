@@ -1110,9 +1110,12 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.s3conn.create_bucket('hosting-bucket')
         self.bucket = self.s3conn.get_bucket('hosting-bucket')
 
-        # Mock out cloundinary
-        self.cloundinary_patcher = patch('api.cdnhosting.CloudinaryHosting')
-        self.cloundinary_mock = self.cloundinary_patcher.start()
+        # Mock out cloudinary
+        self.cloudinary_patcher = patch('api.cdnhosting.CloudinaryHosting')
+        self.cloudinary_mock = self.cloudinary_patcher.start()
+        future = Future()
+        future.set_result(None)
+        self.cloudinary_mock().upload.side_effect = [future]
 
         random.seed(1654984)
 
@@ -1121,7 +1124,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
 
     def tearDown(self):
         self.s3_patcher.stop()
-        self.cloundinary_patcher.stop()
+        self.cloudinary_patcher.stop()
         self.redis.stop()
         super(TestAddingImageData, self).tearDown()
 
@@ -1175,9 +1178,10 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.assertEqual(redirect.redirect_destination,
                          '/' + primary_hosting_key)
 
-        # Check cloundinary
-        self.cloundinary_mock().upload.assert_called_with(thumb_info.urls[0],
-                                                          thumb_info.key)
+        # Check cloudinary
+        self.cloudinary_mock().upload.assert_called_with(thumb_info.urls[0],
+                                                         thumb_info.key,
+                                                         async=True)
 
     @tornado.testing.gen_test
     def test_add_thumbnail_to_video_and_save(self):
