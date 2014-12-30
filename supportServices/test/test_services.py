@@ -166,8 +166,6 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         random.seed(19449)
         
     def tearDown(self):
-        #self.bapi_sync_patcher.stop()
-        #self.bapi_async_patcher.stop()
         self.cp_sync_patcher.stop()
         self.cp_async_patcher.stop()
         self.redis.stop()
@@ -330,7 +328,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         #create a neon account first
         self.api_key = self.create_neon_account()
         self.assertEqual(self.api_key, 
-                neondata.NeonApiKey.get_api_key(self.a_id))
+                         neondata.NeonApiKey.get_api_key(self.a_id))
 
         url = self.get_url('/api/v1/accounts/' + self.a_id + \
                             '/brightcove_integrations')
@@ -1386,10 +1384,11 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
 
         
 
-    @patch('utils.imageutils.utils.http.send_request')
-    @patch('api.cdnhosting.urllib2')
+    @patch('utils.imageutils.utils.http')
     @patch('api.cdnhosting.S3Connection')
-    def test_upload_video_custom_thumbnail(self, mock_conntype, mock_urllib2,
+    @patch('supportServices.services.neondata.api.cdnhosting.utils.http')
+    def test_upload_video_custom_thumbnail(self, mock_cloudinary,
+                                           mock_conntype,
                                            mock_img_download):
         '''
         Test uploading a custom thumbnail for a video
@@ -1412,11 +1411,10 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         conn.create_bucket('host-thumbnails')
         conn.create_bucket('n3.neon-images.com')
         mock_conntype.return_value = conn
-        
-        #cloudinary mock
-        mresponse = MagicMock()
-        mresponse.read.return_value = '{"url": "http://cloudinary.jpg"}' 
-        mock_urllib2.urlopen.return_value = mresponse 
+
+        # Mock out the cloudinary call
+        mock_cloudinary.send_request.side_effect = \
+          lambda x, callback: callback(tornado.httpclient.HTTPResponse(x, 200))
 
         # Mock the image download
         def _handle_img_download(request, callback=None, *args, **kwargs):
@@ -1446,7 +1444,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
                 return self.io_loop.add_callback(callback, response)
             else:
                 return response
-        mock_img_download.side_effect = _handle_img_download 
+        mock_img_download.send_request.side_effect = _handle_img_download 
         
         self._setup_initial_brightcove_state()
         vid = self._get_videos()[0]
@@ -1540,8 +1538,10 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(response.code, 400)
 
         # cloudinary error 
-        mresponse.read.return_value =  '{"error": "fake error"}' 
-        mock_urllib2.urlopen.return_value = mresponse 
+        mock_cloudinary.send_request.side_effect = \
+          lambda x, callback: callback(
+              tornado.httpclient.HTTPResponse(x, 200, buffer=StringIO(
+                  '{"error": "fake error"}')))
         url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
                     "/%s/videos/%s" %(self.a_id, self.b_id, vid))
         data = {

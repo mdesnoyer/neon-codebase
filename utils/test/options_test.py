@@ -26,6 +26,7 @@ import tornado.gen
 import unittest
 import tornado.ioloop
 import tornado.testing
+import utils.neon
 import utils.options
 
 class FileStringIO(StringIO):
@@ -86,6 +87,7 @@ class OptionSubprocess(multiprocessing.Process):
                 # Time to shutdown
                 break
             self.out_q.put_nowait(self.parser.__getattr__(name))
+        del self.parser
 
     def stop(self):
         self.in_q.put_nowait(None)
@@ -103,16 +105,19 @@ class TestMultiProcesses(unittest.TestCase):
 
         self.subproc = OptionSubprocess(self.parser)
         self.subproc.start()
+        super(TestMultiProcesses, self).setUp()
 
     def tearDown(self):
         del self.parser
         sys.modules['__builtin__'].open = self.open_func
         self.subproc.stop()
+        self.subproc.join(2.0)
         if self.subproc.is_alive():
             try:
                 os.kill(self.subproc.pid, signal.SIGKILL)
             except OSError:
                 pass
+        super(TestMultiProcesses, self).tearDown()
 
     def _get_value_in_subprocess(self, variable):
         self.subproc.in_q.put_nowait(variable)
@@ -460,4 +465,5 @@ class TestS3ConfigFiles(unittest.TestCase):
         
 
 if __name__ == '__main__':
+    utils.neon.InitNeonTest()
     unittest.main()

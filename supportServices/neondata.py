@@ -31,6 +31,7 @@ import concurrent.futures
 import contextlib
 import copy
 import datetime
+import errno
 import hashlib
 import json
 import logging
@@ -66,9 +67,9 @@ _log = logging.getLogger(__name__)
 define("thumbnailBucket", default="host-thumbnails", type=str,
         help="S3 bucket to Host thumbnails ")
 
-define("accountDB", default="127.0.0.1", type=str, help="")
-define("videoDB", default="127.0.0.1", type=str, help="")
-define("thumbnailDB", default="127.0.0.1", type=str ,help="")
+define("accountDB", default="0.0.0.0", type=str, help="")
+define("videoDB", default="0.0.0.0", type=str, help="")
+define("thumbnailDB", default="0.0.0.0", type=str ,help="")
 define("dbPort", default=6379, type=int, help="redis port")
 define("watchdogInterval", default=3, type=int, 
         help="interval for watchdog thread")
@@ -1736,7 +1737,8 @@ class BrightcovePlatform(AbstractPlatform):
         self.get_api().create_brightcove_request_by_tag(self.integration_id)
 
 
-    def verify_token_and_create_requests_for_video(self, n, callback=None):
+    @tornado.gen.coroutine
+    def verify_token_and_create_requests_for_video(self, n):
         ''' Method to verify brightcove token on account creation 
             And create requests for processing
             @return: Callback returns job id, along with brightcove vid metadata
@@ -1744,12 +1746,9 @@ class BrightcovePlatform(AbstractPlatform):
 
         vserver = options.video_server
         bc = self.get_api(vserver)
-        if callback:
-            bc.async_verify_token_and_create_requests(self.integration_id,
-                                                      n,
-                                                      callback)
-        else:
-            return bc.verify_token_and_create_requests(self.integration_id,n)
+        val = yield bc.verify_token_and_create_requests(
+            self.integration_id, n)
+        raise tornado.gen.Return(val)
 
     def sync_individual_video_metadata(self):
         ''' sync video metadata from bcove individually using 
@@ -2681,15 +2680,11 @@ class ThumbnailMetadata(StoredObject):
             async=True)
 
         # Send the image to cloudinary
-        # TODO(Sunil): Have this yield the functions directly instead
-        # of going through the run_async function once cdnhosting is
-        # written asynchronously.
         # TODO(Sunil): Merge the cloudinary hosting into the 
         # CDNHostingMetadataList
         cloudinary_hoster = api.cdnhosting.CDNHosting.create(
             CloudinaryCDNHostingMetadata())
-        yield utils.botoutils.run_async(cloudinary_hoster.upload, s3_url,
-                                        self.key)
+        yield cloudinary_hoster.upload(s3_url, self.key, async=True)
 
         # Host the image on the CDN
         if cdn_metadata is None:
