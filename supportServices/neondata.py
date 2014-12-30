@@ -2666,24 +2666,11 @@ class ThumbnailMetadata(StoredObject):
             async=True)
 
         # Send the image to cloudinary
-        # TODO(Sunil): Have this yield the functions directly instead
-        # of going through the run_async function once cdnhosting is
-        # written asynchronously.
         # TODO(Sunil): Merge the cloudinary hosting into the 
         # CDNHostingMetadataList
         cloudinary_hoster = api.cdnhosting.CDNHosting.create(
             CloudinaryCDNHostingMetadata())
-        for i in range(5):
-            try:
-                #yield utils.botoutils.run_async(cloudinary_hoster.upload,
-                #                                s3_url,
-                #                                self.key)
-                cloudinary_hoster.upload(s3_url, self.key )
-                break
-            except IOError as e:
-                if e.errno != errno.EAGAIN or i == 4:
-                    raise
-                _log.warn('Retrying cloudinary upload of %s' % s3_url)
+        yield cloudinary_hoster.upload(s3_url, self.key, async=True)
 
         # Host the image on the CDN
         if cdn_metadata is None:

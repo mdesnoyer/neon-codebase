@@ -1385,9 +1385,8 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         
 
     @patch('utils.imageutils.utils.http.send_request')
-    @patch('api.cdnhosting.urllib2')
     @patch('api.cdnhosting.S3Connection')
-    def test_upload_video_custom_thumbnail(self, mock_conntype, mock_urllib2,
+    def test_upload_video_custom_thumbnail(self, mock_conntype,
                                            mock_img_download):
         '''
         Test uploading a custom thumbnail for a video
@@ -1410,11 +1409,6 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         conn.create_bucket('host-thumbnails')
         conn.create_bucket('n3.neon-images.com')
         mock_conntype.return_value = conn
-        
-        #cloudinary mock
-        mresponse = MagicMock()
-        mresponse.read.return_value = '{"url": "http://cloudinary.jpg"}' 
-        mock_urllib2.urlopen.return_value = mresponse 
 
         # Mock the image download
         def _handle_img_download(request, callback=None, *args, **kwargs):
