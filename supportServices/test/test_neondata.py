@@ -62,7 +62,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         #Test key is random on multiple generations
         a_id = "testaccount"
         api_key_1 = NeonApiKey.generate(a_id)
-        api_key_2 = NeonApiKey.generate(a_id)
+        api_key_2 = NeonApiKey.generate("12")
         self.assertNotEqual(api_key_1, api_key_2)
 
         #create neon account and verify its api key
