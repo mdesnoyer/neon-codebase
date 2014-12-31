@@ -62,7 +62,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         #Test key is random on multiple generations
         a_id = "testaccount"
         api_key_1 = NeonApiKey.generate(a_id)
-        api_key_2 = NeonApiKey.generate(a_id)
+        api_key_2 = NeonApiKey.generate("12")
         self.assertNotEqual(api_key_1, api_key_2)
 
         #create neon account and verify its api key
@@ -158,6 +158,21 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         platforms = account.get_platforms()
         self.assertItemsEqual([x.__dict__ for x in platforms],
                               [x.__dict__ for x in [bp, np, yp]])
+    
+    def test_neon_user_account_save(self):
+        na = NeonUserAccount('acct1')
+        na.save()
+
+        # fetch the api key and verify its the same as this account
+        api_key = NeonApiKey.get_api_key('acct1')
+        self.assertEqual(na.neon_api_key, api_key)
+
+        # create account again
+        na1 = NeonUserAccount('acct1')  
+
+        # ensure that the old api key is still in tact
+        api_key = NeonApiKey.get_api_key('acct1')
+        self.assertEqual(na.neon_api_key, api_key)
 
     @unittest.skip('TODO(Sunil): add this test')
     def test_add_platform_with_bad_account_id(self):
