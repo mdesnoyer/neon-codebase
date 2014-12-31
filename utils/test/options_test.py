@@ -26,6 +26,7 @@ import tornado.gen
 import unittest
 import tornado.ioloop
 import tornado.testing
+import utils.neon
 import utils.options
 
 class FileStringIO(StringIO):
@@ -40,6 +41,10 @@ class TestAsyncOptions(tornado.testing.AsyncTestCase):
     def setUp(self):
         super(TestAsyncOptions, self).setUp()
         self.parser = utils.options.OptionParser()
+
+    def tearDown(self):
+        del self.parser
+        super(TestAsyncOptions, self).tearDown()
 
     @tornado.gen.engine
     def lookup_int_callback(self, ntimes, callback=None):
@@ -82,6 +87,7 @@ class OptionSubprocess(multiprocessing.Process):
                 # Time to shutdown
                 break
             self.out_q.put_nowait(self.parser.__getattr__(name))
+        del self.parser
 
     def stop(self):
         self.in_q.put_nowait(None)
@@ -99,15 +105,19 @@ class TestMultiProcesses(unittest.TestCase):
 
         self.subproc = OptionSubprocess(self.parser)
         self.subproc.start()
+        super(TestMultiProcesses, self).setUp()
 
     def tearDown(self):
+        del self.parser
         sys.modules['__builtin__'].open = self.open_func
         self.subproc.stop()
+        self.subproc.join(2.0)
         if self.subproc.is_alive():
             try:
                 os.kill(self.subproc.pid, signal.SIGKILL)
             except OSError:
                 pass
+        super(TestMultiProcesses, self).tearDown()
 
     def _get_value_in_subprocess(self, variable):
         self.subproc.in_q.put_nowait(variable)
@@ -190,6 +200,7 @@ class TestCommandLineParsing(unittest.TestCase):
         open('/dev/null', 'a').close()
 
     def tearDown(self):
+        del self.parser
         sys.modules['__builtin__'].open = self.open_func
 
     def test_define_twice(self):
@@ -383,6 +394,7 @@ class TestS3ConfigFiles(unittest.TestCase):
 
     def tearDown(self):
         boto.connect_s3 = self.connect_func
+        del self.parser
 
     def test_good_connection(self):
         self.parser.define('an_int', default=6, type=int)
@@ -453,4 +465,5 @@ class TestS3ConfigFiles(unittest.TestCase):
         
 
 if __name__ == '__main__':
+    utils.neon.InitNeonTest()
     unittest.main()

@@ -369,7 +369,10 @@ class StatsDBWatcher(threading.Thread):
                                  incr_counts[1]))
                     
                 self.mastermind.update_stats_info(data)
+            _log.info('Finished processing batch stats update')
         else:
+            _log.info('Looking for incremental stats update from host %s' %
+                      options.incr_stats_host)
             self.mastermind.update_stats_info([
                 (self.video_id_cache.find_video_id(thumb_id),
                  thumb_id,
@@ -439,7 +442,7 @@ class StatsDBWatcher(threading.Thread):
                 neondata.MetricType.PLAYS : '%s:vp' % col_family}
                 
             row_start = None
-            row_end = None
+            row_stop = None
             table = None
             if thumb_id is None:
                 # We want all the data from a given time onwards for all
@@ -451,7 +454,7 @@ class StatsDBWatcher(threading.Thread):
             else:
                 # We only want data from a specific thumb
                 table = conn.table('THUMBNAIL_TIMESTAMP_EVENT_COUNTS')
-                row_end = thumb_id + 'a'
+                row_stop = thumb_id + 'a'
                 if self.last_update is None:
                     row_start = thumb_id
                 else:
@@ -459,7 +462,7 @@ class StatsDBWatcher(threading.Thread):
                         thumb_id, self.last_update.strftime('%Y-%m-%dT%H')])
             
             for key, row in table.scan(row_start=row_start,
-                                       row_end=row_end,
+                                       row_stop=row_stop,
                                        columns=[col_family]):
                 if thumb_id is None:
                     tid = key.partition('_')[2]
@@ -601,6 +604,7 @@ class DirectivePublisher(threading.Thread):
         self.activity_watcher = activity_watcher
 
         self.last_publish_time = datetime.datetime.utcnow()
+        self._update_publish_timer = None
         self._update_time_since_publish()
 
         self.lock = threading.RLock()
@@ -611,6 +615,11 @@ class DirectivePublisher(threading.Thread):
         # we grab the reference to the S3Connection on initialization
         # instead of relying on the import statement.
         self.S3Connection = S3Connection
+
+    def __del__(self):
+        if self._update_publish_timer and self._update_publish_timer.is_alive():
+            self._update_publish_timer.cancel()
+        super(DirectivePublisher, self).__del__()
 
     def run(self):
         self._stopped.clear()
@@ -654,9 +663,10 @@ class DirectivePublisher(threading.Thread):
             datetime.datetime.utcnow() -
             self.last_publish_time).total_seconds()
 
-        timer = threading.Timer(10.0, self._update_time_since_publish)
-        timer.daemon = True
-        timer.start()
+        self._update_publish_timer = threading.Timer(
+            10.0, self._update_time_since_publish)
+        self._update_publish_timer.daemon = True
+        self._update_publish_timer.start()
     
     def _add_video_id_to_serving_map(self, vid):
         try:
@@ -665,7 +675,8 @@ class DirectivePublisher(threading.Thread):
             # new video is inserted, by default its serving state
             # should be false. i.e request state not updated
             self.video_id_serving_map[vid] = False
-        
+
+    # TODO(Sunil): Do these updates asynchronously
     def _update_request_state_to_serving(self):
         ''' update all the new video's serving state 
             i.e ISP URLs are ready

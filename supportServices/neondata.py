@@ -31,6 +31,7 @@ import concurrent.futures
 import contextlib
 import copy
 import datetime
+import errno
 import hashlib
 import json
 import logging
@@ -66,9 +67,9 @@ _log = logging.getLogger(__name__)
 define("thumbnailBucket", default="host-thumbnails", type=str,
         help="S3 bucket to Host thumbnails ")
 
-define("accountDB", default="127.0.0.1", type=str, help="")
-define("videoDB", default="127.0.0.1", type=str, help="")
-define("thumbnailDB", default="127.0.0.1", type=str ,help="")
+define("accountDB", default="0.0.0.0", type=str, help="")
+define("videoDB", default="0.0.0.0", type=str, help="")
+define("thumbnailDB", default="0.0.0.0", type=str ,help="")
 define("dbPort", default=6379, type=int, help="redis port")
 define("watchdogInterval", default=3, type=int, 
         help="interval for watchdog thread")
@@ -882,14 +883,21 @@ class NeonApiKey(object):
         
     @classmethod
     def generate(cls, a_id):
-        ''' generate api key hash'''
+        ''' generate api key hash
+            if present in DB, then return it
+        '''
         api_key = NeonApiKey.id_generator()
         
         #save api key mapping
         db_connection = DBConnection.get(cls)
         key = NeonApiKey.format_key(a_id)
-        if db_connection.blocking_conn.set(key, api_key):
-            return api_key
+        
+        _api_key = cls.get_api_key(a_id)
+        if _api_key is not None:
+            return _api_key 
+        else:
+            if db_connection.blocking_conn.set(key, api_key):
+                return api_key
 
     @classmethod
     def get_api_key(cls, a_id, callback=None):
@@ -982,8 +990,7 @@ class NeonUserAccount(object):
     '''
     def __init__(self, a_id, api_key=None, default_size=(160,90)):
         self.account_id = a_id # Account id chosen when account is created
-        self.neon_api_key = NeonApiKey.generate(a_id) if api_key is None \
-                            else api_key
+        self.neon_api_key = self.get_api_key() if api_key is None else api_key
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
         self.staging_tracker_account_id = \
@@ -997,6 +1004,14 @@ class NeonUserAccount(object):
         
         # Priority Q number for processing, currently supports {0,1}
         self.processing_priority = 1
+    
+    def get_api_key(self):
+        '''
+        Get the API key for the account, If already in the DB the generate method
+        returns it
+        '''
+        # TODO: Refactor when converted to Namespaced object
+        return NeonApiKey.generate(self.account_id) 
 
     def get_processing_priority(self):
         return self.processing_priority
@@ -1722,7 +1737,8 @@ class BrightcovePlatform(AbstractPlatform):
         self.get_api().create_brightcove_request_by_tag(self.integration_id)
 
 
-    def verify_token_and_create_requests_for_video(self, n, callback=None):
+    @tornado.gen.coroutine
+    def verify_token_and_create_requests_for_video(self, n):
         ''' Method to verify brightcove token on account creation 
             And create requests for processing
             @return: Callback returns job id, along with brightcove vid metadata
@@ -1730,12 +1746,9 @@ class BrightcovePlatform(AbstractPlatform):
 
         vserver = options.video_server
         bc = self.get_api(vserver)
-        if callback:
-            bc.async_verify_token_and_create_requests(self.integration_id,
-                                                      n,
-                                                      callback)
-        else:
-            return bc.verify_token_and_create_requests(self.integration_id,n)
+        val = yield bc.verify_token_and_create_requests(
+            self.integration_id, n)
+        raise tornado.gen.Return(val)
 
     def sync_individual_video_metadata(self):
         ''' sync video metadata from bcove individually using 
@@ -2667,15 +2680,11 @@ class ThumbnailMetadata(StoredObject):
             async=True)
 
         # Send the image to cloudinary
-        # TODO(Sunil): Have this yield the functions directly instead
-        # of going through the run_async function once cdnhosting is
-        # written asynchronously.
         # TODO(Sunil): Merge the cloudinary hosting into the 
         # CDNHostingMetadataList
         cloudinary_hoster = api.cdnhosting.CDNHosting.create(
             CloudinaryCDNHostingMetadata())
-        yield utils.botoutils.run_async(cloudinary_hoster.upload, s3_url,
-                                        self.key)
+        yield cloudinary_hoster.upload(s3_url, self.key, async=True)
 
         # Host the image on the CDN
         if cdn_metadata is None:
