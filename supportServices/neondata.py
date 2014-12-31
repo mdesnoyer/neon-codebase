@@ -893,7 +893,7 @@ class NeonApiKey(object):
         key = NeonApiKey.format_key(a_id)
         
         _api_key = cls.get_api_key(a_id)
-        if _api_key:
+        if _api_key is not None:
             return _api_key 
         else:
             if db_connection.blocking_conn.set(key, api_key):
@@ -990,7 +990,7 @@ class NeonUserAccount(object):
     '''
     def __init__(self, a_id, api_key=None, default_size=(160,90)):
         self.account_id = a_id # Account id chosen when account is created
-        self.neon_api_key = self.get_api_key()
+        self.neon_api_key = self.get_api_key() if api_key is None else api_key
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
         self.staging_tracker_account_id = \
