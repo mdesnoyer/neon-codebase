@@ -509,6 +509,8 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
                        'serverTime DOUBLE, '
                        'mnth INT, '
                        'yr INT)')
+        cursor.execute('CREATE TABLE IF NOT EXISTS table_build_times ('
+                       'done_time timestamp)')
         cursor.execute('CREATE TABLE IF NOT EXISTS EventSequences ('
                        'thumbnail_id varchar(128), '
                        'imloadclienttime DOUBLE, '
@@ -571,6 +573,7 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
             cursor = self.ramdb.cursor()
             cursor.execute('drop table videoplays')
             cursor.execute('drop table eventsequences')
+            cursor.execute('drop table if exists table_build_times')
             self.ramdb.commit()
         except Exception as e:
             pass
@@ -612,6 +615,8 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         cursor.execute('REPLACE INTO VideoPlays '
                        '(serverTime, mnth, yr) values '
                        '(1405375746.324, 6, 2033)')
+        cursor.execute('INSERT INTO table_build_times (done_time) values '
+                       "('2014-12-03 10:14:15')")
         cursor.executemany('REPLACE INTO EventSequences '
         '(thumbnail_id, imvisclienttime, imclickclienttime, servertime, mnth, '
         'yr, tai) '
@@ -664,6 +669,8 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
 
     def test_stats_db_no_videoplay_data(self):
         cursor = self.ramdb.cursor()
+        cursor.execute('INSERT INTO table_build_times (done_time) values '
+                       "('2014-12-03 10:14:15')")
         cursor.executemany('REPLACE INTO EventSequences '
         '(thumbnail_id, imvisclienttime, imclickclienttime, mnth, yr, tai) '
         'VALUES (?,?,?,?,?,?)', [
@@ -704,6 +711,8 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         cursor = self.ramdb.cursor()
         cursor.execute('REPLACE INTO VideoPlays '
         '(serverTime, mnth, yr) values (1405375746.32, 6, 2033)')
+        cursor.execute('INSERT INTO table_build_times (done_time) values '
+                       "('2014-12-03 10:14:15')")
         cursor.executemany('REPLACE INTO EventSequences '
         '(thumbnail_id, imloadclienttime, imclickclienttime, adplayclienttime,'
         'videoplayclienttime, servertime, mnth, yr, tai) '
@@ -752,6 +761,8 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         cursor.execute('REPLACE INTO VideoPlays '
                        '(serverTime, mnth, yr) values '
                        '(1405375746.324, 6, 2033)')
+        cursor.execute('INSERT INTO table_build_times (done_time) values '
+                       "('2014-12-03 10:14:15')")
         cursor.executemany('REPLACE INTO EventSequences '
         '(thumbnail_id, imvisclienttime, imclickclienttime, servertime, mnth, '
         'yr, tai) '
@@ -783,10 +794,12 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
 
         # Force there to be no impala update
         cursor = self.ramdb.cursor()
-        self.watcher.last_update = date.datetime.utcnow()
+        self.watcher.last_table_build = date.datetime.utcnow()
         cursor.execute('REPLACE INTO VideoPlays '
                        '(serverTime, mnth, yr) values '
                        '(1405375746.324, 6, 2033)')
+        cursor.execute('INSERT INTO table_build_times (done_time) values '
+                       "('2014-12-03 10:14:15')")
         self.ramdb.commit()
 
         # Check the stats db
@@ -803,11 +816,10 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
 
     def test_missing_cols_in_hbase_db(self):
         # Skip filling the batch db
-        self.watcher.last_update = date.datetime.utcnow()
+        self.watcher.last_table_build = date.datetime.utcnow()
         cursor = self.ramdb.cursor()
-        cursor.execute('REPLACE INTO VideoPlays '
-                       '(serverTime, mnth, yr) values '
-                       '(1405375746.324, 6, 2033)')
+        cursor.execute('INSERT INTO table_build_times (done_time) values '
+                       "('2014-12-03 10:14:15')")
         self.ramdb.commit()
 
         # There is only an impression column in the database
@@ -825,11 +837,10 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
     def test_bad_entry_in_hbase(self):
 
         # Skip filling the batch db
-        self.watcher.last_update = date.datetime.utcnow()
+        self.watcher.last_table_build = date.datetime.utcnow()
         cursor = self.ramdb.cursor()
-        cursor.execute('REPLACE INTO VideoPlays '
-                       '(serverTime, mnth, yr) values '
-                       '(1405375746.324, 6, 2033)')
+        cursor.execute('INSERT INTO table_build_times (done_time) values '
+                       "('2014-12-03 10:14:15')")
         self.ramdb.commit()
 
         # The data is malformed in the db. It must be 8 bytes
@@ -884,6 +895,8 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         cursor.execute('REPLACE INTO VideoPlays '
                        '(serverTime, mnth, yr) values '
                        '(1405375746.324, 6, 2033)')
+        cursor.execute('INSERT INTO table_build_times (done_time) values '
+                       "('2014-12-03 10:14:15')")
         cursor.executemany('REPLACE INTO EventSequences '
         '(thumbnail_id, imvisclienttime, imclickclienttime, servertime, mnth, '
         'yr, tai) '
@@ -918,6 +931,27 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         self.assertEqual(self.mastermind.update_stats_info.call_count, 1)
         self.assertItemsEqual(self._get_all_stat_updates(),
                               [('vid11', 'tid11', None, 13, None, 4)])
+
+    def test_missing_table_build_times(self):
+        # Mock out the database call because if the table isn't there,
+        # a impala.error.RPCError RPC status error:
+        # TExecuteStatementResp: TStatus(errorCode=None,
+        # errorMessage='AnalysisException: Table does not exist:
+        # default.my_funk_time', sqlState='HY000', infoMessages=None,
+        # statusCode=3 is thrown.
+        mock_conn = MagicMock()
+        mock_conn.cursor().execute.side_effect = [
+            impala.error.RPCError('missing table')]
+        self.sqllite_mock.side_effect = [mock_conn]
+
+        with self.assertLogExists(logging.ERROR, 'Probably a table is not'):
+            self.watcher._process_db_data()
+
+        # Make sure that there was no stats update
+        self.assertEqual(self.mastermind.update_stats_info.call_count, 1)
+        self.assertItemsEqual(self._get_all_stat_updates(), [])
+        
+        self.assertTrue(self.watcher.is_loaded)
 
 class TestDirectivePublisher(test_utils.neontest.TestCase):
     def setUp(self):
@@ -1294,6 +1328,8 @@ class SmokeTesting(test_utils.neontest.TestCase):
                        serverTime DOUBLE,
                        mnth INT,
                        yr INT)''')
+        cursor.execute('CREATE TABLE IF NOT EXISTS table_build_times ('
+                       'done_time timestamp)')
         cursor.execute('''CREATE TABLE IF NOT EXISTS EventSequences (
                        thumbnail_id varchar(128),
                        imloadclienttime DOUBLE,
@@ -1356,6 +1392,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
         try:
             cursor = self.ramdb.cursor()
             cursor.execute('drop table videoplays')
+            cursor.execute('drop table table_build_times')
             cursor.execute('drop table eventsequences')
             self.ramdb.commit()
         except Exception as e:
@@ -1386,7 +1423,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
         # it's all hooked together.
 
         # Setup api request and update the state to processed
-        job = neondata.NeonApiRequest('job1', 'key1', 'vid1', 't', 't', 'r', 'h')
+        job = neondata.NeonApiRequest('job1', 'key1', 'vid1')
         job.state = neondata.RequestState.FINISHED 
         job.save()
         
@@ -1419,6 +1456,8 @@ class SmokeTesting(test_utils.neontest.TestCase):
         cursor = self.ramdb.cursor()
         cursor.execute('''REPLACE INTO VideoPlays
         (serverTime, mnth, yr) values (1405372146.32, 6, 2033)''')
+        cursor.execute('INSERT INTO table_build_times (done_time) values '
+                       "('2014-12-03 10:14:15')")
         cursor.executemany('''REPLACE INTO EventSequences
         (thumbnail_id, imvisclienttime, imclickclienttime, servertime, mnth, 
         yr, tai)
