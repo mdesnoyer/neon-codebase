@@ -684,8 +684,7 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         self.ramdb.commit()
 
         with self.assertLogExists(logging.ERROR, 
-                                  ('Cannot determine when the database was '
-                                   'last updated')):
+                                  ('Cannot find any videoplay events')):
             self.watcher._process_db_data()
 
         # Make sure that there was no stats update
