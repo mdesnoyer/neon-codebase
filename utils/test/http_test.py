@@ -337,6 +337,7 @@ class TestRequestPool(test_utils.neontest.TestCase):
 
     def test_lots_of_requests(self):
         random.seed(1659843)
+        self.pool = utils.http.RequestPool(5, 16)
         request, valid_response = create_valid_ack()
         invalid_response = HTTPError(599)
 
