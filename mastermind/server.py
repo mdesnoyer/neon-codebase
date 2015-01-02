@@ -18,6 +18,7 @@ from boto.emr.connection import EmrConnection
 import boto
 import cPickle as pickle
 import datetime
+import dateutil.parser
 import happybase
 import impala.dbapi
 import impala.error
@@ -252,7 +253,8 @@ class StatsDBWatcher(threading.Thread):
         super(StatsDBWatcher, self).__init__(name='StatsDBWatcher')
         self.mastermind = mastermind
         self.video_id_cache = video_id_cache
-        self.last_update = None
+        self.last_update = None # Time of the most recent data
+        self.last_table_build = None # Time when the tables were last built
         self.impala_conn = None
         self.daemon = True
         self.activity_watcher = activity_watcher
@@ -398,25 +400,43 @@ class StatsDBWatcher(threading.Thread):
             return False
         
         cursor = self.impala_conn.cursor()
-        
-        curtime = datetime.datetime.utcnow()
-        cursor.execute(
-            ('SELECT max(serverTime) FROM videoplays WHERE '
-             'yr >= {yr:d} or (yr = {yr:d} and mnth >= {mnth:d})').format(
-            mnth=curtime.month, yr=curtime.year))
-        result = cursor.fetchall()
-        if len(result) == 0 or result[0][0] is None:
-            _log.error('Cannot determine when the database was last updated')
+
+        # First look at table_build_times to find if the last table was built.
+        try:
+            cursor.execute('select max(done_time) from table_build_times')
+            table_build_result = cursor.fetchall()
+
+            # Now, find out when the last event we knew about was
+            curtime = datetime.datetime.utcnow()
+            cursor.execute(
+                ('SELECT max(serverTime) FROM videoplays WHERE '
+                 'yr >= {yr:d} or (yr = {yr:d} and mnth >= {mnth:d})').format(
+                     mnth=curtime.month, yr=curtime.year))
+            play_result = cursor.fetchall()
+            if (len(play_result) == 0 or play_result[0][0] is None or 
+                len(table_build_result) == 0 or 
+                table_build_result[0][0] is None):
+                _log.error('Cannot determine when the database was last '
+                           'updated')
+                statemon.state.increment('statsdb_error')
+                self.is_loaded.set()
+                return False
+        except impala.error.RPCError as e:
+            _log.error('SQL Error. Probably a table is not available yet. %s'
+                       % e)
             statemon.state.increment('statsdb_error')
             self.is_loaded.set()
             return False
-            
-        cur_update = datetime.datetime.utcfromtimestamp(result[0][0])
+
+        cur_table_build = dateutil.parser.parse(table_build_result[0][0])
+        cur_update = datetime.datetime.utcfromtimestamp(play_result[0][0])
         statemon.state.time_since_stats_update = (
             datetime.datetime.now() - cur_update).total_seconds()
 
-        is_newer = self.last_update is None or cur_update > self.last_update
+        is_newer = (self.last_table_build is None or 
+                    cur_table_build > self.last_table_build)
         self.last_update = cur_update
+        self.last_table_build = cur_table_build
         return is_newer
         
  
