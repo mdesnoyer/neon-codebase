@@ -428,7 +428,10 @@ class StatsDBWatcher(threading.Thread):
             self.is_loaded.set()
             return False
 
-        cur_table_build = dateutil.parser.parse(table_build_result[0][0])
+        cur_table_build = table_build_result[0][0]
+        if not isinstance(cur_table_build, datetime.datetime):
+            cur_table_build = dateutil.parser.parse(table_build_result[0][0])
+        
         cur_update = datetime.datetime.utcfromtimestamp(play_result[0][0])
         statemon.state.time_since_stats_update = (
             datetime.datetime.now() - cur_update).total_seconds()
