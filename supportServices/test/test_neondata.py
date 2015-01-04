@@ -62,7 +62,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         #Test key is random on multiple generations
         a_id = "testaccount"
         api_key_1 = NeonApiKey.generate(a_id)
-        api_key_2 = NeonApiKey.generate(a_id)
+        api_key_2 = NeonApiKey.generate("12")
         self.assertNotEqual(api_key_1, api_key_2)
 
         #create neon account and verify its api key
@@ -155,6 +155,21 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         platforms = account.get_platforms()
         self.assertItemsEqual([x.__dict__ for x in platforms],
                               [x.__dict__ for x in [bp, np]])
+    
+    def test_neon_user_account_save(self):
+        na = NeonUserAccount('acct1')
+        na.save()
+
+        # fetch the api key and verify its the same as this account
+        api_key = NeonApiKey.get_api_key('acct1')
+        self.assertEqual(na.neon_api_key, api_key)
+
+        # create account again
+        na1 = NeonUserAccount('acct1')  
+
+        # ensure that the old api key is still in tact
+        api_key = NeonApiKey.get_api_key('acct1')
+        self.assertEqual(na.neon_api_key, api_key)
 
     @unittest.skip('TODO(Sunil): add this test')
     def test_add_platform_with_bad_account_id(self):
@@ -1338,8 +1353,23 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
                          'acct1_vid1')
     
 
-if __name__ == '__main__':
-    unittest.main()
+    def test_defaulted_get(self):
+        strategy = ExperimentStrategy('in_db',
+                                      max_neon_thumbs=7,
+                                      only_exp_if_chosen=True)
+        strategy.save()
+
+        with self.assertLogNotExists(logging.WARN, 'No ExperimentStrategy'):
+            self.assertEquals(strategy, ExperimentStrategy.get('in_db'))
+
+        with self.assertLogExists(logging.WARN, 'No ExperimentStrategy'):
+            self.assertEquals(ExperimentStrategy('not_in_db'),
+                              ExperimentStrategy.get('not_in_db'))
+
+        with self.assertLogNotExists(logging.WARN, 'No ExperimentStrategy'):
+            self.assertEquals(ExperimentStrategy('not_in_db'),
+                              ExperimentStrategy.get('not_in_db',
+                                                     log_missing=False))
 
 
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
@@ -1691,9 +1721,12 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.s3conn.create_bucket('hosting-bucket')
         self.bucket = self.s3conn.get_bucket('hosting-bucket')
 
-        # Mock out cloundinary
-        self.cloundinary_patcher = patch('api.cdnhosting.CloudinaryHosting')
-        self.cloundinary_mock = self.cloundinary_patcher.start()
+        # Mock out cloudinary
+        self.cloudinary_patcher = patch('api.cdnhosting.CloudinaryHosting')
+        self.cloudinary_mock = self.cloudinary_patcher.start()
+        future = Future()
+        future.set_result(None)
+        self.cloudinary_mock().upload.side_effect = [future]
 
         random.seed(1654984)
 
@@ -1702,7 +1735,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
 
     def tearDown(self):
         self.s3_patcher.stop()
-        self.cloundinary_patcher.stop()
+        self.cloudinary_patcher.stop()
         self.redis.stop()
         super(TestAddingImageData, self).tearDown()
 
@@ -1756,9 +1789,10 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.assertEqual(redirect.redirect_destination,
                          '/' + primary_hosting_key)
 
-        # Check cloundinary
-        self.cloundinary_mock().upload.assert_called_with(thumb_info.urls[0],
-                                                          thumb_info.key)
+        # Check cloudinary
+        self.cloudinary_mock().upload.assert_called_with(thumb_info.urls[0],
+                                                         thumb_info.key,
+                                                         async=True)
 
     @tornado.testing.gen_test
     def test_add_thumbnail_to_video_and_save(self):

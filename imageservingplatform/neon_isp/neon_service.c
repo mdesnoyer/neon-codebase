@@ -691,16 +691,16 @@ NEON_CLIENT_API_ERROR
 neon_service_client_api(ngx_http_request_t *request,
                         ngx_chain_t  * chain){
     
-    ngx_buf_t * b;
+    ngx_buf_t * buffer;
     
-    b = ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
-    if(b == NULL){
+    buffer = ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
+    if(buffer == NULL){
         request->headers_out.status = NGX_HTTP_INTERNAL_SERVER_ERROR; //500
         neon_stats[NGINX_OUT_OF_MEMORY] ++;
         return NEON_CLIENT_API_FAIL;
     } 
     
-    chain->buf = b;
+    chain->buf = buffer;
     chain->next = NULL;
     
     ngx_str_t base_url = ngx_string("/v1/client/");

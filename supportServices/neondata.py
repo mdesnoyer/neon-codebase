@@ -31,6 +31,7 @@ import concurrent.futures
 import contextlib
 import copy
 import datetime
+import errno
 import hashlib
 import json
 import logging
@@ -66,9 +67,9 @@ _log = logging.getLogger(__name__)
 define("thumbnailBucket", default="host-thumbnails", type=str,
         help="S3 bucket to Host thumbnails ")
 
-define("accountDB", default="127.0.0.1", type=str, help="")
-define("videoDB", default="127.0.0.1", type=str, help="")
-define("thumbnailDB", default="127.0.0.1", type=str ,help="")
+define("accountDB", default="0.0.0.0", type=str, help="")
+define("videoDB", default="0.0.0.0", type=str, help="")
+define("thumbnailDB", default="0.0.0.0", type=str ,help="")
 define("dbPort", default=6379, type=int, help="redis port")
 define("watchdogInterval", default=3, type=int, 
         help="interval for watchdog thread")
@@ -528,10 +529,17 @@ class StoredObject(object):
         return self.key
 
     @classmethod
-    def get(cls, key, callback=None):
+    def get(cls, key, create_default=False, log_missing=True,
+            callback=None):
         '''Retrieve this object from the database.
 
-        Returns the object or None if it couldn't be found
+        Inputs:
+        key - Key for the object to retrieve
+        create_default - If true, then if the object is not in the database, 
+                         return a default version. Otherwise return None.
+        log_missing - Log if the object is missing in the database.
+
+        Returns the object
         '''
         db_connection = DBConnection.get(cls)
 
@@ -540,28 +548,42 @@ class StoredObject(object):
                 obj = cls._create(key, json.loads(result))
                 callback(obj)
             else:
-                callback(None)
+                if log_missing:
+                    _log.warn('No %s for id %s in db' % (cls.__name__, key))
+                if create_default:
+                    callback(cls(key))
+                else:
+                    callback(None)
 
         if callback:
             db_connection.conn.get(key, cb)
         else:
             jdata = db_connection.blocking_conn.get(key)
             if jdata is None:
-                return None
+                if log_missing:
+                    _log.warn('No %s for %s' % (cls.__name__, key))
+                if create_default:
+                    return cls(key)
+                else:
+                    return None
             return cls._create(key, json.loads(jdata))
 
     @classmethod
-    def get_many(cls, keys, callback=None):
+    def get_many(cls, keys, create_default=False, log_missing=True,
+                 callback=None):
         ''' Get many objects of the same type simultaneously
 
         This is more efficient than one at a time.
 
         Inputs:
         keys - List of keys to get
+        create_default - If true, then if the object is not in the database, 
+                         return a default version. Otherwise return None.
+        log_missing - Log if the object is missing in the database.
         callback - Optional callback function to call
 
         Returns:
-        A list of cls objects or None if it wasn't there, one for each key
+        A list of cls objects or None depending on create_default settings
         '''
         #MGET raises an exception for wrong number of args if keys = []
         if len(keys) == 0:
@@ -573,28 +595,28 @@ class StoredObject(object):
 
         db_connection = DBConnection.get(cls)
 
-        def process(results):
+        def _process(results):
             mappings = [] 
             for key, item in zip(keys, results):
                 if item:
                     obj = cls._create(key, json.loads(item))
                 else:
-                    obj = None
-                mappings.append(obj)
-            callback(mappings)
-
-        if callback:
-            db_connection.conn.mget(keys, process)
-        else:
-            mappings = [] 
-            items = db_connection.blocking_conn.mget(keys)
-            for key, item in zip(keys, items):
-                if item:
-                    obj = cls._create(key, json.loads(item))
-                else:
-                    obj = None
+                    if log_missing:
+                        _log.warn('No %s for %s' % (cls.__name__, key))
+                    if create_default:
+                        obj = cls(key)
+                    else:
+                        obj = None
                 mappings.append(obj)
             return mappings
+
+        if callback:
+            db_connection.conn.mget(
+                keys,
+                callback=lambda items:callback(_process(items)))
+        else:
+            items = db_connection.blocking_conn.mget(keys)
+            return _process(items)
 
     
     @classmethod
@@ -751,19 +773,25 @@ class NamespacedStoredObject(StoredObject):
             return '%s_%s' % (cls._baseclass_name().lower(), key)
 
     @classmethod
-    def get(cls, key, callback=None):
+    def get(cls, key, create_default=False, log_missing=True, callback=None):
         '''Return the object for a given key.'''
         return super(NamespacedStoredObject, cls).get(
-            cls.format_key(key), callback=callback)
+            cls.format_key(key),
+            create_default=create_default,
+            log_missing=log_missing,
+            callback=callback)
 
     @classmethod
-    def get_many(cls, keys, callback=None):
+    def get_many(cls, keys, create_default=False, log_missing=True,
+                 callback=None):
         '''Returns the list of objects from a list of keys.
 
         Each key must be a tuple
         '''
         return super(NamespacedStoredObject, cls).get_many(
             [cls.format_key(x) for x in keys],
+            create_default=create_default,
+            log_missing=log_missing,
             callback=callback)
 
     @classmethod
@@ -812,6 +840,31 @@ class NamespacedStoredObject(StoredObject):
             create_missing=create_missing,
             callback=callback)
 
+class DefaultedStoredObject(NamespacedStoredObject):
+    '''Namespaced object where a get-like operation will never returns None.
+
+    Instead of None, a default object is returned, so a subclass should
+    specify a reasonable default constructor
+    '''
+    def __init__(self, key):
+        super(DefaultedStoredObject, self).__init__(key)
+
+    @classmethod
+    def get(cls, key, log_missing=True, callback=None):
+        return super(DefaultedStoredObject, cls).get(
+            key,
+            create_default=True,
+            log_missing=log_missing,
+            callback=callback)
+
+    @classmethod
+    def get_many(cls, keys, log_missing=True, callback=None):
+        return super(DefaultedStoredObject, cls).get_many(
+            keys,
+            create_default=True,
+            log_missing=log_missing,
+            callback=callback)
+
 class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
 
@@ -834,14 +887,21 @@ class NeonApiKey(object):
         
     @classmethod
     def generate(cls, a_id):
-        ''' generate api key hash'''
+        ''' generate api key hash
+            if present in DB, then return it
+        '''
         api_key = NeonApiKey.id_generator()
         
         #save api key mapping
         db_connection = DBConnection.get(cls)
         key = NeonApiKey.format_key(a_id)
-        if db_connection.blocking_conn.set(key, api_key):
-            return api_key
+        
+        _api_key = cls.get_api_key(a_id)
+        if _api_key is not None:
+            return _api_key 
+        else:
+            if db_connection.blocking_conn.set(key, api_key):
+                return api_key
 
     @classmethod
     def get_api_key(cls, a_id, callback=None):
@@ -934,8 +994,7 @@ class NeonUserAccount(object):
     '''
     def __init__(self, a_id, api_key=None, default_size=(160,90)):
         self.account_id = a_id # Account id chosen when account is created
-        self.neon_api_key = NeonApiKey.generate(a_id) if api_key is None \
-                            else api_key
+        self.neon_api_key = self.get_api_key() if api_key is None else api_key
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
         self.staging_tracker_account_id = \
@@ -949,6 +1008,14 @@ class NeonUserAccount(object):
         
         # Priority Q number for processing, currently supports {0,1}
         self.processing_priority = 1
+    
+    def get_api_key(self):
+        '''
+        Get the API key for the account, If already in the DB the generate method
+        returns it
+        '''
+        # TODO: Refactor when converted to Namespaced object
+        return NeonApiKey.generate(self.account_id) 
 
     def get_processing_priority(self):
         return self.processing_priority
@@ -1077,7 +1144,7 @@ class NeonUserAccount(object):
             return na.tracker_account_id  
 
 
-class ExperimentStrategy(NamespacedStoredObject):
+class ExperimentStrategy(DefaultedStoredObject):
     '''Stores information about the experimental strategy to use.
 
     Keyed by account_id (aka api_key)
@@ -1089,7 +1156,7 @@ class ExperimentStrategy(NamespacedStoredObject):
                  holdback_frac=0.01,
                  only_exp_if_chosen=False,
                  always_show_baseline=True,
-                 baseline_type=ThumbnailType.CENTERFRAME,
+                 baseline_type=ThumbnailType.RANDOM,
                  chosen_thumb_overrides=False,
                  override_when_done=True,
                  experiment_type=MULTIARMED_BANDIT,
@@ -1146,8 +1213,9 @@ class ExperimentStrategy(NamespacedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return ExperimentStrategy.__name__
+        
 
-class CDNHostingMetadataList(NamespacedStoredObject):
+class CDNHostingMetadataList(DefaultedStoredObject):
     '''A list of CDNHostingMetadata objects.
 
     Keyed by (api_key, integration_id). Use the create_key method to
@@ -1159,7 +1227,10 @@ class CDNHostingMetadataList(NamespacedStoredObject):
         if self.get_id() and len(self.get_id().split('_')) != 2:
             raise ValueError('Invalid key %s. Must be generated using '
                              'create_key()' % self.get_id())
-        self.cdns = cdns or []
+        if cdns is None:
+            self.cdns = [NeonCDNHostingMetadata()]
+        else:
+            self.cdns = cdns
 
     def __iter__(self):
         '''Iterate through the cdns.'''
@@ -1667,7 +1738,8 @@ class BrightcovePlatform(AbstractPlatform):
         self.get_api().create_brightcove_request_by_tag(self.integration_id)
 
 
-    def verify_token_and_create_requests_for_video(self, n, callback=None):
+    @tornado.gen.coroutine
+    def verify_token_and_create_requests_for_video(self, n):
         ''' Method to verify brightcove token on account creation 
             And create requests for processing
             @return: Callback returns job id, along with brightcove vid metadata
@@ -1675,12 +1747,9 @@ class BrightcovePlatform(AbstractPlatform):
 
         vserver = options.video_server
         bc = self.get_api(vserver)
-        if callback:
-            bc.async_verify_token_and_create_requests(self.integration_id,
-                                                      n,
-                                                      callback)
-        else:
-            return bc.verify_token_and_create_requests(self.integration_id,n)
+        val = yield bc.verify_token_and_create_requests(
+            self.integration_id, n)
+        raise tornado.gen.Return(val)
 
     def sync_individual_video_metadata(self):
         ''' sync video metadata from bcove individually using 
@@ -2092,14 +2161,15 @@ class NeonApiRequest(NamespacedStoredObject):
         #TODO:validate supported methods
 
     @classmethod
-    def get(cls, job_id, api_key, callback=None):
+    def get(cls, job_id, api_key, log_missing=True, callback=None):
         ''' get instance '''
         return super(NeonApiRequest, cls).get(
             cls._generate_subkey(job_id, api_key),
+            log_missing=log_missing,
             callback=callback)
 
     @classmethod
-    def get_many(cls, keys, callback=None):
+    def get_many(cls, keys, log_missing=True, callback=None):
         '''Returns the list of objects from a list of keys.
 
         Each key must be a tuple of (job_id, api_key)
@@ -2107,6 +2177,7 @@ class NeonApiRequest(NamespacedStoredObject):
         return super(NeonApiRequest, cls).get_many(
             [cls._generate_subkey(job_id, api_key) for 
              job_id, api_key in keys],
+            log_missing=log_missing,
             callback=callback)
 
     @classmethod
@@ -2476,7 +2547,7 @@ class ThumbnailMetadata(StoredObject):
 
     def get_account_id(self):
         ''' get the internal account id. aka api key '''
-        return self.video_id.split('_')[0]
+        return self.key.split('_')[0]
     
     def get_metadata(self):
         ''' get a dictionary of the thumbnail metadata
@@ -2546,15 +2617,11 @@ class ThumbnailMetadata(StoredObject):
             async=True)
 
         # Send the image to cloudinary
-        # TODO(Sunil): Have this yield the functions directly instead
-        # of going through the run_async function once cdnhosting is
-        # written asynchronously.
         # TODO(Sunil): Merge the cloudinary hosting into the 
         # CDNHostingMetadataList
         cloudinary_hoster = api.cdnhosting.CDNHosting.create(
             CloudinaryCDNHostingMetadata())
-        yield utils.botoutils.run_async(cloudinary_hoster.upload, s3_url,
-                                        self.key)
+        yield cloudinary_hoster.upload(s3_url, self.key, async=True)
 
         # Host the image on the CDN
         if cdn_metadata is None:

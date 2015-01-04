@@ -46,5 +46,6 @@ S3_CUSTOMER_ACCOUNT_BUCKET_NAME = 'neon-customer-accounts'
 #IMAGE CDN
 CDN_IMAGE_SIZES = [(120, 67), (160, 90), (210, 118), (320, 180), (480, 270), 
         (640, 360), (120, 90), (160, 120), (320, 240), (480, 360),
-        (640, 480), (1280, 720)]
-
+        (640, 480), (1280, 720), (140, 70), (228, 128), (292, 164), (468, 263), (64, 48), (72, 92)]
+# new image sizes for fox (140, 70), (228, 128), (292, 164), (468, 263), (64, 48), (72, 92) 
+# TODO refactor this and make this a account level property
