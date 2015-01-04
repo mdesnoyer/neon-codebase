@@ -267,7 +267,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
                 # return the object from the DB
                 if method == '':
-                    self.get_account_info(itype, i_id)
+                    yield self.get_account_info(itype, i_id)
                     #self.send_json_response('{"error":"not yet impl"}', 200)
                     return
 

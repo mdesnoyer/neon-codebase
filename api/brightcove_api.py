@@ -860,6 +860,7 @@ class BrightcoveApi(object):
 
     #### Verify Read token and create Requests during signup #####
 
+    @tornado.gen.coroutine
     def verify_token_and_create_requests(self, i_id, n):
         '''
         Initial call when the brightcove account gets created
@@ -908,9 +909,9 @@ class BrightcoveApi(object):
             #Update the videos in customer inbox
             res = bc.save()
             if not res:
-                _log.error("key=async_verify_token_and_create_requests" 
+                _log.error("key=verify_token_and_create_requests" 
                         " msg=customer inbox not updated %s" %i_id)
-            return result
+                raise tornado.gen.Return(result)
 
     def async_verify_token_and_create_requests(self, i_id, n, callback=None):
         '''#Verify Tokens and Create Neon requests'''
