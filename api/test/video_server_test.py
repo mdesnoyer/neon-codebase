@@ -238,7 +238,7 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.nuser = neondata.NeonUserAccount(a_id)
         self.nuser.save()
         self.api_key = self.nuser.neon_api_key
-        self.na = neondata.NeonPlatform(a_id, self.api_key)
+        self.na = neondata.NeonPlatform(a_id, '0', self.api_key)
         self.na.save()
 
         # Patch the video length lookup
@@ -590,7 +590,7 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
         self.nuser = neondata.NeonUserAccount(a_id)
         self.nuser.save()
         self.api_key = self.nuser.neon_api_key
-        self.na = neondata.NeonPlatform(a_id, self.api_key)
+        self.na = neondata.NeonPlatform(a_id, '0', self.api_key)
         self.na.save()
 
         # Make some default jobs

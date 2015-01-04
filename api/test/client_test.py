@@ -109,7 +109,7 @@ class TestVideoClient(test_utils.neontest.TestCase):
         self.na = neondata.NeonUserAccount('acc1')
         self.na.save()
         
-        self.np = neondata.NeonPlatform('acc1', self.na.neon_api_key)
+        self.np = neondata.NeonPlatform('acc1', '0', self.na.neon_api_key)
         self.np.save()
 
         j_id = "j123"
@@ -335,7 +335,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         na = neondata.NeonUserAccount('acct1')
         self.api_key = na.neon_api_key
         na.save()
-        neondata.NeonPlatform('acct1', self.api_key).save()
+        neondata.NeonPlatform('acct1', '0', self.api_key).save()
 
         self.video_id = '%s_vid1' % self.api_key
         self.api_request = neondata.BrightcoveApiRequest(
@@ -873,7 +873,7 @@ class SmokeTest(test_utils.neontest.TestCase):
         na = neondata.NeonUserAccount('acct1')
         self.api_key = na.neon_api_key
         na.save()
-        neondata.NeonPlatform('acct1', self.api_key).save()
+        neondata.NeonPlatform('acct1', '0', self.api_key).save()
 
         self.video_id = '%s_vid1' % self.api_key
         self.api_request = neondata.OoyalaApiRequest(

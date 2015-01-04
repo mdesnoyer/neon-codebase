@@ -211,7 +211,7 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         bp.account_created = 21492000
         bp.save()
         bp.check_feed_and_create_api_requests()
-        u_bp = neondata.BrightcovePlatform.create(bp.get())
+        u_bp = neondata.BrightcovePlatform.get(na.neon_api_key, i_id)
         self.assertEqual(len(u_bp.get_videos()), nvideos)
 
     @patch('api.brightcove_api.BrightcoveApi.write_connection.send_request') 

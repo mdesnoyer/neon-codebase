@@ -93,7 +93,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         testPlatform.get_processed_internal_video_ids.return_value = [api_key
         + '_1', api_key + '_2'] 
 
-        apiPlatform = neondata.NeonPlatform('a3', api_key, abtest=True)
+        apiPlatform = neondata.NeonPlatform('a3', '0', api_key, abtest=True)
         apiPlatform.add_video(4, 'job31')
         job31 = neondata.NeonApiRequest('job31', api_key, 4)
         apiPlatform.get_processed_internal_video_ids = MagicMock()

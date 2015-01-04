@@ -34,7 +34,7 @@ def check_single_brightcove_account_delay(self, api_key='6d3d519b15600c372a1f673
     '''
     Maintains a counter to help understand the delay between api call and request creation
     '''
-    ba = BrighcovePlatform.get_account(api_key, i_id) 
+    ba = BrighcovePlatform.get(api_key, i_id) 
     req = 'http://api.brightcove.com/services/library?command=find_all_videos&token=%s&media_delivery=http&output=json&sort_by=publish_date' %ba.read_token
     response = urllib2.urlopen(req)
     resp = json.loads(resp.read())
