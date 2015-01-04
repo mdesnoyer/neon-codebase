@@ -539,7 +539,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     
     ############## User defined methods ###########
 
-    @tornado.gen.engine 
+    @tornado.gen.coroutine
     def get_account_info(self, i_type, i_id):
         platform_account = yield tornado.gen.Task(self.get_platform_account, 
                             i_type, i_id)

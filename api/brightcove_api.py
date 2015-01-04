@@ -859,24 +859,18 @@ class BrightcoveApi(object):
         return
 
     #### Verify Read token and create Requests during signup #####
-    @tornado.gen.coroutine
+
     def verify_token_and_create_requests(self, i_id, n):
         '''
         Initial call when the brightcove account gets created
         verify the read token and create neon api requests
+        #Sync version
         '''
-        result = yield tornado.gen.Task(
-            self.get_publisher_feed,
-            command='find_all_videos',
-            page_size = n) #get n videos
+        result = self.get_publisher_feed(command='find_all_videos',
+                                         page_size = n) #get n videos
 
         if result and not result.error:
-<<<<<<< HEAD
             bc = supportServices.neondata.BrightcovePlatform.get(
-=======
-            bc = yield tornado.gen.Task(
-                supportServices.neondata.BrightcovePlatform.get_account,
->>>>>>> working
                 self.neon_api_key, i_id)
             if not bc:
                 _log.error("key=verify_brightcove_tokens" 
@@ -898,14 +892,12 @@ class BrightcoveApi(object):
                     continue
 
                 prev_thumbnail = item['videoStillURL'] #item['thumbnailURL']
-                response = yield tornado.gen.Task(
-                    self.format_neon_api_request,
-                    vid,
-                    video_download_url,
-                    prev_thumbnail,
-                    'topn',
-                    i_id,
-                    title)
+                response = self.format_neon_api_request(vid,
+                                                        video_download_url,
+                                                        prev_thumbnail,
+                                                        'topn',
+                                                        i_id,
+                                                        title)
                 if not response.error:
                     vid = str(item['id'])
                     jid = tornado.escape.json_decode(response.body)
@@ -918,7 +910,6 @@ class BrightcoveApi(object):
             if not res:
                 _log.error("key=async_verify_token_and_create_requests" 
                         " msg=customer inbox not updated %s" %i_id)
-<<<<<<< HEAD
             return result
 
     def async_verify_token_and_create_requests(self, i_id, n, callback=None):
@@ -980,9 +971,6 @@ class BrightcoveApi(object):
                 callback(None)
         self.async_get_n_videos(5, verify_brightcove_tokens)
     
-=======
-            raise tornado.gen.Return(result)
->>>>>>> working
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
