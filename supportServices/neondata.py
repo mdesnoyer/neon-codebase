@@ -497,6 +497,8 @@ class StoredObject(object):
                 # type in the databse, so assume that the class is cls
                 classtype = cls
                 data_dict = obj_dict
+            
+            # create basic object using the "default" constructor
             obj = classtype(key)
 
             #populate the object dictionary
@@ -504,6 +506,8 @@ class StoredObject(object):
                 obj.__dict__[str(k)] = cls._deserialize_field(k, value)
         
             return obj
+
+
     @classmethod
     def _deserialize_field(cls, key, value):
         '''Deserializes a field by creating a StoredObject as necessary.'''
@@ -1032,6 +1036,7 @@ class NeonUserAccount(object):
         ''' get all platform accounts for the user '''
 
         ovp_map = {}
+        #TODO: Add Ooyala when necessary
         for plat in [NeonPlatform, BrightcovePlatform, YoutubePlatform]:
             ovp_map[plat.get_ovp()] = plat
 
@@ -1040,10 +1045,10 @@ class NeonUserAccount(object):
             try:
                 plat_type = ovp_map[ovp_string]
                 if plat_type == NeonPlatform:
-                    calls.append(tornado.gen.Task(plat_type.get_account,
-                                                  self.neon_api_key))
+                    calls.append(tornado.gen.Task(plat_type.get,
+                                                  self.neon_api_key, '0'))
                 else:
-                    calls.append(tornado.gen.Task(plat_type.get_account,
+                    calls.append(tornado.gen.Task(plat_type.get,
                                                   self.neon_api_key,
                                                   integration_id))
                     
@@ -1337,16 +1342,18 @@ class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
             resize=False,
             update_serving_urls=False)
 
-class AbstractPlatform(object):
+class AbstractPlatform(NamespacedStoredObject):
     ''' Abstract Platform/ Integration class '''
 
-    def __init__(self, abtest=False, enabled=True, 
+    def __init__(self, api_key, i_id='0', abtest=False, enabled=True, 
                 serving_enabled=True, serving_controller="imageplatform"):
-        self.key = None 
-        self.neon_api_key = ''
+        
+        super(AbstractPlatform, self).__init__(
+            self._generate_subkey(api_key, i_id))
+        self.neon_api_key = api_key 
+        self.integration_id = i_id 
         self.videos = {} # External video id (Original Platform VID) => Job ID
         self.abtest = abtest # Boolean on wether AB tests can run
-        self.integration_id = None # Unique platform ID to 
         self.enabled = enabled # Account enabled for auto processing of videos 
 
         # Will thumbnails be served by our system?
@@ -1354,27 +1361,62 @@ class AbstractPlatform(object):
 
         # What controller is used to serve the image? Default to imageplatform
         self.serving_controller = serving_controller 
-
-    def generate_key(self, i_id):
-        ''' generate db key '''
-        return '_'.join([self.__class__.__name__.lower(),
-                         self.neon_api_key, i_id])
     
+    @classmethod
+    def _generate_subkey(cls, api_key, i_id):
+        return '_'.join([api_key, i_id])
+
+    @classmethod
+    def _baseclass_name(cls):
+        return cls.__name__.lower() 
+   
+    @classmethod
+    def _create(cls, key, obj_dict):
+        def __get_type(key):
+            '''
+            Get the platform type
+            '''
+            platform_type = key.split('_')[0]
+            typemap = {
+                'neonplatform' : NeonPlatform,
+                'brightcoveplatform' : BrightcovePlatform,
+                'ooyalaplatform' : OoyalaPlatform,
+                'youtubeplatform' : YoutubeApiRequest
+                }
+            try:
+                platform = typemap[platform_type]
+                return platform.__name__
+            except KeyError, e:
+                _log.exception("Invalid Platform Object")
+                raise ValueError() # is this the right exception to throw?
+
+        if obj_dict:
+            if not '_type' in obj_dict or not '_data' in obj_dict:
+                obj_dict = {
+                    '_type': __get_type(obj_dict['key']),
+                    '_data': copy.deepcopy(obj_dict)
+                }
+            return super(AbstractPlatform, cls)._create(key, obj_dict)
+
+    def save(self, callback=None):
+        # since we need a default constructor with empty strings for the 
+        # eval magic to work, check here to ensure apikey and i_id aren't empty
+        # since the key is generated based on them
+        if self.neon_api_key == '' or self.integration_id == '':
+            raise Exception('Invalid initialization of AbstractPlatform or its\
+                subclass object. api_key and i_id should not be empty')
+
+        super(AbstractPlatform, self).save(callback)
+
+    @classmethod
+    def get(cls, api_key, i_id, callback=None):
+        ''' get instance '''
+        return super(AbstractPlatform, cls).get(
+            cls._generate_subkey(api_key, i_id), callback=callback)
+
     def to_json(self):
         ''' to json '''
         return json.dumps(self, default=lambda o: o.__dict__) 
-
-    def save(self, callback=None):
-        ''' save instance '''
-        db_connection = DBConnection.get(self)
-        value = self.to_json()
-        if not self.key:
-            raise Exception("Key is empty")
-
-        if callback:
-            db_connection.conn.set(self.key, value, callback)
-        else:
-            return db_connection.blocking_conn.set(self.key, value)
 
     def add_video(self, vid, job_id):
         ''' external video id => job_id '''
@@ -1416,22 +1458,6 @@ class AbstractPlatform(object):
         raise NotImplementedError
 
     @classmethod
-    def get_account(cls, api_key, i_id, callback=None):
-        '''Returns the platform object for the key.
-
-        Inputs:
-          api_key - The api key for the Neon account
-          i_id - The integration id for the platform
-          callback - If None, done asynchronously
-        '''
-        key = cls.__name__.lower()  + '_%s_%s' %(api_key, i_id) 
-        db_connection = DBConnection.get(cls)
-        if callback:
-            db_connection.conn.get(key, lambda x: callback(cls.create(x))) 
-        else:
-            return cls.create(db_connection.blocking_conn.get(key))
-
-    @classmethod
     def get_all_instances(cls, callback=None):
         '''Returns a list of all the platform instances from the db.'''
         instances = []
@@ -1446,7 +1472,14 @@ class AbstractPlatform(object):
         platforms = cls.get_all_platform_data()
         instances = [] 
         for pdata in platforms:
-            platform = cls.create(pdata)
+            platform = None
+            
+            try:
+                obj_dict = json.loads(pdata)
+                platform = cls._create(obj_dict['key'], obj_dict)
+            except ValueError, e:
+                pass
+
             if platform:
                 instances.append(platform)
 
@@ -1466,7 +1499,7 @@ class AbstractPlatform(object):
                 platform_data.append(jdata)
             else:
                 _log.debug("key=get_all_platform data"
-                            " msg=no data for acc %s i_id %s" %(api_key, i_id))
+                            " msg=no data for acc %s i_id %s" % (api_key, i_id))
         
         return platform_data
 
@@ -1480,40 +1513,18 @@ class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
     '''
-    def __init__(self, a_id, api_key, abtest=False):
-        AbstractPlatform.__init__(self, abtest=abtest)
-        self.neon_api_key = api_key 
-        self.integration_id = '0'
-        self.key = self.__class__.__name__.lower()  + '_%s_%s' \
-                %(self.neon_api_key, self.integration_id)
-        self.account_id = a_id
+    def __init__(self, a_id, i_id='0', api_key='', abtest=False):
+        # By default integration ID 0 represents 
+        # Neon Platform Integration (access via neon api)
         
-        #By default integration ID 0 represents 
-        #Neon Platform Integration (access via neon api)
+        super(NeonPlatform, self).__init__(api_key, '0', abtest)
+        self.account_id = a_id
+        self.neon_api_key = api_key 
    
     @classmethod
     def get_ovp(cls):
         ''' ovp string '''
         return "neon"
-
-    @classmethod
-    def get_account(cls, api_key, callback=None):
-        ''' return NeonPlatform account object '''
-        return super(NeonPlatform, cls).get_account(api_key, 0, callback)
-
-    @classmethod
-    def create(cls, json_data): 
-        ''' create obj'''
-        if not json_data:
-            return None
-
-        data_dict = json.loads(json_data)
-        obj = NeonPlatform("dummy", "dummy")
-
-        # populate the object dictionary
-        for key in data_dict.keys():
-            obj.__dict__[key] = data_dict[key]
-        return obj
     
     @classmethod
     def get_all_instances(cls, callback=None):
@@ -1523,15 +1534,13 @@ class NeonPlatform(AbstractPlatform):
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
     
-    def __init__(self, a_id, i_id, api_key, p_id=None, rtoken=None, wtoken=None,
-                auto_update=False, last_process_date=None, abtest=False):
+    def __init__(self, a_id, i_id='', api_key='', p_id=None, 
+                rtoken=None, wtoken=None, auto_update=False,
+                last_process_date=None, abtest=False):
 
         ''' On every request, the job id is saved '''
-        AbstractPlatform.__init__(self, abtest)
-        self.neon_api_key = api_key
-        self.key = self.generate_key(i_id)
+        super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)
         self.account_id = a_id
-        self.integration_id = i_id
         self.publisher_id = p_id
         self.read_token = rtoken
         self.write_token = wtoken
@@ -1547,14 +1556,6 @@ class BrightcovePlatform(AbstractPlatform):
     def get_ovp(cls):
         ''' return ovp name'''
         return "brightcove"
-
-    def get(self, callback=None):
-        ''' get json'''
-        db_connection = DBConnection.get(self)
-        if callback:
-            db_connection.conn.get(self.key, callback)
-        else:
-            return db_connection.blocking_conn.get(self.key)
 
     def get_api(self, video_server_uri=None):
         '''Return the Brightcove API object for this platform integration.'''
@@ -1765,40 +1766,6 @@ class BrightcovePlatform(AbstractPlatform):
             when the still is updated in the brightcove account '''
         self.video_still_width = width
 
-    @classmethod
-    def create(cls, json_data):
-        ''' create object from json data '''
-
-        if not json_data:
-            return None
-
-        params = json.loads(json_data)
-        a_id = params['account_id']
-        i_id = params['integration_id'] 
-        p_id = params['publisher_id']
-        rtoken = params['read_token']
-        wtoken = params['write_token']
-        auto_update = params['auto_update']
-        api_key = params['neon_api_key']
-         
-        ba = BrightcovePlatform(a_id, i_id, api_key, p_id, rtoken, 
-                wtoken, auto_update)
-        ba.videos = params['videos']
-        ba.last_process_date = params['last_process_date'] 
-        ba.linked_youtube_account = params['linked_youtube_account']
-        
-        #backward compatibility
-        if params.has_key('abtest'):
-            ba.abtest = params['abtest'] 
-      
-        if not params.has_key('account_created'):
-            ba.account_created = None
-        
-        #populate rest of keys
-        for key in params:
-            ba.__dict__[key] = params[key]
-        return ba
-
     @staticmethod
     def find_all_videos(token, limit, callback=None):
         ''' find all brightcove videos '''
@@ -1819,14 +1786,15 @@ class BrightcovePlatform(AbstractPlatform):
 class YoutubePlatform(AbstractPlatform):
     ''' Youtube platform integration '''
 
-    def __init__(self, a_id, i_id, api_key, access_token=None, refresh_token=None,
+    # TODO(Sunil): Fix this class when Youtube is implemented 
+
+    def __init__(self, a_id, i_id='', api_key='', access_token=None, refresh_token=None,
                 expires=None, auto_update=False, abtest=False):
-        AbstractPlatform.__init__(self)
+        super(YoutubePlatform, self).__init__(api_key, i_id)
         
         self.key = self.__class__.__name__.lower()  + '_%s_%s' \
                 %(api_key, i_id) #TODO: fix
         self.account_id = a_id
-        self.integration_id = i_id
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.expires = expires
@@ -1926,22 +1894,6 @@ class YoutubePlatform(AbstractPlatform):
         pass
     
     @classmethod
-    def create(cls, json_data):
-        if json_data is None:
-            return None
-        
-        params = json.loads(json_data)
-        a_id = params['account_id']
-        i_id = params['integration_id'] 
-        api_key = params['neon_api_key'] 
-        yt = YoutubePlatform(a_id, i_id, api_key=api_key)
-       
-        for key in params:
-            yt.__dict__[key] = params[key]
-
-        return yt
-
-    @classmethod
     def get_all_instances(cls, callback=None):
         ''' get all brightcove instances'''
         return cls._get_all_instances_impl()
@@ -1950,8 +1902,8 @@ class OoyalaPlatform(AbstractPlatform):
     '''
     OOYALA Platform
     '''
-    def __init__(self, a_id, i_id, api_key, p_code, 
-                 o_api_key, api_secret, auto_update=False): 
+    def __init__(self, a_id, i_id='', api_key='', p_code=None, 
+                 o_api_key=None, api_secret=None, auto_update=False): 
         '''
         Init ooyala platform 
         
@@ -1959,9 +1911,8 @@ class OoyalaPlatform(AbstractPlatform):
         for api calls to ooyala 
 
         '''
-        AbstractPlatform.__init__(self)
+        super(OoyalaPlatform, self).__init__(api_key, i_id)
         self.neon_api_key = api_key
-        self.key = self.generate_key(i_id)
         self.account_id = a_id
         self.integration_id = i_id
         self.partner_code = p_code
@@ -2090,20 +2041,6 @@ class OoyalaPlatform(AbstractPlatform):
                         %vid_request.key)
         raise tornado.gen.Return(True)
     
-    @classmethod
-    def create(cls, json_data):
-        if json_data is None:
-            return None
-        
-        params = json.loads(json_data)
-        a_id = params['account_id']
-        i_id = params['integration_id'] 
-        api_key = params['neon_api_key'] 
-        oo= OoyalaPlatform(a_id, i_id, api_key, None, None, None)
-        for key in params:
-            oo.__dict__[key] = params[key]
-        return oo
-
     @classmethod
     def get_all_instances(cls, callback=None):
         ''' get all brightcove instances'''

@@ -72,6 +72,7 @@ define('expiry_buffer', type=int, default=30,
 
 # Monitoring variables
 statemon.define('time_since_stats_update', float) # Time since the last update
+statemon.define('time_since_last_batch_event', float) # Time since the most recent event in the batch db
 statemon.define('time_since_publish', float) # Time since the last publish
 statemon.define('statsdb_error', int)
 statemon.define('incr_statsdb_error', int)
@@ -405,7 +406,36 @@ class StatsDBWatcher(threading.Thread):
         try:
             cursor.execute('select max(done_time) from table_build_times')
             table_build_result = cursor.fetchall()
+            
+            if (len(table_build_result) == 0 or 
+                table_build_result[0][0] is None):
+                _log.error('Cannot determine when the database was last '
+                           'updated')
+                statemon.state.increment('statsdb_error')
+                self.is_loaded.set()
+                return False
 
+            cur_table_build = table_build_result[0][0]
+            if not isinstance(cur_table_build, datetime.datetime):
+                cur_table_build = \
+                  dateutil.parser.parse(table_build_result[0][0])
+
+            statemon.state.time_since_stats_update = (
+                datetime.datetime.now() - cur_table_build).total_seconds()
+                  
+            is_newer = (self.last_table_build is None or 
+                        cur_table_build > self.last_table_build)
+            if not is_newer:
+                return False
+        except impala.error.RPCError as e:
+            _log.error('SQL Error. Probably a table is not available yet. %s'
+                       % e)
+            statemon.state.increment('statsdb_error')
+            self.is_loaded.set()
+            return False
+        
+
+        try:
             # Now, find out when the last event we knew about was
             curtime = datetime.datetime.utcnow()
             cursor.execute(
@@ -413,11 +443,8 @@ class StatsDBWatcher(threading.Thread):
                  'yr >= {yr:d} or (yr = {yr:d} and mnth >= {mnth:d})').format(
                      mnth=curtime.month, yr=curtime.year))
             play_result = cursor.fetchall()
-            if (len(play_result) == 0 or play_result[0][0] is None or 
-                len(table_build_result) == 0 or 
-                table_build_result[0][0] is None):
-                _log.error('Cannot determine when the database was last '
-                           'updated')
+            if len(play_result) == 0 or play_result[0][0] is None:
+                _log.error('Cannot find any videoplay events')
                 statemon.state.increment('statsdb_error')
                 self.is_loaded.set()
                 return False
@@ -428,15 +455,13 @@ class StatsDBWatcher(threading.Thread):
             self.is_loaded.set()
             return False
 
-        cur_table_build = dateutil.parser.parse(table_build_result[0][0])
-        cur_update = datetime.datetime.utcfromtimestamp(play_result[0][0])
-        statemon.state.time_since_stats_update = (
-            datetime.datetime.now() - cur_update).total_seconds()
-
-        is_newer = (self.last_table_build is None or 
-                    cur_table_build > self.last_table_build)
-        self.last_update = cur_update
+        # Update the state variables
+        cur_play_event = datetime.datetime.utcfromtimestamp(play_result[0][0])
+        statemon.state.time_since_last_batch_event = (
+                datetime.datetime.now() - cur_play_event).total_seconds()
+        self.last_update = cur_play_event
         self.last_table_build = cur_table_build
+        
         return is_newer
         
  
