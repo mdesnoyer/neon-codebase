@@ -91,9 +91,9 @@ public class NeonGenericSerializerTest {
     // Check the increments
     assertEquals(serializer.getIncrements().size(), 2);
     assertIncrementFound("THUMBNAIL_TIMESTAMP_EVENT_COUNTS",
-        "acct1_vid1_thumb1_2014-11-21T15", "evts", "iv", 1);
+        "acct1_vid1_thumb1_2014-11-21T23", "evts", "iv", 1);
     assertIncrementFound("TIMESTAMP_THUMBNAIL_EVENT_COUNTS",
-        "2014-11-21T15_acct1_vid1_thumb1", "evts", "iv", 1);
+        "2014-11-21T23_acct1_vid1_thumb1", "evts", "iv", 1);
   }
 
   @Test
@@ -112,9 +112,9 @@ public class NeonGenericSerializerTest {
     assertEquals(serializer.getActions().size(), 0);
     assertEquals(serializer.getIncrements().size(), 2);
     assertIncrementFound("THUMBNAIL_TIMESTAMP_EVENT_COUNTS",
-        "acct1_vid1_thumb1_2014-11-21T15", "evts", "il", 1);
+        "acct1_vid1_thumb1_2014-11-21T23", "evts", "il", 1);
     assertIncrementFound("TIMESTAMP_THUMBNAIL_EVENT_COUNTS",
-        "2014-11-21T15_acct1_vid1_thumb1", "evts", "il", 1);
+        "2014-11-21T23_acct1_vid1_thumb1", "evts", "il", 1);
 
     // Build the visible event
     ImageVisible visEvent =
@@ -129,9 +129,9 @@ public class NeonGenericSerializerTest {
     assertEquals(serializer.getActions().size(), 0);
     assertEquals(serializer.getIncrements().size(), 2);
     assertIncrementFound("THUMBNAIL_TIMESTAMP_EVENT_COUNTS",
-        "acct1_vid1_thumb1_2014-11-21T15", "evts", "iv", 1);
+        "acct1_vid1_thumb1_2014-11-21T23", "evts", "iv", 1);
     assertIncrementFound("TIMESTAMP_THUMBNAIL_EVENT_COUNTS",
-        "2014-11-21T15_acct1_vid1_thumb1", "evts", "iv", 1);
+        "2014-11-21T23_acct1_vid1_thumb1", "evts", "iv", 1);
   }
   
   @Test
@@ -149,9 +149,9 @@ public class NeonGenericSerializerTest {
     assertEquals(serializer.getActions().size(), 0);
     assertEquals(serializer.getIncrements().size(), 2);
     assertIncrementFound("THUMBNAIL_TIMESTAMP_EVENT_COUNTS",
-        "acct1_vid1_thumb1_2014-11-21T15", "evts", "iv", 1);
+        "acct1_vid1_thumb1_2014-11-21T23", "evts", "iv", 1);
     assertIncrementFound("TIMESTAMP_THUMBNAIL_EVENT_COUNTS",
-        "2014-11-21T15_acct1_vid1_thumb1", "evts", "iv", 1);
+        "2014-11-21T23_acct1_vid1_thumb1", "evts", "iv", 1);
     
     // Now run an invalid event because the schema that's referred to is incorrect
 
@@ -202,9 +202,9 @@ public class NeonGenericSerializerTest {
     // Check the increments
     assertEquals(serializer.getIncrements().size(), 2);
     assertIncrementFound("THUMBNAIL_TIMESTAMP_EVENT_COUNTS",
-        "acct1_vid1_thumb1_2014-11-21T15", "evts", "iv", 1);
+        "acct1_vid1_thumb1_2014-11-21T23", "evts", "iv", 1);
     assertIncrementFound("TIMESTAMP_THUMBNAIL_EVENT_COUNTS",
-        "2014-11-21T15_acct1_vid1_thumb1", "evts", "iv", 1);
+        "2014-11-21T23_acct1_vid1_thumb1", "evts", "iv", 1);
   }
 
   @Test
@@ -227,13 +227,13 @@ public class NeonGenericSerializerTest {
     // Check the increments
     assertEquals(serializer.getIncrements().size(), 4);
     assertIncrementFound("THUMBNAIL_TIMESTAMP_EVENT_COUNTS",
-        "acct1_vid1_thumb1_2014-11-21T15", "evts", "iv", 1);
+        "acct1_vid1_thumb1_2014-11-21T23", "evts", "iv", 1);
     assertIncrementFound("THUMBNAIL_TIMESTAMP_EVENT_COUNTS",
-        "acct1_vid2_thumb2_2014-11-21T15", "evts", "iv", 1);
+        "acct1_vid2_thumb2_2014-11-21T23", "evts", "iv", 1);
     assertIncrementFound("TIMESTAMP_THUMBNAIL_EVENT_COUNTS",
-        "2014-11-21T15_acct1_vid1_thumb1", "evts", "iv", 1);
+        "2014-11-21T23_acct1_vid1_thumb1", "evts", "iv", 1);
     assertIncrementFound("TIMESTAMP_THUMBNAIL_EVENT_COUNTS",
-        "2014-11-21T15_acct1_vid2_thumb2", "evts", "iv", 1);
+        "2014-11-21T23_acct1_vid2_thumb2", "evts", "iv", 1);
   }
 
   @Test
@@ -257,9 +257,9 @@ public class NeonGenericSerializerTest {
     // Check the increments
     assertEquals(serializer.getIncrements().size(), 2);
     assertIncrementFound("THUMBNAIL_TIMESTAMP_EVENT_COUNTS",
-        "acct1_vid1_thumb1_2014-11-21T15", "evts", "ic", 1);
+        "acct1_vid1_thumb1_2014-11-21T23", "evts", "ic", 1);
     assertIncrementFound("TIMESTAMP_THUMBNAIL_EVENT_COUNTS",
-        "2014-11-21T15_acct1_vid1_thumb1", "evts", "ic", 1);
+        "2014-11-21T23_acct1_vid1_thumb1", "evts", "ic", 1);
   }
 
   @Test
@@ -282,9 +282,9 @@ public class NeonGenericSerializerTest {
     // Check the increments
     assertEquals(serializer.getIncrements().size(), 2);
     assertIncrementFound("THUMBNAIL_TIMESTAMP_EVENT_COUNTS",
-        "acct1_vid1_thumb1_2014-11-21T15", "evts", "il", 1);
+        "acct1_vid1_thumb1_2014-11-21T23", "evts", "il", 1);
     assertIncrementFound("TIMESTAMP_THUMBNAIL_EVENT_COUNTS",
-        "2014-11-21T15_acct1_vid1_thumb1", "evts", "il", 1);
+        "2014-11-21T23_acct1_vid1_thumb1", "evts", "il", 1);
   }
 
   @Test
@@ -307,13 +307,13 @@ public class NeonGenericSerializerTest {
     // Check the increments
     assertEquals(serializer.getIncrements().size(), 4);
     assertIncrementFound("THUMBNAIL_TIMESTAMP_EVENT_COUNTS",
-        "acct1_vid1_thumb1_2014-11-21T15", "evts", "il", 1);
+        "acct1_vid1_thumb1_2014-11-21T23", "evts", "il", 1);
     assertIncrementFound("THUMBNAIL_TIMESTAMP_EVENT_COUNTS",
-        "acct1_vid2_thumb2_2014-11-21T15", "evts", "il", 1);
+        "acct1_vid2_thumb2_2014-11-21T23", "evts", "il", 1);
     assertIncrementFound("TIMESTAMP_THUMBNAIL_EVENT_COUNTS",
-        "2014-11-21T15_acct1_vid1_thumb1", "evts", "il", 1);
+        "2014-11-21T23_acct1_vid1_thumb1", "evts", "il", 1);
     assertIncrementFound("TIMESTAMP_THUMBNAIL_EVENT_COUNTS",
-        "2014-11-21T15_acct1_vid2_thumb2", "evts", "il", 1);
+        "2014-11-21T23_acct1_vid2_thumb2", "evts", "il", 1);
 
   }
 

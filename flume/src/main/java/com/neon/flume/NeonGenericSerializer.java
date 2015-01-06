@@ -8,6 +8,7 @@ import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.text.DateFormat;
 import java.util.Date;
+import java.util.TimeZone;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -157,6 +158,7 @@ public class NeonGenericSerializer implements AsyncHbaseEventSerializer {
       // convert to readable format
       Date date = new Date(timestamp);
       DateFormat format = new SimpleDateFormat("YYYY-MM-dd'T'HH");
+      format.setTimeZone(TimeZone.getTimeZone("UTC"));
       byte[] formattedTimestamp = format.format(date).getBytes();
       eventTimestamp = new String(formattedTimestamp);
 
