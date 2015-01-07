@@ -24,7 +24,7 @@ _log = logging.getLogger(__name__)
 
 class Model(object):
     '''The whole model, which consists of a predictor and a filter.'''    
-    def __init__(self, predictor, filt=None, video_searcher=None):
+    def __init__(self, predictor, filt=None, vid_searcher=None):
         self.__version__ = 3
         self.predictor = predictor
         self.filt = filt
@@ -32,7 +32,7 @@ class Model(object):
             self.video_searcher = video_searcher.BisectSearcher(
                 predictor, filt)
         else:
-            self.video_searcher = video_searcher
+            self.video_searcher = vid_searcher
 
     def __setstate__(self, state):
         if 'video_searcher' not in state:
