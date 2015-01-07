@@ -31,10 +31,7 @@ def run_one_video(mod, video_file, n, output_file, batch):
         video.get(cv2.cv.CV_CAP_PROP_FPS)))
     
     startTime = time.time()
-    thumbs, endTime = mod.choose_thumbnails(video, n=n,
-                                            start_time=5.0,
-                                            end_buffer_time=5.0,
-                                            processing_time_ratio=1.2)
+    thumbs = mod.choose_thumbnails(video, n=n)
     _log.info('Processing time: %fs' % (time.time() - startTime))
 
     # Plot the examples
