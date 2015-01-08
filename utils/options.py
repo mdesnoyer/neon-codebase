@@ -88,6 +88,7 @@ class OptionParser(object):
         self.__dict__['lock'] = manager.RLock()
         self.__dict__['cmd_options'] = None
         self.__dict__['last_update'] = None
+        self.__dict__['_config_poll_timer'] = None
 
         # Find the root directory of the source tree
         cur_dir = os.path.abspath(os.path.dirname(__file__))
@@ -102,6 +103,11 @@ class OptionParser(object):
 
         # Find the full prefix for the main module
         self.__dict__['main_prefix'] = self._get_main_prefix()
+
+    def __del__(self):
+        timer = self.__dict__['_config_poll_timer']
+        if timer is not None and time.is_alive():
+            timer.cancel()
 
     def __getattr__(self, name):
         with self.__dict__['lock']:
@@ -179,9 +185,28 @@ class OptionParser(object):
 
             # Start the polling thread if there is a config file to read
             if watch_file and self.cmd_options.config is not None:
-                ConfigPoller(self).start()
+                if self.__dict__['_config_poll_timer'] is not None:
+                    self.__dict__['_config_poll_timer'].cancel()
+                    self.__dict__['_config_poll_timer'] = None
+                self._poll_config_file()
 
         return self, args
+
+    def _poll_config_file(self):
+        '''Polls the config file to see if it has changed.'''
+        try:
+            if self.cmd_options is not None:
+                self._process_new_config_file(
+                    path = self.cmd_options.config)
+        except Exception as e:
+            _log.exception('Error processing config file %s: %s' % 
+                           (self.cmd_options.config, e))
+
+        # Schedule the next time to poll the config file
+        self.__dict__['_config_poll_timer'] = threading.Timer(
+            2.0, self._poll_config_file)
+        self.__dict__['_config_poll_timer'].daemon = True
+        self.__dict__['_config_poll_timer'].start()
 
     def get(self, global_name):
         '''Retrieve the value of the options with a given global name.
@@ -432,25 +457,6 @@ class _Option(object):
 
     def reset(self):
         self._value = None
-
-class ConfigPoller(threading.Thread):
-    '''A thread that polls for updates in the config file.'''
-    def __init__(self, parser):
-        super(ConfigPoller, self).__init__()
-        self.parser = parser
-        self.daemon = True
-
-    def run(self):
-        while True:
-            try:
-                if self.parser.cmd_options is not None:
-                    self.parser._process_new_config_file(
-                        path = self.parser.cmd_options.config)
-            except Exception as e:
-                _log.exception('Error processing config file: %s' % e)
-
-            # Don't poll the file too much
-            time.sleep(2.0)
 
 
 options = OptionParser()

@@ -9,11 +9,11 @@ mvn package
 --Debugger--
 
 jdb -sourcepath /home/pierred/neon-codebase/flume/src/main/java/ -classpath  target/neon-hbase-serializer-1.0-jar-with-dependencies.jar  com.neon.flume.NeonSerializerTest
-
+jdb -sourcepath /home/pierred/neon-codebase/flume/src/main/java/ -classpath  target/neon-hbase-serializer-1.0-jar-with-dependencies.jar:target/test-classes  com.neon.flume.NeonGenericSerializerTest
 
 breakpoint example semantics
 stop at com.neon.flume.NeonSerializerTest:65
-
+stop at com.neon.flume.NeonDynamicSerializer:196
 
 
 

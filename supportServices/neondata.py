@@ -31,6 +31,7 @@ import concurrent.futures
 import contextlib
 import copy
 import datetime
+import errno
 import hashlib
 import json
 import logging
@@ -66,9 +67,9 @@ _log = logging.getLogger(__name__)
 define("thumbnailBucket", default="host-thumbnails", type=str,
         help="S3 bucket to Host thumbnails ")
 
-define("accountDB", default="127.0.0.1", type=str, help="")
-define("videoDB", default="127.0.0.1", type=str, help="")
-define("thumbnailDB", default="127.0.0.1", type=str ,help="")
+define("accountDB", default="0.0.0.0", type=str, help="")
+define("videoDB", default="0.0.0.0", type=str, help="")
+define("thumbnailDB", default="0.0.0.0", type=str ,help="")
 define("dbPort", default=6379, type=int, help="redis port")
 define("watchdogInterval", default=3, type=int, 
         help="interval for watchdog thread")
@@ -496,6 +497,8 @@ class StoredObject(object):
                 # type in the databse, so assume that the class is cls
                 classtype = cls
                 data_dict = obj_dict
+            
+            # create basic object using the "default" constructor
             obj = classtype(key)
 
             #populate the object dictionary
@@ -503,6 +506,8 @@ class StoredObject(object):
                 obj.__dict__[str(k)] = cls._deserialize_field(k, value)
         
             return obj
+
+
     @classmethod
     def _deserialize_field(cls, key, value):
         '''Deserializes a field by creating a StoredObject as necessary.'''
@@ -524,10 +529,17 @@ class StoredObject(object):
         return self.key
 
     @classmethod
-    def get(cls, key, callback=None):
+    def get(cls, key, create_default=False, log_missing=True,
+            callback=None):
         '''Retrieve this object from the database.
 
-        Returns the object or None if it couldn't be found
+        Inputs:
+        key - Key for the object to retrieve
+        create_default - If true, then if the object is not in the database, 
+                         return a default version. Otherwise return None.
+        log_missing - Log if the object is missing in the database.
+
+        Returns the object
         '''
         db_connection = DBConnection.get(cls)
 
@@ -536,28 +548,42 @@ class StoredObject(object):
                 obj = cls._create(key, json.loads(result))
                 callback(obj)
             else:
-                callback(None)
+                if log_missing:
+                    _log.warn('No %s for id %s in db' % (cls.__name__, key))
+                if create_default:
+                    callback(cls(key))
+                else:
+                    callback(None)
 
         if callback:
             db_connection.conn.get(key, cb)
         else:
             jdata = db_connection.blocking_conn.get(key)
             if jdata is None:
-                return None
+                if log_missing:
+                    _log.warn('No %s for %s' % (cls.__name__, key))
+                if create_default:
+                    return cls(key)
+                else:
+                    return None
             return cls._create(key, json.loads(jdata))
 
     @classmethod
-    def get_many(cls, keys, callback=None):
+    def get_many(cls, keys, create_default=False, log_missing=True,
+                 callback=None):
         ''' Get many objects of the same type simultaneously
 
         This is more efficient than one at a time.
 
         Inputs:
         keys - List of keys to get
+        create_default - If true, then if the object is not in the database, 
+                         return a default version. Otherwise return None.
+        log_missing - Log if the object is missing in the database.
         callback - Optional callback function to call
 
         Returns:
-        A list of cls objects or None if it wasn't there, one for each key
+        A list of cls objects or None depending on create_default settings
         '''
         #MGET raises an exception for wrong number of args if keys = []
         if len(keys) == 0:
@@ -569,28 +595,28 @@ class StoredObject(object):
 
         db_connection = DBConnection.get(cls)
 
-        def process(results):
+        def _process(results):
             mappings = [] 
             for key, item in zip(keys, results):
                 if item:
                     obj = cls._create(key, json.loads(item))
                 else:
-                    obj = None
-                mappings.append(obj)
-            callback(mappings)
-
-        if callback:
-            db_connection.conn.mget(keys, process)
-        else:
-            mappings = [] 
-            items = db_connection.blocking_conn.mget(keys)
-            for key, item in zip(keys, items):
-                if item:
-                    obj = cls._create(key, json.loads(item))
-                else:
-                    obj = None
+                    if log_missing:
+                        _log.warn('No %s for %s' % (cls.__name__, key))
+                    if create_default:
+                        obj = cls(key)
+                    else:
+                        obj = None
                 mappings.append(obj)
             return mappings
+
+        if callback:
+            db_connection.conn.mget(
+                keys,
+                callback=lambda items:callback(_process(items)))
+        else:
+            items = db_connection.blocking_conn.mget(keys)
+            return _process(items)
 
     
     @classmethod
@@ -747,20 +773,25 @@ class NamespacedStoredObject(StoredObject):
             return '%s_%s' % (cls._baseclass_name().lower(), key)
 
     @classmethod
-    def get(cls, key, callback=None):
+    def get(cls, key, create_default=False, log_missing=True, callback=None):
         '''Return the object for a given key.'''
         return super(NamespacedStoredObject, cls).get(
             cls.format_key(key),
+            create_default=create_default,
+            log_missing=log_missing,
             callback=callback)
 
     @classmethod
-    def get_many(cls, keys, callback=None):
+    def get_many(cls, keys, create_default=False, log_missing=True,
+                 callback=None):
         '''Returns the list of objects from a list of keys.
 
         Each key must be a tuple
         '''
         return super(NamespacedStoredObject, cls).get_many(
             [cls.format_key(x) for x in keys],
+            create_default=create_default,
+            log_missing=log_missing,
             callback=callback)
 
     @classmethod
@@ -809,6 +840,31 @@ class NamespacedStoredObject(StoredObject):
             create_missing=create_missing,
             callback=callback)
 
+class DefaultedStoredObject(NamespacedStoredObject):
+    '''Namespaced object where a get-like operation will never returns None.
+
+    Instead of None, a default object is returned, so a subclass should
+    specify a reasonable default constructor
+    '''
+    def __init__(self, key):
+        super(DefaultedStoredObject, self).__init__(key)
+
+    @classmethod
+    def get(cls, key, log_missing=True, callback=None):
+        return super(DefaultedStoredObject, cls).get(
+            key,
+            create_default=True,
+            log_missing=log_missing,
+            callback=callback)
+
+    @classmethod
+    def get_many(cls, keys, log_missing=True, callback=None):
+        return super(DefaultedStoredObject, cls).get_many(
+            keys,
+            create_default=True,
+            log_missing=log_missing,
+            callback=callback)
+
 class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
 
@@ -831,14 +887,21 @@ class NeonApiKey(object):
         
     @classmethod
     def generate(cls, a_id):
-        ''' generate api key hash'''
+        ''' generate api key hash
+            if present in DB, then return it
+        '''
         api_key = NeonApiKey.id_generator()
         
         #save api key mapping
         db_connection = DBConnection.get(cls)
         key = NeonApiKey.format_key(a_id)
-        if db_connection.blocking_conn.set(key, api_key):
-            return api_key
+        
+        _api_key = cls.get_api_key(a_id)
+        if _api_key is not None:
+            return _api_key 
+        else:
+            if db_connection.blocking_conn.set(key, api_key):
+                return api_key
 
     @classmethod
     def get_api_key(cls, a_id, callback=None):
@@ -931,8 +994,7 @@ class NeonUserAccount(object):
     '''
     def __init__(self, a_id, api_key=None, default_size=(160,90)):
         self.account_id = a_id # Account id chosen when account is created
-        self.neon_api_key = NeonApiKey.generate(a_id) if api_key is None \
-                            else api_key
+        self.neon_api_key = self.get_api_key() if api_key is None else api_key
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
         self.staging_tracker_account_id = \
@@ -946,6 +1008,14 @@ class NeonUserAccount(object):
         
         # Priority Q number for processing, currently supports {0,1}
         self.processing_priority = 1
+    
+    def get_api_key(self):
+        '''
+        Get the API key for the account, If already in the DB the generate method
+        returns it
+        '''
+        # TODO: Refactor when converted to Namespaced object
+        return NeonApiKey.generate(self.account_id) 
 
     def get_processing_priority(self):
         return self.processing_priority
@@ -966,6 +1036,7 @@ class NeonUserAccount(object):
         ''' get all platform accounts for the user '''
 
         ovp_map = {}
+        #TODO: Add Ooyala when necessary
         for plat in [NeonPlatform, BrightcovePlatform, YoutubePlatform]:
             ovp_map[plat.get_ovp()] = plat
 
@@ -974,10 +1045,10 @@ class NeonUserAccount(object):
             try:
                 plat_type = ovp_map[ovp_string]
                 if plat_type == NeonPlatform:
-                    calls.append(tornado.gen.Task(plat_type.get_account,
-                                                  self.neon_api_key))
+                    calls.append(tornado.gen.Task(plat_type.get,
+                                                  self.neon_api_key, '0'))
                 else:
-                    calls.append(tornado.gen.Task(plat_type.get_account,
+                    calls.append(tornado.gen.Task(plat_type.get,
                                                   self.neon_api_key,
                                                   integration_id))
                     
@@ -1073,7 +1144,7 @@ class NeonUserAccount(object):
             return na.tracker_account_id  
 
 
-class ExperimentStrategy(NamespacedStoredObject):
+class ExperimentStrategy(DefaultedStoredObject):
     '''Stores information about the experimental strategy to use.
 
     Keyed by account_id (aka api_key)
@@ -1085,7 +1156,7 @@ class ExperimentStrategy(NamespacedStoredObject):
                  holdback_frac=0.01,
                  only_exp_if_chosen=False,
                  always_show_baseline=True,
-                 baseline_type=ThumbnailType.CENTERFRAME,
+                 baseline_type=ThumbnailType.RANDOM,
                  chosen_thumb_overrides=False,
                  override_when_done=True,
                  experiment_type=MULTIARMED_BANDIT,
@@ -1142,8 +1213,9 @@ class ExperimentStrategy(NamespacedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return ExperimentStrategy.__name__
+        
 
-class CDNHostingMetadataList(NamespacedStoredObject):
+class CDNHostingMetadataList(DefaultedStoredObject):
     '''A list of CDNHostingMetadata objects.
 
     Keyed by (api_key, integration_id). Use the create_key method to
@@ -1155,7 +1227,10 @@ class CDNHostingMetadataList(NamespacedStoredObject):
         if self.get_id() and len(self.get_id().split('_')) != 2:
             raise ValueError('Invalid key %s. Must be generated using '
                              'create_key()' % self.get_id())
-        self.cdns = cdns or []
+        if cdns is None:
+            self.cdns = [NeonCDNHostingMetadata()]
+        else:
+            self.cdns = cdns
 
     def __iter__(self):
         '''Iterate through the cdns.'''
@@ -1267,16 +1342,18 @@ class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
             resize=False,
             update_serving_urls=False)
 
-class AbstractPlatform(object):
+class AbstractPlatform(NamespacedStoredObject):
     ''' Abstract Platform/ Integration class '''
 
-    def __init__(self, abtest=False, enabled=True, 
+    def __init__(self, api_key, i_id='0', abtest=False, enabled=True, 
                 serving_enabled=True, serving_controller="imageplatform"):
-        self.key = None 
-        self.neon_api_key = ''
+        
+        super(AbstractPlatform, self).__init__(
+            self._generate_subkey(api_key, i_id))
+        self.neon_api_key = api_key 
+        self.integration_id = i_id 
         self.videos = {} # External video id (Original Platform VID) => Job ID
         self.abtest = abtest # Boolean on wether AB tests can run
-        self.integration_id = None # Unique platform ID to 
         self.enabled = enabled # Account enabled for auto processing of videos 
 
         # Will thumbnails be served by our system?
@@ -1284,27 +1361,62 @@ class AbstractPlatform(object):
 
         # What controller is used to serve the image? Default to imageplatform
         self.serving_controller = serving_controller 
-
-    def generate_key(self, i_id):
-        ''' generate db key '''
-        return '_'.join([self.__class__.__name__.lower(),
-                         self.neon_api_key, i_id])
     
+    @classmethod
+    def _generate_subkey(cls, api_key, i_id):
+        return '_'.join([api_key, i_id])
+
+    @classmethod
+    def _baseclass_name(cls):
+        return cls.__name__.lower() 
+   
+    @classmethod
+    def _create(cls, key, obj_dict):
+        def __get_type(key):
+            '''
+            Get the platform type
+            '''
+            platform_type = key.split('_')[0]
+            typemap = {
+                'neonplatform' : NeonPlatform,
+                'brightcoveplatform' : BrightcovePlatform,
+                'ooyalaplatform' : OoyalaPlatform,
+                'youtubeplatform' : YoutubeApiRequest
+                }
+            try:
+                platform = typemap[platform_type]
+                return platform.__name__
+            except KeyError, e:
+                _log.exception("Invalid Platform Object")
+                raise ValueError() # is this the right exception to throw?
+
+        if obj_dict:
+            if not '_type' in obj_dict or not '_data' in obj_dict:
+                obj_dict = {
+                    '_type': __get_type(obj_dict['key']),
+                    '_data': copy.deepcopy(obj_dict)
+                }
+            return super(AbstractPlatform, cls)._create(key, obj_dict)
+
+    def save(self, callback=None):
+        # since we need a default constructor with empty strings for the 
+        # eval magic to work, check here to ensure apikey and i_id aren't empty
+        # since the key is generated based on them
+        if self.neon_api_key == '' or self.integration_id == '':
+            raise Exception('Invalid initialization of AbstractPlatform or its\
+                subclass object. api_key and i_id should not be empty')
+
+        super(AbstractPlatform, self).save(callback)
+
+    @classmethod
+    def get(cls, api_key, i_id, callback=None):
+        ''' get instance '''
+        return super(AbstractPlatform, cls).get(
+            cls._generate_subkey(api_key, i_id), callback=callback)
+
     def to_json(self):
         ''' to json '''
         return json.dumps(self, default=lambda o: o.__dict__) 
-
-    def save(self, callback=None):
-        ''' save instance '''
-        db_connection = DBConnection.get(self)
-        value = self.to_json()
-        if not self.key:
-            raise Exception("Key is empty")
-
-        if callback:
-            db_connection.conn.set(self.key, value, callback)
-        else:
-            return db_connection.blocking_conn.set(self.key, value)
 
     def add_video(self, vid, job_id):
         ''' external video id => job_id '''
@@ -1346,22 +1458,6 @@ class AbstractPlatform(object):
         raise NotImplementedError
 
     @classmethod
-    def get_account(cls, api_key, i_id, callback=None):
-        '''Returns the platform object for the key.
-
-        Inputs:
-          api_key - The api key for the Neon account
-          i_id - The integration id for the platform
-          callback - If None, done asynchronously
-        '''
-        key = cls.__name__.lower()  + '_%s_%s' %(api_key, i_id) 
-        db_connection = DBConnection.get(cls)
-        if callback:
-            db_connection.conn.get(key, lambda x: callback(cls.create(x))) 
-        else:
-            return cls.create(db_connection.blocking_conn.get(key))
-
-    @classmethod
     def get_all_instances(cls, callback=None):
         '''Returns a list of all the platform instances from the db.'''
         instances = []
@@ -1376,7 +1472,14 @@ class AbstractPlatform(object):
         platforms = cls.get_all_platform_data()
         instances = [] 
         for pdata in platforms:
-            platform = cls.create(pdata)
+            platform = None
+            
+            try:
+                obj_dict = json.loads(pdata)
+                platform = cls._create(obj_dict['key'], obj_dict)
+            except ValueError, e:
+                pass
+
             if platform:
                 instances.append(platform)
 
@@ -1396,7 +1499,7 @@ class AbstractPlatform(object):
                 platform_data.append(jdata)
             else:
                 _log.debug("key=get_all_platform data"
-                            " msg=no data for acc %s i_id %s" %(api_key, i_id))
+                            " msg=no data for acc %s i_id %s" % (api_key, i_id))
         
         return platform_data
 
@@ -1410,40 +1513,18 @@ class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
     '''
-    def __init__(self, a_id, api_key, abtest=False):
-        AbstractPlatform.__init__(self, abtest=abtest)
-        self.neon_api_key = api_key 
-        self.integration_id = '0'
-        self.key = self.__class__.__name__.lower()  + '_%s_%s' \
-                %(self.neon_api_key, self.integration_id)
-        self.account_id = a_id
+    def __init__(self, a_id, i_id='0', api_key='', abtest=False):
+        # By default integration ID 0 represents 
+        # Neon Platform Integration (access via neon api)
         
-        #By default integration ID 0 represents 
-        #Neon Platform Integration (access via neon api)
+        super(NeonPlatform, self).__init__(api_key, '0', abtest)
+        self.account_id = a_id
+        self.neon_api_key = api_key 
    
     @classmethod
     def get_ovp(cls):
         ''' ovp string '''
         return "neon"
-
-    @classmethod
-    def get_account(cls, api_key, callback=None):
-        ''' return NeonPlatform account object '''
-        return super(NeonPlatform, cls).get_account(api_key, 0, callback)
-
-    @classmethod
-    def create(cls, json_data): 
-        ''' create obj'''
-        if not json_data:
-            return None
-
-        data_dict = json.loads(json_data)
-        obj = NeonPlatform("dummy", "dummy")
-
-        # populate the object dictionary
-        for key in data_dict.keys():
-            obj.__dict__[key] = data_dict[key]
-        return obj
     
     @classmethod
     def get_all_instances(cls, callback=None):
@@ -1453,15 +1534,13 @@ class NeonPlatform(AbstractPlatform):
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
     
-    def __init__(self, a_id, i_id, api_key, p_id=None, rtoken=None, wtoken=None,
-                auto_update=False, last_process_date=None, abtest=False):
+    def __init__(self, a_id, i_id='', api_key='', p_id=None, 
+                rtoken=None, wtoken=None, auto_update=False,
+                last_process_date=None, abtest=False):
 
         ''' On every request, the job id is saved '''
-        AbstractPlatform.__init__(self, abtest)
-        self.neon_api_key = api_key
-        self.key = self.generate_key(i_id)
+        super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)
         self.account_id = a_id
-        self.integration_id = i_id
         self.publisher_id = p_id
         self.read_token = rtoken
         self.write_token = wtoken
@@ -1477,14 +1556,6 @@ class BrightcovePlatform(AbstractPlatform):
     def get_ovp(cls):
         ''' return ovp name'''
         return "brightcove"
-
-    def get(self, callback=None):
-        ''' get json'''
-        db_connection = DBConnection.get(self)
-        if callback:
-            db_connection.conn.get(self.key, callback)
-        else:
-            return db_connection.blocking_conn.get(self.key)
 
     def get_api(self, video_server_uri=None):
         '''Return the Brightcove API object for this platform integration.'''
@@ -1667,7 +1738,8 @@ class BrightcovePlatform(AbstractPlatform):
         self.get_api().create_brightcove_request_by_tag(self.integration_id)
 
 
-    def verify_token_and_create_requests_for_video(self, n, callback=None):
+    @tornado.gen.coroutine
+    def verify_token_and_create_requests_for_video(self, n):
         ''' Method to verify brightcove token on account creation 
             And create requests for processing
             @return: Callback returns job id, along with brightcove vid metadata
@@ -1675,12 +1747,9 @@ class BrightcovePlatform(AbstractPlatform):
 
         vserver = options.video_server
         bc = self.get_api(vserver)
-        if callback:
-            bc.async_verify_token_and_create_requests(self.integration_id,
-                                                      n,
-                                                      callback)
-        else:
-            return bc.verify_token_and_create_requests(self.integration_id,n)
+        val = yield bc.verify_token_and_create_requests(
+            self.integration_id, n)
+        raise tornado.gen.Return(val)
 
     def sync_individual_video_metadata(self):
         ''' sync video metadata from bcove individually using 
@@ -1696,40 +1765,6 @@ class BrightcovePlatform(AbstractPlatform):
         ''' Set framewidth of the video still to be used 
             when the still is updated in the brightcove account '''
         self.video_still_width = width
-
-    @classmethod
-    def create(cls, json_data):
-        ''' create object from json data '''
-
-        if not json_data:
-            return None
-
-        params = json.loads(json_data)
-        a_id = params['account_id']
-        i_id = params['integration_id'] 
-        p_id = params['publisher_id']
-        rtoken = params['read_token']
-        wtoken = params['write_token']
-        auto_update = params['auto_update']
-        api_key = params['neon_api_key']
-         
-        ba = BrightcovePlatform(a_id, i_id, api_key, p_id, rtoken, 
-                wtoken, auto_update)
-        ba.videos = params['videos']
-        ba.last_process_date = params['last_process_date'] 
-        ba.linked_youtube_account = params['linked_youtube_account']
-        
-        #backward compatibility
-        if params.has_key('abtest'):
-            ba.abtest = params['abtest'] 
-      
-        if not params.has_key('account_created'):
-            ba.account_created = None
-        
-        #populate rest of keys
-        for key in params:
-            ba.__dict__[key] = params[key]
-        return ba
 
     @staticmethod
     def find_all_videos(token, limit, callback=None):
@@ -1751,14 +1786,15 @@ class BrightcovePlatform(AbstractPlatform):
 class YoutubePlatform(AbstractPlatform):
     ''' Youtube platform integration '''
 
-    def __init__(self, a_id, i_id, api_key, access_token=None, refresh_token=None,
+    # TODO(Sunil): Fix this class when Youtube is implemented 
+
+    def __init__(self, a_id, i_id='', api_key='', access_token=None, refresh_token=None,
                 expires=None, auto_update=False, abtest=False):
-        AbstractPlatform.__init__(self)
+        super(YoutubePlatform, self).__init__(api_key, i_id)
         
         self.key = self.__class__.__name__.lower()  + '_%s_%s' \
                 %(api_key, i_id) #TODO: fix
         self.account_id = a_id
-        self.integration_id = i_id
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.expires = expires
@@ -1858,22 +1894,6 @@ class YoutubePlatform(AbstractPlatform):
         pass
     
     @classmethod
-    def create(cls, json_data):
-        if json_data is None:
-            return None
-        
-        params = json.loads(json_data)
-        a_id = params['account_id']
-        i_id = params['integration_id'] 
-        api_key = params['neon_api_key'] 
-        yt = YoutubePlatform(a_id, i_id, api_key=api_key)
-       
-        for key in params:
-            yt.__dict__[key] = params[key]
-
-        return yt
-
-    @classmethod
     def get_all_instances(cls, callback=None):
         ''' get all brightcove instances'''
         return cls._get_all_instances_impl()
@@ -1882,8 +1902,8 @@ class OoyalaPlatform(AbstractPlatform):
     '''
     OOYALA Platform
     '''
-    def __init__(self, a_id, i_id, api_key, p_code, 
-                 o_api_key, api_secret, auto_update=False): 
+    def __init__(self, a_id, i_id='', api_key='', p_code=None, 
+                 o_api_key=None, api_secret=None, auto_update=False): 
         '''
         Init ooyala platform 
         
@@ -1891,9 +1911,8 @@ class OoyalaPlatform(AbstractPlatform):
         for api calls to ooyala 
 
         '''
-        AbstractPlatform.__init__(self)
+        super(OoyalaPlatform, self).__init__(api_key, i_id)
         self.neon_api_key = api_key
-        self.key = self.generate_key(i_id)
         self.account_id = a_id
         self.integration_id = i_id
         self.partner_code = p_code
@@ -2023,20 +2042,6 @@ class OoyalaPlatform(AbstractPlatform):
         raise tornado.gen.Return(True)
     
     @classmethod
-    def create(cls, json_data):
-        if json_data is None:
-            return None
-        
-        params = json.loads(json_data)
-        a_id = params['account_id']
-        i_id = params['integration_id'] 
-        api_key = params['neon_api_key'] 
-        oo= OoyalaPlatform(a_id, i_id, api_key, None, None, None)
-        for key in params:
-            oo.__dict__[key] = params[key]
-        return oo
-
-    @classmethod
     def get_all_instances(cls, callback=None):
         ''' get all brightcove instances'''
         return cls._get_all_instances_impl()
@@ -2156,14 +2161,15 @@ class NeonApiRequest(NamespacedStoredObject):
         #TODO:validate supported methods
 
     @classmethod
-    def get(cls, job_id, api_key, callback=None):
+    def get(cls, job_id, api_key, log_missing=True, callback=None):
         ''' get instance '''
         return super(NeonApiRequest, cls).get(
             cls._generate_subkey(job_id, api_key),
+            log_missing=log_missing,
             callback=callback)
 
     @classmethod
-    def get_many(cls, keys, callback=None):
+    def get_many(cls, keys, log_missing=True, callback=None):
         '''Returns the list of objects from a list of keys.
 
         Each key must be a tuple of (job_id, api_key)
@@ -2171,6 +2177,7 @@ class NeonApiRequest(NamespacedStoredObject):
         return super(NeonApiRequest, cls).get_many(
             [cls._generate_subkey(job_id, api_key) for 
              job_id, api_key in keys],
+            log_missing=log_missing,
             callback=callback)
 
     @classmethod
@@ -2540,7 +2547,7 @@ class ThumbnailMetadata(StoredObject):
 
     def get_account_id(self):
         ''' get the internal account id. aka api key '''
-        return self.video_id.split('_')[0]
+        return self.key.split('_')[0]
     
     def get_metadata(self):
         ''' get a dictionary of the thumbnail metadata
@@ -2610,15 +2617,11 @@ class ThumbnailMetadata(StoredObject):
             async=True)
 
         # Send the image to cloudinary
-        # TODO(Sunil): Have this yield the functions directly instead
-        # of going through the run_async function once cdnhosting is
-        # written asynchronously.
         # TODO(Sunil): Merge the cloudinary hosting into the 
         # CDNHostingMetadataList
         cloudinary_hoster = api.cdnhosting.CDNHosting.create(
             CloudinaryCDNHostingMetadata())
-        yield utils.botoutils.run_async(cloudinary_hoster.upload, s3_url,
-                                        self.key)
+        yield cloudinary_hoster.upload(s3_url, self.key, async=True)
 
         # Host the image on the CDN
         if cdn_metadata is None:

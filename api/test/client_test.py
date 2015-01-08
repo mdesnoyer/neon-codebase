@@ -109,7 +109,7 @@ class TestVideoClient(test_utils.neontest.TestCase):
         self.na = neondata.NeonUserAccount('acc1')
         self.na.save()
         
-        self.np = neondata.NeonPlatform('acc1', self.na.neon_api_key)
+        self.np = neondata.NeonPlatform('acc1', '0', self.na.neon_api_key)
         self.np.save()
 
         j_id = "j123"
@@ -335,7 +335,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         na = neondata.NeonUserAccount('acct1')
         self.api_key = na.neon_api_key
         na.save()
-        neondata.NeonPlatform('acct1', self.api_key).save()
+        neondata.NeonPlatform('acct1', '0', self.api_key).save()
 
         self.video_id = '%s_vid1' % self.api_key
         self.api_request = neondata.BrightcoveApiRequest(
@@ -381,9 +381,12 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.http_mock = self.http_mocker.start()
         self.http_mock.side_effect = lambda x: HTTPResponse(x, 200)
 
-        # Mock out cloundinary
-        self.cloundinary_patcher = patch('api.cdnhosting.CloudinaryHosting')
-        self.cloundinary_mock = self.cloundinary_patcher.start()
+        # Mock out cloudinary
+        self.cloudinary_patcher = patch('api.cdnhosting.CloudinaryHosting')
+        self.cloudinary_mock = self.cloudinary_patcher.start()
+        future = Future()
+        future.set_result(None)
+        self.cloudinary_mock().upload.return_value = future
 
         # Setup the processor object
         job = self.api_request.__dict__
@@ -423,7 +426,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.sqs_mocker.stop()
         self.http_mocker.stop()
         self.im_download_mocker.stop()
-        self.cloundinary_mock.stop()
+        self.cloudinary_mock.stop()
         self.redis.stop()
         super(TestFinalizeResponse, self).tearDown()
 
@@ -870,7 +873,7 @@ class SmokeTest(test_utils.neontest.TestCase):
         na = neondata.NeonUserAccount('acct1')
         self.api_key = na.neon_api_key
         na.save()
-        neondata.NeonPlatform('acct1', self.api_key).save()
+        neondata.NeonPlatform('acct1', '0', self.api_key).save()
 
         self.video_id = '%s_vid1' % self.api_key
         self.api_request = neondata.OoyalaApiRequest(
@@ -929,9 +932,12 @@ class SmokeTest(test_utils.neontest.TestCase):
                     
         self.http_mock.side_effect = _http_response
 
-        # Mock out cloundinary
-        self.cloundinary_patcher = patch('api.cdnhosting.CloudinaryHosting')
-        self.cloundinary_mock = self.cloundinary_patcher.start()
+        # Mock out cloudinary
+        self.cloudinary_patcher = patch('api.cdnhosting.CloudinaryHosting')
+        self.cloudinary_mock = self.cloudinary_patcher.start()
+        future = Future()
+        future.set_result(None)
+        self.cloudinary_mock().upload.side_effect = [future]
 
         # Mock out the model
         self.model_patcher = patch('api.client.model.load_model')
@@ -954,7 +960,7 @@ class SmokeTest(test_utils.neontest.TestCase):
         self.sqs_mocker.stop()
         self.http_mocker.stop()
         self.im_download_mocker.stop()
-        self.cloundinary_mock.stop()
+        self.cloudinary_mock.stop()
         self.model_patcher.stop()
         self.redis.stop()
         super(SmokeTest, self).tearDown()

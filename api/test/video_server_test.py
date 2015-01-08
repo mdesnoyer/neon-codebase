@@ -31,6 +31,7 @@ import tornado.httpclient
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 import unittest
 import urllib
+import utils.neon
 
 from utils.options import define, options
 
@@ -237,7 +238,7 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.nuser = neondata.NeonUserAccount(a_id)
         self.nuser.save()
         self.api_key = self.nuser.neon_api_key
-        self.na = neondata.NeonPlatform(a_id, self.api_key)
+        self.na = neondata.NeonPlatform(a_id, '0', self.api_key)
         self.na.save()
 
         # Patch the video length lookup
@@ -480,6 +481,10 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
 class QueueSmokeTest(test_utils.neontest.TestCase):
     def setUp(self):
         super(QueueSmokeTest, self).setUp()
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start() 
+        random.seed(234895)
+        
         self.fwq = server.FairWeightedRequestQueue(nqueues=2)
         self.nuser1 = neondata.NeonUserAccount("acc1")
         self.nuser1.save()
@@ -500,6 +505,7 @@ class QueueSmokeTest(test_utils.neontest.TestCase):
 
     def tearDown(self):
         self.send_request_patcher.stop()
+        self.redis.stop()
         super(QueueSmokeTest, self).tearDown()
 
     def test_many_puts_gets(self):
@@ -584,7 +590,7 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
         self.nuser = neondata.NeonUserAccount(a_id)
         self.nuser.save()
         self.api_key = self.nuser.neon_api_key
-        self.na = neondata.NeonPlatform(a_id, self.api_key)
+        self.na = neondata.NeonPlatform(a_id, '0', self.api_key)
         self.na.save()
 
         # Make some default jobs
@@ -744,4 +750,5 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
         
 
 if __name__ == '__main__':
+    utils.neon.InitNeon()
     unittest.main()

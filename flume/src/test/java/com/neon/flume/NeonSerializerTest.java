@@ -2,6 +2,9 @@ package com.neon.flume;
 
 import  com.neon.Tracker.*;
 
+import org.junit.* ;
+import static org.junit.Assert.* ;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.io.File;
@@ -51,9 +54,15 @@ import org.apache.flume.api.RpcClientFactory;
 import org.apache.flume.event.EventBuilder;
 
 
-class NeonSerializerTest {   
+public class NeonSerializerTest {   
     
-    public static void test_ImageVisible() throws Exception { 
+    public NeonSerializerTest() {
+        
+    }
+    
+    
+    @Test
+    public void test_ImageVisible() throws Exception { 
 
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
 
@@ -117,7 +126,8 @@ class NeonSerializerTest {
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
     }
 
-    public static void test_ImagesVisible() throws Exception { 
+    @Test
+    public void test_ImagesVisible() throws Exception { 
 
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
 
@@ -184,7 +194,8 @@ class NeonSerializerTest {
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
     }
 
-    public static void test_ImageClick() throws Exception { 
+    @Test
+    public void test_ImageClick() throws Exception { 
 
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
 
@@ -260,7 +271,8 @@ class NeonSerializerTest {
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
     }
     
-    public static void test_ImageLoad() throws Exception { 
+    @Test
+    public void test_ImageLoad() throws Exception { 
 
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
 
@@ -328,7 +340,8 @@ class NeonSerializerTest {
         List<AtomicIncrementRequest> incs =serializer.getIncrements();
     }
     
-    public static void test_ImagesLoaded() throws Exception { 
+    @Test
+    public void test_ImagesLoaded() throws Exception { 
 
         //Schema schema = new Schema.Parser().parse(new File("schema.avsc"));
 
@@ -409,12 +422,12 @@ class NeonSerializerTest {
         System.out.println("\n\nTest Starting"); 
 
         try {
-
-            test_ImageVisible();
-            test_ImagesVisible();
-            test_ImageClick();
-            test_ImageLoad();
-            test_ImagesLoaded();
+            NeonSerializerTest serializer = new NeonSerializerTest();
+            serializer.test_ImageVisible();
+            serializer.test_ImagesVisible();
+            serializer.test_ImageClick();
+            serializer.test_ImageLoad();
+            serializer.test_ImagesLoaded();
             
             System.out.println("\n\nTest successful");
         }

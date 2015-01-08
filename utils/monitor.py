@@ -22,6 +22,7 @@ def send_data(name, value):
     timestamp = int(time.time())
     data = 'system.%s.%s %s %d\n' % (node, name, value, timestamp)
     sock = socket.socket()
+    sock.settimeout(20)
     try:
         sock.connect((options.carbon_server, options.carbon_port))
         sock.sendall(data)

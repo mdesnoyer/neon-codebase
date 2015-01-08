@@ -712,7 +712,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 # creation cron
                 if request_type == 'neon':
                     nplatform = yield tornado.gen.Task(
-                        neondata.NeonPlatform.get_account, api_key)
+                        neondata.NeonPlatform.get, api_key, '0')
                     if nplatform:
                         # TODO:refactor after moving platform accounts
                         # to stored object (atomic save)
