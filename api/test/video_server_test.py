@@ -306,7 +306,6 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(resp.code, 409)
 
     def test_brightcove_request(self):
-        ''' create brightcove platform account '''
 
         i_id = "i125"
         bp = neondata.BrightcovePlatform("testaccountneonapi", i_id,
