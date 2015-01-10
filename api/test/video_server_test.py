@@ -21,6 +21,7 @@ import random
 import subprocess
 from supportServices import neondata
 from StringIO import StringIO
+import test_utils.mock_boto_s3 as boto_mock
 import test_utils.redis
 import test_utils.neontest
 import time
@@ -31,6 +32,7 @@ import tornado.httpclient
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 import unittest
 import urllib
+from utils.imageutils import PILImageUtils
 import utils.neon
 
 from utils.options import define, options
@@ -251,11 +253,38 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.mock_http.send_request.side_effect = \
                 lambda x, callback: callback(response)
 
+        # Mock out the image download
+        self.im_download_mocker = patch(
+            'utils.imageutils.PILImageUtils.download_image')
+        im_download_mock = self.im_download_mocker.start()
+        self.random_image = PILImageUtils.create_random_image(480, 640)
+        image_future = concurrent.futures.Future()
+        image_future.set_result(self.random_image)
+        im_download_mock.return_value = image_future
+
+        # Mock out cloudinary
+        self.cloudinary_patcher = patch('api.cdnhosting.CloudinaryHosting')
+        self.cloudinary_mock = self.cloudinary_patcher.start()
+        future = concurrent.futures.Future()
+        future.set_result(None)
+        self.cloudinary_mock().upload.return_value = future
+
+        # Mock out s3
+        self.s3conn = boto_mock.MockConnection()
+        self.s3_patcher = patch('api.cdnhosting.S3Connection')
+        self.mock_conn = self.s3_patcher.start()
+        self.mock_conn.return_value = self.s3conn
+        self.s3conn.create_bucket('host-thumbnails')
+        self.s3conn.create_bucket('n3.neon-images.com')
+
     def get_app(self):
         return self.server.application
     
     def tearDown(self):
         self.http_patcher.stop()
+        self.im_download_mocker.stop()
+        self.cloudinary_patcher.stop()
+        self.s3_patcher.stop()
         self.redis.stop()
         super(TestVideoServer, self).tearDown()
 
@@ -275,10 +304,13 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
     def add_request(self, video_id="vid123"):
 
         vals = {"api_key": self.api_key, 
-                    "video_url": "http://testurl/video.mp4", 
-                    "video_id": video_id , "topn":2, 
-                    "callback_url": "http://callback_push_url", 
-                    "video_title": "test_title"}
+                "video_url": "http://testurl/video.mp4", 
+                "video_id": video_id ,
+                "topn":2, 
+                "callback_url": "http://callback_push_url", 
+                "video_title": "test_title",
+                "default_thumbnail" : "http://default_thumb.jpg"
+                }
         resp = self.make_api_request(vals)
         return resp
 
@@ -290,6 +322,37 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         job_id = json.loads(resp.body)['job_id']
         api_request = neondata.NeonApiRequest.get(job_id, self.api_key)
         self.assertEqual(api_request.video_id, "neonapivid123")
+
+        # Verify that the default thumb is in the database
+        video = neondata.VideoMetadata.get('%s_neonapivid123' % self.api_key)
+        self.assertIsNotNone(video)
+        self.assertEquals(len(video.thumbnail_ids), 1)
+        self.assertTrue(video.serving_enabled)
+        thumb = neondata.ThumbnailMetadata.get(video.thumbnail_ids[0])
+        self.assertEquals(thumb.type, neondata.ThumbnailType.DEFAULT)
+        self.assertEquals(thumb.rank, 0)
+
+    def test_no_default_thumb(self):
+        vals = {
+           "api_key": self.api_key, 
+           "video_url": "http://testurl/video.mp4", 
+           "video_id": 'neonapivid123',
+           "topn":2, 
+           "callback_url": "http://callback_push_url", 
+           "video_title": "test_title",
+            }
+        response = self.make_api_request(vals)
+        self.assertEquals(response.code, 201)
+
+        # Verify that there is a video entry in the database but it
+        # won't serve anything.
+        video = neondata.VideoMetadata.get('%s_neonapivid123' % self.api_key)
+        self.assertIsNotNone(video)
+        self.assertEquals(len(video.thumbnail_ids), 0)
+        self.assertFalse(video.serving_enabled)
+        self.assertEquals(video.url, 'http://testurl/video.mp4')
+        self.assertEquals(video.integration_id, self.na.integration_id)
+        self.assertEquals(video.job_id, json.loads(response.body)['job_id'])
 
     def test_neon_api_request_invalid_id(self):
         resp = self.add_request("neonap_-ivid123") 
@@ -313,18 +376,18 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         bp.save()
 
         vals = {"api_key": self.api_key, 
-                    "video_url": "http://testurl/video.mp4", 
-                    "video_id": "testid123", "topn":2, 
-                    "callback_url": "http://callback_push_url", 
-                    "video_title": "test_title",
-                    "autosync" : False,
-                    "topn" : 1,
-                    "integration_id" : i_id,
-                    "publisher_id" : "pubid",
-                    "read_token": "rtoken",
-                    "write_token": "wtoken",
-                    "default_thumbnail": "http://prev_thumb"
-                    }
+                "video_url": "http://testurl/video.mp4", 
+                "video_id": "testid123", "topn":2, 
+                "callback_url": "http://callback_push_url", 
+                "video_title": "test_title",
+                "autosync" : False,
+                "topn" : 1,
+                "integration_id" : i_id,
+                "publisher_id" : "pubid",
+                "read_token": "rtoken",
+                "write_token": "wtoken",
+                "default_thumbnail": "http://prev_thumb"
+                }
         url = self.get_url('/api/v1/submitvideo/brightcove')
         resp = self.make_api_request(vals, url)
         self.assertEqual(resp.code, 201)
@@ -332,6 +395,54 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         job_id = json.loads(resp.body)['job_id']
         api_request = neondata.NeonApiRequest.get(job_id, self.api_key)
         self.assertEqual(api_request.video_id, "testid123")
+
+        # Check that the default thumbnail is set
+        video = neondata.VideoMetadata.get('%s_testid123' % self.api_key)
+        self.assertIsNotNone(video)
+        self.assertEquals(len(video.thumbnail_ids), 1)
+        self.assertTrue(video.serving_enabled)
+        thumb = neondata.ThumbnailMetadata.get(video.thumbnail_ids[0])
+        self.assertEquals(thumb.type, neondata.ThumbnailType.BRIGHTCOVE)
+        self.assertEquals(thumb.rank, 0)
+        self.assertEquals(thumb.urls[-1], 'http://prev_thumb')
+
+    def test_ooyala_request(self):
+
+        i_id = "i125"
+        bp = neondata.OoyalaPlatform("testaccountneonapi", i_id,
+               self.api_key)
+        bp.save()
+
+        vals = {"api_key": self.api_key, 
+                "video_url": "http://testurl/video.mp4", 
+                "video_id": "testid123", "topn":2, 
+                "callback_url": "http://callback_push_url", 
+                "video_title": "test_title",
+                "autosync" : False,
+                "topn" : 4,
+                "integration_id" : i_id,
+                "oo_api_key" : "ooyala_key",
+                "oo_secret_key" : "ooyala_secret",
+                "default_thumbnail": "http://prev_thumb"
+                }
+        url = self.get_url('/api/v1/submitvideo/ooyala')
+        resp = self.make_api_request(vals, url)
+        self.assertEqual(resp.code, 201)
+        
+        job_id = json.loads(resp.body)['job_id']
+        api_request = neondata.NeonApiRequest.get(job_id, self.api_key)
+        self.assertEqual(api_request.video_id, "testid123")
+
+        # Check that the default thumbnail is set
+        video = neondata.VideoMetadata.get('%s_testid123' % self.api_key)
+        self.assertIsNotNone(video)
+        self.assertEquals(len(video.thumbnail_ids), 1)
+        self.assertTrue(video.serving_enabled)
+        thumb = neondata.ThumbnailMetadata.get(video.thumbnail_ids[0])
+        self.assertEquals(thumb.type, neondata.ThumbnailType.OOYALA)
+        self.assertEquals(thumb.rank, 0)
+        self.assertEquals(thumb.urls[-1], 'http://prev_thumb')
+        
     
     def test_brightcove_request_invalid(self):
 

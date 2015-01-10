@@ -718,7 +718,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     video_obj.serving_enabled = \
                       len(video_obj.thumbnail_ids) > 0
                 yield tornado.gen.Task(neondata.VideoMetadata.modify,
-                                       self.video_metadata.key,
+                                       video.key,
                                        _set_serving_enabled)
                 
                 # Only if this is a Neon request, save it to the
