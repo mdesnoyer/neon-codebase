@@ -13,7 +13,7 @@
     "type" : {
       "type" : "enum",
       "name" : "TrackerType",
-      "symbols" : [ "BRIGHTCOVE", "OOYALA", "BCGALLERY", "IGN" ]
+      "symbols" : [ "BRIGHTCOVE", "OOYALA", "BCGALLERY", "IGN", "GENERAL" ]
     }
   }, {
     "name" : "pageURL",
@@ -214,6 +214,10 @@
         "name" : "autoplayDelta",
         "type" : [ "null", "int" ]
       }, {
+        "name" : "isAutoPlay",
+        "type" : [ "null", "boolean" ],
+        "default" : null
+      }, {
         "name" : "playCount",
         "type" : "int"
       } ]
@@ -236,6 +240,10 @@
       }, {
         "name" : "autoplayDelta",
         "type" : [ "null", "int" ]
+      }, {
+        "name" : "isAutoPlay",
+        "type" : [ "null", "boolean" ],
+        "default" : null
       }, {
         "name" : "playCount",
         "type" : "int"

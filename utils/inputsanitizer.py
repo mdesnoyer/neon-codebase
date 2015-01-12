@@ -26,12 +26,14 @@ class InputSanitizer(object):
            pass
 
     @classmethod
-    def to_bool(cls, _input):
+    def to_bool(cls, _input, is_null_valid=False):
 
         if isinstance(_input, bool):
             return _input
 
         if _input is None:
+            if is_null_valid:
+                return None
             raise Exception("Missing _input or None")
         
         if isinstance(_input, basestring):
@@ -114,7 +116,7 @@ class InputSanitizer(object):
         '''
         Sanitize null or undefined strings from tracker data to INT or None
         '''
-        if ip == "null" or ip == "undefined":
-            return
+        if ip is None or ip == "null" or ip == "undefined":
+            return None
         return int(ip)
 

@@ -16,7 +16,7 @@ protocol DummyTrackerProtocol {
 import idl "CommonTrackerInfo.avdl";
 
 enum TrackerType {
-  BRIGHTCOVE, OOYALA, BCGALLERY, IGN
+  BRIGHTCOVE, OOYALA, BCGALLERY, IGN, GENERAL
 }
 
 enum EventType {
@@ -79,6 +79,9 @@ record VideoPlay {
   // click
   union{null, int} autoplayDelta;
 
+  // Is this an auto play
+  union{null, boolean} isAutoPlay = null;
+
   // This video is the nth one playing on this page load. 1-based index
   int playCount; 
 }
@@ -97,7 +100,10 @@ record AdPlay {
   // last time an image or the player was clicked by the user. Used to
   // identify autoplay. Given in milliseconds, or null if there was no
   // click
-  union{null, int} autoplayDelta;
+  union{null, int} autoplayDelta = null;
+
+  // Is this an auto play
+  union{null, boolean} isAutoPlay = null;
 
   // This ad is attached to the nth video playing on this page load. 
   // 1-based index
