@@ -524,7 +524,8 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
                   'autoplayDelta': None,
                   'playCount': 1,
                   'playerId' : 'brightcoveP123',
-                  'isVideoPlay' : True
+                  'isVideoPlay' : True,
+                  'isAutoPlay' : None,
                   },
               'neonUserId' : 'neon_id1'},
               'neon_id1'
@@ -535,7 +536,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
             { 'a' : 'ap',
               'pageid' : 'pageid123',
               'tai' : 'tai123',
-              'ttype' : 'brightcove',
+              'ttype' : 'gen',
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
@@ -548,7 +549,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
             { 'eventType' : 'AD_PLAY',
               'pageId' : 'pageid123',
               'trackerAccountId' : 'tai123',
-              'trackerType' : 'BRIGHTCOVE',
+              'trackerType' : 'GENERAL',
               'pageURL' : 'http://go.com',
               'refURL' : 'http://ref.com',
               'clientTime' : 2345623,
@@ -558,7 +559,8 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
                   'autoplayDelta': 214,
                   'playCount': 1,
                   'playerId' : 'brightcoveP123',
-                  'isAdPlay' : True
+                  'isAdPlay' : True,
+                  'isAutoPlay' : None,
                   },
               'neonUserId' : 'neon_id1'},
               'neon_id1'
@@ -810,9 +812,9 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'bn' : 'neonvid_vid3',
               'vid' : 'vid1',
               'adplay': 'False',
-              'adelta': 'null',
               'pcount': '1',
-              'playerid' : 'brightcoveP123'},
+              'playerid' : 'brightcoveP123',
+              'aplay' : 'true'},
             { 'eventType' : 'VIDEO_PLAY',
               'pageId' : 'pageid123',
               'trackerAccountId' : 'tai123',
@@ -827,7 +829,8 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
                   'autoplayDelta': None,
                   'playCount': 1,
                   'playerId' : 'brightcoveP123',
-                  'isVideoPlay' : True
+                  'isVideoPlay' : True,
+                  'isAutoPlay' : True,
                   },
               'neonUserId' : 'neon_id1'},
               'neon_id1'
@@ -838,30 +841,31 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
             { 'a' : 'ap',
               'pageid' : 'pageid123',
               'tai' : 'tai123',
-              'ttype' : 'brightcove',
+              'ttype' : 'gen',
               'page' : 'http://go.com',
               'ref' : 'http://ref.com',
               'cts' : '2345623',
               'bn' : 'neonvid_vid3',
               'vid' : 'vid1',
-              'adelta': '214',
               'pcount' : '1',
               'playerid' : 'brightcoveP123',
+              'aplay' : 'false'
               },
             { 'eventType' : 'AD_PLAY',
               'pageId' : 'pageid123',
               'trackerAccountId' : 'tai123',
-              'trackerType' : 'BRIGHTCOVE',
+              'trackerType' : 'GENERAL',
               'pageURL' : 'http://go.com',
               'refURL' : 'http://ref.com',
               'clientTime' : 2345623,
               'eventData' : {
                   'thumbnailId' : 'acct1_vid3_tid0',
                   'videoId' : 'vid1',
-                  'autoplayDelta': 214,
+                  'autoplayDelta': None,
                   'playCount': 1,
                   'playerId' : 'brightcoveP123',
-                  'isAdPlay' : True
+                  'isAdPlay' : True,
+                  'isAutoPlay' : False
                   },
               'neonUserId' : 'neon_id1'},
               'neon_id1'
@@ -1226,6 +1230,35 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
         self.assertRegexpMatches(response.body,
                                  'height and width must be ints')
 
+    def test_missing_both_aplay_and_adelta(self):
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'ap',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bn' : 'somevideo.jpg',
+             'vid' : 'somevideo',
+             'pcount' : '2'}))
+        self.assertEqual(response.code, 400)
+        self.assertRegexpMatches(response.body, 'either adelta or aplay')
+
+        response = self.fetch('/v2?%s' % urllib.urlencode(
+            {'a' : 'vp',
+             'pageid' : 'pageid123',
+             'tai' : 'tai123',
+             'ttype' : 'brightcove',
+             'page' : 'http://go.com',
+             'ref' : 'http://ref.com',
+             'cts' : '2345623',
+             'bn' : 'somevideo.jpg',
+             'vid' : 'somevideo',
+             'pcount' : '2'}))
+        self.assertEqual(response.code, 400)
+        self.assertRegexpMatches(response.body, 'either adelta or aplay')
+
     @patch('clickTracker.trackserver.socket.create_connection')    
     def test_heartbeat_good_flume_connection(self, sockmock):
         response = self.fetch('/healthcheck')
@@ -1295,7 +1328,8 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
                   'autoplayDelta': None,
                   'playCount': 1,
                   'playerId' : 'brightcoveP123',
-                  'isVideoPlay' : True
+                  'isVideoPlay' : True,
+                  'isAutoPlay' : None
                   },
               'neonUserId' : 'neon_id1'},
               'neon_id1'
@@ -1328,7 +1362,8 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
                   'autoplayDelta': 214,
                   'playCount': 1,
                   'playerId' : 'brightcoveP123',
-                  'isAdPlay' : True
+                  'isAdPlay' : True,
+                  'isAutoPlay' : None
                   },
               'neonUserId' : 'neon_id1'},
               'neon_id1'
