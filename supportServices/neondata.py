@@ -2092,6 +2092,7 @@ class NeonApiRequest(NamespacedStoredObject):
         self.fail_count = 0 # Number of failed processing tries
         
         self.integration_type = "neon"
+        self.integration_id = '0'
         self.default_thumbnail = default_thumbnail # URL of a default thumb
 
         #Save the request response
