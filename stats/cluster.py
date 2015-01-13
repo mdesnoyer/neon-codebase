@@ -615,8 +615,8 @@ class Cluster():
 
         bootstrap_actions = [
             BootstrapAction(
-                'Install HBase',
-                's3://elasticmapreduce/bootstrap-actions/setup-hbase',
+                'Install Hue',
+                's3://elasticmapreduce/libs/hue/install-hue',
                 []),
             BootstrapAction(
                 'Install Ganglia',
@@ -628,9 +628,13 @@ class Cluster():
                 ['--base-path', 's3://elasticmapreduce',
                  '--impala-version', '1.2.4']),
             BootstrapAction(
+                'Setup EMRFS',
+                's3://elasticmapreduce/bootstrap-actions/configure-hadoop',
+                ['-e', 'fs.s3.enableServerSideEncryption=true']),
+            BootstrapAction(
                 'Configure Hadoop',
                 's3://elasticmapreduce/bootstrap-actions/configure-hadoop',
-                ['--site-key-value', 'io.file.buffer.size=65536',
+                ['--hdfs-key-value', 'io.file.buffer.size=65536',
                  '--mapred-key-value',
                  'mapreduce.job.user.classpath.first=true',
                  '--mapred-key-value', 'mapreduce.map.output.compress=true',
@@ -654,13 +658,13 @@ class Cluster():
                  'yarn.log-aggregation-enable=true'])]
             
         steps = [
-            boto.emr.step.InstallHiveStep('0.13.1'),
             boto.emr.step.JarStep(
-                'Start HBase',
-                '/home/hadoop/lib/hbase.jar',
+                'Run Hue',
+                's3://elasticmapreduce/libs/script-runner/script-runner.jar',
                 None,
                 'TERMINATE_JOB_FLOW',
-                ['emr.hbase.backup.Main', '--start-master'])]
+                ['s3://elasticmapreduce/libs/hue/run-hue']),
+            boto.emr.step.InstallHiveStep('0.13.1')]
 
             
         instance_groups = [
