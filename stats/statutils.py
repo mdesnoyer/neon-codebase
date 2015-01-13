@@ -23,7 +23,7 @@ def get_time_clause(start_time=None, end_time=None):
     if start_time is not None:
         start_time = dateutil.parser.parse(start_time)
         clauses.extend([
-            'mnth >= %i' % start_time.month,
+            #'mnth >= %i' % start_time.month,
             'yr >= %i' % start_time.year,
             "cast(serverTime as timestamp) >= '%s'" % 
             start_time.strftime('%Y-%m-%d %H:%M:%S')])
@@ -31,7 +31,7 @@ def get_time_clause(start_time=None, end_time=None):
     if end_time is not None:
         end_time = dateutil.parser.parse(end_time)
         clauses.extend([
-            'mnth <= %i' % end_time.month,
+            #'mnth <= %i' % end_time.month,
             'yr <= %i' % end_time.year,
             "cast(serverTime as timestamp) <= '%s'" % 
             end_time.strftime('%Y-%m-%d %H:%M:%S')])

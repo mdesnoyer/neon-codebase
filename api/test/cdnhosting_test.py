@@ -7,7 +7,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-import api.akamai_api
+from api import akamai_api
 import api.cdnhosting
 import boto.exception
 from cStringIO import StringIO
@@ -23,6 +23,7 @@ import test_utils.neontest
 import test_utils.redis
 import tornado.testing
 import unittest
+from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 from utils.imageutils import PILImageUtils
 
 _log = logging.getLogger(__name__)
@@ -302,8 +303,18 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
         self.http_mock = self.http_call_patcher.start()
         self.redis = test_utils.redis.RedisServer()
         self.redis.start() 
-        random.seed(1654985)
+        
+        metadata = neondata.AkamaiCDNHostingMetadata(key=None,
+                host='http://akamai',
+                akamai_key='akey',
+                akamai_name='aname',
+                baseurl='base',
+                cdn_prefixes=['cdn.akamai.com']
+                )
 
+        self.hoster = api.cdnhosting.CDNHosting.create(metadata)
+        
+        random.seed(1654985)
         self.image = PILImageUtils.create_random_image(480, 640)
         super(TestAkamaiHosting, self).setUp()
 
@@ -324,22 +335,44 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
                 return response
         self.http_mock.side_effect = do_response
 
+    @tornado.testing.gen_test
     def test_upload_image(self):
-        metadata = neondata.AkamaiCDNHostingMetadata(key=None,
-                host='http://akamai',
-                akamai_key='akey',
-                akamai_name='aname',
-                baseurl='base',
-                cdn_prefixes='cdn.akamai.com'
-                )
-
-        hoster = api.cdnhosting.CDNHosting.create(metadata)
-        yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+        self._set_http_response()
+        tid = 'akamai_vid1_tid1'
+        
+        yield self.hoster.upload(self.image, tid, async=True)
+       
+        # Check http mock and Akamai request
+        # make sure the http mock was called
+        self.assertGreater(self.http_mock._mock_call_count, 0)
+        headers = self.http_mock._mock_call_args_list[0][0][0].headers 
+        self.assertListEqual(headers.keys(), ['Content-Length',
+            'X-Akamai-ACS-Auth-Data', 'X-Akamai-ACS-Auth-Sign',
+            'X-Akamai-ACS-Action'])
 
         # Check serving URLs
-   
+        ts = neondata.ThumbnailServingURLs.get(tid)
+        self.assertGreater(len(ts.size_map), 0)
+
+        # Verify the final image URLs
+        for (w, h), url in ts.size_map.iteritems():
+            url = ts.get_serving_url(w, h)
+            self.assertRegexpMatches(
+                    url, 'http://cdn.akamai.com/neontn%s_w%s_h%s.jpg' % (tid, w, h))
+    
+    @tornado.testing.gen_test
     def test_upload_image_error(self):
-        pass
+        self._set_http_response(code=500)
+        tid = 'akamai_vid1_tid2'
+        
+        with self.assertLogExists(logging.WARNING, 
+                'Error uploading image to akamai for tid %s' % tid):
+            yield self.hoster.upload(self.image, tid, async=True)
+        
+        self.assertGreater(self.http_mock._mock_call_count, 0)
+        
+        ts = neondata.ThumbnailServingURLs.get(tid)
+        self.assertEqual(len(ts.size_map), 0)
 
 if __name__ == '__main__':
     unittest.main()

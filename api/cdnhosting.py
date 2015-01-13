@@ -151,7 +151,6 @@ def create_s3_redirect(dest_key, src_key, dest_bucket=None,
                    '%s : %s' %  (src_bucket, src_key, redirect_loc, e))
         raise IOError(str(e))
     
-    
 
 class CDNHosting(object):
     '''Abstract class for hosting images on a CDN.'''
@@ -176,6 +175,9 @@ class CDNHosting(object):
         Saves the mappings in ThumbnailServingURLs object 
         '''
         new_serving_thumbs = [] # (url, width, height)
+        
+        # NOTE: if _upload_impl returns None, the image is not added to the 
+        # list of serving URLs
 
         if self.resize:
             for sz in properties.CDN_IMAGE_SIZES:
@@ -183,11 +185,13 @@ class CDNHosting(object):
                 cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
                 im = pycvutils.to_pil(cv_im_r)
                 cdn_url = yield self._upload_impl(im, tid, async=True)
-                new_serving_thumbs.append((cdn_url, sz[0], sz[1]))
+                if cdn_url:
+                    new_serving_thumbs.append((cdn_url, sz[0], sz[1]))
 
         else:
             cdn_url = yield self._upload_impl(image, tid, async=True)
-            new_serving_thumbs.append((cdn_url, image.size[0], image.size[1]))
+            if cdn_url:
+                new_serving_thumbs.append((cdn_url, image.size[0], image.size[1]))
 
         if self.update_serving_urls:
             def add_serving_urls(obj):
@@ -430,6 +434,9 @@ class AkamaiHosting(CDNHosting):
         
         image_url = "/%s" % key_name
 
-        yield self.ak_conn.upload(image_url, imgdata)
+        response = yield tornado.gen.Task(self.ak_conn.upload, image_url, imgdata)
+        if response.error:
+            _log.warn_n("Error uploading image to akamai for tid %s" % tid)
+            cdn_url = None
 
-        raise tornado.gen.Return(cdn_url)
+        raise tornado.gen.Return(cdn_url) 
