@@ -68,17 +68,30 @@ class ImpalaTableBuilder(threading.Thread):
             options.compiled_schema_path, "%sHive.avsc" % self.event)).read())
 
     def run(self):
-        self.cluster.connect()
-        hive_event = '%sHive' % self.event
-        
+        try:
+            self.cluster.connect()
+            hive_event = '%sHive' % self.event
+        except Exception as e:
+            _log.error('Error connecting to the cluster %s' % e)
+            statemon.state.increment('impala_table_creation_failure')
+            self.status = 'ERROR'
+            return
+
         # Upload the schema for this table to the s3 bucket
-        s3conn = S3Connection()
-        bucket = s3conn.get_bucket(options.schema_bucket)
-        key = boto.s3.key.Key(bucket, '%s.avsc' % hive_event)
-        key.set_contents_from_filename(
-            os.path.join(options.compiled_schema_path,
-                         '%s.avsc' % hive_event),
-                         replace=True)
+        try:
+            s3conn = S3Connection()
+            bucket = s3conn.get_bucket(options.schema_bucket)
+            key = boto.s3.key.Key(bucket, '%s.avsc' % hive_event)
+            key.set_contents_from_filename(
+                os.path.join(options.compiled_schema_path,
+                             '%s.avsc' % hive_event),
+                             replace=True)
+        except Exception as e:
+            _log.error('Error uploading the schema %s to s3: %s' % 
+                       (self.event, e))
+            statemon.state.increment('impala_table_creation_failure')
+            self.status = 'ERROR'
+            return
         
         # Create the hive client
         transport = TSocket.TSocket(self.cluster.master_ip,
@@ -169,7 +182,7 @@ class ImpalaTableBuilder(threading.Thread):
             self.status = 'ERROR'
 
         except HiveServerException as e:
-            _log.exception("Error excuting command")
+            _log.exception("Error executing command")
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
 
@@ -182,6 +195,11 @@ class ImpalaTableBuilder(threading.Thread):
             _log.error("Incompatible schema found for event %s: %s" %
                        (self.event, self.avro_schema))
             statemon.state.increment('impala_table_creation_failure')
+            self.status = 'ERROR'
+
+        except Exception as e:
+            _log.exception('Unexpected exception when building the impala '
+                           'table %s' % self.event)
             self.status = 'ERROR'
 
     def _generate_table_definition(self):
