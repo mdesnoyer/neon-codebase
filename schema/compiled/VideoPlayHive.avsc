@@ -82,7 +82,12 @@
     "default" : false
   }, {
     "name" : "autoplayDelta",
-    "type" : [ "null", "int" ]
+    "type" : [ "null", "int" ],
+    "default" : null
+  }, {
+    "name" : "isAutoPlay",
+    "type" : [ "null", "boolean" ],
+    "default" : null
   }, {
     "name" : "playCount",
     "type" : "int"

@@ -84,6 +84,9 @@ record EventSequenceHive {
   // click
   union { null, int } autoplayDelta = null;
 
+  // Is this an auto play
+  union{null, boolean} isAutoPlay = null;
+
   // This video is the nth one playing on this page load
   union { null, int } playCount = null;
 
