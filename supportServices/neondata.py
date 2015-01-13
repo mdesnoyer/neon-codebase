@@ -1342,6 +1342,24 @@ class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
             resize=False,
             update_serving_urls=False)
 
+class AkamaiCDNHostingMetadata(CDNHostingMetadata):
+    '''
+    Akamai Netstorage CDN Metadata
+    '''
+
+    def __init__(self, key=None, host=None, akamai_key=None, akamai_name=None,
+            baseurl=None, cdn_prefixes=None):
+        super(AkamaiCDNHostingMetadata, self).__init__(
+            key,
+            cdn_prefixes=cdn_prefixes,
+            resize=True,
+            update_serving_urls=True)
+        
+        self.host = host
+        self.akamai_key = akamai_key
+        self.akamai_name = akamai_name
+        self.baseurl = baseurl
+
 class AbstractPlatform(NamespacedStoredObject):
     ''' Abstract Platform/ Integration class '''
 

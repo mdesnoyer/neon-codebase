@@ -7,6 +7,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import api.akamai_api
 import api.cdnhosting
 import boto.exception
 from cStringIO import StringIO
@@ -290,6 +291,55 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
 
         # Make sure that all the expected files were found
         self.assertItemsEqual(sizes_found, api.properties.CDN_IMAGE_SIZES)
+
+class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
+    '''
+    Test uploading images to Akamai
+    '''
+    def setUp(self):
+        self.http_call_patcher = \
+          patch('api.akamai_api.utils.http.send_request')
+        self.http_mock = self.http_call_patcher.start()
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start() 
+        random.seed(1654985)
+
+        self.image = PILImageUtils.create_random_image(480, 640)
+        super(TestAkamaiHosting, self).setUp()
+
+    def tearDown(self):
+        self.http_call_patcher.stop()
+        self.redis.stop()
+        super(TestAkamaiHosting, self).tearDown()
+
+    def _set_http_response(self, code=200, body='', error=None):
+        def do_response(request, callback=None, *args, **kwargs):
+            response = HTTPResponse(request, code,
+                                    buffer=StringIO(body),
+                                    error=error)
+            if callback:
+                tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                             response)
+            else:
+                return response
+        self.http_mock.side_effect = do_response
+
+    def test_upload_image(self):
+        metadata = neondata.AkamaiCDNHostingMetadata(key=None,
+                host='http://akamai',
+                akamai_key='akey',
+                akamai_name='aname',
+                baseurl='base',
+                cdn_prefixes='cdn.akamai.com'
+                )
+
+        hoster = api.cdnhosting.CDNHosting.create(metadata)
+        yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+
+        # Check serving URLs
+   
+    def test_upload_image_error(self):
+        pass
 
 if __name__ == '__main__':
     unittest.main()

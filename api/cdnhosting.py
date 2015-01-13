@@ -8,6 +8,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import akamai_api
 import base64
 import json
 import hashlib
@@ -229,6 +230,9 @@ class CDNHosting(object):
         elif isinstance(cdn_metadata,
                         supportServices.neondata.CloudinaryCDNHostingMetadata):
             return CloudinaryHosting(cdn_metadata)
+        elif isinstance(cdn_metadata,
+                        supportServices.neondata.AkamaiCDNHostingMetadata):
+            return AkamaiHosting(cdn_metadata)
 
         else:
             raise ValueError("CDNHosting type %s not supported yet, please"
@@ -391,4 +395,41 @@ class CloudinaryHosting(CDNHosting):
         to_sign = "&".join(sorted([(k+"="+(",".join(v) if isinstance(v, list) else str(v))) for k, v in params_to_sign.items() if v]))
         return hashlib.sha1(str(to_sign + api_secret)).hexdigest()
 
-    
+   
+
+class AkamaiHosting(CDNHosting):
+
+    neon_fname_fmt = "neontn%s_w%s_h%s.jpg" 
+
+    def __init__(self, cdn_metadata):
+        super(AkamaiHosting, self).__init__(cdn_metadata)
+        self.cdn_prefixes = cdn_metadata.cdn_prefixes 
+        self.ak_conn = akamai_api.AkamaiNetstorage(cdn_metadata.host,
+                            cdn_metadata.akamai_key,
+                            cdn_metadata.akamai_name,
+                            cdn_metadata.baseurl)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _upload_impl(self, image, tid):
+        
+        name_pieces = []
+        name_pieces.append(AkamaiHosting.neon_fname_fmt % 
+                           (tid, image.size[0], image.size[1]))
+        key_name = '/'.join(name_pieces)
+
+        if self.cdn_prefixes and len(self.cdn_prefixes) > 0:
+            cdn_prefix = random.choice(self.cdn_prefixes)
+        
+        cdn_url = "http://%s/%s" % (cdn_prefix, key_name)
+        fmt = 'jpeg'
+        filestream = StringIO()
+        image.save(filestream, fmt, quality=90) 
+        filestream.seek(0)
+        imgdata = filestream.read()
+        
+        image_url = "/%s" % key_name
+
+        yield self.ak_conn.upload(image_url, imgdata)
+
+        raise tornado.gen.Return(cdn_url)
