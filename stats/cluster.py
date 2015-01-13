@@ -675,7 +675,7 @@ class Cluster():
             options.cluster_name,
             log_uri='s3://neon-cluster-logs/',
             ec2_keyname='emr-runner',
-            ami_version='3.1.3',
+            ami_version='3.3.1',
             job_flow_role='EMR_EC2_DefaultRole',
             service_role='EMR_DefaultRole',
             keep_alive=True,
