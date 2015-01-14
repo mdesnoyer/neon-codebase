@@ -285,7 +285,7 @@ class Cluster():
             r"Tracking URL: https?://(\S+)/proxy/(\S+)/")
         jobidRe = re.compile(r"Job ID: (\S+)")
         stdout = ssh_conn.execute_remote_command(
-            ('hadoop jar /home/hadoop/{jar} {main_class} {extra_ops} {input} '
+            ('yarn jar /home/hadoop/{jar} {main_class} {extra_ops} {input} '
              '{output}').format(
                  jar=os.path.basename(jar),
                  main_class=main_class,
@@ -842,10 +842,24 @@ class ClusterSSHConnection:
         retcode = None
         try:
             stdin, stdout, stderr = self.client.exec_command(cmd)
-            for line in stdout:
-                stdout_msg.append(line)
-            for line in stderr:
-                stderr_msg.append(line)
+
+            # Get the stdout and stderr data. Need to do this the long
+            # way because if either is long, an ssh buffer fills up
+            # and hangs forever waiting to be emptied.
+            got_stdout = False
+            got_stderr = False
+            while not got_stderr or not got_stdout:
+                stdout_msg = stdout.readline()
+                if stdout_msg == '':
+                    got_stdout = True
+                else:
+                    stdout_msg.append(stdout_msg)
+
+                stderr_msg = stderr.readline()
+                if stderr_msg == '':
+                    got_stderr = True
+                else:
+                    stderr_msg.append(stderr_msg)
             retcode = stdout.channel.recv_exit_status()
             
         finally:
@@ -854,6 +868,6 @@ class ClusterSSHConnection:
         if retcode != 0:
             raise ExecutionError(
                 "Error running command on the cluster: %s. Stderr was: \n%s" % 
-                (cmd, '\n'.join(stderr_msg)))
+                (cmd, ''.join(stderr_msg)))
 
-        return '\n'.join(stdout_msg)
+        return ''.join(stdout_msg)
