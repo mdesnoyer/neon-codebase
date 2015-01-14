@@ -2716,26 +2716,6 @@ class ThumbnailMetadata(StoredObject):
         return new_thumb_obj, old_thumb_obj 
 
     @classmethod
-    def save_integration(cls, thumbnails, callback=None):
-        ''' save integration 
-
-        TODO(sunil): Explain what this is for
-        '''
-        db_connection = DBConnection.get(cls)
-        if callback:
-            pipe = db_connection.conn.pipeline()
-        else:
-            pipe = db_connection.blocking_conn.pipeline() 
-
-        for thumbnail in thumbnails:
-            pipe.set(thumbnail.key, thumbnail.to_json())
-        
-        if callback:
-            pipe.execute(callback)
-        else:
-            return pipe.execute()
-
-    @classmethod
     def iterate_all_thumbnails(cls):
         '''Iterates through all of the thumbnails in the system.
 

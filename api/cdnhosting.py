@@ -306,8 +306,6 @@ class AWSHosting(CDNHosting):
         raise tornado.gen.Return(cdn_url)
         
 
-# TODO(Sunil): Update this class with the _upload_impl
-# approach. Should raise an IOError on a problem.
 class CloudinaryHosting(CDNHosting):
     
     '''
@@ -323,7 +321,7 @@ class CloudinaryHosting(CDNHosting):
     '''
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def upload(self, image, tid):
+    def _upload_impl(self, image, tid):
         '''
         image: s3 url of the image
         Note: No support for uploading raw images yet 
@@ -341,19 +339,8 @@ class CloudinaryHosting(CDNHosting):
         self.sign_request(params)
         headers = {}
 
-        #not to be used for signing the request 
-        if not isinstance(image, basestring): 
-            #TODO(Sunil): support this later when you have tim
-            #filestream = StringIO()
-            #image.save(filestream, 'jpeg', quality=90) 
-            #filestream.seek(0)
-            #datagen, headers = multipart_encode({'file': filestream})
-            #params['file'] = 'fakefname' 
-            #self.make_request(params, datagen, headers)
-            raise NotImplementedError("No support for upload raw images yet")
-        else:
-            params['file'] = image
-            yield self.make_request(params, None, headers, async=True)
+        params['file'] = image
+        yield self.make_request(params, None, headers, async=True)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -364,11 +351,6 @@ class CloudinaryHosting(CDNHosting):
         encoded_params = urllib.urlencode(params)
         request = tornado.httpclient.HTTPRequest(api_url, 'POST',
                                                  body=encoded_params)
-        
-        #if imdata:
-            #body = imdata #"".join([data for data in imdata])
-            #request = urllib2.Request(api_url + "?" + encoded_params,
-            #                           body, headers)
         
         try:
             yield tornado.gen.Task(utils.http.send_request, request) 
