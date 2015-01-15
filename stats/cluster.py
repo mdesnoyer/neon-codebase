@@ -285,7 +285,7 @@ class Cluster():
             r"Tracking URL: https?://(\S+)/proxy/(\S+)/")
         jobidRe = re.compile(r"Job ID: (\S+)")
         stdout = ssh_conn.execute_remote_command(
-            ('hadoop jar /home/hadoop/{jar} {main_class} {extra_ops} {input} '
+            ('yarn jar /home/hadoop/{jar} {main_class} {extra_ops} {input} '
              '{output}').format(
                  jar=os.path.basename(jar),
                  main_class=main_class,
@@ -615,8 +615,8 @@ class Cluster():
 
         bootstrap_actions = [
             BootstrapAction(
-                'Install HBase',
-                's3://elasticmapreduce/bootstrap-actions/setup-hbase',
+                'Install Hue',
+                's3://elasticmapreduce/libs/hue/install-hue',
                 []),
             BootstrapAction(
                 'Install Ganglia',
@@ -628,9 +628,13 @@ class Cluster():
                 ['--base-path', 's3://elasticmapreduce',
                  '--impala-version', '1.2.4']),
             BootstrapAction(
+                'Setup EMRFS',
+                's3://elasticmapreduce/bootstrap-actions/configure-hadoop',
+                ['-e', 'fs.s3.enableServerSideEncryption=true']),
+            BootstrapAction(
                 'Configure Hadoop',
                 's3://elasticmapreduce/bootstrap-actions/configure-hadoop',
-                ['--site-key-value', 'io.file.buffer.size=65536',
+                ['--hdfs-key-value', 'io.file.buffer.size=65536',
                  '--mapred-key-value',
                  'mapreduce.job.user.classpath.first=true',
                  '--mapred-key-value', 'mapreduce.map.output.compress=true',
@@ -654,13 +658,13 @@ class Cluster():
                  'yarn.log-aggregation-enable=true'])]
             
         steps = [
-            boto.emr.step.InstallHiveStep('0.11.0.2'),
             boto.emr.step.JarStep(
-                'Start HBase',
-                '/home/hadoop/lib/hbase.jar',
+                'Run Hue',
+                's3://elasticmapreduce/libs/script-runner/script-runner.jar',
                 None,
                 'TERMINATE_JOB_FLOW',
-                ['emr.hbase.backup.Main', '--start-master'])]
+                ['s3://elasticmapreduce/libs/hue/run-hue']),
+            boto.emr.step.InstallHiveStep('0.13.1')]
 
             
         instance_groups = [
@@ -675,7 +679,7 @@ class Cluster():
             options.cluster_name,
             log_uri='s3://neon-cluster-logs/',
             ec2_keyname='emr-runner',
-            ami_version='3.1.0',
+            ami_version='3.3.1',
             job_flow_role='EMR_EC2_DefaultRole',
             service_role='EMR_DefaultRole',
             keep_alive=True,
@@ -838,10 +842,24 @@ class ClusterSSHConnection:
         retcode = None
         try:
             stdin, stdout, stderr = self.client.exec_command(cmd)
-            for line in stdout:
-                stdout_msg.append(line)
-            for line in stderr:
-                stderr_msg.append(line)
+
+            # Get the stdout and stderr data. Need to do this the long
+            # way because if either is long, an ssh buffer fills up
+            # and hangs forever waiting to be emptied.
+            got_stdout = False
+            got_stderr = False
+            while not got_stderr or not got_stdout:
+                stdout_msg = stdout.readline()
+                if stdout_msg == '':
+                    got_stdout = True
+                else:
+                    stdout_msg.append(stdout_msg)
+
+                stderr_msg = stderr.readline()
+                if stderr_msg == '':
+                    got_stderr = True
+                else:
+                    stderr_msg.append(stderr_msg)
             retcode = stdout.channel.recv_exit_status()
             
         finally:
@@ -850,6 +868,6 @@ class ClusterSSHConnection:
         if retcode != 0:
             raise ExecutionError(
                 "Error running command on the cluster: %s. Stderr was: \n%s" % 
-                (cmd, '\n'.join(stderr_msg)))
+                (cmd, ''.join(stderr_msg)))
 
-        return '\n'.join(stdout_msg)
+        return ''.join(stdout_msg)

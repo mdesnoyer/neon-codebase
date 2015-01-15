@@ -355,6 +355,9 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
                 body['agentInfo'],
                 {'os': {'name': 'Android', 'version': '2.3.5'},
                  'browser' : {'name' : 'Safari', 'version' : '4.0' }})
+
+            self.assertItemsEqual(ebody['eventData'].items(),
+                                  body['eventData'].items())
         else:
             self.assertEqual(headers['track_vers'], '1')
             self.assertEqual(headers['event'], ebody['a'])
@@ -386,7 +389,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
               'eventData': { 
                   'isImagesVisible' : True,
                   'thumbnailIds' : ['acct1_vid1_tid1', 'acct1_vid2_tid2',
-                                    'acct2-vid1-tid3']
+                                    'acct2_vid1_tid3']
                   },
               'neonUserId' : 'neon_id1'},
               'neon_id1'

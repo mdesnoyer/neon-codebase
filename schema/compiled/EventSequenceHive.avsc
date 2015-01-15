@@ -115,6 +115,10 @@
     "type" : [ "null", "int" ],
     "default" : null
   }, {
+    "name" : "isAutoPlay",
+    "type" : [ "null", "boolean" ],
+    "default" : null
+  }, {
     "name" : "playCount",
     "type" : [ "null", "int" ],
     "default" : null
