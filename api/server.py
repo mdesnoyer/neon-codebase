@@ -49,6 +49,7 @@ DIRNAME = os.path.dirname(__file__)
 # Monitoring variables
 statemon.define('server_queue', int)
 statemon.define('duplicate_requests', int)
+statemon.define('add_video_error', int)
 statemon.define('dequeue_requests', int)
 statemon.define('queue_size_bytes', int) # size of the queue in bytes of video
 
@@ -701,6 +702,27 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 # Add the job to the queue
                 yield self.job_manager.add_job(api_request)
 
+                # Only if this is a Neon request, save it to the
+                # DB. Other platform requests get added on request
+                # creation cron
+                if request_type == 'neon':
+                    nplatform = yield tornado.gen.Task(
+                        neondata.NeonPlatform.get, api_key, '0')
+                    if nplatform:
+                        # TODO:refactor after moving platform accounts
+                        # to stored object (atomic save)
+                        nplatform.add_video(vid, job_id)
+                        res = yield tornado.gen.Task(nplatform.save)
+                        if not res:
+                            _log.error("key=thumbnail_handler update account " 
+                                       "  msg=video not added to account")
+                            self.send_json_response('{}', 500)
+                            statemon.state.increment('add_video_error')
+                    else:
+                        _log.error("account not found or api key error")
+                        self.send_json_response('{}', 400)
+                        return
+
                 # Save the video metadata and the default thumbnail
                 video = yield tornado.gen.Task(
                     neondata.VideoMetadata.get,
@@ -721,32 +743,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                                        video.key,
                                        _set_serving_enabled)
                 
-                # Only if this is a Neon request, save it to the
-                # DB. Other platform requests get added on request
-                # creation cron
-                if request_type == 'neon':
-                    nplatform = yield tornado.gen.Task(
-                        neondata.NeonPlatform.get, api_key, '0')
-                    if nplatform:
-                        # TODO:refactor after moving platform accounts
-                        # to stored object (atomic save)
-                        nplatform.add_video(vid, job_id)
-                        res = yield tornado.gen.Task(nplatform.save)
-                        if res:
-                            self.write(response_data)
-                            self.set_status(201)
-                            self.finish()
-                        else:
-                            _log.error("key=thumbnail_handler update account " 
-                                        "  msg=video not added to account")
-                    else:
-                        _log.error("account not found or api key error")
-                        self.send_json_response('{}', 400)
-
-                else:
-                    self.set_status(201)
-                    self.write(response_data)
-                    self.finish()
+                self.set_status(201)
+                self.write(response_data)
+                self.finish()
 
         except ValueError, e:
             self.send_json_response('{"error":"%s"}' % e, 400)
@@ -755,6 +754,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
         except Exception, e:
             _log.exception("key=thumbnail_handler msg= %s"%e)
             self.send_json_response('{"error":"%s"}' % e, 500)
+            statemon.state.increment('add_video_error')
             return
 
 ###########################################
