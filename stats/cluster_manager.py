@@ -161,7 +161,7 @@ class BatchProcessManager(threading.Thread):
 def main():
     _log.info('Looking up cluster %s' % options.cluster_type)
     try:
-        cluster = stats.cluster.Cluster(options.cluster_type, 8,
+        cluster = stats.cluster.Cluster(options.cluster_type, 12,
                                         options.cluster_ip)
         cluster.connect()
 

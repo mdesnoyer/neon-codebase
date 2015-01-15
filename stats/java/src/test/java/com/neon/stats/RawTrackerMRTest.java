@@ -313,7 +313,8 @@ public class RawTrackerMRTest {
   protected TrackerEvent.Builder MakeBasicAdPlay() {
     return MakeBasicTrackerEvent().setEventType(EventType.AD_PLAY)
         .setEventData(
-            new AdPlay(true, "vid1", "player2", "acct1_vid1_tid1", null, 1));
+            new AdPlay(true, "vid1", "player2", "acct1_vid1_tid1", null, null,
+                1));
   }
 
   protected AdPlayHive.Builder MakeBasicAdPlayHive() {
@@ -359,7 +360,7 @@ public class RawTrackerMRTest {
     return MakeBasicTrackerEvent().setEventType(EventType.VIDEO_PLAY)
         .setEventData(
             new VideoPlay(true, "vid1", "player2", "acct1_vid1_tid1", true,
-                null, 1));
+                null, null, 1));
   }
 
   protected VideoPlayHive.Builder MakeBasicVideoPlayHive() {
@@ -593,7 +594,7 @@ public class RawTrackerMRTest {
         MakeBasicTrackerEvent()
             .setEventType(EventType.VIDEO_PLAY)
             .setEventData(
-                new VideoPlay(true, "vid2", "player2", null, true, 600, 1))
+                new VideoPlay(true, "vid2", "player2", null, true, 600, null, 1))
             .build();
 
     mapDriver.withInput(new AvroKey<TrackerEvent>(inputEvent),
@@ -608,8 +609,10 @@ public class RawTrackerMRTest {
   @Test
   public void testAdPlayMapping() throws IOException {
     TrackerEvent inputEvent =
-        MakeBasicTrackerEvent().setEventType(EventType.AD_PLAY)
-            .setEventData(new AdPlay(true, "vid2", "player2", null, null, 2))
+        MakeBasicTrackerEvent()
+            .setEventType(EventType.AD_PLAY)
+            .setEventData(
+                new AdPlay(true, "vid2", "player2", null, null, null, 2))
             .build();
 
     mapDriver.withInput(new AvroKey<TrackerEvent>(inputEvent),
@@ -673,9 +676,10 @@ public class RawTrackerMRTest {
         MakeBasicImageVisibleHive().setClientTime(1400000000.1).build(),
         MakeBasicImageClickHive().setClientTime(1400000000.2).build(),
         MakeBasicAdPlayHive().setClientTime(1400000000.5).setPageId("vidpage")
-            .setRefURL("http://go.com").build(),
+            .setRefURL("http://go.com").setIsAutoPlay(true).build(),
         MakeBasicVideoPlayHive().setClientTime(1400000000.7)
-            .setPageId("vidpage").setRefURL("http://go.com").build(),
+            .setPageId("vidpage").setIsAutoPlay(true)
+            .setRefURL("http://go.com").build(),
         MakeBasicVideoViewPercentageHive().setClientTime(1400000000.8)
             .setPageId("vidpage").setRefURL("http://go.com").build(),
         MakeBasicEventSequenceHive().setImVisClientTime(1400000000.1)
@@ -695,7 +699,8 @@ public class RawTrackerMRTest {
             .setIsClickInPlayer(false).setIsRightClick(false).setHeight(480)
             .setWidth(640).setImLoadPageId("pageid1").setImVisPageId("pageid1")
             .setImClickPageId("pageid1").setAdPlayPageId("vidpage")
-            .setVideoPlayPageId("vidpage").setVideoViewPercent(34.6f).build()));
+            .setVideoPlayPageId("vidpage").setVideoViewPercent(34.6f)
+            .setIsAutoPlay(true).build()));
   }
 
   @Test
@@ -716,7 +721,7 @@ public class RawTrackerMRTest {
         .setClientTime(1400000000700l)
         .setEventData(
             new VideoPlay(true, "vid1", "player2", "acct1_vid1_tid1", true,
-                200, 1)).build()));
+                200, null, 1)).build()));
     values.add(new AvroValue<TrackerEvent>(MakeBasicVideoViewPercentage()
         .setClientTime(1400000000800l).build()));
 
@@ -731,7 +736,7 @@ public class RawTrackerMRTest {
         MakeBasicImageVisibleHive().setClientTime(1400000000.1).build(),
         MakeBasicVideoClickHive().setClientTime(1400000000.65).build(),
         MakeBasicVideoPlayHive().setClientTime(1400000000.7)
-            .setAutoplayDelta(200).build(),
+            .setAutoplayDelta(200).setIsAutoPlay(false).build(),
         MakeBasicVideoViewPercentageHive().setClientTime(1400000000.8).build(),
         MakeBasicEventSequenceHive().setImLoadClientTime(1400000000.)
             .setImVisClientTime(1400000000.1)
@@ -743,11 +748,11 @@ public class RawTrackerMRTest {
             .setImVisServerTime(1400697546.).setImClickServerTime(1400697546.)
             .setVideoPlayServerTime(1400697546.).setServerTime(1400697546.)
             .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
-            .setPlayerId("player2").setAutoplayDelta(200).setPlayCount(1)
-            .setIsClickInPlayer(true).setIsRightClick(false).setHeight(480)
-            .setWidth(640).setImLoadPageId("pageid1").setImVisPageId("pageid1")
-            .setImClickPageId("pageid1").setVideoPlayPageId("pageid1")
-            .setVideoViewPercent(34.6f).build()));
+            .setPlayerId("player2").setAutoplayDelta(200).setIsAutoPlay(false)
+            .setPlayCount(1).setIsClickInPlayer(true).setIsRightClick(false)
+            .setHeight(480).setWidth(640).setImLoadPageId("pageid1")
+            .setImVisPageId("pageid1").setImClickPageId("pageid1")
+            .setVideoPlayPageId("pageid1").setVideoViewPercent(34.6f).build()));
   }
 
   @Test
@@ -781,14 +786,14 @@ public class RawTrackerMRTest {
     assertEquals(capturedSequences.values().iterator().next().size(), 3);
 
     VerifySequence(Arrays.asList(
-        MakeBasicVideoPlayHive().setClientTime(1400000000.7).build(),
-        MakeBasicVideoViewPercentageHive().setClientTime(1400000000.9)
-            .setPercent(56.4f).build(),
+        MakeBasicVideoPlayHive().setClientTime(1400000000.7)
+            .setIsAutoPlay(true).build(), MakeBasicVideoViewPercentageHive()
+            .setClientTime(1400000000.9).setPercent(56.4f).build(),
         MakeBasicEventSequenceHive().setVideoPlayClientTime(1400000000.7)
             .setVideoPlayServerTime(1400697546.).setServerTime(1400697546.)
             .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
             .setVideoPageURL("http://go.com").setPlayerId("player2")
-            .setAutoplayDelta(null).setPlayCount(1)
+            .setAutoplayDelta(null).setIsAutoPlay(true).setPlayCount(1)
             .setVideoPlayPageId("pageid1").setVideoViewPercent(56.4f).build()));
   }
 
@@ -808,28 +813,30 @@ public class RawTrackerMRTest {
         .setClientTime(1400000000700l)
         .setEventData(
             new VideoPlay(true, "vid1", "player2", "acct1_vid1_tid1", true,
-                200, 1)).build()));
+                null, false, 1)).build()));
     values.add(new AvroValue<TrackerEvent>(MakeBasicVideoClick().setClientTime(
         1400000010600l).build()));
     values.add(new AvroValue<TrackerEvent>(MakeBasicVideoPlay()
         .setClientTime(1400000010700l)
         .setEventData(
             new VideoPlay(true, "vid1", "player2", "acct1_vid1_tid1", true,
-                10000, 2)).build()));
+                null, true, 2)).build()));
 
     reduceDriver.withInput(new Text("tai156.45.41.124vid1"), values).run();
 
     CaptureEvents();
 
-    VerifySequence(Arrays.asList(
-        MakeBasicVideoPlayHive().setClientTime(1400000010.7)
-            .setAutoplayDelta(10000).setPlayCount(2).build(),
-        MakeBasicEventSequenceHive().setVideoPlayClientTime(1400000010.7)
-            .setVideoPageURL("http://go.com")
-            .setVideoPlayServerTime(1400697546.).setServerTime(1400697546.)
-            .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
-            .setPlayerId("player2").setAutoplayDelta(10000).setPlayCount(2)
-            .setVideoPlayPageId("pageid1").build()));
+    VerifySequence(Arrays
+        .asList(
+            MakeBasicVideoPlayHive().setClientTime(1400000010.7)
+                .setAutoplayDelta(null).setPlayCount(2).setIsAutoPlay(true)
+                .build(),
+            MakeBasicEventSequenceHive().setVideoPlayClientTime(1400000010.7)
+                .setVideoPageURL("http://go.com")
+                .setVideoPlayServerTime(1400697546.).setServerTime(1400697546.)
+                .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
+                .setPlayerId("player2").setIsAutoPlay(true).setPlayCount(2)
+                .setVideoPlayPageId("pageid1").build()));
   }
 
   @Test
@@ -852,13 +859,14 @@ public class RawTrackerMRTest {
     values.add(new AvroValue<TrackerEvent>(MakeBasicImageVisible()
         .setPageId("vidpage").setRefURL("http://go.com")
         .setClientTime(1400000010100l).build()));
-    values.add(new AvroValue<TrackerEvent>(MakeBasicAdPlay()
-        .setClientTime(1400000010500l)
-        .setPageId("vidpage")
-        .setRefURL("http://go.com")
-        .setEventData(
-            new AdPlay(true, "vid1", "player2", "acct1_vid1_tid1", 200, 3))
-        .build()));
+    values.add(new AvroValue<TrackerEvent>(
+        MakeBasicAdPlay()
+            .setClientTime(1400000010500l)
+            .setPageId("vidpage")
+            .setRefURL("http://go.com")
+            .setEventData(
+                new AdPlay(true, "vid1", "player2", "acct1_vid1_tid1", 200,
+                    null, 3)).build()));
     values.add(new AvroValue<TrackerEvent>(MakeBasicVideoClick()
         .setClientTime(1400000010600l).setPageId("vidpage")
         .setRefURL("http://go.com").build()));
@@ -868,7 +876,7 @@ public class RawTrackerMRTest {
         .setRefURL("http://go.com")
         .setEventData(
             new VideoPlay(true, "vid1", "player2", "acct1_vid1_tid1", true,
-                200, 3)).build()));
+                200, null, 3)).build()));
 
     reduceDriver.withInput(new Text("tai156.45.41.124vid1"), values).run();
 
@@ -885,35 +893,42 @@ public class RawTrackerMRTest {
             .setHeight(480).build()));
 
     // Check the sequence on page 2
-    VerifySequence(Arrays.asList(
-        MakeBasicImageLoadHive().setClientTime(1400000010.0)
-            .setPageId("vidpage").setRefURL("http://go.com").build(),
-        MakeBasicImageVisibleHive().setClientTime(1400000010.1)
-            .setPageId("vidpage").setRefURL("http://go.com").build(),
-        MakeBasicVideoClickHive().setClientTime(1400000010.6)
-            .setPageId("vidpage").setRefURL("http://go.com").build(),
-        MakeBasicAdPlayHive().setClientTime(1400000010.5).setPageId("vidpage")
-            .setRefURL("http://go.com").setAutoplayDelta(200).setPlayCount(3)
-            .build(),
-        MakeBasicVideoPlayHive().setClientTime(1400000010.7)
-            .setPageId("vidpage").setRefURL("http://go.com")
-            .setAutoplayDelta(200).setPlayCount(3).build(),
-        MakeBasicEventSequenceHive().setImVisClientTime(1400000010.1)
-            .setImClickClientTime(1400000010.6)
-            .setAdPlayClientTime(1400000010.5)
-            .setVideoPlayClientTime(1400000010.7)
-            .setImLoadClientTime(1400000010.).setVideoPageURL("http://go.com")
-            .setImClickPageURL("http://go.com")
-            .setImLoadPageURL("http://go.com").setImLoadServerTime(1400697546.)
-            .setImVisServerTime(1400697546.).setImClickServerTime(1400697546.)
-            .setAdPlayServerTime(1400697546.).setRefURL("http://go.com")
-            .setVideoPlayServerTime(1400697546.).setServerTime(1400697546.)
-            .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
-            .setPlayerId("player2").setAutoplayDelta(200).setPlayCount(3)
-            .setIsClickInPlayer(true).setIsRightClick(false).setHeight(480)
-            .setWidth(640).setImLoadPageId("vidpage").setImVisPageId("vidpage")
-            .setImClickPageId("vidpage").setAdPlayPageId("vidpage")
-            .setVideoPlayPageId("vidpage").build()));
+    VerifySequence(Arrays
+        .asList(
+            MakeBasicImageLoadHive().setClientTime(1400000010.0)
+                .setPageId("vidpage").setRefURL("http://go.com").build(),
+            MakeBasicImageVisibleHive().setClientTime(1400000010.1)
+                .setPageId("vidpage").setRefURL("http://go.com").build(),
+            MakeBasicVideoClickHive().setClientTime(1400000010.6)
+                .setPageId("vidpage").setRefURL("http://go.com").build(),
+            MakeBasicAdPlayHive().setClientTime(1400000010.5)
+                .setPageId("vidpage").setRefURL("http://go.com")
+                .setAutoplayDelta(200).setPlayCount(3).setIsAutoPlay(false)
+                .build(),
+            MakeBasicVideoPlayHive().setClientTime(1400000010.7)
+                .setPageId("vidpage").setRefURL("http://go.com")
+                .setAutoplayDelta(200).setPlayCount(3).setIsAutoPlay(false)
+                .build(),
+            MakeBasicEventSequenceHive().setImVisClientTime(1400000010.1)
+                .setImClickClientTime(1400000010.6)
+                .setAdPlayClientTime(1400000010.5)
+                .setVideoPlayClientTime(1400000010.7)
+                .setImLoadClientTime(1400000010.)
+                .setVideoPageURL("http://go.com")
+                .setImClickPageURL("http://go.com")
+                .setImLoadPageURL("http://go.com")
+                .setImLoadServerTime(1400697546.)
+                .setImVisServerTime(1400697546.)
+                .setImClickServerTime(1400697546.)
+                .setAdPlayServerTime(1400697546.).setRefURL("http://go.com")
+                .setVideoPlayServerTime(1400697546.).setServerTime(1400697546.)
+                .setThumbnailId("acct1_vid1_tid1").setVideoId("vid1")
+                .setPlayerId("player2").setAutoplayDelta(200)
+                .setIsAutoPlay(false).setPlayCount(3).setIsClickInPlayer(true)
+                .setIsRightClick(false).setHeight(480).setWidth(640)
+                .setImLoadPageId("vidpage").setImVisPageId("vidpage")
+                .setImClickPageId("vidpage").setAdPlayPageId("vidpage")
+                .setVideoPlayPageId("vidpage").build()));
   }
 
   @Test

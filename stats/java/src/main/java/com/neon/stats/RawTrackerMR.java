@@ -498,11 +498,11 @@ public class RawTrackerMR extends Configured implements Tool {
         // For the video view percentage, they are the same if it's for the same
         // video id and play count since we only care about the max view
         // percentage.
-        return a.getPageId().equals(b.getPageId()) &&
-            ((VideoViewPercentage)a.getEventData()).getVideoId().equals(
-                ((VideoViewPercentage)b.getEventData()).getVideoId()) &&
-            ((VideoViewPercentage)a.getEventData()).getPlayCount().equals(
-                ((VideoViewPercentage)b.getEventData()).getPlayCount());
+        return a.getPageId().equals(b.getPageId())
+            && ((VideoViewPercentage) a.getEventData()).getVideoId().equals(
+                ((VideoViewPercentage) b.getEventData()).getVideoId())
+            && ((VideoViewPercentage) a.getEventData()).getPlayCount().equals(
+                ((VideoViewPercentage) b.getEventData()).getPlayCount());
 
       case IMAGE_CLICK:
       case VIDEO_CLICK:
@@ -524,12 +524,20 @@ public class RawTrackerMR extends Configured implements Tool {
     private static boolean IsAutoplay(TrackerEvent event) {
       if (event.getEventType() == EventType.VIDEO_PLAY) {
         VideoPlay data = (VideoPlay) event.getEventData();
-        return data.getAutoplayDelta() == null
-            || data.getAutoplayDelta() > 2000;
+        if (data.getIsAutoPlay() == null) {
+          return data.getAutoplayDelta() == null
+              || data.getAutoplayDelta() > 2000;
+        } else {
+          return data.getIsAutoPlay();
+        }
       } else if (event.getEventType() == EventType.AD_PLAY) {
         AdPlay adData = (AdPlay) event.getEventData();
-        return adData.getAutoplayDelta() == null
-            || adData.getAutoplayDelta() > 2000;
+        if (adData.getIsAutoPlay() == null) {
+          return adData.getAutoplayDelta() == null
+              || adData.getAutoplayDelta() > 2000;
+        } else {
+          return adData.getIsAutoPlay();
+        }
       }
 
       return false;
@@ -678,8 +686,10 @@ public class RawTrackerMR extends Configured implements Tool {
                     ((ImageClick) orig.getEventData()).getWindowCoords().getX())
                 .setWindowCoordsY(
                     ((ImageClick) orig.getEventData()).getWindowCoords().getY())
-                .setImageCoordsX(imageCoords == null ? null : imageCoords.getX())
-                .setImageCoordsY(imageCoords == null ? null : imageCoords.getY())
+                .setImageCoordsX(
+                    imageCoords == null ? null : imageCoords.getX())
+                .setImageCoordsY(
+                    imageCoords == null ? null : imageCoords.getY())
                 .setIsClickInPlayer(false)
                 .setIsRightClick(
                     clickCoords.getX() <= 0 && clickCoords.getY() <= 0).build();
@@ -757,6 +767,7 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setPlayerId(((AdPlay) orig.getEventData()).getPlayerId())
                 .setAutoplayDelta(
                     ((AdPlay) orig.getEventData()).getAutoplayDelta())
+                .setIsAutoPlay(IsAutoplay(orig))
                 .setPlayCount(((AdPlay) orig.getEventData()).getPlayCount())
                 .build();
         out.write("AdPlayHive",
@@ -796,6 +807,7 @@ public class RawTrackerMR extends Configured implements Tool {
                 .setPlayerId(((VideoPlay) orig.getEventData()).getPlayerId())
                 .setAutoplayDelta(
                     ((VideoPlay) orig.getEventData()).getAutoplayDelta())
+                .setIsAutoPlay(IsAutoplay(orig))
                 .setPlayCount(((VideoPlay) orig.getEventData()).getPlayCount())
                 .setDidAdPlay(((VideoPlay) orig.getEventData()).getDidAdPlay())
                 .build();
@@ -1005,6 +1017,7 @@ public class RawTrackerMR extends Configured implements Tool {
             .setVideoId(((AdPlay) adPlay.getEventData()).getVideoId())
             .setAutoplayDelta(
                 ((AdPlay) adPlay.getEventData()).getAutoplayDelta())
+            .setIsAutoPlay(IsAutoplay(adPlay))
             .setPlayCount(((AdPlay) adPlay.getEventData()).getPlayCount())
             .setAdPlayClientTime(adPlay.getClientTime() / 1000.)
             .setAdPlayServerTime(adPlay.getServerTime() / 1000.)
@@ -1042,6 +1055,7 @@ public class RawTrackerMR extends Configured implements Tool {
             .setVideoId(((VideoPlay) videoPlay.getEventData()).getVideoId())
             .setAutoplayDelta(
                 ((VideoPlay) videoPlay.getEventData()).getAutoplayDelta())
+            .setIsAutoPlay(IsAutoplay(videoPlay))
             .setPlayCount(((VideoPlay) videoPlay.getEventData()).getPlayCount())
             .setVideoPlayClientTime(videoPlay.getClientTime() / 1000.)
             .setVideoPlayServerTime(videoPlay.getServerTime() / 1000.)
