@@ -34,7 +34,7 @@ import logging
 _log = logging.getLogger(__name__)
 
 from utils.options import define, options
-define("hive_port", default=10004, help="Port to talk to hive on")
+define("hive_port", default=10000, help="Port to talk to hive on")
 define("impala_port", default=21050, help="Port to talk to impala on")
 define("schema_bucket", default="neon-avro-schema",
        help=("Bucket that must contain the compiled schema to define the "
