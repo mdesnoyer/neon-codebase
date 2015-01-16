@@ -108,15 +108,14 @@ class ImpalaTableBuilder(threading.Thread):
                                database='default',
                                timeout=5000) as hive_conn:
                 with conn.cursor() as hive:
-                    try:
-                        # Set some parameters
-                        hive.execute('SET hive.exec.compress.output=true')
-                        hive.execute('SET avro.output.codec=snappy')
-                        hive.execute('SET parquet.compression=SNAPPY')
-                        hive.execute(
-                            'SET hive.exec.dynamic.partition.mode=nonstrict')
+                    # Set some parameters
+                    hive.execute('SET hive.exec.compress.output=true')
+                    hive.execute('SET avro.output.codec=snappy')
+                    hive.execute('SET parquet.compression=SNAPPY')
+                    hive.execute(
+                        'SET hive.exec.dynamic.partition.mode=nonstrict')
                         
-        
+                    try:
                         self.status = 'RUNNING'
 
                         external_table = 'Avro%ss' % self.event
@@ -294,8 +293,8 @@ def build_impala_tables(input_path, cluster, timeout=None):
         if thread.is_alive():
             raise TimeoutException()
         if thread.status != 'SUCCESS':
-            _log.error("Error building impala table %s. See logs."
-                       % thread.event)
+            _log.error("Error building impala table %s. State is %s. See logs."
+                       % (thread.event, thread.status))
             raise ImpalaError("Error building impala table")
 
     _log.info('Updating table table_build_times')
