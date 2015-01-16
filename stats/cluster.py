@@ -849,17 +849,17 @@ class ClusterSSHConnection:
             got_stdout = False
             got_stderr = False
             while not got_stderr or not got_stdout:
-                stdout_msg = stdout.readline()
-                if stdout_msg == '':
+                stdout_line = stdout.readline()
+                if stdout_line == '':
                     got_stdout = True
                 else:
-                    stdout_msg.append(stdout_msg)
+                    stdout_msg.append(stdout_line)
 
-                stderr_msg = stderr.readline()
-                if stderr_msg == '':
+                stderr_line = stderr.readline()
+                if stderr_line == '':
                     got_stderr = True
                 else:
-                    stderr_msg.append(stderr_msg)
+                    stderr_msg.append(stderr_line)
             retcode = stdout.channel.recv_exit_status()
             
         finally:
