@@ -13,7 +13,7 @@
     "type" : {
       "type" : "enum",
       "name" : "TrackerType",
-      "symbols" : [ "BRIGHTCOVE", "OOYALA", "BCGALLERY", "IGN" ]
+      "symbols" : [ "BRIGHTCOVE", "OOYALA", "BCGALLERY", "IGN", "GENERAL" ]
     }
   }, {
     "name" : "clientIP",

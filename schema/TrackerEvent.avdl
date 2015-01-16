@@ -15,10 +15,6 @@ protocol DummyTrackerProtocol {
 
 import idl "CommonTrackerInfo.avdl";
 
-enum TrackerType {
-  BRIGHTCOVE, OOYALA, BCGALLERY, IGN, GENERAL
-}
-
 enum EventType {
   IMAGE_VISIBLE, IMAGES_VISIBLE, IMAGE_LOAD, IMAGES_LOADED, IMAGE_CLICK,
   VIDEO_CLICK, VIDEO_PLAY, AD_PLAY, VIDEO_VIEW_PERCENTAGE
