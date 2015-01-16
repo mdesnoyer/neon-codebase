@@ -156,13 +156,14 @@ def create_s3_redirect(dest_key, src_key, dest_bucket=None,
 class CDNHosting(object):
     '''Abstract class for hosting images on a CDN.'''
 
-    def __init__(self, cdn_metadata):
+    def __init__(self, cdn_metadata, hoster_type="abstract"):
         '''Abstract CDN hosting class.
 
         @cdn_metadata - The metadata specifying how to access the CDN
         '''
         self.resize = cdn_metadata.resize
         self.update_serving_urls = cdn_metadata.update_serving_urls
+        self.hoster_type = hoster_type 
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -253,8 +254,8 @@ class AWSHosting(CDNHosting):
 
     neon_fname_fmt = "neontn%s_w%s_h%s.jpg" 
     
-    def __init__(self, cdn_metadata):
-        super(AWSHosting, self).__init__(cdn_metadata)
+    def __init__(self, cdn_metadata, hoster_type="awshosting"):
+        super(AWSHosting, self).__init__(cdn_metadata, hoster_type)
         self.neon_bucket = isinstance(
             cdn_metadata, supportServices.neondata.NeonCDNHostingMetadata)
         self.s3conn = S3Connection(cdn_metadata.access_key,
@@ -322,8 +323,8 @@ class PrimaryNeonHosting(AWSHosting):
     '''
     Hosting on Neon's Primary S3 bucket
     '''
-    def __init__(self, cdn_metadata):
-        super(PrimaryNeonHosting, self).__init__(cdn_metadata)
+    def __init__(self, cdn_metadata, hoster_type="primary_neon"):
+        super(PrimaryNeonHosting, self).__init__(cdn_metadata, hoster_type)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -344,6 +345,9 @@ class CloudinaryHosting(CDNHosting):
     http://res.cloudinary.com/neon-labs/image/upload/w_120,h_90/{NEON_TID}.jpg
 
     '''
+    def __init__(self, cdn_metadata, hoster_type="cloudinary"):
+        super(CloudinaryHosting, self).__init__(cdn_metadata, hoster_type)
+    
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def _upload_impl(self, image, tid):
@@ -351,6 +355,10 @@ class CloudinaryHosting(CDNHosting):
         image: s3 url of the image
         Note: No support for uploading raw images yet 
         '''
+
+        if not isinstance(image, basestring):
+            raise Exception("Cloudinary hosting currently doesnt support\
+                    uploading raw images")
 
         # 0, 0 indicates original (base image size)
         img_name = "neontn%s_w%s_h%s.jpg" % (tid, "0", "0") 
@@ -414,8 +422,8 @@ class AkamaiHosting(CDNHosting):
 
     neon_fname_fmt = "neontn%s_w%s_h%s.jpg" 
 
-    def __init__(self, cdn_metadata):
-        super(AkamaiHosting, self).__init__(cdn_metadata)
+    def __init__(self, cdn_metadata, hoster_type="akamai"):
+        super(AkamaiHosting, self).__init__(cdn_metadata, hoster_type)
         self.cdn_prefixes = cdn_metadata.cdn_prefixes 
         self.ak_conn = akamai_api.AkamaiNetstorage(cdn_metadata.host,
                             cdn_metadata.akamai_key,

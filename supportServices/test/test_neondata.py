@@ -1482,6 +1482,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.cloudinary_mock = self.cloudinary_patcher.start()
         future = Future()
         future.set_result(None)
+        self.cloudinary_mock().hoster_type = "cloudinary"
         self.cloudinary_mock().upload.side_effect = [future]
 
         random.seed(1654984)
@@ -1538,6 +1539,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.assertIsNotNone(self.s3conn.get_bucket('n3.neon-images.com').
                              get_key('neontn%s_w160_h120.jpg'%thumb_info.key))
 
+        #NOTE: Redirects have been disabled temporarily
         # Check the redirect object
         #redirect = self.s3conn.get_bucket('host-thumbnails').get_key(
         #    'acct1/vid1/neon3.jpg')
@@ -1589,6 +1591,38 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
                          [thumb_info.key])
         self.assertEqual(ThumbnailMetadata.get(thumb_info.key).video_id,
                          'acct1_vid1')
+    
+    @tornado.testing.gen_test
+    def test_add_thumbnail_to_video_and_save_with_cloudinary_hosting(self):
+        '''
+        Testing adding a thumbnail to the video object after it has been
+        hosted in 2 places - Primary Neon copy and then to cloudinary 
+        '''
+        
+        self.s3conn.create_bucket('host-thumbnails')
+        cdn_metadata = CloudinaryCDNHostingMetadata()
+
+        video_info = VideoMetadata('acct1_vid1')
+        thumb_info = ThumbnailMetadata(None,
+                                       ttype=ThumbnailType.CUSTOMUPLOAD,
+                                       rank=-1,
+                                       frameno=35)
+
+        yield video_info.add_thumbnail(thumb_info, self.image, [cdn_metadata],
+                                       save_objects=True, async=True)
+
+        self.assertEqual(thumb_info.video_id, video_info.key)
+        self.assertIsNotNone(thumb_info.key)
+        self.assertEqual(video_info.thumbnail_ids, [thumb_info.key])
+
+        # Check that the images are in S3
+        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
+                             get_key(primary_hosting_key))
+        # Check cloudinary
+        self.cloudinary_mock().upload.assert_called_with(thumb_info.urls[0],
+                                                        thumb_info.key,
+                                                        async=True)
 
     @tornado.testing.gen_test
     def test_add_thumbnail_to_video_and_save_new_video(self):
@@ -1641,6 +1675,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
                              get_key(primary_hosting_key))
         self.assertIsNotNone(self.s3conn.get_bucket('customer-bucket').
                              get_key('neontn%s_w480_h360.jpg'%thumb_info.key))
+        #NOTE: Redirects have been disabled temporarily
         #redirect = self.s3conn.get_bucket('host-thumbnails').get_key(
         #    'acct1/vid1/customupload-1.jpg')
         #self.assertIsNotNone(redirect)

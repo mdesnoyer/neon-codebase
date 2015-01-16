@@ -470,7 +470,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertIsNotNone(n_thumbs[0].phash)
         self.assertIsNotNone(n_thumbs[0].key)
         self.assertEquals(n_thumbs[0].urls, [
-            'https://s3.amazonaws.com/host-thumbnails/%s.jpg' %
+            'http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
             re.sub('_', '/', n_thumbs[0].key)])
         self.assertEquals(n_thumbs[0].width, 640)
         self.assertEquals(n_thumbs[0].height, 480)
@@ -627,7 +627,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertIsNotNone(n_thumbs[0].phash)
         self.assertRegexpMatches(n_thumbs[0].key, '%s_.+'%self.video_id)
         self.assertEquals(n_thumbs[0].urls, [
-            'https://s3.amazonaws.com/host-thumbnails/%s.jpg' %
+            'http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
             re.sub('_', '/', n_thumbs[0].key)])
 
     def test_default_thumb_already_saved(self):

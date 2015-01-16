@@ -2657,8 +2657,15 @@ class ThumbnailMetadata(StoredObject):
                 cdn_metadata = [NeonCDNHostingMetadata()]
             
         hosters = [api.cdnhosting.CDNHosting.create(x) for x in cdn_metadata]
-        yield [x.upload(image, self.key, async=True) for x 
-               in hosters]
+        #yield [x.upload(image, self.key, async=True) for x 
+        #       in hosters]
+        for x in hosters:
+            #NOTE: Cant' use isinstance here as it doesn't work with mock'ed
+            # objects :(
+            if x.hoster_type == "cloudinary":
+                yield x.upload(s3_url, self.key, async=True)
+            else:
+                yield x.upload(image, self.key, async=True)
 
     @classmethod
     def _create(cls, key, data_dict):
