@@ -3,7 +3,7 @@ expiry=2020-07-22T07:14:01Z
 ###################################################################################
 # Default Thumbnail Test Data
 ###################################################################################
-# basic default thumbnail feature test case, no directive, return exact match scaled image
+# basic default thumbnail feature test case, no directive for video
 {"type": "pub", "pid": "defaultpub1", "aid" : "defaccount1" }
 {"type":"default_thumb","aid":"defaccount1","default_url" : "http://neon/default_url_defaccount1.jpg","imgs":[{ "h":480, "w":640, "url":"http://neon/thumb_480_640_default_url_defaccount1.jpg" },{ "h":600, "w":800, "url":"http://neon/thumb_600_800_default_url_defaccount1.jpg" }]}
 #
