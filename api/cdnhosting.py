@@ -229,6 +229,9 @@ class CDNHosting(object):
         '''
 
         if isinstance(cdn_metadata,
+                        supportServices.neondata.PrimaryNeonHostingMetadata):
+            return PrimaryNeonHosting(cdn_metadata)
+        elif isinstance(cdn_metadata,
                       supportServices.neondata.S3CDNHostingMetadata):
             return AWSHosting(cdn_metadata)
         elif isinstance(cdn_metadata,
@@ -245,7 +248,7 @@ class CDNHosting(object):
 class AWSHosting(CDNHosting):
 
     neon_fname_fmt = "neontn%s_w%s_h%s.jpg" 
-
+    
     def __init__(self, cdn_metadata):
         super(AWSHosting, self).__init__(cdn_metadata)
         self.neon_bucket = isinstance(
@@ -259,6 +262,7 @@ class AWSHosting(CDNHosting):
         if self.folder_prefix.endswith('/'):
             self.folder_prefix = self.folder_prefix[:-1]
         self.do_salt = cdn_metadata.do_salt
+        self.make_tid_folders = cdn_metadata.make_tid_folders
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -286,6 +290,13 @@ class AWSHosting(CDNHosting):
         name_pieces.append(AWSHosting.neon_fname_fmt % 
                            (tid, image.size[0], image.size[1]))
         key_name = '/'.join(name_pieces)
+        
+        #@make_tid_folders: If true, _ is replaced by '/' to create folder
+        # Figure the S3 location: <API_KEY>/<VIDEO_ID>/<THUMB_ID>.jpg
+        if self.make_tid_folders:
+            key_name = re.sub('_', '/', self.key) + '.jpg'
+            s3_url = 'https://s3.amazonaws.com/%s/%s' % (get_s3_hosting_bucket(),
+                        s3key)
 
         cdn_url = "http://%s/%s" % (cdn_prefix, key_name)
         fmt = 'jpeg'
@@ -305,6 +316,19 @@ class AWSHosting(CDNHosting):
 
         raise tornado.gen.Return(cdn_url)
         
+class PrimaryNeonHosting(AWSHosting):
+
+    '''
+    Hosting on Neon's Primary S3 bucket
+    '''
+    def __init__(self, cdn_metadata):
+        super(PrimaryNeonHosting, self).__init__(cdn_metadata)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _upload_impl(self, image, tid):
+        s3url = super(DefaultNeonHosting, self)._upload_impl(image, tid)
+        raise tornado.gen.Return(s3url)
 
 class CloudinaryHosting(CDNHosting):
     

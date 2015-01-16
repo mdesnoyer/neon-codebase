@@ -1331,6 +1331,21 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
             update_serving_urls=update_serving_urls,
             do_salt=do_salt)
 
+class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
+    '''
+    Primary Neon S3 Hosting
+    This is where the primary copy of the thumbnails are stored
+    
+    @make_tid_folders: If true, _ is replaced by '/' to create folder
+    '''
+    def __init__(self, key=None,
+            bucket_name='host-thumbnails', #TODO: Should this be hardcoded?
+            make_tid_folders=True):
+        super(NeonCDNHostingMetadata, self).__init__(
+            key,
+            bucket_name=bucket_name)
+        self.make_tid_folders = make_tid_folders
+
 class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     '''
     Cloudinary images
@@ -2614,33 +2629,41 @@ class ThumbnailMetadata(StoredObject):
 
         # Figure out the S3 location,
         # which is <API_KEY>/<VIDEO_ID>/<THUMB_ID>.jpg
-        s3key = re.sub('_', '/', self.key) + '.jpg'
-        s3_url = 'https://s3.amazonaws.com/%s/%s' % \
-          (api.cdnhosting.get_s3_hosting_bucket(), s3key)
-        self.urls.insert(0, s3_url)
+        #s3key = re.sub('_', '/', self.key) + '.jpg'
+        #s3_url = 'https://s3.amazonaws.com/%s/%s' % \
+        #  (api.cdnhosting.get_s3_hosting_bucket(), s3key)
+        #self.urls.insert(0, s3_url)
 
+        #TODO Merged ; to be tested
+        
         # Upload the image to s3
         # TODO(Sunil): Merge the primary hosting copy into the 
         # CDNHostingMetadataList
-        yield api.cdnhosting.upload_image_to_s3(
-            s3key, imgdata, async=True)
+        #yield api.cdnhosting.upload_image_to_s3(
+        #    s3key, imgdata, async=True)
 
         # Create a redirect with a video based url
-        yield api.cdnhosting.create_s3_redirect(
-            s3key,
-            '{video_prefix}/{type}{rank:d}.jpg'.format(
-                video_prefix=re.sub('_', '/', self.video_id),
-                type=self.type,
-                rank=self.rank),
-            content_type='image/jpeg',
-            async=True)
+        #yield api.cdnhosting.create_s3_redirect(
+        #    s3key,
+        #    '{video_prefix}/{type}{rank:d}.jpg'.format(
+        #        video_prefix=re.sub('_', '/', self.video_id),
+        #        type=self.type,
+        #        rank=self.rank),
+        #    content_type='image/jpeg',
+        #    async=True)
 
         # Send the image to cloudinary
         # TODO(Sunil): Merge the cloudinary hosting into the 
         # CDNHostingMetadataList
-        cloudinary_hoster = api.cdnhosting.CDNHosting.create(
-            CloudinaryCDNHostingMetadata())
-        yield cloudinary_hoster.upload(s3_url, self.key, async=True)
+        #cloudinary_hoster = api.cdnhosting.CDNHosting.create(
+        #    CloudinaryCDNHostingMetadata())
+        #yield cloudinary_hoster.upload(s3_url, self.key, async=True)
+
+        # Host the primary copy of the image 
+        s3_url = yield PrimaryCDNHostingMetadata().upload(image, self.key, async=True)
+        
+        # Add the primary image to Thumbmetadata
+        self.urls.insert(0, s3_url)
 
         # Host the image on the CDN
         if cdn_metadata is None:
