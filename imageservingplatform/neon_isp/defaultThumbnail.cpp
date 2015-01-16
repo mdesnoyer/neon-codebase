@@ -6,8 +6,6 @@
 #include "neonException.h"
 #include "mastermind.h"
 
-
-
 DefaultThumbnail::DefaultThumbnail()
 {
 }
@@ -80,9 +78,8 @@ DefaultThumbnail::InitSafe(const rapidjson::Document & document)
 
 
     /*
-     *  Images
+     *  Scaled Images
      */
-
     // if there are no imgs specified then we are finished with init
     if(document.HasMember("imgs") == false) {
         neon_stats[NEON_DEFAULT_THUMBNAIL_PARSE_ERROR]++;
@@ -110,7 +107,6 @@ DefaultThumbnail::InitSafe(const rapidjson::Document & document)
         ScaledImage * img = new ScaledImage();
 
         // store in vector first, if any error it is deletable from Shutdown()
-        // order is important here
         images.push_back(img);
 
         // obtain the specific json fraction
@@ -132,6 +128,8 @@ DefaultThumbnail::InitSafe(const rapidjson::Document & document)
 void
 DefaultThumbnail::Shutdown()
 {
+    accountId = "";
+    default_url = "";
     Dealloc();
 }
 
@@ -175,12 +173,15 @@ DefaultThumbnail::GetScaledImage(int height, int width, int & url_size) const{
     
     static const int pixelRange = 6;
 
-    for(unsigned i=0; i < images.size(); i++){
+    // iterate through our scaled images to find a size match
+    unsigned numOfImgs = images.size();
+    
+    for(unsigned i=0; i < numOfImgs; i++){
         
         if( ScaledImage::ApproxEqual(images[i]->GetHeight(), height, pixelRange) &&
             ScaledImage::ApproxEqual(images[i]->GetWidth(), width, pixelRange)) {
 
-            // a good match, url_size is set here
+            // a match, url_size is set here
             const char * url = images[i]->GetUrl(url_size);
             return url;
         }
@@ -195,7 +196,7 @@ DefaultThumbnail::GetScaledImage(int height, int width, int & url_size) const{
 bool
 DefaultThumbnail::operator==(const DefaultThumbnail &other) const {
 
-    return  accountId == other.GetAccountId();
+    return  accountId == other.GetAccountIdRef();
 };
 
 

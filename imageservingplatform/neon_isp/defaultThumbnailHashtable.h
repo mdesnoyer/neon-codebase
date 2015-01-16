@@ -22,7 +22,7 @@ public:
     unsigned GetSize();
     
     /*
-     * Add a directive to the hash table
+     * Add a default thumbnail directive
      */
     void Add(rapidjson::Document & directive);
 
@@ -46,7 +46,6 @@ protected:
     struct hash_directive {
         size_t operator()(const std::string & key)  const;
 	};
-
 
     typedef __gnu_cxx::hash_map<std::string, DefaultThumbnail*, hash_directive>  DefaultThumbnailTable;
     

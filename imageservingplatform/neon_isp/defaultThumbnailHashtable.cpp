@@ -78,9 +78,11 @@ DefaultThumbnailHashtable::Add(rapidjson::Document & defaultThumb){
     
     DefaultThumbnail * d = new DefaultThumbnail();
     
+    // object will dealloc any internal in case of failure 
     int ret = d->Init(defaultThumb);
     
     if(ret != 0) {
+        // just delete it
         delete d;
         return;
     }
@@ -94,7 +96,6 @@ DefaultThumbnailHashtable::Find(std::string & accountId) const {
 
     DefaultThumbnail * def = NULL;
     def = (*table)[accountId];
-
     return def;
 }
 
@@ -102,9 +103,7 @@ DefaultThumbnailHashtable::Find(std::string & accountId) const {
 size_t
 DefaultThumbnailHashtable::hash_directive::operator()(const std::string & key)  const {
     uint32_t result = 0;
-    
     result = NeonHash::Hash(key.c_str(), 1);
-    
     return result;
 }
 

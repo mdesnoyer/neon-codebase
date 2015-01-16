@@ -288,7 +288,7 @@ Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpir
         if(line[0] == 'e')
             break;
 
-        // a commented line 
+        // skip commented or empty lines 
         if(line[0] == '#' || line[0] == '\n')
             continue;
 
@@ -318,16 +318,16 @@ Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpir
         // must be either a publisher "pub" or directive "dir"
         std::string type = document["type"].GetString();
         
-        // a publisher entry
+        // a publisher record
         if(type == typePublisher) {
             publisherTable->AddPublisher(document);
         }
         
-        // a directive entry
+        // a video directive 
         else if(type == typeDirective) {
             directiveTable->AddDirective(document);
         }
-        // a default thumbnail entry
+        // an account-wide default thumbnail directive
         else if(type == typeDefaultThumbnail) {
             defaultThumbnailTable->Add(document);
         }            

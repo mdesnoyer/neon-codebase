@@ -1,10 +1,3 @@
-/*
- * Directive class 
- *
- * This is class that reprents each of the directives from the
- * mastermind file. All directives are stored in the directiveHashtable
- * */
-
 #ifndef _NEON_DEFAULT_THUMBNAIL__
 #define _NEON_DEFAULT_THUMBNAIL__
 
@@ -15,8 +8,8 @@
 
 
 /*
- *  Default Thumbnail type which decribes what is the default image to serve for an ccount 
- *  in case no directive are defined for it.
+ *  This class represents an account-wide default thumbnail for the 
+ *  cases where a video directive might not exists.
  */
 class DefaultThumbnail  {
     
