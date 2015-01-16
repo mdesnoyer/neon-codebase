@@ -14,6 +14,7 @@ import json
 import hashlib
 import random
 import properties
+import re
 import socket
 import string
 import supportServices.neondata
@@ -190,6 +191,7 @@ class CDNHosting(object):
 
         else:
             cdn_url = yield self._upload_impl(image, tid, async=True)
+            # Append only if the image was uploaded successfully   
             if cdn_url:
                 new_serving_thumbs.append((cdn_url, image.size[0], image.size[1]))
 
@@ -203,6 +205,9 @@ class CDNHosting(object):
                 tid,
                 add_serving_urls,
                 create_missing=True)
+        
+        # return the CDN URL 
+        raise tornado.gen.Return(cdn_url)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -227,7 +232,6 @@ class CDNHosting(object):
         '''
         Creates the appropriate connection based on a database entry.
         '''
-
         if isinstance(cdn_metadata,
                         supportServices.neondata.PrimaryNeonHostingMetadata):
             return PrimaryNeonHosting(cdn_metadata)
@@ -291,12 +295,9 @@ class AWSHosting(CDNHosting):
                            (tid, image.size[0], image.size[1]))
         key_name = '/'.join(name_pieces)
         
-        #@make_tid_folders: If true, _ is replaced by '/' to create folder
         # Figure the S3 location: <API_KEY>/<VIDEO_ID>/<THUMB_ID>.jpg
         if self.make_tid_folders:
-            key_name = re.sub('_', '/', self.key) + '.jpg'
-            s3_url = 'https://s3.amazonaws.com/%s/%s' % (get_s3_hosting_bucket(),
-                        s3key)
+            key_name = re.sub('_', '/', tid) + ".jpg" 
 
         cdn_url = "http://%s/%s" % (cdn_prefix, key_name)
         fmt = 'jpeg'
@@ -327,7 +328,7 @@ class PrimaryNeonHosting(AWSHosting):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def _upload_impl(self, image, tid):
-        s3url = super(DefaultNeonHosting, self)._upload_impl(image, tid)
+        s3url = super(PrimaryNeonHosting, self)._upload_impl(image, tid)
         raise tornado.gen.Return(s3url)
 
 class CloudinaryHosting(CDNHosting):
@@ -364,7 +365,9 @@ class CloudinaryHosting(CDNHosting):
         headers = {}
 
         params['file'] = image
-        yield self.make_request(params, None, headers, async=True)
+        response = yield self.make_request(params, None, headers, async=True)
+        if response.error:
+            _log.error("Failed to upload image to cloudinary for tid %s" % tid)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -377,8 +380,8 @@ class CloudinaryHosting(CDNHosting):
                                                  body=encoded_params)
         
         try:
-            yield tornado.gen.Task(utils.http.send_request, request) 
-
+            response = yield tornado.gen.Task(utils.http.send_request, request) 
+            raise tornado.gen.Return(response)
         except socket.error, e:
             _log.error("Socket error uploading image to cloudinary %s" %\
                         params['public_id'])

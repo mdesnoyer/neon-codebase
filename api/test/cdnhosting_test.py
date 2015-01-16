@@ -47,6 +47,8 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.datamock.CloudinaryCDNHostingMetadata = \
           neondata.CloudinaryCDNHostingMetadata
         self.datamock.NeonCDNHostingMetadata = neondata.NeonCDNHostingMetadata
+        self.datamock.PrimaryNeonHostingMetadata = \
+                            neondata.PrimaryNeonHostingMetadata
 
         random.seed(1654984)
 
@@ -60,6 +62,9 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_host_single_image(self):
+        '''
+        Test hosting a single image with CDN prefixes into a S3 bucket
+        '''
         metadata = neondata.S3CDNHostingMetadata(None,
             'access_key', 'secret_key',
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
@@ -78,7 +83,28 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         # Make sure that the serving urls weren't added
         self.assertEquals(self.datamock.ThumbnailServingURLs.modify.call_count,
                           0)
+    
+        
+    @tornado.testing.gen_test
+    def test_primary_hosting_single_image(self):
+        '''
+        Test hosting the Primary copy for a image in Neon's primary 
+        hosting bucket
+        '''
+       
+        # use the default bucket in the class to test with
+        self.s3conn.create_bucket('host-thumbnails')
+        metadata = neondata.PrimaryNeonHostingMetadata()
 
+        hoster = api.cdnhosting.CDNHosting.create(metadata)
+        url = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+        self.assertEqual(url,
+                    "http://s3.amazonaws.com/host-thumbnails/acct1/vid1/tid1.jpg")
+        self.bucket = self.s3conn.get_bucket('host-thumbnails')
+        s3_key = self.bucket.get_key('acct1/vid1/tid1.jpg')
+        self.assertIsNotNone(s3_key)
+        self.assertEqual(s3_key.content_type, 'image/jpeg')
+        self.assertNotEqual(s3_key.policy, 'public-read')
 
     @tornado.testing.gen_test
     def test_permissions_error_uploading_image(self):
@@ -189,12 +215,30 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         mock_http.side_effect = lambda x, callback: callback(
             tornado.httpclient.HTTPResponse(x, 200,
                                             buffer=StringIO(mock_response)))
-        cd.upload(im, tid)
+        url = cd.upload(im, tid)
         self.assertEquals(mock_http.call_count, 1)
-        # TODO(sunil): Check the contents of the request that was seen
-        # to make sure it is what was expected.
+        self.assertIsNotNone(mock_http._mock_call_args_list[0][0][0]._body)
+        self.assertEqual(mock_http._mock_call_args_list[0][0][0].url,
+                "https://api.cloudinary.com/v1_1/neon-labs/image/upload")
 
-    # TODO(Sunil): Add error testing for the uploads of cloudinary
+    @patch('api.cdnhosting.utils.http.send_request')
+    def test_cloudinary_error(self, mock_http):
+
+        metadata = neondata.CloudinaryCDNHostingMetadata()
+        cd = api.cdnhosting.CDNHosting.create(metadata)
+        im = 'https://s3.amazonaws.com/host-thumbnails/image.jpg'
+        tid = 'bfea94933dc752a2def8a6d28f9ac4c2'
+        mresponse = tornado.httpclient.HTTPResponse(
+            tornado.httpclient.HTTPRequest('http://cloudinary.com'), 
+            502, buffer=StringIO("gateway error"))
+        mock_http.side_effect = lambda x, callback: callback(
+                                    tornado.httpclient.HTTPResponse(x, 502,
+                                    buffer=StringIO("gateway error")))
+        with self.assertLogExists(logging.ERROR,
+                'Failed to upload image to cloudinary for tid %s' % tid):
+            url = cd.upload(im, tid)
+        self.assertEquals(mock_http.call_count, 1)
+
 
 class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
     ''' 
