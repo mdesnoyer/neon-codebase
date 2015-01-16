@@ -841,7 +841,7 @@ class ClusterSSHConnection:
         stderr_msg = []
         retcode = None
         try:
-            stdin, stdout, stderr = self.client.exec_command(cmd)
+            stdin, stdout, stderr = self.client.exec_command(cmd, timeout=60.0)
 
             # Get the stdout and stderr data. Need to do this the long
             # way because if either is long, an ssh buffer fills up
