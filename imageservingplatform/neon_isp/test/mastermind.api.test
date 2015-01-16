@@ -7,10 +7,6 @@ expiry=2020-07-22T07:14:01Z
 {"type": "pub", "pid": "defaultpub1", "aid" : "defaccount1" }
 {"type":"default_thumb","aid":"defaccount1","default_url" : "http://neon/default_url_defaccount1.jpg","imgs":[{ "h":480, "w":640, "url":"http://neon/thumb_480_640_default_url_defaccount1.jpg" },{ "h":600, "w":800, "url":"http://neon/thumb_600_800_default_url_defaccount1.jpg" }]}
 #
-# default thumbnail feature, no directive, no size match, return default_url
-{"type": "pub", "pid": "defaultpub2", "aid" : "defaccount2" }
-{"type":"default_thumb","aid":"defaccount2","default_url" : "http://neon/default_url_defaccount2.jpg","imgs":[{ "h":480, "w":640, "url":"http://neon/thumb_480_640_default_url_defaccount2.jpg" },{ "h":600, "w":800, "url":"http://neon/thumb_600_800_default_url_defaccount2.jpg" }]}
-#
 # default thumbnail feature, no directive, no size match due to array being empty, return default_url
 {"type": "pub", "pid": "defaultpub3", "aid" : "defaccount3" }
 {"type":"default_thumb","aid":"defaccount3","default_url" : "http://neon/default_url_defaccount3.jpg","imgs":[]}

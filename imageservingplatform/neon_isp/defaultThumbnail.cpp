@@ -96,8 +96,7 @@ DefaultThumbnail::InitSafe(const rapidjson::Document & document)
     rapidjson::SizeType numOfImages = imgs.Size();
 
     if(numOfImages == 0) {
-        neon_stats[NEON_DEFAULT_THUMBNAIL_INVALID]++;
-        return -1;
+        return 0;
     }
 
     images.reserve(numOfImages);
