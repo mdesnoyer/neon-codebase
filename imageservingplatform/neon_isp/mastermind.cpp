@@ -425,9 +425,9 @@ Mastermind::GetImageUrl(const char * account_id,
         
         const DefaultThumbnail * def = defaultThumbnailTable->Find(accountId); 
 
-        // nothing more can be done
+        // if nothing more can be done
         if(def == 0) {
-            //neon_stats[NEON_INVALID_VIDEO_ID] ++;
+            neon_stats[NEON_INVALID_VIDEO_ID] ++;
             return 0;
         }
 
