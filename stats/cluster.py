@@ -941,12 +941,8 @@ class ClusterSSHConnection:
         _log.info('Opening %s on %s' %
                   (remote_path, self.cluster_info.master_ip))
         self._connect()
-        try:
-            ftp_client = self.client.open_sftp()
-            return ftp_client.file(remote_path, mode, bufsize)
-        finally:
-            self.client.close()
-        
+        ftp_client = self.client.open_sftp()
+        return ftp_client.file(remote_path, mode, bufsize)
 
     def execute_remote_command(self, cmd):
         '''Executes a command on the master node.
