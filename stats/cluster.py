@@ -427,11 +427,11 @@ class Cluster():
                 _log.error('Timeout when waiting for EMR to send the job %s '
                            'to Haddop' % step_id)
                 _log.error('stderr was:\n %s' %
-                       self.get_emr_logfile(ssh_conn, step_id, 'stderr')
+                       self.get_emr_logfile(ssh_conn, step_id, 'stderr'))
                 _log.error('stdout was:\n %s' %
-                       self.get_emr_logfile(ssh_conn, step_id, 'stdout')
+                       self.get_emr_logfile(ssh_conn, step_id, 'stdout'))
                 _log.error('syslog was:\n %s' %
-                       self.get_emr_logfile(ssh_conn, step_id, 'syslog')
+                       self.get_emr_logfile(ssh_conn, step_id, 'syslog'))
                 raise MapReduceError('Timeout when waiting for EMR to send '
                                      'job %s to Hadoop' % step_id)
             time.sleep(15.0)
@@ -446,11 +446,11 @@ class Cluster():
 
             # Get the logs from the cluster
             _log.error('stderr was:\n %s' %
-                       self.get_emr_logfile(ssh_conn, step_id, 'stderr')
+                       self.get_emr_logfile(ssh_conn, step_id, 'stderr'))
             _log.error('stdout was:\n %s' %
-                       self.get_emr_logfile(ssh_conn, step_id, 'stdout')
+                       self.get_emr_logfile(ssh_conn, step_id, 'stdout'))
             _log.error('syslog was:\n %s' %
-                       self.get_emr_logfile(ssh_conn, step_id, 'syslog')
+                       self.get_emr_logfile(ssh_conn, step_id, 'syslog'))
             raise MapReduceError('Error loading job into Hadoop. '
                                  'See earlier logs for job logs')
 
