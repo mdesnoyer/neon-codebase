@@ -457,7 +457,7 @@ class Cluster():
         # Get the stdout from the job being loaded up
         return self.get_emr_logfile(ssh_conn, step_id, 'stdout')
 
-    def get_emr_logfile(self, ssh_conn, step_id, logtype='stdout'):
+    def get_emr_logfile(self, ssh_conn, step_id, logtype='stdout', retry=True):
         '''Grabs the logfile from the master and returns it as a string'''
         try:
             log_fp = ssh_conn.open_remote_file(
@@ -471,7 +471,12 @@ class Cluster():
                 fileobj=ssh_conn.open_remote_file(
                     '/mnt/var/log/hadoop/steps/%s/%s.gz' % (step_id, logtype),
                     'rb'))
-        return ''.join(log_fp.readlines())
+        retval = ''.join(log_fp.readlines())
+        if retval == '':
+            # The data might not be in the file yet, wait a few
+            # seconds and try again
+            time.sleep(10.0)
+            return self.get_emr_logfile(ssh_conn, step_id, logtype, False)
 
     def is_alive(self):
         '''Returns true if the cluster is up and running.'''
