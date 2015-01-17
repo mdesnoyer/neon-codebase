@@ -472,11 +472,12 @@ class Cluster():
                     '/mnt/var/log/hadoop/steps/%s/%s.gz' % (step_id, logtype),
                     'rb'))
         retval = ''.join(log_fp.readlines())
-        if retval == '':
+        if retval == '' and retry:
             # The data might not be in the file yet, wait a few
             # seconds and try again
             time.sleep(10.0)
             return self.get_emr_logfile(ssh_conn, step_id, logtype, False)
+        return retval
 
     def is_alive(self):
         '''Returns true if the cluster is up and running.'''
