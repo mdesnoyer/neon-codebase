@@ -459,6 +459,7 @@ class Cluster():
 
     def get_emr_logfile(self, ssh_conn, step_id, logtype='stdout', retry=True):
         '''Grabs the logfile from the master and returns it as a string'''
+        ssh_conn = ClusterSSHConnection(self)
         try:
             log_fp = ssh_conn.open_remote_file(
                 '/mnt/var/log/hadoop/steps/%s/%s' % (step_id, logtype),
