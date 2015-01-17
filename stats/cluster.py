@@ -459,7 +459,13 @@ class Cluster():
 
     def get_emr_logfile(self, ssh_conn, step_id, logtype='stdout'):
         '''Grabs the logfile from the master and returns it as a string'''
-        log_fp = gzip.GzipFile(
+        try:
+            log_fp = ssh_conn.open_remote_file(
+                '/mnt/var/log/hadoop/steps/%s/%s' % (step_id, logtype),
+                'r')
+        except IOError:
+            # The log might have been g-zipped so try getting it that way
+            log_fp = gzip.GzipFile(
                 '',
                 'rb',
                 fileobj=ssh_conn.open_remote_file(
