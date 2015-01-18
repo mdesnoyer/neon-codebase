@@ -1568,13 +1568,18 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
 
         yield video_info.add_thumbnail(thumb_info, self.image, [cdn_metadata],
                                        save_objects=True, async=True)
-
+        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        
         self.assertEqual(thumb_info.video_id, video_info.key)
+        self.assertGreater(len(thumb_info.urls), 0) # verify url insertion
+        self.assertEqual(thumb_info.urls[0],
+                'http://s3.amazonaws.com/host-thumbnails/%s' %\
+                primary_hosting_key)
+
         self.assertIsNotNone(thumb_info.key)
         self.assertEqual(video_info.thumbnail_ids, [thumb_info.key])
 
         # Check that the images are in S3
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
         self.assertIsNotNone(self.s3conn.get_bucket('customer-bucket').
