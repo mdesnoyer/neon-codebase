@@ -108,6 +108,8 @@ class ImpalaTableBuilder(threading.Thread):
                                database='default',
                                timeout=5000) as hive_conn:
                 with conn.cursor() as hive:
+                    _log.info('Setting hive parameters')
+                    
                     # Set some parameters
                     hive.execute('SET hive.exec.compress.output=true')
                     hive.execute('SET avro.output.codec=snappy')
