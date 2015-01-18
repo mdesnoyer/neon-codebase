@@ -198,7 +198,7 @@ class TornadoHTTPHandler(logging.Handler):
         self.emit_error_sampling_period = emit_error_sampling_period
         self.last_emit_error = None
 
-        # import utils.http here, so that the NeonLogger is sets as
+        # import utils.http here, so that the NeonLogger is set as
         # the default logger before utils.http loads its logger. If
         # imported earlier, then the log_n function is not available
         # to utils.http Yes, this is a circular dependency, but lets
