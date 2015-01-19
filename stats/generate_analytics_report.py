@@ -28,7 +28,8 @@ from supportServices import neondata
 import utils.neon
 from utils.options import options, define
 
-define("stats_host", default="54.210.126.245",
+#define("stats_host", default="54.210.126.245",
+define("stats_host", default="127.0.0.1",
         type=str, help="Host to connect to the stats db on.")
 define("stats_port", default=21050, type=int,
        help="Port to connect to the stats db on")
@@ -63,6 +64,7 @@ def get_thumbnail_ids():
     _log.info('Querying for thumbnail ids')
     conn = connect()
     cursor = conn.cursor()
+    print statutils.get_time_clause(options.start_time, options.end_time)
     cursor.execute(
     """select distinct thumbnail_id from imageloads where 
     tai='%s' %s""" % (options.pub_id, 
