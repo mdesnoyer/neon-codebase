@@ -148,11 +148,7 @@ class ImpalaTableBuilder(threading.Thread):
                         create table if not exists %s
                         (%s)
                         partitioned by (tai string, yr int, mnth int)
-                        ROW FORMAT SERDE 'parquet.hive.serde.ParquetHiveSerDe' 
-                        STORED AS INPUTFORMAT 
-                        'parquet.hive.DeprecatedParquetInputFormat' 
-                        OUTPUTFORMAT 
-                        'parquet.hive.DeprecatedParquetOutputFormat'
+                        STORED AS PARQUET
                         """ % (parq_table, self._generate_table_definition()))
 
                         # Building parquet tables takes a lot of
