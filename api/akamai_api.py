@@ -90,6 +90,9 @@ class G2OAuth(object):
         label = 'x-akamai-acs-action:'
         authd = self.get_auth_data()
         sign_string = authd + uri + lf + label + action + lf
+        
+        # Convert the key to String
+        self.key = str(self.key)
 
         # version is guaranteed to be in (4,5) by the constructor
         # Version 3 is deprecated and will be removed, don't support it.
