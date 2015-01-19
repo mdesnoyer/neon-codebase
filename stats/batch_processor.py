@@ -107,7 +107,7 @@ class ImpalaTableBuilder(threading.Thread):
                                user='hadoop',
                                password='',
                                database='default',
-                               timeout=5000) as hive_conn:
+                               timeout=300000) as hive_conn:
                 with hive_conn.cursor() as hive:
                     _log.info('Setting hive parameters')
                     
