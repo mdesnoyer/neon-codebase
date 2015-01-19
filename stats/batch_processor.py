@@ -108,7 +108,7 @@ class ImpalaTableBuilder(threading.Thread):
                                password='',
                                database='default',
                                timeout=5000) as hive_conn:
-                with conn.cursor() as hive:
+                with hive_conn.cursor() as hive:
                     _log.info('Setting hive parameters')
                     
                     # Set some parameters
