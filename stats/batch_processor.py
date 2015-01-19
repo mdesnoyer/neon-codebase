@@ -19,6 +19,7 @@ import datetime
 import impala.dbapi
 import impala.error
 import pyhs2
+import pyhs2.error
 import re
 import threading
 from thrift import Thrift
@@ -192,8 +193,8 @@ class ImpalaTableBuilder(threading.Thread):
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
 
-        except HiveServerException as e:
-            _log.exception("Error executing command")
+        except pyhs2.error.Pyhs2Exception as e:
+            _log.exception("Error executing hive command")
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
 
