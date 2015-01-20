@@ -346,7 +346,7 @@ class OptionParser(object):
         if stream is not None:
             return yaml.load(stream)        
 
-        s3re = re.compile('s3://([0-9a-zA-Z\.\-]+)/([0-9a-zA-Z\.\-/]+)')
+        s3re = re.compile('s3://([0-9a-zA-Z\.\-_]+)/([0-9a-zA-Z\.\-/]+)')
 
         if path is not None:
             s3match = s3re.match(path)

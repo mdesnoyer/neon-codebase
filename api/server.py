@@ -256,6 +256,7 @@ class FairWeightedRequestQueue(object):
             video_url = item.get_video_url()
 
             # Get content length of the video
+            # TODO(Sunil): Get the content length of videos on s3
             req = tornado.httpclient.HTTPRequest(method='HEAD',
                             url=video_url, request_timeout=5.0) 
             result = yield tornado.gen.Task(utils.http.send_request, req)
