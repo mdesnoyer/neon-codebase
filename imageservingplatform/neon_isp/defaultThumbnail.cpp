@@ -143,7 +143,7 @@ DefaultThumbnail::Dealloc()
         ScaledImage * img = (*it);
 
         if(img == NULL) {
-            neon_stats[NEON_SCALED_IMAGE_SHUTDOWN_NULL_POINTER]++;
+            neon_stats[NEON_DEFAULT_THUMBNAIL_SHUTDOWN_NULL_POINTER]++;
             continue;
         }
 
