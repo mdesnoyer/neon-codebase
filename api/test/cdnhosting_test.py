@@ -7,6 +7,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+from api import akamai_api
 import api.cdnhosting
 import boto.exception
 from cStringIO import StringIO
@@ -22,6 +23,7 @@ import test_utils.neontest
 import test_utils.redis
 import tornado.testing
 import unittest
+from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 from utils.imageutils import PILImageUtils
 
 _log = logging.getLogger(__name__)
@@ -45,6 +47,8 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.datamock.CloudinaryCDNHostingMetadata = \
           neondata.CloudinaryCDNHostingMetadata
         self.datamock.NeonCDNHostingMetadata = neondata.NeonCDNHostingMetadata
+        self.datamock.PrimaryNeonHostingMetadata = \
+                            neondata.PrimaryNeonHostingMetadata
 
         random.seed(1654984)
 
@@ -58,6 +62,9 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_host_single_image(self):
+        '''
+        Test hosting a single image with CDN prefixes into a S3 bucket
+        '''
         metadata = neondata.S3CDNHostingMetadata(None,
             'access_key', 'secret_key',
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
@@ -76,7 +83,28 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         # Make sure that the serving urls weren't added
         self.assertEquals(self.datamock.ThumbnailServingURLs.modify.call_count,
                           0)
+    
+        
+    @tornado.testing.gen_test
+    def test_primary_hosting_single_image(self):
+        '''
+        Test hosting the Primary copy for a image in Neon's primary 
+        hosting bucket
+        '''
+       
+        # use the default bucket in the class to test with
+        self.s3conn.create_bucket('host-thumbnails')
+        metadata = neondata.PrimaryNeonHostingMetadata()
 
+        hoster = api.cdnhosting.CDNHosting.create(metadata)
+        url = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+        self.assertEqual(url,
+                    "http://s3.amazonaws.com/host-thumbnails/acct1/vid1/tid1.jpg")
+        self.bucket = self.s3conn.get_bucket('host-thumbnails')
+        s3_key = self.bucket.get_key('acct1/vid1/tid1.jpg')
+        self.assertIsNotNone(s3_key)
+        self.assertEqual(s3_key.content_type, 'image/jpeg')
+        self.assertNotEqual(s3_key.policy, 'public-read')
 
     @tornado.testing.gen_test
     def test_permissions_error_uploading_image(self):
@@ -187,12 +215,30 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         mock_http.side_effect = lambda x, callback: callback(
             tornado.httpclient.HTTPResponse(x, 200,
                                             buffer=StringIO(mock_response)))
-        cd.upload(im, tid)
+        url = cd.upload(im, tid)
         self.assertEquals(mock_http.call_count, 1)
-        # TODO(sunil): Check the contents of the request that was seen
-        # to make sure it is what was expected.
+        self.assertIsNotNone(mock_http._mock_call_args_list[0][0][0]._body)
+        self.assertEqual(mock_http._mock_call_args_list[0][0][0].url,
+                "https://api.cloudinary.com/v1_1/neon-labs/image/upload")
 
-    # TODO(Sunil): Add error testing for the uploads of cloudinary
+    @patch('api.cdnhosting.utils.http.send_request')
+    def test_cloudinary_error(self, mock_http):
+
+        metadata = neondata.CloudinaryCDNHostingMetadata()
+        cd = api.cdnhosting.CDNHosting.create(metadata)
+        im = 'https://s3.amazonaws.com/host-thumbnails/image.jpg'
+        tid = 'bfea94933dc752a2def8a6d28f9ac4c2'
+        mresponse = tornado.httpclient.HTTPResponse(
+            tornado.httpclient.HTTPRequest('http://cloudinary.com'), 
+            502, buffer=StringIO("gateway error"))
+        mock_http.side_effect = lambda x, callback: callback(
+                                    tornado.httpclient.HTTPResponse(x, 502,
+                                    buffer=StringIO("gateway error")))
+        with self.assertLogExists(logging.ERROR,
+                'Failed to upload image to cloudinary for tid %s' % tid):
+            url = cd.upload(im, tid)
+        self.assertEquals(mock_http.call_count, 1)
+
 
 class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
     ''' 
@@ -290,6 +336,87 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
 
         # Make sure that all the expected files were found
         self.assertItemsEqual(sizes_found, api.properties.CDN_IMAGE_SIZES)
+
+class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
+    '''
+    Test uploading images to Akamai
+    '''
+    def setUp(self):
+        self.http_call_patcher = \
+          patch('api.akamai_api.utils.http.send_request')
+        self.http_mock = self.http_call_patcher.start()
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start() 
+        
+        metadata = neondata.AkamaiCDNHostingMetadata(key=None,
+                host='http://akamai',
+                akamai_key='akey',
+                akamai_name='aname',
+                baseurl='base',
+                cdn_prefixes=['cdn.akamai.com']
+                )
+
+        self.hoster = api.cdnhosting.CDNHosting.create(metadata)
+        
+        random.seed(1654985)
+        self.image = PILImageUtils.create_random_image(480, 640)
+        super(TestAkamaiHosting, self).setUp()
+
+    def tearDown(self):
+        self.http_call_patcher.stop()
+        self.redis.stop()
+        super(TestAkamaiHosting, self).tearDown()
+
+    def _set_http_response(self, code=200, body='', error=None):
+        def do_response(request, callback=None, *args, **kwargs):
+            response = HTTPResponse(request, code,
+                                    buffer=StringIO(body),
+                                    error=error)
+            if callback:
+                tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                             response)
+            else:
+                return response
+        self.http_mock.side_effect = do_response
+
+    @tornado.testing.gen_test
+    def test_upload_image(self):
+        self._set_http_response()
+        tid = 'akamai_vid1_tid1'
+        
+        yield self.hoster.upload(self.image, tid, async=True)
+       
+        # Check http mock and Akamai request
+        # make sure the http mock was called
+        self.assertGreater(self.http_mock._mock_call_count, 0)
+        headers = self.http_mock._mock_call_args_list[0][0][0].headers 
+        self.assertListEqual(headers.keys(), ['Content-Length',
+            'X-Akamai-ACS-Auth-Data', 'X-Akamai-ACS-Auth-Sign',
+            'X-Akamai-ACS-Action'])
+
+        # Check serving URLs
+        ts = neondata.ThumbnailServingURLs.get(tid)
+        self.assertGreater(len(ts.size_map), 0)
+
+        # Verify the final image URLs
+        for (w, h), url in ts.size_map.iteritems():
+            url = ts.get_serving_url(w, h)
+            self.assertRegexpMatches(
+                    url, 'http://cdn.akamai.com/neontn%s_w%s_h%s.jpg' % (tid, w, h))
+    
+    @tornado.testing.gen_test
+    def test_upload_image_error(self):
+        self._set_http_response(code=500)
+        tid = 'akamai_vid1_tid2'
+        
+        with self.assertLogExists(logging.WARNING, 
+                'Error uploading image to akamai for tid %s' % tid):
+            yield self.hoster.upload(self.image, tid, async=True)
+        
+        self.assertGreater(self.http_mock._mock_call_count, 0)
+        
+        ts = neondata.ThumbnailServingURLs.get(tid)
+        self.assertEqual(len(ts.size_map), 0)
 
 if __name__ == '__main__':
     unittest.main()

@@ -1294,7 +1294,8 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
     def __init__(self, key=None, access_key=None, secret_key=None, 
                  bucket_name=None, cdn_prefixes=None, folder_prefix=None,
-                 resize=False, update_serving_urls=False, do_salt=True):
+                 resize=False, update_serving_urls=False, do_salt=True,
+                 make_tid_folders=False):
         '''
         Create the object
         '''
@@ -1307,7 +1308,10 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
 
         # Add a random named directory between folder prefix and the 
         # image name? Useful for performance when serving.
-        self.do_salt = do_salt 
+        self.do_salt = do_salt
+
+        # make folders for easy navigation
+        self.make_tid_folders = make_tid_folders
 
 class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     '''
@@ -1321,7 +1325,8 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
                  folder_prefix='',
                  resize=True,
                  update_serving_urls=True,
-                 do_salt=True):
+                 do_salt=True,
+                 make_tid_folders=False):
         super(NeonCDNHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
@@ -1330,6 +1335,21 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
             resize=resize,
             update_serving_urls=update_serving_urls,
             do_salt=do_salt)
+
+class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
+    '''
+    Primary Neon S3 Hosting
+    This is where the primary copy of the thumbnails are stored
+    
+    @make_tid_folders: If true, _ is replaced by '/' to create folder
+    '''
+    def __init__(self, key=None,
+            bucket_name='host-thumbnails', #TODO: Should this be hardcoded?
+            make_tid_folders=True):
+        super(PrimaryNeonHostingMetadata, self).__init__(
+            key,
+            bucket_name=bucket_name,
+            make_tid_folders=make_tid_folders)
 
 class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     '''
@@ -1341,6 +1361,24 @@ class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
             key,
             resize=False,
             update_serving_urls=False)
+
+class AkamaiCDNHostingMetadata(CDNHostingMetadata):
+    '''
+    Akamai Netstorage CDN Metadata
+    '''
+
+    def __init__(self, key=None, host=None, akamai_key=None, akamai_name=None,
+            baseurl=None, cdn_prefixes=None):
+        super(AkamaiCDNHostingMetadata, self).__init__(
+            key,
+            cdn_prefixes=cdn_prefixes,
+            resize=True,
+            update_serving_urls=True)
+        
+        self.host = host
+        self.akamai_key = akamai_key
+        self.akamai_name = akamai_name
+        self.baseurl = baseurl
 
 class AbstractPlatform(NamespacedStoredObject):
     ''' Abstract Platform/ Integration class '''
@@ -2594,35 +2632,15 @@ class ThumbnailMetadata(StoredObject):
 
         self.key = ThumbnailID.generate(imgdata, self.video_id)
 
-        # Figure out the S3 location,
-        # which is <API_KEY>/<VIDEO_ID>/<THUMB_ID>.jpg
-        s3key = re.sub('_', '/', self.key) + '.jpg'
-        s3_url = 'https://s3.amazonaws.com/%s/%s' % \
-          (api.cdnhosting.get_s3_hosting_bucket(), s3key)
+        # Host the primary copy of the image 
+        primary_hoster = api.cdnhosting.PrimaryNeonHosting(
+                            PrimaryNeonHostingMetadata())
+        s3_url = yield primary_hoster.upload(image, self.key, async=True)
+        
+        # TODO (Sunil):  Add redirect for the image
+
+        # Add the primary image to Thumbmetadata
         self.urls.insert(0, s3_url)
-
-        # Upload the image to s3
-        # TODO(Sunil): Merge the primary hosting copy into the 
-        # CDNHostingMetadataList
-        yield api.cdnhosting.upload_image_to_s3(
-            s3key, imgdata, async=True)
-
-        # Create a redirect with a video based url
-        yield api.cdnhosting.create_s3_redirect(
-            s3key,
-            '{video_prefix}/{type}{rank:d}.jpg'.format(
-                video_prefix=re.sub('_', '/', self.video_id),
-                type=self.type,
-                rank=self.rank),
-            content_type='image/jpeg',
-            async=True)
-
-        # Send the image to cloudinary
-        # TODO(Sunil): Merge the cloudinary hosting into the 
-        # CDNHostingMetadataList
-        cloudinary_hoster = api.cdnhosting.CDNHosting.create(
-            CloudinaryCDNHostingMetadata())
-        yield cloudinary_hoster.upload(s3_url, self.key, async=True)
 
         # Host the image on the CDN
         if cdn_metadata is None:
@@ -2639,8 +2657,14 @@ class ThumbnailMetadata(StoredObject):
                 cdn_metadata = [NeonCDNHostingMetadata()]
             
         hosters = [api.cdnhosting.CDNHosting.create(x) for x in cdn_metadata]
-        yield [x.upload(image, self.key, async=True) for x 
-               in hosters]
+        for x in hosters:
+            #NOTE: Cant' use isinstance here as it doesn't work with mock'ed
+            # objects :(
+            if x.hoster_type == "cloudinary":
+                # Send the url to cloudinary to upload 
+                yield x.upload(s3_url, self.key, async=True)
+            else:
+                yield x.upload(image, self.key, async=True)
 
     @classmethod
     def _create(cls, key, data_dict):
@@ -2696,26 +2720,6 @@ class ThumbnailMetadata(StoredObject):
 
         #return only the modified thumbnail objs
         return new_thumb_obj, old_thumb_obj 
-
-    @classmethod
-    def save_integration(cls, thumbnails, callback=None):
-        ''' save integration 
-
-        TODO(sunil): Explain what this is for
-        '''
-        db_connection = DBConnection.get(cls)
-        if callback:
-            pipe = db_connection.conn.pipeline()
-        else:
-            pipe = db_connection.blocking_conn.pipeline() 
-
-        for thumbnail in thumbnails:
-            pipe.set(thumbnail.key, thumbnail.to_json())
-        
-        if callback:
-            pipe.execute(callback)
-        else:
-            return pipe.execute()
 
     @classmethod
     def iterate_all_thumbnails(cls):
