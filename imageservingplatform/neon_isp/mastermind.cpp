@@ -537,6 +537,12 @@ Mastermind::Dealloc() {
         delete directiveTable;
         directiveTable = 0;
     }
+
+    if(defaultThumbnailTable != 0) {
+        defaultThumbnailTable->Shutdown();
+        delete defaultThumbnailTable;
+        defaultThumbnailTable = 0;
+    }
 }
 
 
