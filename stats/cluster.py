@@ -861,6 +861,14 @@ class ClusterSSHConnection:
                 else:
                     stderr_msg.append(stderr_line)
             retcode = stdout.channel.recv_exit_status()
+
+        except socket.timeout:
+            # TODO(mdesnoyer): Right now, running a yarn job will
+            # hang, so a timeout occurs. However, the job actually
+            # runs. Figure out why it hangs.
+            _log.warn('Socket timeout when running command. '
+                      'Assuming that the process succeeds for now: %s' % cmd)
+            return ''.join(stdout_msg)
             
         finally:
             self.client.close()
