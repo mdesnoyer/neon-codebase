@@ -117,13 +117,23 @@ class Cluster():
     # network reduction.
     #
     # This table is (type, multiplier, on demand price)
-    instance_info = {
-        'r3.2xlarge' : (2.1, 0.70),
-        'r3.4xlarge' : (4.4, 1.40),
-        'r3.8xlarge' : (9.6, 2.80),
-        'hi1.4xlarge' : (2.5, 3.10),
-        'm2.4xlarge' : (2.2, 0.98)}
+    #instance_info = {
+    #    'r3.2xlarge' : (2.1, 0.70),
+    #    'r3.4xlarge' : (4.4, 1.40),
+    #    'r3.8xlarge' : (9.6, 2.80),
+    #    'hi1.4xlarge' : (2.5, 3.10),
+    #    'm2.4xlarge' : (2.2, 0.98)
+    #    }
 
+    # We are basing it on a combination of memory and disk space
+    instance_info = {
+        'm2.2xlarge' : (1.0, 0.49),
+        'm2.4xlarge' : (2.1, 0.98),
+        'r3.4xlarge' : (3.1, 1.40),
+        'r3.8xlarge' : (6.2, 2.80),
+        'hi1.4xlarge' : (6.1, 3.1),
+        'cc2.8xlarge' : (9.1, 2.0),
+        }
 
     # Possible cluster roles
     ROLE_PRIMARY = 'primary'
@@ -541,8 +551,8 @@ class Cluster():
                 if group_type == 'TASK' and new_size is not None:
                     _log.info('Could not find the instance group to change, '
                               'creating it')
-                    group = InstanceGroup(new_size, 'TASK', 'c3.2xlarge', 
-                                          'SPOT', 'Task Instance Group', 0.46)
+                    group = InstanceGroup(new_size, 'TASK', 'r3.2xlarge', 
+                                          'SPOT', 'Task Instance Group', 0.77)
                     conn.add_instance_groups(self.cluster_id, [group])
                     return group
                         
