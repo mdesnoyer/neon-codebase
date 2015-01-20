@@ -2636,7 +2636,6 @@ class ThumbnailMetadata(StoredObject):
         primary_hoster = api.cdnhosting.PrimaryNeonHosting(
                             PrimaryNeonHostingMetadata())
         s3_url = yield primary_hoster.upload(image, self.key, async=True)
-        
         # TODO (Sunil):  Add redirect for the image
 
         # Add the primary image to Thumbmetadata
