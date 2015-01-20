@@ -375,6 +375,256 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         ts = int(time.time()) / 100
         self.assertTrue(str(ts) in cookie_value)
 
+    def test_client_api_default_thumbnail(self):
+        '''
+        A video directive doesnt exists, an scaled default thumbnail of exact size
+        is found.  
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("defaultpub1", prefix + "novid", 800, 600, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://neon/thumb_600_800_default_url_defaccount1.jpg")
+
+
+    def test_client_api_default_thumbnail_good_enough_size_match_height(self):
+        '''
+        A video directive doesnt exists, a scaled default thumbnail of 
+        size that is within acceptable tolerances is selected. 
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("defaultpub1", prefix + "novid", 800, 606, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://neon/thumb_600_800_default_url_defaccount1.jpg")
+
+
+    def test_client_api_default_thumbnail_good_enough_size_match_width(self):
+        '''
+        A video directive doesnt exists, a scaled default thumbnail of 
+        size that is within acceptable tolerances is selected. 
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("defaultpub1", prefix + "novid", 806, 600, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://neon/thumb_600_800_default_url_defaccount1.jpg")
+
+
+
+    def test_client_api_default_thumbnail_good_enough_size_match_width_height(self):
+        '''
+        A video directive doesnt exists, a scaled default thumbnail of 
+        size that is within acceptable tolerances is selected. 
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("defaultpub1", prefix + "novid", 806, 606, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://neon/thumb_600_800_default_url_defaccount1.jpg")
+
+
+    def test_client_api_default_thumbnail_good_enough_size_match_smaller_height(self):
+        '''
+        A video directive doesnt exists, a scaled default thumbnail of 
+        size that is within acceptable tolerances is selected. 
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("defaultpub1", prefix + "novid", 800, 594, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://neon/thumb_600_800_default_url_defaccount1.jpg")
+
+
+    def test_client_api_default_thumbnail_no_scaled_image_match_heigth(self):
+        '''
+        A video directive doesnt exists, no scaled default thumbnail of appropriate height
+        is found, so the default_url is returned.
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("defaultpub1", prefix + "novid", 800, 607, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://neon/default_url_defaccount1.jpg")
+
+    def test_client_api_default_thumbnail_no_scaled_image_match_width(self):
+        '''
+        A video directive doesnt exists, no scaled default thumbnail of appropriate width
+        is found, so the default_url is returned.
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("defaultpub1", prefix + "novid", 807, 600, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+        
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+        
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://neon/default_url_defaccount1.jpg")
+
+    def test_client_api_default_thumbnail_no_scaled_image_defined(self):
+        '''
+        A video directive doesnt exists, no default scaled thumbnails are listed 
+        (empty set), so the default_url is returned.
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("defaultpub3", prefix + "novid", 800, 600, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+        
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+        
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://neon/default_url_defaccount3.jpg")
+
+
+    def test_client_api_default_thumbnail_directive_exist_no_default(self):
+        '''
+        A video directive exists, so no default thumbnails is returned. 
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("defaultpub4", prefix + "vid0", 800, 700, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://neon/thumb2_700_800.jpg")
+
+
     def test_client_api_request_jpg_extention(self):
         '''
         Test Client API call

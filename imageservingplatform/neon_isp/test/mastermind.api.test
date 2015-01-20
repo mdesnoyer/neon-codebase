@@ -1,4 +1,26 @@
 expiry=2020-07-22T07:14:01Z
+
+###################################################################################
+# Default Thumbnail Test Data
+###################################################################################
+# basic default thumbnail feature test case, no directive for video
+{"type": "pub", "pid": "defaultpub1", "aid" : "defaccount1" }
+{"type":"default_thumb","aid":"defaccount1","default_url" : "http://neon/default_url_defaccount1.jpg","imgs":[{ "h":480, "w":640, "url":"http://neon/thumb_480_640_default_url_defaccount1.jpg" },{ "h":600, "w":800, "url":"http://neon/thumb_600_800_default_url_defaccount1.jpg" }]}
+#
+# default thumbnail feature, no directive, no size match due to array being empty, return default_url
+{"type": "pub", "pid": "defaultpub3", "aid" : "defaccount3" }
+{"type":"default_thumb","aid":"defaccount3","default_url" : "http://neon/default_url_defaccount3.jpg","imgs":[]}
+#
+# directive exists, default thumbnail not invoked
+{"type": "pub", "pid": "defaultpub4", "aid" : "defaccount4" }
+{"type":"default_thumb","aid":"defaccount4","default_url" : "http://neon/error.jpg","imgs":[]}
+{ "type": "dir","aid":"defaccount4", "vid":"vid0", "sla":"expiry=2014-07-22T07:14:01Z", "fractions":[ { "pct": 1.0, "tid": "thumb1", "default_url": "http://dir_default_url_defaccount4.jpg.jpg", "imgs":[{"h":700, "w":800, "url":"http://neon/thumb2_700_800.jpg"}]}]}
+#
+# 
+
+###################################################################################
+# Legacy tests
+###################################################################################
 {"type": "pub", "pid": "pub0", "aid" : "acc0" }
 {"type": "pub", "pid": "pub1", "aid" : "acc1" }
 {"type": "pub", "pid": "pub2", "aid" : "acc2" }
