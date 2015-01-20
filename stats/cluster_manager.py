@@ -36,7 +36,7 @@ define("batch_period", default=86400, type=float,
        help='Minimum period in seconds between runs of the batch process.')
 define("cluster_ip", default=None, type=str,
        help='Elastic ip to assign to the primary cluster')
-define("max_task_instances", default=20, type=int,
+define("max_task_instances", default=10, type=int,
        help='Maximum number of task instances to spin up')
 
 from utils import statemon
@@ -135,8 +135,8 @@ class BatchProcessManager(threading.Thread):
                     # increment the core size. That should probably be
                     # based on the data volume
                     #self.cluster.increment_core_size()
-                    if self.n_task_instances < (options.max_task_instances-4):
-                        self.n_task_instances += 4
+                    if self.n_task_instances < (options.max_task_instances-2):
+                        self.n_task_instances += 2
                 except Exception as e:
                     _log.exception('Error incrementing core instance size %s'
                                    % e)

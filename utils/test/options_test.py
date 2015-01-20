@@ -14,6 +14,7 @@ import boto
 import boto.exception
 import concurrent.futures
 import fake_filesystem
+import logging
 import mock
 from mock import patch
 import multiprocessing
@@ -21,6 +22,7 @@ import os
 import signal
 from StringIO import StringIO
 import options_test_module as test_mod
+import test_utils.neontest
 import time
 import tornado.gen
 import unittest
@@ -37,7 +39,7 @@ class FileStringIO(StringIO):
         self.close()
         return False
 
-class TestAsyncOptions(tornado.testing.AsyncTestCase):
+class TestAsyncOptions(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestAsyncOptions, self).setUp()
         self.parser = utils.options.OptionParser()
@@ -92,7 +94,7 @@ class OptionSubprocess(multiprocessing.Process):
     def stop(self):
         self.in_q.put_nowait(None)
 
-class TestMultiProcesses(unittest.TestCase):
+class TestMultiProcesses(test_utils.neontest.TestCase):
         
     def setUp(self):
         self.parser = utils.options.OptionParser()
@@ -103,21 +105,25 @@ class TestMultiProcesses(unittest.TestCase):
         self.filesystem.CreateDirectory('/dev')
         open('/dev/null', 'a').close()
 
-        self.subproc = OptionSubprocess(self.parser)
-        self.subproc.start()
+        self.subproc = None
         super(TestMultiProcesses, self).setUp()
 
     def tearDown(self):
         del self.parser
         sys.modules['__builtin__'].open = self.open_func
-        self.subproc.stop()
-        self.subproc.join(2.0)
-        if self.subproc.is_alive():
-            try:
-                os.kill(self.subproc.pid, signal.SIGKILL)
-            except OSError:
-                pass
+        if self.subproc is not None:
+            self.subproc.stop()
+            self.subproc.join(2.0)
+            if self.subproc.is_alive():
+                try:
+                    os.kill(self.subproc.pid, signal.SIGKILL)
+                except OSError:
+                    pass
         super(TestMultiProcesses, self).tearDown()
+
+    def _start_subproc(self):
+        self.subproc = OptionSubprocess(self.parser)
+        self.subproc.start()
 
     def _get_value_in_subprocess(self, variable):
         self.subproc.in_q.put_nowait(variable)
@@ -125,25 +131,44 @@ class TestMultiProcesses(unittest.TestCase):
 
     def test_different_types(self):
         self.parser.define('an_int', default=6, type=int)
-        self.assertEquals(self._get_value_in_subprocess('an_int'), 6)
-
+        self.parser.define('a_long', default=67l, type=long)
         self.parser.define('a_float', default=6.9, type=float)
-        self.assertAlmostEquals(self._get_value_in_subprocess('a_float'), 6.9)
-
         self.parser.define('a_string', default='Hi joe')
+
+        self._start_subproc()
+        
+        self.assertEquals(self._get_value_in_subprocess('an_int'), 6)
+        self.assertEquals(self._get_value_in_subprocess('a_long'), 67)
+        self.assertAlmostEquals(self._get_value_in_subprocess('a_float'), 6.9)
         self.assertEquals(self._get_value_in_subprocess('a_string'), 'Hi joe')
 
     def test_change_values(self):
         self.parser.define('an_int', default=6, type=int)
+        self._start_subproc()
+        
         self.assertEquals(self._get_value_in_subprocess('an_int'), 6)
         self.parser._set('an_int', 9)
         self.assertEquals(self._get_value_in_subprocess('an_int'), 9)
+
+    
+    def test_string_too_long(self):
+        self.parser.define('long_string', type=str, max_str_size=6)
+        self._start_subproc()
+
+        with self.assertLogExists(
+                logging.ERROR,
+                'String for option .*long_string is too long'):
+            with self.assertRaises(ValueError):
+                self.parser._set('long_string', '12345678')
+
+        self.assertEquals(self._get_value_in_subprocess('long_string'), None)
 
     def test_changing_config_file(self):
         '''Test when the config file changes. We want to update the options.'''
         self.parser.define('a_float', default=6.5, type=float)
         self.parser.define('an_int', default=3, type=int)
         self.parser.define('a_string', default='cow')
+        self._start_subproc()
 
         config_file = self.filesystem.CreateFile(
             'my_config.yaml', 
@@ -178,6 +203,8 @@ class TestMultiProcesses(unittest.TestCase):
 
     def test_bounded_value(self):
         self.parser.define('an_int', default=3, type=int)
+        self._start_subproc()
+        
         self.assertEquals(self.parser.an_int, 3)
         self.assertEquals(self._get_value_in_subprocess('an_int'), 3)
 
@@ -465,5 +492,5 @@ class TestS3ConfigFiles(unittest.TestCase):
         
 
 if __name__ == '__main__':
-    utils.neon.InitNeonTest()
+    utils.neon.InitNeon()
     unittest.main()

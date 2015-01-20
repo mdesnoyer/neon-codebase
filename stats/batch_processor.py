@@ -19,6 +19,7 @@ import datetime
 import impala.dbapi
 import impala.error
 import pyhs2
+import pyhs2.error
 import re
 import threading
 from thrift import Thrift
@@ -106,8 +107,10 @@ class ImpalaTableBuilder(threading.Thread):
                                user='hadoop',
                                password='',
                                database='default',
-                               timeout=5000) as hive_conn:
-                with conn.cursor() as hive:
+                               timeout=300000) as hive_conn:
+                with hive_conn.cursor() as hive:
+                    _log.info('Setting hive parameters')
+                    
                     # Set some parameters
                     hive.execute('SET hive.exec.compress.output=true')
                     hive.execute('SET avro.output.codec=snappy')
@@ -115,61 +118,55 @@ class ImpalaTableBuilder(threading.Thread):
                     hive.execute(
                         'SET hive.exec.dynamic.partition.mode=nonstrict')
                         
-                    try:
-                        self.status = 'RUNNING'
 
-                        external_table = 'Avro%ss' % self.event
-                        _log.info("Registering external %s table with Hive" % 
-                                  external_table)
-                        hive.execute('DROP TABLE IF EXISTS %s' % 
-                                     external_table)
-                        hive.execute("""
-                        create external table %s
-                        ROW FORMAT SERDE 
-                        'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
-                        STORED AS
-                        INPUTFORMAT  
-                        'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat'
-                        OUTPUTFORMAT 
-                        'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat'
-                        LOCATION '%s/%s'
-                        TBLPROPERTIES (
-                        'avro.schema.url'='s3://%s/%s.avsc'
-                        )""" % 
-                        (external_table, self.base_input_path, hive_event, 
-                         options.schema_bucket, hive_event))
+                    self.status = 'RUNNING'
 
-                        parq_table = '%ss' % self.event
-                        _log.info("Building parquet table %s" % parq_table)
-                        hive.execute( """
-                        create table if not exists %s
-                        (%s)
-                        partitioned by (tai string, yr int, mnth int)
-                        ROW FORMAT SERDE 'parquet.hive.serde.ParquetHiveSerDe' 
-                        STORED AS INPUTFORMAT 
-                        'parquet.hive.DeprecatedParquetInputFormat' 
-                        OUTPUTFORMAT 
-                        'parquet.hive.DeprecatedParquetOutputFormat'
-                        """ % (parq_table, self._generate_table_definition()))
+                    external_table = 'Avro%ss' % self.event
+                    _log.info("Registering external %s table with Hive" % 
+                              external_table)
+                    hive.execute('DROP TABLE IF EXISTS %s' % 
+                                 external_table)
+                    hive.execute("""
+                    create external table %s
+                    ROW FORMAT SERDE 
+                    'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
+                    STORED AS
+                    INPUTFORMAT  
+                    'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat'
+                    OUTPUTFORMAT 
+                    'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat'
+                    LOCATION '%s/%s'
+                    TBLPROPERTIES (
+                    'avro.schema.url'='s3://%s/%s.avsc'
+                    )""" % 
+                    (external_table, self.base_input_path, hive_event, 
+                     options.schema_bucket, hive_event))
 
-                        # Building parquet tables takes a lot of
-                        # memory, so make sure we give the job enough.
-                        hive.execute("SET mapreduce.reduce.memory.mb=8000")
-                        hive.execute(
-                            "SET mapreduce.reduce.java.opts=-Xmx6400m")
-                        hive.execute("SET mapreduce.map.memory.mb=8000")
-                        hive.execute("SET mapreduce.map.java.opts=-Xmx6400m")
-                        hive.execute("""
-                        insert overwrite table %s
-                        partition(tai, yr, mnth)
-                        select %s, trackerAccountId,
-                        year(cast(serverTime as timestamp)),
-                        month(cast(serverTime as timestamp)) from %s""" %
-                        (parq_table, ','.join(x.name for x in 
-                                              self.avro_schema.fields),
-                         external_table))
-                    finally:
-                        hive.execute('reset')
+                    parq_table = '%ss' % self.event
+                    _log.info("Building parquet table %s" % parq_table)
+                    hive.execute( """
+                    create table if not exists %s
+                    (%s)
+                    partitioned by (tai string, yr int, mnth int)
+                    STORED AS PARQUET
+                    """ % (parq_table, self._generate_table_definition()))
+
+                    # Building parquet tables takes a lot of
+                    # memory, so make sure we give the job enough.
+                    hive.execute("SET mapreduce.reduce.memory.mb=8000")
+                    hive.execute(
+                        "SET mapreduce.reduce.java.opts=-Xmx6400m")
+                    hive.execute("SET mapreduce.map.memory.mb=8000")
+                    hive.execute("SET mapreduce.map.java.opts=-Xmx6400m")
+                    hive.execute("""
+                    insert overwrite table %s
+                    partition(tai, yr, mnth)
+                    select %s, trackerAccountId,
+                    year(cast(serverTime as timestamp)),
+                    month(cast(serverTime as timestamp)) from %s""" %
+                    (parq_table, ','.join(x.name for x in 
+                                          self.avro_schema.fields),
+                     external_table))
 
             _log.info("Refreshing table %s in Impala" % parq_table)
             impala_cursor = impala_conn.cursor()
@@ -190,8 +187,8 @@ class ImpalaTableBuilder(threading.Thread):
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
 
-        except HiveServerException as e:
-            _log.exception("Error executing command")
+        except pyhs2.error.Pyhs2Exception as e:
+            _log.exception("Error executing hive command")
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
 
@@ -280,7 +277,7 @@ def build_impala_tables(input_path, cluster, timeout=None):
         thread = ImpalaTableBuilder(input_path, cluster, event)
         thread.start()
         threads.append(thread)
-        time.sleep(1)
+        time.sleep(5)
 
     # Wait for all of the tables to be built
     for thread in threads:
