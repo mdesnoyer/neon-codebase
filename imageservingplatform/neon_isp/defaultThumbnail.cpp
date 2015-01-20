@@ -80,7 +80,7 @@ DefaultThumbnail::InitSafe(const rapidjson::Document & document)
     /*
      *  Scaled Images
      */
-    // if there are no imgs specified then we are finished with init
+    // the array must exist
     if(document.HasMember("imgs") == false) {
         neon_stats[NEON_DEFAULT_THUMBNAIL_PARSE_ERROR]++;
         return -1;
@@ -95,6 +95,7 @@ DefaultThumbnail::InitSafe(const rapidjson::Document & document)
 
     rapidjson::SizeType numOfImages = imgs.Size();
 
+    // the array may legally be empty, so we are done with init here
     if(numOfImages == 0) {
         return 0;
     }
