@@ -516,6 +516,62 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         self.assertEqual(im_url, "http://neon/thumb_600_800_default_url_defaccount1.jpg")
 
 
+    def test_client_api_default_thumbnail_no_size_match_smaller_height(self):
+        '''
+        A video directive doesnt exists, a scaled default thumbnail of 
+        size that is within acceptable tolerances is selected. 
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("defaultpub1", prefix + "novid", 800, 593, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://neon/default_url_defaccount1.jpg")
+
+
+    def test_client_api_default_thumbnail_no_size_match_smaller_width(self):
+        '''
+        A video directive doesnt exists, a scaled default thumbnail of 
+        size that is within acceptable tolerances is selected. 
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("defaultpub1", prefix + "novid", 793, 600, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://neon/default_url_defaccount1.jpg")
+
+
     def test_client_api_default_thumbnail_no_scaled_image_match_heigth(self):
         '''
         A video directive doesnt exists, no scaled default thumbnail of appropriate height
