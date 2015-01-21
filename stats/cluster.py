@@ -428,6 +428,8 @@ class Cluster():
         _log.info('EMR Job id is %s. Waiting for it to be sent to Hadoop' %
                   step_id)
 
+        ssh_conn = ClusterSSHConnection(self)
+
         # Wait until it is "done". When it is "done" it has actually
         # only sucessfully loaded the job into the resource manager
         wait_count = 0
@@ -449,7 +451,6 @@ class Cluster():
 
         job_state = emrconn.describe_step(self.cluster_id,
                                           step_id).status.state
-        ssh_conn = ClusterSSHConnection(self)
         if (job_state != 'COMPLETED'):
             _log.error('EMR job could not be added to Hadoop. It is state %s'
                        % job_state)
