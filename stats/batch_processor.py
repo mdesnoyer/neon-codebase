@@ -228,7 +228,7 @@ class ImpalaTableBuilder(threading.Thread):
                                      'ERROR_STATE']:
             raise pyhs2.error.Pyhs2Exception(status.errorCode,
                                              status.errorMessage)
-        elif status.operationState == ['FINISHED_STATE']:
+        elif status.operationState == 'FINISHED_STATE':
             return False
         return True
 

@@ -61,7 +61,7 @@ class BatchProcessManager(threading.Thread):
         self._stopped = threading.Event()
 
         # Number of extra task instances to spin up for the batch process.
-        self.n_task_instances = 8 
+        self.n_task_instances = 4
         self.daemon = True
 
     def run(self):

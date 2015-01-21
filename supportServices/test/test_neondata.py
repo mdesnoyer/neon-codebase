@@ -1370,6 +1370,9 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
             self.assertEquals(ExperimentStrategy('not_in_db'),
                               ExperimentStrategy.get('not_in_db',
                                                      log_missing=False))
+    @tornado.testing.gen_test
+    def test_add_account_default_thumb(self):
+        
 
 
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
