@@ -16,9 +16,10 @@ import avro.schema
 from boto.s3.connection import S3Connection
 import boto.s3.key
 import datetime
-from externalLibs import pyhs2, pyhs2.error
 import impala.dbapi
 import impala.error
+from externalLibs import pyhs2
+import pyhs2.error
 import re
 import threading
 from thrift import Thrift
