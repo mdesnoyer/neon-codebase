@@ -19,7 +19,6 @@ import datetime
 import impala.dbapi
 import impala.error
 from externalLibs import pyhs2
-import pyhs2.error
 import re
 import threading
 from thrift import Thrift
