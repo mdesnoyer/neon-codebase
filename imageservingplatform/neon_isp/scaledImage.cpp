@@ -21,6 +21,16 @@ ScaledImage::~ScaledImage()
 }
 
 
+// check if a & b approx equal i.e in the range of the window size specified 
+bool
+ScaledImage::ApproxEqual(int a, int b, int window){
+    if (abs(a - b) <= window)
+        return true;
+    else
+        return false;
+}
+
+
 int
 ScaledImage::Init(const rapidjson::Value& img)
 {
