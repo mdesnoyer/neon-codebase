@@ -125,12 +125,3 @@ TEST_F(FractionsTest, test_fractions_less_than_one){
 
 }
 
-TEST_F(FractionsTest, test_approx_equal){
-    int vals[5] = {498, 499, 500, 501, 502};
-
-    for(int i=0; i<5; i++)
-        ASSERT_TRUE(Fraction::ApproxEqual(500, vals[i], 2)); 
-
-    ASSERT_TRUE(Fraction::ApproxEqual(500, 500, 0)); 
-    ASSERT_FALSE(Fraction::ApproxEqual(500, 503, 2)); 
-}
