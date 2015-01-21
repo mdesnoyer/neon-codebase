@@ -1,0 +1,3 @@
+[submodule "externalLibs/pyhs2"]
+	path = externalLibs/pyhs2
+	url = git@github.com:neon-lab/pyhs2.git

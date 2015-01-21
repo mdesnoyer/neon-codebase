@@ -16,10 +16,9 @@ import avro.schema
 from boto.s3.connection import S3Connection
 import boto.s3.key
 import datetime
+from externalLibs import pyhs2, pyhs2.error
 import impala.dbapi
 import impala.error
-import pyhs2
-import pyhs2.error
 import re
 import threading
 from thrift import Thrift
@@ -60,11 +59,16 @@ class ImpalaTableBuilder(threading.Thread):
         self.base_input_path = base_input_path
         self.cluster = cluster
         self.status = 'INIT'
+        self._stopped = threading.Event()
 
         self.avro_schema = avro.schema.parse(open(os.path.join(
             options.compiled_schema_path, "%sHive.avsc" % self.event)).read())
 
+    def stop(self):
+        self._stopped.set()
+
     def run(self):
+        self._stopped.clear()
         try:
             self.cluster.connect()
             hive_event = '%sHive' % self.event
@@ -158,7 +162,7 @@ class ImpalaTableBuilder(threading.Thread):
                         "SET mapreduce.reduce.java.opts=-Xmx6400m")
                     hive.execute("SET mapreduce.map.memory.mb=8000")
                     hive.execute("SET mapreduce.map.java.opts=-Xmx6400m")
-                    hive.execute("""
+                    hive.execute_nonblocking("""
                     insert overwrite table %s
                     partition(tai, yr, mnth)
                     select %s, trackerAccountId,
@@ -167,6 +171,13 @@ class ImpalaTableBuilder(threading.Thread):
                     (parq_table, ','.join(x.name for x in 
                                           self.avro_schema.fields),
                      external_table))
+
+                    while self._hive_still_running(hive):
+                        if self._stopped.is_set():
+                            self.status = 'STOPPED'
+                            return
+
+                        time.sleep(15.0)
 
             _log.info("Refreshing table %s in Impala" % parq_table)
             impala_cursor = impala_conn.cursor()
@@ -208,6 +219,18 @@ class ImpalaTableBuilder(threading.Thread):
                            'table %s' % self.event)
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
+
+    def _hive_still_running(self, cursor):
+        status = cursor.check_pending_execute()
+        _log.debug("job status for event %s is %s" %
+                   (self.event, status.operationState))
+        if status.operationState in ['CANCELED_STATE', 'CLOSED_STATE',
+                                     'ERROR_STATE']:
+            raise pyhs2.error.Pyhs2Exception(status.errorCode,
+                                             status.errorMessage)
+        elif status.operationState == ['FINISHED_STATE']
+            return False
+        return True
 
     def _generate_table_definition(self):
         '''Generates this hive table definition based on the avro schema.
@@ -288,6 +311,8 @@ def build_impala_tables(input_path, cluster, timeout=None):
                 raise TimeoutException()
         thread.join(time_left)
         if thread.is_alive():
+            for t2 in threads:
+                t2.stop()
             raise TimeoutException()
         if thread.status != 'SUCCESS':
             _log.error("Error building impala table %s. State is %s. See logs."
