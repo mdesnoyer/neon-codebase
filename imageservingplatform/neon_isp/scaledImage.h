@@ -27,7 +27,8 @@ public:
     int GetWidth () const;
     const char * GetUrl(int & size) const;
     const std::string & GetUrlString() const;
-    
+    static bool ApproxEqual(int a, int b, int window);
+
 protected:
     bool initialized;
     int height;
