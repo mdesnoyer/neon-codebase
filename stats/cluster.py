@@ -736,10 +736,6 @@ class Cluster():
 
         bootstrap_actions = [
             BootstrapAction(
-                'Install Hue',
-                's3://elasticmapreduce/libs/hue/install-hue',
-                []),
-            BootstrapAction(
                 'Install Ganglia',
                 's3://elasticmapreduce/bootstrap-actions/install-ganglia',
                 []),
@@ -748,10 +744,6 @@ class Cluster():
                 's3://elasticmapreduce/libs/impala/setup-impala',
                 ['--base-path', 's3://elasticmapreduce',
                  '--impala-version', '1.2.4']),
-            BootstrapAction(
-                'Setup EMRFS',
-                's3://elasticmapreduce/bootstrap-actions/configure-hadoop',
-                ['-e', 'fs.s3.enableServerSideEncryption=true']),
             BootstrapAction(
                 'Configure Hadoop',
                 's3://elasticmapreduce/bootstrap-actions/configure-hadoop',
@@ -779,13 +771,13 @@ class Cluster():
                  'yarn.log-aggregation-enable=true'])]
             
         steps = [
+            boto.emr.step.InstallHiveStep('0.11.0.2'),
             boto.emr.step.JarStep(
-                'Run Hue',
-                's3://elasticmapreduce/libs/script-runner/script-runner.jar',
+                'Start HBase',
+                '/home/hadoop/lib/hbase.jar',
                 None,
                 'TERMINATE_JOB_FLOW',
-                ['s3://elasticmapreduce/libs/hue/run-hue']),
-            boto.emr.step.InstallHiveStep('0.13.1')]
+                ['emr.hbase.backup.Main', '--start-master'])]
 
             
         instance_groups = [
@@ -800,7 +792,7 @@ class Cluster():
             options.cluster_name,
             log_uri='s3://neon-cluster-logs/',
             ec2_keyname='emr-runner',
-            ami_version='3.3.1',
+            ami_version='3.1.4',
             job_flow_role='EMR_EC2_DefaultRole',
             service_role='EMR_DefaultRole',
             keep_alive=True,

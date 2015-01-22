@@ -83,7 +83,7 @@ class BatchProcessManager(threading.Thread):
                         stats.batch_processor.build_impala_tables(
                             self.last_output_path,
                             self.cluster,
-                            timeout = (options.batch_period * 10))
+                            timeout = (options.batch_period * 4))
             except Exception as e:
                 _log.exception('Error finding the running batch job: %s' % e)
                 continue
@@ -107,7 +107,7 @@ class BatchProcessManager(threading.Thread):
                 stats.batch_processor.build_impala_tables(
                     cleaned_output_path,
                     self.cluster,
-                    timeout = (options.batch_period * 10))
+                    timeout = (options.batch_period * 4))
                 self.last_output_path = cleaned_output_path
                 statemon.state.increment('successful_batch_runs')
                 statemon.state.last_batch_success = 1
@@ -190,7 +190,7 @@ def main():
                     stats.batch_processor.build_impala_tables(
                         batch_processor.last_output_path,
                         cluster,
-                        timeout = (options.batch_period * 10))
+                        timeout = (options.batch_period * 4))
                     batch_processor.schedule_run()
             cluster.set_public_ip(options.cluster_ip)
         except Exception as e:
