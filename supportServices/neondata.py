@@ -1135,7 +1135,7 @@ class NeonUserAccount(object):
 
         tmeta = ThumbnailMetadata(
             None,
-            InternalVideoID.generate(self.neon_api_key, '000'),
+            InternalVideoID.generate(self.neon_api_key, 'NOVIDEO'),
             ttype=ThumbnailType.DEFAULT,
             rank=cur_rank)
         yield tmeta.add_image_data(image, cdn_metadata, async=True)
