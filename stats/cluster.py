@@ -771,13 +771,7 @@ class Cluster():
                  'yarn.log-aggregation-enable=true'])]
             
         steps = [
-            boto.emr.step.InstallHiveStep('0.11.0.2'),
-            boto.emr.step.JarStep(
-                'Start HBase',
-                '/home/hadoop/lib/hbase.jar',
-                None,
-                'TERMINATE_JOB_FLOW',
-                ['emr.hbase.backup.Main', '--start-master'])]
+            boto.emr.step.InstallHiveStep('0.11.0.2')]
 
             
         instance_groups = [
