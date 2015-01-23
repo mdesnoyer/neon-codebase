@@ -79,6 +79,7 @@ statemon.define('incr_statsdb_error', int)
 statemon.define('videodb_error', int)
 statemon.define('publish_error', int)
 statemon.define('serving_urls_missing', int)
+statemon.define('account_default_serving_url_missing', int)
 
 _log = logging.getLogger(__name__)
 
@@ -187,10 +188,14 @@ class VideoDBWatcher(threading.Thread):
             dict(((str(x.get_tai()), str(x.value)) for x in
                   neondata.TrackerAccountIDMapper.get_all())))
 
-        # Get an update for the default widths
+        # Get an update for the default widths and thumbnail ids
+        account_tups = [(str(x.neon_api_key), x.default_size,
+                         x.default_thumbnail_id) for x in
+                         neondata.NeonUserAccount.get_all_accounts()]
         self.directive_pusher.update_default_sizes(
-            dict(((str(x.neon_api_key), x.default_size) for x in
-                  neondata.NeonUserAccount.get_all_accounts())))
+            dict((x[0], x[1]) for x in account_tups))
+        self.directive_pusher.update_default_thumbs(
+            dict((x[0], x[2]) for x in account_tups if x[2]))
 
         # Update the video data
         for platform in neondata.AbstractPlatform.get_all_instances():
@@ -334,7 +339,7 @@ class StatsDBWatcher(threading.Thread):
                          "from EventSequences where tai='{tai}' and "
                          "{imp_type} is not null "
                          "and servertime < {update_hour:f} "
-                         "and (yr >= {yr:d} or "
+                         "and (yr > {yr:d} or "
                          "(yr = {yr:d} and mnth >= {mnth:d})) "
                          "group by thumbnail_id").format(
                             imp_type=col_map[strategy.impression_type],
@@ -349,7 +354,8 @@ class StatsDBWatcher(threading.Thread):
                          "from EventSequences where tai='{tai}' and "
                          "{imp_type} is not null "
                          "and servertime < {update_hour:f} "
-                         "and yr >= {yr:d} and mnth >= {mnth:d} "
+                         "and (yr > {yr:d} or "
+                         "(yr = {yr:d} and mnth >= {mnth:d})) "
                          "group by thumbnail_id").format(
                             imp_type=col_map[strategy.impression_type],
                             conv_type=col_map[strategy.conversion_type],
@@ -386,6 +392,13 @@ class StatsDBWatcher(threading.Thread):
                  for thumb_id, counts in 
                  self._get_incremental_stat_data(strategy_cache)
                  .iteritems()])
+
+        if self.last_update is not None and self.last_table_build is not None:
+            statemon.state.time_since_last_batch_event = (
+                datetime.datetime.now() - self.last_update).total_seconds()
+            statemon.state.time_since_stats_update = (
+                datetime.datetime.now() -
+                self.last_table_build).total_seconds()
                     
         self.is_loaded.set()
 
@@ -456,10 +469,8 @@ class StatsDBWatcher(threading.Thread):
             return False
 
         # Update the state variables
-        cur_play_event = datetime.datetime.utcfromtimestamp(play_result[0][0])
-        statemon.state.time_since_last_batch_event = (
-                datetime.datetime.now() - cur_play_event).total_seconds()
-        self.last_update = cur_play_event
+        self.last_update = datetime.datetime.utcfromtimestamp(
+            play_result[0][0])
         self.last_table_build = cur_table_build
         
         return is_newer
@@ -577,7 +588,28 @@ class DirectivePublisher(threading.Thread):
 
     {"type" : "pub", "pid":"publisher1_prod", "aid":"account1"}
 
-    The second type of file is a serving directive for a video. The
+    The second type of file is a default thumbnail for an account.
+
+    {
+    "type":"default_thumb",
+    "aid":"account1",
+    "default_url" : "http://neon/thumb1_480_640.jpg",
+    "imgs":
+    [
+      {
+        "h":480,
+        "w":640,
+        "url":"http://neon/thumb1_480_640.jpg"
+      },
+      {
+        "h":600,
+        "w":800,
+        "url":"http://neon/thumb1_600_800.jpg"
+      }
+    ]
+    }
+
+    The third type of file is a serving directive for a video. The
     reference json is:
     {
     "type":"dir",
@@ -625,8 +657,8 @@ class DirectivePublisher(threading.Thread):
     ]
     }
     '''
-    def __init__(self, mastermind, tracker_id_map={}, serving_urls={},
-                 default_sizes={},
+    def __init__(self, mastermind, tracker_id_map=None, serving_urls=None,
+                 default_sizes=None, default_thumbs=None,
                  activity_watcher=utils.ps.ActivityWatcher()):
         '''Creates the publisher.
 
@@ -636,16 +668,19 @@ class DirectivePublisher(threading.Thread):
         serving_urls - A map of thumbnail_id -> { (width, height) -> url }
         default_widths - A map of account_id (aka api_key) -> 
                                              default thumbnail width
+        default_thumbs - A map of account_id (aka api_key) ->
+                                             default thumbnail id
         '''
         super(DirectivePublisher, self).__init__(name='DirectivePublisher')
         self.mastermind = mastermind
-        self.tracker_id_map = tracker_id_map
+        self.tracker_id_map = tracker_id_map or {}
         # Keep track of videos for which the directive has been published
         # This map is used to keep track of video_ids for which serving urls
         # state has been updated.
         self.video_id_serving_map = {} # video_id => serving_state
-        self.serving_urls = serving_urls
-        self.default_sizes = default_sizes
+        self.serving_urls = serving_urls or {}
+        self.default_sizes = default_sizes or {}
+        self.default_thumbs = default_thumbs or {}
         self.activity_watcher = activity_watcher
 
         self.last_publish_time = datetime.datetime.utcnow()
@@ -702,6 +737,10 @@ class DirectivePublisher(threading.Thread):
     def update_default_sizes(self, new_map):
         with self.lock:
             self.default_sizes = new_map
+
+    def update_default_thumbs(self, new_map):
+        with self.lock:
+            self.default_thumbs = new_map
 
     def _update_time_since_publish(self):
         statemon.state.time_since_publish = (
@@ -806,6 +845,33 @@ class DirectivePublisher(threading.Thread):
         for tracker_id, account_id in self.tracker_id_map.iteritems():
             stream.write('\n' + json.dumps({'type': 'pub', 'pid': tracker_id,
                                             'aid': account_id}))
+
+        # Next write the default thumbnails for each account that has them
+        _log.info("Writing default thumbnails")
+        missing_account_default_serving = 0
+        for account_id, thumb_id in self.default_thumbs.iteritems():
+            try:
+                stream.write('\n' + json.dumps(
+                    {'type': 'default_thumb',
+                     'aid' : account_id,
+                     'default_url' : self._get_default_url(account_id, thumb_id),
+                     'imgs' : [
+                         {
+                             'w': k[0],
+                             'h': k[1],
+                             'url': v
+                        }
+                        for k, v in 
+                        unpack_obj(self.serving_urls[thumb_id]).iteritems()
+                        ]
+                    }))
+            except KeyError:
+                _log.error('Could not find serving url for thumb %s, which is '
+                           'the default on account %s . Skipping' %
+                           (thumb_id, account_id))
+                missing_account_default_serving += 1
+        statemon.state.account_default_serving_url_missing = \
+          missing_account_default_serving
 
         # Now write the directives
         _log.info("Writing directives")

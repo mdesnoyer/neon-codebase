@@ -291,6 +291,8 @@ class Mastermind(object):
 
     def is_serving_video(self, video_id):
         '''Returns true if the video is being managed.'''
+        if neondata.InternalVideoID.is_no_video(video_id):
+            return True
         if video_id is None:
             return False
         return video_id in self.serving_directive

@@ -47,6 +47,7 @@ define("compiled_schema_path",
 from utils import statemon
 statemon.define("stats_cleaning_job_failures", int)
 statemon.define("impala_table_creation_failure", int)
+statemon.define("hbase_table_load_failure", int)
 
 class NeonDataPipelineException(Exception): pass
 class ExecutionError(NeonDataPipelineException): pass
@@ -262,6 +263,71 @@ class ImpalaTableBuilder(threading.Thread):
                     (field.name, field_type))
         return ','.join(cols)
 
+def add_hbase_table_to_impala(cluster):
+    '''Adds the hbase event table to Impala if it is not there already
+
+    Inputs:
+    cluster - A Cluster object for working with the cluster
+    '''
+    EVENT_TABLE_NAME = 'hbaseevents'
+
+    _log.info('Registering hbase table in Impala')
+    
+    # Create the hive client
+    transport = TSocket.TSocket(cluster.master_ip,
+                                options.hive_port)
+    transport = TTransport.TBufferedTransport(transport)
+    protocol = TBinaryProtocol.TBinaryProtocol(transport)
+    hive = ThriftHive.Client(protocol)
+
+    try:
+        transport.open()
+
+        # See if the table exists
+        found_hbase_table = False
+        hive.execute('show tables')
+        for row in hive.fetchall():
+            if re.compile(EVENT_TABLE_NAME).search(row):
+                found_hbase_table = True
+        if found_hbase_table:
+            _log.info('hbase table is already registered')
+            return
+
+        # Create the table
+        hive.execute('''
+        create external table %s (
+          hour_thumb string,
+          loads bigint,
+          views bigint,
+          clicks bigint)
+        STORED BY 'org.apache.hadoop.hive.hbase.HBaseStorageHandler'
+        WITH SERDEPROPERTIES ("hbase.columns.mapping" =
+          ":key,\
+          THUMBNAIL_EVENTS_TYPES:IMAGE_LOAD,\
+          THUMBNAIL_EVENTS_TYPES:IMAGE_VISIBLE,\
+          THUMBNAIL_EVENTS_TYPES:IMAGE_CLICK")
+        TBLPROPERTIES("hbase.table.name" = "TIMESTAMP_THUMBNAIL_EVENTS")
+        ''' % EVENT_TABLE_NAME)
+
+        # Connect to Impala
+        impala_conn = impala.dbapi.connect(
+            host=cluster.master_ip,
+            port=options.impala_port)
+
+        # Refresh the metastore so that impala can see the table
+        impala_cursor = impala_conn.cursor()
+        impala_cursor.execute('invalidate metadata')
+    except Thrift.TException as e:
+        statemon.state.increment('hbase_table_load_failure')
+        raise ImpalaError('Error loading hbase table: %s' % e)
+    except HiveServerException as e:
+        statemon.state.increment('hbase_table_load_failure')
+        raise ImpalaError('Error loading hbase table: %s' % e)
+    except impala.error.Error as e:
+        statemon.state.increment('hbase_table_load_failure')
+        raise ImpalaError('Error loading hbase table: %s' % e)
+        
+
 def build_impala_tables(input_path, cluster, timeout=None):
     '''Builds the impala tables.
 
@@ -316,6 +382,8 @@ def build_impala_tables(input_path, cluster, timeout=None):
                    '(done_time timestamp) stored as PARQUET')
     cursor.execute("insert into table_build_times (done_time) values ('%s')" %
                    datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+
+    add_hbase_table_to_impala()
 
     _log.info('Finished building Impala tables')
     return True

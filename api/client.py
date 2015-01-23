@@ -27,6 +27,7 @@ import api.brightcove_api
 import api.ooyala_api
 import atexit
 import boto.exception
+from boto.s3.connection import S3Connection
 import cv2
 import ffvideo
 import hashlib
@@ -38,6 +39,7 @@ from PIL import Image
 import psutil
 import Queue
 import random
+import re
 import signal
 import socket
 from supportServices import neondata
@@ -234,19 +236,46 @@ class VideoProcessor(object):
         Download the video file 
         '''
         CHUNK_SIZE = 4*1024*1024 # 4MB
+        s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws\.com/))([a-zA-Z0-9\-_\.]+)/(.+)')
         _log.info('Starting download of video %s' % self.video_url)
-        req = urllib2.Request(self.video_url, headers=self.headers)
+
         try:
-            response = urllib2.urlopen(req, timeout=self.timeout)
-            data = response.read(CHUNK_SIZE)
-            while data != '':
-                self.tempfile.write(data)
-                self.tempfile.flush()
+            s3match = s3re.search(self.video_url)
+            if s3match:
+                # Get the video from s3 directly
+                bucket_name = s3match.group(4)
+                key_name = s3match.group(5)
+                s3conn = S3Connection()
+                bucket = s3conn.get_bucket(bucket_name)
+                key = bucket.get_key(key_name)
+                key.get_contents_to_file(self.tempfile)
+            else:
+                # Use urllib2
+                req = urllib2.Request(self.video_url, headers=self.headers)
+                response = urllib2.urlopen(req, timeout=self.timeout)
                 data = response.read(CHUNK_SIZE)
+                while data != '':
+                    self.tempfile.write(data)
+                    self.tempfile.flush()
+                    data = response.read(CHUNK_SIZE)
+
+            self.tempfile.flush()
 
             _log.info('Finished downloading video %s' % self.video_url)
         except urllib2.URLError as e:
             _log.error("Error downloading video from %s: %s" % 
+                       (self.video_url, e))
+            statemon.state.increment('video_download_error')
+            raise VideoDownloadError(str(e))
+
+        except boto.exception.BotoClientError as e:
+            _log.error("Client error downloading video %s from S3: %s" %
+                       (self.video_url, e))
+            statemon.state.increment('video_download_error')
+            raise VideoDownloadError(str(e))
+
+        except boto.exception.BotoServerError as e:
+            _log.error("Server error downloading video %s from S3: %s" %
                        (self.video_url, e))
             statemon.state.increment('video_download_error')
             raise VideoDownloadError(str(e))

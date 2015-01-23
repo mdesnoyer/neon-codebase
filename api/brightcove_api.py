@@ -670,7 +670,8 @@ class BrightcoveApi(object):
         #data['sort_by'] = 'modified_date'
         #data['sort_order'] = 'DESC'
         data['get_item_count'] = "true"
-        data['video_fields'] = "id,name,length,endDate,startDate,creationDate,publishedDate,lastModifiedDate,thumbnailURL,videoStillURL,FLVURL"
+        data['video_fields'] =\
+            "id,name,length,endDate,startDate,creationDate,publishedDate,lastModifiedDate,thumbnailURL,videoStillURL,FLVURL,renditions"
         data["from_date"] = 21492000
         data["filter"] = "UNSCHEDULED,INACTIVE"
         data['cache_buster'] = time.time() 

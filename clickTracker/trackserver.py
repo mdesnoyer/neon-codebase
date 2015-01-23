@@ -201,8 +201,20 @@ class BaseTrackerDataV2(object):
         # brightcove tracker code is fixed. It should just be
         # underscores.
         tidRe = re.compile('^[0-9a-zA-Z]+[\-_][0-9a-zA-Z\-~\.]+[\-_][0-9a-zA-Z]+$')
-        return [None if x is None or not tidRe.match(x) else x for x in
-                tids]
+        tidRe = re.compile('^[0-9a-zA-Z]+_[0-9a-zA-Z\-~\.]+_[0-9a-zA-Z]+$')
+        dashTidRe = re.compile('^[0-9a-zA-Z]+\-[0-9a-zA-Z~\.]+\-[0-9a-zA-Z]+$')
+        retval = []
+        for tid in tids:
+            if tid is None:
+                retval.append(tid)
+            elif tidRe.match(tid):
+                retval.append(tid)
+            elif dashTidRe.match(tid):
+                # Replace the dashes with underscores
+                retval.append(re.sub('\-', '_', tid))
+            else:
+                retval.append(None)
+        return retval
 
     def validate_video_id(self, vid):
         '''Returns the video id or None if it is invalid

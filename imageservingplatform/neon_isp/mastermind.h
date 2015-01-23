@@ -6,6 +6,7 @@
 #include "rapidjson/document.h"
 #include "publisherHashtable.h"
 #include "directiveHashtable.h"
+#include "defaultThumbnailHashtable.h"
 
 
 class Mastermind  {
@@ -71,13 +72,15 @@ protected:
     static const std::string typeKey;
     static const std::string typeDirective;
     static const std::string typePublisher;
-    
+    static const std::string typeDefaultThumbnail;
+
     static const std::string expiryKey;
     
     time_t expiry;
 
     PublisherHashtable * publisherTable;
     DirectiveHashtable * directiveTable;
+    DefaultThumbnailHashtable * defaultThumbnailTable;
 };
 
 
