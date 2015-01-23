@@ -39,3 +39,4 @@ winpdb==1.4.8
 ipdb==0.8
 nose-cov==1.6
 happybase==0.9
+pyhs2==0.6.0

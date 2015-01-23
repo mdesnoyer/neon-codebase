@@ -9,7 +9,7 @@
 protocol DummyCommonTrackerInfoProtocol {
 
 enum TrackerType {
-  BRIGHTCOVE, OOYALA, BCGALLERY, IGN
+  BRIGHTCOVE, OOYALA, BCGALLERY, IGN, GENERAL
 }
 
 record GeoData {

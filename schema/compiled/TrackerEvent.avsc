@@ -239,7 +239,8 @@
         "type" : [ "null", "string" ]
       }, {
         "name" : "autoplayDelta",
-        "type" : [ "null", "int" ]
+        "type" : [ "null", "int" ],
+        "default" : null
       }, {
         "name" : "isAutoPlay",
         "type" : [ "null", "boolean" ],
