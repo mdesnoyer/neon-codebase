@@ -18,9 +18,9 @@ interactive console to talk to the database with.
 import os
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 import api.cdnhosting
 from api import ooyala_api
@@ -915,11 +915,20 @@ class NeonApiKey(object):
 
 class InternalVideoID(object):
     ''' Internal Video ID Generator '''
+    NOVIDEO = 'NOVIDEO' # External video id to specify that there is no video
+    
     @staticmethod
-    def generate(api_key, vid):
+    def generate(api_key, vid=None):
         ''' external platform vid --> internal vid '''
+        if vid is None:
+            vid = InternalVideoID.NOVIDEO
         key = '%s_%s' % (api_key, vid)
         return key
+
+    @staticmethod
+    def is_no_video(internal_vid):
+        '''Returns true if this video id refers to there not being a video'''
+        return internal_vid.partition('_')[2] == InternalVideoID.NOVIDEO
 
     @staticmethod
     def to_external(internal_vid):
@@ -1008,6 +1017,10 @@ class NeonUserAccount(object):
         
         # Priority Q number for processing, currently supports {0,1}
         self.processing_priority = 1
+
+        # Default thumbnail to show if we don't have one for a video
+        # under this account.
+        self.default_thumbnail_id = None
     
     def get_api_key(self):
         '''
@@ -1097,6 +1110,54 @@ class NeonUserAccount(object):
         pipe.set(new_integration.key, new_integration.to_json()) 
         callback(pipe.execute())
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def add_default_thumbnail(self, image, integration_id='0', replace=False):
+        '''Adds a default thumbnail to the account.
+
+        Note that the NeonUserAccount object is saved after this change.
+
+        Inputs:
+        image - A PIL image that will be added as the default thumb
+        integration_id - Used to specify the CDN hosting parameters.
+                         Defaults to the one associated with the NeonPlatform
+        replace - If true, then will replace the existing default thumb
+        '''
+        if self.default_thumbnail_id is not None and not replace:
+            raise ValueError('The account %s already has a default thumbnail'
+                             % self.neon_api_key)
+
+        cur_rank = 0
+        if self.default_thumbnail_id is not None:
+            old_default = yield tornado.gen.Task(ThumbnailMetadata.get,
+                                                 self.default_thumbnail_id)
+            if old_default is None:
+                raise ValueError('The old thumbnail is not in the database. '
+                                 'This should never happen')
+            cur_rank = old_default.rank - 1
+
+        cdn_key = CDNHostingMetadataList.create_key(self.neon_api_key,
+                                                    integration_id)
+        cdn_metadata = yield tornado.gen.Task(
+            CDNHostingMetadataList.get,
+            cdn_key)
+
+        tmeta = ThumbnailMetadata(
+            None,
+            InternalVideoID.generate(self.neon_api_key, None),
+            ttype=ThumbnailType.DEFAULT,
+            rank=cur_rank)
+        yield tmeta.add_image_data(image, cdn_metadata, async=True)
+        self.default_thumbnail_id = tmeta.key
+        
+        success = yield tornado.gen.Task(tmeta.save)
+        if not success:
+            raise IOError("Could not save thumbnail")
+
+        success = yield tornado.gen.Task(self.save)
+        if not success:
+            raise IOError("Could not save account data with new default thumb")
+
     @classmethod
     def get_account(cls, api_key, callback=None):
         ''' return neon useraccount instance'''
@@ -1141,7 +1202,7 @@ class NeonUserAccount(object):
         '''
         na = cls.get_account(api_key)
         if nc:
-            return na.tracker_account_id  
+            return na.tracker_account_id
 
 
 class ExperimentStrategy(DefaultedStoredObject):
