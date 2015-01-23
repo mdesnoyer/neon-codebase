@@ -240,6 +240,26 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                           'tai2': 'acct1',
                           'tai11': 'acct2'})
 
+    def test_account_default_thumb_update(self, datamock):
+        a1 = neondata.NeonUserAccount('a1', 'acct1')
+        a1.default_thumbnail_id = 'a1_NOVIDEO_tdef'
+        a2 = neondata.NeonUserAccount('a2', 'acct2')
+        datamock.NeonUserAccount.get_all_accounts.return_value = [
+            a1, a2]
+
+        # Process the data
+        self.watcher._process_db_data()
+
+        # Check the data
+        self.assertEqual(self.directive_publisher.default_thumbs['acct1'],
+                         'a1_NOVIDEO_tdef')
+        self.assertNotIn('acct2', self.directive_publisher.default_thumbs)
+
+        # Check if we remove the default thumb, it is removed from the map
+        a1.default_thumbnail_id = None
+        self.watcher._process_db_data()
+        self.assertNotIn('acct1', self.directive_publisher.default_thumbs)
+
     def test_default_size_update(self, datamock):
         datamock.NeonUserAccount.get_all_accounts.return_value = [
             neondata.NeonUserAccount('a1', 'acct1', default_size=(160, 90)),
@@ -998,8 +1018,10 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.assertRegexpMatches(lines[0], 'expiry=.+')
         expiry = dateutil.parser.parse(lines[0].split('=')[1])
 
-        # Split the data lines into tracker id maps and directives
+        # Split the data lines into tracker id maps, default thumb
+        # maps and directives
         tracker_ids = {}
+        default_thumbs = {}
         directives = {}
         found_end = False
         for line in lines[1:]:
@@ -1014,12 +1036,14 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
                 tracker_ids[data['pid']] = data['aid']
             elif data['type'] == 'dir':
                 directives[(data['aid'], data['vid'])] = data
+            elif data['type'] == 'default_thumb':
+                default_thumbs[data['aid']] = data
             else:
                 self.fail('Invalid data type: %s' % data['type'])
 
         self.assertTrue(found_end)
 
-        return expiry, tracker_ids, directives
+        return expiry, tracker_ids, default_thumbs, directives
 
     def test_s3_connection_error(self):
         bucket_mock = MagicMock()
@@ -1061,6 +1085,9 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'tai1' : 'acct1',
             'tai1s' : 'acct1',
             'tai2p' : 'acct2'})
+        self.publisher.update_default_thumbs({
+            'acct1' : 'acct1_vid1_tid11'}
+            )
         self.publisher.update_serving_urls(
             {
             'acct1_vid1_tid11' : { (640, 480): 't11_640.jpg',
@@ -1088,7 +1115,8 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.assertRegexpMatches(key_names[0], '[0-9]+\.mastermind')
         
         # Now check the data format in the file
-        expiry, tracker_ids, directives = self._parse_directive_file(
+        expiry, tracker_ids, default_thumbs, directives = \
+          self._parse_directive_file(
             bucket.get_key('mastermind').get_contents_as_string())
         
         # Make sure the expiry is valid
@@ -1100,6 +1128,18 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.assertEqual(tracker_ids, {'tai1': 'acct1',
                                        'tai1s': 'acct1',
                                        'tai2p': 'acct2'})
+
+        # Validate the default thumb
+        self.assertEqual(default_thumbs, {
+            'acct1' : {
+                'type' : 'default_thumb',
+                'aid' : 'acct1',
+                'default_url' : 't11_160.jpg',
+                'imgs' : [
+                    { 'h': 480, 'w': 640, 'url': 't11_640.jpg' },
+                    { 'h': 90, 'w': 160, 'url': 't11_160.jpg' }]
+                }
+            })
 
         # Validate the actual directives
         self.assertDictContainsSubset({
@@ -1170,6 +1210,9 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'acct1' : (640, 480),
             'acct2' : None
             })
+        self.publisher.update_default_thumbs({
+            'acct1' : 'acct1_vid1_tid11'}
+            )
         self.publisher.update_serving_urls(
             {
             'acct1_vid1_tid11' : { (640, 480): 't11_640.jpg',
@@ -1183,8 +1226,21 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.publisher._publish_directives()
 
         bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
-        expiry, tracker_ids, directives = self._parse_directive_file(
+        expiry, tracker_ids, default_thumbs, directives = \
+          self._parse_directive_file(
             bucket.get_key('mastermind').get_contents_as_string())
+
+        # Validate the default thumb
+        self.assertEqual(default_thumbs, {
+            'acct1' : {
+                'type' : 'default_thumb',
+                'aid' : 'acct1',
+                'default_url' : 't11_640.jpg',
+                'imgs' : [
+                    { 'h': 480, 'w': 640, 'url': 't11_640.jpg' },
+                    { 'h': 90, 'w': 160, 'url': 't11_160.jpg' }]
+                }
+            })
 
         # Extract a dictionary of the default urls for each thumb
         defaults = {}
@@ -1208,23 +1264,34 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.mastermind.video_info = self.mastermind.serving_directive
         self.publisher.update_tracker_id_map({'tai1' : 'acct1',
                                               'tai2' : 'acct2'})
+        self.publisher.update_default_thumbs({
+            'acct1' : 'acct1_vid1_tid11'}
+            )
 
         self.publisher.update_serving_urls({
             'acct1_vid2_tid21' : 
                 { (800, 600): 't21_800.jpg',
                   (160, 90): 't21_160.jpg'}})
 
-        with self.assertLogExists(logging.ERROR, 
-                                  ('Could not find all serving URLs for '
-                                   'video: acct1_vid1')):
-            with self.assertLogNotExists(logging.ERROR,
-                                         ('Could not find all serving URLs for'
-                                          ' video: acct1_vid2')):
-                self.publisher._publish_directives()
+        with self.assertLogExists(logging.ERROR,
+                                  'Could not find serving url for thumb '
+                                  'acct1_vid1_tid11, which is .*'
+                                  'account acct1'):
+            with self.assertLogExists(logging.ERROR, 
+                                      ('Could not find all serving URLs for '
+                                       'video: acct1_vid1')):
+                with self.assertLogNotExists(logging.ERROR,
+                                             ('Could not find all serving '
+                                              'URLs for video: acct1_vid2')):
+                    self.publisher._publish_directives()
 
         bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
-        expiry, tracker_ids, directives = self._parse_directive_file(
+        expiry, tracker_ids, default_thumbs, directives = \
+          self._parse_directive_file(
             bucket.get_key('mastermind').get_contents_as_string())
+
+        # Make sure that no default thumbs are listed
+        self.assertEquals(default_thumbs, {})
 
         # Make sure that there is a directive for vid2 because tid22
         # is 0% serving, so we don't need to know the serving urls.
@@ -1421,6 +1488,17 @@ class SmokeTesting(test_utils.neontest.TestCase):
         # This is purely a smoke test to see if anything breaks when
         # it's all hooked together.
 
+        # Create the account with a default thumbnail
+        default_acct_thumb = neondata.ThumbnailMetadata('key1_NOVIDEO_t0',
+                                                        'key1_NOVIDEO',
+                                                        ttype='default',
+                                                        rank=0)
+        default_acct_thumb.save()
+        neondata.ThumbnailServingURLs('key1_NOVIDEO_t0',
+                                      {(160, 90) : 't_default.jpg'}).save()
+        acct = neondata.NeonUserAccount('acct1', 'key1')
+        acct.default_thumbnail_id = default_acct_thumb.key
+
         # Setup api request and update the state to processed
         job = neondata.NeonApiRequest('job1', 'key1', 'vid1')
         job.state = neondata.RequestState.FINISHED 
@@ -1434,7 +1512,6 @@ class SmokeTesting(test_utils.neontest.TestCase):
                                                abtest=True)
         platform.add_video('vid1', vid.job_id)
         platform.save()
-        acct = neondata.NeonUserAccount('acct1', 'key1')
         acct.add_platform(platform)
         acct.save()
         thumbs =  [neondata.ThumbnailMetadata('key1_vid1_t1', 'key1_vid1',
@@ -1486,7 +1563,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
         # See if there is anything in S3 (which there should be)
         bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
         lines = bucket.get_key('mastermind').get_contents_as_string().split('\n')
-        self.assertEqual(len(lines), 4)
+        self.assertEqual(len(lines), 5)
     
         # Check if the serving state of the video has changed
         self.assertTrue(

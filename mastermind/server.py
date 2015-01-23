@@ -193,9 +193,9 @@ class VideoDBWatcher(threading.Thread):
                          x.default_thumbnail_id) for x in
                          neondata.NeonUserAccount.get_all_accounts()]
         self.directive_pusher.update_default_sizes(
-            dict((x[0], x[1] for x in account_tups)))
+            dict((x[0], x[1]) for x in account_tups))
         self.directive_pusher.update_default_thumbs(
-            dict((x[0], x[2] for x in account_tups if x[2])))
+            dict((x[0], x[2]) for x in account_tups if x[2]))
 
         # Update the video data
         for platform in neondata.AbstractPlatform.get_all_instances():
@@ -587,7 +587,7 @@ class DirectivePublisher(threading.Thread):
     {
     "type":"default_thumb",
     "aid":"account1",
-    “default_url” : "http://neon/thumb1_480_640.jpg",
+    "default_url" : "http://neon/thumb1_480_640.jpg",
     "imgs":
     [
       {

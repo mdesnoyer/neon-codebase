@@ -915,11 +915,20 @@ class NeonApiKey(object):
 
 class InternalVideoID(object):
     ''' Internal Video ID Generator '''
+    NOVIDEO = 'NOVIDEO' # External video id to specify that there is no video
+    
     @staticmethod
-    def generate(api_key, vid):
+    def generate(api_key, vid=None):
         ''' external platform vid --> internal vid '''
+        if vid is None:
+            vid = InternalVideoID.NOVIDEO
         key = '%s_%s' % (api_key, vid)
         return key
+
+    @staticmethod
+    def is_no_video(internal_vid):
+        '''Returns true if this video id refers to there not being a video'''
+        return internal_vid.partition('_')[2] == InternalVideoID.NOVIDEO
 
     @staticmethod
     def to_external(internal_vid):
@@ -1135,7 +1144,7 @@ class NeonUserAccount(object):
 
         tmeta = ThumbnailMetadata(
             None,
-            InternalVideoID.generate(self.neon_api_key, 'NOVIDEO'),
+            InternalVideoID.generate(self.neon_api_key, None),
             ttype=ThumbnailType.DEFAULT,
             rank=cur_rank)
         yield tmeta.add_image_data(image, cdn_metadata, async=True)
