@@ -189,26 +189,16 @@ Fraction::Dealloc()  {
         free((void *)tid);
 }
 
-
-// check if a & b approx equal i.e in the range of the window size specified 
-bool
-Fraction::ApproxEqual(int a, int b, int window){
-    if (abs(a - b) <= window)
-        return true;
-    else
-        return false;
-}
-
 // Iterate throgugh the images to find the appropriate image for a given
 // height & width
-
 ScaledImage*
 Fraction::GetScaledImage(int height, int width) const{
 
+    static const int pixelRange = 6; 
+
     for(unsigned i=0; i < images.size(); i++){
-        
-        if(ApproxEqual(images[i]->GetHeight(), height, 6) &&
-           ApproxEqual(images[i]->GetWidth(), width, 6))
+        if(ScaledImage::ApproxEqual(images[i]->GetHeight(), height, pixelRange) &&
+           ScaledImage::ApproxEqual(images[i]->GetWidth(), width, pixelRange))
             return images[i];
     }
     

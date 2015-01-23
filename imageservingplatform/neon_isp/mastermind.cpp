@@ -16,6 +16,7 @@
 const std::string Mastermind::typeKey            = "type";
 const std::string Mastermind::typeDirective      = "dir";
 const std::string Mastermind::typePublisher      = "pub";
+const std::string Mastermind::typeDefaultThumbnail      = "default_thumb";
 
 char Mastermind::lineBuffer[MaxLineBufferSize];
 
@@ -27,6 +28,7 @@ Mastermind::Mastermind()
 {
     publisherTable = 0;
     directiveTable = 0;
+    defaultThumbnailTable = 0;
     expiry = 0;
     parseFile = 0;
     initialized = false;
@@ -37,6 +39,7 @@ Mastermind::~Mastermind()
 {
     publisherTable = 0;
     directiveTable = 0;
+    defaultThumbnailTable = 0;
     parseFile = 0;
     initialized = false;
 }
@@ -170,8 +173,10 @@ Mastermind::Init() {
    
     publisherTable = new PublisherHashtable();
     directiveTable = new DirectiveHashtable();
+    defaultThumbnailTable = new DefaultThumbnailHashtable();
     publisherTable->Init(100);
     directiveTable->Init(100);
+    defaultThumbnailTable->Init(100);
     
     initialized = true;
 }
@@ -255,10 +260,12 @@ Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpir
     // allocate all tables
     publisherTable = new PublisherHashtable();
     directiveTable = new DirectiveHashtable();
+    defaultThumbnailTable = new DefaultThumbnailHashtable();
 
     publisherTable->Init(100);
     directiveTable->Init(100);
-    
+    defaultThumbnailTable->Init(100);
+
     /*
      *  get publishers and directives
      */
@@ -280,7 +287,11 @@ Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpir
         // check if this is the last line of the file, the marker "end"
         if(line[0] == 'e')
             break;
-        
+
+        // skip commented or empty lines 
+        if(line[0] == '#' || line[0] == '\n')
+            continue;
+
         // init json parser
         rapidjson::Document document;
         document.Parse<0>(line);
@@ -307,16 +318,20 @@ Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpir
         // must be either a publisher "pub" or directive "dir"
         std::string type = document["type"].GetString();
         
-        // a publisher entry
+        // a publisher record
         if(type == typePublisher) {
             publisherTable->AddPublisher(document);
         }
         
-        // a directive entry
+        // a video directive 
         else if(type == typeDirective) {
             directiveTable->AddDirective(document);
         }
-        
+        // an account-wide default thumbnail directive
+        else if(type == typeDefaultThumbnail) {
+            defaultThumbnailTable->Add(document);
+        }            
+
         // unrecognized type
         else {
             throw new NeonException("Mastermind::Init: line number %d in "
@@ -404,10 +419,19 @@ Mastermind::GetImageUrl(const char * account_id,
     const Directive * directive = 0;
     directive = directiveTable->Find(accountId, videoId);
     
-    // Invalid VideoId or VideoId not found
+    // if no directive are found for this vid then try to return 
+    // the default thumb for this account
     if(directive == 0){
-        neon_stats[NEON_INVALID_VIDEO_ID] ++;
-        return 0;
+        
+        const DefaultThumbnail * def = defaultThumbnailTable->Find(accountId); 
+
+        // if nothing more can be done
+        if(def == 0) {
+            neon_stats[NEON_INVALID_VIDEO_ID] ++;
+            return 0;
+        }
+
+       return def->GetScaledImage(height, width, size); 
     }
 
     const Fraction * fraction = directive->GetFraction(bucketId, bucketIdLen);
@@ -512,6 +536,12 @@ Mastermind::Dealloc() {
         directiveTable->Shutdown();
         delete directiveTable;
         directiveTable = 0;
+    }
+
+    if(defaultThumbnailTable != 0) {
+        defaultThumbnailTable->Shutdown();
+        delete defaultThumbnailTable;
+        defaultThumbnailTable = 0;
     }
 }
 
