@@ -339,7 +339,7 @@ class StatsDBWatcher(threading.Thread):
                          "from EventSequences where tai='{tai}' and "
                          "{imp_type} is not null "
                          "and servertime < {update_hour:f} "
-                         "and (yr >= {yr:d} or "
+                         "and (yr > {yr:d} or "
                          "(yr = {yr:d} and mnth >= {mnth:d})) "
                          "group by thumbnail_id").format(
                             imp_type=col_map[strategy.impression_type],
@@ -354,7 +354,8 @@ class StatsDBWatcher(threading.Thread):
                          "from EventSequences where tai='{tai}' and "
                          "{imp_type} is not null "
                          "and servertime < {update_hour:f} "
-                         "and yr >= {yr:d} and mnth >= {mnth:d} "
+                         "and (yr > {yr:d} or "
+                         "(yr = {yr:d} and mnth >= {mnth:d})) "
                          "group by thumbnail_id").format(
                             imp_type=col_map[strategy.impression_type],
                             conv_type=col_map[strategy.conversion_type],
@@ -391,6 +392,13 @@ class StatsDBWatcher(threading.Thread):
                  for thumb_id, counts in 
                  self._get_incremental_stat_data(strategy_cache)
                  .iteritems()])
+
+        if self.last_update is not None and self.last_table_build is not None:
+            statemon.state.time_since_last_batch_event = (
+                datetime.datetime.now() - self.last_update).total_seconds()
+            statemon.state.time_since_stats_update = (
+                datetime.datetime.now() -
+                self.last_table_build).total_seconds()
                     
         self.is_loaded.set()
 
@@ -461,10 +469,8 @@ class StatsDBWatcher(threading.Thread):
             return False
 
         # Update the state variables
-        cur_play_event = datetime.datetime.utcfromtimestamp(play_result[0][0])
-        statemon.state.time_since_last_batch_event = (
-                datetime.datetime.now() - cur_play_event).total_seconds()
-        self.last_update = cur_play_event
+        self.last_update = datetime.datetime.utcfromtimestamp(
+            play_result[0][0])
         self.last_table_build = cur_table_build
         
         return is_newer
