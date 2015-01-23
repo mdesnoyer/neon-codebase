@@ -795,6 +795,24 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         r_nps = NeonPlatform.get_many(keys)
         self.assertListEqual(nps, r_nps)
 
+    def test_defaulted_get_experiment_strategy(self):
+        strategy = ExperimentStrategy('in_db',
+                                      max_neon_thumbs=7,
+                                      only_exp_if_chosen=True)
+        strategy.save()
+
+        with self.assertLogNotExists(logging.WARN, 'No ExperimentStrategy'):
+            self.assertEquals(strategy, ExperimentStrategy.get('in_db'))
+
+        with self.assertLogExists(logging.WARN, 'No ExperimentStrategy'):
+            self.assertEquals(ExperimentStrategy('not_in_db'),
+                              ExperimentStrategy.get('not_in_db'))
+
+        with self.assertLogNotExists(logging.WARN, 'No ExperimentStrategy'):
+            self.assertEquals(ExperimentStrategy('not_in_db'),
+                              ExperimentStrategy.get('not_in_db',
+                                                     log_missing=False))
+
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()
@@ -1729,6 +1747,62 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
                          [thumb_info.key])
         self.assertEqual(ThumbnailMetadata.get(thumb_info.key).video_id,
                          'acct1_vid1')
+
+    @tornado.testing.gen_test
+    def test_add_account_default_thumb(self):
+        self.s3conn.create_bucket('host-thumbnails')
+        self.s3conn.create_bucket('n3.neon-images.com')
+        account = NeonUserAccount('a1')
+
+        yield account.add_default_thumbnail(self.image, async=True)
+
+        # Make sure that the thumbnail id is put in
+        self.assertIsNotNone(account.default_thumbnail_id)
+        self.assertEquals(
+            account.default_thumbnail_id,
+            NeonUserAccount.get_account(account.neon_api_key).default_thumbnail_id)
+
+        # Make sure that the thubmnail info is in the database
+        tmeta = ThumbnailMetadata.get(account.default_thumbnail_id)
+        self.assertIsNotNone(tmeta)
+        self.assertEquals(tmeta.type, ThumbnailType.DEFAULT)
+        self.assertEquals(tmeta.rank, 0)
+        self.assertGreater(len(tmeta.urls), 0)
+        self.assertEquals(tmeta.width, 480)
+        self.assertEquals(tmeta.height, 360)
+        self.assertIsNotNone(tmeta.phash)
+
+        # Make sure the image is hosted in s3
+        primary_hosting_key = re.sub('_', '/', tmeta.key)+'.jpg'
+        self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
+                             get_key(primary_hosting_key))
+
+        # If we try to add another image as the default, we should
+        # throw an error
+        new_image = PILImageUtils.create_random_image(540, 640)
+        with self.assertRaises(ValueError):
+            yield account.add_default_thumbnail(new_image, async=True)
+
+        # Now force the new image to be added
+        yield account.add_default_thumbnail(new_image, replace=True,
+                                            async=True)
+
+        # Check that the new thumb is in the account
+        self.assertIsNotNone(account.default_thumbnail_id)
+        self.assertNotEquals(account.default_thumbnail_id, tmeta.key)
+        self.assertEquals(
+            account.default_thumbnail_id,
+            NeonUserAccount.get_account(account.neon_api_key).default_thumbnail_id)
+
+        # Check the data in the new thumb
+        tmeta2 = ThumbnailMetadata.get(account.default_thumbnail_id)
+        self.assertIsNotNone(tmeta2)
+        self.assertEquals(tmeta2.type, ThumbnailType.DEFAULT)
+        self.assertEquals(tmeta2.rank, -1)
+        self.assertGreater(len(tmeta2.urls), 0)
+        self.assertEquals(tmeta2.width, 640)
+        self.assertEquals(tmeta2.height, 540)
+        self.assertIsNotNone(tmeta2.phash)
     
 
 if __name__ == '__main__':
