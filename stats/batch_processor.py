@@ -64,11 +64,16 @@ class ImpalaTableBuilder(threading.Thread):
         self.base_input_path = base_input_path
         self.cluster = cluster
         self.status = 'INIT'
+        self._stopped = threading.Event()
 
         self.avro_schema = avro.schema.parse(open(os.path.join(
             options.compiled_schema_path, "%sHive.avsc" % self.event)).read())
 
+    def stop(self):
+        self._stopped.set()
+
     def run(self):
+        self._stopped.clear()
         try:
             self.cluster.connect()
             hive_event = '%sHive' % self.event
@@ -93,37 +98,46 @@ class ImpalaTableBuilder(threading.Thread):
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
             return
-        
-        # Create the hive client
-        transport = TSocket.TSocket(self.cluster.master_ip,
-                                    options.hive_port)
-        transport = TTransport.TBufferedTransport(transport)
-        protocol = TBinaryProtocol.TBinaryProtocol(transport)
-        hive = ThriftHive.Client(protocol)
 
         try:
+            # Connect to hive
+            _log.debug('Connecting to hive at %s:%s' %
+                      (self.cluster.master_ip, options.hive_port))
+            transport = TSocket.TSocket(self.cluster.master_ip,
+                                        options.hive_port)
+            transport = TTransport.TBufferedTransport(transport)
+            protocol = TBinaryProtocol.TBinaryProtocol(transport)
+            hive = ThriftHive.Client(protocol)
             transport.open()
-
+            
             # Connect to Impala
+            _log.debug('Connecting to impala at %s:%s' %
+                      (self.cluster.master_ip, options.impala_port))
             impala_conn = impala.dbapi.connect(
                 host=self.cluster.master_ip,
                 port=options.impala_port)
+            
+            _log.info('Setting hive parameters')
 
             # Set some parameters
             hive.execute('SET hive.exec.compress.output=true')
             hive.execute('SET avro.output.codec=snappy')
             hive.execute('SET parquet.compression=SNAPPY')
-            hive.execute('SET hive.exec.dynamic.partition.mode=nonstrict')
-        
+            hive.execute(
+                'SET hive.exec.dynamic.partition.mode=nonstrict')
+
+
             self.status = 'RUNNING'
 
             external_table = 'Avro%ss' % self.event
             _log.info("Registering external %s table with Hive" % 
                       external_table)
-            hive.execute('DROP TABLE IF EXISTS %s' % external_table)
+            hive.execute('DROP TABLE IF EXISTS %s' % 
+                         external_table)
             hive.execute("""
             create external table %s
-            ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
+            ROW FORMAT SERDE 
+            'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
             STORED AS
             INPUTFORMAT  
             'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat'
@@ -131,7 +145,7 @@ class ImpalaTableBuilder(threading.Thread):
             'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat'
             LOCATION '%s/%s'
             TBLPROPERTIES (
-              'avro.schema.url'='s3://%s/%s.avsc'
+            'avro.schema.url'='s3://%s/%s.avsc'
             )""" % 
             (external_table, self.base_input_path, hive_event, 
              options.schema_bucket, hive_event))
@@ -147,18 +161,21 @@ class ImpalaTableBuilder(threading.Thread):
             OUTPUTFORMAT 'parquet.hive.DeprecatedParquetOutputFormat'
             """ % (parq_table, self._generate_table_definition()))
 
-            # Building parquet tables takes a lot of memory, so make
-            # sure we give the job enough.
+            # Building parquet tables takes a lot of
+            # memory, so make sure we give the job enough.
             hive.execute("SET mapreduce.reduce.memory.mb=8000")
-            hive.execute("SET mapreduce.reduce.java.opts=-Xmx6400m")
+            hive.execute(
+                "SET mapreduce.reduce.java.opts=-Xmx6400m")
             hive.execute("SET mapreduce.map.memory.mb=8000")
             hive.execute("SET mapreduce.map.java.opts=-Xmx6400m")
             hive.execute("""
             insert overwrite table %s
             partition(tai, yr, mnth)
-            select %s, trackerAccountId, year(cast(serverTime as timestamp)),
+            select %s, trackerAccountId,
+            year(cast(serverTime as timestamp)),
             month(cast(serverTime as timestamp)) from %s""" %
-            (parq_table, ','.join(x.name for x in self.avro_schema.fields),
+            (parq_table, ','.join(x.name for x in 
+                                  self.avro_schema.fields),
              external_table))
 
             _log.info("Refreshing table %s in Impala" % parq_table)
@@ -173,8 +190,6 @@ class ImpalaTableBuilder(threading.Thread):
                 # It's not there, so we need to refresh all the metadata
                 impala_cursor.execute('invalidate metadata')
 
-            hive.execute('reset')
-
             self.status = 'SUCCESS'
             
         except Thrift.TException as e:
@@ -183,7 +198,7 @@ class ImpalaTableBuilder(threading.Thread):
             self.status = 'ERROR'
 
         except HiveServerException as e:
-            _log.exception("Error executing command")
+            _log.exception("Error excuting command")
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
 
@@ -201,7 +216,11 @@ class ImpalaTableBuilder(threading.Thread):
         except Exception as e:
             _log.exception('Unexpected exception when building the impala '
                            'table %s' % self.event)
+            statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
+
+        finally:
+            transport.close()
 
     def _generate_table_definition(self):
         '''Generates this hive table definition based on the avro schema.
@@ -336,7 +355,7 @@ def build_impala_tables(input_path, cluster, timeout=None):
         thread = ImpalaTableBuilder(input_path, cluster, event)
         thread.start()
         threads.append(thread)
-        time.sleep(1)
+        time.sleep(5)
 
     # Wait for all of the tables to be built
     for thread in threads:
@@ -347,10 +366,12 @@ def build_impala_tables(input_path, cluster, timeout=None):
                 raise TimeoutException()
         thread.join(time_left)
         if thread.is_alive():
+            for t2 in threads:
+                t2.stop()
             raise TimeoutException()
         if thread.status != 'SUCCESS':
-            _log.error("Error building impala table %s. See logs."
-                       % thread.event)
+            _log.error("Error building impala table %s. State is %s. See logs."
+                       % (thread.event, thread.status))
             raise ImpalaError("Error building impala table")
 
     _log.info('Updating table table_build_times')

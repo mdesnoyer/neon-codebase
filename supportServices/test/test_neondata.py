@@ -1145,7 +1145,7 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         
         with self.assertRaises(AttributeError):
             thumb.thumbnail_id
-
+        
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()

@@ -36,7 +36,7 @@ define("batch_period", default=86400, type=float,
        help='Minimum period in seconds between runs of the batch process.')
 define("cluster_ip", default=None, type=str,
        help='Elastic ip to assign to the primary cluster')
-define("max_task_instances", default=20, type=int,
+define("max_task_instances", default=10, type=int,
        help='Maximum number of task instances to spin up')
 
 from utils import statemon
@@ -61,7 +61,7 @@ class BatchProcessManager(threading.Thread):
         self._stopped = threading.Event()
 
         # Number of extra task instances to spin up for the batch process.
-        self.n_task_instances = 8 
+        self.n_task_instances = 4
         self.daemon = True
 
     def run(self):
@@ -83,7 +83,7 @@ class BatchProcessManager(threading.Thread):
                         stats.batch_processor.build_impala_tables(
                             self.last_output_path,
                             self.cluster,
-                            timeout = (options.batch_period * 10))
+                            timeout = (options.batch_period * 4))
             except Exception as e:
                 _log.exception('Error finding the running batch job: %s' % e)
                 continue
@@ -107,7 +107,7 @@ class BatchProcessManager(threading.Thread):
                 stats.batch_processor.build_impala_tables(
                     cleaned_output_path,
                     self.cluster,
-                    timeout = (options.batch_period * 10))
+                    timeout = (options.batch_period * 4))
                 self.last_output_path = cleaned_output_path
                 statemon.state.increment('successful_batch_runs')
                 statemon.state.last_batch_success = 1
@@ -135,8 +135,8 @@ class BatchProcessManager(threading.Thread):
                     # increment the core size. That should probably be
                     # based on the data volume
                     #self.cluster.increment_core_size()
-                    if self.n_task_instances < (options.max_task_instances-4):
-                        self.n_task_instances += 4
+                    if self.n_task_instances < (options.max_task_instances-2):
+                        self.n_task_instances += 2
                 except Exception as e:
                     _log.exception('Error incrementing core instance size %s'
                                    % e)
@@ -190,7 +190,7 @@ def main():
                     stats.batch_processor.build_impala_tables(
                         batch_processor.last_output_path,
                         cluster,
-                        timeout = (options.batch_period * 10))
+                        timeout = (options.batch_period * 4))
                     batch_processor.schedule_run()
             cluster.set_public_ip(options.cluster_ip)
         except Exception as e:
