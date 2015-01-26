@@ -60,7 +60,10 @@ record AdPlayHive {
   // last time an image or the player was clicked by the user. Used to
   // identify autoplay. Given in milliseconds, or null if there was no
   // click
-  union{null, int} autoplayDelta;
+  union{null, int} autoplayDelta = null;
+
+  // Is this an auto play
+  union{null, boolean} isAutoPlay = null;
 
   // This video is the nth one playing on this page load
   int playCount;

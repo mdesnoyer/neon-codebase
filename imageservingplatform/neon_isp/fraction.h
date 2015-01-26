@@ -24,7 +24,6 @@ public:
     const char * GetThumbnailID() const;
 
     ScaledImage* GetScaledImage(int height, int width) const;
-    static bool ApproxEqual(int a, int b, int window);    
     
 protected:
     

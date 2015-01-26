@@ -13,7 +13,7 @@
     "type" : {
       "type" : "enum",
       "name" : "TrackerType",
-      "symbols" : [ "BRIGHTCOVE", "OOYALA", "BCGALLERY", "IGN" ]
+      "symbols" : [ "BRIGHTCOVE", "OOYALA", "BCGALLERY", "IGN", "GENERAL" ]
     }
   }, {
     "name" : "pageURL",
@@ -78,7 +78,12 @@
     "type" : [ "null", "string" ]
   }, {
     "name" : "autoplayDelta",
-    "type" : [ "null", "int" ]
+    "type" : [ "null", "int" ],
+    "default" : null
+  }, {
+    "name" : "isAutoPlay",
+    "type" : [ "null", "boolean" ],
+    "default" : null
   }, {
     "name" : "playCount",
     "type" : "int"

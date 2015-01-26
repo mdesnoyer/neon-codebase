@@ -30,6 +30,7 @@ import threading
 import urllib2
 import urlparse
 import utils.monitor
+import gzip
 
 import logging
 _log = logging.getLogger(__name__)
@@ -47,6 +48,8 @@ define("resource_manager_port", default=9026,
        help="Port to query the resource manager on")
 define("history_server_port", default=19888,
        help='Port to query the history server on')
+define("s3_jar_bucket", default="neon-emr-packages",
+       help='S3 bucket where jobs will be stored')
 
 from utils import statemon
 statemon.define("master_connection_error", int)
@@ -114,13 +117,23 @@ class Cluster():
     # network reduction.
     #
     # This table is (type, multiplier, on demand price)
-    instance_info = {
-        'r3.2xlarge' : (2.1, 0.70),
-        'r3.4xlarge' : (4.4, 1.40),
-        'r3.8xlarge' : (9.6, 2.80),
-        'hi1.4xlarge' : (2.5, 3.10),
-        'm2.4xlarge' : (2.2, 0.98)}
+    #instance_info = {
+    #    'r3.2xlarge' : (2.1, 0.70),
+    #    'r3.4xlarge' : (4.4, 1.40),
+    #    'r3.8xlarge' : (9.6, 2.80),
+    #    'hi1.4xlarge' : (2.5, 3.10),
+    #    'm2.4xlarge' : (2.2, 0.98)
+    #    }
 
+    # We are basing it on a combination of memory and disk space
+    instance_info = {
+        'm2.2xlarge' : (1.0, 0.49),
+        'm2.4xlarge' : (2.1, 0.98),
+        'r3.4xlarge' : (3.1, 1.40),
+        'r3.8xlarge' : (6.2, 2.80),
+        'hi1.4xlarge' : (6.1, 3.1),
+        'cc2.8xlarge' : (9.1, 2.0),
+        }
 
     # Possible cluster roles
     ROLE_PRIMARY = 'primary'
@@ -278,21 +291,12 @@ class Cluster():
             extra_ops['mapreduce.reduce.java.opts'] = '-Xmx4000m'
         
         self.connect()
-        ssh_conn = ClusterSSHConnection(self)
-        ssh_conn.copy_file(jar, '/home/hadoop/%s' % os.path.basename(jar))
+        stdout = self.send_job_to_cluster(jar, main_class, extra_ops,
+                                          input_path, output_path)
 
         trackURLRe = re.compile(
             r"Tracking URL: https?://(\S+)/proxy/(\S+)/")
         jobidRe = re.compile(r"Job ID: (\S+)")
-        stdout = ssh_conn.execute_remote_command(
-            ('hadoop jar /home/hadoop/{jar} {main_class} {extra_ops} {input} '
-             '{output}').format(
-                 jar=os.path.basename(jar),
-                 main_class=main_class,
-                 extra_ops=' '.join(('-D %s=%s' % x 
-                                     for x in extra_ops.iteritems())),
-                 input=input_path,
-                 output=output_path))
         url_parse = trackURLRe.search(stdout)
         if not url_parse:
             raise MapReduceError(
@@ -370,6 +374,123 @@ class Cluster():
                     raise
                 time.sleep(30)
 
+    def send_job_to_cluster(self, jar, main_class, extra_ops, input_path,
+                            output_path):
+        '''Sends a job to the cluster and returns a string of the stdout.
+
+        Inputs:
+        jar - Local path to the jar to run
+        main_class - Main java class to execute
+        extra_ops - Dictionary of extra parameters for the job
+        input_path - Input path for the job to use. Probably hdfs or s3 path
+        output_path - Output path for the job to use
+
+        returns - String of the stdout for starting the job
+        '''
+        # First upload the jar to s3
+        s3conn = S3Connection()
+        bucket = s3conn.get_bucket(options.s3_jar_bucket)
+        jar_key = bucket.new_key(os.path.basename(jar))
+        _log.info('Uploading jar to s3://%s/%s' % (bucket.name, jar_key.name))
+        jar_key.set_contents_from_filename(
+            jar,
+            headers={'Content-Type' : 'application/java-archive'},
+            replace=True)
+
+        _log.info('Wait for jar to be available in S3')
+        found_key = bucket.get_key(jar_key.name)
+        wait_count = 0
+        while found_key is None or jar_key.md5 != found_key.etag.strip('"'):
+            if wait_count > 60:
+                _log.error('Timeout when waiting for the jar to show up in S3')
+                raise IOError('Timeout when uploading jar to s3://%s/%s' %
+                              (bucket.name, jar_key.name))
+            time.sleep(5.0)
+            found_key = bucket.get_key(jar_key.name)
+            wait_count += 1
+
+        # Now send the job to emr
+        _log.info('Sending job to EMR')
+        emrconn = EmrConnection()
+        step_args = ' '.join(('-D %s=%s' % x 
+                              for x in extra_ops.iteritems()))
+        step_args = step_args.split()
+        step_args.append(input_path)
+        step_args.append(output_path)
+        step = boto.emr.step.JarStep(main_class,
+                                     's3://%s/%s' % (bucket.name,
+                                                     jar_key.name),
+                                     main_class,
+                                     'CONTINUE',
+                                     step_args)
+        res = emrconn.add_jobflow_steps(self.cluster_id, [step])
+        step_id = res.stepids[0].value
+        _log.info('EMR Job id is %s. Waiting for it to be sent to Hadoop' %
+                  step_id)
+
+        ssh_conn = ClusterSSHConnection(self)
+
+        # Wait until it is "done". When it is "done" it has actually
+        # only sucessfully loaded the job into the resource manager
+        wait_count = 0
+        while (emrconn.describe_step(self.cluster_id, step_id).status.state in
+               ['PENDING', 'RUNNING']):
+            if wait_count > 40:
+                _log.error('Timeout when waiting for EMR to send the job %s '
+                           'to Haddop' % step_id)
+                _log.error('stderr was:\n %s' %
+                       self.get_emr_logfile(ssh_conn, step_id, 'stderr'))
+                _log.error('stdout was:\n %s' %
+                       self.get_emr_logfile(ssh_conn, step_id, 'stdout'))
+                _log.error('syslog was:\n %s' %
+                       self.get_emr_logfile(ssh_conn, step_id, 'syslog'))
+                raise MapReduceError('Timeout when waiting for EMR to send '
+                                     'job %s to Hadoop' % step_id)
+            time.sleep(15.0)
+            wait_count += 1
+
+        job_state = emrconn.describe_step(self.cluster_id,
+                                          step_id).status.state
+        if (job_state != 'COMPLETED'):
+            _log.error('EMR job could not be added to Hadoop. It is state %s'
+                       % job_state)
+
+            # Get the logs from the cluster
+            _log.error('stderr was:\n %s' %
+                       self.get_emr_logfile(ssh_conn, step_id, 'stderr'))
+            _log.error('stdout was:\n %s' %
+                       self.get_emr_logfile(ssh_conn, step_id, 'stdout'))
+            _log.error('syslog was:\n %s' %
+                       self.get_emr_logfile(ssh_conn, step_id, 'syslog'))
+            raise MapReduceError('Error loading job into Hadoop. '
+                                 'See earlier logs for job logs')
+
+        # Get the stdout from the job being loaded up
+        return self.get_emr_logfile(ssh_conn, step_id, 'stdout')
+
+    def get_emr_logfile(self, ssh_conn, step_id, logtype='stdout', retry=True):
+        '''Grabs the logfile from the master and returns it as a string'''
+        ssh_conn = ClusterSSHConnection(self)
+        try:
+            log_fp = ssh_conn.open_remote_file(
+                '/mnt/var/log/hadoop/steps/%s/%s' % (step_id, logtype),
+                'r')
+        except IOError:
+            # The log might have been g-zipped so try getting it that way
+            log_fp = gzip.GzipFile(
+                '',
+                'rb',
+                fileobj=ssh_conn.open_remote_file(
+                    '/mnt/var/log/hadoop/steps/%s/%s.gz' % (step_id, logtype),
+                    'rb'))
+        retval = ''.join(log_fp.readlines())
+        if retval == '' and retry:
+            # The data might not be in the file yet, wait a few
+            # seconds and try again
+            time.sleep(10.0)
+            return self.get_emr_logfile(ssh_conn, step_id, logtype, False)
+        return retval
+
     def is_alive(self):
         '''Returns true if the cluster is up and running.'''
         try:
@@ -431,8 +552,8 @@ class Cluster():
                 if group_type == 'TASK' and new_size is not None:
                     _log.info('Could not find the instance group to change, '
                               'creating it')
-                    group = InstanceGroup(new_size, 'TASK', 'c3.2xlarge', 
-                                          'SPOT', 'Task Instance Group', 0.46)
+                    group = InstanceGroup(new_size, 'TASK', 'r3.2xlarge', 
+                                          'SPOT', 'Task Instance Group', 0.77)
                     conn.add_instance_groups(self.cluster_id, [group])
                     return group
                         
@@ -615,10 +736,6 @@ class Cluster():
 
         bootstrap_actions = [
             BootstrapAction(
-                'Install HBase',
-                's3://elasticmapreduce/bootstrap-actions/setup-hbase',
-                []),
-            BootstrapAction(
                 'Install Ganglia',
                 's3://elasticmapreduce/bootstrap-actions/install-ganglia',
                 []),
@@ -630,7 +747,7 @@ class Cluster():
             BootstrapAction(
                 'Configure Hadoop',
                 's3://elasticmapreduce/bootstrap-actions/configure-hadoop',
-                ['--site-key-value', 'io.file.buffer.size=65536',
+                ['--hdfs-key-value', 'io.file.buffer.size=65536',
                  '--mapred-key-value',
                  'mapreduce.job.user.classpath.first=true',
                  '--mapred-key-value', 'mapreduce.map.output.compress=true',
@@ -654,13 +771,7 @@ class Cluster():
                  'yarn.log-aggregation-enable=true'])]
             
         steps = [
-            boto.emr.step.InstallHiveStep('0.11.0.2'),
-            boto.emr.step.JarStep(
-                'Start HBase',
-                '/home/hadoop/lib/hbase.jar',
-                None,
-                'TERMINATE_JOB_FLOW',
-                ['emr.hbase.backup.Main', '--start-master'])]
+            boto.emr.step.InstallHiveStep('0.11.0.2')]
 
             
         instance_groups = [
@@ -675,7 +786,7 @@ class Cluster():
             options.cluster_name,
             log_uri='s3://neon-cluster-logs/',
             ec2_keyname='emr-runner',
-            ami_version='3.1.0',
+            ami_version='3.1.4',
             job_flow_role='EMR_EC2_DefaultRole',
             service_role='EMR_DefaultRole',
             keep_alive=True,
@@ -806,7 +917,7 @@ class ClusterSSHConnection:
             raise ClusterConnectionError("Error connecting to %s: %s" %
                                          (self.cluster_info.master_ip, e))
 
-    def copy_file(self, local_path, remote_path):
+    def put_file(self, local_path, remote_path):
         '''Copies a file from the local path to the cluster.
 
         '''
@@ -821,6 +932,14 @@ class ClusterSSHConnection:
 
         finally:
             self.client.close()
+
+    def open_remote_file(self, remote_path, mode='r', bufsize=-1):
+        '''Returns a file like object for a remote file'''
+        _log.info('Opening %s on %s' %
+                  (remote_path, self.cluster_info.master_ip))
+        self._connect()
+        ftp_client = self.client.open_sftp()
+        return ftp_client.file(remote_path, mode, bufsize)
 
     def execute_remote_command(self, cmd):
         '''Executes a command on the master node.
@@ -837,12 +956,34 @@ class ClusterSSHConnection:
         stderr_msg = []
         retcode = None
         try:
-            stdin, stdout, stderr = self.client.exec_command(cmd)
-            for line in stdout:
-                stdout_msg.append(line)
-            for line in stderr:
-                stderr_msg.append(line)
+            stdin, stdout, stderr = self.client.exec_command(cmd, timeout=60.0)
+
+            # Get the stdout and stderr data. Need to do this the long
+            # way because if either is long, an ssh buffer fills up
+            # and hangs forever waiting to be emptied.
+            got_stdout = False
+            got_stderr = False
+            while not got_stderr or not got_stdout:
+                stdout_line = stdout.readline()
+                if stdout_line == '':
+                    got_stdout = True
+                else:
+                    stdout_msg.append(stdout_line)
+
+                stderr_line = stderr.readline()
+                if stderr_line == '':
+                    got_stderr = True
+                else:
+                    stderr_msg.append(stderr_line)
             retcode = stdout.channel.recv_exit_status()
+
+        except socket.timeout:
+            # TODO(mdesnoyer): Right now, running a yarn job will
+            # hang, so a timeout occurs. However, the job actually
+            # runs. Figure out why it hangs.
+            _log.warn('Socket timeout when running command. '
+                      'Assuming that the process succeeds for now: %s' % cmd)
+            return ''.join(stdout_msg)
             
         finally:
             self.client.close()
@@ -850,6 +991,6 @@ class ClusterSSHConnection:
         if retcode != 0:
             raise ExecutionError(
                 "Error running command on the cluster: %s. Stderr was: \n%s" % 
-                (cmd, '\n'.join(stderr_msg)))
+                (cmd, ''.join(stderr_msg)))
 
-        return '\n'.join(stdout_msg)
+        return ''.join(stdout_msg)

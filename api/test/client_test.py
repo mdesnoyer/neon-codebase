@@ -102,7 +102,7 @@ class TestVideoClient(test_utils.neontest.TestCase):
         super(TestVideoClient, self).tearDown()
         self.utils_patch.stop()
         
-    def setup_video_processor(self, request_type):
+    def setup_video_processor(self, request_type, url='http://url.com'):
         '''
         Setup the api request for the video processor
         '''
@@ -121,15 +121,16 @@ class TestVideoClient(test_utils.neontest.TestCase):
         if request_type == "neon":
             jparams = request_template.neon_api_request % (
                     j_id, vid, api_key, "neon", api_key, j_id)
-            self.api_request = neondata.NeonApiRequest(j_id, api_key, vid, "title",
-                    'url', 'neon', None)
+            self.api_request = neondata.NeonApiRequest(j_id, api_key, vid,
+                                                       "title",
+                                                       url, 'neon', None)
         elif request_type == "brightcove":
             i_id = "b_id"
-            jparams = request_template.brightcove_api_request %(j_id, vid, api_key,
-                            "brightcove", api_key, j_id, i_id)
+            jparams = request_template.brightcove_api_request %(
+                j_id, vid, api_key, "brightcove", api_key, j_id, i_id)
             self.api_request = neondata.BrightcoveApiRequest(
                                         j_id, api_key, vid, 
-                                        'title', 'http://url',
+                                        'title', url,
                                         'rtok', 'wtok', None) 
             self.api_request.previous_thumbnail = "http://prevthumb"
         elif request_type == "ooyala":
@@ -137,13 +138,14 @@ class TestVideoClient(test_utils.neontest.TestCase):
             jparams = request_template.ooyala_api_request %(j_id, vid, api_key,
                             "ooyala", api_key, j_id, i_id)
             self.api_request = neondata.OoyalaApiRequest(
-                                       j_id, api_key, i_id, vid, 'title', 'url',
-                                       'oo_key', 'oo_secret', 'http://p_thumb', 'cb')
+                j_id, api_key, i_id, vid, 'title', url,
+                'oo_key', 'oo_secret', 'http://p_thumb', 'cb')
 
         job = json.loads(jparams)
+        job['video_url'] = url
         
         i_vid = neondata.InternalVideoID.generate(api_key, vid)
-        vmdata = neondata.VideoMetadata(i_vid, [], j_id, "url", 10,
+        vmdata = neondata.VideoMetadata(i_vid, [], j_id, url, 10,
                                         4, None, i_id, [640,480])
         vmdata.save()
         
@@ -191,19 +193,76 @@ class TestVideoClient(test_utils.neontest.TestCase):
             with self.assertRaises(api.client.VideoDownloadError):
                 vprocessor.download_video_file()
 
+    @patch('api.client.S3Connection')
+    def test_download_s3_video(self, s3_mock):
+        vdata = '%030x' % random.randrange(16**(10*1024*1024))
+        
+        s3conn = boto_mock.MockConnection()
+        s3_mock.return_value = s3conn
+        s3conn.create_bucket('customer-videos')
+        bucket = s3conn.get_bucket('customer-videos')
+        key = bucket.new_key('some/video.mp4')
+        key.set_contents_from_string(vdata)
+
+        vprocessor = self.setup_video_processor(
+            "neon", url='s3://customer-videos/some/video.mp4')
+        vprocessor.download_video_file()
+        vprocessor.tempfile.seek(0) 
+        self.assertEqual(vprocessor.tempfile.read(), vdata)
+
+    @patch('api.client.S3Connection')
+    def test_download_s3_video_http_path(self, s3_mock):
+        vdata = '%030x' % random.randrange(16**(10*1024*1024))
+        
+        s3conn = boto_mock.MockConnection()
+        s3_mock.return_value = s3conn
+        s3conn.create_bucket('customer-videos')
+        bucket = s3conn.get_bucket('customer-videos')
+        key = bucket.new_key('some/video.mp4')
+        key.set_contents_from_string(vdata)
+
+        vprocessor = self.setup_video_processor(
+            "neon", url='https://s3-us-west-2.amazonaws.com/customer-videos/some/video.mp4')
+        vprocessor.download_video_file()
+        vprocessor.tempfile.seek(0) 
+        self.assertEqual(vprocessor.tempfile.read(), vdata)
+
+    @patch('api.client.S3Connection')
+    def test_download_s3_video_error(self, s3_mock):
+        s3_mock.side_effect = [
+            boto.exception.BotoClientError("Permissions error"),
+            boto.exception.BotoServerError(404, "Connection error"),
+            IOError()
+            ]
+
+        vprocessor = self.setup_video_processor(
+            "neon", url='s3://customer-videos/some/video.mp4')
+        
+        with self.assertLogExists(logging.ERROR, "Client error downloading"):
+            with self.assertRaises(api.client.VideoDownloadError):
+                vprocessor.download_video_file()
+                
+        with self.assertLogExists(logging.ERROR, "Server error downloading"):
+            with self.assertRaises(api.client.VideoDownloadError):
+                vprocessor.download_video_file()
+
+        with self.assertLogExists(logging.ERROR, "Error saving video to disk"):
+            with self.assertRaises(api.client.VideoDownloadError):
+                vprocessor.download_video_file()
+
     def test_process_video(self):
        
         '''
         Verify execution of the process_all call in ProcessVideo
         '''
-        vprocessor = self.setup_video_processor("neon")
+        vprocessor = self.setup_video_processor("neon", url='http://video.com')
         vprocessor.process_video(self.test_video_file, n_thumbs=5)
 
         # Check that the model was called correctly
         self.assertTrue(self.model.choose_thumbnails.called)
         cargs, kwargs = self.model.choose_thumbnails.call_args
         self.assertEquals(kwargs, {'n':5,
-                                   'video_name':  'http://brightcove.vo.llnwd.net/e1/uds/pd/2294876105001/2294876105001_2369427498001_shutterstock-v2602466.mp4'})
+                                   'video_name':  'http://video.com'})
         self.assertEquals(len(cargs), 1)
 
         #verify video metadata has been populated
@@ -466,7 +525,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertIsNotNone(n_thumbs[0].phash)
         self.assertIsNotNone(n_thumbs[0].key)
         self.assertEquals(n_thumbs[0].urls, [
-            'https://s3.amazonaws.com/host-thumbnails/%s.jpg' %
+            'http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
             re.sub('_', '/', n_thumbs[0].key)])
         self.assertEquals(n_thumbs[0].width, 640)
         self.assertEquals(n_thumbs[0].height, 480)
@@ -623,7 +682,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertIsNotNone(n_thumbs[0].phash)
         self.assertRegexpMatches(n_thumbs[0].key, '%s_.+'%self.video_id)
         self.assertEquals(n_thumbs[0].urls, [
-            'https://s3.amazonaws.com/host-thumbnails/%s.jpg' %
+            'http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
             re.sub('_', '/', n_thumbs[0].key)])
 
     def test_default_thumb_already_saved(self):

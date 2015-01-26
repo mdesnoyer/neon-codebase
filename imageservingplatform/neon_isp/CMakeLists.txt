@@ -29,6 +29,8 @@ add_library(NeonISP STATIC
  publisher.cpp 
  fraction.cpp 
  scaledImage.cpp 
+ defaultThumbnail.cpp
+ defaultThumbnailHashtable.cpp
  neonException.cpp 
  neon_error_codes.c
  neon_stats.c

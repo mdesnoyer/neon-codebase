@@ -47,6 +47,7 @@ define("compiled_schema_path",
 from utils import statemon
 statemon.define("stats_cleaning_job_failures", int)
 statemon.define("impala_table_creation_failure", int)
+statemon.define("hbase_table_load_failure", int)
 
 class NeonDataPipelineException(Exception): pass
 class ExecutionError(NeonDataPipelineException): pass
@@ -63,53 +64,80 @@ class ImpalaTableBuilder(threading.Thread):
         self.base_input_path = base_input_path
         self.cluster = cluster
         self.status = 'INIT'
+        self._stopped = threading.Event()
 
         self.avro_schema = avro.schema.parse(open(os.path.join(
             options.compiled_schema_path, "%sHive.avsc" % self.event)).read())
 
+    def stop(self):
+        self._stopped.set()
+
     def run(self):
-        self.cluster.connect()
-        hive_event = '%sHive' % self.event
-        
+        self._stopped.clear()
+        try:
+            self.cluster.connect()
+            hive_event = '%sHive' % self.event
+        except Exception as e:
+            _log.error('Error connecting to the cluster %s' % e)
+            statemon.state.increment('impala_table_creation_failure')
+            self.status = 'ERROR'
+            return
+
         # Upload the schema for this table to the s3 bucket
-        s3conn = S3Connection()
-        bucket = s3conn.get_bucket(options.schema_bucket)
-        key = boto.s3.key.Key(bucket, '%s.avsc' % hive_event)
-        key.set_contents_from_filename(
-            os.path.join(options.compiled_schema_path,
-                         '%s.avsc' % hive_event),
-                         replace=True)
-        
-        # Create the hive client
-        transport = TSocket.TSocket(self.cluster.master_ip,
-                                    options.hive_port)
-        transport = TTransport.TBufferedTransport(transport)
-        protocol = TBinaryProtocol.TBinaryProtocol(transport)
-        hive = ThriftHive.Client(protocol)
+        try:
+            s3conn = S3Connection()
+            bucket = s3conn.get_bucket(options.schema_bucket)
+            key = boto.s3.key.Key(bucket, '%s.avsc' % hive_event)
+            key.set_contents_from_filename(
+                os.path.join(options.compiled_schema_path,
+                             '%s.avsc' % hive_event),
+                             replace=True)
+        except Exception as e:
+            _log.error('Error uploading the schema %s to s3: %s' % 
+                       (self.event, e))
+            statemon.state.increment('impala_table_creation_failure')
+            self.status = 'ERROR'
+            return
 
         try:
+            # Connect to hive
+            _log.debug('Connecting to hive at %s:%s' %
+                      (self.cluster.master_ip, options.hive_port))
+            transport = TSocket.TSocket(self.cluster.master_ip,
+                                        options.hive_port)
+            transport = TTransport.TBufferedTransport(transport)
+            protocol = TBinaryProtocol.TBinaryProtocol(transport)
+            hive = ThriftHive.Client(protocol)
             transport.open()
-
+            
             # Connect to Impala
+            _log.debug('Connecting to impala at %s:%s' %
+                      (self.cluster.master_ip, options.impala_port))
             impala_conn = impala.dbapi.connect(
                 host=self.cluster.master_ip,
                 port=options.impala_port)
+            
+            _log.info('Setting hive parameters')
 
             # Set some parameters
             hive.execute('SET hive.exec.compress.output=true')
             hive.execute('SET avro.output.codec=snappy')
             hive.execute('SET parquet.compression=SNAPPY')
-            hive.execute('SET hive.exec.dynamic.partition.mode=nonstrict')
-        
+            hive.execute(
+                'SET hive.exec.dynamic.partition.mode=nonstrict')
+
+
             self.status = 'RUNNING'
 
             external_table = 'Avro%ss' % self.event
             _log.info("Registering external %s table with Hive" % 
                       external_table)
-            hive.execute('DROP TABLE IF EXISTS %s' % external_table)
+            hive.execute('DROP TABLE IF EXISTS %s' % 
+                         external_table)
             hive.execute("""
             create external table %s
-            ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
+            ROW FORMAT SERDE 
+            'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
             STORED AS
             INPUTFORMAT  
             'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat'
@@ -117,7 +145,7 @@ class ImpalaTableBuilder(threading.Thread):
             'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat'
             LOCATION '%s/%s'
             TBLPROPERTIES (
-              'avro.schema.url'='s3://%s/%s.avsc'
+            'avro.schema.url'='s3://%s/%s.avsc'
             )""" % 
             (external_table, self.base_input_path, hive_event, 
              options.schema_bucket, hive_event))
@@ -133,18 +161,21 @@ class ImpalaTableBuilder(threading.Thread):
             OUTPUTFORMAT 'parquet.hive.DeprecatedParquetOutputFormat'
             """ % (parq_table, self._generate_table_definition()))
 
-            # Building parquet tables takes a lot of memory, so make
-            # sure we give the job enough.
+            # Building parquet tables takes a lot of
+            # memory, so make sure we give the job enough.
             hive.execute("SET mapreduce.reduce.memory.mb=8000")
-            hive.execute("SET mapreduce.reduce.java.opts=-Xmx6400m")
+            hive.execute(
+                "SET mapreduce.reduce.java.opts=-Xmx6400m")
             hive.execute("SET mapreduce.map.memory.mb=8000")
             hive.execute("SET mapreduce.map.java.opts=-Xmx6400m")
             hive.execute("""
             insert overwrite table %s
             partition(tai, yr, mnth)
-            select %s, trackerAccountId, year(cast(serverTime as timestamp)),
+            select %s, trackerAccountId,
+            year(cast(serverTime as timestamp)),
             month(cast(serverTime as timestamp)) from %s""" %
-            (parq_table, ','.join(x.name for x in self.avro_schema.fields),
+            (parq_table, ','.join(x.name for x in 
+                                  self.avro_schema.fields),
              external_table))
 
             _log.info("Refreshing table %s in Impala" % parq_table)
@@ -158,8 +189,6 @@ class ImpalaTableBuilder(threading.Thread):
             else:
                 # It's not there, so we need to refresh all the metadata
                 impala_cursor.execute('invalidate metadata')
-
-            hive.execute('reset')
 
             self.status = 'SUCCESS'
             
@@ -183,6 +212,15 @@ class ImpalaTableBuilder(threading.Thread):
                        (self.event, self.avro_schema))
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
+
+        except Exception as e:
+            _log.exception('Unexpected exception when building the impala '
+                           'table %s' % self.event)
+            statemon.state.increment('impala_table_creation_failure')
+            self.status = 'ERROR'
+
+        finally:
+            transport.close()
 
     def _generate_table_definition(self):
         '''Generates this hive table definition based on the avro schema.
@@ -225,6 +263,71 @@ class ImpalaTableBuilder(threading.Thread):
                     (field.name, field_type))
         return ','.join(cols)
 
+def add_hbase_table_to_impala(cluster):
+    '''Adds the hbase event table to Impala if it is not there already
+
+    Inputs:
+    cluster - A Cluster object for working with the cluster
+    '''
+    EVENT_TABLE_NAME = 'hbaseevents'
+
+    _log.info('Registering hbase table in Impala')
+    
+    # Create the hive client
+    transport = TSocket.TSocket(cluster.master_ip,
+                                options.hive_port)
+    transport = TTransport.TBufferedTransport(transport)
+    protocol = TBinaryProtocol.TBinaryProtocol(transport)
+    hive = ThriftHive.Client(protocol)
+
+    try:
+        transport.open()
+
+        # See if the table exists
+        found_hbase_table = False
+        hive.execute('show tables')
+        for row in hive.fetchall():
+            if re.compile(EVENT_TABLE_NAME).search(row):
+                found_hbase_table = True
+        if found_hbase_table:
+            _log.info('hbase table is already registered')
+            return
+
+        # Create the table
+        hive.execute('''
+        create external table %s (
+          hour_thumb string,
+          loads bigint,
+          views bigint,
+          clicks bigint)
+        STORED BY 'org.apache.hadoop.hive.hbase.HBaseStorageHandler'
+        WITH SERDEPROPERTIES ("hbase.columns.mapping" =
+          ":key,\
+          THUMBNAIL_EVENTS_TYPES:IMAGE_LOAD,\
+          THUMBNAIL_EVENTS_TYPES:IMAGE_VISIBLE,\
+          THUMBNAIL_EVENTS_TYPES:IMAGE_CLICK")
+        TBLPROPERTIES("hbase.table.name" = "TIMESTAMP_THUMBNAIL_EVENTS")
+        ''' % EVENT_TABLE_NAME)
+
+        # Connect to Impala
+        impala_conn = impala.dbapi.connect(
+            host=cluster.master_ip,
+            port=options.impala_port)
+
+        # Refresh the metastore so that impala can see the table
+        impala_cursor = impala_conn.cursor()
+        impala_cursor.execute('invalidate metadata')
+    except Thrift.TException as e:
+        statemon.state.increment('hbase_table_load_failure')
+        raise ImpalaError('Error loading hbase table: %s' % e)
+    except HiveServerException as e:
+        statemon.state.increment('hbase_table_load_failure')
+        raise ImpalaError('Error loading hbase table: %s' % e)
+    except impala.error.Error as e:
+        statemon.state.increment('hbase_table_load_failure')
+        raise ImpalaError('Error loading hbase table: %s' % e)
+        
+
 def build_impala_tables(input_path, cluster, timeout=None):
     '''Builds the impala tables.
 
@@ -252,7 +355,7 @@ def build_impala_tables(input_path, cluster, timeout=None):
         thread = ImpalaTableBuilder(input_path, cluster, event)
         thread.start()
         threads.append(thread)
-        time.sleep(1)
+        time.sleep(5)
 
     # Wait for all of the tables to be built
     for thread in threads:
@@ -263,10 +366,12 @@ def build_impala_tables(input_path, cluster, timeout=None):
                 raise TimeoutException()
         thread.join(time_left)
         if thread.is_alive():
+            for t2 in threads:
+                t2.stop()
             raise TimeoutException()
         if thread.status != 'SUCCESS':
-            _log.error("Error building impala table %s. See logs."
-                       % thread.event)
+            _log.error("Error building impala table %s. State is %s. See logs."
+                       % (thread.event, thread.status))
             raise ImpalaError("Error building impala table")
 
     _log.info('Updating table table_build_times')
@@ -277,6 +382,8 @@ def build_impala_tables(input_path, cluster, timeout=None):
                    '(done_time timestamp) stored as PARQUET')
     cursor.execute("insert into table_build_times (done_time) values ('%s')" %
                    datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+
+    add_hbase_table_to_impala()
 
     _log.info('Finished building Impala tables')
     return True

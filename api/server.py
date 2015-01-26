@@ -49,6 +49,7 @@ DIRNAME = os.path.dirname(__file__)
 # Monitoring variables
 statemon.define('server_queue', int)
 statemon.define('duplicate_requests', int)
+statemon.define('add_video_error', int)
 statemon.define('dequeue_requests', int)
 statemon.define('queue_size_bytes', int) # size of the queue in bytes of video
 
@@ -255,6 +256,7 @@ class FairWeightedRequestQueue(object):
             video_url = item.get_video_url()
 
             # Get content length of the video
+            # TODO(Sunil): Get the content length of videos on s3
             req = tornado.httpclient.HTTPRequest(method='HEAD',
                             url=video_url, request_timeout=5.0) 
             result = yield tornado.gen.Task(utils.http.send_request, req)
@@ -593,7 +595,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             uri = self.request.uri
             self.parsed_params = {}
             api_request = None 
-            http_callback = None
+            http_callback = params.get(CALLBACK_URL, None)
+            default_thumbnail = params.get('default_thumbnail', None)
             
             # Verify essential parameters
             try:
@@ -607,25 +610,19 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 title = params[VIDEO_TITLE]
                 url = params[VIDEO_DOWNLOAD_URL]
                 
-                #TODO: Handle default thumbnail
 
             except KeyError, e:
                 self.send_json_response('{"error":"params not set"}', 400)
                 return
-           
-            # Treat http_callback as an optional parameter
-            try:
-                http_callback = params[CALLBACK_URL]
-            except KeyError, e:
-                pass
 
             # compare with supported api methods
             if params.has_key(TOP_THUMBNAILS):
                 api_method = "topn"
                 api_param = min(int(params[TOP_THUMBNAILS]),
-                        MAX_THUMBNAILS)
+                                MAX_THUMBNAILS)
             else:
-                self.send_json_response('{"error":"api method not supported"}', 400)
+                self.send_json_response('{"error":"api method not supported"}',
+                                        400)
                 return
            
             # Generate JOB ID  
@@ -637,7 +634,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             # Identify Request Type
             if "brightcove" in self.request.uri:
                 pub_id  = params[PUBLISHER_ID] #publisher id
-                p_thumb = params["default_thumbnail"]
                 rtoken = params[BCOVE_READ_TOKEN]
                 wtoken = params[BCOVE_WRITE_TOKEN]
                 autosync = params["autosync"]
@@ -646,7 +642,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 api_request = neondata.BrightcoveApiRequest(
                     job_id, api_key, vid, title, url,
                     rtoken, wtoken, pub_id, http_callback, i_id,
-                    default_thumbnail=p_thumb)
+                    default_thumbnail=default_thumbnail)
                 api_request.autosync = autosync
 
             elif "ooyala" in self.request.uri:
@@ -655,7 +651,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 oo_secret_key = params["oo_secret_key"]
                 autosync = params["autosync"]
                 i_id = params[INTEGRATION_ID]
-                p_thumb = params["default_thumbnail"]
                 api_request = neondata.OoyalaApiRequest(
                     job_id,
                     api_key, 
@@ -666,7 +661,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     oo_api_key,
                     oo_secret_key, 
                     http_callback,
-                    default_thumbnail=p_thumb)
+                    default_thumbnail=default_thumbnail)
                 api_request.autosync = autosync
 
             else:
@@ -674,7 +669,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 api_request = neondata.NeonApiRequest(job_id, api_key, vid,
                                                       title, url,
                                                       request_type,
-                                                      http_callback)
+                                                      http_callback,
+                                                      default_thumbnail)
             
             # API Method
             api_request.set_api_method(api_method, api_param)
@@ -706,7 +702,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             else:
                 # Add the job to the queue
                 yield self.job_manager.add_job(api_request)
-                
+
                 # Only if this is a Neon request, save it to the
                 # DB. Other platform requests get added on request
                 # creation cron
@@ -718,21 +714,39 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                         # to stored object (atomic save)
                         nplatform.add_video(vid, job_id)
                         res = yield tornado.gen.Task(nplatform.save)
-                        if res:
-                            self.write(response_data)
-                            self.set_status(201)
-                            self.finish()
-                        else:
+                        if not res:
                             _log.error("key=thumbnail_handler update account " 
-                                        "  msg=video not added to account")
+                                       "  msg=video not added to account")
+                            self.send_json_response('{}', 500)
+                            statemon.state.increment('add_video_error')
                     else:
                         _log.error("account not found or api key error")
                         self.send_json_response('{}', 400)
+                        return
 
-                else:
-                    self.set_status(201)
-                    self.write(response_data)
-                    self.finish()
+                # Save the video metadata and the default thumbnail
+                video = yield tornado.gen.Task(
+                    neondata.VideoMetadata.get,
+                    neondata.InternalVideoID.generate(api_key, vid))
+                if video is None:
+                    video = neondata.VideoMetadata(
+                        neondata.InternalVideoID.generate(api_key, vid),
+                        request_id=api_request.job_id,
+                        video_url=url,
+                        i_id=api_request.integration_id,
+                        serving_enabled=False)
+                    yield tornado.gen.Task(video.save)
+                yield api_request.save_default_thumbnail(async=True)
+                def _set_serving_enabled(video_obj):
+                    video_obj.serving_enabled = \
+                      len(video_obj.thumbnail_ids) > 0
+                yield tornado.gen.Task(neondata.VideoMetadata.modify,
+                                       video.key,
+                                       _set_serving_enabled)
+                
+                self.set_status(201)
+                self.write(response_data)
+                self.finish()
 
         except ValueError, e:
             self.send_json_response('{"error":"%s"}' % e, 400)
@@ -741,6 +755,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
         except Exception, e:
             _log.exception("key=thumbnail_handler msg= %s"%e)
             self.send_json_response('{"error":"%s"}' % e, 500)
+            statemon.state.increment('add_video_error')
             return
 
 ###########################################

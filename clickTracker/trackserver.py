@@ -114,7 +114,8 @@ class BaseTrackerDataV2(object):
         'brightcove' : 'BRIGHTCOVE',
         'ooyala' : 'OOYALA',
         'bcgallery' : 'BCGALLERY',
-        'ign' : 'IGN'
+        'ign' : 'IGN',
+        'gen' : 'GENERAL'
         }
         
     
@@ -200,8 +201,20 @@ class BaseTrackerDataV2(object):
         # brightcove tracker code is fixed. It should just be
         # underscores.
         tidRe = re.compile('^[0-9a-zA-Z]+[\-_][0-9a-zA-Z\-~\.]+[\-_][0-9a-zA-Z]+$')
-        return [None if x is None or not tidRe.match(x) else x for x in
-                tids]
+        tidRe = re.compile('^[0-9a-zA-Z]+_[0-9a-zA-Z\-~\.]+_[0-9a-zA-Z]+$')
+        dashTidRe = re.compile('^[0-9a-zA-Z]+\-[0-9a-zA-Z~\.]+\-[0-9a-zA-Z]+$')
+        retval = []
+        for tid in tids:
+            if tid is None:
+                retval.append(tid)
+            elif tidRe.match(tid):
+                retval.append(tid)
+            elif dashTidRe.match(tid):
+                # Replace the dashes with underscores
+                retval.append(re.sub('\-', '_', tid))
+            else:
+                retval.append(None)
+        return retval
 
     def validate_video_id(self, vid):
         '''Returns the video id or None if it is invalid
@@ -534,12 +547,18 @@ class VideoPlay(BaseTrackerDataV2):
             request.get_argument('adplay', False))
         # (time when player initiates request to play video - 
         #             Last time an image or the player was clicked) 
+        # autoplay delta in milliseconds
         self.eventData['autoplayDelta'] = InputSanitizer.sanitize_int(
-            request.get_argument('adelta')) # autoplay delta in milliseconds
+            request.get_argument('adelta', None))
         self.eventData['playCount'] = InputSanitizer.sanitize_int(
             request.get_argument('pcount')) #the current count of the video playing on the page 
-        self.infocus = utils.inputsanitizer.InputSanitizer.to_bool(
-                request.get_argument('infocus', True)) # Was the player in foucs when video started playing (optional) 
+        self.eventData['isAutoPlay'] = InputSanitizer.to_bool(
+            request.get_argument('aplay', None), is_null_valid=True)
+
+        if (self.eventData['isAutoPlay'] is None and 
+            request.get_argument('adelta', None) is None):
+            raise tornado.web.MissingArgumentError(
+                'either adelta or aplay must be present')
 
 class AdPlay(BaseTrackerDataV2):
     '''An event specifying that the image were loaded.'''
@@ -554,12 +573,24 @@ class AdPlay(BaseTrackerDataV2):
         # Video id
         self.eventData['videoId'] = self.validate_video_id(
             InputSanitizer.sanitize_null(request.get_argument('vid'))) 
-        self.eventData['playerId'] = request.get_argument('playerid', None) # Player id
-        # (time when player initiates request to play video - Last time an image or the player was clicked) 
+        # Player id
+        self.eventData['playerId'] = request.get_argument('playerid', None)
+        # (time when player initiates request to play video - Last
+        # time an image or the player was clicked) autoplay delta in
+        # millisecond
         self.eventData['autoplayDelta'] = InputSanitizer.sanitize_int(
-            request.get_argument('adelta')) # autoplay delta in millisecond
+            request.get_argument('adelta', None))
          #the current count of the video playing on the page
-        self.eventData['playCount'] = InputSanitizer.sanitize_int(request.get_argument('pcount'))
+        self.eventData['playCount'] = InputSanitizer.sanitize_int(
+            request.get_argument('pcount'))
+
+        self.eventData['isAutoPlay'] = InputSanitizer.to_bool(
+            request.get_argument('aplay', None), is_null_valid=True)
+
+        if (self.eventData['isAutoPlay'] is None and 
+            request.get_argument('adelta', None) is None):
+            raise tornado.web.MissingArgumentError(
+                'either adelta or aplay must be present')
 
 class VideoViewPercentage(BaseTrackerDataV2):
     '''An event specifying that a percentage of the video was viewed.'''

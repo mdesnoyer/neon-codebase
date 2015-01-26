@@ -50,6 +50,11 @@ For variables defined in __main__, they are at the root of the option
 hierarchy although they can be specified in the config file in their
 modules instead.
 
+If you are forking new processes in your code, the subprocesses will
+only be able to access those options that are available when the
+process forks. In practice, if you are using global options and fork
+after all the importing is done, you will be fine.
+
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright 2013 Neon Labs
 
@@ -82,10 +87,8 @@ class Error(Exception):
 class OptionParser(object):
     '''A collection of options.'''
     def __init__(self):
-        manager = multiprocessing.Manager()
-        self.__dict__['_manager'] = manager
-        self.__dict__['_options'] = manager.dict()
-        self.__dict__['lock'] = manager.RLock()
+        self.__dict__['_options'] = {}
+        self.__dict__['lock'] = multiprocessing.RLock()
         self.__dict__['cmd_options'] = None
         self.__dict__['last_update'] = None
         self.__dict__['_config_poll_timer'] = None
@@ -125,7 +128,8 @@ class OptionParser(object):
             global_name = self._local2global(name)
             return self._options[global_name].value()
 
-    def define(self, name, default=None, type=None, help=None, stack_depth=2):
+    def define(self, name, default=None, type=None, help=None, stack_depth=2,
+               max_str_size=256):
         '''Defines a new option.
 
         Inputs:
@@ -133,6 +137,8 @@ class OptionParser(object):
         default - The default value
         type - The type object to expect
         help - Help string
+        stack_depth - Frame stack depth where the option was defined
+        max_str_size - Maximum size of a string option
         '''
         global_name = self._local2global(name, stack_depth=stack_depth)
 
@@ -160,7 +166,8 @@ class OptionParser(object):
                 type = default.__class__
 
         self._options[global_name] = _Option(name, default=default,
-                                             type=type, help=help)
+                                             type=type, help=help,
+                                             max_size=max_str_size)
 
     def parse_options(self, args=None, config_stream=None,
                       usage='%prog [options]', watch_file=True):
@@ -237,13 +244,17 @@ class OptionParser(object):
         with options._set_bounded('my.var', 95):
           do_stuff()
         '''
-        old_val = self._options[global_name]._value
-        self._set(global_name, value)
-
+        option = self._options[global_name]
+        is_default = option.is_default()
+        old_val = option.value()
+        option.set(value)
         try:
             yield
         finally:
-            self._set(global_name, old_val)
+            if is_default:
+                option.reset()
+            else:
+                option.set(old_val)
 
     def _set(self, global_name, value):
         '''Sets the value of an option.
@@ -261,8 +272,6 @@ class OptionParser(object):
             try:
                 option = self._options[global_name]
                 option.set(value)
-                # Register that the option changed with all the other processes
-                self._options[global_name] = option
             except KeyError:
                 _log.warn('Cannot set %s. It does not exist' % global_name)
 
@@ -321,8 +330,6 @@ class OptionParser(object):
             for name in self._options.keys():
                 obj = self._options[name]
                 obj.reset()
-                # Register that the option changed with all the other processes
-                self._options[name] = obj
 
     def _register_command_line_options(self):
         '''Takes the options in self.cmd_options and registers them.'''
@@ -346,7 +353,7 @@ class OptionParser(object):
         if stream is not None:
             return yaml.load(stream)        
 
-        s3re = re.compile('s3://([0-9a-zA-Z\.\-]+)/([0-9a-zA-Z\.\-/]+)')
+        s3re = re.compile('s3://([0-9a-zA-Z\.\-_]+)/([0-9a-zA-Z\.\-/]+)')
 
         if path is not None:
             s3match = s3re.match(path)
@@ -395,14 +402,10 @@ class OptionParser(object):
                 continue
 
             try:
-                option = self._options[name]
-                if option._value is None:
-                    self._set(name, option.type(value))
+                option = self._options[name].set(value,
+                                                 ignore_if_already_set=True)
             except KeyError:
                 _log.warn('Unknown option %s. Ignored' % name)
-            except ValueError:
-                raise TypeError('For option %s could not convert "%s" to %s' %
-                                (name, value, option.type.__name__))
 
     def _local2global(self, option, stack_depth=2):
         '''Converts the local name of the option to a global one.
@@ -442,29 +445,84 @@ class OptionParser(object):
         return '.'.join(relpath.split('/'))
 
 class _Option(object):
-    def __init__(self, name, default=None, type=str, help=None):
+    # Enums to put for the status of data captured in the value
+    _DATA_DEFAULT = 0
+    _DATA_VALID_VAL = 1
+    _DATA_NONE = 2
+    
+    
+    def __init__(self, name, default=None, type=str, help=None, max_size=256):
         self.name = name
         self.default = default
         self.type = type
         self.help = help
-        self._value = None
+        self.max_size = max_size
+        self._create_mutable_fields(type, max_size)
 
     def value(self):
-        return self.default if self._value is None else self._value
+        '''Get the value of the option.'''
+        with self._lock:
+            status = self._data_status.value
+            if status == _Option._DATA_DEFAULT:
+                return self.default
+            elif status == _Option._DATA_NONE:
+                return None
+            else:
+                return self._value.value
 
-    def set(self, value):
-        self._value = value
+    def set(self, value, ignore_if_already_set=False):
+        '''Sets the value of this option.'''
+        with self._lock:
+            if (ignore_if_already_set and 
+                self._data_status.value != _Option._DATA_DEFAULT):
+                return
+            if value is None:
+                self._data_status.value = _Option._DATA_NONE
+            else:
+                if (issubclass(self.type, basestring) and 
+                    len(value) >= self.max_size):
+                    msg = ('String for option %s is too long (%d): %s' %
+                        (self.name, self.max_size, value))
+                    _log.error(msg)
+                    raise ValueError(msg)
+                try:
+                    val = self.type(value)
+                except ValueError:
+                    raise TypeError(
+                        'For option %s could not convert "%s" to %s' %
+                        (self.name, value, self.type.__name__))
+                self._value.value = val
+                self._data_status.value = _Option._DATA_VALID_VAL
 
     def reset(self):
-        self._value = None
+        self._data_status.value = _Option._DATA_DEFAULT
+
+    def is_default(self):
+        self._data_status.value == _Option._DATA_DEFAULT
+
+    def _create_mutable_fields(self, type, max_size):
+        self._lock = multiprocessing.RLock()
+        if type == int:
+            self._value = multiprocessing.Value('i', 0, lock=self._lock)
+        elif type == long:
+            self._value = multiprocessing.Value('l', 0L, lock=self._lock)
+        elif type == float:
+            self._value = multiprocessing.Value('d', 0.0, lock=self._lock)
+        elif issubclass(type, basestring):
+            self._value = multiprocessing.Array('c', max_size, lock=self._lock)
+        else:
+            raise ValueError('Type %s is not supported' % type)
+        
+        self._data_status = multiprocessing.Value('b', _Option._DATA_DEFAULT,
+                                                  lock=self._lock)
 
 
 options = OptionParser()
 '''Global options object.'''
 
-def define(name, default=None, type=None, help=None):
+def define(name, default=None, type=None, help=None, max_str_size=256):
     return options.define(name, default=default, type=type, help=help,
-                          stack_depth=3)
+                          stack_depth=3, max_str_size=max_str_size)
 
 
 def parse_options(args=None, config_stream=None,

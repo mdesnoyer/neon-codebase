@@ -795,6 +795,24 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         r_nps = NeonPlatform.get_many(keys)
         self.assertListEqual(nps, r_nps)
 
+    def test_defaulted_get_experiment_strategy(self):
+        strategy = ExperimentStrategy('in_db',
+                                      max_neon_thumbs=7,
+                                      only_exp_if_chosen=True)
+        strategy.save()
+
+        with self.assertLogNotExists(logging.WARN, 'No ExperimentStrategy'):
+            self.assertEquals(strategy, ExperimentStrategy.get('in_db'))
+
+        with self.assertLogExists(logging.WARN, 'No ExperimentStrategy'):
+            self.assertEquals(ExperimentStrategy('not_in_db'),
+                              ExperimentStrategy.get('not_in_db'))
+
+        with self.assertLogNotExists(logging.WARN, 'No ExperimentStrategy'):
+            self.assertEquals(ExperimentStrategy('not_in_db'),
+                              ExperimentStrategy.get('not_in_db',
+                                                     log_missing=False))
+
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()
@@ -1127,251 +1145,7 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         
         with self.assertRaises(AttributeError):
             thumb.thumbnail_id
-
-class TestAddingImageData(test_utils.neontest.AsyncTestCase):
-    '''
-    Test cases that add image data to thumbnails (and do uploads) 
-    '''
-    def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-
-        # Mock out s3
-        self.s3conn = boto_mock.MockConnection()
-        self.s3_patcher = patch('api.cdnhosting.S3Connection')
-        self.mock_conn = self.s3_patcher.start()
-        self.mock_conn.return_value = self.s3conn
-        self.s3conn.create_bucket('hosting-bucket')
-        self.bucket = self.s3conn.get_bucket('hosting-bucket')
-
-        # Mock out cloundinary
-        self.cloundinary_patcher = patch('api.cdnhosting.CloudinaryHosting')
-        self.cloundinary_mock = self.cloundinary_patcher.start()
-
-        random.seed(1654984)
-
-        self.image = PILImageUtils.create_random_image(360, 480)
-        super(TestAddingImageData, self).setUp()
-
-    def tearDown(self):
-        self.s3_patcher.stop()
-        self.cloundinary_patcher.stop()
-        self.redis.stop()
-        super(TestAddingImageData, self).tearDown()
-
-    @tornado.testing.gen_test
-    def test_lookup_cdn_info(self):
-        # Create the necessary buckets so that we can write to them
-        self.s3conn.create_bucket('n3.neon-images.com')
-        self.s3conn.create_bucket('customer-bucket')
-        self.s3conn.create_bucket('host-thumbnails')
         
-        # Setup the CDN information in the database
-        VideoMetadata(InternalVideoID.generate('acct1', 'vid1'),
-                      i_id='i6').save()
-        cdn_list = CDNHostingMetadataList(
-            CDNHostingMetadataList.create_key('acct1', 'i6'), 
-            [ NeonCDNHostingMetadata(do_salt=False),
-              S3CDNHostingMetadata(bucket_name='customer-bucket',
-                                   do_salt=False) ])
-        cdn_list.save()
-
-        thumb_info = ThumbnailMetadata(None, 'acct1_vid1',
-                                       ttype=ThumbnailType.NEON, rank=3)
-        yield thumb_info.add_image_data(self.image, async=True)
-
-        # Check that the thumb_info was updated
-        self.assertIsNotNone(thumb_info.key)
-        self.assertEqual(thumb_info.width, 480)
-        self.assertEqual(thumb_info.height, 360)
-        self.assertIsNotNone(thumb_info.created_time)
-        self.assertIsNotNone(thumb_info.phash)
-        self.assertEqual(thumb_info.type, ThumbnailType.NEON)
-        self.assertEqual(thumb_info.rank, 3)
-        self.assertEqual(thumb_info.urls,
-                         ['https://s3.amazonaws.com/host-thumbnails/%s.jpg' %
-                          re.sub('_', '/', thumb_info.key)])
-
-        # Make sure that the image was uploaded to s3 properly
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
-        self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
-                             get_key(primary_hosting_key))
-        self.assertIsNotNone(self.s3conn.get_bucket('customer-bucket').
-                             get_key('neontn%s_w480_h360.jpg'%thumb_info.key))
-        # Make sure that some different size is found on the Neon CDN
-        self.assertIsNotNone(self.s3conn.get_bucket('n3.neon-images.com').
-                             get_key('neontn%s_w160_h120.jpg'%thumb_info.key))
-
-        # Check the redirect object
-        redirect = self.s3conn.get_bucket('host-thumbnails').get_key(
-            'acct1/vid1/neon3.jpg')
-        self.assertIsNotNone(redirect)
-        self.assertEqual(redirect.redirect_destination,
-                         '/' + primary_hosting_key)
-
-        # Check cloundinary
-        self.cloundinary_mock().upload.assert_called_with(thumb_info.urls[0],
-                                                          thumb_info.key)
-
-    @tornado.testing.gen_test
-    def test_add_thumbnail_to_video_and_save(self):
-        self.s3conn.create_bucket('customer-bucket')
-        self.s3conn.create_bucket('host-thumbnails')
-
-        cdn_metadata = S3CDNHostingMetadata(bucket_name='customer-bucket',
-                                            do_salt=False) 
-
-        video_info = VideoMetadata('acct1_vid1')
-        thumb_info = ThumbnailMetadata(None,
-                                       ttype=ThumbnailType.CUSTOMUPLOAD,
-                                       rank=-1,
-                                       frameno=35)
-
-        yield video_info.add_thumbnail(thumb_info, self.image, [cdn_metadata],
-                                       save_objects=True, async=True)
-
-        self.assertEqual(thumb_info.video_id, video_info.key)
-        self.assertIsNotNone(thumb_info.key)
-        self.assertEqual(video_info.thumbnail_ids, [thumb_info.key])
-
-        # Check that the images are in S3
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
-        self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
-                             get_key(primary_hosting_key))
-        self.assertIsNotNone(self.s3conn.get_bucket('customer-bucket').
-                             get_key('neontn%s_w480_h360.jpg'%thumb_info.key))
-        redirect = self.s3conn.get_bucket('host-thumbnails').get_key(
-            'acct1/vid1/customupload-1.jpg')
-        self.assertIsNotNone(redirect)
-        self.assertEqual(redirect.redirect_destination,
-                         '/' + primary_hosting_key)
-
-        # Check the database
-        self.assertEqual(VideoMetadata.get('acct1_vid1').thumbnail_ids,
-                         [thumb_info.key])
-        self.assertEqual(ThumbnailMetadata.get(thumb_info.key).video_id,
-                         'acct1_vid1')
-
-    @tornado.testing.gen_test
-    def test_add_thumbnail_to_video_and_save_new_video(self):
-        self.s3conn.create_bucket('host-thumbnails')
-
-        video_info = VideoMetadata('acct1_vid1', video_url='my.mp4')
-        video_info.save()
-        thumb_info = ThumbnailMetadata(None,
-                                       ttype=ThumbnailType.CUSTOMUPLOAD,
-                                       rank=-1,
-                                       frameno=35)
-
-        yield video_info.add_thumbnail(thumb_info, self.image, [],
-                                       save_objects=True, async=True)
-
-        self.assertEqual(thumb_info.video_id, video_info.key)
-        self.assertIsNotNone(thumb_info.key)
-        self.assertEqual(video_info.thumbnail_ids, [thumb_info.key])
-
-        # Check the database
-        self.assertEqual(VideoMetadata.get('acct1_vid1').thumbnail_ids,
-                         [thumb_info.key])
-        self.assertEqual(ThumbnailMetadata.get(thumb_info.key).video_id,
-                         'acct1_vid1')
-
-    @tornado.testing.gen_test
-    def test_add_thumbnail_to_video_without_saving(self):
-        self.s3conn.create_bucket('customer-bucket')
-        self.s3conn.create_bucket('host-thumbnails')
-
-        cdn_metadata = S3CDNHostingMetadata(bucket_name='customer-bucket',
-                                            do_salt=False) 
-
-        video_info = VideoMetadata('acct1_vid1')
-        thumb_info = ThumbnailMetadata(None,
-                                       ttype=ThumbnailType.CUSTOMUPLOAD,
-                                       rank=-1,
-                                       frameno=35)
-
-        yield video_info.add_thumbnail(thumb_info, self.image, [cdn_metadata],
-                                       save_objects=False, async=True)
-
-        self.assertEqual(thumb_info.video_id, video_info.key)
-        self.assertIsNotNone(thumb_info.key)
-        self.assertEqual(video_info.thumbnail_ids, [thumb_info.key])
-
-        # Check that the images are in S3
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
-        self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
-                             get_key(primary_hosting_key))
-        self.assertIsNotNone(self.s3conn.get_bucket('customer-bucket').
-                             get_key('neontn%s_w480_h360.jpg'%thumb_info.key))
-        redirect = self.s3conn.get_bucket('host-thumbnails').get_key(
-            'acct1/vid1/customupload-1.jpg')
-        self.assertIsNotNone(redirect)
-        self.assertEqual(redirect.redirect_destination,
-                         '/' + primary_hosting_key)
-
-        # Check the database is empty
-        self.assertIsNone(VideoMetadata.get('acct1_vid1'))
-        self.assertIsNone(ThumbnailMetadata.get(thumb_info.key))
-
-    @tornado.testing.gen_test
-    def test_download_and_add_thumbnail(self):
-        self.s3conn.create_bucket('host-thumbnails')
-
-        video_info = VideoMetadata('acct1_vid1')
-        thumb_info = ThumbnailMetadata(None,
-                                       ttype=ThumbnailType.CUSTOMUPLOAD,
-                                       rank=-1,
-                                       frameno=35)
-
-        with patch('supportServices.neondata.utils.imageutils.PILImageUtils') \
-          as pil_mock:
-            image_future = Future()
-            image_future.set_result(self.image)
-            pil_mock.download_image.return_value = image_future
-
-            yield video_info.download_and_add_thumbnail(
-                thumb_info, "http://my_image.jpg", [], async=True,
-                save_objects=True)
-
-            # Check that the image was downloaded
-            pil_mock.download_imageassert_called_with("http://my_image.jpg",
-                                                      async=True)
-
-        self.assertEqual(thumb_info.video_id, video_info.key)
-        self.assertIsNotNone(thumb_info.key)
-        self.assertEqual(video_info.thumbnail_ids, [thumb_info.key])
-        
-        # Check that the images are in S3
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
-        self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
-                             get_key(primary_hosting_key))
-
-        # Check that the database was updated
-        self.assertEqual(VideoMetadata.get('acct1_vid1').thumbnail_ids,
-                         [thumb_info.key])
-        self.assertEqual(ThumbnailMetadata.get(thumb_info.key).video_id,
-                         'acct1_vid1')
-    
-
-    def test_defaulted_get(self):
-        strategy = ExperimentStrategy('in_db',
-                                      max_neon_thumbs=7,
-                                      only_exp_if_chosen=True)
-        strategy.save()
-
-        with self.assertLogNotExists(logging.WARN, 'No ExperimentStrategy'):
-            self.assertEquals(strategy, ExperimentStrategy.get('in_db'))
-
-        with self.assertLogExists(logging.WARN, 'No ExperimentStrategy'):
-            self.assertEquals(ExperimentStrategy('not_in_db'),
-                              ExperimentStrategy.get('not_in_db'))
-
-        with self.assertLogNotExists(logging.WARN, 'No ExperimentStrategy'):
-            self.assertEquals(ExperimentStrategy('not_in_db'),
-                              ExperimentStrategy.get('not_in_db',
-                                                     log_missing=False))
-
-
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()
@@ -1726,6 +1500,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.cloudinary_mock = self.cloudinary_patcher.start()
         future = Future()
         future.set_result(None)
+        self.cloudinary_mock().hoster_type = "cloudinary"
         self.cloudinary_mock().upload.side_effect = [future]
 
         random.seed(1654984)
@@ -1769,7 +1544,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.assertEqual(thumb_info.type, ThumbnailType.NEON)
         self.assertEqual(thumb_info.rank, 3)
         self.assertEqual(thumb_info.urls,
-                         ['https://s3.amazonaws.com/host-thumbnails/%s.jpg' %
+                         ['http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
                           re.sub('_', '/', thumb_info.key)])
 
         # Make sure that the image was uploaded to s3 properly
@@ -1782,25 +1557,73 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.assertIsNotNone(self.s3conn.get_bucket('n3.neon-images.com').
                              get_key('neontn%s_w160_h120.jpg'%thumb_info.key))
 
+        #NOTE: Redirects have been disabled temporarily
         # Check the redirect object
-        redirect = self.s3conn.get_bucket('host-thumbnails').get_key(
-            'acct1/vid1/neon3.jpg')
-        self.assertIsNotNone(redirect)
-        self.assertEqual(redirect.redirect_destination,
-                         '/' + primary_hosting_key)
-
-        # Check cloudinary
-        self.cloudinary_mock().upload.assert_called_with(thumb_info.urls[0],
-                                                         thumb_info.key,
-                                                         async=True)
+        #redirect = self.s3conn.get_bucket('host-thumbnails').get_key(
+        #    'acct1/vid1/neon3.jpg')
+        #self.assertIsNotNone(redirect)
+        #self.assertEqual(redirect.redirect_destination,
+        #                 '/' + primary_hosting_key)
 
     @tornado.testing.gen_test
     def test_add_thumbnail_to_video_and_save(self):
+        '''
+        Testing adding a thumbnail to the video object after it has been
+        hosted in 2 places - Primary Neon copy and then to a specified customer
+        hosting bucket 
+        '''
         self.s3conn.create_bucket('customer-bucket')
         self.s3conn.create_bucket('host-thumbnails')
 
         cdn_metadata = S3CDNHostingMetadata(bucket_name='customer-bucket',
                                             do_salt=False) 
+
+        video_info = VideoMetadata('acct1_vid1')
+        thumb_info = ThumbnailMetadata(None,
+                                       ttype=ThumbnailType.CUSTOMUPLOAD,
+                                       rank=-1,
+                                       frameno=35)
+
+        yield video_info.add_thumbnail(thumb_info, self.image, [cdn_metadata],
+                                       save_objects=True, async=True)
+        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        
+        self.assertEqual(thumb_info.video_id, video_info.key)
+        self.assertGreater(len(thumb_info.urls), 0) # verify url insertion
+        self.assertEqual(thumb_info.urls[0],
+                'http://s3.amazonaws.com/host-thumbnails/%s' %\
+                primary_hosting_key)
+
+        self.assertIsNotNone(thumb_info.key)
+        self.assertEqual(video_info.thumbnail_ids, [thumb_info.key])
+
+        # Check that the images are in S3
+        self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
+                             get_key(primary_hosting_key))
+        self.assertIsNotNone(self.s3conn.get_bucket('customer-bucket').
+                             get_key('neontn%s_w480_h360.jpg'%thumb_info.key))
+        #NOTE: Redirects have been disabled temporarily
+        #redirect = self.s3conn.get_bucket('host-thumbnails').get_key(
+        #    'acct1/vid1/customupload-1.jpg')
+        #self.assertIsNotNone(redirect)
+        #self.assertEqual(redirect.redirect_destination,
+        #                 '/' + primary_hosting_key)
+
+        # Check the database
+        self.assertEqual(VideoMetadata.get('acct1_vid1').thumbnail_ids,
+                         [thumb_info.key])
+        self.assertEqual(ThumbnailMetadata.get(thumb_info.key).video_id,
+                         'acct1_vid1')
+    
+    @tornado.testing.gen_test
+    def test_add_thumbnail_to_video_and_save_with_cloudinary_hosting(self):
+        '''
+        Testing adding a thumbnail to the video object after it has been
+        hosted in 2 places - Primary Neon copy and then to cloudinary 
+        '''
+        
+        self.s3conn.create_bucket('host-thumbnails')
+        cdn_metadata = CloudinaryCDNHostingMetadata()
 
         video_info = VideoMetadata('acct1_vid1')
         thumb_info = ThumbnailMetadata(None,
@@ -1819,19 +1642,10 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
-        self.assertIsNotNone(self.s3conn.get_bucket('customer-bucket').
-                             get_key('neontn%s_w480_h360.jpg'%thumb_info.key))
-        redirect = self.s3conn.get_bucket('host-thumbnails').get_key(
-            'acct1/vid1/customupload-1.jpg')
-        self.assertIsNotNone(redirect)
-        self.assertEqual(redirect.redirect_destination,
-                         '/' + primary_hosting_key)
-
-        # Check the database
-        self.assertEqual(VideoMetadata.get('acct1_vid1').thumbnail_ids,
-                         [thumb_info.key])
-        self.assertEqual(ThumbnailMetadata.get(thumb_info.key).video_id,
-                         'acct1_vid1')
+        # Check cloudinary
+        self.cloudinary_mock().upload.assert_called_with(thumb_info.urls[0],
+                                                        thumb_info.key,
+                                                        async=True)
 
     @tornado.testing.gen_test
     def test_add_thumbnail_to_video_and_save_new_video(self):
@@ -1884,11 +1698,12 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
                              get_key(primary_hosting_key))
         self.assertIsNotNone(self.s3conn.get_bucket('customer-bucket').
                              get_key('neontn%s_w480_h360.jpg'%thumb_info.key))
-        redirect = self.s3conn.get_bucket('host-thumbnails').get_key(
-            'acct1/vid1/customupload-1.jpg')
-        self.assertIsNotNone(redirect)
-        self.assertEqual(redirect.redirect_destination,
-                         '/' + primary_hosting_key)
+        #NOTE: Redirects have been disabled temporarily
+        #redirect = self.s3conn.get_bucket('host-thumbnails').get_key(
+        #    'acct1/vid1/customupload-1.jpg')
+        #self.assertIsNotNone(redirect)
+        #self.assertEqual(redirect.redirect_destination,
+        #                 '/' + primary_hosting_key)
 
         # Check the database is empty
         self.assertIsNone(VideoMetadata.get('acct1_vid1'))
@@ -1932,6 +1747,62 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
                          [thumb_info.key])
         self.assertEqual(ThumbnailMetadata.get(thumb_info.key).video_id,
                          'acct1_vid1')
+
+    @tornado.testing.gen_test
+    def test_add_account_default_thumb(self):
+        self.s3conn.create_bucket('host-thumbnails')
+        self.s3conn.create_bucket('n3.neon-images.com')
+        account = NeonUserAccount('a1')
+
+        yield account.add_default_thumbnail(self.image, async=True)
+
+        # Make sure that the thumbnail id is put in
+        self.assertIsNotNone(account.default_thumbnail_id)
+        self.assertEquals(
+            account.default_thumbnail_id,
+            NeonUserAccount.get_account(account.neon_api_key).default_thumbnail_id)
+
+        # Make sure that the thubmnail info is in the database
+        tmeta = ThumbnailMetadata.get(account.default_thumbnail_id)
+        self.assertIsNotNone(tmeta)
+        self.assertEquals(tmeta.type, ThumbnailType.DEFAULT)
+        self.assertEquals(tmeta.rank, 0)
+        self.assertGreater(len(tmeta.urls), 0)
+        self.assertEquals(tmeta.width, 480)
+        self.assertEquals(tmeta.height, 360)
+        self.assertIsNotNone(tmeta.phash)
+
+        # Make sure the image is hosted in s3
+        primary_hosting_key = re.sub('_', '/', tmeta.key)+'.jpg'
+        self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
+                             get_key(primary_hosting_key))
+
+        # If we try to add another image as the default, we should
+        # throw an error
+        new_image = PILImageUtils.create_random_image(540, 640)
+        with self.assertRaises(ValueError):
+            yield account.add_default_thumbnail(new_image, async=True)
+
+        # Now force the new image to be added
+        yield account.add_default_thumbnail(new_image, replace=True,
+                                            async=True)
+
+        # Check that the new thumb is in the account
+        self.assertIsNotNone(account.default_thumbnail_id)
+        self.assertNotEquals(account.default_thumbnail_id, tmeta.key)
+        self.assertEquals(
+            account.default_thumbnail_id,
+            NeonUserAccount.get_account(account.neon_api_key).default_thumbnail_id)
+
+        # Check the data in the new thumb
+        tmeta2 = ThumbnailMetadata.get(account.default_thumbnail_id)
+        self.assertIsNotNone(tmeta2)
+        self.assertEquals(tmeta2.type, ThumbnailType.DEFAULT)
+        self.assertEquals(tmeta2.rank, -1)
+        self.assertGreater(len(tmeta2.urls), 0)
+        self.assertEquals(tmeta2.width, 640)
+        self.assertEquals(tmeta2.height, 540)
+        self.assertIsNotNone(tmeta2.phash)
     
 
 if __name__ == '__main__':
