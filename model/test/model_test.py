@@ -113,7 +113,7 @@ class TestThumbnailSelector(unittest.TestCase):
                                             'test_videos',
                                             'swimmer.mp4'))
 
-        thumb_data, end_time = self.model.choose_thumbnails(mov, 5.0)
+        thumb_data = self.model.choose_thumbnails(mov, 5.0)
 
         self.assertGreater(len(thumb_data), 0)
         self.assertGreater(thumb_data[0][1], thumb_data[1][1])

@@ -33,6 +33,7 @@ import ffvideo
 import hashlib
 import json
 import model
+import model.errors
 import multiprocessing
 import numpy as np 
 from PIL import Image
@@ -107,7 +108,6 @@ define('video_temp_dir', default=None,
 
 class VideoError(Exception): pass
 class BadVideoError(VideoError): pass
-class VideoReadError(VideoError, IOError): pass
 class VideoDownloadError(VideoError, IOError): pass  
 class DBError(IOError): pass
 class CallbackError(IOError): pass
@@ -173,7 +173,6 @@ class VideoProcessor(object):
         self.model = model
         self.model_version = model_version
         self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
-        self.sec_to_extract = 1 
 
     def start(self):
         '''
@@ -318,7 +317,7 @@ class VideoProcessor(object):
             _log.error("Error reading ffvideo metadata of %s: %s" %
                        (self.video_url, e))
             statemon.state.increment('ffvideo_metadata_error')
-            raise VideoReadError(str(e))
+            raise model.errors.VideoReadError(str(e))
 
         #Try to open the video file using openCV
         try:
@@ -327,7 +326,7 @@ class VideoProcessor(object):
             _log.error("Error opening video file %s: %s"  % 
                        (self.video_url, e))
             statemon.state.increment('video_read_error')
-            raise VideoReadError(str(e))
+            raise model.errors.VideoReadError(str(e))
 
         duration = self.video_metadata.duration or 0.0
 
@@ -342,40 +341,16 @@ class VideoProcessor(object):
         if duration > 3600:
             statemon.state.increment('video_duration_60m')
 
-        # Decide the time buffer at the beginning and end of the video
-        # to ignore.
-        if duration < 10:
-            ignore_time = 0.0
-            thumb_min_dist = 1.0
-        elif duration < 30:
-            ignore_time = 2.0
-            thumb_min_dist = 3.0
-        else:
-            ignore_time = 5.0
-            thumb_min_dist = 5.0
-
         try:
-            results, self.sec_to_extract = \
+            results = \
               self.model.choose_thumbnails(
                   mov,
                   n=n_thumbs,
-                  start_time=ignore_time,
-                  end_buffer_time=ignore_time,
-                  thumb_min_dist=thumb_min_dist,
-                  processing_time_ratio=1.2,
                   video_name=self.video_url)
-        except model.VideoReadError:
-            _log.error("Error using OpenCV to read video. Trying ffvideo")
+        except model.errors.VideoReadError:
+            _log.error("Error using OpenCV to read video. %s" % self.video_url)
             statemon.state.increment('video_read_error')
-            try:
-                results, self.sec_to_extract = \
-                  self.model.ffvideo_choose_thumbnails(
-                      fmov,
-                      n=n_thumbs,
-                      sample_step=1.0,
-                      start_time=self.sec_to_extract)
-            except Exception as e:
-                raise VideoReadError(str(e))
+            raise
 
         exists_unfiltered_images = np.any([x[4] is not None and x[4] == ''
                                            for x in results])
@@ -476,7 +451,8 @@ class VideoProcessor(object):
         _log.error('Error reading frame %i of video %s'
                     % (frameno, self.video_url))
         statemon.state.increment('extract_frame_error')
-        raise VideoReadError('Error reading frame %i of video' % frameno)
+        raise model.errors.VideoReadError('Error reading frame %i of video'
+                                          % frameno)
 
     def finalize_response(self):
         '''

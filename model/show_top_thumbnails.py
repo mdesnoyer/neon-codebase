@@ -6,9 +6,9 @@ Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 import cProfile as profile
 import cv2
@@ -31,10 +31,7 @@ def run_one_video(mod, video_file, n, output_file, batch):
         video.get(cv2.cv.CV_CAP_PROP_FPS)))
     
     startTime = time.time()
-    thumbs, endTime = mod.choose_thumbnails(video, n=n,
-                                            start_time=5.0,
-                                            end_buffer_time=5.0,
-                                            processing_time_ratio=1.2)
+    thumbs = mod.choose_thumbnails(video, n=n)
     _log.info('Processing time: %fs' % (time.time() - startTime))
 
     # Plot the examples
