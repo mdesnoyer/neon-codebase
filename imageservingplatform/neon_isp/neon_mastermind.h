@@ -102,8 +102,9 @@ NEON_BOOLEAN neon_mastermind_expired();
 
 
 /*
- *  Get health check information
+ *  Get health check status
  *
+ *  returns:
  *  0 = not in service
  *  1 = in service but mastermind is passed expiry
  *  2 = in service, mastermind current
