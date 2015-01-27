@@ -24,6 +24,7 @@ import boto.exception
 import json
 import logging
 from mock import MagicMock, patch
+import model.errors
 import multiprocessing
 import numpy as np
 import os
@@ -77,7 +78,7 @@ class TestVideoClient(test_utils.neontest.TestCase):
 
         #Mock Model methods, use pkl to load captured outputs
         ct_output, ft_output = pickle.load(open(self.model_file)) 
-        self.model.choose_thumbnails.return_value = (ct_output, 9)
+        self.model.choose_thumbnails.return_value = ct_output
         self.model.score.return_value = 1, 2 
         self.test_video_file = os.path.join(os.path.dirname(__file__), 
                                 "test.mp4") 
@@ -261,10 +262,6 @@ class TestVideoClient(test_utils.neontest.TestCase):
         self.assertTrue(self.model.choose_thumbnails.called)
         cargs, kwargs = self.model.choose_thumbnails.call_args
         self.assertEquals(kwargs, {'n':5,
-                                   'start_time': 0.0,
-                                   'end_buffer_time': 0.0,
-                                   'thumb_min_dist': 1.0,
-                                   'processing_time_ratio': 1.2,
                                    'video_name':  'http://video.com'})
         self.assertEquals(len(cargs), 1)
 
@@ -312,7 +309,7 @@ class TestVideoClient(test_utils.neontest.TestCase):
         vprocessor = self.setup_video_processor("neon")
 
         with self.assertLogExists(logging.ERROR, "Error reading"):
-            with self.assertRaises(api.client.VideoReadError):
+            with self.assertRaises(model.errors.VideoReadError):
                 vprocessor.process_video('a_garbage_video_thats_gone.mov')
 
     def test_process_all_filtered_video(self):
@@ -323,8 +320,7 @@ class TestVideoClient(test_utils.neontest.TestCase):
              (np.zeros((480, 640, 3), np.uint8), float('-inf'), 600, 20.0,
               'black'),
              (np.zeros((480, 640, 3), np.uint8), float('-inf'), 900, 30.0,
-              'black')],
-             40.0)
+              'black')])
         vprocessor = self.setup_video_processor("neon")
         vprocessor.process_video(self.test_video_file2, n_thumbs=3)
 
@@ -1006,7 +1002,7 @@ class SmokeTest(test_utils.neontest.TestCase):
         load_model_mock = self.model_patcher.start()
         load_model_mock.return_value = self.model
         ct_output, ft_output = pickle.load(open(self.model_file)) 
-        self.model.choose_thumbnails.return_value = (ct_output, 9)
+        self.model.choose_thumbnails.return_value = ct_output
 
         # create the client object
         self.video_client = api.client.VideoClient(

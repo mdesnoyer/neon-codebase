@@ -11,7 +11,6 @@ from model.features import GistGenerator
 from model.predictor import KFlannPredictor
 import unittest
 import model
-from model import knn_cluster_model
 import numpy as np
 import fake_filesystem
 import fake_tempfile
@@ -45,23 +44,6 @@ class TestSaveModel(unittest.TestCase):
                                 np.random.random())
 
         predictor.train()
-
-    def test_knn_cluster_model(self):
-        predictor = knn_cluster_model.Predictor(GistGenerator(),
-                                                4)
-        mod = model.Model(predictor, None)
-
-        self.trainPredictor(predictor)
-
-        model.save_model(mod, 'test.model')
-        loaded = model.load_model('test.model')
-
-        # Make sure that the loaded model does the same predictions as
-        # the original for some random images
-        for i in range(10):
-            cur_image = self.createRandomImage()
-            self.assertAlmostEqual(mod.score(cur_image),
-                                   loaded.score(cur_image))
 
     def test_kflann_model(self):
         predictor = KFlannPredictor(GistGenerator(), seed=20472)
@@ -113,7 +95,7 @@ class TestThumbnailSelector(unittest.TestCase):
                                             'test_videos',
                                             'swimmer.mp4'))
 
-        thumb_data, end_time = self.model.choose_thumbnails(mov, 5.0)
+        thumb_data = self.model.choose_thumbnails(mov, 5.0)
 
         self.assertGreater(len(thumb_data), 0)
         self.assertGreater(thumb_data[0][1], thumb_data[1][1])
