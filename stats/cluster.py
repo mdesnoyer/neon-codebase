@@ -227,7 +227,7 @@ class Cluster():
 
     def run_map_reduce_job(self, jar, main_class, input_path,
                            output_path, map_memory_mb=None,
-                           timeout=None):
+                           timeout=None, name='Raw Tracker Data Cleaning'):
         '''Runs a mapreduce job.
 
         Inputs:
@@ -320,11 +320,26 @@ class Cluster():
 
         # Now poll the job status until it is done
         error_count = 0
+        job_status = None
         while True:
             if timeout is not None and budget_time < datetime.datetime.now():
                 raise MapReduceError("Map Reduce Job timed out.")
                 
             try:
+                if job_status != 'RUNNING':
+                    response = self.query_resource_manager(
+                        '/ws/v1/cluster/apps?stats=RUNNING,ACCEPTED')
+                    latest_app_time = None
+                    for app in response['apps']['app']:
+                        if (app['name'] == name and (
+                            latest_app_time is None or 
+                            latest_app_time < app['startedTime'])):
+                            latest_app_time = app['startedTime']
+                            job_status = app['state']
+                    if job_status != 'RUNNING':
+                        time.sleep(60)
+                        continue
+                
                 url = ("http://{host}:{port}/proxy/{app_id}/ws/v1/mapreduce/"
                        "jobs/{job_id}").format(
                            host=host, 
