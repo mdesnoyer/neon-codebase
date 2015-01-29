@@ -237,21 +237,27 @@ neon_mastermind_expired(){
  * determine the state of the Image Platform
  *
  * */
-
 int
 neon_mastermind_healthcheck()
 {
-    // not in service
+    // no mastermind data structure allocated, typically very early 
+    // during server bootup 
     if(mastermind_current == NULL)
-        return 0;
-    
-    // in service but expired mastermind information
+        return 0; // no service
+
+    // empty mastermind data structure, typically after server bootup but
+    // before a valid mastermind file has been fetched from S3 
+    if(mastermind_current->GetExpiry() == 0){
+        return 0; // no serivce
+    }
+
+    // in service but with expired mastermind information, typically 
+    // during mastermind updating process or due to S3 download problems
     if(neon_mastermind_expired() == NEON_TRUE){
-        //NeonLog::Error("mastermind expired: %d", mastermind_current->GetExpiry());
         return 1;
     }
     
-    // in service
+    // otherwise in service with unexpired mastermind 
     return 2;
 }
 
