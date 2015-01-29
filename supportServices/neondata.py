@@ -1371,7 +1371,8 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
         # image name? Useful for performance when serving.
         self.do_salt = do_salt
 
-        # make folders for easy navigation
+        # make folders for easy navigation. This puts the image in the
+        # form <api_key>/<video_id>/<thumb_id>.jpg
         self.make_tid_folders = make_tid_folders
 
 class NeonCDNHostingMetadata(S3CDNHostingMetadata):
@@ -1405,12 +1406,16 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     @make_tid_folders: If true, _ is replaced by '/' to create folder
     '''
     def __init__(self, key=None,
-            bucket_name='host-thumbnails', #TODO: Should this be hardcoded?
-            make_tid_folders=True):
+                 bucket_name='host-thumbnails',
+                 folder_prefix=''):
         super(PrimaryNeonHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
-            make_tid_folders=make_tid_folders)
+            folder_prefix=folder_prefix,
+            resize=False,
+            update_serving_urls=False,
+            do_salt=False,
+            make_tid_folders=True)
 
 class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     '''

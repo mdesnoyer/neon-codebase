@@ -234,9 +234,6 @@ class CDNHosting(object):
         Creates the appropriate connection based on a database entry.
         '''
         if isinstance(cdn_metadata,
-                        supportServices.neondata.PrimaryNeonHostingMetadata):
-            return PrimaryNeonHosting(cdn_metadata)
-        elif isinstance(cdn_metadata,
                       supportServices.neondata.S3CDNHostingMetadata):
             return AWSHosting(cdn_metadata)
         elif isinstance(cdn_metadata,
@@ -292,13 +289,12 @@ class AWSHosting(CDNHosting):
             name_pieces.append(''.join(
                 random.choice(string.letters + string.digits) 
                 for _ in range(3)))
-        name_pieces.append(AWSHosting.neon_fname_fmt % 
-                           (tid, image.size[0], image.size[1]))
-        key_name = '/'.join(name_pieces)
-        
-        # Figure the S3 location: <API_KEY>/<VIDEO_ID>/<THUMB_ID>.jpg
         if self.make_tid_folders:
-            key_name = re.sub('_', '/', tid) + ".jpg" 
+            name_pieces.append("%s.jpg" % re.sub('_', '/', tid))
+        else:
+            name_pieces.append(AWSHosting.neon_fname_fmt % 
+                               (tid, image.size[0], image.size[1]))
+        key_name = '/'.join(name_pieces)
 
         cdn_url = "http://%s/%s" % (cdn_prefix, key_name)
         fmt = 'jpeg'
@@ -317,20 +313,6 @@ class AWSHosting(CDNHosting):
                                  policy=policy, async=True)
 
         raise tornado.gen.Return(cdn_url)
-        
-class PrimaryNeonHosting(AWSHosting):
-
-    '''
-    Hosting on Neon's Primary S3 bucket
-    '''
-    def __init__(self, cdn_metadata, hoster_type="primary_neon"):
-        super(PrimaryNeonHosting, self).__init__(cdn_metadata, hoster_type)
-
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def _upload_impl(self, image, tid):
-        s3url = super(PrimaryNeonHosting, self)._upload_impl(image, tid)
-        raise tornado.gen.Return(s3url)
 
 class CloudinaryHosting(CDNHosting):
     
