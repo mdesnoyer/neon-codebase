@@ -422,7 +422,8 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertFalse(cloud.update_serving_urls)
         neon_cdn = NeonCDNHostingMetadata(None, 
                                           'my-bucket',
-                                          ['mycdn.neon-lab.com'])
+                                          ['mycdn.neon-lab.com'],
+                                          rendition_sizes=[[360, 240]])
         self.assertTrue(neon_cdn.resize)
         self.assertTrue(neon_cdn.update_serving_urls)
         self.assertEqual(neon_cdn.folder_prefix, '')
@@ -1643,9 +1644,9 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
         # Check cloudinary
-        self.cloudinary_mock().upload.assert_called_with(thumb_info.urls[0],
-                                                        thumb_info.key,
-                                                        async=True)
+        cargs, kwargs = self.cloudinary_mock().upload.call_args
+        self.assertEqual(cargs[1], thumb_info.key)
+        self.assertEqual(cargs[2], thumb_info.urls[0])
 
     @tornado.testing.gen_test
     def test_add_thumbnail_to_video_and_save_new_video(self):

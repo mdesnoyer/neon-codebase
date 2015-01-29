@@ -233,7 +233,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
 
         metadata = neondata.CloudinaryCDNHostingMetadata()
         cd = api.cdnhosting.CDNHosting.create(metadata)
-        im = 'https://s3.amazonaws.com/host-thumbnails/image.jpg'
+        url = 'https://s3.amazonaws.com/host-thumbnails/image.jpg'
         tid = 'bfea94933dc752a2def8a6d28f9ac4c2'
         mresponse = tornado.httpclient.HTTPResponse(
             tornado.httpclient.HTTPRequest('http://cloudinary.com'), 
@@ -241,7 +241,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         mock_http.side_effect = lambda x, callback: callback(
             tornado.httpclient.HTTPResponse(x, 200,
                                             buffer=StringIO(mock_response)))
-        url = cd.upload(im, tid)
+        url = cd.upload(None, tid, url)
         self.assertEquals(mock_http.call_count, 1)
         self.assertIsNotNone(mock_http._mock_call_args_list[0][0][0]._body)
         self.assertEqual(mock_http._mock_call_args_list[0][0][0].url,
@@ -252,7 +252,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
 
         metadata = neondata.CloudinaryCDNHostingMetadata()
         cd = api.cdnhosting.CDNHosting.create(metadata)
-        im = 'https://s3.amazonaws.com/host-thumbnails/image.jpg'
+        url = 'https://s3.amazonaws.com/host-thumbnails/image.jpg'
         tid = 'bfea94933dc752a2def8a6d28f9ac4c2'
         mresponse = tornado.httpclient.HTTPResponse(
             tornado.httpclient.HTTPRequest('http://cloudinary.com'), 
@@ -262,7 +262,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
                                     buffer=StringIO("gateway error")))
         with self.assertLogExists(logging.ERROR,
                 'Failed to upload image to cloudinary for tid %s' % tid):
-            url = cd.upload(im, tid)
+            url = cd.upload(None, tid, url)
         self.assertEquals(mock_http.call_count, 1)
 
 
@@ -292,9 +292,10 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_host_resized_images(self):
+        sizes = [(640, 480), (160, 90)]
         metadata = neondata.NeonCDNHostingMetadata(None,
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
-            'folder1', True, True, False)
+            'folder1', True, True, False, False, sizes)
 
         hoster = api.cdnhosting.CDNHosting.create(metadata)
         yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
@@ -302,7 +303,6 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
         serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
         self.assertIsNotNone(serving_urls)
 
-        sizes = api.properties.CDN_IMAGE_SIZES 
         for w, h in sizes:
 
             # check that the image is in s3
@@ -324,9 +324,10 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_salted_path(self):
+        sizes = [(640, 480), (160, 90), (1960, 1080)]
         metadata = neondata.NeonCDNHostingMetadata(None,
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
-            'folder1', True, True, True)
+            'folder1', True, True, True, False, sizes)
 
         hoster = api.cdnhosting.CDNHosting.create(metadata)
         yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
@@ -361,7 +362,7 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
             self.assertEqual(s3key.policy, 'public-read')
 
         # Make sure that all the expected files were found
-        self.assertItemsEqual(sizes_found, api.properties.CDN_IMAGE_SIZES)
+        self.assertItemsEqual(sizes_found, sizes)
 
 class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
     '''
