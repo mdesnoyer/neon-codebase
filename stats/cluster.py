@@ -48,6 +48,8 @@ define("resource_manager_port", default=9026,
        help="Port to query the resource manager on")
 define("history_server_port", default=19888,
        help='Port to query the history server on')
+define("mapreduce_status_port", default=9046,
+       help="Port to query the mapreduce status on")
 define("s3_jar_bucket", default="neon-emr-packages",
        help='S3 bucket where jobs will be stored')
 
@@ -225,7 +227,7 @@ class Cluster():
 
     def run_map_reduce_job(self, jar, main_class, input_path,
                            output_path, map_memory_mb=None,
-                           timeout=None):
+                           timeout=None, name='Raw Tracker Data Cleaning'):
         '''Runs a mapreduce job.
 
         Inputs:
@@ -295,7 +297,7 @@ class Cluster():
                                           input_path, output_path)
 
         trackURLRe = re.compile(
-            r"Tracking URL: https?://(\S+)/proxy/(\S+)/")
+            r"Tracking URL: https?://(\S+):[0-9]*/proxy/(\S+)/")
         jobidRe = re.compile(r"Job ID: (\S+)")
         url_parse = trackURLRe.search(stdout)
         if not url_parse:
@@ -318,25 +320,44 @@ class Cluster():
 
         # Now poll the job status until it is done
         error_count = 0
+        job_status = None
         while True:
             if timeout is not None and budget_time < datetime.datetime.now():
                 raise MapReduceError("Map Reduce Job timed out.")
                 
             try:
-                url = ("http://%s/proxy/%s/ws/v1/mapreduce/jobs/%s" % 
-                       (host, application_id, job_id))
+                if job_status != 'RUNNING':
+                    response = self.query_resource_manager(
+                        '/ws/v1/cluster/apps?stats=RUNNING,ACCEPTED')
+                    latest_app_time = None
+                    for app in response['apps']['app']:
+                        if (app['name'] == name and (
+                            latest_app_time is None or 
+                            latest_app_time < app['startedTime'])):
+                            latest_app_time = app['startedTime']
+                            job_status = app['state']
+                    if job_status != 'RUNNING':
+                        time.sleep(60)
+                        continue
+                
+                url = ("http://{host}:{port}/proxy/{app_id}/ws/v1/mapreduce/"
+                       "jobs/{job_id}").format(
+                           host=host, 
+                           port=options.mapreduce_status_port, 
+                           app_id=application_id, 
+                           job_id=job_id)
                 response = urllib2.urlopen(url)
 
                 if url != response.geturl():
                     # The job is probably done, so we need to look at the
                     # job history server
-                    history_url = (
-                        "http://%s/ws/v1/history/mapreduce/jobs/%s" %
-                        (urlparse.urlparse(response.geturl()).netloc,
-                         job_id))
-                    response = urllib2.urlopen(history_url)
+                    data = self.query_history_manager(
+                        '/ws/v1/history/mapreduce/jobs/%s' %
+                        job_id)
+                else:
+                    data = json.load(response)
 
-                data = json.load(response)['job']
+                data = data['job']
 
                 # Send monitoring data
                 for key, value in data.iteritems():
