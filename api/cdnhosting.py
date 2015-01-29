@@ -253,8 +253,11 @@ class AWSHosting(CDNHosting):
     
     def __init__(self, cdn_metadata, hoster_type="awshosting"):
         super(AWSHosting, self).__init__(cdn_metadata, hoster_type)
-        self.neon_bucket = isinstance(
+        self.neon_bucket = (isinstance(
             cdn_metadata, supportServices.neondata.NeonCDNHostingMetadata)
+            or isinstance(
+                cdn_metadata,
+                supportServices.neondata.PrimaryNeonHostingMetadata))
         self.s3conn = S3Connection(cdn_metadata.access_key,
                                    cdn_metadata.secret_key)
         self.s3bucket_name = cdn_metadata.bucket_name

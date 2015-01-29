@@ -1396,7 +1396,8 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
             folder_prefix=folder_prefix,
             resize=resize,
             update_serving_urls=update_serving_urls,
-            do_salt=do_salt)
+            do_salt=do_salt,
+            make_tid_folders=make_tid_folders)
 
 class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     '''

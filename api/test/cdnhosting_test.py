@@ -75,7 +75,8 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
 
         self.mock_conn.assert_called_with('access_key', 'secret_key')
 
-        s3_key = self.bucket.get_key('folder1/neontnacct1_vid1_tid1_w640_h480.jpg')
+        s3_key = self.bucket.get_key(
+            'folder1/neontnacct1_vid1_tid1_w640_h480.jpg')
         self.assertIsNotNone(s3_key)
         self.assertEqual(s3_key.content_type, 'image/jpeg')
         self.assertNotEqual(s3_key.policy, 'public-read')
@@ -94,17 +95,42 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
        
         # use the default bucket in the class to test with
         self.s3conn.create_bucket('host-thumbnails')
-        metadata = neondata.PrimaryNeonHostingMetadata()
+        metadata = neondata.PrimaryNeonHostingMetadata('acct1')
 
         hoster = api.cdnhosting.CDNHosting.create(metadata)
         url = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
-        self.assertEqual(url,
-                    "http://s3.amazonaws.com/host-thumbnails/acct1/vid1/tid1.jpg")
+        self.assertEqual(
+            url,
+            "http://s3.amazonaws.com/host-thumbnails/acct1/vid1/tid1.jpg")
         self.bucket = self.s3conn.get_bucket('host-thumbnails')
         s3_key = self.bucket.get_key('acct1/vid1/tid1.jpg')
         self.assertIsNotNone(s3_key)
         self.assertEqual(s3_key.content_type, 'image/jpeg')
-        self.assertNotEqual(s3_key.policy, 'public-read')
+        self.assertEqual(s3_key.policy, 'public-read')
+
+    @tornado.testing.gen_test
+    def test_primary_hosting_with_folder(self):
+        '''
+        Test hosting the Primary copy for a image in Neon's primary 
+        hosting bucket
+        '''
+       
+        # use the default bucket in the class to test with
+        self.s3conn.create_bucket('host-thumbnails')
+        metadata = neondata.PrimaryNeonHostingMetadata(
+            'acct1',
+            folder_prefix='my/folder/path')
+
+        hoster = api.cdnhosting.CDNHosting.create(metadata)
+        url = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+        self.assertEqual(
+            url,
+            "http://s3.amazonaws.com/host-thumbnails/my/folder/path/acct1/vid1/tid1.jpg")
+        self.bucket = self.s3conn.get_bucket('host-thumbnails')
+        s3_key = self.bucket.get_key('my/folder/path/acct1/vid1/tid1.jpg')
+        self.assertIsNotNone(s3_key)
+        self.assertEqual(s3_key.content_type, 'image/jpeg')
+        self.assertEqual(s3_key.policy, 'public-read')
 
     @tornado.testing.gen_test
     def test_permissions_error_uploading_image(self):
