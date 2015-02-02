@@ -836,6 +836,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(response['published_count'], 0)
         self.assertEqual(response['processing_count'], 0)
         self.assertEqual(response['recommended_count'], len(ordered_videos))
+        self.assertEqual(response['serving_count'], 0)
 
         #request last page with page_size > #of videos available in the page
         page_no = 1 
@@ -1198,17 +1199,28 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         resp = self.get_request(url, self.api_key)
         self.assertEqual(resp.code, 400)
 
-        # TODO (Sunil) More test cases on states
-        # get videos with serving state
+        # serving state
         api_requests[-1].state = neondata.RequestState.SERVING
         api_requests[-1].save()
+        url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/videos/serving?page_no=%s&page_size=%s'
+                %(self.a_id, "0", page_no, page_size))
+        resp = self.get_request(url, self.api_key)
+        items = json.loads(resp.body)['items']
+        self.assertEqual(len(items), 1) #1 video serving
+        self.assertEqual(items[0]['status'], 'serving')
+        self.assertEqual(items[0]['job_id'], api_requests[-1].job_id)
 
+        # TODO (Sunil) More test cases on states
+        # get videos with serving state
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos'  %(self.a_id, "0"))
         resp = self.get_request(url, self.api_key)
         items = json.loads(resp.body)['items']
         status = [item['status'] for item in items]
         self.assertEqual(status.count("serving"), 1)
+
+        
 
     def _setup_neon_account_and_request_object(self, vid="testvideo1",
                                             job_id = "j1"):

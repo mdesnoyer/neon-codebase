@@ -13,7 +13,6 @@ import base64
 import json
 import hashlib
 import random
-import properties
 import re
 import socket
 import string
@@ -156,25 +155,33 @@ def create_s3_redirect(dest_key, src_key, dest_bucket=None,
 class CDNHosting(object):
     '''Abstract class for hosting images on a CDN.'''
 
-    def __init__(self, cdn_metadata, hoster_type="abstract"):
+    def __init__(self, cdn_metadata):
         '''Abstract CDN hosting class.
 
         @cdn_metadata - The metadata specifying how to access the CDN
+        @accepts_images - If true, upload functions takes images.
+                          otherwise they take urls.
         '''
         self.resize = cdn_metadata.resize
         self.update_serving_urls = cdn_metadata.update_serving_urls
-        self.hoster_type = hoster_type 
+        self.rendition_sizes = cdn_metadata.rendition_sizes or []
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def upload(self, image, tid):
+    def upload(self, image, tid, url=None):
         '''
         Host images on the CDN
 
-        The sizes for a given image is specified in the properties file
+        The sizes for a given image is specified in the rendition_sizes
         size is a tuple (width, height)
 
         Saves the mappings in ThumbnailServingURLs object 
+
+        Inputs: 
+        image - Image to upload
+        tid - Thumbnail id of the image
+        url - URL of the image that's already live. This is optional but some
+              CDNHosting objects might use this instead of the image.
         '''
         new_serving_thumbs = [] # (url, width, height)
         
@@ -182,16 +189,16 @@ class CDNHosting(object):
         # list of serving URLs
 
         if self.resize:
-            for sz in properties.CDN_IMAGE_SIZES:
+            for sz in self.rendition_sizes:
                 cv_im = pycvutils.from_pil(image)
                 cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
                 im = pycvutils.to_pil(cv_im_r)
-                cdn_url = yield self._upload_impl(im, tid, async=True)
+                cdn_url = yield self._upload_impl(im, tid, url, async=True)
                 if cdn_url:
                     new_serving_thumbs.append((cdn_url, sz[0], sz[1]))
 
         else:
-            cdn_url = yield self._upload_impl(image, tid, async=True)
+            cdn_url = yield self._upload_impl(image, tid, url, async=True)
             # Append only if the image was uploaded successfully   
             if cdn_url:
                 new_serving_thumbs.append((cdn_url, image.size[0], image.size[1]))
@@ -212,7 +219,7 @@ class CDNHosting(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, image, tid):
+    def _upload_impl(self, image, tid, url=None):
         '''Upload the specific image to the CDN service.
 
         Note that this could be called multiple times for the same
@@ -223,8 +230,10 @@ class CDNHosting(object):
         Inputs:
         @image: PIL image to upload
         @tid: tid of the image being uploaded
+        @url: URL of the image that's already live. This is optional but some
+              CDNHosting objects might use this instead of the image.
 
-        @returns: The serving url for the image
+        @returns: The serving url for the image or None if it shouldn't be served
         '''
         raise NotImplementedError()
 
@@ -234,9 +243,6 @@ class CDNHosting(object):
         Creates the appropriate connection based on a database entry.
         '''
         if isinstance(cdn_metadata,
-                        supportServices.neondata.PrimaryNeonHostingMetadata):
-            return PrimaryNeonHosting(cdn_metadata)
-        elif isinstance(cdn_metadata,
                       supportServices.neondata.S3CDNHostingMetadata):
             return AWSHosting(cdn_metadata)
         elif isinstance(cdn_metadata,
@@ -254,10 +260,13 @@ class AWSHosting(CDNHosting):
 
     neon_fname_fmt = "neontn%s_w%s_h%s.jpg" 
     
-    def __init__(self, cdn_metadata, hoster_type="awshosting"):
-        super(AWSHosting, self).__init__(cdn_metadata, hoster_type)
-        self.neon_bucket = isinstance(
+    def __init__(self, cdn_metadata):
+        super(AWSHosting, self).__init__(cdn_metadata)
+        self.neon_bucket = (isinstance(
             cdn_metadata, supportServices.neondata.NeonCDNHostingMetadata)
+            or isinstance(
+                cdn_metadata,
+                supportServices.neondata.PrimaryNeonHostingMetadata))
         self.s3conn = S3Connection(cdn_metadata.access_key,
                                    cdn_metadata.secret_key)
         self.s3bucket_name = cdn_metadata.bucket_name
@@ -271,7 +280,7 @@ class AWSHosting(CDNHosting):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, image, tid):
+    def _upload_impl(self, image, tid, url=None):
         # Connect to the bucket if not done already
         if self.s3bucket is None:
             self.s3bucket = yield utils.botoutils.run_async(
@@ -292,13 +301,12 @@ class AWSHosting(CDNHosting):
             name_pieces.append(''.join(
                 random.choice(string.letters + string.digits) 
                 for _ in range(3)))
-        name_pieces.append(AWSHosting.neon_fname_fmt % 
-                           (tid, image.size[0], image.size[1]))
-        key_name = '/'.join(name_pieces)
-        
-        # Figure the S3 location: <API_KEY>/<VIDEO_ID>/<THUMB_ID>.jpg
         if self.make_tid_folders:
-            key_name = re.sub('_', '/', tid) + ".jpg" 
+            name_pieces.append("%s.jpg" % re.sub('_', '/', tid))
+        else:
+            name_pieces.append(AWSHosting.neon_fname_fmt % 
+                               (tid, image.size[0], image.size[1]))
+        key_name = '/'.join(name_pieces)
 
         cdn_url = "http://%s/%s" % (cdn_prefix, key_name)
         fmt = 'jpeg'
@@ -317,20 +325,6 @@ class AWSHosting(CDNHosting):
                                  policy=policy, async=True)
 
         raise tornado.gen.Return(cdn_url)
-        
-class PrimaryNeonHosting(AWSHosting):
-
-    '''
-    Hosting on Neon's Primary S3 bucket
-    '''
-    def __init__(self, cdn_metadata, hoster_type="primary_neon"):
-        super(PrimaryNeonHosting, self).__init__(cdn_metadata, hoster_type)
-
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def _upload_impl(self, image, tid):
-        s3url = super(PrimaryNeonHosting, self)._upload_impl(image, tid)
-        raise tornado.gen.Return(s3url)
 
 class CloudinaryHosting(CDNHosting):
     
@@ -345,20 +339,21 @@ class CloudinaryHosting(CDNHosting):
     http://res.cloudinary.com/neon-labs/image/upload/w_120,h_90/{NEON_TID}.jpg
 
     '''
-    def __init__(self, cdn_metadata, hoster_type="cloudinary"):
-        super(CloudinaryHosting, self).__init__(cdn_metadata, hoster_type)
+    def __init__(self, cdn_metadata):
+        super(CloudinaryHosting, self).__init__(cdn_metadata)
     
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, image, tid):
+    def _upload_impl(self, image, tid, url=None):
         '''
-        image: s3 url of the image
+        Upload the image to cloudinary.
+        
         Note: No support for uploading raw images yet 
         '''
 
-        if not isinstance(image, basestring):
-            raise Exception("Cloudinary hosting currently doesnt support\
-                    uploading raw images")
+        if url is None:
+            raise ValueError("Cloudinary hosting must be done by specifying "
+                             "the url")
 
         # 0, 0 indicates original (base image size)
         img_name = "neontn%s_w%s_h%s.jpg" % (tid, "0", "0") 
@@ -372,10 +367,11 @@ class CloudinaryHosting(CDNHosting):
         self.sign_request(params)
         headers = {}
 
-        params['file'] = image
+        params['file'] = url
         response = yield self.make_request(params, None, headers, async=True)
         if response.error:
-            _log.error("Failed to upload image to cloudinary for tid %s" % tid)
+            _log.error("Failed to upload image to cloudinary for tid %s: %s" %
+                       (tid, response.error))
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -422,8 +418,8 @@ class AkamaiHosting(CDNHosting):
 
     neon_fname_fmt = "neontn%s_w%s_h%s.jpg" 
 
-    def __init__(self, cdn_metadata, hoster_type="akamai"):
-        super(AkamaiHosting, self).__init__(cdn_metadata, hoster_type)
+    def __init__(self, cdn_metadata):
+        super(AkamaiHosting, self).__init__(cdn_metadata)
         self.cdn_prefixes = cdn_metadata.cdn_prefixes 
         self.ak_conn = akamai_api.AkamaiNetstorage(cdn_metadata.host,
                             cdn_metadata.akamai_key,
@@ -432,7 +428,7 @@ class AkamaiHosting(CDNHosting):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, image, tid):
+    def _upload_impl(self, image, tid, url=None):
         
         name_pieces = []
         name_pieces.append(AkamaiHosting.neon_fname_fmt % 

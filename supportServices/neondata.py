@@ -1321,7 +1321,8 @@ class CDNHostingMetadata(NamespacedStoredObject):
     ''' 
     
     def __init__(self, key=None, cdn_prefixes=None, resize=False, 
-                 update_serving_urls=False):
+                 update_serving_urls=False,
+                 rendition_sizes=None):
         self.key = key
         
         self.cdn_prefixes = cdn_prefixes # List of url prefixes
@@ -1332,6 +1333,30 @@ class CDNHostingMetadata(NamespacedStoredObject):
 
         # Should the images be added to ThumbnailServingURL object?
         self.update_serving_urls = update_serving_urls
+
+        # A list of image rendition sizes to generate if resize is
+        # True. The list is of (w, h) tuples.
+        self.rendition_sizes = rendition_sizes or [
+            [120, 67],
+            [120, 90],
+            [160, 90],
+            [160, 120],
+            [210, 118],
+            [320, 180],
+            [320, 240],
+            [480, 270],
+            [480, 360],
+            [640, 360],
+            [640, 480],
+            [1280, 720]]
+
+    # TODO(sunil or mdesnoyer): Write a function to add a new
+    # rendition size to the list and upload the requisite images to
+    # where they are hosted. Some of the functionality will be in
+    # cdnhosting, but this object will have to be saved too. We
+    # probably want to update all the images in the account or it
+    # could have parameters like a single image, all the images newer
+    # than a date etc.
 
     def save(self):
         raise NotImplementedError()
@@ -1356,12 +1381,12 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
     def __init__(self, key=None, access_key=None, secret_key=None, 
                  bucket_name=None, cdn_prefixes=None, folder_prefix=None,
                  resize=False, update_serving_urls=False, do_salt=True,
-                 make_tid_folders=False):
+                 make_tid_folders=False, rendition_sizes=None):
         '''
         Create the object
         '''
         super(S3CDNHostingMetadata, self).__init__(
-            key, cdn_prefixes, resize, update_serving_urls)
+            key, cdn_prefixes, resize, update_serving_urls, rendition_sizes)
         self.access_key = access_key # S3 access key
         self.secret_key = secret_key # S3 secret access key
         self.bucket_name = bucket_name # S3 bucket to host in
@@ -1371,7 +1396,8 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
         # image name? Useful for performance when serving.
         self.do_salt = do_salt
 
-        # make folders for easy navigation
+        # make folders for easy navigation. This puts the image in the
+        # form <api_key>/<video_id>/<thumb_id>.jpg
         self.make_tid_folders = make_tid_folders
 
 class NeonCDNHostingMetadata(S3CDNHostingMetadata):
@@ -1387,7 +1413,8 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
                  resize=True,
                  update_serving_urls=True,
                  do_salt=True,
-                 make_tid_folders=False):
+                 make_tid_folders=False,
+                 rendition_sizes=None):
         super(NeonCDNHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
@@ -1395,7 +1422,9 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
             folder_prefix=folder_prefix,
             resize=resize,
             update_serving_urls=update_serving_urls,
-            do_salt=do_salt)
+            do_salt=do_salt,
+            make_tid_folders=make_tid_folders,
+            rendition_sizes=rendition_sizes)
 
 class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     '''
@@ -1405,12 +1434,16 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     @make_tid_folders: If true, _ is replaced by '/' to create folder
     '''
     def __init__(self, key=None,
-            bucket_name='host-thumbnails', #TODO: Should this be hardcoded?
-            make_tid_folders=True):
+                 bucket_name='host-thumbnails',
+                 folder_prefix=''):
         super(PrimaryNeonHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
-            make_tid_folders=make_tid_folders)
+            folder_prefix=folder_prefix,
+            resize=False,
+            update_serving_urls=False,
+            do_salt=False,
+            make_tid_folders=True)
 
 class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     '''
@@ -1429,12 +1462,13 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
     '''
 
     def __init__(self, key=None, host=None, akamai_key=None, akamai_name=None,
-            baseurl=None, cdn_prefixes=None):
+            baseurl=None, cdn_prefixes=None, rendition_sizes=None):
         super(AkamaiCDNHostingMetadata, self).__init__(
             key,
             cdn_prefixes=cdn_prefixes,
             resize=True,
-            update_serving_urls=True)
+            update_serving_urls=True,
+            rendition_sizes=rendition_sizes)
         
         self.host = host
         self.akamai_key = akamai_key
@@ -2694,8 +2728,8 @@ class ThumbnailMetadata(StoredObject):
         self.key = ThumbnailID.generate(imgdata, self.video_id)
 
         # Host the primary copy of the image 
-        primary_hoster = api.cdnhosting.PrimaryNeonHosting(
-                            PrimaryNeonHostingMetadata())
+        primary_hoster = api.cdnhosting.CDNHosting.create(
+            PrimaryNeonHostingMetadata())
         s3_url = yield primary_hoster.upload(image, self.key, async=True)
         # TODO (Sunil):  Add redirect for the image
 
@@ -2717,14 +2751,8 @@ class ThumbnailMetadata(StoredObject):
                 cdn_metadata = [NeonCDNHostingMetadata()]
             
         hosters = [api.cdnhosting.CDNHosting.create(x) for x in cdn_metadata]
-        for x in hosters:
-            #NOTE: Cant' use isinstance here as it doesn't work with mock'ed
-            # objects :(
-            if x.hoster_type == "cloudinary":
-                # Send the url to cloudinary to upload 
-                yield x.upload(s3_url, self.key, async=True)
-            else:
-                yield x.upload(image, self.key, async=True)
+        for x in hosters: 
+            yield x.upload(image, self.key, s3_url, async=True)
 
     @classmethod
     def _create(cls, key, data_dict):
