@@ -85,7 +85,8 @@ placeholder_images = [
 class GetVideoStatusResponse(object):
     ''' VideoStatus response on *_integration calls '''
     def __init__(self, items, count, page_no=0, page_size=100,
-            processing_count=0, recommended_count=0, published_count=0):
+            processing_count=0, recommended_count=0, published_count=0,
+            serving_count=0):
         self.items = items
         self.total_count = count 
         self.page_no = page_no
@@ -93,6 +94,7 @@ class GetVideoStatusResponse(object):
         self.processing_count = processing_count
         self.recommended_count = recommended_count
         self.published_count = published_count
+        self.serving_count = serving_count
 
     def to_json(self):
         ''' to json''' 
@@ -293,7 +295,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     if len(uri_parts) == 9:
                         video_state = uri_parts[-1].split('?')[0]
                         if video_state not in ["processing", "recommended",
-                                "published", "failed"]:
+                                "published", "failed", "serving"]:
                                 
                                 # Check if there was a "/" 
                                 if len(video_state) < 2: 
@@ -800,11 +802,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         c_processing = 0
         c_recommended = 0
         c_failed = 0
+        c_serving = 0
 
         #videos by state
         p_videos = []
         r_videos = []
         a_videos = []
+        serving_videos = []
         f_videos = [] #failed videos 
 
         page_no = 0 
@@ -861,7 +865,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                         None)
                     vstatus_response = GetVideoStatusResponse(
                                         [vr.to_dict()], 0, page_no, page_size,
-                                        c_processing, c_recommended, c_published)
+                                        c_processing, c_recommended, c_published, c_serving)
                     data = vstatus_response.to_json() 
                     self.send_json_response(data, 200)
                     return
@@ -874,7 +878,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         if not vids:
             vstatus_response = GetVideoStatusResponse(
                         [], 0, page_no, page_size,
-                        c_processing, c_recommended, c_published)
+                        c_processing, c_recommended, c_published, c_serving)
             data = vstatus_response.to_json() 
             self.send_json_response(data, 200)
             return
@@ -939,12 +943,12 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 thumbs = None
                 if request.state == neondata.RequestState.FINISHED:
                     r_videos.append(vid) #finshed processing
-                elif request.state == neondata.RequestState.SERVING:
-                    r_videos.append(vid) #finshed processing
-                    status = neondata.RequestState.SERVING
                 elif request.state in [neondata.RequestState.ACTIVE, 
                         neondata.RequestState.SERVING_AND_ACTIVE]:
-                    a_videos.append(vid) #published /active 
+                    a_videos.append(vid) #published /active
+                elif request.state == neondata.RequestState.SERVING:
+                    serving_videos.append(vid)
+                    status = neondata.RequestState.SERVING
 
             pub_date = None if not request.__dict__.has_key('publish_date') \
                             else request.publish_date
@@ -971,6 +975,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             elif video_state == "processing":
                 vids = p_videos
                 completed_videos = []
+            elif video_state == "serving":
+                vids = completed_videos = serving_videos
             elif video_state == "failed":
                 vids = f_videos
                 completed_videos = []
@@ -1054,6 +1060,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         c_recommended = len(r_videos)
         c_published = len(a_videos)
         c_failed = len(f_videos)
+        c_serving = len(serving_videos)
 
         if i_type == "brightcove":
             #Sort brightcove videos by video_id, since publish_date 
@@ -1072,7 +1079,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         vstatus_response = GetVideoStatusResponse(
                         s_vresult, total_count, page_no, page_size,
-                        c_processing, c_recommended, c_published)
+                        c_processing, c_recommended, c_published, c_serving)
         data = vstatus_response.to_json() 
         self.send_json_response(data, 200)
 
