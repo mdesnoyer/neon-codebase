@@ -7,13 +7,13 @@ Create api requests for the OOYALA customers
 '''
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
     
 import redis as blockingRedis
 import os
-from supportServices.neondata import *
+from cmsdb.neondata import *
 import json
 import utils.neon
 from utils.options import define, options

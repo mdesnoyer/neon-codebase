@@ -22,10 +22,11 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-import api.cdnhosting
 from api import ooyala_api
 import base64
 import binascii
+import cmsdb.cdnhosting
+import cmsdb.url2thumbnail
 import code
 import concurrent.futures
 import contextlib
@@ -42,7 +43,6 @@ import re
 import redis as blockingRedis
 import string
 from StringIO import StringIO
-import supportServices.url2thumbnail
 import tornado.ioloop
 import tornado.gen
 import tornado.httpclient
@@ -2643,7 +2643,7 @@ class ThumbnailMetadata(StoredObject):
 
     def update_phash(self, image):
         '''Update the phash from a PIL image.'''
-        self.phash = supportServices.url2thumbnail.hash_pil_image(image)
+        self.phash = cmsdb.url2thumbnail.hash_pil_image(image)
 
     def get_account_id(self):
         ''' get the internal account id. aka api key '''
@@ -2694,7 +2694,7 @@ class ThumbnailMetadata(StoredObject):
         self.key = ThumbnailID.generate(imgdata, self.video_id)
 
         # Host the primary copy of the image 
-        primary_hoster = api.cdnhosting.PrimaryNeonHosting(
+        primary_hoster = cmsdb.cdnhosting.PrimaryNeonHosting(
                             PrimaryNeonHostingMetadata())
         s3_url = yield primary_hoster.upload(image, self.key, async=True)
         # TODO (Sunil):  Add redirect for the image
@@ -2716,7 +2716,7 @@ class ThumbnailMetadata(StoredObject):
                 # Default to hosting on the Neon CDN if we don't know about it
                 cdn_metadata = [NeonCDNHostingMetadata()]
             
-        hosters = [api.cdnhosting.CDNHosting.create(x) for x in cdn_metadata]
+        hosters = [cmsdb.cdnhosting.CDNHosting.create(x) for x in cdn_metadata]
         for x in hosters:
             #NOTE: Cant' use isinstance here as it doesn't work with mock'ed
             # objects :(

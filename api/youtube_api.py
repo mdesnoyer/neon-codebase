@@ -19,7 +19,7 @@ from PIL import Image
 import time
 import urllib
 import os
-from supportServices.neondata import *
+from cmsdb.neondata import *
 
 
 class YoutubeApi(object):

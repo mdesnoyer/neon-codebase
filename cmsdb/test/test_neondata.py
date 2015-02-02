@@ -7,7 +7,6 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] <> base_path:
         sys.path.insert(0,base_path)
 
-import bcove_responses
 import copy
 from concurrent.futures import Future
 import logging
@@ -33,8 +32,8 @@ import unittest
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.redis 
 from StringIO import StringIO
-from supportServices import neondata
-from supportServices.neondata import NeonPlatform, BrightcovePlatform, \
+from cmsdb import neondata
+from cmsdb.neondata import NeonPlatform, BrightcovePlatform, \
         YoutubePlatform, NeonUserAccount, DBConnection, NeonApiKey, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
         ThumbnailMetadata, InternalVideoID, OoyalaPlatform, \
@@ -219,8 +218,8 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         
         #Trigger a change in the options, so that the watchdog thread 
         #can update the connection
-        options._set("supportServices.neondata.dbPort", self.redis.port)
-        check_interval = options.get("supportServices.neondata.watchdogInterval")
+        options._set("cmsdb.neondata.dbPort", self.redis.port)
+        check_interval = options.get("cmsdb.neondata.watchdogInterval")
         time.sleep(check_interval + 0.5)
         
         #try any db operation
@@ -617,7 +616,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertTrue(expected_url in staging_url)
 
 
-    @patch('supportServices.neondata.VideoMetadata.get')
+    @patch('cmsdb.neondata.VideoMetadata.get')
     def test_save_default_thumbnail(self, get_video_mock): 
         get_video_mock.side_effect = lambda x, callback: callback(None)
 
@@ -816,7 +815,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()
-        self.connection_patcher = patch('supportServices.neondata.blockingRedis.StrictRedis')
+        self.connection_patcher = patch('cmsdb.neondata.blockingRedis.StrictRedis')
 
         # For the sake of this test, we will only mock the get() function
         mock_redis = self.connection_patcher.start()
@@ -826,13 +825,13 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
         self.valid_obj = TrackerAccountIDMapper("tai1", "api_key")
 
         # Speed up the retry delays to make the test faster
-        self.old_delay = options.get('supportServices.neondata.baseRedisRetryWait')
-        options._set('supportServices.neondata.baseRedisRetryWait', 0.01)
+        self.old_delay = options.get('cmsdb.neondata.baseRedisRetryWait')
+        options._set('cmsdb.neondata.baseRedisRetryWait', 0.01)
 
     def tearDown(self):
         self.connection_patcher.stop()
         DBConnection.clear_singleton_instance()
-        options._set('supportServices.neondata.baseRedisRetryWait',
+        options._set('cmsdb.neondata.baseRedisRetryWait',
                      self.old_delay)
         super(TestDbConnectionHandling, self).tearDown()
 
@@ -1149,7 +1148,7 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()
-        self.connection_patcher = patch('supportServices.neondata.blockingRedis.StrictRedis')
+        self.connection_patcher = patch('cmsdb.neondata.blockingRedis.StrictRedis')
 
         # For the sake of this test, we will only mock the get() function
         mock_redis = self.connection_patcher.start()
@@ -1159,13 +1158,13 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
         self.valid_obj = TrackerAccountIDMapper("tai1", "api_key")
 
         # Speed up the retry delays to make the test faster
-        self.old_delay = options.get('supportServices.neondata.baseRedisRetryWait')
-        options._set('supportServices.neondata.baseRedisRetryWait', 0.01)
+        self.old_delay = options.get('cmsdb.neondata.baseRedisRetryWait')
+        options._set('cmsdb.neondata.baseRedisRetryWait', 0.01)
 
     def tearDown(self):
         self.connection_patcher.stop()
         DBConnection.clear_singleton_instance()
-        options._set('supportServices.neondata.baseRedisRetryWait',
+        options._set('cmsdb.neondata.baseRedisRetryWait',
                      self.old_delay)
         super(TestDbConnectionHandling, self).tearDown()
 
@@ -1489,14 +1488,14 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
 
         # Mock out s3
         self.s3conn = boto_mock.MockConnection()
-        self.s3_patcher = patch('api.cdnhosting.S3Connection')
+        self.s3_patcher = patch('cmsdb.cdnhosting.S3Connection')
         self.mock_conn = self.s3_patcher.start()
         self.mock_conn.return_value = self.s3conn
         self.s3conn.create_bucket('hosting-bucket')
         self.bucket = self.s3conn.get_bucket('hosting-bucket')
 
         # Mock out cloudinary
-        self.cloudinary_patcher = patch('api.cdnhosting.CloudinaryHosting')
+        self.cloudinary_patcher = patch('cmsdb.cdnhosting.CloudinaryHosting')
         self.cloudinary_mock = self.cloudinary_patcher.start()
         future = Future()
         future.set_result(None)
@@ -1719,7 +1718,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
                                        rank=-1,
                                        frameno=35)
 
-        with patch('supportServices.neondata.utils.imageutils.PILImageUtils') \
+        with patch('cmsdb.neondata.utils.imageutils.PILImageUtils') \
           as pil_mock:
             image_future = Future()
             image_future.set_result(self.image)

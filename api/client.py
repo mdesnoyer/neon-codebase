@@ -28,6 +28,7 @@ import api.ooyala_api
 import atexit
 import boto.exception
 from boto.s3.connection import S3Connection
+from cmsdb import neondata
 import cv2
 import ffvideo
 import hashlib
@@ -43,7 +44,6 @@ import random
 import re
 import signal
 import socket
-from supportServices import neondata
 import tempfile
 import tornado.web
 import tornado.gen

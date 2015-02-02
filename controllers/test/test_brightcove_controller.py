@@ -1,11 +1,13 @@
 #!/usr/bin/env python
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
-                                         '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
+                                             '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
+from cmsdb import neondata
+from cmsdb.url2thumbnail import URL2ThumbnailIndex
 import controllers.brightcove_controller
 import json
 import logging
@@ -13,8 +15,6 @@ from mock import patch, MagicMock
 import PIL.Image
 import random
 from StringIO import StringIO
-from supportServices import neondata
-from supportServices.url2thumbnail import URL2ThumbnailIndex
 import time
 import test_utils.redis
 import test_utils.mock_boto_s3

@@ -12,7 +12,7 @@ if sys.path[0] != __base_path__:
 
 import cv.imhash_index
 import logging
-import neondata
+import cmsdb.neondata
 import threading
 import tornado.gen
 import tornado.httpclient
@@ -55,7 +55,7 @@ class URL2ThumbnailIndex:
         '''Builds the index from the neondata database.'''
         _log.info('Collecting all the images in the database.')
         hashes = set()
-        for thumb_info in neondata.ThumbnailMetadata.iterate_all_thumbnails():
+        for thumb_info in cmsdb.neondata.ThumbnailMetadata.iterate_all_thumbnails():
             cur_hash = self._add_new_thumbnail_to_index(
                 thumb_info,
                 update_hash_index=False)
@@ -128,7 +128,7 @@ class URL2ThumbnailIndex:
             # Update the phash in the thumbnail metadata
             def _setphash(x): x.phash = thumb.phash
             updated_thumb = yield tornado.gen.Task(
-                neondata.ThumbnailMetadata.modify,
+                cmsdb.neondata.ThumbnailMetadata.modify,
                 thumb.key,
                 _setphash)
             if updated_thumb is None:
@@ -160,10 +160,10 @@ class URL2ThumbnailIndex:
         '''
 
         # First look for the URL in our mapper
-        thumb_id = yield tornado.gen.Task(neondata.ThumbnailURLMapper.get_id,
+        thumb_id = yield tornado.gen.Task(cmsdb.neondata.ThumbnailURLMapper.get_id,
                                           url)
         if thumb_id is not None:
-            thumb_info = yield tornado.gen.Task(neondata.ThumbnailMetadata.get,
+            thumb_info = yield tornado.gen.Task(cmsdb.neondata.ThumbnailMetadata.get,
                                                 thumb_id)
             if thumb_info is None:
                 _log.error('Could not find thumbnail information for id: %s' %
@@ -217,7 +217,7 @@ class URL2ThumbnailIndex:
         
         # Filter out the thumbs not in this account and/or video id
         dists, thumb_ids = zip(*possible_thumbs)
-        thumbs = yield tornado.gen.Task(neondata.ThumbnailMetadata.get_many,
+        thumbs = yield tornado.gen.Task(cmsdb.neondata.ThumbnailMetadata.get_many,
                                         thumb_ids)
         possible_thumbs = filter(
             lambda x: (account_api_key is None or 
@@ -241,13 +241,13 @@ class URL2ThumbnailIndex:
                 if possible_thumbs[0][0] == 0:
                     thumb.phash = phash
             updated_thumb = yield tornado.gen.Task(
-                neondata.ThumbnailMetadata.modify,
+                cmsdb.neondata.ThumbnailMetadata.modify,
                 found_thumb.key,
                 _update_thumb)
 
             # Add an entry for this url in the URL mapper
             yield tornado.gen.Task(
-                neondata.ThumbnailURLMapper(url, updated_thumb.key).save)
+                cmsdb.neondata.ThumbnailURLMapper(url, updated_thumb.key).save)
 
             raise tornado.gen.Return(updated_thumb)
 

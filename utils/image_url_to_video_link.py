@@ -8,11 +8,11 @@ USAGE: ./script --url "http://image.url"
 import os
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0, base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
     
-from supportServices.neondata import NeonApiRequest, ThumbnailURLMapper,\
+from cmsdb.neondata import NeonApiRequest, ThumbnailURLMapper,\
         VideoMetadata, ThumbnailMetadata
 import utils
 from utils.options import define, options

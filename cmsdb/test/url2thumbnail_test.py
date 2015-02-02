@@ -11,13 +11,13 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+from cmsdb import neondata
 import logging
 from mock import patch, MagicMock
-from supportServices import neondata
 import PIL.Image
 import random
 from StringIO import StringIO
-from supportServices.url2thumbnail import URL2ThumbnailIndex
+from cmsdb.url2thumbnail import URL2ThumbnailIndex
 import test_utils.neontest
 import test_utils.redis
 import tornado.httpclient
@@ -87,7 +87,7 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
         # Define the mapping that will be mocked out from url to images. 
         self.url2img = {}
         self.get_img_patcher = \
-          patch('supportServices.url2thumbnail.utils.http.send_request')
+          patch('cmsdb.url2thumbnail.utils.http.send_request')
         self.get_img_mock = self.get_img_patcher.start()
         self.get_img_mock.side_effect = self._returnImageCallback
 

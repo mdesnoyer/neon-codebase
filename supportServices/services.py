@@ -32,7 +32,7 @@ import utils.logs
 import utils.http
 
 from StringIO import StringIO
-from supportServices import neondata
+from cmsdb import neondata
 from utils.inputsanitizer import InputSanitizer
 from utils import statemon
 import utils.sync

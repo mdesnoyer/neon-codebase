@@ -8,16 +8,15 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-import akamai_api
+import api.akamai_api
 import base64
 import json
 import hashlib
 import random
-import properties
 import re
 import socket
 import string
-import supportServices.neondata
+import cmsdb.neondata
 import time
 import tornado.gen
 import urllib
@@ -45,6 +44,13 @@ define('cloudinary_api_key', default='433154993476843',
        help='Cloudinary api key')
 define('cloudinary_api_secret', default='n0E7427lrS1Fe_9HLbtykf9CdtA',
        help='Cloudinary secret api key')
+
+# TODO(Sunil): refactor this and make this a account level property
+_CDN_IMAGE_SIZES = [(120, 67), (160, 90), (210, 118), (320, 180), (480, 270), 
+        (640, 360), (120, 90), (160, 120), (320, 240), (480, 360),
+        (640, 480), (1280, 720), (140, 70), (228, 128), (292, 164), (468, 263), (64, 48), (72, 92)]
+# new image sizes for fox (140, 70), (228, 128), (292, 164), (468, 263), (64, 48), (72, 92) 
+
 
 @utils.sync.optional_sync
 @tornado.gen.coroutine
@@ -171,7 +177,7 @@ class CDNHosting(object):
         '''
         Host images on the CDN
 
-        The sizes for a given image is specified in the properties file
+        The sizes for a given image is specified at the top of this file
         size is a tuple (width, height)
 
         Saves the mappings in ThumbnailServingURLs object 
@@ -182,7 +188,7 @@ class CDNHosting(object):
         # list of serving URLs
 
         if self.resize:
-            for sz in properties.CDN_IMAGE_SIZES:
+            for sz in _CDN_IMAGE_SIZES:
                 cv_im = pycvutils.from_pil(image)
                 cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
                 im = pycvutils.to_pil(cv_im_r)
@@ -202,7 +208,7 @@ class CDNHosting(object):
                     obj.add_serving_url(*params)
 
             yield tornado.gen.Task(
-                supportServices.neondata.ThumbnailServingURLs.modify,
+                cmsdb.neondata.ThumbnailServingURLs.modify,
                 tid,
                 add_serving_urls,
                 create_missing=True)
@@ -234,16 +240,16 @@ class CDNHosting(object):
         Creates the appropriate connection based on a database entry.
         '''
         if isinstance(cdn_metadata,
-                        supportServices.neondata.PrimaryNeonHostingMetadata):
+                        cmsdb.neondata.PrimaryNeonHostingMetadata):
             return PrimaryNeonHosting(cdn_metadata)
         elif isinstance(cdn_metadata,
-                      supportServices.neondata.S3CDNHostingMetadata):
+                      cmsdb.neondata.S3CDNHostingMetadata):
             return AWSHosting(cdn_metadata)
         elif isinstance(cdn_metadata,
-                        supportServices.neondata.CloudinaryCDNHostingMetadata):
+                        cmsdb.neondata.CloudinaryCDNHostingMetadata):
             return CloudinaryHosting(cdn_metadata)
         elif isinstance(cdn_metadata,
-                        supportServices.neondata.AkamaiCDNHostingMetadata):
+                        cmsdb.neondata.AkamaiCDNHostingMetadata):
             return AkamaiHosting(cdn_metadata)
 
         else:
@@ -257,7 +263,7 @@ class AWSHosting(CDNHosting):
     def __init__(self, cdn_metadata, hoster_type="awshosting"):
         super(AWSHosting, self).__init__(cdn_metadata, hoster_type)
         self.neon_bucket = isinstance(
-            cdn_metadata, supportServices.neondata.NeonCDNHostingMetadata)
+            cdn_metadata, cmsdb.neondata.NeonCDNHostingMetadata)
         self.s3conn = S3Connection(cdn_metadata.access_key,
                                    cdn_metadata.secret_key)
         self.s3bucket_name = cdn_metadata.bucket_name
@@ -425,10 +431,11 @@ class AkamaiHosting(CDNHosting):
     def __init__(self, cdn_metadata, hoster_type="akamai"):
         super(AkamaiHosting, self).__init__(cdn_metadata, hoster_type)
         self.cdn_prefixes = cdn_metadata.cdn_prefixes 
-        self.ak_conn = akamai_api.AkamaiNetstorage(cdn_metadata.host,
-                            cdn_metadata.akamai_key,
-                            cdn_metadata.akamai_name,
-                            cdn_metadata.baseurl)
+        self.ak_conn = api.akamai_api.AkamaiNetstorage(
+            cdn_metadata.host,
+            cdn_metadata.akamai_key,
+            cdn_metadata.akamai_name,
+            cdn_metadata.baseurl)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine

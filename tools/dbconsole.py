@@ -12,13 +12,13 @@ if sys.path[0] != __base_path__:
 
 import atexit
 import boto.opsworks
+from cmsdb.neondata import *
 import code
 import ipdb
 import random
 import signal
 import socket
 import subprocess
-from supportServices.neondata import *
 import utils.neon
 import utils.ps
 
@@ -96,10 +96,10 @@ if __name__ == '__main__':
     proc = forward_port(local_port)
     try:
         # Set the options for connecting to the db
-        options._set('supportServices.neondata.dbPort', local_port)
-        options._set('supportServices.neondata.accountDB', 'localhost')
-        options._set('supportServices.neondata.thumbnailDB', 'localhost')
-        options._set('supportServices.neondata.videoDB', 'localhost')
+        options._set('cmsdb.neondata.dbPort', local_port)
+        options._set('cmsdb.neondata.accountDB', 'localhost')
+        options._set('cmsdb.neondata.thumbnailDB', 'localhost')
+        options._set('cmsdb.neondata.videoDB', 'localhost')
 
         # Enter the console
         ipdb.set_trace()

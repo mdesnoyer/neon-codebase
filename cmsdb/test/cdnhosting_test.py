@@ -8,13 +8,13 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 from api import akamai_api
-import api.cdnhosting
 import boto.exception
 from cStringIO import StringIO
+import cmsdb.cdnhosting
 import json
 import logging
 from mock import MagicMock, patch
-from supportServices import neondata
+from cmsdb import neondata
 import PIL
 import random
 import re
@@ -34,14 +34,14 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     '''
     def setUp(self):
         self.s3conn = boto_mock.MockConnection()
-        self.s3_patcher = patch('api.cdnhosting.S3Connection')
+        self.s3_patcher = patch('cmsdb.cdnhosting.S3Connection')
         self.mock_conn = self.s3_patcher.start()
         self.mock_conn.return_value = self.s3conn
         self.s3conn.create_bucket('hosting-bucket')
         self.bucket = self.s3conn.get_bucket('hosting-bucket')
 
         # Mock neondata
-        self.neondata_patcher = patch('api.cdnhosting.supportServices.neondata')
+        self.neondata_patcher = patch('cmsdb.cdnhosting.cmsdb.neondata')
         self.datamock = self.neondata_patcher.start()
         self.datamock.S3CDNHostingMetadata = neondata.S3CDNHostingMetadata
         self.datamock.CloudinaryCDNHostingMetadata = \
@@ -70,7 +70,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
             'folder1', False, False, False)
 
-        hoster = api.cdnhosting.CDNHosting.create(metadata)
+        hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
         yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
 
         self.mock_conn.assert_called_with('access_key', 'secret_key')
@@ -96,7 +96,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.s3conn.create_bucket('host-thumbnails')
         metadata = neondata.PrimaryNeonHostingMetadata()
 
-        hoster = api.cdnhosting.CDNHosting.create(metadata)
+        hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
         url = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
         self.assertEqual(url,
                     "http://s3.amazonaws.com/host-thumbnails/acct1/vid1/tid1.jpg")
@@ -115,7 +115,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
             'access_key', 'secret_key',
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
             'folder1', False, False)
-        hoster = api.cdnhosting.CDNHosting.create(metadata)
+        hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
 
         with self.assertLogExists(logging.ERROR, 'AWS client error'):
             with self.assertRaises(IOError):
@@ -130,7 +130,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
             'access_key', 'secret_key',
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
             'folder1', False, False)
-        hoster = api.cdnhosting.CDNHosting.create(metadata)
+        hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
 
         with self.assertLogExists(logging.ERROR, 'AWS Server error'):
             with self.assertRaises(IOError):
@@ -143,21 +143,21 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.s3conn.create_bucket('obucket')
         self.s3conn.create_bucket('mine')
 
-        with patch('api.cdnhosting.get_s3_hosting_bucket') as location_mock:
+        with patch('cmsdb.cdnhosting.get_s3_hosting_bucket') as location_mock:
             location_mock.return_value = 'host-bucket'
             yield [
-                api.cdnhosting.create_s3_redirect(
+                cmsdb.cdnhosting.create_s3_redirect(
                     'dest/image.jpg', 'src/samebuc.jpg', 'my-bucket',
                     'my-bucket', async=True),
-                api.cdnhosting.create_s3_redirect(
+                cmsdb.cdnhosting.create_s3_redirect(
                     'dest/image.jpg', 'src/diffbuc.jpg', 'my-bucket',
                     'obucket', async=True),
-                api.cdnhosting.create_s3_redirect(
+                cmsdb.cdnhosting.create_s3_redirect(
                         'dest/image.jpg', 'src/bothdefault.jpg', async=True),
-                api.cdnhosting.create_s3_redirect(
+                cmsdb.cdnhosting.create_s3_redirect(
                         'dest/image.jpg', 'src/destdefault.jpg',
                         src_bucket='mine', async=True),
-                api.cdnhosting.create_s3_redirect(
+                cmsdb.cdnhosting.create_s3_redirect(
                         'dest/image.jpg', 'src/srcdefault.jpg',
                         dest_bucket='mine', async=True), 
                 ]
@@ -186,7 +186,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
 
         with self.assertLogExists(logging.ERROR, 'AWS client error'):
             with self.assertRaises(IOError):
-                yield api.cdnhosting.create_s3_redirect('dest.jpg', 'src.jpg',
+                yield cmsdb.cdnhosting.create_s3_redirect('dest.jpg', 'src.jpg',
                                                         async=True)
 
     @tornado.testing.gen_test
@@ -197,16 +197,16 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
 
         with self.assertLogExists(logging.ERROR, 'AWS Server error'):
             with self.assertRaises(IOError):
-                yield api.cdnhosting.create_s3_redirect('dest.jpg', 'src.jpg',
+                yield cmsdb.cdnhosting.create_s3_redirect('dest.jpg', 'src.jpg',
                                                         async=True)
 
-    @patch('api.cdnhosting.utils.http.send_request')
+    @patch('cmsdb.cdnhosting.utils.http.send_request')
     def test_cloudinary_hosting(self, mock_http):
         
         mock_response = '{"public_id":"bfea94933dc752a2def8a6d28f9ac4c2","version":1406671711,"signature":"26bd2ffa2b301b9a14507d152325d7692c0d4957","width":480,"height":268,"format":"jpg","resource_type":"image","created_at":"2014-07-29T22:08:19Z","bytes":74827,"type":"upload","etag":"99fd609b49a802fdef7e2952a5e75dc3","url":"http://res.cloudinary.com/neon-labs/image/upload/v1406671711/bfea94933dc752a2def8a6d28f9ac4c2.jpg","secure_url":"https://res.cloudinary.com/neon-labs/image/upload/v1406671711/bfea94933dc752a2def8a6d28f9ac4c2.jpg"}'
 
         metadata = neondata.CloudinaryCDNHostingMetadata()
-        cd = api.cdnhosting.CDNHosting.create(metadata)
+        cd = cmsdb.cdnhosting.CDNHosting.create(metadata)
         im = 'https://s3.amazonaws.com/host-thumbnails/image.jpg'
         tid = 'bfea94933dc752a2def8a6d28f9ac4c2'
         mresponse = tornado.httpclient.HTTPResponse(
@@ -221,11 +221,11 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.assertEqual(mock_http._mock_call_args_list[0][0][0].url,
                 "https://api.cloudinary.com/v1_1/neon-labs/image/upload")
 
-    @patch('api.cdnhosting.utils.http.send_request')
+    @patch('cmsdb.cdnhosting.utils.http.send_request')
     def test_cloudinary_error(self, mock_http):
 
         metadata = neondata.CloudinaryCDNHostingMetadata()
-        cd = api.cdnhosting.CDNHosting.create(metadata)
+        cd = cmsdb.cdnhosting.CDNHosting.create(metadata)
         im = 'https://s3.amazonaws.com/host-thumbnails/image.jpg'
         tid = 'bfea94933dc752a2def8a6d28f9ac4c2'
         mresponse = tornado.httpclient.HTTPResponse(
@@ -248,7 +248,7 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
         self.s3conn = boto_mock.MockConnection()
-        self.s3_patcher = patch('api.cdnhosting.S3Connection')
+        self.s3_patcher = patch('cmsdb.cdnhosting.S3Connection')
         self.mock_conn = self.s3_patcher.start()
         self.mock_conn.return_value = self.s3conn
         self.s3conn.create_bucket('hosting-bucket')
@@ -270,13 +270,13 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
             'folder1', True, True, False)
 
-        hoster = api.cdnhosting.CDNHosting.create(metadata)
+        hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
         yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
 
         serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
         self.assertIsNotNone(serving_urls)
 
-        sizes = api.properties.CDN_IMAGE_SIZES 
+        sizes = cmsdb.cdnhosting._CDN_IMAGE_SIZES 
         for w, h in sizes:
 
             # check that the image is in s3
@@ -302,7 +302,7 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
             'folder1', True, True, True)
 
-        hoster = api.cdnhosting.CDNHosting.create(metadata)
+        hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
         yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
 
         serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
@@ -335,7 +335,7 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
             self.assertEqual(s3key.policy, 'public-read')
 
         # Make sure that all the expected files were found
-        self.assertItemsEqual(sizes_found, api.properties.CDN_IMAGE_SIZES)
+        self.assertItemsEqual(sizes_found, cmsdb.cdnhosting._CDN_IMAGE_SIZES)
 
 class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
     '''
@@ -356,7 +356,7 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
                 cdn_prefixes=['cdn.akamai.com']
                 )
 
-        self.hoster = api.cdnhosting.CDNHosting.create(metadata)
+        self.hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
         
         random.seed(1654985)
         self.image = PILImageUtils.create_random_image(480, 640)

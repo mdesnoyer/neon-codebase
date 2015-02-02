@@ -11,6 +11,7 @@ if sys.path[0] <> base_path:
 
 from api import server 
 import api.server
+from cmsdb import neondata
 import concurrent.futures
 import logging
 import json
@@ -19,7 +20,6 @@ import os
 import re
 import random
 import subprocess
-from supportServices import neondata
 from StringIO import StringIO
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.redis
@@ -263,7 +263,7 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         im_download_mock.return_value = image_future
 
         # Mock out cloudinary
-        self.cloudinary_patcher = patch('api.cdnhosting.CloudinaryHosting')
+        self.cloudinary_patcher = patch('cmsdb.cdnhosting.CloudinaryHosting')
         self.cloudinary_mock = self.cloudinary_patcher.start()
         future = concurrent.futures.Future()
         future.set_result(None)
@@ -271,7 +271,7 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
 
         # Mock out s3
         self.s3conn = boto_mock.MockConnection()
-        self.s3_patcher = patch('api.cdnhosting.S3Connection')
+        self.s3_patcher = patch('cmsdb.cdnhosting.S3Connection')
         self.mock_conn = self.s3_patcher.start()
         self.mock_conn.return_value = self.s3conn
         self.s3conn.create_bucket('host-thumbnails')

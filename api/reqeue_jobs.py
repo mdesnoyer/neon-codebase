@@ -13,12 +13,12 @@ Copyright 2013 Neon Labs
 
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 import logging
-from supportServices import neondata
+from cmsdb import neondata
 import urllib2
 import utils.neon
 

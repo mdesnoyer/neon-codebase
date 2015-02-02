@@ -11,6 +11,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+from cmsdb import neondata
 from collections import deque
 import datetime
 import hashlib
@@ -22,7 +23,6 @@ import Queue
 import random
 import re
 import redis
-from supportServices import neondata
 import time
 import tornado.httpserver
 import tornado.gen

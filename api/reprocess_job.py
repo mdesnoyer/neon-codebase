@@ -13,7 +13,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import logging
-from supportServices import neondata
+from cmsdb import neondata
 import urllib2
 import utils.neon
 

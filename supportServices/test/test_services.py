@@ -14,6 +14,7 @@ if sys.path[0] <> base_path:
         sys.path.insert(0, base_path)
 
 from api import brightcove_api
+from cmsdb import neondata
 import datetime
 import json
 from mock import MagicMock, patch 
@@ -21,7 +22,7 @@ import random
 import re
 from PIL import Image
 from StringIO import StringIO
-from supportServices import services, neondata
+from supportServices import services
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.redis
 import time
@@ -615,7 +616,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         update_response = self.update_brightcove_account(new_rtoken)
         self.assertEqual(update_response.code, 200)
         platform = neondata.BrightcovePlatform.get(self.api_key,
-                                                           self.b_id)
+                                                   self.b_id)
         self.assertEqual(platform.read_token, "newrtoken")
         self.assertFalse(platform.auto_update)
         self.assertEqual(platform.write_token, self.wtoken)
@@ -623,7 +624,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
     def test_brightcove_web_account_flow(self):
         #Create Neon Account --> Bcove Integration --> update Integration --> 
         #query videos --> autopublish --> verify autopublish
-        with options._set_bounded('supportServices.neondata.dbPort',
+        with options._set_bounded('cmsdb.neondata.dbPort',
                                   self.redis.port):
         
             #create neon account
@@ -684,8 +685,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
     #Brightcove API failures
 
     def test_update_thumbnail_fails(self):
-        with options._set_bounded('supportServices.neondata.dbPort',
-                                  self.redis.port):
+        with options._set_bounded('cmsdb.neondata.dbPort', self.redis.port):
             self._setup_initial_brightcove_state()
             self._test_update_thumbnail_fails()
     
@@ -1418,8 +1418,8 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         
 
     @patch('utils.imageutils.utils.http')
-    @patch('api.cdnhosting.S3Connection')
-    @patch('supportServices.services.neondata.api.cdnhosting.utils.http')
+    @patch('cmsdb.cdnhosting.S3Connection')
+    @patch('supportServices.services.neondata.cmsdb.cdnhosting.utils.http')
     def test_upload_video_custom_thumbnail(self, mock_cloudinary,
                                            mock_conntype,
                                            mock_img_download):

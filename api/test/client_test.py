@@ -18,9 +18,10 @@ if sys.path[0] != __base_path__:
         sys.path.insert(0, __base_path__)
 
 import api.client
-import api.cdnhosting
 from boto.s3.connection import S3Connection
 import boto.exception
+import cmsdb.cdnhosting
+from cmsdb import neondata
 import json
 import logging
 from mock import MagicMock, patch
@@ -38,7 +39,6 @@ import signal
 import socket
 from StringIO import StringIO
 import subprocess
-from supportServices import neondata
 import time
 import tempfile
 import test_utils
@@ -92,7 +92,7 @@ class TestVideoClient(test_utils.neontest.TestCase):
         self.api_request = None
         
         #patch for download_and_add_thumb
-        self.utils_patch = patch('supportServices.neondata.utils.http.send_request')
+        self.utils_patch = patch('cmsdb.neondata.utils.http.send_request')
         self.uc = self.utils_patch.start() 
 
         random.seed(984695198)
@@ -409,7 +409,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
 
         # Mock out s3
         self.s3conn = boto_mock.MockConnection()
-        self.s3_patcher = patch('api.cdnhosting.S3Connection')
+        self.s3_patcher = patch('cmsdb.cdnhosting.S3Connection')
         self.mock_conn = self.s3_patcher.start()
         self.mock_conn.return_value = self.s3conn
         self.s3conn.create_bucket('host-thumbnails')
@@ -437,7 +437,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.http_mock.side_effect = lambda x: HTTPResponse(x, 200)
 
         # Mock out cloudinary
-        self.cloudinary_patcher = patch('api.cdnhosting.CloudinaryHosting')
+        self.cloudinary_patcher = patch('cmsdb.cdnhosting.CloudinaryHosting')
         self.cloudinary_mock = self.cloudinary_patcher.start()
         future = Future()
         future.set_result(None)
@@ -481,7 +481,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.sqs_mocker.stop()
         self.http_mocker.stop()
         self.im_download_mocker.stop()
-        self.cloudinary_mock.stop()
+        self.cloudinary_patcher.stop()
         self.redis.stop()
         super(TestFinalizeResponse, self).tearDown()
 
@@ -950,7 +950,7 @@ class SmokeTest(test_utils.neontest.TestCase):
 
         # Mock out s3
         self.s3conn = boto_mock.MockConnection()
-        self.s3_patcher = patch('api.cdnhosting.S3Connection')
+        self.s3_patcher = patch('cmsdb.cdnhosting.S3Connection')
         self.mock_conn = self.s3_patcher.start()
         self.mock_conn.return_value = self.s3conn
         self.s3conn.create_bucket('host-thumbnails')
@@ -988,7 +988,7 @@ class SmokeTest(test_utils.neontest.TestCase):
         self.http_mock.side_effect = _http_response
 
         # Mock out cloudinary
-        self.cloudinary_patcher = patch('api.cdnhosting.CloudinaryHosting')
+        self.cloudinary_patcher = patch('cmsdb.cdnhosting.CloudinaryHosting')
         self.cloudinary_mock = self.cloudinary_patcher.start()
         future = Future()
         future.set_result(None)
@@ -1015,7 +1015,7 @@ class SmokeTest(test_utils.neontest.TestCase):
         self.sqs_mocker.stop()
         self.http_mocker.stop()
         self.im_download_mocker.stop()
-        self.cloudinary_mock.stop()
+        self.cloudinary_patcher.stop()
         self.model_patcher.stop()
         self.redis.stop()
         super(SmokeTest, self).tearDown()
