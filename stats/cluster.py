@@ -801,7 +801,7 @@ class Cluster():
             
         instance_groups = [
             InstanceGroup(1, 'MASTER', 'r3.xlarge', 'SPOT',
-                          'Master Instance Group', 2.01),
+                          'Master Instance Group', 1.4),
             self._get_core_instance_group()
             ]
         
