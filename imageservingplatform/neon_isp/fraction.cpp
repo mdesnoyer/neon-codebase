@@ -196,12 +196,27 @@ Fraction::GetScaledImage(int height, int width) const{
 
     static const int pixelRange = 6; 
 
-    for(unsigned i=0; i < images.size(); i++){
+    // go through all images again and pick the first approximate fit
+    unsigned numOfImages = images.size();
+
+    if(numOfImages == 0)
+        return 0; 
+
+    // try to find an exact fit
+    for(unsigned i=0; i < numOfImages; i++){
+        if(images[i]->GetHeight() == height &&
+           images[i]->GetWidth() == width)
+             return images[i];
+    }
+
+    // otherwise try to find pick an approximate fit
+    for(unsigned i=0; i < numOfImages; i++){
         if(ScaledImage::ApproxEqual(images[i]->GetHeight(), height, pixelRange) &&
            ScaledImage::ApproxEqual(images[i]->GetWidth(), width, pixelRange))
             return images[i];
     }
     
+    // no fit found
     return 0;
 }
 

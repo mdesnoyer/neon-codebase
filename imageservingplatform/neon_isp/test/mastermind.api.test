@@ -17,6 +17,18 @@ expiry=2020-01-09T07:14:01Z
 { "type": "dir","aid":"defaccount4", "vid":"vid0", "sla":"expiry=2014-07-22T07:14:01Z", "fractions":[ { "pct": 1.0, "tid": "thumb1", "default_url": "http://dir_default_url_defaccount4.jpg.jpg", "imgs":[{"h":700, "w":800, "url":"http://neon/thumb2_700_800.jpg"}]}]}
 #
 # 
+###################################################################################
+## Perfect Match Thumbnail Test Data
+###################################################################################
+# basic test case where a perfect match is found while there are also qualifying 
+# approximate scaled images defined.
+# 
+# NOTE: the qualifying approx pixel range is currently hardcoded to 6.  These tests depend on this value.  When we upgrade to a configurable
+# value these tests will need updating.
+#
+{"type": "pub", "pid": "perfectpub1", "aid" : "perfectaccount1" }
+{ "type": "dir","aid":"perfectaccount1", "vid":"vid0", "sla":"expiry=2014-07-22T07:14:01Z", "fractions":[ { "pct": 1.0, "tid": "thumb1", "default_url": "http://perfect_match_default.jpg", "imgs":[ {"h":704, "w":804, "url":"http://neon/thumb2_704_804.jpg"}, {"h":705, "w":805, "url":"http://neon/thumb2_705_805.jpg"}, {"h":706, "w":806, "url":"http://neon/thumb2_706_806.jpg"}, {"h":718, "w":818, "url":"http://neon/thumb2_718_818.jpg"}  ]}]}
+
 
 ###################################################################################
 # Legacy tests
