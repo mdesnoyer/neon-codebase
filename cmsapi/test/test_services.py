@@ -8,12 +8,13 @@ tornado server share the same io_loop
 
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
                                          '..'))
-if sys.path[0] <> base_path:
-        sys.path.insert(0, base_path)
+if sys.path[0] != __base_path__:
+        sys.path.insert(0, __base_path__)
 
 from api import brightcove_api
+from cmsapi import services
 from cmsdb import neondata
 import datetime
 import json
@@ -22,7 +23,6 @@ import random
 import re
 from PIL import Image
 from StringIO import StringIO
-from supportServices import services
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.redis
 import time
@@ -1419,7 +1419,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
 
     @patch('utils.imageutils.utils.http')
     @patch('cmsdb.cdnhosting.S3Connection')
-    @patch('supportServices.services.neondata.cmsdb.cdnhosting.utils.http')
+    @patch('cmsapi.services.neondata.cmsdb.cdnhosting.utils.http')
     def test_upload_video_custom_thumbnail(self, mock_cloudinary,
                                            mock_conntype,
                                            mock_img_download):
@@ -1678,7 +1678,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         r_vids = resp['videoids']
         self.assertListEqual(sorted(r_vids), sorted(vids))
    
-    @patch('supportServices.services.utils.http') 
+    @patch('cmsapi.services.utils.http') 
     def test_healthcheck(self, mock_http):
         url = self.get_url("/healthcheck")
         response = self.get_request(url, self.api_key)

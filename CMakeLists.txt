@@ -14,7 +14,7 @@ add_subdirectory(mastermind)
 add_subdirectory(clickTracker)
 add_subdirectory(controllers)
 add_subdirectory(cmsdb)
-add_subdirectory(supportServices)
+add_subdirectory(cmsapi)
 add_subdirectory(api)
 add_subdirectory(imageservingplatform/neon_isp)
 

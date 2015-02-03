@@ -98,7 +98,7 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
             params = yaml.load(conf_stream)
 
             params['cmsdb']['neondata']['dbPort'] = cls.redis.port
-            params['supportServices']['services']['port'] = \
+            params['cmsapi']['services']['port'] = \
               test_utils.net.find_free_port()
             params['mastermind']['server']['port'] = \
               test_utils.net.find_free_port()

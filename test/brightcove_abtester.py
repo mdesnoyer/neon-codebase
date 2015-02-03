@@ -25,7 +25,7 @@ import urllib
 import urllib2
 
 from api import server
-from supportServices import services
+from cmsapi import services
 from cmsdb import neondata
 from test_utils import redis
 

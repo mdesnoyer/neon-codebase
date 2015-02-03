@@ -104,7 +104,7 @@ def check_services_internal_error():
     '''
     Check for internal errors on services servers
     '''
-    module = 'supportServices'
+    module = 'cmsapi'
     program = 'services'
     m_var = 'internal_err'
     check_module(module, program, m_var)
@@ -113,7 +113,7 @@ def check_services_bad_gateway():
     '''
     Check for bad gateway errors
     '''
-    module = 'supportServices'
+    module = 'cmsapi'
     program = 'services'
     m_var = 'bad_gateway'
     check_module(module, program, m_var)
@@ -122,7 +122,7 @@ def check_services_bad_request():
     '''
     Check for bad request errors
     '''
-    module = 'supportServices'
+    module = 'cmsapi'
     program = 'services'
     m_var = 'bad_request'
     check_module(module, program, m_var)
