@@ -406,12 +406,17 @@ static ngx_int_t ngx_http_neon_handler_server(ngx_http_request_t *request)
     neon_stats[NEON_SERVER_API_REQUESTS] ++;
 
     ngx_chain_t chain;
-    
+    chain.buf = NULL;
+    chain.next = NULL;
+   
     neon_service_server_api(request, &chain);
     
     ngx_http_send_header(request);
     
-    return ngx_http_output_filter(request, &chain);
+    if(chain.buf != NULL)
+        return ngx_http_output_filter(request, &chain);
+    else
+        return ngx_http_output_filter(request, NULL);
 }
 
 
@@ -428,12 +433,17 @@ static ngx_int_t ngx_http_neon_handler_client(ngx_http_request_t *request)
     neon_stats[NEON_CLIENT_API_REQUESTS] ++;
 
     ngx_chain_t  chain;
- 
+    chain.buf = NULL;
+    chain.next = NULL;
+
     neon_service_client_api(request, &chain);
     
     ngx_http_send_header(request);
-    
-    return ngx_http_output_filter(request, &chain);
+   
+    if(chain.buf != NULL)
+        return ngx_http_output_filter(request, &chain);
+    else
+        return ngx_http_output_filter(request, NULL);
 }
 
 
