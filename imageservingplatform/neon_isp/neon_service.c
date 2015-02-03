@@ -690,19 +690,7 @@ neon_service_client_api_redirect(ngx_http_request_t *request,
 NEON_CLIENT_API_ERROR
 neon_service_client_api(ngx_http_request_t *request,
                         ngx_chain_t  * chain){
-    
-    ngx_buf_t * buffer;
-    
-    buffer = ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
-    if(buffer == NULL){
-        request->headers_out.status = NGX_HTTP_INTERNAL_SERVER_ERROR; //500
-        neon_stats[NGINX_OUT_OF_MEMORY] ++;
-        return NEON_CLIENT_API_FAIL;
-    } 
-    
-    chain->buf = buffer;
-    chain->next = NULL;
-    
+
     ngx_str_t base_url = ngx_string("/v1/client/");
    
     const char * account_id = 0;
@@ -774,16 +762,13 @@ neon_service_client_api(ngx_http_request_t *request,
     }
 
     // set up the response with a redirect
-    neon_service_client_api_redirect(request,
-            chain,
-            url,
-            url_size);
+    neon_service_client_api_redirect(request, chain, url, url_size);
     
     return NEON_CLIENT_API_OK;
 }
 
-/* Get Thumbnail ID service handler */
 
+/* Get Thumbnail ID service handler */
 NEON_GETTHUMB_API_ERROR 
 neon_service_getthumbnailid(ngx_http_request_t *request,
                             ngx_chain_t  **  chain){
