@@ -23,8 +23,6 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-import api.brightcove_api
-import api.ooyala_api
 import atexit
 import boto.exception
 from boto.s3.connection import S3Connection
