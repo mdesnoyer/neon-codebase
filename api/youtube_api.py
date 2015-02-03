@@ -14,7 +14,6 @@ from StringIO import StringIO
 from poster.encode import multipart_encode
 import poster.encode
 import urllib
-import properties
 from PIL import Image
 import time
 import urllib

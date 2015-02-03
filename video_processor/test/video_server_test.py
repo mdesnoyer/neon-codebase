@@ -4,13 +4,11 @@ Unit test for Video Server
 '''
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
                                          '..'))
-if sys.path[0] <> base_path:
-        sys.path.insert(0,base_path)
+if sys.path[0] <> __base_path__:
+        sys.path.insert(0, __base_path__)
 
-from api import server 
-import api.server
 from cmsdb import neondata
 import concurrent.futures
 import logging
@@ -34,8 +32,8 @@ import unittest
 import urllib
 from utils.imageutils import PILImageUtils
 import utils.neon
-
 from utils.options import define, options
+import video_processor.server
 
 _log = logging.getLogger(__name__)
 NEON_AUTH = "secret_key"
@@ -48,7 +46,7 @@ class TestSimpleThreadSafeDictQ(test_utils.neontest.TestCase):
     '''
     def setUp(self):
         super(TestSimpleThreadSafeDictQ, self).setUp()
-        self.sq = server.SimpleThreadSafeDictQ(int)
+        self.sq = video_processor.server.SimpleThreadSafeDictQ(int)
 
     def tearDown(self):
         super(TestSimpleThreadSafeDictQ, self).tearDown()
@@ -125,7 +123,7 @@ class TestSimpleThreadSafeDictQ(test_utils.neontest.TestCase):
 class TestFairWeightedQ(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestFairWeightedQ, self).setUp()
-        self.fwq = server.FairWeightedRequestQueue(nqueues=2)
+        self.fwq = video_processor.server.FairWeightedRequestQueue(nqueues=2)
         self.fwq._schedule_metadata_thread = MagicMock()
         self.redis = test_utils.redis.RedisServer()
         self.redis.start() 
@@ -138,7 +136,7 @@ class TestFairWeightedQ(test_utils.neontest.AsyncTestCase):
         self.nuser2.save()
 
         # Patch the video length lookup
-        self.send_request_patcher = patch('api.server.utils.http.send_request')
+        self.send_request_patcher = patch('video_processor.server.utils.http.send_request')
         self.mock_send_request = self.send_request_patcher.start()
         self.video_size = MagicMock()
         self.video_size.return_value = 10.0
@@ -225,7 +223,7 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         super(TestVideoServer, cls).setUpClass()
    
     def setUp(self):
-        self.server = server.Server()
+        self.server = video_processor.server.Server()
         super(TestVideoServer, self).setUp()
 
         self.base_uri = '/api/v1/submitvideo/topn'
@@ -244,7 +242,7 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.na.save()
 
         # Patch the video length lookup
-        self.http_patcher = patch('api.server.utils.http')
+        self.http_patcher = patch('video_processor.server.utils.http')
         self.mock_http = self.http_patcher.start()
         vsize = 1024
         request = tornado.httpclient.HTTPRequest("http://xyz")
@@ -575,7 +573,7 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
 
         nuser = neondata.NeonUserAccount("acc1")
         nuser.save()
-        with options._set_bounded('api.server.test_key', nuser.neon_api_key):
+        with options._set_bounded('video_processor.server.test_key', nuser.neon_api_key):
             self.http_client.fetch(self.get_url('/healthcheck'),
                     callback=self.stop, method="GET", headers={})
             resp = self.wait()
@@ -595,7 +593,7 @@ class QueueSmokeTest(test_utils.neontest.TestCase):
         self.redis.start() 
         random.seed(234895)
         
-        self.fwq = server.FairWeightedRequestQueue(nqueues=2)
+        self.fwq = video_processor.server.FairWeightedRequestQueue(nqueues=2)
         self.nuser1 = neondata.NeonUserAccount("acc1")
         self.nuser1.save()
         self.nuser2 = neondata.NeonUserAccount("acc2")
@@ -603,7 +601,7 @@ class QueueSmokeTest(test_utils.neontest.TestCase):
         self.nuser2.save()
 
         # Patch the video length lookup
-        self.send_request_patcher = patch('api.server.utils.http.send_request')
+        self.send_request_patcher = patch('video_processor.server.utils.http.send_request')
         self.mock_send_request = self.send_request_patcher.start()
         self.video_size = MagicMock()
         self.video_size.return_value = 10.0
@@ -672,8 +670,8 @@ class QueueSmokeTest(test_utils.neontest.TestCase):
       
         # verify that the add metadata thread ran and we were able
         # to collect some data on size of Q in # of bytes 
-        state_vars = server.statemon.state.get_all_variables()
-        qsize = ['api.server.queue_size_bytes']
+        state_vars = video_processor.server.statemon.state.get_all_variables()
+        qsize = ['video_processor.server.queue_size_bytes']
         self.assertGreater(qsize, 0)
 
 class TestJobManager(test_utils.neontest.AsyncTestCase):
@@ -685,7 +683,7 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
         random.seed(1324)
 
         # Patch the video length lookup
-        self.send_request_patcher = patch('api.server.utils.http.send_request')
+        self.send_request_patcher = patch('video_processor.server.utils.http.send_request')
         self.mock_send_request = self.send_request_patcher.start()
         self.video_size = MagicMock()
         self.video_size.return_value = 10.0
@@ -709,7 +707,7 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
         neondata.NeonApiRequest.save_all(self.jobs)
 
         self.base_time = 0.05
-        self.job_manager = api.server.JobManager(
+        self.job_manager = video_processor.server.JobManager(
             job_check_interval=self.base_time / 10,
             base_time=self.base_time)
 
@@ -773,11 +771,11 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_job_times_out_too_much(self):
         self.video_size.side_effect = [
-            10.0 for x in range(options.get('api.server.max_retries'))]
+            10.0 for x in range(options.get('video_processor.server.max_retries'))]
         
         yield self.job_manager.add_job(self.jobs[0])
 
-        for i in range(options.get('api.server.max_retries')-1):
+        for i in range(options.get('video_processor.server.max_retries')-1):
             job = self.job_manager.get_job()
             self.assertIsNotNone(job)
             yield self.run_loop(self.base_time * ((1<<i) + 1))

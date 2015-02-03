@@ -24,10 +24,10 @@ import time
 import urllib
 import urllib2
 
-from api import server
 from cmsapi import services
 from cmsdb import neondata
 from test_utils import redis
+from video_processor import server
 
 _log = logging.getLogger(__name__)
 

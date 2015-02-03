@@ -44,7 +44,7 @@ if __name__ == "__main__":
 
         try:
             skip_accounts = []
-            # Get all Brightcove accounts
+            # Get all Ooyala accounts
             host = "10.249.34.227"
             port = 6379
             rclient = blockingRedis.StrictRedis(host, port)

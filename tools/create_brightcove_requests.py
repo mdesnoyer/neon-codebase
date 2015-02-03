@@ -69,12 +69,14 @@ if __name__ == "__main__":
                     continue
                 api_key = accnt.neon_api_key
                 i_id = accnt.integration_id 
-                _log.info("key=brightcove_request msg= internal account %s i_id %s" %(api_key, i_id))
+                _log.info("key=brightcove_request msg= internal account %s "
+                          "i_id %s" %(api_key, i_id))
                 #retrieve the blob and create the object
                 accnt.check_feed_and_create_api_requests()
 
         except Exception as e:
-            _log.exception('key=create_brightcove_requests msg=Unhandled exception %s'
+            _log.exception('key=create_brightcove_requests '
+                           'msg=Unhandled exception %s'
                            % e)
             statemon.state.increment('cron_error')
 
