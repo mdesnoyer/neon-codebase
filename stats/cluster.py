@@ -757,6 +757,10 @@ class Cluster():
 
         bootstrap_actions = [
             BootstrapAction(
+                'Fix Ride the Rocket',
+                's3://support.elasticmapreduce/bootstrap-actions/ami/3.1.0/tcpPacketLoss.sh',
+                []),
+            BootstrapAction(
                 'Install Ganglia',
                 's3://elasticmapreduce/bootstrap-actions/install-ganglia',
                 []),
@@ -796,8 +800,8 @@ class Cluster():
 
             
         instance_groups = [
-            InstanceGroup(1, 'MASTER', 'm1.large', 'ON_DEMAND',
-                          'Master Instance Group', 0.50),
+            InstanceGroup(1, 'MASTER', 'r3.xlarge', 'SPOT',
+                          'Master Instance Group', 1.4),
             self._get_core_instance_group()
             ]
         

@@ -44,8 +44,8 @@ define("output", default=None, type=str,
        help="Output file. If not set, outputs to STDOUT")
 define("min_impressions", default=1000,
        help="Minimum number of impressions for a thumbnail for it to be included.")
-define("baseline_type", default="centerframe",
-       help="Thumbnail type to treat as baseline")
+define("baseline_types", default="centerframe",
+       help="Comma separated list of thumbnail type to treat as baseline")
 
 _log = logging.getLogger(__name__)
 
@@ -201,10 +201,14 @@ def calc_per_video_stats(counts):
     Outputs - (type, rank) -> (impression, conversion, ctr, extra conversions, lift, pvalue)
     '''
     retval = {}
+    baseline_types = options.baseline_types.split(',')
     baseline = None
-    for key, stat in counts.items():
-        if key[0] == options.baseline_type:
-            baseline = stat
+    for baseline_type in baseline_types:
+        for key, stat in counts.items():
+            if key[0] == baseline_type:
+                baseline = stat
+                break
+        if baseline is not None:
             break
 
     if baseline is None:
@@ -256,12 +260,13 @@ def calculate_aggregate_stats(video_stats):
     agg_stat_names = ['Mean Lift', 'P Value', 'Lower 95%',
                       'Upper 95%', 'Random Effects Error']
     agg_data = {}
+    baseline_types = options.baseline_types.split(',')
 
     for stat_name, video_stat in video_stats.items():
-        video_stats = video_stat.sortlevel()
+        video_stat = video_stat.sortlevel()
         
         # Grab the load & click columns
-        agg_counts = video_stat.loc[:, ['impr', 'conv']]
+        agg_counts = video_stat.loc[:, ['impr', 'conv']].copy()
 
         # Aggregate all the neon counts
         agg_counts = agg_counts.groupby(level=[0,1,2]).sum().fillna(0)
@@ -271,8 +276,11 @@ def calculate_aggregate_stats(video_stats):
         # <acting impressions>,<acting conversions>
         agg_counts = agg_counts.unstack().swaplevel(0, 1, axis=1).sortlevel(
             axis=1)
+        baseline_counts = agg_counts[baseline_types[0]]
+        for typ in baseline_types[1:]:
+            baseline_counts = baseline_counts.fillna(agg_counts[typ])
         agg_counts = pandas.concat(
-            [agg_counts[options.baseline_type], agg_counts['neon']],
+            [baseline_counts, agg_counts['neon']],
             axis=1, join='inner').dropna()
 
         # Calculate the ab metrics
@@ -354,19 +362,25 @@ def main():
     _log.info('Calculating aggregate statistics')
     aggregate_sheets = {}
     aggregate_sheets['Overall'] = calculate_aggregate_stats(video_stats)
-    integration_stats = {}
-    for stat_name, data_frame in video_stats.iteritems():
-        for integration_id, data in data_frame.groupby(level=[0]):
-            if integration_id not in integration_stats:
-                integration_stats[integration_id] = {}
+
+
     
-            integration_stats[integration_id][stat_name] = data
-    for integration_id, data_dict in integration_stats.iteritems():
-        try:
-            aggregate_sheets['Aggregate %s' % integration_id] = \
-              calculate_aggregate_stats(data_dict)
-        except Exception as e:
-            _log.exception('Error: %s' % e)
+    # TODO(mdesnoyer): Figure out why this doesn't work with multiple
+    # base types. It seems like the data isn't being copied directly.
+    #integration_stats = {}
+    #for stat_name, data_frame in video_stats.iteritems():
+    #    for integration_id, data in data_frame.groupby(level=[0]):
+    #        if integration_id not in integration_stats:
+    #            integration_stats[integration_id] = {}
+    # 
+    #        integration_stats[integration_id][stat_name] = data
+    #
+    #for integration_id, data_dict in integration_stats.iteritems():
+    #    try:
+    #        aggregate_sheets['Aggregate %s' % integration_id] = \
+    #          calculate_aggregate_stats(data_dict)
+    #    except Exception as e:
+    #        _log.exception('Error: %s' % e)
     
     with pandas.ExcelWriter(options.output) as writer:
         video_data.to_excel(writer, sheet_name='Per Video Stats')

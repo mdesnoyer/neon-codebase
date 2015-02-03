@@ -402,6 +402,9 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         self.assertIsNotNone(im_url)
         self.assertEqual(im_url, "http://neon/thumb_600_800_default_url_defaccount1.jpg")
 
+    #
+    # Account-wide default thumbnail 
+    #
 
     def test_client_api_default_thumbnail_good_enough_size_match_height(self):
         '''
@@ -681,6 +684,68 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         self.assertEqual(im_url, "http://neon/thumb2_700_800.jpg")
 
 
+    # Perfect fix first feature testing. A perfectly matched scale should be returned 
+    # if it exist in the fraction scaled images list.  Otherwise an approximately fitting scaled 
+    # image should be returned if one qualifies.    
+
+    def test_client_api_perfect_match_thumbnail(self):
+        '''
+        a perfectly matched scaled image is returned when one exists in a fraction  
+        and others which are also qualifying approx match.  
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("perfectpub1", prefix + "vid0", 805, 705, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://neon/thumb2_705_805.jpg")
+
+    def test_client_api_no_perfect_match_multiple_approx_match_thumbnail(self):
+        '''
+        No perfectly matched scaled image is available, a qualifying approximate
+        one is returned. At this time no specific order is required in the selection
+        when multiple approx choices are available.
+
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("perfectpub1", prefix + "vid0", 812, 712, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://neon/thumb2_706_806.jpg")
+
+
+
+    # ISP should understand and support request having a .jpg extension in
+    # lower and upper case
     def test_client_api_request_jpg_extention(self):
         '''
         Test Client API call
