@@ -11,14 +11,15 @@ Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 import atexit
 from boto.s3.connection import S3Connection
 from boto.s3.bucketlistresultset import BucketListResultSet
 import clickTracker.trackserver
+from cmsdb import neondata
 import contextlib
 import copy
 from datetime import datetime
@@ -42,7 +43,6 @@ import stats.db
 import string
 from StringIO import StringIO
 import subprocess
-from supportServices import neondata
 import tempfile
 import test_utils.net
 import test_utils.redis
@@ -97,8 +97,8 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         with open(base_conf_path) as conf_stream:
             params = yaml.load(conf_stream)
 
-            params['supportServices']['neondata']['dbPort'] = cls.redis.port
-            params['supportServices']['services']['port'] = \
+            params['cmsdb']['neondata']['dbPort'] = cls.redis.port
+            params['cmsapi']['services']['port'] = \
               test_utils.net.find_free_port()
             params['mastermind']['server']['port'] = \
               test_utils.net.find_free_port()
@@ -202,7 +202,7 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         self.directives_captured = []
 
         # Mock out the brightcove connection
-        self.bc_patcher = patch('supportServices.neondata.api.'
+        self.bc_patcher = patch('cmsdb.neondata.api.'
                                 'brightcove_api.utils.http.RequestPool')
         self.mock_bc_conn = self.bc_patcher.start()
 
@@ -210,7 +210,7 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         # random image. Can handle an async request even if it doesn't
         # actually do it asynchronously.
         self.im_request_patcher = \
-          patch('supportServices.neondata.api.'
+          patch('cmsdb.neondata.api.'
                 'brightcove_api.utils.http.send_request')
         mock_im = self.im_request_patcher.start()
         def return_image(request, callback=None):

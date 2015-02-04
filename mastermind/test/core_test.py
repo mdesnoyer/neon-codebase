@@ -14,6 +14,8 @@ if sys.path[0] != __base_path__:
 import mastermind.core
 from mastermind.core import Mastermind, ThumbnailInfo, VideoInfo
 
+from cmsdb import neondata
+from cmsdb.neondata import ThumbnailMetadata, ExperimentStrategy, VideoMetadata
 import decimal
 import fake_filesystem
 import fake_tempfile
@@ -21,8 +23,6 @@ import logging
 from mock import patch, MagicMock
 import multiprocessing.pool
 import numpy.random
-from supportServices import neondata
-from supportServices.neondata import ThumbnailMetadata, ExperimentStrategy, VideoMetadata
 import test_utils.neontest
 import test_utils.redis
 import utils.neon
@@ -85,7 +85,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         # Mock out the redis connection so that it doesn't throw an error
         self.redis_patcher = patch(
-            'supportServices.neondata.blockingRedis.StrictRedis')
+            'cmsdb.neondata.blockingRedis.StrictRedis')
         self.redis_patcher.start()
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
@@ -961,7 +961,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
 
         # Mock out the redis connection so that it doesn't throw an error
         self.redis_patcher = patch(
-            'supportServices.neondata.blockingRedis.StrictRedis')
+            'cmsdb.neondata.blockingRedis.StrictRedis')
         self.redis_mock = self.redis_patcher.start()
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
@@ -1125,7 +1125,7 @@ class TestStatUpdating(test_utils.neontest.TestCase):
 
         # Mock out the redis connection so that it doesn't throw an error
         self.redis_patcher = patch(
-            'supportServices.neondata.blockingRedis.StrictRedis')
+            'cmsdb.neondata.blockingRedis.StrictRedis')
         self.redis_mock = self.redis_patcher.start()
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 

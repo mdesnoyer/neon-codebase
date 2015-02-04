@@ -11,9 +11,9 @@ simulated: load & click data on the videos/ thumbnails
 
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 import datetime
 import json
 import logging
@@ -24,9 +24,10 @@ import time
 import urllib
 import urllib2
 
-from api import server
-from supportServices import services, neondata
+from cmsapi import services
+from cmsdb import neondata
 from test_utils import redis
+from video_processor import server
 
 _log = logging.getLogger(__name__)
 

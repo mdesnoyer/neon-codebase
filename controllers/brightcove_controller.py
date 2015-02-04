@@ -10,12 +10,15 @@ Tasks can include -- push thumbnail X in to brightcove account A
 '''
 import os,os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0, base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 from api.brightcove_api import BrightcoveApi
 from boto.s3.connection import S3Connection
+from cmsdb.neondata import VideoMetadata, ThumbnailMetadata, \
+      AbstractPlatform, InternalVideoID, ThumbnailID, BrightcovePlatform, \
+      NeonApiRequest
 import datetime
 from heapq import heappush, heappop
 import itertools
@@ -23,9 +26,6 @@ import json
 from multiprocessing.pool import ThreadPool
 import random
 import re
-from supportServices.neondata import VideoMetadata, ThumbnailMetadata, \
-      AbstractPlatform, InternalVideoID, ThumbnailID, BrightcovePlatform, \
-      NeonApiRequest
 import time
 import threading
 import tornado

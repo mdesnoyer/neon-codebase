@@ -17,7 +17,7 @@ import random
 import re
 import signal
 import subprocess
-from supportServices import neondata
+from cmsdb import neondata
 import tempfile
 import utils.ps
 from utils.options import define, options
@@ -46,7 +46,7 @@ class RedisServer:
             self.port = net.find_free_port()
 
     def start(self):
-        ''' Start on a random port and set supportServices.neondata.dbPort '''
+        ''' Start on a random port and set cmsdb.neondata.dbPort '''
 
         # Clear the singleton instance
         # This is required so that we can use a new connection(port) 
@@ -78,15 +78,15 @@ class RedisServer:
 
         # Set the port for the most common place we use redis. If it's
         # not being used in the test, it won't hurt anything.
-        self.old_port = options.get('supportServices.neondata.dbPort')
-        options._set('supportServices.neondata.dbPort', self.port)
+        self.old_port = options.get('cmsdb.neondata.dbPort')
+        options._set('cmsdb.neondata.dbPort', self.port)
         
 
     def stop(self):
         ''' stop redis instance '''
 
         self.config_file.close()
-        options._set('supportServices.neondata.dbPort', self.old_port)
+        options._set('cmsdb.neondata.dbPort', self.old_port)
         still_running = utils.ps.send_signal_and_wait(signal.SIGTERM,
                                                       [self.proc.pid],
                                                       timeout=8)
