@@ -11,6 +11,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+from boto.s3.connection import S3Connection
 from collections import deque
 import datetime
 import hashlib
@@ -30,6 +31,7 @@ import tornado.ioloop
 import tornado.web
 import tornado.escape
 import threading
+import utils.botoutils
 import utils.http
 import utils.neon
 import utils.ps
@@ -257,21 +259,45 @@ class FairWeightedRequestQueue(object):
 
             # Get content length of the video
             # TODO(Sunil): Get the content length of videos on s3
-            req = tornado.httpclient.HTTPRequest(method='HEAD',
-                            url=video_url, request_timeout=5.0) 
-            result = yield tornado.gen.Task(utils.http.send_request, req)
 
-            if not result.error:
-                headers = result.headers
-                nbytes = int(headers.get('Content-Length', 0))
-                if nbytes > 0:
+            try:
+                nbytes = yield self._get_content_length(video_url)
+                if nbytes is not None:
                     statemon.state.increment('queue_size_bytes', nbytes)
                     _log.info("Request %s had video file of size %s",
                               item, nbytes)
                     # add video size 
                     item.set_video_size(nbytes)
+            except Exception as e:
+                # on error do nothing for now
+                _log.exception('An exception getting the video length: %s' % e)
+                pass
 
-            # On error do nothing currently
+    @tornado.gen.coroutine
+    def _get_content_length(self, video_url):
+        s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws\.com/))([a-zA-Z0-9\-_\.]+)/(.+)')
+
+        s3match = s3re.search(video_url)
+        if s3match:
+            # Get the video size from s3
+            bucket_name = s3match.group(4)
+            key_name = s3match.group(5)
+            s3conn = S3Connection()
+            bucket = yield utils.botoutils.run_async(s3conn.get_bucket,
+                                                     bucket_name)
+            key = yield utils.botoutils.run_async(bucket.get_key,
+                                                  key_name)
+            raise tornado.gen.Return(key.size)
+        else:
+            req = tornado.httpclient.HTTPRequest(method='HEAD',
+                            url=video_url, request_timeout=5.0) 
+            
+            result = yield tornado.gen.Task(utils.http.send_request, req)
+
+            if not result.error:
+                headers = result.headers
+                raise tornado.gen.Return(int(headers.get('Content-Length', 0)))
+        raise tornado.gen.Return(None)
 
     def qsize(self):
         sz = 0

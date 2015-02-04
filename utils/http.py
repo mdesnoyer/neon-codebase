@@ -118,12 +118,12 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
                 response = tornado.httpclient.HTTPResponse(request,
                                                            e.code,
                                                            error=e)
-        except socket.gaierror as e:
-            # Address resolution error
+        except socket.error as e:
+            # Socket resolution error
             if do_logging:
-                _log.error('msg=address resolution error for %r' % request)
+                _log.error('msg=socket resolution error for %r' % request)
             error = tornado.httpclient.HTTPError(
-                502, 'error resolving address')
+                502, 'socket error')
             response = tornado.httpclient.HTTPResponse(request,
                                                         502,
                                                         error=error)

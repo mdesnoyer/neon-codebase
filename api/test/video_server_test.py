@@ -208,7 +208,8 @@ class TestFairWeightedQ(test_utils.neontest.AsyncTestCase):
     def test_adding_metadata(self):
         vsize = 1024
         self.video_size.return_value = vsize
-        req = neondata.NeonApiRequest('job0', self.nuser1.neon_api_key)
+        req = neondata.NeonApiRequest('job0', self.nuser1.neon_api_key,
+                                      url='http://someurl')
         yield self.fwq.put(req, async=True)
         self.assertTrue(self.mock_send_request.called)
      
@@ -705,7 +706,8 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
 
         # Make some default jobs
         self.jobs = [
-            neondata.NeonApiRequest('job0', self.api_key)]
+            neondata.NeonApiRequest('job0', self.api_key,
+                                    url='http://somewhere.mp4')]
         neondata.NeonApiRequest.save_all(self.jobs)
 
         self.base_time = 0.05
