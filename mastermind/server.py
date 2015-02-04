@@ -16,6 +16,7 @@ import atexit
 from boto.s3.connection import S3Connection
 from boto.emr.connection import EmrConnection
 import boto
+from cmsdb import neondata
 import cPickle as pickle
 import datetime
 import dateutil.parser
@@ -29,7 +30,6 @@ import signal
 import socket
 import stats.cluster
 import struct
-from supportServices import neondata
 import tempfile
 import time
 import thrift

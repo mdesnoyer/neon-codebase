@@ -14,6 +14,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+from cmsdb import neondata
 import copy
 from datetime import datetime
 import dateutil.parser
@@ -24,7 +25,6 @@ import pandas
 import re
 import stats.metrics
 from stats import statutils
-from supportServices import neondata
 import utils.neon
 from utils.options import options, define
 

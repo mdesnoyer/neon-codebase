@@ -4,11 +4,11 @@ import urllib2
 import json
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
-from supportServices.neondata import *
+from cmsdb.neondata import *
 from api import brightcove_api
 
 html_start = '<html><head><style>div.img{  margin: 5px;  padding: 5px;  border: 1px solid #0000ff;'\

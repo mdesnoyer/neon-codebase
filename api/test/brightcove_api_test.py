@@ -18,12 +18,11 @@ if sys.path[0] != __base_path__:
 
 import api.brightcove_api
 import bcove_responses
+from cmsdb import neondata
 import json
 import logging
 from mock import patch, MagicMock
 from StringIO import StringIO
-from supportServices.test import bcove_responses
-from supportServices import neondata
 import test_utils.neontest
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
 import tornado.ioloop

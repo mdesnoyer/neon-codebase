@@ -13,7 +13,6 @@ import base64
 import json
 import hashlib
 import logging
-import properties
 from StringIO import StringIO
 import urllib
 from utils.http import RequestPool

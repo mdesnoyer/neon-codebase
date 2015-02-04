@@ -14,6 +14,7 @@ if sys.path[0] != __base_path__:
 import mastermind.server
 
 import boto.exception
+from cmsdb import neondata
 import datetime as date
 import dateutil.parser
 import fake_filesystem
@@ -31,7 +32,6 @@ import stats.db
 from StringIO import StringIO
 import struct
 import socket
-from supportServices import neondata
 import test_utils.mock_boto_s3
 import test_utils.neontest
 import test_utils.redis
@@ -51,7 +51,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
     def setUp(self):
         # Mock out the redis connection so that it doesn't throw an error
         self.redis_patcher = patch(
-            'supportServices.neondata.blockingRedis.StrictRedis')
+            'cmsdb.neondata.blockingRedis.StrictRedis')
         self.redis_patcher.start()
         
         self.mastermind = mastermind.core.Mastermind()

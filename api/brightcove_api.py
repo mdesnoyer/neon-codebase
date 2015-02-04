@@ -14,7 +14,7 @@ from poster.encode import multipart_encode
 import poster.encode
 from PIL import Image
 from StringIO import StringIO
-import supportServices.neondata 
+import cmsdb.neondata 
 import time
 import tornado.gen
 import tornado.httpclient
@@ -464,7 +464,7 @@ class BrightcoveApi(object):
         thumbnail/still requests '''
         
         vids_to_process = [] 
-        bc = supportServices.neondata.BrightcovePlatform.get(
+        bc = cmsdb.neondata.BrightcovePlatform.get(
             self.neon_api_key, i_id)
         videos_processed = bc.get_videos() 
         if videos_processed is None:
@@ -512,7 +512,7 @@ class BrightcoveApi(object):
                 _log.info("creating request for video [topn] %s" % vid)
                 if resp is not None and not resp.error:
                     #Update the videos in customer inbox
-                    bc = supportServices.neondata.BrightcovePlatform.get(
+                    bc = cmsdb.neondata.BrightcovePlatform.get(
                             self.neon_api_key, i_id)
                     r = tornado.escape.json_decode(resp.body)
                     bc.videos[vid] = r['job_id']
@@ -524,7 +524,7 @@ class BrightcoveApi(object):
                 #Sync the changes in brightcove account to NeonDB
                 #TODO: Sync not just the latest 100 videos
                 job_id = bc.videos[vid]
-                vid_request = supportServices.neondata.NeonApiRequest.get(
+                vid_request = cmsdb.neondata.NeonApiRequest.get(
                     job_id, self.neon_api_key)
                 pub_date = int(item['publishedDate']) if item['publishedDate'] else None
                 vid_request.publish_date = pub_date 
@@ -533,7 +533,7 @@ class BrightcoveApi(object):
 
     def sync_neondb_with_brightcovedb(self, items, i_id):
         ''' sync neondb with brightcove metadata '''        
-        bc = supportServices.neondata.BrightcovePlatform.get(
+        bc = cmsdb.neondata.BrightcovePlatform.get(
             self.neon_api_key, i_id)
         videos_processed = bc.get_videos() 
         if videos_processed is None:
@@ -544,7 +544,7 @@ class BrightcoveApi(object):
             title = item['name']
             if vid in videos_processed:
                 job_id = bc.videos[vid]
-                vid_request = supportServices.neondata.NeonApiRequest.get(
+                vid_request = cmsdb.neondata.NeonApiRequest.get(
                     job_id, self.neon_api_key)
                 pub_date = int(item['publishedDate']) if item['publishedDate'] else None
                 vid_request.publish_date = pub_date 
@@ -712,7 +712,7 @@ class BrightcoveApi(object):
 
         #TODO: make this more efficient
         '''
-        bc = supportServices.neondata.BrightcovePlatform.get(
+        bc = cmsdb.neondata.BrightcovePlatform.get(
             self.neon_api_key, i_id)
         videos_processed = bc.get_videos() 
 
@@ -721,7 +721,7 @@ class BrightcoveApi(object):
             item = tornado.escape.json_decode(response.body)
             title = item['name']
             job_id = bc.videos[vid]
-            vid_request = supportServices.neondata.NeonApiRequest.get(
+            vid_request = cmsdb.neondata.NeonApiRequest.get(
                     job_id, self.neon_api_key)
             pub_date = int(item['publishedDate']) if item['publishedDate'] else None
             vid_request.publish_date = pub_date 
@@ -787,7 +787,7 @@ class BrightcoveApi(object):
         
         jid = tornado.escape.json_decode(response.body)
         job_id = jid["job_id"]
-        bc = supportServices.neondata.BrightcovePlatform.get(
+        bc = cmsdb.neondata.BrightcovePlatform.get(
             self.neon_api_key, i_id)
         bc.videos[video_id] = job_id
         bc.save()
@@ -872,7 +872,7 @@ class BrightcoveApi(object):
                                          page_size = n) #get n videos
 
         if result and not result.error:
-            bc = supportServices.neondata.BrightcovePlatform.get(
+            bc = cmsdb.neondata.BrightcovePlatform.get(
                 self.neon_api_key, i_id)
             if not bc:
                 _log.error("key=verify_brightcove_tokens" 
@@ -921,7 +921,7 @@ class BrightcoveApi(object):
         def verify_brightcove_tokens(result):
             if not result.error:
                 bc = yield tornado.gen.Task(
-                    supportServices.neondata.BrightcovePlatform.get,
+                    cmsdb.neondata.BrightcovePlatform.get,
                     self.neon_api_key, i_id)
                 if not bc:
                     _log.error("key=verify_brightcove_tokens "

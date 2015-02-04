@@ -15,7 +15,6 @@ import json
 import hmac
 import hashlib
 import logging
-import properties
 import random
 import time
 import tornado.gen
