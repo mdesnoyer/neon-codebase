@@ -448,18 +448,18 @@ class AkamaiHosting(CDNHosting):
        
         # Akamai storage does not recommend a single folder for all
         # files under an account for performance reasons (limit 2000). 
-        # Therefore we need a folder structure, one where no parent 
-        # folder will reasonably exceed the the max number of children 
-        # files of 2000. Size of folder name is also a storage consideration.
-        # we use here a 4 folder deep structure where folder name are randomly 
-        # selected single letters 
+        # Therefore we need a folder structure, one where we can spread 
+        # the pictures with a reasonable expectation of staying within
+        # the limit. 
+        #
+        # we use here a 2 folder deep structure where folder names are 
+        # randomly selected single letter. This structure affords over 
+        # 5 million elements before reaching the limit.
         random.seed(time.time());
 
-        image_url = "/%s/%s/%s/%s/%s" % (random.choice(string.ascii_lowercase),
-                                         random.choice(string.ascii_lowercase),
-                                         random.choice(string.ascii_lowercase),
-                                         random.choice(string.ascii_lowercase),
-                                         key_name)
+        image_url = "/%s/%s/%s" % (random.choice(string.ascii_letters),
+                                   random.choice(string.ascii_letters),
+                                   key_name)
 
         response = yield tornado.gen.Task(self.ak_conn.upload, image_url, imgdata)
         if response.error:
