@@ -1625,6 +1625,26 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         vals = {'property' : "enabled", "value" : False}
         response = self.put_request(url, vals, self.api_key, jsonheader=True)
         self.assertEqual(response.code, 202) 
+        self.assertFalse(neondata.ThumbnailMetadata.get(tid).enabled)
+
+        # Now test enabling the thumb using a form encoded request
+        vals = {'property' : "enabled", "value" : 'true'}
+        response = self.put_request(url, vals, self.api_key)
+        self.assertEqual(response.code, 202)
+        self.assertTrue(neondata.ThumbnailMetadata.get(tid).enabled)
+
+    def test_change_invalid_thumb_property(self):
+        self._setup_initial_brightcove_state()
+        vids = self._get_videos()
+        vid  = vids[0]
+        job_id = self.job_ids[0]
+        tids = self._get_thumbnails(vid)
+        tid = tids[0]
+        url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
+                    "/%s/thumbnails/%s" %(self.a_id, self.b_id, tid))
+        vals = {'property' : 'chosen', "value" : False}
+        response = self.put_request(url, vals, self.api_key, jsonheader=True)
+        self.assertEqual(response.code, 400) 
 
     def test_job_status(self):
         '''
