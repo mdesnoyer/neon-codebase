@@ -11,8 +11,7 @@ import sys
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
-    
-from brightcove_api import BrightcoveApi
+
 import redis as blockingRedis
 import os
 from cmsdb.neondata import *
