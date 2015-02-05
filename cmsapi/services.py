@@ -530,6 +530,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 _log.error("Method not supported")
                 self.set_status(400)
                 self.finish()
+        except tornado.web.MissingArgumentError, e:
+            raise
         
         except Exception, e:
 
@@ -1746,19 +1748,21 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         if tid is None:
             self.send_json_response(invalid_msg, 400)
 
-        tmdata = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, tid)
+        prop = self.get_argument('property')
+        if prop not in ['enabled']:
+            raise tornado.web.MissingArgumentError('property')
+        val = InputSanitizer.to_bool(self.get_argument('value'))
+
+        def _mod_property(thumb_obj):
+            thumb_obj.__dict__[prop] = val
+                  
+
+        tmdata = yield tornado.gen.Task(neondata.ThumbnailMetadata.modify,
+                                        tid, _mod_property)
         if tmdata is None:
             self.send_json_response(invalid_msg, 400)
 
-        inp = json.loads(self.request.body)
-        tmdata.enabled = inp['value']
-        
-        res = yield tornado.gen.Task(neondata.ThumbnailMetadata.save_all,
-                                      [tmdata])
-        if res:
-            self.send_json_response('', 202)
-        else:
-            self.send_json_response('Internal DB error failed to save', 500)
+        self.send_json_response('', 202)
 
 
 ######################################################################
