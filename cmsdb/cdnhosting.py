@@ -455,11 +455,11 @@ class AkamaiHosting(CDNHosting):
         # selected single letters 
         random.seed(time.time());
 
-        image_url = "/%s/%s/%s/%/%s" % (random.choice(string.ascii_lowercase),
-                                        random.choice(string.ascii_lowercase),
-                                        random.choice(string.ascii_lowercase),
-                                        random.choice(string.ascii_lowercase),
-                                        key_name)
+        image_url = "/%s/%s/%s/%s/%s" % (random.choice(string.ascii_lowercase),
+                                         random.choice(string.ascii_lowercase),
+                                         random.choice(string.ascii_lowercase),
+                                         random.choice(string.ascii_lowercase),
+                                         key_name)
 
         response = yield tornado.gen.Task(self.ak_conn.upload, image_url, imgdata)
         if response.error:
