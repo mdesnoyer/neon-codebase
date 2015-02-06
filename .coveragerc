@@ -28,3 +28,4 @@ omit =
      .pyenv/*
      *gen-py*
      */flume/*
+     tools/*

@@ -104,7 +104,7 @@ def make_snappy_api_request(url):
 
 
 #array of feeds to check from Snappy.  For Ryder Cup, there was 1 unique JSON for each day of the tournament
-var feeds = ["http://api.snappytv.com/partner_api/v1/timeline/25336934.json","http://api.snappytv.com/partner_api/v1/timeline/25336937.json","http://api.snappytv.com/partner_api/v1/timeline/25336938.json","http://api.snappytv.com/partner_api/v1/timeline/25336935.json","http://api.snappytv.com/partner_api/v1/timeline/25336936.json","http://api.snappytv.com/partner_api/v1/timeline/25336939.json","http://api.snappytv.com/partner_api/v1/timeline/25336940.json","http://api.snappytv.com/partner_api/v1/timeline/25336942.json","http://api.snappytv.com/partner_api/v1/timeline/25337239.json"]
+#var feeds = ["http://api.snappytv.com/partner_api/v1/timeline/25336934.json","http://api.snappytv.com/partner_api/v1/timeline/25336937.json","http://api.snappytv.com/partner_api/v1/timeline/25336938.json","http://api.snappytv.com/partner_api/v1/timeline/25336935.json","http://api.snappytv.com/partner_api/v1/timeline/25336936.json","http://api.snappytv.com/partner_api/v1/timeline/25336939.json","http://api.snappytv.com/partner_api/v1/timeline/25336940.json","http://api.snappytv.com/partner_api/v1/timeline/25336942.json","http://api.snappytv.com/partner_api/v1/timeline/25337239.json"]
 
 video_requests = []
  
