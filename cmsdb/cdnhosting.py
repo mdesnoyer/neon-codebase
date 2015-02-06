@@ -455,15 +455,12 @@ class AkamaiHosting(CDNHosting):
         # randomly selected single letter. This structure affords over 
         # 5 million elements before reaching the limit.
         
-        # using system time here implicitly
-        random.seed();
-
         # directory structure
         image_url = "/%s/%s/%s" % (random.choice(string.ascii_letters),
                                    random.choice(string.ascii_letters),
                                    key_name)
         # the full cdn url
-        cdn_url = "http://%s/%s" % (cdn_prefix, image_url)
+        cdn_url = "http://%s%s" % (cdn_prefix, image_url)
 
         response = yield tornado.gen.Task(self.ak_conn.upload, image_url, imgdata)
         if response.error:
