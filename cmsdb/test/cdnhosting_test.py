@@ -425,11 +425,13 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
         ts = neondata.ThumbnailServingURLs.get(tid)
         self.assertGreater(len(ts.size_map), 0)
 
-        # Verify the final image URLs
+        # Verify the final image URLs. The 2 sub folders should be randomly choosen
+        # lower and uppercase letters.
+        expected_url_with_regex = 'http://cdn.akamai.com/[a-zA-Z]/[a-zA-Z]/neontn%s_w%s_h%s.jpg' % (tid, w, h)
+        
         for (w, h), url in ts.size_map.iteritems():
             url = ts.get_serving_url(w, h)
-            self.assertRegexpMatches(
-                    url, 'http://cdn.akamai.com/[a-zA-Z]/[a-zA-Z]/neontn%s_w%s_h%s.jpg' % (tid, w, h))
+            self.assertRegexpMatches(url, expected_url_with_regex)
     
     @tornado.testing.gen_test
     def test_upload_image_error(self):
