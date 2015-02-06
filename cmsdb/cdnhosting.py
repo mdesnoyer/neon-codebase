@@ -439,7 +439,6 @@ class AkamaiHosting(CDNHosting):
         if self.cdn_prefixes and len(self.cdn_prefixes) > 0:
             cdn_prefix = random.choice(self.cdn_prefixes)
         
-        cdn_url = "http://%s/%s" % (cdn_prefix, key_name)
         fmt = 'jpeg'
         filestream = StringIO()
         image.save(filestream, fmt, quality=90) 
@@ -455,11 +454,16 @@ class AkamaiHosting(CDNHosting):
         # we use here a 2 folder deep structure where folder names are 
         # randomly selected single letter. This structure affords over 
         # 5 million elements before reaching the limit.
-        random.seed(time.time());
+        
+        # using system time here implicitly
+        random.seed();
 
+        # directory structure
         image_url = "/%s/%s/%s" % (random.choice(string.ascii_letters),
                                    random.choice(string.ascii_letters),
                                    key_name)
+        # the full cdn url
+        cdn_url = "http://%s/%s" % (cdn_prefix, image_url)
 
         response = yield tornado.gen.Task(self.ak_conn.upload, image_url, imgdata)
         if response.error:
