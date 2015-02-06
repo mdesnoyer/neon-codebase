@@ -490,71 +490,74 @@ class StatsDBWatcher(threading.Thread):
             retval[thumb_id] = [0, 0]
         try:
             conn = happybase.Connection(options.incr_stats_host)
-            col_family = options.incr_stats_col_family
-            col_map = {
-                neondata.MetricType.LOADS : '%s:il' % col_family,
-                neondata.MetricType.VIEWS : '%s:iv' % col_family,
-                neondata.MetricType.CLICKS : '%s:ic' % col_family,
-                neondata.MetricType.PLAYS : '%s:vp' % col_family}
-                
-            row_start = None
-            row_stop = None
-            table = None
-            if thumb_id is None:
-                # We want all the data from a given time onwards for all
-                # thumbnails
-                table = conn.table('TIMESTAMP_THUMBNAIL_EVENT_COUNTS')
-                if self.last_update is not None:
-                    # There is a time to start at
-                    row_start = self.last_update.strftime('%Y-%m-%dT%H')
-            else:
-                # We only want data from a specific thumb
-                table = conn.table('THUMBNAIL_TIMESTAMP_EVENT_COUNTS')
-                row_stop = thumb_id + 'a'
-                if self.last_update is None:
-                    row_start = thumb_id
-                else:
-                    row_start = '_'.join([
-                        thumb_id, self.last_update.strftime('%Y-%m-%dT%H')])
-            
-            for key, row in table.scan(row_start=row_start,
-                                       row_stop=row_stop,
-                                       columns=[col_family]):
+            try:
+                col_family = options.incr_stats_col_family
+                col_map = {
+                    neondata.MetricType.LOADS : '%s:il' % col_family,
+                    neondata.MetricType.VIEWS : '%s:iv' % col_family,
+                    neondata.MetricType.CLICKS : '%s:ic' % col_family,
+                    neondata.MetricType.PLAYS : '%s:vp' % col_family}
+
+                row_start = None
+                row_stop = None
+                table = None
                 if thumb_id is None:
-                    tid = key.partition('_')[2]
+                    # We want all the data from a given time onwards for all
+                    # thumbnails
+                    table = conn.table('TIMESTAMP_THUMBNAIL_EVENT_COUNTS')
+                    if self.last_update is not None:
+                        # There is a time to start at
+                        row_start = self.last_update.strftime('%Y-%m-%dT%H')
                 else:
-                    tid = thumb_id
-                if tid == '':
-                    _log.warn_n('Invalid thumbnail id in key %s' % key, 100)
-                    continue
+                    # We only want data from a specific thumb
+                    table = conn.table('THUMBNAIL_TIMESTAMP_EVENT_COUNTS')
+                    row_stop = thumb_id + 'a'
+                    if self.last_update is None:
+                        row_start = thumb_id
+                    else:
+                        row_start = '_'.join([
+                            thumb_id, self.last_update.strftime('%Y-%m-%dT%H')])
 
-                strategy = strategy_cache.from_thumb_id(tid)
+                for key, row in table.scan(row_start=row_start,
+                                           row_stop=row_stop,
+                                           columns=[col_family]):
+                    if thumb_id is None:
+                        tid = key.partition('_')[2]
+                    else:
+                        tid = thumb_id
+                    if tid == '':
+                        _log.warn_n('Invalid thumbnail id in key %s' % key, 100)
+                        continue
 
-                counts = retval.get(tid, [0, 0])
+                    strategy = strategy_cache.from_thumb_id(tid)
 
-                try:
-                    impr_col = col_map[strategy.impression_type]
-                    conv_col = col_map[strategy.conversion_type]
-                except KeyError as e:
-                    _log.error_n('Unexpected event type in the experiment '
-                                 'strategy for account %s: %s' % 
-                                 (strategy.get_id(), e), 100)
-                    continue
+                    counts = retval.get(tid, [0, 0])
 
-                try:
-                    
-                    incr_imp = struct.unpack('>q',
-                                             row.get(impr_col, '\x00'*8))[0]
-                    incr_conv = struct.unpack('>q',
-                                              row.get(conv_col,'\x00'*8))[0]
-                    counts[0] += incr_imp
-                    counts[1] += incr_conv
-                except struct.error as e:
-                    _log.warn_n('Invalid value found for key %s: %s' %
-                                (key, e), 100)
-                    continue
+                    try:
+                        impr_col = col_map[strategy.impression_type]
+                        conv_col = col_map[strategy.conversion_type]
+                    except KeyError as e:
+                        _log.error_n('Unexpected event type in the experiment '
+                                     'strategy for account %s: %s' % 
+                                     (strategy.get_id(), e), 100)
+                        continue
 
-                retval[tid] = counts
+                    try:
+
+                        incr_imp = struct.unpack('>q',
+                                                 row.get(impr_col, '\x00'*8))[0]
+                        incr_conv = struct.unpack('>q',
+                                                  row.get(conv_col,'\x00'*8))[0]
+                        counts[0] += incr_imp
+                        counts[1] += incr_conv
+                    except struct.error as e:
+                        _log.warn_n('Invalid value found for key %s: %s' %
+                                    (key, e), 100)
+                        continue
+
+                    retval[tid] = counts
+            finally:
+                conn.close()
         except thrift.Thrift.TException as e:
             _log.error('Error connecting to incremental stats database: %s'
                        % e)
