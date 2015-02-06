@@ -11,6 +11,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import boto.exception
 from boto.s3.connection import S3Connection
 from cmsdb import neondata
 from collections import deque
@@ -279,23 +280,29 @@ class FairWeightedRequestQueue(object):
         s3match = s3re.search(video_url)
         if s3match:
             # Get the video size from s3
-            bucket_name = s3match.group(4)
-            key_name = s3match.group(5)
-            s3conn = S3Connection()
-            bucket = yield utils.botoutils.run_async(s3conn.get_bucket,
-                                                     bucket_name)
-            key = yield utils.botoutils.run_async(bucket.get_key,
-                                                  key_name)
-            raise tornado.gen.Return(key.size)
-        else:
-            req = tornado.httpclient.HTTPRequest(method='HEAD',
-                            url=video_url, request_timeout=5.0) 
+            try:
+                bucket_name = s3match.group(4)
+                key_name = s3match.group(5)
+                s3conn = S3Connection()
+                bucket = yield utils.botoutils.run_async(s3conn.get_bucket,
+                                                         bucket_name)
+                key = yield utils.botoutils.run_async(bucket.get_key,
+                                                      key_name)
+                raise tornado.gen.Return(key.size)
+            except boto.exception.S3ResponseError as e:
+                _log.warn('Error getting video url %s via boto. '
+                          'Falling back on http: %s' % (video_url, e))
+                
+        
+        req = tornado.httpclient.HTTPRequest(method='HEAD',
+                                             url=video_url,
+                                             request_timeout=5.0) 
             
-            result = yield tornado.gen.Task(utils.http.send_request, req)
+        result = yield tornado.gen.Task(utils.http.send_request, req)
 
-            if not result.error:
-                headers = result.headers
-                raise tornado.gen.Return(int(headers.get('Content-Length', 0)))
+        if not result.error:
+            headers = result.headers
+            raise tornado.gen.Return(int(headers.get('Content-Length', 0)))
         raise tornado.gen.Return(None)
 
     def qsize(self):
