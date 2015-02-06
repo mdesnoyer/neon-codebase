@@ -258,7 +258,6 @@ class FairWeightedRequestQueue(object):
             video_url = item.get_video_url()
 
             # Get content length of the video
-            # TODO(Sunil): Get the content length of videos on s3
 
             try:
                 nbytes = yield self._get_content_length(video_url)
