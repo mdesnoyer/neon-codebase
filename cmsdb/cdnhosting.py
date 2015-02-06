@@ -454,7 +454,8 @@ class AkamaiHosting(CDNHosting):
         # we use here a 2 folder deep structure where folder names are 
         # randomly selected single letter. This structure affords over 
         # 5 million elements before reaching the limit.
-        
+        random.seed()
+
         # directory structure
         image_url = "/%s/%s/%s" % (random.choice(string.ascii_letters),
                                    random.choice(string.ascii_letters),
