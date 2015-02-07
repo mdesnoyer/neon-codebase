@@ -446,17 +446,17 @@ class AkamaiHosting(CDNHosting):
         imgdata = filestream.read()
        
         # Akamai storage does not recommend a single folder for all
-        # files under our account for performance reasons (limit 2000). 
+        # files under our neon account for performance reasons (limit 2000). 
         # Therefore we need a folder structure, one where we can spread 
         # the pictures with a reasonable expectation of staying within
         # the limit. 
         #
         # We use here a 4 folders deep structure. The root folder is the 
-        # customer account name. It is followed by 3 sub folders with single 
+        # customer account id.  It is followed by 3 sub folders with single 
         # randomly selected letters. This structure affords over 281 million 
-        # elements before reaching the recommended limit.
+        # elements before reaching the recommended limit for a given account
         
-        # the customer account root folder name is taken from the tid. This may 
+        # the customer account root folder id is taken from the tid. This may 
         # break in the future if the tid scheme changes 
         root_folder_name = tid[:24]
         
