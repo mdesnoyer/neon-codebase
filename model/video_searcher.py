@@ -62,6 +62,7 @@ class VideoSearcher(object):
         self.max_startend_buffer=max_startend_buffer
         self.thumb_min_dist=thumb_min_dist
         self.max_thumb_min_dist=max_thumb_min_dist
+        self.filter_dups=filter_dups
 
     def __str__(self):
         return utils.obj.full_object_str(self)
@@ -81,9 +82,13 @@ class VideoSearcher(object):
         '''
         # Clear the gist cache
         self.gist.reset()
+
+        new_n = 5*n if self.filter_dups else n
         
-        thumbs = self.choose_thumbnails_impl(video, n*5, video_name)
-        return self.filter_duplicates(thumbs, n, 0)
+        thumbs = self.choose_thumbnails_impl(video, new_n, video_name)
+        if self.filter_dups:
+            return self.filter_duplicates(thumbs, n, 0)
+        return thumbs
 
     def choose_thumbnails_impl(self, video, n=1, video_name=''):
         '''Implementation of choose_thumbnails.

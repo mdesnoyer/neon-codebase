@@ -28,7 +28,7 @@ define('job_id', default=None, type=str, help='job id')
 _log = logging.getLogger(__name__)
 
 def main():
-    # TODO(mdesnoyer): Use boto to lookup server addresses
+    # TODO(mdesnoyer): Use boto to lookup server addresses and setup a tunnel
     
     request = neondata.NeonApiRequest.get(options.job_id, options.api_key)
     if request is None:
