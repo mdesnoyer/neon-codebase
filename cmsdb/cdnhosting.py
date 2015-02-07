@@ -457,7 +457,9 @@ class AkamaiHosting(CDNHosting):
         # elements before reaching the recommended limit for a given account
         
         # the customer account root folder id is taken from the tid. This may 
-        # break in the future if the tid scheme changes 
+        # break in the future if the tid scheme changes. Another option would 
+        # be to add a root folder to the class that would be set using the 
+        # account id. For now, this is fine so go with it.
         root_folder_name = tid[:24]
         
         random.seed()
