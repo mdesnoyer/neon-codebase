@@ -739,7 +739,6 @@ class VideoClient(multiprocessing.Process):
         super(VideoClient, self).__init__()
         self.model_file = model_file
         self.kill_received = multiprocessing.Event()
-        self.dequeue_url = 'http://%s/dequeue' % options.video_server
         self.state = "start"
         self.model_version = None
         self.model = None
@@ -753,8 +752,9 @@ class VideoClient(multiprocessing.Process):
         _log.debug("Dequeuing job [%s] " % (self.pid))
         headers = {'X-Neon-Auth' : options.server_auth} 
         result = None
+        dequeue_url = 'http://%s/dequeue' % options.video_server
         req = tornado.httpclient.HTTPRequest(
-                                            url=self.dequeue_url,
+                                            url=dequeue_url,
                                             method="GET",
                                             headers=headers,
                                             request_timeout=60.0,
