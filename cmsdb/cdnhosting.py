@@ -439,14 +439,39 @@ class AkamaiHosting(CDNHosting):
         if self.cdn_prefixes and len(self.cdn_prefixes) > 0:
             cdn_prefix = random.choice(self.cdn_prefixes)
         
-        cdn_url = "http://%s/%s" % (cdn_prefix, key_name)
         fmt = 'jpeg'
         filestream = StringIO()
         image.save(filestream, fmt, quality=90) 
         filestream.seek(0)
         imgdata = filestream.read()
+       
+        # Akamai storage does not recommend a single folder for all
+        # files under our neon account for performance reasons (limit 2000). 
+        # Therefore we need a folder structure, one where we can spread 
+        # the pictures with a reasonable expectation of staying within
+        # the limit. 
+        #
+        # We use here a 4 folders deep structure. The root folder is the 
+        # customer account id.  It is followed by 3 sub folders with single 
+        # randomly selected letters. This structure affords over 281 million 
+        # elements before reaching the recommended limit for a given account
         
-        image_url = "/%s" % key_name
+        # the customer account root folder id is taken from the tid. This may 
+        # break in the future if the tid scheme changes. Another option would 
+        # be to add a root folder to the class that would be set using the 
+        # account id. For now, this is fine so go with it.
+        root_folder_name = tid[:24]
+        
+        random.seed()
+
+        # directory structure
+        image_url = "/%s/%s/%s/%s/%s" % (root_folder_name,
+                                         random.choice(string.ascii_letters),
+                                         random.choice(string.ascii_letters),
+                                         random.choice(string.ascii_letters),
+                                         key_name)
+        # the full cdn url
+        cdn_url = "http://%s%s" % (cdn_prefix, image_url)
 
         response = yield tornado.gen.Task(self.ak_conn.upload, image_url, imgdata)
         if response.error:

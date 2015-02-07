@@ -409,8 +409,11 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_upload_image(self):
         self._set_http_response()
-        tid = 'akamai_vid1_tid1'
-        
+        tid = 'customeraccountnamelabel_vid1_tid1'
+
+        # the expected root of the url is the first 24 characters of the tid
+        url_root_folder = tid[:24]
+
         yield self.hoster.upload(self.image, tid, async=True)
        
         # Check http mock and Akamai request
@@ -425,11 +428,14 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
         ts = neondata.ThumbnailServingURLs.get(tid)
         self.assertGreater(len(ts.size_map), 0)
 
-        # Verify the final image URLs
+        # Verify the final image URLs. This should be the account id 
+        # followed by 3 sub folders whose name should be a single letter
+        # (lower or uppercase) choosen randomly, then the thumbnail file
         for (w, h), url in ts.size_map.iteritems():
             url = ts.get_serving_url(w, h)
-            self.assertRegexpMatches(
-                    url, 'http://cdn.akamai.com/neontn%s_w%s_h%s.jpg' % (tid, w, h))
+            self.assertRegexpMatches(url, 
+              'http://cdn.akamai.com/%s/[a-zA-Z]/[a-zA-Z]/[a-zA-Z]/neontn%s_w%s_h%s.jpg' 
+              % (url_root_folder,tid, w, h))
     
     @tornado.testing.gen_test
     def test_upload_image_error(self):
