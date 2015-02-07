@@ -446,20 +446,28 @@ class AkamaiHosting(CDNHosting):
         imgdata = filestream.read()
        
         # Akamai storage does not recommend a single folder for all
-        # files under an account for performance reasons (limit 2000). 
+        # files under our account for performance reasons (limit 2000). 
         # Therefore we need a folder structure, one where we can spread 
         # the pictures with a reasonable expectation of staying within
         # the limit. 
         #
-        # we use here a 2 folder deep structure where folder names are 
-        # randomly selected single letter. This structure affords over 
-        # 5 million elements before reaching the limit.
+        # We use here a 4 folders deep structure. The root folder is the 
+        # customer account name. It is followed by 3 sub folders with single 
+        # randomly selected letters. This structure affords over 281 million 
+        # elements before reaching the recommended limit.
+        
+        # the customer account root folder name is taken from the tid. This may 
+        # break in the future if the tid scheme changes 
+        root_folder_name = tid[:24]
+        
         random.seed()
 
         # directory structure
-        image_url = "/%s/%s/%s" % (random.choice(string.ascii_letters),
-                                   random.choice(string.ascii_letters),
-                                   key_name)
+        image_url = "/%s/%s/%s/%s/%s" % (root_folder_name,
+                                         random.choice(string.ascii_letters),
+                                         random.choice(string.ascii_letters),
+                                         random.choice(string.ascii_letters),
+                                         key_name)
         # the full cdn url
         cdn_url = "http://%s%s" % (cdn_prefix, image_url)
 
