@@ -213,7 +213,7 @@ class AkamaiNetstorage(object):
         # Do g2o and send the request
         encoded_url = urllib.quote(url)
         g2o_auth_data = self.g2o.get_auth_data()
-        g2o_auth_sign = self.g2o.get_auth_sign(encoded_url, action_string)
+        g2o_auth_sign = self.g2o.get_auth_sign(self.baseurl + encoded_url, action_string)
         headers = {
             'X-Akamai-ACS-Action': action_string,
             'X-Akamai-ACS-Auth-Data': g2o_auth_data,
