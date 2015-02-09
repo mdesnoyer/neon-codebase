@@ -6,9 +6,9 @@ Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 import csv
 import cv2
@@ -26,16 +26,7 @@ def parse_image_scores(score_file, source_file, img_id_regex, image_dir):
     Returns ([image_files], [scores])
 
     '''
-
-    # Create a id->source lookup table
-    source_lut = {}
-    with open(source_file) as f:
-        for fields in csv.reader(f, delimiter=' '):
-            if fields[0] == '':
-                continue
-            source_lut[fields[0]] = fields[1]
-
-
+    # Extract all the scores
     image_files = []
     scores = []
     with open(score_file) as f:
@@ -44,6 +35,18 @@ def parse_image_scores(score_file, source_file, img_id_regex, image_dir):
                 continue
             image_files.append(os.path.join(image_dir, fields[0]))
             scores.append(float(fields[1]))
+
+    if source_file is None:
+        # We're done
+        return image_files, scores
+
+    # Create a id->source lookup table
+    source_lut = {}
+    with open(source_file) as f:
+        for fields in csv.reader(f, delimiter=' '):
+            if fields[0] == '':
+                continue
+            source_lut[fields[0]] = fields[1]
 
     # Sort based on the source
     def _get_source(image_file, source_lut, img_id_regex):
@@ -97,7 +100,7 @@ if __name__ == '__main__':
     parser.add_option('--output', '-o', default=None,
                       help='File that will contain the trained model.')
     parser.add_option('--scores', default=None,
-                      help='File containing "<filename> <score>" on each line')
+                      help='File containing "<filename>,<score>" on each line')
     parser.add_option('--image_source', default=None,
                       help='File containing "<img_id> <url>" on each line')
     parser.add_option('--img_id_regex', default='([a-zA-Z0-9_-]+)\.jpg',

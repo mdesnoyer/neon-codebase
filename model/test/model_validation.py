@@ -488,7 +488,7 @@ if __name__ == '__main__':
     parser.add_option('--model', default=None,
                       help='File containing the model')
     parser.add_option('--scores', default=None,
-                      help='File containing "<filename> <score>" on each line')
+                      help='File containing "<filename>,<score>" on each line')
     parser.add_option('--image_source', default=None,
                       help='File containing "<img_id> <url>" on each line')
     parser.add_option('--img_id_regex', default='([a-zA-Z0-9_-]+)\.jpg',

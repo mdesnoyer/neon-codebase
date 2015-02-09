@@ -240,21 +240,27 @@ class VideoProcessor(object):
             s3match = s3re.search(self.video_url)
             if s3match:
                 # Get the video from s3 directly
-                bucket_name = s3match.group(4)
-                key_name = s3match.group(5)
-                s3conn = S3Connection()
-                bucket = s3conn.get_bucket(bucket_name)
-                key = bucket.get_key(key_name)
-                key.get_contents_to_file(self.tempfile)
-            else:
-                # Use urllib2
-                req = urllib2.Request(self.video_url, headers=self.headers)
-                response = urllib2.urlopen(req, timeout=self.timeout)
-                data = response.read(CHUNK_SIZE)
-                while data != '':
-                    self.tempfile.write(data)
+                try:
+                    bucket_name = s3match.group(4)
+                    key_name = s3match.group(5)
+                    s3conn = S3Connection()
+                    bucket = s3conn.get_bucket(bucket_name)
+                    key = bucket.get_key(key_name)
+                    key.get_contents_to_file(self.tempfile)
                     self.tempfile.flush()
-                    data = response.read(CHUNK_SIZE)
+                    return
+                except boto.exception.S3ResponseError as e:
+                    _log.warn('Error getting video url %s via boto. '
+                              'Falling back on http: %s' % (self.video_url, e))
+            
+            # Use urllib2
+            req = urllib2.Request(self.video_url, headers=self.headers)
+            response = urllib2.urlopen(req, timeout=self.timeout)
+            data = response.read(CHUNK_SIZE)
+            while data != '':
+                self.tempfile.write(data)
+                self.tempfile.flush()
+                data = response.read(CHUNK_SIZE)
 
             self.tempfile.flush()
 
@@ -733,7 +739,6 @@ class VideoClient(multiprocessing.Process):
         super(VideoClient, self).__init__()
         self.model_file = model_file
         self.kill_received = multiprocessing.Event()
-        self.dequeue_url = 'http://%s/dequeue' % options.video_server
         self.state = "start"
         self.model_version = None
         self.model = None
@@ -747,8 +752,9 @@ class VideoClient(multiprocessing.Process):
         _log.debug("Dequeuing job [%s] " % (self.pid))
         headers = {'X-Neon-Auth' : options.server_auth} 
         result = None
+        dequeue_url = 'http://%s/dequeue' % options.video_server
         req = tornado.httpclient.HTTPRequest(
-                                            url=self.dequeue_url,
+                                            url=dequeue_url,
                                             method="GET",
                                             headers=headers,
                                             request_timeout=60.0,
