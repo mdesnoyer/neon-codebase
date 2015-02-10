@@ -19,7 +19,7 @@ VideoCounter::~VideoCounter()
 
 
 int
-VideoCounter::Init(const rapidjson::Document & document) 
+VideoCounter::Init() 
 {
 
     return 0;
@@ -32,16 +32,55 @@ VideoCounter::Shutdown()
 }
 
 
-std::string &
-VideoCounter::GetVideoId() const
+const std::string &  
+VideoCounter::GetId() const 
 {
-    return videoId();
+    return videoId;
 }
+
+
+void 
+VideoCounter::SetId(const char * vid)
+{
+    videoId = vid;
+}
+
+
+unsigned long long 
+VideoCounter::GetCounter() const
+{
+    return counter;
+}
+
+
+void 
+VideoCounter::Increment()
+{
+    counter++;
+}
+
 
 
 bool
 VideoCounter::operator==(const VideoCounter &other) const {
 
-    return videoId  == other.GetVideoId();
+    return videoId  == other.GetId();
 };
+
+
+VideoCounter * 
+VideoCounter::Create()
+{
+    VideoCounter * v = new VideoCounter();
+    return v;
+}
+
+
+void 
+VideoCounter::Destroy(VideoCounter * v)
+{
+    delete v;
+}
+
+
 

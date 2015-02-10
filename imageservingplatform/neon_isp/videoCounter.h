@@ -18,13 +18,24 @@ public:
     VideoCounter(const VideoCounter &  v);
     ~VideoCounter();
 
-    int Init(std::string & id);
+    int Init();
 
     void Shutdown();
 
-    std::string &  GetVideoId() const;
+    const std::string &  GetId() const;
+
+    void SetId(const char * vid);
+
+    unsigned long long GetCounter() const;
 
     bool operator == (const VideoCounter & other) const;
+
+    void Increment();
+
+    static VideoCounter * Create();
+
+    static void Destroy(VideoCounter * a);
+
 
 protected:
 
