@@ -68,7 +68,7 @@ class TestBackfillCDN(test_utils.neontest.AsyncTestCase):
         self.s3_patcher.stop()
         self.http_call_patcher.stop()
         self.redis.stop()
-        super(TestBackfillCDN, self).setUp()
+        super(TestBackfillCDN, self).tearDown()
 
     def _set_http_response(self, code=200, body='', error=None):
         def do_response(request, callback=None, *args, **kwargs):
