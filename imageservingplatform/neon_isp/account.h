@@ -5,6 +5,8 @@
 #include <ext/hash_map>
 #include "videoCounter.h"
 
+class AccountHashtableLogger;
+
 
 class Account {
 
@@ -13,13 +15,19 @@ class Account {
     Account();
     ~Account();
 
-    int Init();
+    int Init(const char * aid);
+    
     void Shutdown();
     
     void SetId(const char * aid);
 
+    const std::string & GetId() const;
+
     void Increment(const char * videoId);
 
+    VideoCounter * FindVideoCounter(const char * vid);
+
+    int Traverse(AccountHashtableLogger * logger);
 
     static const unsigned numOfBuckets = 100;
 

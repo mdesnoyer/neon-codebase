@@ -1,4 +1,5 @@
 #include "accountHashtable.h"
+#include "accountHashtableLogger.h"
 #include "neonHash.h"
 
 
@@ -80,9 +81,28 @@ AccountHashtable::Increment(const char * accountId,
 }
 
 
-Account * 
-AccountHashtable::Find(const char * accountId)
+VideoCounter * 
+AccountHashtable::FindVideoCounter(const char * aid, const char * vid)
 {
+     Account * a = (*table)[aid];
+
+    if(a == 0)
+        return 0;
+
+    
+
+
+    return 0;
+}
+
+
+int 
+AccountHashtable::Traverse(AccountHashtableLogger * logger)
+{
+    for(AccountTable::iterator it = table->begin(); it != table->end(); it ++)
+    {
+        (*it).second->Traverse(logger);
+    }
     return 0;
 }
 

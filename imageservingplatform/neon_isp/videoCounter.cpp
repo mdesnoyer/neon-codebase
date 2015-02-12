@@ -19,9 +19,9 @@ VideoCounter::~VideoCounter()
 
 
 int
-VideoCounter::Init() 
+VideoCounter::Init(const char * vid) 
 {
-
+    videoId = vid;
     return 0;
 }
 

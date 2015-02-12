@@ -1,6 +1,6 @@
 #include "account.h"
 #include "neonHash.h"
-
+#include "accountHashtableLogger.h"
 
 
 
@@ -15,12 +15,13 @@ Account::~Account()
 
 
 int
-Account::Init()
+Account::Init(const char * aid)
 {
     if(initialized == true) {
         return 1;
     }
 
+    accountId = aid;
     table = new VideoCounterTable(numOfBuckets);
     return 0;
 }
@@ -55,6 +56,13 @@ Account::SetId(const char * aid)
 }
 
 
+const std::string & 
+Account::GetId() const
+{
+    return accountId;
+}
+
+
 void 
 Account::Increment(const char * videoId)
 {
@@ -62,11 +70,33 @@ Account::Increment(const char * videoId)
 
     if(v == 0) {
         v = VideoCounter::Create();
-        v->SetId(videoId);        
+        v->Init(videoId);        
         (*table)[videoId] = v;
     }
 
     v->Increment();
+}
+
+
+VideoCounter * 
+Account::FindVideoCounter(const char * vid)
+{
+    VideoCounter * v = (*table)[vid];
+    return v;
+}
+
+
+int 
+Account::Traverse(AccountHashtableLogger * logger)
+{
+    for(VideoCounterTable::iterator it = table->begin(); it != table->end(); it ++)
+    {
+//        logger->Log(accountId.c_str(),
+  //                  (*it).second->GetId().c_str(), 
+    //                (*it).second->GetCounter());
+    }
+
+    return 0;
 }
 
 

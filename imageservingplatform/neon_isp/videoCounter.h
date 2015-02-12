@@ -6,7 +6,7 @@
 #include "fraction.h"
 #include "neon_constants.h"
 #include "rapidjson/document.h"
-
+#include "string"
 
 
 class VideoCounter  {
@@ -18,7 +18,7 @@ public:
     VideoCounter(const VideoCounter &  v);
     ~VideoCounter();
 
-    int Init();
+    int Init(const char * vid);
 
     void Shutdown();
 
