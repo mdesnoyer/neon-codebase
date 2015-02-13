@@ -287,6 +287,11 @@ class StatsDBWatcher(threading.Thread):
                 _log.exception('Uncaught stats DB Error: %s' % e)
                 statemon.state.increment('statsdb_error')
 
+            finally:
+                if self.impala_conn is not None:
+                    self.impala_conn.close()
+                    self.impala_conn = None
+
             # Now we wait so that we don't hit the database too much.
             self._stopped.wait(options.stats_db_polling_delay)
 
@@ -312,73 +317,76 @@ class StatsDBWatcher(threading.Thread):
             _log.info('Found a newer entry in the stats database from %s. '
                       'Processing' % self.last_update.isoformat())
             cursor = self.impala_conn.cursor()
-            last_month = self.last_update - datetime.timedelta(weeks=4)
-            col_map = {
-                neondata.MetricType.LOADS: 'imloadclienttime',
-                neondata.MetricType.VIEWS: 'imvisclienttime',
-                neondata.MetricType.CLICKS: 'imclickclienttime',
-                neondata.MetricType.PLAYS: 'videoplayclienttime'
-                }
+            try:
+                last_month = self.last_update - datetime.timedelta(weeks=4)
+                col_map = {
+                    neondata.MetricType.LOADS: 'imloadclienttime',
+                    neondata.MetricType.VIEWS: 'imvisclienttime',
+                    neondata.MetricType.CLICKS: 'imclickclienttime',
+                    neondata.MetricType.PLAYS: 'videoplayclienttime'
+                    }
 
-            # We are going to walk through the db by tracker id
-            # because it is partitioned that way and it makes the
-            # calls faster
-            for tai_info in neondata.TrackerAccountIDMapper.get_all():
-                if (tai_info.itype != 
-                    neondata.TrackerAccountIDMapper.PRODUCTION):
-                    continue
+                # We are going to walk through the db by tracker id
+                # because it is partitioned that way and it makes the
+                # calls faster
+                for tai_info in neondata.TrackerAccountIDMapper.get_all():
+                    if (tai_info.itype != 
+                        neondata.TrackerAccountIDMapper.PRODUCTION):
+                        continue
 
-                # Build the query for all the data in the last month
-                strategy = strategy_cache.get(tai_info.value)
-                if strategy.conversion_type == neondata.MetricType.PLAYS:
-                    query = (
-                        ("select thumbnail_id, count({imp_type}), "
-                         "sum(cast(imclickclienttime is not null and " 
-                         "(adplayclienttime is not null or "
-                         "videoplayclienttime is not null) as int)) "
-                         "from EventSequences where tai='{tai}' and "
-                         "{imp_type} is not null "
-                         "and servertime < {update_hour:f} "
-                         "and (yr > {yr:d} or "
-                         "(yr = {yr:d} and mnth >= {mnth:d})) "
-                         "group by thumbnail_id").format(
-                            imp_type=col_map[strategy.impression_type],
-                            tai=tai_info.get_tai(),
-                            update_hour=hourtimestamp(self.last_update),
-                            yr=last_month.year,
-                            mnth=last_month.month))
-                else:
-                    query = (
-                        ("select thumbnail_id, count({imp_type}), "
-                         "count({conv_type}) "
-                         "from EventSequences where tai='{tai}' and "
-                         "{imp_type} is not null "
-                         "and servertime < {update_hour:f} "
-                         "and (yr > {yr:d} or "
-                         "(yr = {yr:d} and mnth >= {mnth:d})) "
-                         "group by thumbnail_id").format(
-                            imp_type=col_map[strategy.impression_type],
-                            conv_type=col_map[strategy.conversion_type],
-                            tai=tai_info.get_tai(),
-                            update_hour=hourtimestamp(self.last_update),
-                            yr=last_month.year,
-                            mnth=last_month.month))
-                cursor.execute(query)
+                    # Build the query for all the data in the last month
+                    strategy = strategy_cache.get(tai_info.value)
+                    if strategy.conversion_type == neondata.MetricType.PLAYS:
+                        query = (
+                            ("select thumbnail_id, count({imp_type}), "
+                             "sum(cast(imclickclienttime is not null and " 
+                             "(adplayclienttime is not null or "
+                             "videoplayclienttime is not null) as int)) "
+                             "from EventSequences where tai='{tai}' and "
+                             "{imp_type} is not null "
+                             "and servertime < {update_hour:f} "
+                             "and (yr > {yr:d} or "
+                             "(yr = {yr:d} and mnth >= {mnth:d})) "
+                             "group by thumbnail_id").format(
+                                imp_type=col_map[strategy.impression_type],
+                                tai=tai_info.get_tai(),
+                                update_hour=hourtimestamp(self.last_update),
+                                yr=last_month.year,
+                                mnth=last_month.month))
+                    else:
+                        query = (
+                            ("select thumbnail_id, count({imp_type}), "
+                             "count({conv_type}) "
+                             "from EventSequences where tai='{tai}' and "
+                             "{imp_type} is not null "
+                             "and servertime < {update_hour:f} "
+                             "and (yr > {yr:d} or "
+                             "(yr = {yr:d} and mnth >= {mnth:d})) "
+                             "group by thumbnail_id").format(
+                                imp_type=col_map[strategy.impression_type],
+                                conv_type=col_map[strategy.conversion_type],
+                                tai=tai_info.get_tai(),
+                                update_hour=hourtimestamp(self.last_update),
+                                yr=last_month.year,
+                                mnth=last_month.month))
+                    cursor.execute(query)
 
-                data = []
-                for thumb_id, base_imp, base_conv in cursor:
-                    incr_counts = self._get_incremental_stat_data(
-                        strategy_cache,
-                        thumb_id=thumb_id)[thumb_id]
-                    data.append((self.video_id_cache.find_video_id(thumb_id),
-                                 thumb_id,
-                                 base_imp,
-                                 incr_counts[0],
-                                 base_conv,
-                                 incr_counts[1]))
-                    
-                self.mastermind.update_stats_info(data)
-            _log.info('Finished processing batch stats update')
+                    data = []
+                    for thumb_id, base_imp, base_conv in cursor:
+                        incr_counts = self._get_incremental_stat_data(
+                            strategy_cache,
+                            thumb_id=thumb_id)[thumb_id]
+                        data.append((self.video_id_cache.find_video_id(thumb_id),
+                                     thumb_id,
+                                     base_imp,
+                                     incr_counts[0],
+                                     base_conv,
+                                     incr_counts[1]))
+
+                    self.mastermind.update_stats_info(data)
+                _log.info('Finished processing batch stats update')
+            finally:
+                cursor.close()
         else:
             _log.info('Looking for incremental stats update from host %s' %
                       options.incr_stats_host)
@@ -415,58 +423,64 @@ class StatsDBWatcher(threading.Thread):
         
         cursor = self.impala_conn.cursor()
 
-        # First look at table_build_times to find if the last table was built.
         try:
-            cursor.execute('select max(done_time) from table_build_times')
-            table_build_result = cursor.fetchall()
-            
-            if (len(table_build_result) == 0 or 
-                table_build_result[0][0] is None):
-                _log.error('Cannot determine when the database was last '
-                           'updated')
+
+            # First look at table_build_times to find if the last
+            # table was built.
+            try:
+                cursor.execute('select max(done_time) from table_build_times')
+                table_build_result = cursor.fetchall()
+
+                if (len(table_build_result) == 0 or 
+                    table_build_result[0][0] is None):
+                    _log.error('Cannot determine when the database was last '
+                               'updated')
+                    statemon.state.increment('statsdb_error')
+                    self.is_loaded.set()
+                    return False
+
+                cur_table_build = table_build_result[0][0]
+                if not isinstance(cur_table_build, datetime.datetime):
+                    cur_table_build = \
+                      dateutil.parser.parse(table_build_result[0][0])
+
+                statemon.state.time_since_stats_update = (
+                    datetime.datetime.now() - cur_table_build).total_seconds()
+
+                is_newer = (self.last_table_build is None or 
+                            cur_table_build > self.last_table_build)
+                if not is_newer:
+                    return False
+            except impala.error.RPCError as e:
+                _log.error('SQL Error. Probably a table is not available yet. '
+                           '%s' % e)
                 statemon.state.increment('statsdb_error')
                 self.is_loaded.set()
                 return False
 
-            cur_table_build = table_build_result[0][0]
-            if not isinstance(cur_table_build, datetime.datetime):
-                cur_table_build = \
-                  dateutil.parser.parse(table_build_result[0][0])
 
-            statemon.state.time_since_stats_update = (
-                datetime.datetime.now() - cur_table_build).total_seconds()
-                  
-            is_newer = (self.last_table_build is None or 
-                        cur_table_build > self.last_table_build)
-            if not is_newer:
-                return False
-        except impala.error.RPCError as e:
-            _log.error('SQL Error. Probably a table is not available yet. %s'
-                       % e)
-            statemon.state.increment('statsdb_error')
-            self.is_loaded.set()
-            return False
-        
-
-        try:
-            # Now, find out when the last event we knew about was
-            curtime = datetime.datetime.utcnow()
-            cursor.execute(
-                ('SELECT max(serverTime) FROM videoplays WHERE '
-                 'yr >= {yr:d} or (yr = {yr:d} and mnth >= {mnth:d})').format(
-                     mnth=curtime.month, yr=curtime.year))
-            play_result = cursor.fetchall()
-            if len(play_result) == 0 or play_result[0][0] is None:
-                _log.error('Cannot find any videoplay events')
+            try:
+                # Now, find out when the last event we knew about was
+                curtime = datetime.datetime.utcnow()
+                cursor.execute(
+                    ('SELECT max(serverTime) FROM videoplays WHERE '
+                     'yr >= {yr:d} or (yr = {yr:d} and mnth >= {mnth:d})'
+                     ).format(
+                         mnth=curtime.month, yr=curtime.year))
+                play_result = cursor.fetchall()
+                if len(play_result) == 0 or play_result[0][0] is None:
+                    _log.error('Cannot find any videoplay events')
+                    statemon.state.increment('statsdb_error')
+                    self.is_loaded.set()
+                    return False
+            except impala.error.RPCError as e:
+                _log.error('SQL Error. Probably a table is not available yet. '
+                           '%s' % e)
                 statemon.state.increment('statsdb_error')
                 self.is_loaded.set()
                 return False
-        except impala.error.RPCError as e:
-            _log.error('SQL Error. Probably a table is not available yet. %s'
-                       % e)
-            statemon.state.increment('statsdb_error')
-            self.is_loaded.set()
-            return False
+        finally:
+            cursor.close()
 
         # Update the state variables
         self.last_update = datetime.datetime.utcfromtimestamp(
@@ -516,7 +530,8 @@ class StatsDBWatcher(threading.Thread):
                         row_start = thumb_id
                     else:
                         row_start = '_'.join([
-                            thumb_id, self.last_update.strftime('%Y-%m-%dT%H')])
+                            thumb_id,
+                            self.last_update.strftime('%Y-%m-%dT%H')])
 
                 for key, row in table.scan(row_start=row_start,
                                            row_stop=row_stop,
@@ -526,7 +541,8 @@ class StatsDBWatcher(threading.Thread):
                     else:
                         tid = thumb_id
                     if tid == '':
-                        _log.warn_n('Invalid thumbnail id in key %s' % key, 100)
+                        _log.warn_n('Invalid thumbnail id in key %s' % key,
+                                    100)
                         continue
 
                     strategy = strategy_cache.from_thumb_id(tid)
@@ -544,10 +560,12 @@ class StatsDBWatcher(threading.Thread):
 
                     try:
 
-                        incr_imp = struct.unpack('>q',
-                                                 row.get(impr_col, '\x00'*8))[0]
-                        incr_conv = struct.unpack('>q',
-                                                  row.get(conv_col,'\x00'*8))[0]
+                        incr_imp = struct.unpack(
+                            '>q',
+                            row.get(impr_col, '\x00'*8))[0]
+                        incr_conv = struct.unpack(
+                            '>q',
+                            row.get(conv_col,'\x00'*8))[0]
                         counts[0] += incr_imp
                         counts[1] += incr_conv
                     except struct.error as e:

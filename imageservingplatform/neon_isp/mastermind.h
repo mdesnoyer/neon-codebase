@@ -39,7 +39,7 @@ public:
     
     static double randZeroToOne();
     
-    static const int MaxLineBufferSize = 40000;
+    static const int MaxLineBufferSize = 500000;
     static char lineBuffer[];
 
     // searches the publisher hashtable
