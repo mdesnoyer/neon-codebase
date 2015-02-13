@@ -112,7 +112,7 @@ def process_single_video(video_info):
 
 def main():
     # Start some extra subprocesses for processing
-    pool = multiprocessing.Pool(processes=(multiprocessing.cpu_count()-1))
+    pool = multiprocessing.Pool(processes=(multiprocessing.cpu_count()+16))
     
     # Open the input file
     with open(options.input) as stream:
