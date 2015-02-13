@@ -62,45 +62,46 @@ def process_single_video(video_info):
 
             for thumb in video_info['thumbnails']:
                 # Extract the thumbnail
-                with tempfile.NamedTemporaryFile('w+b', dir=options.temp_dir,
-                                                 suffix='.jpg') as \
-                  thumb_file:
-                  proc_args = [
-                          'ffmpeg',
-                          '-i',
-                          vid_file.name,
-                          '-vf',
-                          '"select=gte(n\,%d)"' % thumb['frameno'],
-                          '-vframes',
-                          '1',
-                          '-q:v',
-                          '1',
-                          thumb_file.name]
-                  retval = subprocess.call(' '.join(proc_args), shell=True)
-                  if retval != 0:
+                thumb_filename = os.path.join(options.temp_dir,
+                                              '%s_%s.jpg' % (
+                                                  video_info['video_id'],
+                                                  thumb['frameno']))
+                proc_args = [
+                      'ffmpeg',
+                      '-i',
+                      vid_file.name,
+                      '-vf',
+                      '"select=gte(n\,%d)"' % thumb['frameno'],
+                      '-vframes',
+                      '1',
+                      '-q:v',
+                      '1',
+                      thumb_filename]
+                retval = subprocess.call(' '.join(proc_args), shell=True)
+                if retval != 0:
                     _log.error('Error Extracting frame %d from video %s' %
                                (thumb['frameno'], video_info['video_id']))
                     return
-                                 
 
-                  # Upload the image to s3
-                  img_bucket_name, img_key_name, img_fn = \
-                    s3re.search(thumb['url']).groups()
 
-                  img_bucket = s3conn.get_bucket(img_bucket_name)
-                  img_key = img_bucket.get_key(img_key_name)
-                  if img_key is None:
+                # Upload the image to s3
+                img_bucket_name, img_key_name, img_fn = \
+                s3re.search(thumb['url']).groups()
+
+                img_bucket = s3conn.get_bucket(img_bucket_name)
+                img_key = img_bucket.get_key(img_key_name)
+                if img_key is None:
                     img_key = img_bucket.new_key(img_key_name)
-                  else:
+                else:
                     mod_date = dateutil.parser.parse(img_key.last_modified)
                     if mod_date > dateutil.parser.parse('2015-02-11T12:00:00 GMT'):
-                      continue
-                  img_key.set_contents_from_filename(
-                    thumb_file.name,
+                        continue
+                img_key.set_contents_from_filename(
+                    thumb_filename,
                     replace=True,
                     headers={
-                      'Content-Type' : 'image/jpeg'
-                      },
+                        'Content-Type' : 'image/jpeg'
+                        },
                     policy='private')
                 
     except Exception as e:
