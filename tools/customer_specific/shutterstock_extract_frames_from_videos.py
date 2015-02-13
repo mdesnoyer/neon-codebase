@@ -66,7 +66,7 @@ def process_single_video(video_info):
                                                  suffix='.jpg') as \
                   thumb_file:
                   proc_args = [
-                          'avconv',
+                          'ffmpeg',
                           '-i',
                           vid_file.name,
                           '-vf',
@@ -116,8 +116,8 @@ def main():
         json_data = json.load(stream)['results']
 
     # Start the jobs
-    process_single_video(json_data[0])
-    #pool.map(process_single_video, json_data)
+    #process_single_video(json_data[0])
+    pool.map(process_single_video, json_data)
 
     
 
