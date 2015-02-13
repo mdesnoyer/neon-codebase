@@ -84,27 +84,28 @@ def process_single_video(video_info):
                                (thumb['frameno'], video_info['video_id']))
                     return
 
+                try:
+                    # Upload the image to s3
+                    img_bucket_name, img_key_name, img_fn = \
+                    s3re.search(thumb['url']).groups()
 
-                # Upload the image to s3
-                img_bucket_name, img_key_name, img_fn = \
-                s3re.search(thumb['url']).groups()
-
-                img_bucket = s3conn.get_bucket(img_bucket_name)
-                img_key = img_bucket.get_key(img_key_name)
-                if img_key is None:
-                    img_key = img_bucket.new_key(img_key_name)
-                else:
-                    mod_date = dateutil.parser.parse(img_key.last_modified)
-                    if mod_date > dateutil.parser.parse('2015-02-11T12:00:00 GMT'):
-                        continue
-                img_key.set_contents_from_filename(
-                    thumb_filename,
-                    replace=True,
-                    headers={
-                        'Content-Type' : 'image/jpeg'
-                        },
-                    policy='private')
-                os.remove(thumb_filename)
+                    img_bucket = s3conn.get_bucket(img_bucket_name)
+                    img_key = img_bucket.get_key(img_key_name)
+                    if img_key is None:
+                        img_key = img_bucket.new_key(img_key_name)
+                    else:
+                        mod_date = dateutil.parser.parse(img_key.last_modified)
+                        if mod_date > dateutil.parser.parse('2015-02-11T12:00:00 GMT'):
+                            continue
+                    img_key.set_contents_from_filename(
+                        thumb_filename,
+                        replace=True,
+                        headers={
+                            'Content-Type' : 'image/jpeg'
+                            },
+                        policy='private')
+                finally:
+                    os.remove(thumb_filename)
         _log.info('Sucessfully processed video %s' % video_info['video_id'])
     except Exception as e:
         _log.exception('Error processing video %s' % video_info['video_id'])
