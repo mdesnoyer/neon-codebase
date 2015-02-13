@@ -34,6 +34,7 @@ import dateutil.parser
 import json
 import logging
 import multiprocessing
+import os
 import re
 import subprocess
 import tempfile
@@ -103,7 +104,8 @@ def process_single_video(video_info):
                         'Content-Type' : 'image/jpeg'
                         },
                     policy='private')
-                
+                os.remove(thumb_filename)
+        _log.info('Sucessfully processed video %s' % video_info['video_id'])
     except Exception as e:
         _log.exception('Error processing video %s' % video_info['video_id'])
         
