@@ -45,6 +45,8 @@ _log = logging.getLogger(__name__)
 
 define('input', default=None, help='Input json')
 define('temp_dir', default=None)
+define('video_id_list', default=None,
+       help='File with list of video ids to process')
 
 def process_single_video(video_info):
     _log.info('Processing video %s' % video_info['video_id'])
@@ -118,6 +120,12 @@ def main():
     # Open the input file
     with open(options.input) as stream:
         json_data = json.load(stream)['results']
+
+    # Filter the json based on the video id list
+    if options.video_id_list is not None:
+        valid_video_ids = set([x.strip() for x in open(options.video_id_list)])
+        json_data = filter(lamda x: x['video_id'] in valid_video_ids,
+                           json_data)
 
     # Start the jobs
     #process_single_video(json_data[0])
