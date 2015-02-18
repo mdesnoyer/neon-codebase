@@ -33,6 +33,10 @@ define('modify_pool_size', type=int, default=5,
 statemon.define('n_directives', int)
 statemon.define('directive_changes', int)
 statemon.define('pending_modifies', int)
+statemon.define('no_experiment_strategy', int)
+statemon.define('invalid_experiment_type', int) 
+statemon.define('unhandled_exception', int) # unhandled or unknown exception
+statemon.define('no_valid_thumbnails', int) # no valid thumbnails for a video
 
 class MastermindError(Exception): pass
 class UpdateError(MastermindError): pass
@@ -373,6 +377,7 @@ class Mastermind(object):
             _log.critical(
                 'Could not find video_id %s. This should never happen' 
                 % video_id)
+            # TODO(Mark): Add a counter here ? 
             return
         
         result = self._calculate_current_serving_directive(
@@ -417,6 +422,7 @@ class Mastermind(object):
         except KeyError:
             _log.error(('Could not find the experimental strategy for account'
                         ' %s' % video_info.account_id))
+            statemon.state.increment('no_experiment_strategy')
             return None
             
         # Find the different types of thumbnails. We are looking for:
@@ -479,11 +485,14 @@ class Mastermind(object):
         if editor is None and baseline is None:
             if len(candidates) == 0:
                 _log.error("No valid thumbnails for video %s" % video_id)
+                statemon.state.increment('no_valid_thumbnails')
                 return None
             
             _log.warn_n('Could not find a baseline for video id: %s' %
                         video_id)
             if not video_info.testing_enabled:
+                #TODO(Mark): Should this be info? testing of video could
+                # be disabled for valid reasons by the customer
                 _log.error_n(
                     'Testing was disabled and there was no baseline for'
                     ' video %s' % video_id, 5)
@@ -537,6 +546,7 @@ class Mastermind(object):
         else:
             _log.error('Invalid experiment type for video %s : %s' % 
                        (video_id, strategy.experiment_type))
+            statemon.state.increment('invalid_experiment_type')
             return None
         return (experiment_state, run_frac, value_left)
 
@@ -807,6 +817,7 @@ def _modify_many_serving_fracs(mastermind, video_id, new_directive,
         mastermind._incr_pending_modify(-1)
     except Exception as e:
         _log.exception('Unhandled exception when updating thumbs %s' % e)
+        statemon.state.increment('unhandled_exception')
         raise
 
 
@@ -829,6 +840,7 @@ def _modify_video_info(mastermind, video_id, experiment_state, value_left):
         mastermind._incr_pending_modify(-1)
     except Exception as e:
         _log.exception('Unhandled exception when updating video %s' % e)
+        statemon.state.increment('unhandled_exception')
         raise
 
 def _update_experiment_info(experiment_state, value_left, video_obj):

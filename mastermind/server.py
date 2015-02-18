@@ -74,12 +74,15 @@ define('expiry_buffer', type=int, default=30,
 statemon.define('time_since_stats_update', float) # Time since the last update
 statemon.define('time_since_last_batch_event', float) # Time since the most recent event in the batch db
 statemon.define('time_since_publish', float) # Time since the last publish
-statemon.define('statsdb_error', int)
-statemon.define('incr_statsdb_error', int)
-statemon.define('videodb_error', int)
-statemon.define('publish_error', int)
-statemon.define('serving_urls_missing', int)
-statemon.define('account_default_serving_url_missing', int)
+statemon.define('statsdb_error', int) # error connecting to the stats database
+statemon.define('incr_statsdb_error', int) # error connecting to the hbase 
+statemon.define('videodb_error', int) # error connecting to the video DB
+statemon.define('publish_error', int) # error publishing directive to s3
+statemon.define('serving_urls_missing', int) # missing serving urls for videos
+statemon.define('account_default_serving_url_missing', int) # mising default
+statemon.define('no_videometadata', int) # mising videometadata 
+statemon.define('no_thumbnailmetadata', int) # mising thumb metadata 
+statemon.define('default_serving_thumb_size_mismatch', int) # default thumb size missing 
 
 _log = logging.getLogger(__name__)
 
@@ -208,6 +211,7 @@ class VideoDBWatcher(threading.Thread):
             all_video_metadata = neondata.VideoMetadata.get_many(video_ids)
             for video_id, video_metadata in zip(video_ids, all_video_metadata):
                 if video_metadata is None:
+                    statemon.state.increment('no_videometadata')
                     _log.error('Could not find information about video %s' %
                                video_id)
                     continue
@@ -222,6 +226,7 @@ class VideoDBWatcher(threading.Thread):
                     for thumb_id, meta in zip(video_metadata.thumbnail_ids,
                                               thumbs):
                         if meta is None:
+                            statemon.state.increment('no_thumbnailmetadata')
                             _log.error('Could not find metadata for thumb %s' %
                                        thumb_id)
                             data_missing = True
@@ -965,6 +970,7 @@ class DirectivePublisher(threading.Thread):
                       '%s. Using (%i, %i) instead'
                       % (default_size[0], default_size[1], thumb_id,
                          closest_size[0], closest_size[1]))
+            statemon.state.increment('default_serving_thumb_size_mismatch')
             return serving_urls[closest_size]
         
 def main(activity_watcher = utils.ps.ActivityWatcher()):    
