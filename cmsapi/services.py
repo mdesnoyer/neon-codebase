@@ -62,11 +62,28 @@ def CachePrimer():
     '''
     pass
 
-#Monitoring variables
-statemon.define('bad_request', int) #HTTP 400s
+################################################################################
+# Monitoring variables
+################################################################################
 statemon.define('bad_gateway', int) #HTTP 502s
 statemon.define('internal_err', int) #HTTP 500s
 statemon.define('total_requests', int) #all requests 
+
+# HTTP 400s total and fine-grained issues counters
+statemon.define('bad_request', int) #all HTTP 400s
+statemon.define('invalid_api_key', int) 
+statemon.define('invalid_method', int)
+statemon.define('account_id_missing', int)
+statemon.define('account_not_found', int)
+statemon.define('api_params_missing', int)
+statemon.define('invalid_video_link', int)
+statemon.define('invalid_image_link', int)
+statemon.define('video_id_missing', int)
+statemon.define('job_creation_fail', int)
+statemon.define('content_type_missing', int)
+statemon.define('integration_id_missing', int)
+statemon.define('thumbnail_args_missing', int)
+statemon.define('invalid_json', int)
 
 #Place holder images for processing
 placeholder_images = [
@@ -184,6 +201,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             data = '{"error":"invalid api_key or account id"}'
             _log.warning(("key=verify_account "
                           "msg=api key doesn't match for account %s") % a_id)
+            statemon.state.increment('invalid_api_key')
             self.send_json_response(data, 400)
             raise tornado.gen.Return(False)
         
