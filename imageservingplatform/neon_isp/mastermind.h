@@ -17,11 +17,26 @@ public:
     Mastermind();
     ~Mastermind();
 
+    enum EINIT_ERRORS {
+        // mastermind has already been initialized previously and is serviceable 
+        EINIT_ALREADY_INITIALIZED = 0,
+        // successful mastermind initializatio, all directives parsedn
+        EINIT_SUCCESS,
+        // successful mastermind initialization, however one or more directives were 
+        // rejected due to individual error
+        EINIT_PARTIAL_SUCCESS,
+        // failed entire mastermind initialization due to a fatal error in file  
+        EINIT_FATAL_ERROR,
+    };
+
     // basic init with empty tables
-    void Init();
+    EINIT_ERRORS Init();
 
     // full init with a json document
-    void Init(const char * mastermindFile, time_t previousMastermindExpiry);
+    EINIT_ERRORS Init(const char * mastermindFile, 
+                      time_t previousMastermindExpiry,
+                      char * error_message,
+                      unsigned error_message_size);
     
     void Shutdown();
     
@@ -64,7 +79,10 @@ protected:
     
     // this function reclaims all memory safely
     void Dealloc();
-    void InitSafe(const char * mastermindFile, time_t previousMastermindExpiry);
+    EINIT_ERRORS InitSafe(const char * mastermindFile, 
+                          time_t previousMastermindExpiry,
+                          char * error_message,
+                          unsigned error_message_size);
 
     bool initialized;
     FILE * parseFile;

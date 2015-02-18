@@ -86,7 +86,10 @@ neon_mastermind_load(const char * filepath){
     try {
         candidate = new Mastermind();
         
-        candidate->Init(filepath, mastermind_current->GetExpiry());
+        candidate->Init(filepath, 
+                        mastermind_current->GetExpiry(),
+                        neon_mastermind_error,
+                        neon_mastermind_error_size);
     }
     catch (NeonException * error)
     {
