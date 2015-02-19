@@ -65,9 +65,20 @@ def CachePrimer():
 ################################################################################
 # Monitoring variables
 ################################################################################
-statemon.define('bad_gateway', int) #HTTP 502s
-statemon.define('internal_err', int) #HTTP 500s
 statemon.define('total_requests', int) #all requests 
+
+# HHTP 500s totals and fine-grained issues counters
+statemon.define('bad_gateway', int) # all HTTP 502s
+statemon.define('internal_err', int) # all HTTP 500s
+statemon.define('unexpected_exception', int)
+statemon.define('custom_thumbnail_not_added', int)
+statemon.define('brightcove_api_failure', int)
+statemon.define('account_not_created', int)
+statemon.define('account_not_updated', int)
+statemon.define('ooyala_api_failure', int)
+statemon.define('thumb_metadata_not_saved', int)
+statemon.define('thumb_metadata_not_modified', int)
+statemon.define('db_error', int)
 
 # HTTP 400s total and fine-grained issues counters
 statemon.define('bad_request', int) #all HTTP 400s
@@ -537,6 +548,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                             return
                     except IOError, e:
                         data = '{"error": "internal error adding custom thumb"}'
+                        statemon.state.increment('custom_thumbnail_not_added')
                         self.send_json_response(data, 500)
                     except tornado.web.MissingArgumentError, e:
                         data = '{"error": "missing thumbnail_id or thumbnails argument"}'
@@ -547,6 +559,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     except Exception, e:
                         _log.exception('Unexpected exception: %s' % e)
                         data = '{"error": "internal error"}'
+                        statemon.state.increment('unexpected_exception')
                         self.send_json_response(data, 500)
 
                     if "brightcove_integrations" == itype:
@@ -1206,6 +1219,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 return
             else:
                 data = '{"error": "brightcove api failure"}'
+                statemon.state.increment('brightcove_api_failure')
                 self.send_json_response(data, 502)
                 return
 
@@ -1251,6 +1265,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 self.send_json_response(data, 200)
             else:
                 data = '{"error": "account not created"}'
+                statemon.state.increment('account_not_created')
                 self.send_json_response(data, 500)
 
         else:
@@ -1363,6 +1378,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 else:
                     data = '{"error": "platform was not added,\
                                 account creation issue"}'
+                    statemon.state.increment('account_not_created')
                     self.send_json_response(data, 500)
                     return
         else:
@@ -1404,6 +1420,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 self.send_json_response(data, 200)
             else:
                 data = '{"error": "account not updated"}'
+                statemon.state.increment('account_not_updated')
                 self.send_json_response(data, 500)
         else:
             _log.error("key=update_brightcove_integration " 
@@ -1514,6 +1531,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 else:
                     data = '{"error": "platform was not added,\
                                 account creation issue"}'
+                    statemon.state.increment('account_not_created')
                     self.send_json_response(data, 500)
 
     #2. Update  the Account
@@ -1552,6 +1570,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 self.send_json_response(data, 200)
             else:
                 data = '{"error": "account not updated"}'
+                statemon.state.increment('account_not_updated')
                 self.send_json_response(data, 500)
         else:
             _log.error("key=update_ooyala_integration msg=no such account ") 
@@ -1588,6 +1607,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         else:
             if result is None:
                 data = '{"error": "ooyala api failure"}'
+                statemon.state.increment('ooyala_api_failure')
                 self.send_json_response(data, 502)
             else:
                 data = '{"error": "internal error"}'
@@ -1699,12 +1719,14 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 _log.error('Error modifying the video metadata for vid %s' %
                            i_vid)
                 data = '{"error": "internal error"}'
+                statemon.state.increment('thumb_metadata_not_modified')
                 self.send_json_response(data, 500)
                 return
         else:
             _log.error('Error saving new thumbnail metadata to vid %s' %
                        i_vid)
             data = '{"error": "internal error"}'
+            statemon.state.increment('thumb_metadata_not_saved')
             self.send_json_response(data, 500)
             return
 
@@ -1730,6 +1752,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         result = yield tornado.gen.Task(vmdata.save)
         
         if not result:
+            statemon.state.increment('db_error')
             self.send_json_response('{"error": "internal db error"}', 500)
             return
 
