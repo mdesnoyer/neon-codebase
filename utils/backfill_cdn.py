@@ -26,6 +26,7 @@ import utils.http
 
 from utils.options import define, options
 define('account', default=None, help='api key to backfill')
+define('integration_id', default=0, help='integration id')
 
 import logging
 _log = logging.getLogger(__name__)
@@ -95,4 +96,4 @@ if __name__ == "__main__":
     utils.neon.InitNeon()
 
     if options.account:
-        backfill(options.account)
+        backfill(options.account, options.integration_id)

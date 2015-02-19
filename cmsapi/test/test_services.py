@@ -493,7 +493,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertNotEqual(json_video_response, '{}') # !empty json response
         
         #verify account id added to Neon user account
-        nuser = neondata.NeonUserAccount.get_account(self.api_key)
+        nuser = neondata.NeonUserAccount.get(self.api_key)
         self.assertTrue(self.b_id in nuser.integrations.keys())
 
         #Verifty that there is an experiment strategy for the account
@@ -988,7 +988,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
     
     def test_create_neon_integration(self):
         api_key = self.create_neon_account()
-        nuser = neondata.NeonUserAccount.get_account(api_key)
+        nuser = neondata.NeonUserAccount.get(api_key)
         neon_integration_id = "0"
         self.assertTrue(neon_integration_id in nuser.integrations.keys()) 
 
@@ -1276,7 +1276,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         resp = self.get_request(url, self.api_key)
         vresponse = json.loads(resp.body)["items"][0]
 
-        pub_id = neondata.NeonUserAccount.get_account(self.api_key).tracker_account_id
+        pub_id = neondata.NeonUserAccount.get(self.api_key).tracker_account_id
         serving_url = 'neon-images.com/v1/client/%s/neonvid_%s.jpg' \
                         % (pub_id, vid)
 

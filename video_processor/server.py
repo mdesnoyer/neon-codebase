@@ -85,7 +85,7 @@ def get_customer_priority(api_key):
     try:
         priority = customer_priorities[api_key]
     except KeyError, e:
-        nu = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
+        nu = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                 api_key)
         if nu:
             priority = nu.processing_priority
@@ -825,7 +825,7 @@ class HealthCheckHandler(tornado.web.RequestHandler):
         
         # Ping the DB to see if its running
         try:
-            ret = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
+            ret = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                 test_account_key)
             if ret:
                 self.set_status(200)

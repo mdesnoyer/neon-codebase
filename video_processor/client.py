@@ -697,7 +697,7 @@ class VideoProcessor(object):
         title = self.job_params['video_title']
         i_id = self.video_metadata.integration_id
         job_id  = self.job_params['job_id']
-        account = neondata.NeonUserAccount.get_account(api_key)
+        account = neondata.NeonUserAccount.get(api_key)
         if account is None:
             _log.error('Could not get the account for api key %s' %
                        api_key)

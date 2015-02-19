@@ -213,7 +213,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
     @tornado.gen.coroutine
     def get_platform_account(self, i_type, i_id):
-        
         #Get account/integration
         
         platform_account = None
@@ -267,7 +266,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 if not is_verified:
                     return
 
-                # return the object from the DB
                 if method == '':
                     yield self.get_account_info(itype, i_id)
                     #self.send_json_response('{"error":"not yet impl"}', 200)
@@ -560,7 +558,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         '''
         Return tracker account id associated with the neon user account
         '''
-        nu = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
+        nu = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                                     self.api_key)
         if nu:
             data = ('{"tracker_account_id":"%s","staging_tracker_account_id":"%s"}'
@@ -1160,7 +1158,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         user = neondata.NeonUserAccount(a_id)
         api_key = user.neon_api_key
         nuser_data = yield tornado.gen.Task(
-            neondata.NeonUserAccount.get_account, a_id)
+            neondata.NeonUserAccount.get, a_id)
         if not nuser_data:
             nplatform = neondata.NeonPlatform(a_id, '0', api_key)
             user.add_platform(nplatform)
@@ -1223,7 +1221,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             self.send_json_response(data, 400)
             return 
 
-        na = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
+        na = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                                     self.api_key)
         #Create and Add Platform Integration
         if na:
@@ -1380,7 +1378,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             self.send_json_response(data, 400)
             return 
 
-        na = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
+        na = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                                     self.api_key)
         #Create and Add Platform Integration
         if na:
