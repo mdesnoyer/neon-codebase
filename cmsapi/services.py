@@ -213,7 +213,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
     @tornado.gen.coroutine
     def get_platform_account(self, i_type, i_id):
-        
         #Get account/integration
         
         platform_account = None
@@ -267,7 +266,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 if not is_verified:
                     return
 
-                # return the object from the DB
                 if method == '':
                     yield self.get_account_info(itype, i_id)
                     #self.send_json_response('{"error":"not yet impl"}', 200)

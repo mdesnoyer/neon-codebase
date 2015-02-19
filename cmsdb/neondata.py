@@ -932,7 +932,7 @@ class NeonApiKey(NamespacedStoredObject):
         ''' get api key from db '''
 
         # Use get
-        api_key = cls.get(a_id)
+        api_key = cls.get(a_id, callback)
         return api_key
 
     @classmethod
