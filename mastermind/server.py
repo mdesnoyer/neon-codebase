@@ -83,6 +83,7 @@ statemon.define('account_default_serving_url_missing', int) # mising default
 statemon.define('no_videometadata', int) # mising videometadata 
 statemon.define('no_thumbnailmetadata', int) # mising thumb metadata 
 statemon.define('default_serving_thumb_size_mismatch', int) # default thumb size missing 
+statemon.define('directive_file_size', int) # file size in bytes 
 
 _log = logging.getLogger(__name__)
 
@@ -821,7 +822,7 @@ class DirectivePublisher(threading.Thread):
         with self.lock:
             self._write_directives(directive_file)
         directive_file.write('\nend')
-
+        statemon.state.directive_file_size = directive_file.tell() # in bytes
 
         filename = '%s.%s' % (curtime.strftime('%Y%m%d%H%M%S'),
                               options.directive_filename)
