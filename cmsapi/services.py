@@ -71,12 +71,20 @@ statemon.define('total_requests', int) #all requests
 
 # HTTP 400s total and fine-grained issues counters
 statemon.define('bad_request', int) #all HTTP 400s
-statemon.define('invalid_api_key', int) 
+statemon.define('invalid_api_key', int)
 statemon.define('invalid_method', int)
+statemon.define('invalid_state_request', int)
+statemon.define('invalid_thumbnail_id', int)
+statemon.define('invalid_job_id', int)
+statemon.define('invalid_video_id', int)
 statemon.define('account_id_missing', int)
 statemon.define('account_not_found', int)
+statemon.define('account_exists', int)
+statemon.define('job_not_found', int)
+statemon.define('video_not_found', int)
 statemon.define('api_params_missing', int)
 statemon.define('invalid_video_link', int)
+statemon.define('deprecated', int)
 statemon.define('invalid_image_link', int)
 statemon.define('video_id_missing', int)
 statemon.define('job_creation_fail', int)
@@ -84,6 +92,8 @@ statemon.define('content_type_missing', int)
 statemon.define('integration_id_missing', int)
 statemon.define('thumbnail_args_missing', int)
 statemon.define('invalid_json', int)
+statemon.define('malformed_request', int)
+statemon.define('not_supported', int)
 
 #Place holder images for processing
 placeholder_images = [
