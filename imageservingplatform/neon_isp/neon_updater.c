@@ -147,10 +147,8 @@ neon_runloop(void * arg){
             neon_stats[MASTERMIND_FILE_FETCH_SUCCESS]++; 
             
             /*
-             *  validate meta data of new file 
+             *  Validate meta data of new file 
              */
-            
-           	// TODO(Sunil) : Spawn a process to validate the Expiry
             time_t new_mastermind_expiry = neon_get_expiry(mastermind_filepath);
             if (new_mastermind_expiry < time(0)){
                 
@@ -163,22 +161,32 @@ neon_runloop(void * arg){
                     neon_sleep(sleep_time);
                     continue;
                 }
-	    } 
+	        } 
             
             /*
-             *  parse and process new mastermind file into memory
+             *  Parse and process new mastermind file into memory
              */
-            // process file into memory
-            if(neon_mastermind_load(mastermind_filepath) == NEON_LOAD_FAIL) {
-                
+            NEON_LOAD_ERROR load_error = neon_mastermind_load(mastermind_filepath);
+
+            // success
+            if(load_error == NEON_LOAD_OK || load_error == NEON_LOAD_PARTIAL) {
+
+                // if some non-fatal errors were detected we log them
+                if(load_error == NEON_LOAD_PARTIAL) {
+                    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: some mastermind entries were rejected, "
+                        "investigation recommended:  %s", neon_mastermind_error);            
+                }
+            }   
+            // failure
+            else {
                 ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: mastermind load failed: %s", neon_mastermind_error);
                 neon_stats[NEON_UPDATER_MASTERMIND_LOAD_FAIL]++;
                 neon_sleep(sleep_time);
-                continue;
+                continue; 
             }
-            
+
             /*
-             *  rename mastermind file as validated
+             *  Rename mastermind file as validated
              */
             if( neon_rename(mastermind_filepath, validated_mastermind_filepath) == NEON_RENAME_FAIL) {
         
@@ -188,7 +196,7 @@ neon_runloop(void * arg){
                 continue;
             }
 
-	    // success
+	        // log success
             ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: fetched and loaded mastermind file successfully");
             neon_stats[MASTERMIND_RENAME_SUCCESS]++;
         }

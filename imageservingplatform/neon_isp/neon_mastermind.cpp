@@ -72,7 +72,6 @@ neon_mastermind_shutdown() {
 
 NEON_LOAD_ERROR
 neon_mastermind_load(const char * filepath){
-
     Mastermind * to_delete = 0;
     Mastermind * candidate = 0;
     
@@ -86,50 +85,49 @@ neon_mastermind_load(const char * filepath){
     try {
         candidate = new Mastermind();
         
-        candidate->Init(filepath, 
-                        mastermind_current->GetExpiry(),
-                        neon_mastermind_error,
-                        neon_mastermind_error_size);
+        Mastermind::EINIT_ERRORS err = candidate->Init(filepath, 
+                                                       mastermind_current->GetExpiry(),
+                                                       neon_mastermind_error,
+                                                       neon_mastermind_error_size);
+        
+        // the mastermind candidate is acceptable
+        if(err == Mastermind::EINIT_SUCCESS || err == Mastermind::EINIT_PARTIAL_SUCCESS) {
+       
+            // replace
+            mastermind_old = mastermind_current;
+            mastermind_current = candidate;
+
+            if(err == Mastermind::EINIT_PARTIAL_SUCCESS)
+                return NEON_LOAD_PARTIAL;
+
+            return NEON_LOAD_OK;
+        }
     }
+    // exception safeguards
     catch (NeonException * error)
     {
         // create error message
-        snprintf(neon_mastermind_error, neon_mastermind_error_size, "%s", error->GetMessage());
+        snprintf(neon_mastermind_error, neon_mastermind_error_size, 
+            "neon_mastermind_load: %s", error->GetMessage());
         delete error;
-        
-        // erase candidate
-        if(candidate)
-            delete candidate;
-        
-        return NEON_LOAD_FAIL;
     }
     catch (std::bad_alloc e) {
-        
-        snprintf(neon_mastermind_error, neon_mastermind_error_size, "%s", "unable to allocate memory");
+        snprintf(neon_mastermind_error, neon_mastermind_error_size, 
+            "neon_mastermind_load: %s", "unable to allocate memory");
         neon_stats[NGINX_OUT_OF_MEMORY]++; 
-        
-        // erase candidate
-        if(candidate)
-            delete candidate;
-        
-        return NEON_LOAD_FAIL;
     }
     catch (...) {
-        
-        snprintf(neon_mastermind_error, neon_mastermind_error_size, "%s", "unable to allocate memory");
-        
-        // erase candidate
-        if(candidate)
-            delete candidate;
-    
-        return NEON_LOAD_FAIL;
+        snprintf(neon_mastermind_error, neon_mastermind_error_size, 
+            "neon_mastermind_load: %s", "unspecified exception");
     }
 
-    // replace
-    mastermind_old = mastermind_current;
-    mastermind_current = candidate;
-    
-    return NEON_LOAD_OK;
+    // mastermind was not found acceptable
+
+    // erase candidate
+    if(candidate)
+        delete candidate;
+
+    return NEON_LOAD_FAIL;
 }
 
 
