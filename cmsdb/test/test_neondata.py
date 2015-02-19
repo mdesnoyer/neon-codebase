@@ -372,7 +372,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             (ThumbnailServingURLs('key'), get_func),
             (ExperimentStrategy('key'), get_func),
             (NeonUserAccount('key', 'api'),
-             lambda x: x.get('api')),
+             lambda x: x.get('key')),
             (NeonPlatform('key', '0', 'api'),
              lambda x: x.get('api', '0')),
             (BrightcovePlatform('a', 'i', 'api'),
