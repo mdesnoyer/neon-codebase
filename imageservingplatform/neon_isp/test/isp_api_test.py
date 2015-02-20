@@ -213,6 +213,7 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         with open(mfile_path, 'r') as f:
             gzip_data = f.read()
             gzip_mfile.write(gzipstream.GzipStream().read(StringIO(gzip_data)))
+            gzip_mfile.flush()
         
         FakeS3Upload(gzip_mfile.name, cls.s3cfg.name, cls.s3_mfile_url)
 
