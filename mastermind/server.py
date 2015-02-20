@@ -30,6 +30,7 @@ import signal
 import socket
 import stats.cluster
 import struct
+from StringIO import StringIO
 import tempfile
 import time
 import thrift
@@ -38,6 +39,7 @@ import threading
 import tornado.ioloop
 import utils.neon
 from utils.options import define, options
+from utils import gzipstream
 import utils.ps
 from utils import statemon
 import zlib
@@ -803,20 +805,24 @@ class DirectivePublisher(threading.Thread):
                     self.video_id_serving_map[vid] = True
 
     def _publish_directives(self):
+
         '''Publishes the directives to S3'''
         # Create the directives file
         _log.info("Building directives file")
         curtime = datetime.datetime.utcnow()
         directive_file = tempfile.TemporaryFile()
         valid_length = options.expiry_buffer + options.publishing_period
-        directive_file.write(
-            'expiry=%s' % 
-            (curtime + datetime.timedelta(seconds=valid_length))
-            .strftime('%Y-%m-%dT%H:%M:%SZ'))
-        with self.lock:
-            self._write_directives(directive_file)
-        directive_file.write('\nend')
+        expiry = 'expiry=%s' % (curtime + datetime.timedelta(
+                        seconds=valid_length)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
+        # Write gzip data in the directive file 
+        directive_file.write(gzipstream.GzipStream().read(StringIO(expiry)))
+        directive_stream = StringIO()
+        with self.lock:
+            self._write_directives(directive_stream)
+            directive_stream.seek(0)
+            directive_file.write(gzipstream.GzipStream().read(directive_stream))
+        directive_file.write(gzipstream.GzipStream().read(StringIO('\nend')))
 
         filename = '%s.%s' % (curtime.strftime('%Y%m%d%H%M%S'),
                               options.directive_filename)
@@ -844,7 +850,7 @@ class DirectivePublisher(threading.Thread):
 
         # Write the file that is timestamped
         key = bucket.new_key(filename)
-        key.content_type = 'text/plain'
+        key.content_type = 'application/x-gzip'
         directive_file.seek(0)
         key.set_contents_from_file(directive_file,
                                    encrypt_key=True)

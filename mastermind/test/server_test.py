@@ -22,6 +22,7 @@ import fake_tempfile
 import happybase
 import impala.error
 import json
+import gzip
 import logging
 import mastermind.core
 from mock import MagicMock, patch
@@ -1012,7 +1013,8 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
     def _parse_directive_file(self, file_data):
         '''Returns expiry, {tracker_id -> account_id},
         {(account_id, video_id) -> json_directive}'''
-        lines = file_data.split('\n')
+        gz = gzip.GzipFile(fileobj=StringIO(file_data), mode='rb')
+        lines = gz.read().split('\n')
         
         # Make sure the expiry is valid
         self.assertRegexpMatches(lines[0], 'expiry=.+')
@@ -1113,11 +1115,15 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.assertIn('mastermind', key_names)
         key_names.remove('mastermind')
         self.assertRegexpMatches(key_names[0], '[0-9]+\.mastermind')
-        
+       
+        # check that mastermind file has a gzip header 
+        mastermind_file = bucket.get_key('mastermind')
+        self.assertEqual(mastermind_file.content_type, 'application/x-gzip')
+
         # Now check the data format in the file
         expiry, tracker_ids, default_thumbs, directives = \
           self._parse_directive_file(
-            bucket.get_key('mastermind').get_contents_as_string())
+            mastermind_file.get_contents_as_string())
         
         # Make sure the expiry is valid
         self.assertGreater(expiry,
