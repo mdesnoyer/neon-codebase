@@ -147,7 +147,7 @@ neon_runloop(void * arg){
             neon_stats[MASTERMIND_FILE_FETCH_SUCCESS]++; 
             
             /*
-             *  Validate meta data of new file 
+             *  Validate expiry of new file 
              */
             time_t new_mastermind_expiry = neon_get_expiry(mastermind_filepath);
             if (new_mastermind_expiry < time(0)){
@@ -171,15 +171,15 @@ neon_runloop(void * arg){
             // success
             if(load_error == NEON_LOAD_OK || load_error == NEON_LOAD_PARTIAL) {
 
-                // if some non-fatal errors were detected we log them
+                // if some non-fatal errors were detected
                 if(load_error == NEON_LOAD_PARTIAL) {
-                    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: some mastermind entries were rejected, "
-                        "investigation recommended:  %s", neon_mastermind_error);            
+                    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: some mastermind entries were rejected needing "
+                        "prompt investigation: %s", neon_mastermind_error);            
                 }
             }   
             // failure
             else {
-                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: mastermind load failed: %s", neon_mastermind_error);
+                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "updater: mastermind load failed: error: %s", neon_mastermind_error);
                 neon_stats[NEON_UPDATER_MASTERMIND_LOAD_FAIL]++;
                 neon_sleep(sleep_time);
                 continue; 

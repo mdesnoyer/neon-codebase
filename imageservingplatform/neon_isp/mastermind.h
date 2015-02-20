@@ -20,10 +20,10 @@ public:
     enum EINIT_ERRORS {
         // mastermind has already been initialized previously and is serviceable 
         EINIT_ALREADY_INITIALIZED = 0,
-        // successful mastermind initializatio, all directives parsedn
+        // successful mastermind initializatio, all directives parsed
         EINIT_SUCCESS,
         // successful mastermind initialization, however one or more directives were 
-        // rejected due to individual error
+        // rejected
         EINIT_PARTIAL_SUCCESS,
         // failed entire mastermind initialization due to a fatal error in file  
         EINIT_FATAL_ERROR,

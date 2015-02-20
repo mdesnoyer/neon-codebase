@@ -299,14 +299,15 @@ Mastermind::InitSafe(const char * mastermindFile,
     defaultThumbnailTable->Init(100);
 
     /*
-     *  parse all entries (publishers, account default image, video directives).  
-     *  Each entry is a self-contained json document. An entry that fails parsing or 
-     *  validation is rejected. In this case the return code is EINIT_PARTIAL_SUCCESS
+     *  Parse all entries (publishers, account default image, video directives).  
+     *  Each entry is a self-contained json document and may be rejected individually
+     *  if malformed.  If there are rejected entries the return code is EINIT_PARTIAL_SUCCESS
+     *  Ocurrences of entry rejection should be promptly investigated. Check stats counters
+     *  for details and velocity of errors.
      *
-     *  Entries that fail are accounted for in stat counters. For performance reasons
-     *  we only do a best-effort logging of the first occurence of an entry rejection.  
-     *  This is done to prevent bogging down isp in the case of a mastermind file with 
-     *  potentially millions of repetitive entry issues.  
+     *  For performance reasons we only do a best-effort logging of the first occurence of an 
+     *  entry rejection. This is done to prevent bogging down isp in the case of a mastermind
+     *  file with potentially millions of repetitive entry issues.  
      */
 
     // used to count rejected entries below

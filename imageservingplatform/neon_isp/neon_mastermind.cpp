@@ -90,10 +90,9 @@ neon_mastermind_load(const char * filepath){
                                                        neon_mastermind_error,
                                                        neon_mastermind_error_size);
         
-        // the mastermind candidate is acceptable
         if(err == Mastermind::EINIT_SUCCESS || err == Mastermind::EINIT_PARTIAL_SUCCESS) {
        
-            // replace
+            // swap
             mastermind_old = mastermind_current;
             mastermind_current = candidate;
 
@@ -108,12 +107,12 @@ neon_mastermind_load(const char * filepath){
     {
         // create error message
         snprintf(neon_mastermind_error, neon_mastermind_error_size, 
-            "neon_mastermind_load: %s", error->GetMessage());
+            "neon_mastermind_load: neon exception: %s", error->GetMessage());
         delete error;
     }
     catch (std::bad_alloc e) {
         snprintf(neon_mastermind_error, neon_mastermind_error_size, 
-            "neon_mastermind_load: %s", "unable to allocate memory");
+            "neon_mastermind_load: %s", "bad  alloc exception");
         neon_stats[NGINX_OUT_OF_MEMORY]++; 
     }
     catch (...) {
@@ -121,9 +120,7 @@ neon_mastermind_load(const char * filepath){
             "neon_mastermind_load: %s", "unspecified exception");
     }
 
-    // mastermind was not found acceptable
-
-    // erase candidate
+    // candidate failed, erase
     if(candidate)
         delete candidate;
 

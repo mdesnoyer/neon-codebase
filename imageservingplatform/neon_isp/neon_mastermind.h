@@ -38,8 +38,11 @@ NEON_BOOLEAN neon_mastermind_is_expiry_greater_than_current(time_t);
  */
 typedef enum  {
     
-    NEON_LOAD_OK = 0,
+    // all entries successfully parsed and validated
+    NEON_LOAD_OK = 0, 
+    // while serviceable, some entries in mastermind were rejected 
     NEON_LOAD_PARTIAL,
+    // the load failed entirely
     NEON_LOAD_FAIL
     
 } NEON_LOAD_ERROR;
