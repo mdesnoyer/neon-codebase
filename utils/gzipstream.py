@@ -1,12 +1,20 @@
 '''
 Streaming class for Gzip
+
+Usage: 
+To zip:
+    gz_data = GzipStream().read(StringIO(data))
+
+unzip:
+    gz = gzip.GzipFile(fileobj=StringIO(gzip_output), mode='rb')
+    gz.read()
 '''
 
 import gzip
 from StringIO import StringIO
 
 class GzipStream(StringIO):
-    CHUNCK_SIZE = 65536
+    CHUNK_SIZE = 65536
 
     def __init__(self, name="data"):
         StringIO.__init__(self)
@@ -22,9 +30,9 @@ class GzipStream(StringIO):
         while ((len(self.gz_buffer) < size) or (size == -1)) and not self.source_eof:
             if source == None: 
                 break
-            chunk = source.read(GzipStream.CHUNCK_SIZE)
+            chunk = source.read(GzipStream.CHUNK_SIZE)
             self.zipfile.write(chunk)
-            if (len(chunk) < GzipStream.CHUNCK_SIZE):
+            if (len(chunk) < GzipStream.CHUNK_SIZE):
                 self.source_eof = True
                 self.zipfile.flush()
                 self.zipfile.close()
