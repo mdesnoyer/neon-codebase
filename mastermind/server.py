@@ -784,6 +784,7 @@ class DirectivePublisher(threading.Thread):
             self.video_id_serving_map[vid] = False
 
     # TODO(Sunil): Do these updates asynchronously
+    @tornado.gen.coroutine
     def _update_request_state_to_serving(self):
         ''' update all the new video's serving state 
             i.e ISP URLs are ready
@@ -792,7 +793,8 @@ class DirectivePublisher(threading.Thread):
         for key, value in self.video_id_serving_map.iteritems():
             if value == False:
                 vids.append(key)
-        requests = neondata.VideoMetadata.get_video_requests(vids)
+        requests =  \
+                yield torando.gen.Task(neondata.VideoMetadata.get_video_requests, vids)
         for vid, request in zip(vids, requests):
             # TODO(Sunil) : Bulk update
             if request:
@@ -801,8 +803,14 @@ class DirectivePublisher(threading.Thread):
                     request.state = neondata.RequestState.SERVING_AND_ACTIVE
                 else:
                     request.state = neondata.RequestState.SERVING
-                if request.save():
+                val = yield tornado.gen.Task(request.save)
+                if val:
                     self.video_id_serving_map[vid] = True
+
+    @tornado.gen.coroutine
+    def _async_update_request_state(self):
+        yield tornado.gen.Task(tornado.ioloop.IOLoop.current().add_timeout, 
+                time.time() + 1, self._update_request_state_to_serving)
 
     def _publish_directives(self):
 
@@ -863,7 +871,8 @@ class DirectivePublisher(threading.Thread):
 
         # The serving directives for videos are active, update the request state
         # for videos
-        self._update_request_state_to_serving()
+        #self._update_request_state_to_serving()
+        tornado.ioloop.IOLoop.current().add_callback(self._async_update_request_state)
 
     def _write_directives(self, stream):
         '''Write the current directives to the stream.'''

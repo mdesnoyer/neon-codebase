@@ -1344,7 +1344,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         for i_vid in i_vids:
             self.assertFalse(self.publisher.video_id_serving_map[i_vid])
 
-        self.publisher._update_request_state_to_serving()
+        yield self.publisher._update_request_state_to_serving()
         
         def validate():
             for i_vid in i_vids:
@@ -1361,12 +1361,12 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         validate()
 
         # Second iteration of directive publisher with no video change
-        self.publisher._update_request_state_to_serving()
+        yield self.publisher._update_request_state_to_serving()
         validate()
 
         # Add a video
         add_video('6')
-        self.publisher._update_request_state_to_serving()
+        yield self.publisher._update_request_state_to_serving()
         validate()
 
 class SmokeTesting(test_utils.neontest.TestCase):
