@@ -267,6 +267,7 @@ Mastermind::InitSafe(const char * mastermindFile,
     if(line == 0) {
         snprintf(error_message, error_message_size, "%s",
                 "Mastermind::Init: expiry line missing in mastermind file");
+        neon_stats[MASTERMIND_PARSE_FAIL]++;
         return EINIT_FATAL_ERROR;
     }
 
@@ -278,6 +279,7 @@ Mastermind::InitSafe(const char * mastermindFile,
     if(expiry == 0) {
         snprintf(error_message, error_message_size, 
                "Mastermind::Init: expiry parse error in mastermind file: line %s", line);
+         neon_stats[MASTERMIND_PARSE_FAIL]++;
         return EINIT_FATAL_ERROR;
     }
 
@@ -328,6 +330,7 @@ Mastermind::InitSafe(const char * mastermindFile,
             snprintf(error_message, error_message_size, "%s",
                     "Mastermind::Init: new mastermind file is missing its end marker, "
                     "the file is incomplete ");
+            neon_stats[MASTERMIND_PARSE_FAIL]++;
             return EINIT_FATAL_ERROR;
         }
 
@@ -345,7 +348,9 @@ Mastermind::InitSafe(const char * mastermindFile,
         
         // if json parsing error
         if(document.IsObject() == false) {
-         
+    
+            neon_stats[MASTERMIND_ENTRY_REJECTED]++;
+
             // terminating null value in buffer was overwritten by file read, the
             // read buffer may be too small
             if(lineBuffer[MaxLineBufferSize-1] != 0) {
@@ -414,6 +419,7 @@ Mastermind::InitSafe(const char * mastermindFile,
        line[2]      != 'd') {
         snprintf(error_message, error_message_size, "Mastermind::Init: file mastermind has incorrect "
                                 "end marker, line in file is: %s", line);
+        neon_stats[MASTERMIND_PARSE_FAIL]++;
         return EINIT_FATAL_ERROR;
     }
 
@@ -424,6 +430,7 @@ Mastermind::InitSafe(const char * mastermindFile,
     if(line != 0) {
         snprintf(error_message, error_message_size, "%s", "Mastermind::Init: file mastermind has extraneous data following "
                                 "end marker \"end\", which is invalid");
+        neon_stats[MASTERMIND_PARSE_FAIL]++;
         return EINIT_FATAL_ERROR;
     }
 
@@ -435,8 +442,6 @@ Mastermind::InitSafe(const char * mastermindFile,
         return EINIT_FATAL_ERROR;
     }
    
-    neon_stats[MASTERMIND_PARSE_SUCCESS]++;
-
     int ret = fclose(parseFile);
    
     // unable to close file
@@ -448,11 +453,15 @@ Mastermind::InitSafe(const char * mastermindFile,
     initialized = true;
 
     // some entries were rejected, so partial success
-    if(entries_rejected > 0)
+    if(entries_rejected > 0) {
+        neon_stats[MASTERMIND_PARSE_PARTIAL]++;
         return EINIT_PARTIAL_SUCCESS;
+    }
     // complete success
-    else
+    else {
+        neon_stats[MASTERMIND_PARSE_SUCCESS]++;
         return EINIT_SUCCESS;
+    }
 }
 
 
