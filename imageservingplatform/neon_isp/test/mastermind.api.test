@@ -3,10 +3,16 @@ expiry=2020-02-10T23:43:01Z
 ###################################################################################
 ## Invalid entries are dismissed while good ones are retained
 ####################################################################################
-#
+# invalid publisher missing terminating curly
 {"type": "pub", "pid": "pubbadjson", "aid" : "accbadjson"
+# invalid directive missing curly 
 { "type": "dir","aid":"accbadjson", "vid":"vidbadjson", "sla":"expiry=2014-07-22T07:14:01Z", "fractions":[ { "pct": 0.7, "tid": "thumb1", "default_url": "http://default_image_url.jpg", "imgs":[ { "h":500,"w":600, "url":"http://neon-image-cdn.s3.amazonaws.com/pixel.jpg"},{"h":700, "w":800, "url":"http://neon/thumb2_700_800.jpg"} ]}, { "pct": 0.2,"tid": "thumb2", "default_url": "http://default_image_url.jpg", "imgs": [ {"h":500, "w":600, "url":"http://neont2/thumb1_500_600.jpg"},{ "h":300, "w":400, "url":"http://neont2/thumb2_300_400.jpg"} ]},{ "pct": 0.1,"tid": "thumb3", "default_url": "http://default_image_url.jpg", "imgs": [ {"h":500, "w":600, "url":"http://neont3/thumb1_500_600.jpg"},{ "h":300, "w":400, "url":"http://neont3/thumb2_300_400.jpg"} ]}]
+# invalid default thumbnail terminating curly
 {"type":"default_thumb","aid":"defaccount1","default_url" : "http://neon/default_url_defaccount1.jpg","imgs":[{ "h":480, "w":640, "url":"http://neon/thumb_480_640_default_url_defaccount1.jpg" },{ "h":600, "w":800, "url":"http://neon/thumb_600_800_default_url_defaccount1.jpg" }]
+# good publisher but invalid directive with fractions missing pct
+{"type": "pub", "pid": "pubmissingpct", "aid" : "accmissingpct" }
+{"type":"default_thumb","aid":"accmissingpct","default_url" : "http://neon/default_url_defaccmissingpct.jpg","imgs":[]}
+{ "type": "dir","aid":"accmissingpct", "vid":"vidmissingpct", "sla":"expiry=2014-07-22T07:14:01Z", "fractions":[ {  "tid": "thumb1", "default_url": "http://default_image_url.jpg", "imgs":[ { "h":500,"w":600, "url":"http://neon-image-cdn.s3.amazonaws.com/pixel.jpg"},{"h":700, "w":800, "url":"http://neon/thumb2_700_800.jpg"} ]}, { "tid": "thumb2", "default_url": "http://default_image_url.jpg", "imgs": [ {"h":500, "w":600, "url":"http://neont2/thumb1_500_600.jpg"},{ "h":300, "w":400, "url":"http://neont2/thumb2_300_400.jpg"} ]},{ "tid": "thumb3", "default_url": "http://default_image_url.jpg", "imgs": [ {"h":500, "w":600, "url":"http://neont3/thumb1_500_600.jpg"},{ "h":300, "w":400, "url":"http://neont3/thumb2_300_400.jpg"} ]}] }
 #
 #
 ###################################################################################
