@@ -167,9 +167,8 @@ Mastermind::EINIT_ERRORS
 Mastermind::Init() {
    
    if(initialized == true) {
-        //neon_stats[NEON_MASTERMIND_INVALID_INIT]++;
-        //throw new NeonException("Mastermind::Init: calling Init on mastermind object already initialized");
-        return EINIT_ALREADY_INITIALIZED;  
+        neon_stats[NEON_MASTERMIND_INVALID_INIT]++;
+        return EINIT_FATAL_ERROR;  
    }
    
     try {
@@ -197,7 +196,7 @@ Mastermind::Init(const char * mastermindFile,
                  unsigned error_message_size)
 {
     if(initialized == true) {
-        return EINIT_ALREADY_INITIALIZED;
+        return EINIT_FATAL_ERROR;
     }
    
     try {
@@ -233,7 +232,7 @@ Mastermind::InitSafe(const char * mastermindFile,
 
     if(initialized == true) {
         neon_stats[NEON_MASTERMIND_INVALID_INIT]++;
-        return EINIT_ALREADY_INITIALIZED;
+        return EINIT_FATAL_ERROR;
     }
 
     parseFile = 0;

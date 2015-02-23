@@ -18,10 +18,8 @@ public:
     ~Mastermind();
 
     enum EINIT_ERRORS {
-        // mastermind has already been initialized previously and is serviceable 
-        EINIT_ALREADY_INITIALIZED = 0,
         // successful mastermind initializatio, all directives parsed
-        EINIT_SUCCESS,
+        EINIT_SUCCESS = 0,
         // successful mastermind initialization, however one or more directives were 
         // rejected
         EINIT_PARTIAL_SUCCESS,
