@@ -163,42 +163,55 @@ Mastermind::GetExpiry()
 }
 
 
-void 
+Mastermind::EINIT_ERRORS 
 Mastermind::Init() {
    
    if(initialized == true) {
         //neon_stats[NEON_MASTERMIND_INVALID_INIT]++;
-        throw new NeonException("Mastermind::Init: calling Init on mastermind object already initialized");
-    }
+        //throw new NeonException("Mastermind::Init: calling Init on mastermind object already initialized");
+        return EINIT_ALREADY_INITIALIZED;  
+   }
    
-    publisherTable = new PublisherHashtable();
-    directiveTable = new DirectiveHashtable();
-    defaultThumbnailTable = new DefaultThumbnailHashtable();
-    publisherTable->Init(100);
-    directiveTable->Init(100);
-    defaultThumbnailTable->Init(100);
-    
+    try {
+        publisherTable = new PublisherHashtable();
+        directiveTable = new DirectiveHashtable();
+        defaultThumbnailTable = new DefaultThumbnailHashtable();
+        publisherTable->Init(100);
+        directiveTable->Init(100);
+        defaultThumbnailTable->Init(100);
+    }
+    catch(...) {
+        neon_stats[NEON_MASTERMIND_INVALID_INIT]++;
+        return EINIT_FATAL_ERROR;
+    }
+
     initialized = true;
+    return EINIT_SUCCESS;
 }
 
 
-void
-Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
+Mastermind::EINIT_ERRORS
+Mastermind::Init(const char * mastermindFile, 
+                 time_t previousMastermindExpiry,
+                 char * error_message,
+                 unsigned error_message_size)
 {
-    NeonException * error = 0;
-
+    if(initialized == true) {
+        return EINIT_ALREADY_INITIALIZED;
+    }
+   
     try {
-        InitSafe(mastermindFile, previousMastermindExpiry);
-        return;
-    }
-    catch (NeonException * e) {
-        error = e;
-    }
-    catch (std::bad_alloc e) {
-        error = new NeonException("Mastermind::Init: bad alloc exception");
+        EINIT_ERRORS ret = InitSafe(mastermindFile, 
+                                    previousMastermindExpiry,
+                                    error_message,
+                                    error_message_size);
+        
+        if(ret == EINIT_SUCCESS || EINIT_PARTIAL_SUCCESS)  
+            return ret;
     }
     catch (...) {
-        error = new NeonException("Mastermind::Init: unspecified exception");
+        snprintf(error_message, error_message_size, "%s", 
+                 "Mastermind::Init: failed: uncaught exception");
     }
 
     if(parseFile != 0) {
@@ -207,56 +220,77 @@ Mastermind::Init(const char * mastermindFile, time_t previousMastermindExpiry)
     }
 
     Dealloc();
-    throw error;
+    return EINIT_FATAL_ERROR;
 }
 
 
-void
-Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpiry)
+Mastermind::EINIT_ERRORS
+Mastermind::InitSafe(const char * mastermindFile, 
+                     time_t previousMastermindExpiry,
+                     char * error_message,
+                     unsigned error_message_size)
 {
 
     if(initialized == true) {
-        //neon_stats[NEON_MASTERMIND_INVALID_INIT]++;
-        throw new NeonException("Mastermind::Init: calling Init on mastermind object already initialized");
+        neon_stats[NEON_MASTERMIND_INVALID_INIT]++;
+        return EINIT_ALREADY_INITIALIZED;
     }
 
-
+    parseFile = 0;
     int lineNumber = 1;
 
-    if(mastermindFile == 0)
-        throw new NeonException("Mastermind::Init: mastermind file name is null");
-    
+    // terminate this error buffer
+    error_message[0] = 0;
+
+    if(mastermindFile == 0) {
+        snprintf(error_message, error_message_size, "%s",
+                "Mastermind::Init: mastermind file name ptr is null");
+        return EINIT_FATAL_ERROR;
+    }
+
     errno = 0;
     parseFile = 0;
     parseFile = fopen(mastermindFile, "r");
     
     if(parseFile == 0) {
-        throw new NeonException("Mastermind::Init: cannot open mastermind file name "
-        "\"%s\" for reading, errno = %d", mastermindFile, errno);
+        snprintf(error_message, error_message_size, 
+                 "Mastermind::Init: cannot open mastermind file named %s: errno %d",
+                 mastermindFile, errno);
+        return EINIT_FATAL_ERROR;
     }
     
     /*
      *  check expiry
      */
-    
     char * line = fgets(lineBuffer, MaxLineBufferSize, parseFile);
     
-    if(line == 0)
-        throw new NeonException("Mastermind::Init: expiry line missing in mastermind file");
-    
+    if(line == 0) {
+        snprintf(error_message, error_message_size, "%s",
+                "Mastermind::Init: expiry line missing in mastermind file");
+        neon_stats[MASTERMIND_PARSE_FAIL]++;
+        return EINIT_FATAL_ERROR;
+    }
+
     lineNumber++;
     
-    // parse expiry here
+    // parse expiry line
     expiry = GetUTC(line);
     
-    if(expiry == 0)
-        throw new NeonException("Mastermind::Init: expiry parse error in mastermind file: line %s", line);
-    
-    if(expiry <= previousMastermindExpiry)
-        throw new NeonException("Mastermind::Init: expiry in new mastermind file is lower or the same as the "
-                                "current mastermind in memory: new file expiry %d, current mastermind expiry "
-                                " %d", expiry, previousMastermindExpiry);
-    
+    if(expiry == 0) {
+        snprintf(error_message, error_message_size, 
+               "Mastermind::Init: expiry parse error in mastermind file: line %s", line);
+         neon_stats[MASTERMIND_PARSE_FAIL]++;
+        return EINIT_FATAL_ERROR;
+    }
+
+    if(expiry <= previousMastermindExpiry) {
+        snprintf(error_message, error_message_size, 
+           "Mastermind::Init: expiry in new mastermind file is lower or the same as the "
+           "current mastermind in memory: new file expiry %d, current mastermind expiry %d",
+           (int)expiry, (int)previousMastermindExpiry);
+        return EINIT_FATAL_ERROR;
+    }
+
     // allocate all tables
     publisherTable = new PublisherHashtable();
     directiveTable = new DirectiveHashtable();
@@ -267,8 +301,20 @@ Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpir
     defaultThumbnailTable->Init(100);
 
     /*
-     *  get publishers and directives
+     *  Parse all entries (publishers, account default image, video directives).  
+     *  Each entry is a self-contained json document and may be rejected individually
+     *  if malformed.  If there are rejected entries the return code is EINIT_PARTIAL_SUCCESS
+     *  Ocurrences of entry rejection should be promptly investigated. Check stats counters
+     *  for details and velocity of errors.
+     *
+     *  For performance reasons we only do a best-effort logging of the first occurence of an 
+     *  entry rejection. This is done to prevent bogging down isp in the case of a mastermind
+     *  file with potentially millions of repetitive entry issues.  
      */
+
+    // used to count rejected entries below
+    unsigned entries_rejected = 0; 
+    
     while(1)
     {
         // put a terminating char at end of read buffer.  If overwritten while reading a line
@@ -279,11 +325,15 @@ Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpir
         line = fgets(lineBuffer, MaxLineBufferSize, parseFile);
         lineNumber++;
         
-        // error, end of file but no end marker detected before
-        if(line == 0)
-            throw new NeonException("Mastermind::Init: new mastermind file is missing its end marker, "
-                                    "the file may be incomplete ");
-        
+        // error, end of file reached but no end marker detected before
+        if(line == 0) {
+            snprintf(error_message, error_message_size, "%s",
+                    "Mastermind::Init: new mastermind file is missing its end marker, "
+                    "the file is incomplete ");
+            neon_stats[MASTERMIND_PARSE_FAIL]++;
+            return EINIT_FATAL_ERROR;
+        }
+
         // check if this is the last line of the file, the marker "end"
         if(line[0] == 'e')
             break;
@@ -296,81 +346,122 @@ Mastermind::InitSafe(const char * mastermindFile, time_t previousMastermindExpir
         rapidjson::Document document;
         document.Parse<0>(line);
         
-        // if parsing error
+        // if json parsing error
         if(document.IsObject() == false) {
-         
+    
+            neon_stats[MASTERMIND_ENTRY_REJECTED]++;
+
             // terminating null value in buffer was overwritten by file read, the
             // read buffer may be too small
-            if(lineBuffer[MaxLineBufferSize-1] != 0)
-                throw new NeonException("Mastermind::Init: line number %d in "
-                    "mastermind file is bigger than buffer, json parse fail", lineNumber);
+            if(lineBuffer[MaxLineBufferSize-1] != 0) {
+                // log error is no previous error message
+                if(error_message[0] == 0) {
+                    snprintf(error_message, error_message_size, "Mastermind::Init: directive at "
+                    "line number %d in mastermind file is bigger than parse buffer, json parse fail", 
+                    lineNumber);
+                    entries_rejected++;
+                    continue;
+                }
+            }
+
+            // log error is no previous error message
+            if(error_message[0] == 0) {
+                snprintf(error_message, error_message_size, "Mastermind::Init: directive at "
+                       "line number %d in mastermind file isn't a well-formed json document", 
+                        lineNumber);
+            }
             
-            throw new NeonException("Mastermind::Init: line number %d in "
-            "mastermind file isn't a well-formed json document", lineNumber);
+            entries_rejected++;
+            continue;
         }
         
         // if missing type key
-        if(document.HasMember("type") == false)
-            throw new NeonException("Mastermind::Init: line number %d in "
-            "mastermind file isn't a well-formed json containing a \"type\" "
-            "key and value, either a publisher or a directive", lineNumber);
-        
-        // must be either a publisher "pub" or directive "dir"
+        if(document.HasMember("type") == false) {
+            // log error is no previous error message
+            if(error_message[0] == 0)
+                snprintf(error_message, error_message_size, "Mastermind::Init: directive at "
+                    "line number %d in mastermind file doesn't contain a \"type\" "
+                    "key and value", lineNumber);
+           entries_rejected++;
+           continue;
+        }
+
         std::string type = document["type"].GetString();
         
         // a publisher record
         if(type == typePublisher) {
             publisherTable->AddPublisher(document);
         }
-        
         // a video directive 
         else if(type == typeDirective) {
             directiveTable->AddDirective(document);
         }
-        // an account-wide default thumbnail directive
+        // an account-wide default thumbnail
         else if(type == typeDefaultThumbnail) {
             defaultThumbnailTable->Add(document);
         }            
 
-        // unrecognized type
+        // unrecognized entry type
         else {
-            throw new NeonException("Mastermind::Init: line number %d in "
-            "mastermind file isn't a well-formed json containing a recognized "
-            "\"type\" value, either \"pub\" or \"dir\"", lineNumber);
+            // log error is no previous error message
+            if(error_message[0] == 0)
+                snprintf(error_message, error_message_size, "Mastermind::Init: directive at "
+                    "line number %d in mastermind file is of an unrecognized "
+                    "\"type\": %s ", lineNumber, type.c_str());
+            entries_rejected++;
+            continue;
         }
     }
     
     // check the end of file marker "end" is correct
     if(line[0]      != 'e'      ||
        line[1]      != 'n'      ||
-       line[2]      != 'd')
-        throw new NeonException("Mastermind::Init: file mastermind has incorrect "
+       line[2]      != 'd') {
+        snprintf(error_message, error_message_size, "Mastermind::Init: file mastermind has incorrect "
                                 "end marker, line in file is: %s", line);
-    
+        neon_stats[MASTERMIND_PARSE_FAIL]++;
+        return EINIT_FATAL_ERROR;
+    }
+
     // make sure this is the last line by trying to read another
     line = fgets(lineBuffer, MaxLineBufferSize, parseFile);
     
     // more stuff was read after the end marker, which is invalid
-    if(line != 0)
-        throw new NeonException("Mastermind::Init: file mastermind has extraneous data following "
-                                "end marker \"end\", which should is invalid");
-    
-    // check that we got non-zero number of publishers and directives
-    if(publisherTable->GetSize() == 0 && directiveTable->GetSize() == 0)
-        throw new NeonException("Mastermind::Init: zero publishers and "
-                                "directives read from mastermind file");
-   
-    neon_stats[MASTERMIND_PARSE_SUCCESS]++;
+    if(line != 0) {
+        snprintf(error_message, error_message_size, "%s", "Mastermind::Init: file mastermind has extraneous data following "
+                                "end marker \"end\", which is invalid");
+        neon_stats[MASTERMIND_PARSE_FAIL]++;
+        return EINIT_FATAL_ERROR;
+    }
 
+    // check that we got non-zero number of publishers and directives
+    if(publisherTable->GetSize() == 0 && directiveTable->GetSize() == 0) {
+        snprintf(error_message, error_message_size, "Mastermind::Init:  publishers and "
+            "directives tables are empty after loading mastermind file.  Number of "
+            "rejected entries is %d", entries_rejected);
+        return EINIT_FATAL_ERROR;
+    }
+   
     int ret = fclose(parseFile);
-    
+   
+    // unable to close file
     if(ret != 0) {
         // add a counter here
     }
 
     parseFile = 0;
-
     initialized = true;
+
+    // some entries were rejected, so partial success
+    if(entries_rejected > 0) {
+        neon_stats[MASTERMIND_PARSE_PARTIAL]++;
+        return EINIT_PARTIAL_SUCCESS;
+    }
+    // complete success
+    else {
+        neon_stats[MASTERMIND_PARSE_SUCCESS]++;
+        return EINIT_SUCCESS;
+    }
 }
 
 
