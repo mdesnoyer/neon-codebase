@@ -3067,11 +3067,13 @@ class VideoMetadata(StoredObject):
             raise AttributeError("Callbacks not allowed")
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def get_video_requests(cls, i_vids):
         '''
         Get video request objs given video_ids
         '''
-        vms = VideoMetadata.get_many(i_vids)
+        vms = yield tornado.gen.Task(VideoMetadata.get_many, i_vids)
         retval = [None for x in vms]
         request_keys = []
         request_idx = []
@@ -3084,10 +3086,11 @@ class VideoMetadata(StoredObject):
                 request_keys.append(rkey)
                 request_idx.append(cur_idx)
             cur_idx += 1
-        for api_request, idx in zip(NeonApiRequest.get_many(request_keys),
-                                    request_idx):
+          
+        requests = yield tornado.gen.Task(NeonApiRequest.get_many, request_keys)  
+        for api_request, idx in zip(requests, request_idx):
             retval[idx] = api_request
-        return retval
+        raise tornado.gen.Return(retval)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
