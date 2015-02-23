@@ -38,6 +38,7 @@ import thrift.Thrift
 import threading
 import tornado.ioloop
 import utils.neon
+import utils
 from utils.options import define, options
 from utils import gzipstream
 import utils.ps
@@ -71,6 +72,10 @@ define('publishing_period', type=int, default=300,
        help='Time in seconds between when the directive file is published.')
 define('expiry_buffer', type=int, default=30,
        help='Buffer in seconds for the expiry of the directives file')
+
+# misc options
+define('db_update_delay', type=int, default=240,
+       help='delay in seconds to update vids in DB to serving state')
 
 # Monitoring variables
 statemon.define('time_since_stats_update', float) # Time since the last update
@@ -713,6 +718,8 @@ class DirectivePublisher(threading.Thread):
         self.lock = threading.RLock()
         self._stopped = threading.Event()
 
+        self.db_update_lock = threading.RLock()
+        
         # For some reason, when testing on some machines, the patch
         # for the S3Connection doesn't work in a separate thread. So,
         # we grab the reference to the S3Connection on initialization
@@ -782,27 +789,32 @@ class DirectivePublisher(threading.Thread):
             # new video is inserted, by default its serving state
             # should be false. i.e request state not updated
             self.video_id_serving_map[vid] = False
-
-    # TODO(Sunil): Do these updates asynchronously
+   
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def _update_request_state_to_serving(self):
         ''' update all the new video's serving state 
             i.e ISP URLs are ready
         '''
-        vids = []
-        for key, value in self.video_id_serving_map.iteritems():
-            if value == False:
-                vids.append(key)
-        requests = neondata.VideoMetadata.get_video_requests(vids)
-        for vid, request in zip(vids, requests):
-            # TODO(Sunil) : Bulk update
-            if request:
-                if request.state in [neondata.RequestState.ACTIVE, 
-                        neondata.RequestState.SERVING_AND_ACTIVE]:
-                    request.state = neondata.RequestState.SERVING_AND_ACTIVE
-                else:
-                    request.state = neondata.RequestState.SERVING
-                if request.save():
-                    self.video_id_serving_map[vid] = True
+
+        with self.db_update_lock:
+            vids = []
+            for key, value in self.video_id_serving_map.iteritems():
+                if value == False:
+                    vids.append(key)
+            requests = \
+                    yield tornado.gen.Task(
+                            neondata.VideoMetadata.get_video_requests, vids)
+            for vid, request in zip(vids, requests):
+                if request:
+                    if request.state in [neondata.RequestState.ACTIVE, 
+                            neondata.RequestState.SERVING_AND_ACTIVE]:
+                        request.state = neondata.RequestState.SERVING_AND_ACTIVE
+                    else:
+                        request.state = neondata.RequestState.SERVING
+                    val = yield tornado.gen.Task(request.save)
+                    if val:
+                        self.video_id_serving_map[vid] = True
 
     def _publish_directives(self):
 
@@ -863,7 +875,10 @@ class DirectivePublisher(threading.Thread):
 
         # The serving directives for videos are active, update the request state
         # for videos
-        self._update_request_state_to_serving()
+        t = threading.Timer(options.db_update_delay, 
+                self._update_request_state_to_serving)
+        t.daemon = True
+        t.start()
 
     def _write_directives(self, stream):
         '''Write the current directives to the stream.'''

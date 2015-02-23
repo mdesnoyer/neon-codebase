@@ -1344,7 +1344,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         for i_vid in i_vids:
             self.assertFalse(self.publisher.video_id_serving_map[i_vid])
 
-        self.publisher._update_request_state_to_serving()
+        yield self.publisher._update_request_state_to_serving()
         
         def validate():
             for i_vid in i_vids:
@@ -1361,12 +1361,12 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         validate()
 
         # Second iteration of directive publisher with no video change
-        self.publisher._update_request_state_to_serving()
+        yield self.publisher._update_request_state_to_serving()
         validate()
 
         # Add a video
         add_video('6')
-        self.publisher._update_request_state_to_serving()
+        yield self.publisher._update_request_state_to_serving()
         validate()
 
 class SmokeTesting(test_utils.neontest.TestCase):
@@ -1556,26 +1556,29 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self._add_hbase_entry(1405372146, 'key1_vid1_t1', iv=3, ic=1)
         self._add_hbase_entry(1405372146, 'key1_vid1_t2', iv=1, ic=1)
 
-        # Now start all the threads
-        self.video_watcher.start()
-        self.video_watcher.wait_until_loaded()
-        self.stats_watcher.start()
-        self.stats_watcher.wait_until_loaded()
-        self.directive_publisher.start()
+        # set the db update delay to 0
+        with options._set_bounded('mastermind.server.db_update_delay', 0):
+            # Now start all the threads
+            self.video_watcher.start()
+            self.video_watcher.wait_until_loaded()
+            self.stats_watcher.start()
+            self.stats_watcher.wait_until_loaded()
+            self.directive_publisher.start()
 
-        time.sleep(1) # Make sure that the directive publisher gets busy
-        self.activity_watcher.wait_for_idle()
+            time.sleep(1) # Make sure that the directive publisher gets busy
+            self.activity_watcher.wait_for_idle()
 
-        # See if there is anything in S3 (which there should be)
-        bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
-        data = bucket.get_key('mastermind').get_contents_as_string()
-        gz = gzip.GzipFile(fileobj=StringIO(data), mode='rb')
-        lines = gz.read().split('\n')
-        self.assertEqual(len(lines), 5)
-    
-        # Check if the serving state of the video has changed
-        self.assertTrue(
-                self.directive_publisher.video_id_serving_map['key1_vid1'])
+            time.sleep(2) # sleep for db update to finish 
+            # See if there is anything in S3 (which there should be)
+            bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
+            data = bucket.get_key('mastermind').get_contents_as_string()
+            gz = gzip.GzipFile(fileobj=StringIO(data), mode='rb')
+            lines = gz.read().split('\n')
+            self.assertEqual(len(lines), 5)
+        
+            # Check if the serving state of the video has changed
+            self.assertTrue(
+                    self.directive_publisher.video_id_serving_map['key1_vid1'])
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
