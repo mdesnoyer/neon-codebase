@@ -951,6 +951,10 @@ class DirectivePublisher(threading.Thread):
             default_size = (160, 90)
         
         serving_urls = unpack_obj(self.serving_urls[thumb_id])
+        if serving_urls is None or len(serving_urls) == 0:
+            _log.error('No serving urls for thumb %s' % thumb_id)
+            raise KeyError('No serving urls for thumb %s' % thumb_id)
+        
         try:
             return serving_urls[tuple(default_size)]
         except KeyError:

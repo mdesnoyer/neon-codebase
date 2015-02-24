@@ -1309,6 +1309,31 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             },
             directives[('acct1', 'acct1_vid2')])
 
+    def test_serving_url_list_empty(self):
+        self.mastermind.serving_directive = {
+            'acct1_vid2': (('acct1', 'acct1_vid2'), 
+                           [('tid21', 1.0),
+                            ('tid22', 0.0)])}
+        self.mastermind.video_info = self.mastermind.serving_directive
+        self.publisher.update_tracker_id_map({'tai1' : 'acct1',
+                                              'tai2' : 'acct2'})
+
+        self.publisher.update_serving_urls({
+            'acct1_vid2_tid21' : {}})
+
+        with self.assertLogExists(logging.ERROR, 
+                                  ('Could not find all serving URLs for '
+                                   'video: acct1_vid2')):
+            with self.assertLogExists(logging.ERROR,
+                                      ('No serving urls for thumb '
+                                       'acct1_vid2_tid21')):
+                self.publisher._publish_directives()
+
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
+        expiry, tracker_ids, default_thumbs, directives = \
+          self._parse_directive_file(
+            bucket.get_key('mastermind').get_contents_as_string())
+
     def test_update_request_state_to_serving(self):
         '''
         Test the update_request_state logic
