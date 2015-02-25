@@ -16,7 +16,118 @@ if sys.path[0] != __base_path__:
 
 import math
 import numpy as np
+import pandas
 import scipy.stats
+
+def calc_lift_at_first_significant_hour(impressions, conversions):
+    '''Calculates the lift for each thumbnail relative to the others 
+    when statistical significant is reached.
+
+    Inputs:
+    Impressions - A pandas DataFrame of impression counts where rows are hours
+                  and columns are thumbnails
+    Conversions - A pandas DataFrame of conversion counts where rows are hours
+                  and columns are thumbnails
+    
+
+    If there is no statistically significant point, then the aggregate
+    is used for calculating the stats.
+
+    Returns:
+    
+    A pandas Panel with three frames: 'lift', 'p_value' and
+    'revlift'. Each frame is a symmetric matrix where the
+    cols and rows represent the thumbnail and the entries are row
+    vs. col (baseline)
+
+    '''
+
+    # Calculate the cumulative, per thumbnail stats we need.
+    cum_imp = impressions.cumsum().fillna(method='ffill')
+    cum_conv = conversions.cumsum().fillna(method='ffill')
+    cum_ctr = cum_conv / cum_imp
+    cum_stderr = np.sqrt(cum_ctr * (1-cum_ctr) / cum_imp)
+
+    # Now put together the pairwise comparisons
+    thumb_list = impressions.columns
+    stats = pandas.Panel(items=['lift', 'p_value', 'revlift'],
+                         major_axis=thumb_list,
+                         minor_axis=thumb_list)
+    for base in thumb_list:
+        for top in [x for x in thumb_list if x != base]:
+            if cum_imp[base].iloc[-1] == 0 or cum_imp[top].iloc[-1] == 0:
+                continue
+            
+            zscore = (cum_ctr[base] - cum_ctr[top]) / \
+                np.sqrt(cum_stderr[base]*cum_stderr[base] +
+                        cum_stderr[top]*cum_stderr[top])
+
+            p_value = pandas.Series(
+                scipy.stats.norm(0, 1).cdf(zscore),
+                index=zscore.index)
+            p_value = p_value.where(p_value > 0.5, 1 - p_value)
+
+            # Find where the first hour of statististical significance is
+            sig = p_value[(p_value > 0.95) & (cum_imp[base] > 500) & 
+                          (cum_imp[top] > 500)]
+            if len(sig) == 0:
+                # There isn't statistical significance anywhere so use
+                # the aggregate stats.
+                idx = p_value.index[-1]
+            else:
+                idx = sig.index[0]
+                
+            stats['p_value'][base][top] = p_value[idx]
+            stats['lift'][base][top] = ((
+                cum_ctr[top][idx] - cum_ctr[base][idx]) /
+                cum_ctr[base][idx])
+
+            stats['revlift'][base][top] = ((
+                cum_ctr[top][idx] - cum_ctr[base][idx]))# /
+            #    cum_ctr[top][idx])
+            #stats['extra_conversions'][base][top] = (
+            #    cum_conv[top].max() * revlift)
+
+    return stats
+
+def calc_extra_conversions(conversions, revlift):
+    '''Calculate the extra conversions for each thumb relative to the others.
+
+    Inputs:
+    conversions - A pandas DataFrame of conversion counts where rows are hours
+                  and columns are thumbnails
+    revlift - A DataFrame of lift where row and cols are thumbs. cols are baseline
+
+    Returns:
+    A DataFrame of extra conversions in the same shape as revlift
+    '''
+    conv_totals = conversions.sum()
+            
+    retval = revlift.multiply(conv_totals, axis='index')
+    retval = retval.replace(np.inf, 0).replace(-np.inf, 0)
+    return retval
+
+def calc_aggregate_click_based_stats_from_dataframe(data):
+    '''Calculate click based stats using a dataframe.
+
+    Inputs:
+    data - Data frame with columns of extra_conversions, impr, conv and is_base
+
+    Returns:
+    pandas series of stats we generate
+    '''
+    base_sums = data.fillna(0).groupby(['is_base']).sum()
+    neon_sums = data.fillna(0).groupby(level=['type']).sum()
+
+    lift = base_sums['impr'][True] * base_sums['extra_conversions'][False] / \
+      (base_sums['conv'][True] * base_sums['impr'][False])
+
+    #lift = base_sums['impr'][True] * neon_sums['extra_conversions']['neon'] / \
+    #  (base_sums['conv'][True] * neon_sums['impr']['neon'])
+    
+
+    return pandas.Series({'lift': lift})
+            
 
 def calc_thumb_stats(baseCounts, thumbCounts):
     '''Calculates statistics for a thumbnail relative to a baseline.

@@ -28,7 +28,6 @@ from stats import statutils
 import utils.neon
 from utils.options import options, define
 
-#define("stats_host", default="54.210.126.245",
 define("stats_host", default="127.0.0.1",
         type=str, help="Host to connect to the stats db on.")
 define("stats_port", default=21050, type=int,
@@ -60,18 +59,20 @@ def connect():
                                 port=options.stats_port,
                                 timeout=600)
 
-def get_thumbnail_ids():
-    _log.info('Querying for thumbnail ids')
+def get_video_ids():
+    _log.info('Querying for video ids')
     conn = connect()
     cursor = conn.cursor()
     cursor.execute(
-    """select distinct thumbnail_id from imageloads where 
+    """select distinct regexp_extract(thumbnail_id, 
+    '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_', 1) from imageclicks where 
+    thumbnail_id is not NULL and
     tai='%s' %s""" % (options.pub_id, 
                       statutils.get_time_clause(options.start_time,
                                                   options.end_time)))
 
-    tidRe = re.compile('[0-9a-zA-Z]+_[0-9a-zA-Z]+_[0-9a-zA-Z]+')
-    retval = [x[0] for x in cursor if tidRe.match(x[0])]
+    vidRe = re.compile('[0-9a-zA-Z]+_[0-9a-zA-Z]+')
+    retval = [x[0] for x in cursor if vidRe.match(x[0])]
     return retval
 
 def collect_stats(thumb_info, video_info,
@@ -86,7 +87,7 @@ def collect_stats(thumb_info, video_info,
     Returns: A panda DataFrame with index of (integration_id, video_id, type,
     rank) and columns of (impression_count, conversion_count, CTR, extra conversions, lift, pvalue)
     '''
-    query_dict = {} # Thumbnail_id -> (impression_count, conversion_count)
+    video_data = {} # (integration_id, video_id) => DataFrame with stats
 
     col_map = {
         MetricTypes.LOADS: 'imloadclienttime',
@@ -100,128 +101,135 @@ def collect_stats(thumb_info, video_info,
                                                     conversion_metric))
     if conversion_metric == MetricTypes.PLAYS:
         query = (
-        """select thumbnail_id, count(%s), 
-        sum(cast(imclickclienttime is not null and 
-        (adplayclienttime is not null or videoplayclienttime is not null) 
-        as int))
-        from EventSequences where tai='%s' and %s is not null %s
-        group by thumbnail_id""" %
-        (col_map[impression_metric], options.pub_id,
-         col_map[impression_metric],
-         statutils.get_time_clause(options.start_time,
-                                     options.end_time)))
+            """select 
+            cast(floor(servertime/3600)*3600 as timestamp) as hr,
+            thumbnail_id,
+            count(%s) as imp, 
+            sum(cast(imclickclienttime is not null and 
+            (adplayclienttime is not null or videoplayclienttime is not null) 
+            as int)) as conv,
+            from EventSequences where tai='%s' and 
+            hr is not null and
+            %s is not null and
+            regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_',
+            1) in (%s)
+            group by thumbnail_id, hr""" %
+            (col_map[impression_metric], options.pub_id,
+             col_map[impression_metric],
+             ','.join(["'%s'" % x for x in video_info.keys()])))
     else:
-        
         query = (
-            """select thumbnail_id, count(%s), count(%s) from 
+            """select 
+            cast(floor(servertime/3600)*3600 as timestamp) as hr,
+            thumbnail_id, count(%s) as imp, count(%s) as conv from 
             EventSequences
-            where tai='%s' and %s is not null %s 
-            group by thumbnail_id
+            where tai='%s' and 
+            %s is not null and
+            regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_',
+            1) in (%s) 
+            %s
+            group by thumbnail_id, hr
             """ % (col_map[impression_metric], col_map[conversion_metric],
                    options.pub_id, col_map[impression_metric],
+                   ','.join(["'%s'" % x for x in video_info.keys()]),
                    statutils.get_time_clause(options.start_time,
-                                               options.end_time)))
+                                             options.end_time)))
     cursor.execute(query)
 
-    for row in cursor:
-        # Only grab data if there are enough impressions
-        if row[1] > options.min_impressions:
-            query_dict[row[0]] = (row[1], row[2])
+    impala_cols = [metadata[0] for metadata in cursor.description]
+    all_hourly_data = pandas.DataFrame((dict(zip(impala_cols, row))
+                                        for row in cursor))
 
-    video_data = {}
-    names = ['impr', 'conv', 'CTR', 'Extra Conv', 'Lift',
-             'P Value']
-    for video_id, type_map in merge_video_stats(thumb_info,
-                                                query_dict).iteritems():
-        for key, stat in calc_per_video_stats(type_map).items():
-            integration_id = 'UKNOWN'
-            try:
-                integration_id = video_info[video_id].integration_id
-            except KeyError: pass
-            video_data[(integration_id, video_id, key[0], key[1])] = \
-              dict(zip(names, stat))
+    # Add a column for the video id
+    all_hourly_data = pandas.concat([
+        all_hourly_data,
+        pandas.DataFrame({'video_id': 
+                          ['_'.join(x.split('_')[0:2]) 
+                           for x in all_hourly_data['thumbnail_id']]})],
+        axis=1)
 
-    index = pandas.MultiIndex.from_tuples(video_data.keys(),
-                                          names=['integration_id', 'video_id',
-                                                 'type', 'rank'])
-    retval= pandas.DataFrame(video_data.values(),
-                             index=index,
-                             columns=names)
-    return retval
+    grouped_hourly_data = all_hourly_data.groupby('video_id')
+    for video_id in grouped_hourly_data.groups.keys():
+        _log.info('Processing video %s' % video_id)
+        video = video_info[video_id]
+        hourly_data = grouped_hourly_data.get_group(video_id)
 
-def merge_video_stats(thumb_info, counts):
-    '''Merges the counts for different thumbnails from a given video by their
-    thumbnail type. Keep the neon types separate.
+        impressions = hourly_data.pivot(index='hr', columns='thumbnail_id',
+                                        values='imp')
+        conversions = hourly_data.pivot(index='hr', columns='thumbnail_id',
+                                        values='conv')
+        cross_stats = stats.metrics.calc_lift_at_first_significant_hour(
+            impressions, conversions)
 
-    Inputs:
-    thumb_info - thumbnail_id -> ThumbnailMetadata
-    counts - thumbnail_id -> (impression, conversion)
+        windowed_impressions = impressions
+        windowed_conversions = conversions
+        if options.start_time is not None:
+            windowed_impressions = impressions[options.start_time:]
+            windowed_conversions = conversions[options.start_time:]
+        if options.end_time is not None:
+            windowed_impressions = impressions[:options.end_time]
+            windowed_conversions = conversions[:options.end_time]
+        cum_impr = windowed_impressions.cumsum().fillna(method='ffill')
+        cum_conv = windowed_conversions.cumsum().fillna(method='ffill')
+            
+        extra_conv = stats.metrics.calc_extra_conversions(
+            windowed_impressions,
+            cross_stats['revlift'])
 
-    Output:
-    video_id ->  {(type, rank) -> [impression, conversion]}
-    '''
-
-    retval = {}
-
-    for thumbnail_id, cur_stats in counts.iteritems():
-        try:
-            tinfo = thumb_info[thumbnail_id]
-        except KeyError:
-            _log.error('Could not find metadata for thumb: %s' % thumbnail_id)
-            continue
-
-        if tinfo.type == 'neon':
-            thumb_type = (tinfo.type, tinfo.rank)
-        else:
-            thumb_type = (tinfo.type, 0)
-
-        try:
-            type_map = retval[tinfo.video_id]
-        except KeyError:
-            type_map = {}
-            retval[tinfo.video_id] = type_map
-
-        try:
-            stats = type_map[thumb_type]
-            stats[0] += cur_stats[0]
-            stats[1] += cur_stats[1]
-            type_map[thumb_type] = stats
-        except KeyError:
-            type_map[thumb_type] = list(cur_stats)
-
-    return retval
-
-def calc_per_video_stats(counts):
-    '''Calculate the per video stats in a dataframe.
-
-    Inputs:
-    counts - (type, rank) -> [impression, conversion]
-
-    Outputs - (type, rank) -> (impression, conversion, ctr, extra conversions, lift, pvalue)
-    '''
-    retval = {}
-    baseline_types = options.baseline_types.split(',')
-    baseline = None
-    for baseline_type in baseline_types:
-        for key, stat in counts.items():
-            if key[0] == baseline_type:
-                baseline = stat
+        # Find the baseline thumb
+        baseline_types = options.baseline_types.split(',')
+        base_thumb = None
+        for baseline_type in baseline_types:
+            for thumb_id in video.thumbnail_ids:
+                cur_thumb = thumb_info[thumb_id]
+                if cur_thumb.type == baseline_type:
+                    base_thumb = cur_thumb
+                    break
+            if base_thumb is not None:
                 break
-        if baseline is not None:
-            break
 
-    if baseline is None:
-        _log.error('Could not find baseline')
+        thumb_stats = pandas.DataFrame({
+            'impr' : cum_impr.iloc[-1],
+            'conv' : cum_conv.iloc[-1],
+            'ctr' : cum_conv.iloc[-1] / cum_impr.iloc[-1]})
+        thumb_stats = thumb_stats[thumb_stats['impr'] > options.min_impressions]
+        thumb_meta_info = dict([
+            (x.key,
+             {
+                 'is_base': False if base_thumb is None else x.key == base_thumb.key,
+                 'type' : x.type,
+                 'rank': x.rank
+                 }) for tid in video.thumbnail_ids 
+                 for x in [thumb_info[tid]]])
+        thumb_stats = pandas.concat([
+            thumb_stats,
+            pandas.DataFrame(thumb_meta_info).transpose()],
+            axis=1,
+            join='inner')
 
-    for key, value in counts.items():
-        if baseline is None:
-            retval[key] = (value[0], value[1], 0.0, 0.0, 0.0, 0.0)
-            continue
+        if base_thumb is not None and base_thumb.key in impressions.columns:
+            thumb_stats = pandas.concat([
+                thumb_stats,
+                cross_stats.minor_xs(base_thumb.key),
+                pandas.DataFrame({'extra_conversions':
+                                  extra_conv[base_thumb.key]})],
+                axis=1,
+                join='inner')
 
-        value.extend(stats.metrics.calc_thumb_stats(baseline, value[0:2]))
-        retval[key] = value
+        # Put the type and rank columns in the index
+        subcols = thumb_stats[[x for x in thumb_stats.columns if x not in 
+                               ['type', 'rank']]]
+        thumb_stats = pandas.DataFrame(
+            subcols.values,
+            columns=subcols.columns,
+            index=[thumb_stats['type'],
+                   thumb_stats['rank'],
+                   thumb_stats.index]).sortlevel()
 
-    return retval
+        video_data[(video.integration_id, video_id)] = thumb_stats
+
+    return pandas.concat(video_data.itervalues(),
+                         keys=video_data.keys()).sortlevel()
 
 def get_video_titles(video_ids):
     '''Returns the video titles for a list of video id'''
@@ -256,6 +264,18 @@ def calculate_aggregate_stats(video_stats):
     Outputs:
     DataFrame indexed by stat_type on one dimension and stat_name on the other
     '''
+    agg_data = {}
+
+    for stat_name, video_stat in video_stats.items():
+        # Calculate the click based stats
+        click_stats = stats.metrics.calc_aggregate_click_based_stats_from_dataframe(video_stat)
+
+        agg_data[stat_name] = click_stats
+
+    agg_data = pandas.DataFrame(agg_data)
+    return agg_data
+
+    # Old code below here.
     agg_stat_names = ['Mean Lift', 'P Value', 'Lower 95%',
                       'Upper 95%', 'Random Effects Error']
     agg_data = {}
@@ -303,15 +323,16 @@ def calculate_aggregate_stats(video_stats):
     
         
 def main():
+    _log.info('Getting metadata about the videos.')
+    video_info = neondata.VideoMetadata.get_many(get_video_ids())
+    video_info = dict([(x.key, x) for x in video_info if x is not None])
+
     _log.info('Getting metadata about the thumbnails.')
-    thumbnail_info = neondata.ThumbnailMetadata.get_many(get_thumbnail_ids())
+    thumbnail_info = neondata.ThumbnailMetadata.get_many(
+        reduce(lambda x, y: x | y,
+               [set(x.thumbnail_ids) for x in video_info.itervalues()]))
     thumbnail_info = dict([(x.key, x) for x in thumbnail_info
                            if x is not None])
-
-    _log.info('Getting metadata about the videos.')
-    video_info = neondata.VideoMetadata.get_many(
-        set([x.video_id for x in thumbnail_info.itervalues()]))
-    video_info = dict([(x.key, x) for x in video_info if x is not None])
 
     _log.info('Getting urls and video titles')
     titles = get_video_titles([x.video_id for x in thumbnail_info.values() if
@@ -333,28 +354,29 @@ def main():
     # index by integration id, video_id, type and rank
     _log.info('Calculating per video statistics')
     video_stats = {
-        'CTR (Loads)' : collect_stats(thumbnail_info, video_info,
-                                      MetricTypes.LOADS,
-                                      MetricTypes.CLICKS),
+        #'CTR (Loads)' : collect_stats(thumbnail_info, video_info,
+        #                              MetricTypes.LOADS,
+        #                              MetricTypes.CLICKS),
         'CTR (Views)' : collect_stats(thumbnail_info, video_info,
                                       MetricTypes.VIEWS,
                                       MetricTypes.CLICKS),
-        'PTR (Loads)' : collect_stats(thumbnail_info, video_info,
-                                      MetricTypes.LOADS,
-                                      MetricTypes.PLAYS),
-        'PTR (Views)' : collect_stats(thumbnail_info, video_info,
-                                      MetricTypes.VIEWS,
-                                      MetricTypes.PLAYS),
-        'VTR' : collect_stats(thumbnail_info, video_info,
-                              MetricTypes.LOADS,
-                              MetricTypes.VIEWS),           
+        #'PTR (Loads)' : collect_stats(thumbnail_info, video_info,
+        #                              MetricTypes.LOADS,
+        #                              MetricTypes.PLAYS),
+        #'PTR (Views)' : collect_stats(thumbnail_info, video_info,
+        #                              MetricTypes.VIEWS,
+        #                              MetricTypes.PLAYS),
+        #'VTR' : collect_stats(thumbnail_info, video_info,
+        #                      MetricTypes.LOADS,
+        #                      MetricTypes.VIEWS),           
         }
     video_data = pandas.concat(video_stats.values(),
                                keys=video_stats.keys(),
-                               axis=1).dropna()
-    
-    video_data = pandas.concat([video_data, urls], join='inner',
-                               keys=['data', 'metadata'], axis=1)
+                               axis=1)
+
+    # TODO Add the video titls and urls back in
+    #video_data = pandas.concat([video_data, urls], join='inner',
+    #                           keys=['data', 'metadata'], axis=1)
     video_data = video_data.sortlevel()
     
 
