@@ -39,6 +39,7 @@ import tornado.ioloop
 import utils.neon
 from utils.options import define, options
 import utils.ps
+import utils.sqsmanager
 from utils import statemon
 import zlib
 
@@ -717,6 +718,8 @@ class DirectivePublisher(threading.Thread):
         # instead of relying on the import statement.
         self.S3Connection = S3Connection
 
+        self.callback_manager = utils.sqsmanager.CustomerCallbackManager()
+
     def __del__(self):
         if self._update_publish_timer and self._update_publish_timer.is_alive():
             self._update_publish_timer.cancel()
@@ -814,7 +817,7 @@ class DirectivePublisher(threading.Thread):
             (curtime + datetime.timedelta(seconds=valid_length))
             .strftime('%Y-%m-%dT%H:%M:%SZ'))
         with self.lock:
-            self._write_directives(directive_file)
+            written_video_ids = self._write_directives(directive_file)
         directive_file.write('\nend')
 
 
@@ -859,8 +862,19 @@ class DirectivePublisher(threading.Thread):
         # for videos
         self._update_request_state_to_serving()
 
+        try:
+            self.callback_manager.schedule_all_callbacks(written_video_ids)
+        except Exception as e:
+            _log.warn('Unexpected error when sending a customer callback: %s' %
+                      e)
+
     def _write_directives(self, stream):
-        '''Write the current directives to the stream.'''
+        '''Write the current directives to the stream.
+
+        Returns the video ids of the directives that were sucessfully written.
+        '''
+        written_video_ids = []
+        
         # First write out the tracker id maps
         _log.info("Writing tracker id maps")
         for tracker_id, account_id in self.tracker_id_map.iteritems():
@@ -940,8 +954,10 @@ class DirectivePublisher(threading.Thread):
                 'fractions': fractions
             }
             stream.write('\n' + json.dumps(data))
+            written_video_ids.append(video_id)
 
         statemon.state.serving_urls_missing = serving_urls_missing
+        return written_video_ids
 
     def _get_default_url(self, account_id, thumb_id):
         '''Returns the default url for this thumbnail id.'''

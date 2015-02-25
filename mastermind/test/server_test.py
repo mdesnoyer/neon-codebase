@@ -997,6 +997,12 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.datamock = self.neondata_patcher.start()
         self.datamock.RequestState = neondata.RequestState
 
+        # Mock out the callback manager
+        self.callback_patcher = patch(
+            'mastermind.server.utils.sqsmanager.CustomerCallbackManager')
+        self.callback_mock = MagicMock()
+        self.callback_patcher.start().return_value = self.callback_mock
+
         self.mastermind = mastermind.core.Mastermind()
         self.publisher = mastermind.server.DirectivePublisher(
             self.mastermind)
@@ -1004,6 +1010,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
 
     def tearDown(self):
         self.neondata_patcher.stop()
+        self.callback_patcher.stop()
         mastermind.server.tempfile = self.real_tempfile
         self.s3_patcher.stop()
         del self.mastermind
@@ -1195,6 +1202,10 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             dateutil.parser.parse(directives[('acct1', 'acct1_vid2')]['sla']),
             date.datetime.now(dateutil.tz.tzutc()))
 
+        # Verify that the callbacks were scheduled
+        self.callback_mock.schedule_all_callbacks.assert_called_with(
+            ['acct1_vid1', 'acct1_vid2'])
+
     def test_different_default_urls(self):
         self.mastermind.serving_directive = {
             'acct1_vid1': (('acct1', 'acct1_vid1'), 
@@ -1363,6 +1374,59 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.publisher._update_request_state_to_serving()
         validate()
 
+    def test_error_when_sending_callback(self):
+        self.callback_mock.schedule_all_callbacks.side_effect = [
+            Exception('Some kind of exception')
+            ]
+        
+        # We will fill the data structures in the mastermind core
+        # directly because it's too complicated to insert them using
+        # the update* functions and mocking out all the db calls.
+        self.mastermind.serving_directive = {
+            'acct1_vid1': (('acct1', 'acct1_vid1'), 
+                           [('tid11', 0.1),
+                            ('tid12', 0.2),
+                            ('tid13', 0.8)]),
+            'acct1_vid2': (('acct1', 'acct1_vid2'), 
+                           [('tid21', 0.0),
+                            ('tid22', 1.0)])}
+        self.mastermind.video_info = self.mastermind.serving_directive
+        
+        self.publisher.update_tracker_id_map({
+            'tai1' : 'acct1',
+            'tai1s' : 'acct1',
+            'tai2p' : 'acct2'})
+        self.publisher.update_default_thumbs({
+            'acct1' : 'acct1_vid1_tid11'}
+            )
+        self.publisher.update_serving_urls(
+            {
+            'acct1_vid1_tid11' : { (640, 480): 't11_640.jpg',
+                                   (160, 90): 't11_160.jpg' },
+            'acct1_vid1_tid12' : { (800, 600): 't12_800.jpg',
+                                   (160, 90): 't12_160.jpg'},
+            'acct1_vid1_tid13' : { (160, 90): 't13_160.jpg'},
+            'acct1_vid2_tid21' : { (1920, 720): 't21_1920.jpg',
+                                   (160, 90): 't21_160.jpg'},
+            'acct1_vid2_tid22' : { (500, 500): 't22_500.jpg',
+                                   (160, 90): 't22_160.jpg'},
+                                   })
+
+        with self.assertLogExists(logging.WARNING,
+                                  'Unexpected error when sending a customer'):
+            self.publisher._publish_directives()
+
+        # Make sure that there are two directive files, one is the
+        # REST endpoint and the second is a timestamped one.
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
+        keys = [x for x in bucket.get_all_keys()]
+        key_names = [x.name for x in keys]
+        self.assertEquals(len(key_names), 2)
+        self.assertEquals(keys[0].size,keys[1].size)
+        self.assertIn('mastermind', key_names)
+        key_names.remove('mastermind')
+        self.assertRegexpMatches(key_names[0], '[0-9]+\.mastermind')
+
 class SmokeTesting(test_utils.neontest.TestCase):
 
     def setUp(self):
@@ -1376,6 +1440,12 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.s3conn = test_utils.mock_boto_s3.MockConnection()
         self.s3_patcher.start().return_value = self.s3conn
         self.s3conn.create_bucket('neon-image-serving-directives-test')
+
+        # Mock out the callback manager
+        self.callback_patcher = patch(
+            'mastermind.server.utils.sqsmanager.CustomerCallbackManager')
+        self.callback_mock = MagicMock()
+        self.callback_patcher.start().return_value = self.callback_mock
 
         # Insert a fake filesystem
         self.filesystem = fake_filesystem.FakeFilesystem()
@@ -1449,6 +1519,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
         mastermind.server.tempfile = self.real_tempfile
         self.hbase_patcher.stop()
         self.cluster_patcher.stop()
+        self.callback_patcher.stop()
         self.s3_patcher.stop()
         self.sqlite_connect_patcher.stop()
         self.redis.stop()

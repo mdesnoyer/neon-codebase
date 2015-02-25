@@ -14,6 +14,7 @@ import logging
 from mock import patch, MagicMock
 import Queue
 import random
+import socket
 from StringIO import StringIO
 import test_utils.neontest
 from tornado.concurrent import Future
@@ -74,6 +75,20 @@ class TestSyncSendRequest(test_utils.neontest.TestCase):
 
         with self.assertLogExists(logging.WARNING,
                                   'key=http_connection_error msg=.*500'):
+            found_response = utils.http.send_request(request, 3)
+
+        self.assertEqual(found_response, valid_response)
+
+    def test_socket_errors(self):
+        request, valid_response = create_valid_ack()
+        self.mock_client().fetch.side_effect = [
+            socket.error(),
+            socket.error(),
+            valid_response
+            ]
+
+        with self.assertLogExists(logging.ERROR,
+                                  'socket resolution error'):
             found_response = utils.http.send_request(request, 3)
 
         self.assertEqual(found_response, valid_response)
@@ -176,6 +191,26 @@ class TestAsyncSendRequest(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.WARNING, 'key=http_response_error'):
             utils.http.send_request(request, 3, callback=self.stop)
             found_response = self.wait()
+            self.assertEqual(found_response, valid_response)
+
+    @unittest.skip('Cannot mock out exceptions properly in async mode. '
+                   'Should switch to a pure tornado solution instead of '
+                   'handling the callbacks manually')
+    @tornado.testing.gen_test
+    def test_async_socket_errors(self):
+        request, valid_response = create_valid_ack()
+        self.mock_responses.side_effect = [
+            socket.error(),
+            socket.error(),
+            valid_response
+            ]
+
+        with self.assertLogExists(logging.ERROR,
+                                  'socket resolution error'):
+            found_response = yield tornado.gen.Task(
+                utils.http.send_request,
+                HTTPRequest('http://sdjfaoei.com'),
+                3)
             self.assertEqual(found_response, valid_response)
 
     def test_too_many_retries(self):
