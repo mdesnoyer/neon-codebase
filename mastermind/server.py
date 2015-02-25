@@ -30,6 +30,7 @@ import signal
 import socket
 import stats.cluster
 import struct
+from StringIO import StringIO
 import tempfile
 import time
 import thrift
@@ -37,7 +38,9 @@ import thrift.Thrift
 import threading
 import tornado.ioloop
 import utils.neon
+import utils
 from utils.options import define, options
+from utils import gzipstream
 import utils.ps
 from utils import statemon
 import zlib
@@ -69,6 +72,10 @@ define('publishing_period', type=int, default=300,
        help='Time in seconds between when the directive file is published.')
 define('expiry_buffer', type=int, default=30,
        help='Buffer in seconds for the expiry of the directives file')
+
+# misc options
+define('db_update_delay', type=int, default=240,
+       help='delay in seconds to update vids in DB to serving state')
 
 # Monitoring variables
 statemon.define('time_since_stats_update', float) # Time since the last update
@@ -711,6 +718,8 @@ class DirectivePublisher(threading.Thread):
         self.lock = threading.RLock()
         self._stopped = threading.Event()
 
+        self.db_update_lock = threading.RLock()
+        
         # For some reason, when testing on some machines, the patch
         # for the S3Connection doesn't work in a separate thread. So,
         # we grab the reference to the S3Connection on initialization
@@ -780,43 +789,52 @@ class DirectivePublisher(threading.Thread):
             # new video is inserted, by default its serving state
             # should be false. i.e request state not updated
             self.video_id_serving_map[vid] = False
-
-    # TODO(Sunil): Do these updates asynchronously
+   
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def _update_request_state_to_serving(self):
         ''' update all the new video's serving state 
             i.e ISP URLs are ready
         '''
-        vids = []
-        for key, value in self.video_id_serving_map.iteritems():
-            if value == False:
-                vids.append(key)
-        requests = neondata.VideoMetadata.get_video_requests(vids)
-        for vid, request in zip(vids, requests):
-            # TODO(Sunil) : Bulk update
-            if request:
-                if request.state in [neondata.RequestState.ACTIVE, 
-                        neondata.RequestState.SERVING_AND_ACTIVE]:
-                    request.state = neondata.RequestState.SERVING_AND_ACTIVE
-                else:
-                    request.state = neondata.RequestState.SERVING
-                if request.save():
-                    self.video_id_serving_map[vid] = True
+
+        with self.db_update_lock:
+            vids = []
+            for key, value in self.video_id_serving_map.iteritems():
+                if value == False:
+                    vids.append(key)
+            requests = \
+                    yield tornado.gen.Task(
+                            neondata.VideoMetadata.get_video_requests, vids)
+            for vid, request in zip(vids, requests):
+                if request:
+                    if request.state in [neondata.RequestState.ACTIVE, 
+                            neondata.RequestState.SERVING_AND_ACTIVE]:
+                        request.state = neondata.RequestState.SERVING_AND_ACTIVE
+                    else:
+                        request.state = neondata.RequestState.SERVING
+                    val = yield tornado.gen.Task(request.save)
+                    if val:
+                        self.video_id_serving_map[vid] = True
 
     def _publish_directives(self):
+
         '''Publishes the directives to S3'''
         # Create the directives file
         _log.info("Building directives file")
         curtime = datetime.datetime.utcnow()
         directive_file = tempfile.TemporaryFile()
         valid_length = options.expiry_buffer + options.publishing_period
-        directive_file.write(
-            'expiry=%s' % 
-            (curtime + datetime.timedelta(seconds=valid_length))
-            .strftime('%Y-%m-%dT%H:%M:%SZ'))
-        with self.lock:
-            self._write_directives(directive_file)
-        directive_file.write('\nend')
+        expiry = 'expiry=%s' % (curtime + datetime.timedelta(
+                        seconds=valid_length)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
+        # Write gzip data in the directive file 
+        directive_file.write(gzipstream.GzipStream().read(StringIO(expiry)))
+        directive_stream = StringIO()
+        with self.lock:
+            self._write_directives(directive_stream)
+            directive_stream.seek(0)
+            directive_file.write(gzipstream.GzipStream().read(directive_stream))
+        directive_file.write(gzipstream.GzipStream().read(StringIO('\nend')))
 
         filename = '%s.%s' % (curtime.strftime('%Y%m%d%H%M%S'),
                               options.directive_filename)
@@ -844,7 +862,7 @@ class DirectivePublisher(threading.Thread):
 
         # Write the file that is timestamped
         key = bucket.new_key(filename)
-        key.content_type = 'text/plain'
+        key.content_type = 'application/x-gzip'
         directive_file.seek(0)
         key.set_contents_from_file(directive_file,
                                    encrypt_key=True)
@@ -857,7 +875,10 @@ class DirectivePublisher(threading.Thread):
 
         # The serving directives for videos are active, update the request state
         # for videos
-        self._update_request_state_to_serving()
+        t = threading.Timer(options.db_update_delay, 
+                self._update_request_state_to_serving)
+        t.daemon = True
+        t.start()
 
     def _write_directives(self, stream):
         '''Write the current directives to the stream.'''
