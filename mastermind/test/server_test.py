@@ -1696,6 +1696,8 @@ class SmokeTesting(test_utils.neontest.TestCase):
             self.assertTrue(
                 self.directive_publisher.video_id_serving_map['key1_vid1'])
 
+            # check the DB to ensure it has changed
+
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()

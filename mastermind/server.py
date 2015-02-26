@@ -860,13 +860,14 @@ class DirectivePublisher(threading.Thread):
                          preserve_acl=True)
 
                 self.last_publish_time = curtime
+                self._update_request_state_to_serving()
 
                 # The serving directives for videos are active, update the
                 # request state for videos
-                t = threading.Timer(options.serving_update_delay, 
-                                    self._update_request_state_to_serving)
-                t.daemon = True
-                t.start()
+                #t = threading.Timer(options.serving_update_delay, 
+                #                    self._update_request_state_to_serving)
+                #t.daemon = True
+                #t.start()
 
                 # Send the callbacks for new videos after a delay
                 if self._callback_thread is None:
