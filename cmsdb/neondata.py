@@ -1081,8 +1081,11 @@ class NeonUserAccount(NamespacedStoredObject):
         Get the API key for the account, If already in the DB the generate method
         returns it
         '''
-        # TODO: Refactor when converted to Namespaced object
-        return NeonApiKey.generate(self.account_id) 
+        # Note: On DB retrieval the object gets created again, this may lead to
+        # creation of an addional api key mapping ; hence prevent it
+        # Figure out a cleaner implementation
+        if NeonUserAccount.__name__ not in self.account_id: 
+            return NeonApiKey.generate(self.account_id) 
 
     def get_processing_priority(self):
         return self.processing_priority

@@ -509,6 +509,15 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
     # Unit Tests
     ################################################################
 
+    def test_bad_brightcove_tokens(self):
+        #set up account and video state for testing
+        self.api_key = self.create_neon_account()
+        json_video_response = self.create_brightcove_account()
+        vr = json.loads(json_video_response)
+        self.assertEqual(vr['error'], 
+            "Read token given is incorrect or brightcove api failed")
+
+
     def test_invalid_get_rest_uri(self):
         ''' test uri parsing, invalid requests '''
         api_key = self.create_neon_account()

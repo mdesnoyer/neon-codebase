@@ -70,10 +70,8 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         na = NeonUserAccount(a_id)
         na.save()
 
-        print a_id
         api_key_from_db = NeonApiKey.get_api_key(a_id)
         self.assertEqual(na.neon_api_key, api_key_from_db)
-
 
     def test_get_all_accounts(self):
         ''' test get all neonuser accounts '''
