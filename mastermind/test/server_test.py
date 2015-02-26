@@ -22,6 +22,7 @@ import fake_tempfile
 import happybase
 import impala.error
 import json
+import gzip
 import logging
 import mastermind.core
 from mock import MagicMock, patch
@@ -1003,6 +1004,10 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.callback_mock = MagicMock()
         self.callback_patcher.start().return_value = self.callback_mock
 
+        self.old_serving_update_delay = options.get(
+            'mastermind.server.serving_update_delay')
+        options._set('mastermind.server.serving_update_delay', 0)
+
         self.mastermind = mastermind.core.Mastermind()
         self.publisher = mastermind.server.DirectivePublisher(
             self.mastermind)
@@ -1013,13 +1018,19 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.callback_patcher.stop()
         mastermind.server.tempfile = self.real_tempfile
         self.s3_patcher.stop()
+        options._set('mastermind.server.serving_update_delay',
+                     self.old_serving_update_delay)
+        cb_thread = self.publisher._callback_thread
         del self.mastermind
         super(TestDirectivePublisher, self).tearDown()
+        if cb_thread is not None:
+            cb_thread.join(5)
 
     def _parse_directive_file(self, file_data):
         '''Returns expiry, {tracker_id -> account_id},
         {(account_id, video_id) -> json_directive}'''
-        lines = file_data.split('\n')
+        gz = gzip.GzipFile(fileobj=StringIO(file_data), mode='rb')
+        lines = gz.read().split('\n')
         
         # Make sure the expiry is valid
         self.assertRegexpMatches(lines[0], 'expiry=.+')
@@ -1120,11 +1131,15 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.assertIn('mastermind', key_names)
         key_names.remove('mastermind')
         self.assertRegexpMatches(key_names[0], '[0-9]+\.mastermind')
-        
+       
+        # check that mastermind file has a gzip header 
+        mastermind_file = bucket.get_key('mastermind')
+        self.assertEqual(mastermind_file.content_type, 'application/x-gzip')
+
         # Now check the data format in the file
         expiry, tracker_ids, default_thumbs, directives = \
           self._parse_directive_file(
-            bucket.get_key('mastermind').get_contents_as_string())
+            mastermind_file.get_contents_as_string())
         
         # Make sure the expiry is valid
         self.assertGreater(expiry,
@@ -1202,7 +1217,9 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             dateutil.parser.parse(directives[('acct1', 'acct1_vid2')]['sla']),
             date.datetime.now(dateutil.tz.tzutc()))
 
-        # Verify that the callbacks were scheduled
+        # Verify that the callbacks were sent
+        if self.publisher._callback_thread:
+            self.publisher._callback_thread.join(5)
         self.callback_mock.schedule_all_callbacks.assert_called_with(
             ['acct1_vid1', 'acct1_vid2'])
 
@@ -1320,6 +1337,31 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             },
             directives[('acct1', 'acct1_vid2')])
 
+    def test_serving_url_list_empty(self):
+        self.mastermind.serving_directive = {
+            'acct1_vid2': (('acct1', 'acct1_vid2'), 
+                           [('tid21', 1.0),
+                            ('tid22', 0.0)])}
+        self.mastermind.video_info = self.mastermind.serving_directive
+        self.publisher.update_tracker_id_map({'tai1' : 'acct1',
+                                              'tai2' : 'acct2'})
+
+        self.publisher.update_serving_urls({
+            'acct1_vid2_tid21' : {}})
+
+        with self.assertLogExists(logging.ERROR, 
+                                  ('Could not find all serving URLs for '
+                                   'video: acct1_vid2')):
+            with self.assertLogExists(logging.ERROR,
+                                      ('No serving urls for thumb '
+                                       'acct1_vid2_tid21')):
+                self.publisher._publish_directives()
+
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
+        expiry, tracker_ids, default_thumbs, directives = \
+          self._parse_directive_file(
+            bucket.get_key('mastermind').get_contents_as_string())
+
     def test_update_request_state_to_serving(self):
         '''
         Test the update_request_state logic
@@ -1415,6 +1457,8 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.WARNING,
                                   'Unexpected error when sending a customer'):
             self.publisher._publish_directives()
+            if self.publisher._callback_thread:
+                self.publisher._callback_thread.join(5)
 
         # Make sure that there are two directive files, one is the
         # REST endpoint and the second is a timestamped one.
@@ -1504,6 +1548,10 @@ class SmokeTesting(test_utils.neontest.TestCase):
 
         self.activity_watcher = utils.ps.ActivityWatcher()
 
+        self.old_serving_update_delay = options.get(
+            'mastermind.server.serving_update_delay')
+        options._set('mastermind.server.serving_update_delay', 0)
+
         self.mastermind = mastermind.core.Mastermind()
         self.directive_publisher = mastermind.server.DirectivePublisher(
             self.mastermind, activity_watcher=self.activity_watcher)
@@ -1522,6 +1570,8 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.callback_patcher.stop()
         self.s3_patcher.stop()
         self.sqlite_connect_patcher.stop()
+        options._set('mastermind.server.serving_update_delay',
+                     self.old_serving_update_delay)
         self.redis.stop()
         self.directive_publisher.stop()
         self.video_watcher.stop()
@@ -1621,23 +1671,28 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self._add_hbase_entry(1405372146, 'key1_vid1_t1', iv=3, ic=1)
         self._add_hbase_entry(1405372146, 'key1_vid1_t2', iv=1, ic=1)
 
-        # Now start all the threads
-        self.video_watcher.start()
-        self.video_watcher.wait_until_loaded()
-        self.stats_watcher.start()
-        self.stats_watcher.wait_until_loaded()
-        self.directive_publisher.start()
+        # set the db update delay to 0
+        with options._set_bounded('mastermind.server.serving_update_delay', 0):
+            # Now start all the threads
+            self.video_watcher.start()
+            self.video_watcher.wait_until_loaded()
+            self.stats_watcher.start()
+            self.stats_watcher.wait_until_loaded()
+            self.directive_publisher.start()
 
-        time.sleep(1) # Make sure that the directive publisher gets busy
-        self.activity_watcher.wait_for_idle()
+            time.sleep(1) # Make sure that the directive publisher gets busy
+            self.activity_watcher.wait_for_idle()
 
-        # See if there is anything in S3 (which there should be)
-        bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
-        lines = bucket.get_key('mastermind').get_contents_as_string().split('\n')
-        self.assertEqual(len(lines), 5)
-    
-        # Check if the serving state of the video has changed
-        self.assertTrue(
+            time.sleep(2) # sleep for db update to finish 
+            # See if there is anything in S3 (which there should be)
+            bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
+            data = bucket.get_key('mastermind').get_contents_as_string()
+            gz = gzip.GzipFile(fileobj=StringIO(data), mode='rb')
+            lines = gz.read().split('\n')
+            self.assertEqual(len(lines), 5)
+        
+            # Check if the serving state of the video has changed
+            self.assertTrue(
                 self.directive_publisher.video_id_serving_map['key1_vid1'])
 
 if __name__ == '__main__':

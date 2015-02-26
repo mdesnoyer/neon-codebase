@@ -9,31 +9,15 @@ NOTE: The s3 credentials come from IAM role
 
 import boto.s3.connection
 import hashlib
+import gzip
 import re
 import sys
 from boto.s3.key import Key
 from boto.exception import S3ResponseError
 from optparse import OptionParser
+from StringIO import StringIO
 
-if __name__ == '__main__':
-    parser = OptionParser()
-    parser.add_option("-u", "--s3url", dest="s3URL",
-                        default="s3://neon-image-serving-directives/mastermind",
-                        help="s3location")
-
-    parser.add_option("-d", "--dest", dest="destination",
-                        default="/tmp/mastermind",
-                        help="write to FILE")
-
-    # Test configurations
-    parser.add_option("-s", "--host", dest="s3host", default=None,
-                        help="host ip")
-    
-    parser.add_option("-p", "--port", dest="s3port", default=None,
-                        help="port")
-
-    (options, pargs) = parser.parse_args()
-
+def main(options):
     s3re = re.compile("^s3://([^/]+)/?(.*)", re.IGNORECASE) 
     match = s3re.match(options.s3URL)
     if not match:
@@ -65,7 +49,11 @@ if __name__ == '__main__':
 
     try:
         # This overwrites the destination file
-        k.get_contents_to_filename(destination)
+        gzip_data = k.get_contents_as_string()
+        gz = gzip.GzipFile(fileobj=StringIO(gzip_data), mode='rb')
+        with open(destination, 'w') as f:
+            f.write(gz.read())
+
         # TODO (Sunil/Pierre) : test and refactor md5 check
         #downloaded_md5 = hashlib.md5(open(destination).read()).hexdigest()
         #if downloaded_md5 != k.md5:
@@ -74,3 +62,25 @@ if __name__ == '__main__':
         #TODO: more friendly exception messages
         print "Error downloading or writing the file", e
         sys.exit(1)
+
+if __name__ == '__main__':
+    parser = OptionParser()
+    parser.add_option("-u", "--s3url", dest="s3URL",
+                        default="s3://neon-image-serving-directives/mastermind",
+                        help="s3location")
+
+    parser.add_option("-d", "--dest", dest="destination",
+                        default="/tmp/mastermind",
+                        help="write to FILE")
+
+    # Test configurations
+    parser.add_option("-s", "--host", dest="s3host", default=None,
+                        help="host ip")
+    
+    parser.add_option("-p", "--port", dest="s3port", default=None,
+                        help="port")
+
+    (options, pargs) = parser.parse_args()
+
+    main(options)
+
