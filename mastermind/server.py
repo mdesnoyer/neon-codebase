@@ -719,8 +719,6 @@ class DirectivePublisher(threading.Thread):
         self.lock = threading.RLock()
         self._stopped = threading.Event()
 
-        self.db_update_lock = threading.RLock()
-        
         # For some reason, when testing on some machines, the patch
         # for the S3Connection doesn't work in a separate thread. So,
         # we grab the reference to the S3Connection on initialization
@@ -862,6 +860,7 @@ class DirectivePublisher(threading.Thread):
                 self.last_publish_time = curtime
                 self._update_request_state_to_serving()
 
+                #TODO(Sunil): use a thread and delay the DB update
                 # The serving directives for videos are active, update the
                 # request state for videos
                 #t = threading.Timer(options.serving_update_delay, 
@@ -996,32 +995,29 @@ class DirectivePublisher(threading.Thread):
                       % (default_size[0], default_size[1], thumb_id,
                          closest_size[0], closest_size[1]))
             return serving_urls[closest_size]
-   
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
+  
+    #TODO(Sunil): Make this async
     def _update_request_state_to_serving(self):
         ''' update all the new video's serving state 
             i.e ISP URLs are ready
         '''
 
-        with self.db_update_lock:
-            vids = []
-            for key, value in self.video_id_serving_map.iteritems():
-                if value == False:
-                    vids.append(key)
-            requests = \
-                    yield tornado.gen.Task(
-                            neondata.VideoMetadata.get_video_requests, vids)
-            for vid, request in zip(vids, requests):
-                if request:
-                    if request.state in [neondata.RequestState.ACTIVE, 
-                            neondata.RequestState.SERVING_AND_ACTIVE]:
-                        request.state = neondata.RequestState.SERVING_AND_ACTIVE
-                    else:
-                        request.state = neondata.RequestState.SERVING
-                    val = yield tornado.gen.Task(request.save)
-                    if val:
-                        self.video_id_serving_map[vid] = True
+        vids = []
+        for key, value in self.video_id_serving_map.iteritems():
+            if value == False:
+                vids.append(key)
+        requests = \
+                  neondata.VideoMetadata.get_video_requests(vids)
+        for vid, request in zip(vids, requests):
+            if request:
+                if request.state in [neondata.RequestState.ACTIVE, 
+                        neondata.RequestState.SERVING_AND_ACTIVE]:
+                    request.state = neondata.RequestState.SERVING_AND_ACTIVE
+                else:
+                    request.state = neondata.RequestState.SERVING
+                val = request.save()
+                if val:
+                    self.video_id_serving_map[vid] = True
 
     def _send_callbacks(self, compressed_video_ids):
         try:

@@ -55,6 +55,13 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             'cmsdb.neondata.blockingRedis.StrictRedis')
         self.redis_patcher.start()
         
+        # Mock out the callback manager
+        self.callback_patcher = patch(
+            'mastermind.server.utils.sqsmanager.CustomerCallbackManager')
+        self.callback_mock = MagicMock()
+        self.callback_patcher.start().return_value = \
+          self.callback_mock
+        
         self.mastermind = mastermind.core.Mastermind()
         self.directive_publisher = mastermind.server.DirectivePublisher(
             self.mastermind)
@@ -66,6 +73,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
         self.redis_patcher.stop()
+        self.callback_patcher.stop()
 
     def test_good_db_data(self, datamock):
         # Define platforms in the database
@@ -1363,6 +1371,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
           self._parse_directive_file(
             bucket.get_key('mastermind').get_contents_as_string())
 
+    #TODO(Sunil): split the test, add error cases
     def test_update_request_state_to_serving(self):
         '''
         Test the update_request_state logic
@@ -1697,6 +1706,8 @@ class SmokeTesting(test_utils.neontest.TestCase):
                 self.directive_publisher.video_id_serving_map['key1_vid1'])
 
             # check the DB to ensure it has changed
+            req = neondata.VideoMetadata.get_video_request('key1_vid1')
+            self.assertEqual(req.state, "serving")
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
