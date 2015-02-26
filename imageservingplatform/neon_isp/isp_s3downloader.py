@@ -49,10 +49,21 @@ def main(options):
 
     try:
         # This overwrites the destination file
-        gzip_data = k.get_contents_as_string()
-        gz = gzip.GzipFile(fileobj=StringIO(gzip_data), mode='rb')
-        with open(destination, 'w') as f:
-            f.write(gz.read())
+        data = k.get_contents_as_string()
+        ctype = k.content_type
+        if ctype and ctype == "application/x-gzip":
+            gz = gzip.GzipFile(fileobj=StringIO(data), mode='rb')
+            with open(destination, 'w') as f:
+                gzip_data = gz.read()
+                f.write(gzip_data)
+        else:
+            with open(destination, 'w') as f:
+                try:
+                    gz = gzip.GzipFile(fileobj=StringIO(data), mode='rb')
+                    gzip_data = gz.read()
+                    f.write(gzip_data)
+                except IOError, e:
+                    f.write(data)
 
         # TODO (Sunil/Pierre) : test and refactor md5 check
         #downloaded_md5 = hashlib.md5(open(destination).read()).hexdigest()

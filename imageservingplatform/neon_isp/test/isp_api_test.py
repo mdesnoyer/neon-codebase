@@ -83,7 +83,8 @@ def FakeS3Upload(fpath, s3cfg, s3fname):
     '''
     Upload a file to s3 using s3cmd
     '''
-    ret = subprocess.call(["s3cmd", "--config=%s" % s3cfg, "put", "%s" % fpath,
+    ret = subprocess.call(["s3cmd", "--config=%s" % s3cfg,
+        "--add-header=Content-Type:application/x-gzip", "put", "%s" % fpath,
         "%s" % s3fname]) 
     
     #cmd = "s3cmd --config=%s put %s %s" % (s3cfg, fpath, s3fname)
