@@ -404,7 +404,11 @@ class BrightcoveApi(object):
         '''
 
         video_urls = {}
-        d_url  = b_json_item['FLVURL']
+        try:
+            d_url  = b_json_item['FLVURL']
+        except KeyError, e:
+            _log.error("missing flvurl")
+            return
 
         #If we get a broken response from brightcove api
         if not b_json_item.has_key('renditions'):
@@ -484,7 +488,11 @@ class BrightcoveApi(object):
             if vid not in videos_processed:
                 thumb  = item['thumbnailURL'] 
                 still  = item['videoStillURL']
-                d_url  = item['FLVURL']
+                try:
+                    d_url  = item['FLVURL']
+                except KeyError, e:
+                    _log.error("missing flvurl for video %s" % vid)
+                    continue
                 length = item['length']
 
                 d_url = self.get_video_url_to_download(item, 
@@ -495,12 +503,12 @@ class BrightcoveApi(object):
 
                 if thumb is None or still is None or length <0:
                     _log.info("key=process_publisher_feed" 
-                                " msg=%s is a live feed" %vid)
+                                " msg=%s is a live feed" % vid)
                     continue
 
                 if d_url is None:
                     _log.info("key=process_publisher_feed"
-                                " msg=flv url missing for %s" %vid)
+                                " msg=flv url missing for %s" % vid)
                     continue
 
                 resp = self.format_neon_api_request(vid,
@@ -739,7 +747,12 @@ class BrightcoveApi(object):
             ''' vid info callback '''
             if not response.error and "error" not in response.body:
                 data = tornado.escape.json_decode(response.body)
-                v_url = data["FLVURL"]
+                try:
+                    v_url = data["FLVURL"]
+                except KeyError, e:
+                    create_callback(response)
+                    return
+
                 still = data['videoStillURL']
                 vid = str(data["id"])
                 title = data["name"]
