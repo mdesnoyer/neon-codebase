@@ -121,7 +121,7 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
         except socket.error as e:
             # Socket resolution error
             if do_logging:
-                _log.error('msg=socket resolution error for %r' % request)
+                _log.error('msg=socket resolution error for %r' % request.url)
             error = tornado.httpclient.HTTPError(
                 502, 'socket error')
             response = tornado.httpclient.HTTPResponse(request,
