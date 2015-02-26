@@ -976,6 +976,13 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
 class TestDirectivePublisher(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestDirectivePublisher, self).setUp()
+
+        # Mock out the callback manager
+        self.callback_patcher = patch(
+            'mastermind.server.utils.sqsmanager.CustomerCallbackManager')
+        self.callback_mock = MagicMock()
+        self.callback_patcher.start().return_value = \
+          self.callback_mock
         
         self.mastermind = mastermind.core.Mastermind()
         self.publisher = mastermind.server.DirectivePublisher(
@@ -997,12 +1004,6 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.neondata_patcher = patch('mastermind.server.neondata')
         self.datamock = self.neondata_patcher.start()
         self.datamock.RequestState = neondata.RequestState
-
-        # Mock out the callback manager
-        self.callback_patcher = patch(
-            'mastermind.server.utils.sqsmanager.CustomerCallbackManager')
-        self.callback_mock = MagicMock()
-        self.callback_patcher.start().return_value = self.callback_mock
 
         self.old_serving_update_delay = options.get(
             'mastermind.server.serving_update_delay')
