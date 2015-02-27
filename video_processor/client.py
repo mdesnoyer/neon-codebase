@@ -618,7 +618,7 @@ class VideoProcessor(object):
             raise DBError("Error finishing api request")
 
         # Send callbacks and notifications
-        self.send_client_callback_response(video_id, cb_request)
+        self.send_client_callback_response(new_video_metadata.key, cb_request)
         self.send_notifiction_response(api_request)
 
         _log.info('Sucessfully finalized video %s. Is has video id %s' % 
@@ -634,7 +634,8 @@ class VideoProcessor(object):
 
         response_body = {}
         response_body["job_id"] = self.video_metadata.job_id 
-        response_body["video_id"] = self.video_metadata.key 
+        response_body["video_id"] = neondata.InternalVideoID.to_external(
+            self.video_metadata.key)
         response_body["framenos"] = [
             x[0].frameno for x in self.thumbnails 
             if x[0].type == neondata.ThumbnailType.NEON]
