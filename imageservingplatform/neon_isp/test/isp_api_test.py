@@ -19,6 +19,7 @@ import atexit
 from boto.s3.connection import S3Connection
 from boto.s3.bucketlistresultset import BucketListResultSet
 import json
+import gzip
 import logging
 import httplib
 import nginx_isp_test_conf
@@ -29,6 +30,7 @@ import signal
 import shutil
 import subprocess
 import s3cmd_fakes3cfg
+from StringIO import StringIO
 import unittest
 import urllib
 import urllib2
@@ -36,6 +38,7 @@ import utils
 import utils.neon
 import utils.ps
 import time
+from utils import gzipstream
 import tempfile
 from test_utils import net
 import test_utils.neontest
@@ -80,7 +83,8 @@ def FakeS3Upload(fpath, s3cfg, s3fname):
     '''
     Upload a file to s3 using s3cmd
     '''
-    ret = subprocess.call(["s3cmd", "--config=%s" % s3cfg, "put", "%s" % fpath,
+    ret = subprocess.call(["s3cmd", "--config=%s" % s3cfg,
+        "--add-header=Content-Type:application/x-gzip", "put", "%s" % fpath,
         "%s" % s3fname]) 
     
     #cmd = "s3cmd --config=%s put %s %s" % (s3cfg, fpath, s3fname)
@@ -202,7 +206,17 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         bucket_name = "s3://my_bucket"
         FakeS3CreateBucket(bucket_name, cls.s3cfg.name)
         cls.s3_mfile_url = "%s/mastermind.api.test" % bucket_name # mastermind s3 file url
-        FakeS3Upload(mfile_path, cls.s3cfg.name, cls.s3_mfile_url)
+        
+        # Gzip the mastermind file that is being uploaded to fake s3
+        # Lets keep the mastermind file as ascii the the test repo as its 
+        # human readable
+        gzip_mfile = tempfile.NamedTemporaryFile()
+        with open(mfile_path, 'r') as f:
+            gzip_data = f.read()
+            gzip_mfile.write(gzipstream.GzipStream().read(StringIO(gzip_data)))
+            gzip_mfile.flush()
+        
+        FakeS3Upload(gzip_mfile.name, cls.s3cfg.name, cls.s3_mfile_url)
 
         s3downloader = base_path +\
                     "/imageservingplatform/neon_isp/isp_s3downloader.py"
@@ -374,6 +388,37 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         #Verify cookie inclusion of timestamp in the cookie
         ts = int(time.time()) / 100
         self.assertTrue(str(ts) in cookie_value)
+
+    #
+    # directive is invalid and rejected but the rest of mastermind is loaded. 
+    # the  default account thumbnail is returned
+
+    def test_client_api_directive_rejected(self):
+        '''
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("pubmissingpct", prefix + "vidmissingpct", 800, 700, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://neon/default_url_defaccmissingpct.jpg")
+
+
+
 
     def test_client_api_default_thumbnail(self):
         '''

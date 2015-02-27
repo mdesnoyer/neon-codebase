@@ -16,10 +16,12 @@ import atexit
 from boto.s3.connection import S3Connection
 from boto.emr.connection import EmrConnection
 import boto
+from contextlib import closing
 from cmsdb import neondata
 import cPickle as pickle
 import datetime
 import dateutil.parser
+import gzip
 import happybase
 import impala.dbapi
 import impala.error
@@ -30,6 +32,7 @@ import signal
 import socket
 import stats.cluster
 import struct
+from StringIO import StringIO
 import tempfile
 import time
 import thrift
@@ -37,8 +40,10 @@ import thrift.Thrift
 import threading
 import tornado.ioloop
 import utils.neon
+import utils
 from utils.options import define, options
 import utils.ps
+import utils.sqsmanager
 from utils import statemon
 import zlib
 
@@ -69,6 +74,9 @@ define('publishing_period', type=int, default=300,
        help='Time in seconds between when the directive file is published.')
 define('expiry_buffer', type=int, default=30,
        help='Buffer in seconds for the expiry of the directives file')
+define('serving_update_delay', type=int, default=240,
+       help='delay in seconds to update new videos to serving state')
+
 
 # Monitoring variables
 statemon.define('time_since_stats_update', float) # Time since the last update
@@ -717,6 +725,9 @@ class DirectivePublisher(threading.Thread):
         # instead of relying on the import statement.
         self.S3Connection = S3Connection
 
+        self.callback_manager = utils.sqsmanager.CustomerCallbackManager()
+        self._callback_thread = None
+
     def __del__(self):
         if self._update_publish_timer and self._update_publish_timer.is_alive():
             self._update_publish_timer.cancel()
@@ -781,86 +792,98 @@ class DirectivePublisher(threading.Thread):
             # should be false. i.e request state not updated
             self.video_id_serving_map[vid] = False
 
-    # TODO(Sunil): Do these updates asynchronously
-    def _update_request_state_to_serving(self):
-        ''' update all the new video's serving state 
-            i.e ISP URLs are ready
-        '''
-        vids = []
-        for key, value in self.video_id_serving_map.iteritems():
-            if value == False:
-                vids.append(key)
-        requests = neondata.VideoMetadata.get_video_requests(vids)
-        for vid, request in zip(vids, requests):
-            # TODO(Sunil) : Bulk update
-            if request:
-                if request.state in [neondata.RequestState.ACTIVE, 
-                        neondata.RequestState.SERVING_AND_ACTIVE]:
-                    request.state = neondata.RequestState.SERVING_AND_ACTIVE
-                else:
-                    request.state = neondata.RequestState.SERVING
-                if request.save():
-                    self.video_id_serving_map[vid] = True
-
     def _publish_directives(self):
+
         '''Publishes the directives to S3'''
         # Create the directives file
         _log.info("Building directives file")
         curtime = datetime.datetime.utcnow()
-        directive_file = tempfile.TemporaryFile()
-        valid_length = options.expiry_buffer + options.publishing_period
-        directive_file.write(
-            'expiry=%s' % 
-            (curtime + datetime.timedelta(seconds=valid_length))
-            .strftime('%Y-%m-%dT%H:%M:%SZ'))
-        with self.lock:
-            self._write_directives(directive_file)
-        directive_file.write('\nend')
+        with closing(tempfile.NamedTemporaryFile('w+b')) as directive_file:
+            valid_length = options.expiry_buffer + options.publishing_period
+            expiry = 'expiry=%s' % (curtime + datetime.timedelta(
+                            seconds=valid_length)).strftime('%Y-%m-%dT%H:%M:%SZ')
+            directive_file.write(
+                'expiry=%s' % 
+                (curtime + datetime.timedelta(seconds=valid_length))
+                .strftime('%Y-%m-%dT%H:%M:%SZ'))
+            with self.lock:
+                written_video_ids = self._write_directives(directive_file)
+            directive_file.write('\nend')
+            directive_file.flush()
+            directive_file.seek(0)
 
+            with closing(tempfile.NamedTemporaryFile('w+b')) as gzip_file:
+                gzip_stream = gzip.GzipFile(mode='wb',
+                                            compresslevel=7,
+                                            fileobj=gzip_file)
+                gzip_stream.writelines(directive_file)
+                gzip_stream.close()
+                gzip_file.flush()
 
-        filename = '%s.%s' % (curtime.strftime('%Y%m%d%H%M%S'),
-                              options.directive_filename)
-        _log.info('Publishing directive to s3://%s/%s' %
-                  (options.s3_bucket, filename))
+                filename = '%s.%s' % (curtime.strftime('%Y%m%d%H%M%S'),
+                                      options.directive_filename)
+                _log.info('Publishing directive to s3://%s/%s' %
+                          (options.s3_bucket, filename))
 
-        # Create the connection to S3
-        s3conn = self.S3Connection()
-        try:
-            bucket = s3conn.get_bucket(options.s3_bucket)
-        except boto.exception.BotoServerError as e:
-            _log.error('Could not get bucket %s: %s' % (options.s3_bucket,
-                                                         e))
-            statemon.state.increment('publish_error')
-            return
-        except boto.exception.BotoClientError as e:
-            _log.error('Could not get bucket %s: %s' % (options.s3_bucket,
-                                                         e))
-            statemon.state.increment('publish_error')
-            return
-        except socket.error as e:
-            _log.error('Error connecting to S3: %s' % e)
-            statemon.state.increment('publish_error')
-            return
+                # Create the connection to S3
+                s3conn = self.S3Connection()
+                try:
+                    bucket = s3conn.get_bucket(options.s3_bucket)
+                except boto.exception.BotoServerError as e:
+                    _log.error('Could not get bucket %s: %s' % 
+                               (options.s3_bucket, e))
+                    statemon.state.increment('publish_error')
+                    return
+                except boto.exception.BotoClientError as e:
+                    _log.error('Could not get bucket %s: %s' % 
+                               (options.s3_bucket, e))
+                    statemon.state.increment('publish_error')
+                    return
+                except socket.error as e:
+                    _log.error('Error connecting to S3: %s' % e)
+                    statemon.state.increment('publish_error')
+                    return
 
-        # Write the file that is timestamped
-        key = bucket.new_key(filename)
-        key.content_type = 'text/plain'
-        directive_file.seek(0)
-        key.set_contents_from_file(directive_file,
-                                   encrypt_key=True)
+                # Write the file that is timestamped
+                key = bucket.new_key(filename)
+                gzip_file.seek(0)
+                key.set_contents_from_file(
+                    gzip_file,
+                    encrypt_key=True,
+                    headers={'Content-Type': 'application/x-gzip'})
 
-        # Copy the file to the REST endpoint
-        key.copy(bucket.name, options.directive_filename, encrypt_key=True,
-                 preserve_acl=True)
+                # Copy the file to the REST endpoint
+                key.copy(bucket.name, options.directive_filename,
+                         encrypt_key=True,
+                         preserve_acl=True)
 
-        self.last_publish_time = curtime
+                self.last_publish_time = curtime
+                self._update_request_state_to_serving()
 
-        # The serving directives for videos are active, update the request state
-        # for videos
-        self._update_request_state_to_serving()
+                #TODO(Sunil): use a thread and delay the DB update
+                # The serving directives for videos are active, update the
+                # request state for videos
+                #t = threading.Timer(options.serving_update_delay, 
+                #                    self._update_request_state_to_serving)
+                #t.daemon = True
+                #t.start()
+
+                # Send the callbacks for new videos after a delay
+                if self._callback_thread is None:
+                    self._callback_thread = threading.Timer(
+                        options.serving_update_delay,
+                        self._send_callbacks,
+                        (pack_obj(written_video_ids),))
+                    self._callback_thread.daemon = True
+                    self._callback_thread.start()
 
     def _write_directives(self, stream):
-        '''Write the current directives to the stream.'''
+        '''Write the current directives to the stream.
+
+        Returns the video ids of the directives that were sucessfully written.
+        '''
+        written_video_ids = []
+        
         # First write out the tracker id maps
         _log.info("Writing tracker id maps")
         for tracker_id, account_id in self.tracker_id_map.iteritems():
@@ -940,8 +963,10 @@ class DirectivePublisher(threading.Thread):
                 'fractions': fractions
             }
             stream.write('\n' + json.dumps(data))
+            written_video_ids.append(video_id)
 
         statemon.state.serving_urls_missing = serving_urls_missing
+        return written_video_ids
 
     def _get_default_url(self, account_id, thumb_id):
         '''Returns the default url for this thumbnail id.'''
@@ -951,6 +976,10 @@ class DirectivePublisher(threading.Thread):
             default_size = (160, 90)
         
         serving_urls = unpack_obj(self.serving_urls[thumb_id])
+        if serving_urls is None or len(serving_urls) == 0:
+            _log.error('No serving urls for thumb %s' % thumb_id)
+            raise KeyError('No serving urls for thumb %s' % thumb_id)
+        
         try:
             return serving_urls[tuple(default_size)]
         except KeyError:
@@ -966,6 +995,40 @@ class DirectivePublisher(threading.Thread):
                       % (default_size[0], default_size[1], thumb_id,
                          closest_size[0], closest_size[1]))
             return serving_urls[closest_size]
+  
+    #TODO(Sunil): Make this async
+    def _update_request_state_to_serving(self):
+        ''' update all the new video's serving state 
+            i.e ISP URLs are ready
+        '''
+
+        vids = []
+        for key, value in self.video_id_serving_map.iteritems():
+            if value == False:
+                vids.append(key)
+        requests = \
+                  neondata.VideoMetadata.get_video_requests(vids)
+        for vid, request in zip(vids, requests):
+            if request:
+                if request.state in [neondata.RequestState.ACTIVE, 
+                        neondata.RequestState.SERVING_AND_ACTIVE]:
+                    request.state = neondata.RequestState.SERVING_AND_ACTIVE
+                else:
+                    request.state = neondata.RequestState.SERVING
+                val = request.save()
+                if val:
+                    self.video_id_serving_map[vid] = True
+
+    def _send_callbacks(self, compressed_video_ids):
+        try:
+            video_ids = unpack_obj(compressed_video_ids)
+            
+            self.callback_manager.schedule_all_callbacks(video_ids)
+        except Exception as e:
+            _log.warn('Unexpected error when sending a customer '
+                      'callback: %s' % e)
+        finally:
+            self._callback_thread = None
         
 def main(activity_watcher = utils.ps.ActivityWatcher()):    
     with activity_watcher.activate():
@@ -998,6 +1061,10 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
             publisher.last_publish_time).total_seconds()
     tornado.ioloop.PeriodicCallback(update_publish_time, 10000)
     tornado.ioloop.IOLoop.current().start()
+
+    publisher.join(300)
+    videoDbThread.join(30)
+    statsDbThread.join(30)
     
 if __name__ == "__main__":
     utils.neon.InitNeon()
