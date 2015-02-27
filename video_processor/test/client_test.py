@@ -559,7 +559,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         # and that it was recorded in the api request object.
         expected_response = {
             'job_id' : 'job1',
-            'video_id' : video_data.key,
+            'video_id' : 'vid1',
             'framenos' : [6],
             'thumbnails' : [n_thumbs[0].urls[0]],
             'serving_url' : video_data.serving_url
@@ -569,7 +569,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertEquals(self.mock_sqs_manager().
                           add_callback_response.call_count, 1)
         cargs, kwargs = self.mock_sqs_manager().add_callback_response.call_args
-        self.assertEquals(cargs[0], 'vid1')
+        self.assertEquals(cargs[0], '%s_vid1' % self.api_key)
         self.assertEquals(cargs[1], 'http://callback.com')
         self.assertDictContainsSubset(expected_response,
                                       json.loads(cargs[2]))
