@@ -797,20 +797,21 @@ class DirectivePublisher(threading.Thread):
         '''Publishes the directives to S3'''
         # Create the directives file
         _log.info("Building directives file")
-        curtime = datetime.datetime.utcnow()
         with closing(tempfile.NamedTemporaryFile('w+b')) as directive_file:
-            valid_length = options.expiry_buffer + options.publishing_period
-            expiry = 'expiry=%s' % (curtime + datetime.timedelta(
-                            seconds=valid_length)).strftime('%Y-%m-%dT%H:%M:%SZ')
-            directive_file.write(
-                'expiry=%s' % 
-                (curtime + datetime.timedelta(seconds=valid_length))
-                .strftime('%Y-%m-%dT%H:%M:%SZ'))
+            # Create the space for the expiry
+            self._write_expiry(directive_file)
+
+            # Write the data
             with self.lock:
                 written_video_ids = self._write_directives(directive_file)
             directive_file.write('\nend')
+
+            # Overwrite the expiry because write_directives can take a while
+            self._write_expiry(directive_file)
             directive_file.flush()
             directive_file.seek(0)
+
+            curtime = datetime.datetime.utcnow()
 
             with closing(tempfile.NamedTemporaryFile('w+b')) as gzip_file:
                 gzip_stream = gzip.GzipFile(mode='wb',
@@ -995,6 +996,20 @@ class DirectivePublisher(threading.Thread):
                       % (default_size[0], default_size[1], thumb_id,
                          closest_size[0], closest_size[1]))
             return serving_urls[closest_size]
+
+    def _write_expiry(self, fp):
+        '''Writes the expiry line at the beginning of the file point fp.
+
+        Seeks if necessary.
+        '''
+        fp.seek(0)
+        valid_length = options.expiry_buffer + options.publishing_period
+        fp.write('expiry=%s' % 
+                 (datetime.datetime.utcnow() +
+                  datetime.timedelta(seconds=valid_length))
+                 .strftime('%Y-%m-%dT%H:%M:%SZ'))
+        fp.flush()
+        
   
     #TODO(Sunil): Make this async
     def _update_request_state_to_serving(self):
