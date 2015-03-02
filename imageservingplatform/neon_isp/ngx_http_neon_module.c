@@ -537,11 +537,12 @@ static ngx_int_t ngx_http_neon_handler_healthcheck(ngx_http_request_t *r)
 
 static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
 {
-    static u_char resp[2048];
-    char formatter[2048];
+    // static const unsigned buf_size = 4096;
+    static u_char resp[2400];
+    char formatter[2400];
     
     // creates a formatter string capable of holding all counters
-    create_stats_formatter((int)NEON_STATS_NUM_OF_ELEMENTS, formatter, 2048);
+    create_stats_formatter((int)NEON_STATS_NUM_OF_ELEMENTS, formatter, 2400);
 
     //static unsigned char test_response[] = "stats";
     ngx_buf_t    *b;
