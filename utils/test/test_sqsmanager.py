@@ -162,7 +162,7 @@ class TestSQSCallbackManager(test_utils.neontest.AsyncTestCase):
                                            '{"vid": 1}') 
         self.manager.add_callback_response('v2', 'http://callback2',
                                            '{"vid": 2}') 
-        self.manager.schedule_all_callbacks(['v1', 'v2', 'v3'])
+        self.manager.schedule_all_callbacks(set(['v1', 'v2', 'v3']))
         self.assertEqual(self.mock_http.send_request.call_count, 2)
         requests = self.mock_http.send_request.call_args_list
         self.assertEqual(requests[0][0][0].url, 'http://callback1')

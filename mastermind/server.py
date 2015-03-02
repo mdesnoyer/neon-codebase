@@ -28,6 +28,7 @@ import impala.error
 import json
 import logging
 from mastermind.core import VideoInfo, ThumbnailInfo, Mastermind
+import multiprocessing
 import signal
 import socket
 import stats.cluster
@@ -88,6 +89,9 @@ statemon.define('videodb_error', int)
 statemon.define('publish_error', int)
 statemon.define('serving_urls_missing', int)
 statemon.define('account_default_serving_url_missing', int)
+statemon.define('unexpected_callback_errors', int)
+statemon.define('unexpected_db_update_error', int)
+statemon.define('pending_modifies', int)
 
 _log = logging.getLogger(__name__)
 
@@ -703,10 +707,6 @@ class DirectivePublisher(threading.Thread):
         super(DirectivePublisher, self).__init__(name='DirectivePublisher')
         self.mastermind = mastermind
         self.tracker_id_map = tracker_id_map or {}
-        # Keep track of videos for which the directive has been published
-        # This map is used to keep track of video_ids for which serving urls
-        # state has been updated.
-        self.video_id_serving_map = {} # video_id => serving_state
         self.serving_urls = serving_urls or {}
         self.default_sizes = default_sizes or {}
         self.default_thumbs = default_thumbs or {}
@@ -725,13 +725,36 @@ class DirectivePublisher(threading.Thread):
         # instead of relying on the import statement.
         self.S3Connection = S3Connection
 
+        # Set of last video ids in the directive file
+        self.last_published_videos = set([])
+
         self.callback_manager = utils.sqsmanager.CustomerCallbackManager()
         self._callback_thread = None
+
+        # Counter for the number of pending modify calls to the database
+        self.pending_modifies = multiprocessing.Value('i', 0)
+        statemon.state.pending_modifies = 0
+        self._lock = multiprocessing.RLock()
+        self.modify_waiter = multiprocessing.Condition()
 
     def __del__(self):
         if self._update_publish_timer and self._update_publish_timer.is_alive():
             self._update_publish_timer.cancel()
         super(DirectivePublisher, self).__del__()
+
+    def _incr_pending_modify(self, count):
+        '''Safely increment the number of pending modifies by count.'''
+        with self._lock:
+            self.pending_modifies.value += count
+
+        with self.modify_waiter:
+            self.modify_waiter.notify_all()
+        statemon.state.pending_modifies = self.pending_modifies.value
+
+    def wait_for_pending_modifies(self):
+        with self.modify_waiter:
+            while self.pending_modifies.value > 0:
+                self.modify_waiter.wait()
 
     def run(self):
         self._stopped.clear()
@@ -783,14 +806,6 @@ class DirectivePublisher(threading.Thread):
             10.0, self._update_time_since_publish)
         self._update_publish_timer.daemon = True
         self._update_publish_timer.start()
-    
-    def _add_video_id_to_serving_map(self, vid):
-        try:
-            self.video_id_serving_map[vid]
-        except KeyError, e:
-            # new video is inserted, by default its serving state
-            # should be false. i.e request state not updated
-            self.video_id_serving_map[vid] = False
 
     def _publish_directives(self):
 
@@ -858,32 +873,47 @@ class DirectivePublisher(threading.Thread):
                          encrypt_key=True,
                          preserve_acl=True)
 
-                self.last_publish_time = curtime
-                self._update_request_state_to_serving()
-
-                #TODO(Sunil): use a thread and delay the DB update
-                # The serving directives for videos are active, update the
-                # request state for videos
-                #t = threading.Timer(options.serving_update_delay, 
-                #                    self._update_request_state_to_serving)
-                #t.daemon = True
-                #t.start()
+                # Schedule updates to the database with the video request state
+                new_serving_videos = (written_video_ids - \
+                                      self.last_published_videos)
+                just_stopped_videos = (self.last_published_videos - \
+                                       written_video_ids)
+                self.last_published_videos = written_video_ids
+                if len(new_serving_videos) > 0:
+                    self._incr_pending_modify(len(new_serving_videos))
+                    t = threading.Timer(
+                        options.serving_update_delay,
+                        self._update_video_serving_state,
+                        (new_serving_videos,
+                         neondata.RequestState.SERVING))
+                    t.daemon = True
+                    t.start()
+                if len(just_stopped_videos) > 0:
+                    self._incr_pending_modify(len(just_stopped_videos))
+                    t = threading.Timer(
+                        options.serving_update_delay,
+                        self._update_video_serving_state,
+                        (just_stopped_videos,
+                         neondata.RequestState.FINISHED))
+                    t.daemon = True
+                    t.start()
 
                 # Send the callbacks for new videos after a delay
                 if self._callback_thread is None:
                     self._callback_thread = threading.Timer(
                         options.serving_update_delay,
-                        self._send_callbacks,
-                        (pack_obj(written_video_ids),))
+                        self._send_callbacks)
                     self._callback_thread.daemon = True
                     self._callback_thread.start()
+
+                self.last_publish_time = curtime
 
     def _write_directives(self, stream):
         '''Write the current directives to the stream.
 
         Returns the video ids of the directives that were sucessfully written.
         '''
-        written_video_ids = []
+        written_video_ids = set([])
         
         # First write out the tracker id maps
         _log.info("Writing tracker id maps")
@@ -923,8 +953,6 @@ class DirectivePublisher(threading.Thread):
         serving_urls_missing = 0
         for key, directive in self.mastermind.get_directives():
             account_id, video_id = key
-            # keep track of video_ids in directive file
-            self._add_video_id_to_serving_map(video_id)
             fractions = []
             missing_urls = False
             for thumb_id, frac in directive:
@@ -964,7 +992,7 @@ class DirectivePublisher(threading.Thread):
                 'fractions': fractions
             }
             stream.write('\n' + json.dumps(data))
-            written_video_ids.append(video_id)
+            written_video_ids.add(video_id)
 
         statemon.state.serving_urls_missing = serving_urls_missing
         return written_video_ids
@@ -1009,37 +1037,31 @@ class DirectivePublisher(threading.Thread):
                   datetime.timedelta(seconds=valid_length))
                  .strftime('%Y-%m-%dT%H:%M:%SZ'))
         fp.flush()
-        
-  
-    #TODO(Sunil): Make this async
-    def _update_request_state_to_serving(self):
-        ''' update all the new video's serving state 
-            i.e ISP URLs are ready
-        '''
 
-        vids = []
-        for key, value in self.video_id_serving_map.iteritems():
-            if value == False:
-                vids.append(key)
-        requests = \
-                  neondata.VideoMetadata.get_video_requests(vids)
-        for vid, request in zip(vids, requests):
-            if request:
-                if request.state in [neondata.RequestState.ACTIVE, 
-                        neondata.RequestState.SERVING_AND_ACTIVE]:
-                    request.state = neondata.RequestState.SERVING_AND_ACTIVE
-                else:
-                    request.state = neondata.RequestState.SERVING
-                val = request.save()
-                if val:
-                    self.video_id_serving_map[vid] = True
-
-    def _send_callbacks(self, compressed_video_ids):
+    def _update_video_serving_state(self, video_ids, new_state):
+        '''Updates a list of video ids with a new serving state.'''
         try:
-            video_ids = unpack_obj(compressed_video_ids)
-            
-            self.callback_manager.schedule_all_callbacks(video_ids)
+            request_keys = [(video.job_id, video.get_account_id()) for 
+                            video in neondata.VideoMetadata.get_many(video_ids)
+                            if video is not None]
+            def _set_state(request_dict):
+                for obj in request_dict.itervalues():
+                    if obj is not None:
+                        obj.state = new_state
+            neondata.NeonApiRequest.modify_many(request_keys, _set_state)
         except Exception as e:
+            statemon.state.increment('unexpected_db_update_error')
+            _log.exception('Unexpected error when updating serving state in '
+                           'database %s' % e)
+        finally:
+            self._incr_pending_modify(-len(video_ids))
+
+    def _send_callbacks(self):
+        try:
+            self.callback_manager.schedule_all_callbacks(
+                self.last_published_videos)
+        except Exception as e:
+            statemon.state.increment('unexpected_callback_errors')
             _log.warn('Unexpected error when sending a customer '
                       'callback: %s' % e)
         finally:

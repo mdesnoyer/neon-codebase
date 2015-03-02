@@ -1282,6 +1282,7 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
         self.redis.stop()
+        super(TestStatusUpdatesInDb, self).tearDown()
 
     def _wait_for_db_updates(self):
         self.mastermind.wait_for_pending_modifies()
