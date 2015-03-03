@@ -45,6 +45,7 @@ define("test_key", default="3qswu22oabmnl8d8hqcuku14", help="test api key",
         type=str)
 define("max_retries", default=3,
        help="Maximum number of video processing retries")
+define("priority_check", default=600, type=str)
 
 _log = logging.getLogger(__name__)
 DIRNAME = os.path.dirname(__file__)
@@ -54,8 +55,16 @@ statemon.define('server_queue', int)
 statemon.define('duplicate_requests', int)
 statemon.define('add_video_error', int)
 statemon.define('dequeue_requests', int)
-statemon.define('queue_size_bytes', int) # size of the queue in bytes of video
-
+statemon.define('queue_size_bytes', int) #size of the queue in bytes of video
+#invalid url while retrieving headers
+statemon.define('get_content_length_error', int) 
+statemon.define('job_timedout', int)
+statemon.define('requeue_exception', int)
+statemon.define('too_many_job_retries', int)
+statemon.define('bad_request', int)
+statemon.define('neon_requests', int)
+statemon.define('brightcove_requests', int)
+statemon.define('ooyala_requests', int)
 
 # Constants
 TOP_THUMBNAILS = "topn"
@@ -75,25 +84,33 @@ INTEGRATION_ID = "integration_id"
 class JobException(Exception): pass
 class JobFailed(JobException): pass
 
-customer_priorities = {} 
 
-@utils.sync.optional_sync
-@tornado.gen.coroutine
-def get_customer_priority(api_key):
-    #TODO(Sunil): refresh contents every "x" mins
-    priority = 1 # by default return priority=1
-    try:
-        priority = customer_priorities[api_key]
-    except KeyError, e:
-        nu = yield tornado.gen.Task(neondata.NeonUserAccount.get,
-                api_key)
-        if nu:
-            priority = nu.processing_priority
-            customer_priorities[api_key] = priority
-        else:
-            _log.error("Failed to fetch NeonUserAccount %s" % api_key)
+class DBCache(object):
+    customer_priorities = {} 
+    last_priority_check = time.time()
 
-    raise tornado.gen.Return(priority)
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_customer_priority(cls, api_key):
+        priority = 1 # by default return priority=1
+        try:
+            # invalidate the cache 
+            if cls.last_priority_check + options.priority_check < time.time():
+                cls.last_priority_check = time.time()
+                cls.customer_priorities = {}
+
+            priority = cls.customer_priorities[api_key]
+        except KeyError, e:
+            nu = yield tornado.gen.Task(neondata.NeonUserAccount.get,
+                    api_key)
+            if nu:
+                priority = nu.processing_priority
+                cls.customer_priorities[api_key] = priority
+            else:
+                _log.error("Failed to fetch NeonUserAccount %s" % api_key)
+
+        raise tornado.gen.Return(priority)
 
 class RequestData(object):
     '''
@@ -211,7 +228,7 @@ class FairWeightedRequestQueue(object):
     @tornado.gen.coroutine
     def put(self, api_request):
         # Based on customer priority put in the appropriate Q
-        p = yield get_customer_priority(api_request.api_key, async=True)
+        p = yield DBCache.get_customer_priority(api_request.api_key, async=True)
         
         # if priority > # of queues, then consider all priorities > len(Qs) as
         # the lowest priority
@@ -271,7 +288,6 @@ class FairWeightedRequestQueue(object):
             except Exception as e:
                 # on error do nothing for now
                 _log.exception('An exception getting the video length: %s' % e)
-                pass
 
     @tornado.gen.coroutine
     def _get_content_length(self, video_url):
@@ -303,6 +319,8 @@ class FairWeightedRequestQueue(object):
         if not result.error:
             headers = result.headers
             raise tornado.gen.Return(int(headers.get('Content-Length', 0)))
+        else:
+            statemon.state.increment('get_content_length_error')
         raise tornado.gen.Return(None)
 
     def qsize(self):
@@ -389,8 +407,7 @@ class JobManager(object):
 
             if request.state in [neondata.RequestState.FINISHED,
                                  neondata.RequestState.SERVING,
-                                 neondata.RequestState.ACTIVE,
-                                 neondata.RequestState.SERVING_AND_ACTIVE]:
+                                 neondata.RequestState.ACTIVE]:
                 # The job finished sucessfully
                 continue
             elif request.state in [neondata.RequestState.FAILED,
@@ -408,6 +425,7 @@ class JobManager(object):
                                     neondata.RequestState.FINALIZING]):
                 _log.error('Job %s from account %s timed out' %
                            (job_id, api_key))
+                statemon.state.increment('job_timedout')
                 
                 # Requeue with a small exponential backoff and flag
                 # the error in the database.
@@ -436,6 +454,7 @@ class JobManager(object):
             pass
         except Exception as e:
             _log.exception('Unexpected exception when requeueing job %s' % e)
+            statemon.state.increment('requeue_exception')
 
     @tornado.gen.coroutine
     def requeue_job(self, job_id, api_key):
@@ -467,6 +486,7 @@ class JobManager(object):
             msg = ('Failed processing job %s for account %s too '
                    'many times' % (job_id, api_key))
             _log.error(msg)
+            statemon.state.increment('too_many_job_retries')
             raise JobFailed(msg)
         retval = yield self.add_job(api_request)
         raise tornado.gen.Return(retval)
@@ -532,6 +552,7 @@ class DequeueHandler(tornado.web.RequestHandler):
             if not _verify_neon_auth(self.request.headers.get('X-Neon-Auth')):
                 raise tornado.web.HTTPError(400)
         else:
+            statemon.state.increment('bad_request')
             raise tornado.web.HTTPError(400)
         
         statemon.state.increment('dequeue_requests')
@@ -571,6 +592,7 @@ class RequeueHandler(tornado.web.RequestHandler):
                 api_request = neondata.NeonApiRequest._create(key, data)
             except KeyError, e:
                 _log.error("Inavlid format for request json data")
+                statemon.state.increment('bad_request')
                 self.set_status(400)
                 self.finish()
                 return
@@ -613,6 +635,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
 
     def send_json_response(self, data, status=200):
        
+        if status == 400:
+            statemon.state.increment('bad_request')
         self.set_header("Content-Type", "application/json")
         self.set_status(status)
         self.write(data)
@@ -676,6 +700,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     rtoken, wtoken, pub_id, http_callback, i_id,
                     default_thumbnail=default_thumbnail)
                 api_request.autosync = autosync
+                statemon.state.increment('brightcove_requests')
 
             elif "ooyala" in self.request.uri:
                 request_type = "ooyala"
@@ -695,6 +720,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     http_callback,
                     default_thumbnail=default_thumbnail)
                 api_request.autosync = autosync
+                statemon.state.increment('ooyala_requests')
 
             else:
                 request_type = "neon"
@@ -703,6 +729,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                                                       request_type,
                                                       http_callback,
                                                       default_thumbnail)
+                statemon.state.increment('neon_requests')
             
             # API Method
             api_request.set_api_method(api_method, api_param)
