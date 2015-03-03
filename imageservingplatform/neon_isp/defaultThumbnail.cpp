@@ -175,7 +175,20 @@ DefaultThumbnail::GetScaledImage(int height, int width, int & url_size) const{
 
     // iterate through our scaled images to find a size match
     unsigned numOfImgs = images.size();
-    
+
+    // try to find a perfect size match
+    for(unsigned i=0; i < numOfImgs; i++){
+
+        if( images[i]->GetHeight() ==  height &&
+            images[i]->GetWidth() == width ) {
+
+            // a match, url_size is set here
+            const char * url = images[i]->GetUrl(url_size);
+            return url;
+        }
+    }
+
+    // try to find an approximate size
     for(unsigned i=0; i < numOfImgs; i++){
         
         if( ScaledImage::ApproxEqual(images[i]->GetHeight(), height, pixelRange) &&

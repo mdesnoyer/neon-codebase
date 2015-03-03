@@ -6,6 +6,9 @@ expiry=2020-02-10T23:43:01Z
 # basic default thumbnail feature test case, no directive for video
 {"type": "pub", "pid": "defaultpub1", "aid" : "defaccount1" }
 {"type":"default_thumb","aid":"defaccount1","default_url" : "http://neon/default_url_defaccount1.jpg","imgs":[{ "h":480, "w":640, "url":"http://neon/thumb_480_640_default_url_defaccount1.jpg" },{ "h":600, "w":800, "url":"http://neon/thumb_600_800_default_url_defaccount1.jpg" }]}
+# basic default thumbnail feature test case, no directive for video, exact match is returned despite the existence of a close match
+{"type": "pub", "pid": "defaultpub2", "aid" : "defaccount2" }
+{"type":"default_thumb","aid":"defaccount2","default_url" : "http://neon/default_url_defaccount2.jpg","imgs":[{ "h":480, "w":640, "url":"http://neon/thumb_480_640_default_url_defaccount2.jpg" },{ "h":601, "w":800, "url":"http://neon/thumb_601_800_default_url_defaccount2.jpg" },  { "h":600, "w":800, "url":"http://neon/thumb_600_800_default_url_defaccount2.jpg" }]}
 #
 # default thumbnail feature, no directive, no size match due to array being empty, return default_url
 {"type": "pub", "pid": "defaultpub3", "aid" : "defaccount3" }
