@@ -547,12 +547,12 @@ class JobManager(object):
 class StatsHandler(tornado.web.RequestHandler):
     """ Q Stats """ 
     def initialize(self, job_manager):
-        super(DequeueHandler, self).initialize()
+        super(StatsHandler, self).initialize()
         self.job_manager = job_manager
     
     def get(self, *args, **kwargs):
-        qsize = self.job_manger.get_qsize()
-        self.write('{"size", "%s"}' % qsize, 200)
+        qsize = self.job_manager.get_qsize()
+        self.write('{"size": %s}' % qsize)
         self.finish()
 
 class DequeueHandler(tornado.web.RequestHandler):
