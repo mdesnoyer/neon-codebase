@@ -359,6 +359,9 @@ class JobManager(object):
         self._lock = threading.RLock()
         self.running_jobs = [] 
 
+    def get_qsize(self):
+        return self.q.qsize()
+
     def is_healthy(self):
         '''Returns true if the job management is healthy.'''
         #TODO(Sunil): Write this function so that it actually checks
@@ -540,6 +543,17 @@ class JobManager(object):
                                   neondata.RequestState.FAILED,
                                   neondata.RequestState.INT_ERROR]):
                 yield self.requeue_job(request.job_id, request.api_key)
+
+class StatsHandler(tornado.web.RequestHandler):
+    """ Q Stats """ 
+    def initialize(self, job_manager):
+        super(DequeueHandler, self).initialize()
+        self.job_manager = job_manager
+    
+    def get(self, *args, **kwargs):
+        qsize = self.job_manger.get_qsize()
+        self.write('{"size", "%s"}' % qsize, 200)
+        self.finish()
 
 class DequeueHandler(tornado.web.RequestHandler):
     """ DEQUEUE JOB Handler """
@@ -877,7 +891,7 @@ class Server(object):
         self.application = tornado.web.Application([
             (r'/api/v1/submitvideo/(.*)', GetThumbnailsHandler,
              dict(job_manager=self.job_manager)),
-            #(r"/stats", StatsHandler),
+            (r"/stats", StatsHandler,  dict(job_manager=self.job_manager)),
             (r"/dequeue", DequeueHandler, dict(job_manager=self.job_manager)),
             (r"/requeue", RequeueHandler, dict(job_manager=self.job_manager,
                                                  reprocess=False)),

@@ -586,7 +586,14 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
                 callback=self.stop, method="GET", headers={})
         resp = self.wait()
         self.assertEqual(resp.code, 503)
-        
+       
+    def test_statshandler(self):
+        self.http_client.fetch(self.get_url('/stats'),
+                callback=self.stop, method="GET", headers={})
+        resp = self.wait()
+        self.assertEqual(json.loads(resp.body))["size"], 0)
+        self.assertEqual(resp.code, 200)
+
 class QueueSmokeTest(test_utils.neontest.TestCase):
     def setUp(self):
         super(QueueSmokeTest, self).setUp()
