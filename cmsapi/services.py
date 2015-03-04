@@ -79,6 +79,9 @@ statemon.define('ooyala_api_failure', int)
 statemon.define('thumb_metadata_not_saved', int)
 statemon.define('thumb_metadata_not_modified', int)
 statemon.define('db_error', int)
+statemon.define('thumb_updated', int)
+statemon.define('custom_thumb_upload', int)
+statemon.define('abtest_state_update')
 
 # HTTP 400s total and fine-grained issues counters
 statemon.define('bad_request', int) #all HTTP 400s
@@ -238,7 +241,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             statemon.state.increment('bad_request')
         elif status == 502:
             statemon.state.increment('bad_gateway')
-        elif status > 201:
+        elif status >= 500:
             statemon.state.increment('internal_err')
 
         self.set_header("Content-Type", "application/json")
@@ -311,7 +314,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
                 if method == '':
                     yield self.get_account_info(itype, i_id)
-                    #self.send_json_response('{"error":"not yet impl"}', 200)
                     return
 
                 elif method == "status":
@@ -449,6 +451,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     yield self.create_brightcove_video_request(i_id)
                 elif "neon_integrations" == itype:
                     yield self.create_neon_video_request_from_ui(i_id)
+                # TODO(Sunil): Expose when necessary
                 #elif "ooyala_integrations" == itype:
                 #    self.create_ooyala_video_request(i_id)
                 else:
@@ -624,7 +627,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             data = '{"error":"account not found"}'
             statemon.state.increment('account_not_found')
             self.send_json_response(data, 400)
-
 
     def get_neon_videos(self):
         ''' Get Videos which were called from the Neon API '''
@@ -1327,17 +1329,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                         bc.verify_token_and_create_requests_for_video,
                         10)
                     
-                    # TODO: investigate further, 
-                    #ReferenceError: weakly-referenced object no longer exists
-                    # (self.subscribed and cmd == 'PUBLISH')):
-                    #Not Async due to tornado redis bug in neon server
-                    #Task(bc.verify_token_and_create_requests_for_video,5)
-                    
                     ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     #TODO : Add expected time of completion !
                     video_response = []
                     if not response:
-                        #TODO : Distinguish between api call failure and bad tokens
+                        #Distinguish between api call failure and bad tokens
                         _log.error("key=create brightcove account " 
                             " msg=brightcove api call failed or token error")
                         data = '{"error": "Read token given is incorrect'  
@@ -1560,7 +1556,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             oo.ooyala_api_key = oo_api_key
             oo.api_secret = oo_secret_key 
             oo.autosync = autosync
-            #TODO: Test autosync
             res = yield tornado.gen.Task(oo.save)
             if res:
                 data = ''
@@ -1711,6 +1706,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                           %(i_vid, new_tids))
                 data = ''
                 self.send_json_response(data, 202)
+                statemon.state.increment('custom_thumb_upload')
                 return
             else:
                 _log.error('Error modifying the video metadata for vid %s' %
@@ -1753,6 +1749,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             self.send_json_response('{"error": "internal db error"}', 500)
             return
 
+        statemon.state.increment('abtest_state_update')
         self.send_json_response('', 202)
 
     ### AB Test State #####
@@ -1855,6 +1852,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             statemon.state.increment('malformed_request')
             self.send_json_response(invalid_msg, 400)
 
+        statemon.state.increment('thumb_updated')
         self.send_json_response('', 202)
 
 
