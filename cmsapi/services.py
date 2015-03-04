@@ -81,7 +81,7 @@ statemon.define('thumb_metadata_not_modified', int)
 statemon.define('db_error', int)
 statemon.define('thumb_updated', int)
 statemon.define('custom_thumb_upload', int)
-statemon.define('abtest_state_update')
+statemon.define('abtest_state_update', int)
 
 # HTTP 400s total and fine-grained issues counters
 statemon.define('bad_request', int) #all HTTP 400s
