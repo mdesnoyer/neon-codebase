@@ -82,6 +82,9 @@ statemon.define('extract_frame_error', int)
 statemon.define('running_workers', int)
 statemon.define('workers_cv_processing', int)
 statemon.define('other_worker_completed', int)
+statemon.define('s3url_download_error', int)
+statemon.define('centerframe_extraction_error', int)
+statemon.define('randomframe_extraction_error', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -252,6 +255,7 @@ class VideoProcessor(object):
                 except boto.exception.S3ResponseError as e:
                     _log.warn('Error getting video url %s via boto. '
                               'Falling back on http: %s' % (self.video_url, e))
+                    statemon.state.increment('s3url_download_error')
             
             # Use urllib2
             req = urllib2.Request(self.video_url, headers=self.headers)
@@ -405,6 +409,7 @@ class VideoProcessor(object):
         except Exception, e:
             _log.error("Unexpected error extracting center frame from %s:"
                        " %s" % (self.video_url, e))
+            statemon.state.increment('centerframe_extraction_error')
             raise
 
     def _get_random_frame(self, video_file, nframes=None):
@@ -429,6 +434,7 @@ class VideoProcessor(object):
         except Exception, e:
             _log.error("Unexpected error extracting random frame from %s:"
                            " %s" % (self.video_url, e))
+            statemon.state.increment('randomframe_extraction_error')
             raise
 
     def _get_specific_frame(self, mov, frameno):
