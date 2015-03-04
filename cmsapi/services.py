@@ -1310,6 +1310,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     a_id, i_id, self.api_key, p_id, 
                     rtoken,wtoken, autosync, curtime) 
                 na.add_platform(bc)
+                
                 #save & update acnt
                 res = yield tornado.gen.Task(na.save_platform, bc)
                 
@@ -1467,8 +1468,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                     partner_code, oo_api_key, oo_secret_key,
                                     autosync)  
                 na.add_platform(oo_account)
+
                 #save & update acnt
                 res = yield tornado.gen.Task(na.save_platform, oo_account)
+                
                 if res:
                     # Set the default experimental strategy for
                     # Ooyala Customers.
@@ -1741,8 +1744,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 '{"error": "invalid data type or not boolean"}', 400)
             return
 
-        vmdata.testing_enabled = state
-        result = yield tornado.gen.Task(vmdata.save)
+        def _update_video(vm):
+            vm.testing_enabled = state
+        result = yield tornado.gen.Task(neondata.VideoMetadata.modify, i_vid,
+                _update_video)
         
         if not result:
             statemon.state.increment('db_error')

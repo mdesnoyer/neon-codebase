@@ -321,6 +321,11 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         job_id = json.loads(resp.body)['job_id']
         api_request = neondata.NeonApiRequest.get(job_id, self.api_key)
         self.assertEqual(api_request.video_id, "neonapivid123")
+        
+        # verify that the video has been added to the account
+        np = neondata.NeonPlatform.get(self.api_key, '0')
+        vids = np.get_videos()
+        self.assertIn("neonapivid123", vids)
 
         # Verify that the default thumb is in the database
         video = neondata.VideoMetadata.get('%s_neonapivid123' % self.api_key)
