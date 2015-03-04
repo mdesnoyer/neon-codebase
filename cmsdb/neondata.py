@@ -1585,6 +1585,25 @@ class AbstractPlatform(NamespacedStoredObject):
         ''' get instance '''
         return super(AbstractPlatform, cls).get(
             cls._generate_subkey(api_key, i_id), callback=callback)
+    
+    @classmethod
+    def modify(cls, api_key, i_id, func, callback=None):
+        return super(AbstractPlatform, cls).modify(
+            cls._generate_subkey(api_key, i_id),
+            func,
+            callback=callback)
+
+    @classmethod
+    def modify_many(cls, keys, func, callback=None):
+        '''Modify many keys.
+
+        Each key must be a tuple of (api_key, i_id)
+        '''
+        return super(AbstractPlatform, cls).modify_many(
+            [cls._generate_subkey(api_key, i_id) for 
+             api_key, i_id in keys],
+            func,
+            callback=callback)
 
     def to_json(self):
         ''' to json '''
