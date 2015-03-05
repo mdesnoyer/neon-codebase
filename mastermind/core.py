@@ -613,8 +613,8 @@ class Mastermind(object):
 
         # Run the monte carlo series
         MC_SAMPLES = 10000.
-        mc_series = [spstats.beta.rvs(conv[x],
-                                      imp[x],
+        mc_series = [spstats.beta.rvs(max(1, conv[x]),
+                                      max(1, imp[x]),
                                       size=MC_SAMPLES)
                                       for x in bandit_ids]
         if non_exp_thumb is not None:
