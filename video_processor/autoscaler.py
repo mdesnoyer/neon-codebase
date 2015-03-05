@@ -144,7 +144,7 @@ def start_new_instances(instances_needed):
     statemon.state.increment('boto_vclient_launch')
 
 
-def terminate_instances(instances_needed):
+def terminate_instances(instances_needed, vclients):
     print 'terminating %d vclients' %instances_needed
 
      # open connection to AWS in our region
@@ -156,7 +156,7 @@ def terminate_instances(instances_needed):
         statemon.state.increment('boto_connection_failed')
         return None
 
-    # terminate here 
+    # terminate the number of instances needed 
     statemon.state.increment('boto_vclient_terminate')
 
 
@@ -167,11 +167,11 @@ def handle_low_load(vclients_states_count, vclients):
     if vclients_states_count['running'] <= minimum_vclients:
         return
 
-    # calculate how many new vclients do we need to terminate, at least one
+    # calculate how many vclients do we need to terminate, at least one
     instances_needed = max(1, int(vclients_states_count['running'] * SCALE_DOWN_FACTOR))
 
     # calculate the actual number of instances we can terminate before reaching
-    # the minimum 
+    # the minimum allowable 
     limit = vclients_states_count['running'] - minimum_vclients
 
     # pick the smallest number
