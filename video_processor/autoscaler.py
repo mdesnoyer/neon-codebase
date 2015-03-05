@@ -16,6 +16,14 @@ import time
 from utils import statemon
 
 
+#Monitoring
+statemon.define('video_server_connection_failed', int)
+statemon.define('boto_connection_failed', int)
+statemon.define('boto_vclient_launch', int)
+statemon.define('boto_vclient_terminate', int)
+
+
+
 AWS_REGION = 'us-west-2'
 AWS_ACCESS_KEY_ID = 'AKIAIHEAXZIPN7HC5YBQ'
 AWS_SECRET_ACCESS_KEY = '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'
@@ -53,8 +61,10 @@ def get_queue_size():
     try:
         response = urlopen(video_server_ip)
     except URLError:
+        statemon.state.increment('video_server_connection_failed')
         return -1
     except:
+        statemon.state.increment('video_server_connection_failed')
         return -1
     
     try:
@@ -87,6 +97,7 @@ def fetch_all_vclients_status(vclients):
                                       aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
     
     if conn == None:
+        statemon.state.increment('boto_connection_failed')
         return None
 
     # only inquire about video clients
@@ -126,13 +137,27 @@ def start_new_instances(instances_needed):
                                       aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
     
     if conn == None:
+        statemon.state.increment('boto_connection_failed')
         return None
 
-    
+    # launch here 
+    statemon.state.increment('boto_vclient_launch')
 
 
 def terminate_instances(instances_needed):
     print 'terminating %d vclients' %instances_needed
+
+     # open connection to AWS in our region
+    conn = boto.ec2.connect_to_region(AWS_REGION,
+                                      aws_access_key_id=AWS_ACCESS_KEY_ID,
+                                      aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
+    
+    if conn == None:
+        statemon.state.increment('boto_connection_failed')
+        return None
+
+    # terminate here 
+    statemon.state.increment('boto_vclient_terminate')
 
 
 def handle_low_load(vclients_states_count, vclients):
@@ -241,4 +266,7 @@ def main():
 
 if __name__ == "__main__":
         main()
+
+
+
 
