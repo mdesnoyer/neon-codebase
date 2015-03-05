@@ -70,7 +70,7 @@ def process_single_video(video_info):
                                                   video_info['video_id'],
                                                   thumb['frameno']))
                 proc_args = [
-                      'ffmpeg',
+                      'avconv',
                       '-i',
                       vid_file.name,
                       '-vf',
@@ -124,7 +124,7 @@ def main():
     # Filter the json based on the video id list
     if options.video_id_list is not None:
         valid_video_ids = set([x.strip() for x in open(options.video_id_list)])
-        json_data = filter(lamda x: x['video_id'] in valid_video_ids,
+        json_data = filter(lambda x: x['video_id'] in valid_video_ids,
                            json_data)
 
     # Start the jobs

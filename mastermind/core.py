@@ -35,8 +35,9 @@ statemon.define('directive_changes', int)
 statemon.define('pending_modifies', int)
 statemon.define('no_experiment_strategy', int)
 statemon.define('invalid_experiment_type', int) 
-statemon.define('unhandled_exception', int) # unhandled or unknown exception
+statemon.define('db_update_error', int) # error updating database
 statemon.define('no_valid_thumbnails', int) # no valid thumbnails for a video
+statemon.define('critical_error', int)
 
 class MastermindError(Exception): pass
 class UpdateError(MastermindError): pass
@@ -377,7 +378,7 @@ class Mastermind(object):
             _log.critical(
                 'Could not find video_id %s. This should never happen' 
                 % video_id)
-            # TODO(Mark): Add a counter here ? 
+            statemon.state.increment('critical_error') 
             return
         
         result = self._calculate_current_serving_directive(
@@ -491,11 +492,10 @@ class Mastermind(object):
             _log.warn_n('Could not find a baseline for video id: %s' %
                         video_id)
             if not video_info.testing_enabled:
-                #TODO(Mark): Should this be info? testing of video could
-                # be disabled for valid reasons by the customer
                 _log.error_n(
                     'Testing was disabled and there was no baseline for'
                     ' video %s' % video_id, 5)
+                statemon.state.increment('no_valid_thumbnails')
                 return None
 
         # Limit the number of Neon thumbnails being shown
@@ -817,7 +817,7 @@ def _modify_many_serving_fracs(mastermind, video_id, new_directive,
         mastermind._incr_pending_modify(-1)
     except Exception as e:
         _log.exception('Unhandled exception when updating thumbs %s' % e)
-        statemon.state.increment('unhandled_exception')
+        statemon.state.increment('db_update_error')
         raise
 
 
@@ -840,7 +840,7 @@ def _modify_video_info(mastermind, video_id, experiment_state, value_left):
         mastermind._incr_pending_modify(-1)
     except Exception as e:
         _log.exception('Unhandled exception when updating video %s' % e)
-        statemon.state.increment('unhandled_exception')
+        statemon.state.increment('db_update_error')
         raise
 
 def _update_experiment_info(experiment_state, value_left, video_obj):
