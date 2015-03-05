@@ -6,118 +6,239 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-import boto.exception
-from boto.s3.connection import S3Connection
-from cmsdb import neondata
-from collections import deque
-import datetime
-import hashlib
+import boto.ec2
 import json
+from urllib2 import urlopen, URLError
 import logging
-import multiprocessing
 import os
-import Queue
 import random
-import re
-import redis
 import time
-import tornado.httpserver
-import tornado.gen
-import tornado.ioloop
-import tornado.web
-import tornado.escape
-import threading
-import utils.botoutils
-import utils.http
-import utils.neon
-import utils.ps
 from utils import statemon
+
 
 AWS_REGION = 'us-west-2'
 AWS_ACCESS_KEY_ID = 'AKIAIHEAXZIPN7HC5YBQ'
 AWS_SECRET_ACCESS_KEY = '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'
 
 #
-video_server_ip = '10.1.1.1'
-video_server_port = 80
+video_server_ip = 'http://localhost'
 
-#
-INITIAL_SLEEP = 0
+# 
+INITIAL_SLEEP       = 1
+NORMAL_SLEEP        = 1
+SCALE_UP_SLEEP      = 1
+SCALE_DOWN_SLEEP    = 1
 
 # to indicate that the process should quit
-shutdown = false
+shutdown = False
 
 # 
 high_water_mark = 80 
 low_water_mark = 10
 
+#
+minimum_vclients    = 8
+maximum_vclients    = 20
+SCALE_UP_FACTOR     = 0.2
+SCALE_DOWN_FACTOR   = 0.1
 
-vclients = None
+# vclients states count
+vclients_state_count = None
+
 
 def get_queue_size():
-    return 50 
 
-def fetch_all_vclients_status():
+    response = None
+
+    try:
+        response = urlopen(video_server_ip)
+    except URLError:
+        return -1
+    except:
+        return -1
     
-    conn = boto.ec2.connect_to_region(AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+    try:
+        data = json.load(response)
+        percentage = data['size']
 
-    if conn == None
+        if percentage >= 0 and percentage <= 100:
+            return percentage
+        else: 
+            return -1
+    except:
+        return -1
+
+
+def is_scaling_in_progress(vclients):
+      
+    instances =  vclients['pending'] + vclients['shutting-down'] + vclients['stopping'] 
+
+    if instances > 0: 
+        return True;
+
+    return False
+
+
+def fetch_all_vclients_status(vclients):
+    
+    # open connection to AWS in our region
+    conn = boto.ec2.connect_to_region(AWS_REGION, 
+                                      aws_access_key_id=AWS_ACCESS_KEY_ID, 
+                                      aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
+    
+    if conn == None:
         return None
 
     # only inquire about video clients
-    reservations = conn.get_all_instances(ifilters={"tag:opsworks:layer:vclient" : "Video Client"})
+    reservations = conn.get_all_instances(filters={"tag:opsworks:layer:vclient" : "Video Client"})
     
-    # all instances
-    vclients = [i for r in reservations for i in r.instances]
+    if reservations == None:
+        return None
+ 
+    # extract instances
+    vclient_instances = [i for r in reservations for i in r.instances]
+
+    # count all vclients by their current state 
+    for v in vclient_instances:
+        if v.state == 'pending':
+            vclients['pending'] += 1
+        elif v.state == 'running':
+            vclients['running'] += 1
+        elif v.state == 'shutting-down':
+            vclients['shutting-down'] += 1
+        elif v.state == 'terminated':
+            vclients['terminated'] += 1
+        elif v.state == 'stopping':
+            vclients['stopping'] += 1
+        elif v.state == 'stopped':
+            vclients['stopped'] += 1 
+
+    print vclients
+    return vclient_instances 
 
 
-def scaling_operations_in_progress()
-    return true
+def start_new_instances(instances_needed):
+    print 'starting %d vclients' %instances_needed
+    
+    # open connection to AWS in our region
+    conn = boto.ec2.connect_to_region(AWS_REGION, 
+                                      aws_access_key_id=AWS_ACCESS_KEY_ID, 
+                                      aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
+    
+    if conn == None:
+        return None
 
-def handle_low_load():
-    pass
-
-def handle_high_load():
-    pass
+    
 
 
-def run():
+def terminate_instances(instances_needed):
+    print 'terminating %d vclients' %instances_needed
+
+
+def handle_low_load(vclients_states_count, vclients):
+    import pdb; pdb.set_trace()
+
+    # minimum capacity already reached, no further action
+    if vclients_states_count['running'] <= minimum_vclients:
+        return
+
+    # calculate how many new vclients do we need to terminate, at least one
+    instances_needed = max(1, int(vclients_states_count['running'] * SCALE_DOWN_FACTOR))
+
+    # calculate the actual number of instances we can terminate before reaching
+    # the minimum 
+    limit = vclients_states_count['running'] - minimum_vclients
+
+    # pick the smallest number
+    instances_needed = min(limit, instances_needed)
+
+    # terminate a number of vclients from the list 
+    # of running instances
+    terminate_instances(instances_needed, vclients)
+
+
+def handle_high_load(vclients):
+    import pdb; pdb.set_trace()
+
+    # alert, max capacity already reached
+    if vclients['running'] >= maximum_vclients:
+        return
+
+    # calculate how many new vclients do we need
+    if  vclients['running'] <= 0:
+        # none running, therefore start the minimum
+        instances_needed = minimum_vclients
+    else:
+        # increase the number of vclients by a factor, at least by one
+        instances_needed = max(1, int(vclients['running'] * SCALE_UP_FACTOR))
+
+        # calculate the max of instances we can actually launch
+        # before we reach the maximum allowable
+        limit = maximum_vclients - vclients['running']
+
+        # pick the smaller number
+        instances_needed = min(limit, instances_needed)
+
+    start_new_instances(instances_needed)
+
+
+###################################################################
+# runloop
+###################################################################
+def runloop():
+
+    # import pdb; pdb.set_trace()
 
     sleep_time = INITIAL_SLEEP 
-
     
-    while(shutdown == false):
+    while(shutdown == False):
 
-        # sleep
-         time.sleep(sleep_time)
+        # to hold the counts of all vclients and the state they're in
+        vclients_states_count = {'pending':0,'running':0,'shutting-down':0,
+                'terminated':0,'stopping':0,'stopped':0} 
 
-        # get all video clients states
-        fetch_all_vclients_status()
+        # periodic sleep
+        time.sleep(sleep_time)
+        sleep_time = NORMAL_SLEEP
 
-        # if any instance either booting or shutting down
-        if(scaling_operations_in_progress() == true):
+        # get all video clients states (running, stopped, pending, etc))
+        vclients = None
+        vclients = fetch_all_vclients_status(vclients_states_count) 
+      
+        # error, try again later
+        if vclients == None:
             continue
 
-        # get queue size
+        # Here we check that no vclients are in the process of shutting down or 
+        # starting up. This would be indicative that we migth have crashed and
+        # restarted, or that some human intervention is going on.
+        # As a safeguard, we do not take any action when vclient instances
+        # are in transitory states.  
+        if is_scaling_in_progress(vclients_states_count) == True:
+            continue
+
+        # get video server queue size
         queue_size = get_queue_size() 
 
-        # error
+        # error, try again later
         if(queue_size < 0):
             continue
 
-        # the case where the video server queue is growing
-        if(queue_size > queue_high_water_mark):
-            handle_high_load()
+        # scale up, the video server queue is growing
+        if queue_size > high_water_mark:
+            handle_high_load(vclients_states_count)
+            sleep_time = SCALE_UP_SLEEP            
 
-        # the case where the video server queue is shrinking
-        else if(queue_size < queue_low_water_mark):
-            handle_low_load()
-
-        # else the queue is normal
-        else:        
-    
+        # scale down, the video server queue is low
+        elif queue_size < low_water_mark:
+            handle_low_load(vclients_states_count, vclients)
+            sleep_time = SCALE_DOWN_SLEEP
 
 
 def main():
-    run()
+    # import pdb; pdb.set_trace()
+    runloop()
+
+if __name__ == "__main__":
+        main()
 
