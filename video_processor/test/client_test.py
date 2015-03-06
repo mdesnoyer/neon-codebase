@@ -562,7 +562,8 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             'video_id' : 'vid1',
             'framenos' : [6],
             'thumbnails' : [n_thumbs[0].urls[0]],
-            'serving_url' : video_data.serving_url
+            'serving_url' : video_data.serving_url,
+            'error' : ""
             }
         self.assertDictContainsSubset(expected_response,
                                       api_request.response)
