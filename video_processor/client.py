@@ -653,6 +653,7 @@ class VideoProcessor(object):
           response_body["thumbnails"][:self.n_thumbs]
         response_body["timestamp"] = str(time.time())
         response_body["serving_url"] = self.video_metadata.get_serving_url()
+        response_body["error"] =  ""
 
         #CREATE POST REQUEST
         body = tornado.escape.json_encode(response_body)

@@ -825,6 +825,10 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             self.send_json_response('{"error":"%s"}' % e, 400)
             return
 
+        except IOError, e:
+            self.send_json_response('{"error":"%s"}' % e, 400)
+            return
+
         except Exception, e:
             _log.exception("key=thumbnail_handler msg= %s"%e)
             self.send_json_response('{"error":"%s"}' % e, 500)
