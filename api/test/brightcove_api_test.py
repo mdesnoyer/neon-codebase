@@ -214,6 +214,7 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(len(u_bp.get_videos()), nvideos)
 
     @patch('api.brightcove_api.BrightcoveApi.write_connection.send_request') 
+    @tornado.testing.gen_test 
     def test_add_image(self, write_conn_mock):
         def verify():
             '''
@@ -231,34 +232,39 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
             c_disposition = img_data.split('\r\n')[1]
             #ex: 'Content-Disposition: form-data; name="filePath"; filename="neontnTID.jpg"'
             img_filename = c_disposition.split(';')[-1].split("=")[-1]
-            self.assertEqual(img_filename, '"neontn%s.jpg"' %tid)
+            self.assertEqual(img_filename, '"neontn%s.jpg"' % tid)
     
         response = HTTPResponse(HTTPRequest("http://bcove"), 200,
-                buffer=StringIO('done'))
-        write_conn_mock.return_value = response
+                buffer=StringIO('"done"'))
+        write_conn_mock.side_effect = lambda x, callback: callback(response)
         image = PILImageUtils.create_random_image(360, 480) 
         tid = "TID"
         
         #verify image name
-        self.api.add_image("video_id1", image, reference_id=tid, tid=tid)
+        yield self.api.add_image("video_id1", tid, image=image,
+                                 reference_id=tid)
         verify()
+        write_conn_mock.reset()
         
         #verify image name
-        self.api.add_image("video_id1", image, reference_id="still-%s" %tid, tid=tid)
+        self.api.add_image("video_id1", tid, image=image,
+                           reference_id="still-%s" % tid)
         verify()
-    
-    @patch('api.brightcove_api.BrightcoveApi.write_connection.send_request') 
+
+    @patch('api.brightcove_api.BrightcoveApi.write_connection.send_request')
+    @tornado.testing.gen_test 
     def test_add_remote_image(self, write_conn_mock):
 
         '''
         Verify the multipart request construction to brightcove
         '''
         response = HTTPResponse(HTTPRequest("http://bcove"), 200,
-                buffer=StringIO('done'))
-        write_conn_mock.return_value = response
+                buffer=StringIO('"done"'))
+        write_conn_mock.side_effect = lambda x, callback: callback(response)
         r_url = "http://i1.neon-images.com/video_id1?height=10&width=20"
-        response = self.api.add_image("video_id1", remote_url=r_url)
-        self.assertEqual(response.code, 200)
+        resp = yield self.api.add_image("video_id1", 'tid1', 
+                                        remote_url=r_url)
+        self.assertEqual(resp, 'done')
         headers = write_conn_mock.call_args[0][0].headers
         self.assertTrue('multipart/form-data' in headers['Content-Type'])
         body = write_conn_mock.call_args[0][0].body

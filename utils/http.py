@@ -88,8 +88,9 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
         # Handling the retries
         cur_try += 1
         if cur_try >= ntries:
-            response.error = tornado.httpclient.HTTPError(
-                503, 'Too many errors connecting to %s' % request.url)
+            if do_logging:
+                _log.warn_n('Too many errors connecting to %s' % request.url,
+                            3)
             return finish_request(response)
 
 

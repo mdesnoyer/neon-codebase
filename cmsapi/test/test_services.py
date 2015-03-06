@@ -24,6 +24,7 @@ import re
 from PIL import Image
 from StringIO import StringIO
 import test_utils.mock_boto_s3 as boto_mock
+import test_utils.neontest
 import test_utils.redis
 import time
 import tornado.gen
@@ -131,7 +132,7 @@ def process_neon_api_requests(api_requests, api_key, i_id, t_type):
 
     return images, thumbnail_url_to_image
 
-class TestServices(tornado.testing.AsyncHTTPTestCase):
+class TestServices(test_utils.neontest.AsyncHTTPTestCase):
     ''' Services Test '''
         
     @classmethod
@@ -699,31 +700,26 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
             self._test_update_thumbnail_fails()
     
     def _test_update_thumbnail_fails(self):
-        def _failure_http_side_effect(*args, **kwargs):
-            http_request = args[0]
-            if mock_image_url_prefix in http_request.url:
-                request = tornado.httpclient.HTTPRequest(http_request.url)
+        def _failure_http_side_effect(request, callback=None):
+            if mock_image_url_prefix in request.url:
                 response = tornado.httpclient.HTTPResponse(request, 500,
                     buffer=StringIO("Server error"))
-                if kwargs.has_key("callback"):
-                    callback = kwargs["callback"]
-                else:
-                    callback = args[1]
-                return tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                                     response)
 
-            if "http://api.brightcove.com/services/post" in http_request.url:
+            elif "http://api.brightcove.com/services/post" in request.url:
                 itype = "THUMBNAIL"
-                if "VIDEO_STILL" in http_request.body:
+                if "VIDEO_STILL" in request.body:
                     itype = "VIDEO_STILL"
 
-                request = tornado.httpclient.HTTPRequest("http://api.brightcove.com/services/post")
-                response = tornado.httpclient.HTTPResponse(request, 500,
+                response = tornado.httpclient.HTTPResponse(request, 502,
                     buffer=StringIO
                         ('{"result": {"displayName":"test","id":123,'
                         '"referenceId":"test_ref_id","remoteUrl":null,"type":"%s"},'
                         '"error": "mock error", "id": null}'%itype))
-                return response
+
+            if callback:
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                                    response)
+            return response
 
         vids = self._get_videos()
         vid  = vids[0]
@@ -732,15 +728,17 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         #Failed to download Image; Expect internal error 500
         self.cp_mock_async_client().fetch.side_effect = \
                 _failure_http_side_effect
-        resp = self.update_brightcove_thumbnail(vid, tids[1]) 
-        self.assertEqual(resp.code, 500) 
+        with self.assertLogExists(logging.ERROR, 'Error retrieving image'):
+            resp = self.update_brightcove_thumbnail(vid, tids[1]) 
+        self.assertEqual(resp.code, 502) 
 
         #Brightcove api error, gateway error 502
         self.cp_mock_async_client().fetch.side_effect = \
                 self._success_http_side_effect
         self.cp_mock_client().fetch.side_effect =\
-                _failure_http_side_effect 
-        resp = self.update_brightcove_thumbnail(vid, tids[1]) 
+                _failure_http_side_effect
+        with self.assertLogExists(logging.ERROR, 'Internal Brightcove error'):
+            resp = self.update_brightcove_thumbnail(vid, tids[1]) 
         self.assertEqual(resp.code, 502) 
 
         #Successful update of thumbnail
