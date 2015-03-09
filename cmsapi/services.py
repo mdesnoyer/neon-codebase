@@ -1053,6 +1053,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 self.send_json_response('{"error":"invalid state request"}', 400)
                 return
 
+        # backward compatibilty for recommended videos, hence add 
+        # all the videos to the recommended list
+        if video_state == "recommended":
+            completed_videos.extend(serving_videos)
+
         #3. Populate Completed videos
         keys = [neondata.InternalVideoID.generate(
             self.api_key, vid) for vid in completed_videos] #get internal vids
