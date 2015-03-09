@@ -483,7 +483,6 @@ class BrightcoveApi(object):
             to_process = False
             vid   = str(item['id'])
             title = item['name']
-
             #Check if neon has processed the videos already 
             if vid not in videos_processed:
                 thumb  = item['thumbnailURL'] 
@@ -905,6 +904,40 @@ class BrightcoveApi(object):
 
         raise tornado.gen.Return((thumb_url, still_url))
     
+    def create_request_from_playlist(self, pid, i_id):
+        ''' create thumbnail api request given a video id 
+            NOTE: currently we only need a sync version of this method
+
+        '''
+
+        url = 'http://api.brightcove.com/services/library?command=find_playlist_by_id' \
+                '&token=%s&media_delivery=http&output=json&playlist_id=%s' %\
+                (self.read_token, pid)
+        req = tornado.httpclient.HTTPRequest(url=url,
+                                             method="GET",
+                                             request_timeout=60.0,
+                                             connect_timeout=10.0)
+        response = utils.http.send_request(req)
+        if response.error:
+            _log.error('key=create_request_from_playlist msg=Unable to get %s'
+                       % url)
+            return False
+       
+        json = tornado.escape.json_decode(response.body)
+        try:
+            items_to_process = json['videos']
+
+        except ValueError, e:
+            _log.exception('json error: %s' % e)
+            return
+
+        except Exception, e:
+            _log.exception('unexpected error: %s' % e)
+            return
+            
+        # Process the publisher feed
+        self.process_publisher_feed(items_to_process, i_id)
+        return
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
