@@ -6,6 +6,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import boto.opsworks
 import boto.ec2
 import json
 from urllib2 import urlopen, URLError
@@ -15,14 +16,15 @@ import random
 import time
 from utils import statemon
 
-
 #Monitoring
 statemon.define('video_server_connection_failed', int)
 statemon.define('boto_connection_failed', int)
 statemon.define('boto_vclient_launch', int)
 statemon.define('boto_vclient_terminate', int)
 
-
+from utils.options import define, options
+define("aws_region", default="us-west-2", type=str,
+       help="Region to look for the vclients")
 
 AWS_REGION = 'us-west-2'
 AWS_ACCESS_KEY_ID = 'AKIAIHEAXZIPN7HC5YBQ'
@@ -54,7 +56,7 @@ SCALE_DOWN_FACTOR   = 0.1
 vclients_state_count = None
 
 
-def get_queue_size():
+def get_video_server_queue_info():
 
     response = None
 
@@ -90,12 +92,14 @@ def is_scaling_in_progress(vclients):
 
 
 def fetch_all_vclients_status(vclients):
-    
+
+    import pdb; pdb.set_trace()
+
     # open connection to AWS in our region
-    conn = boto.ec2.connect_to_region(AWS_REGION, 
-                                      aws_access_key_id=AWS_ACCESS_KEY_ID, 
-                                      aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
-    
+    conn = boto.ec2.connect_to_region(AWS_REGION,
+                                      aws_access_key_id='AKIAIHEAXZIPN7HC5YBQ',
+                                      aws_secret_access_key='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')
+
     if conn == None:
         statemon.state.increment('boto_connection_failed')
         return None
@@ -126,6 +130,18 @@ def fetch_all_vclients_status(vclients):
 
     print vclients
     return vclient_instances 
+
+
+def fetch_all_vclients_status_opworks():
+    
+    import pdb; pdb.set_trace()
+    
+    conn = boto.opsworks.connect_to_region(options.aws_region)
+
+    if(conn == None):
+        return None
+
+    conn.describe_instances( layer_id='Video Client')
 
 
 def start_new_instances(instances_needed):
@@ -227,9 +243,13 @@ def runloop():
         sleep_time = NORMAL_SLEEP
 
         # get all video clients states (running, stopped, pending, etc))
-        vclients = None
-        vclients = fetch_all_vclients_status(vclients_states_count) 
-      
+        #vclients = None
+        #vclients = fetch_all_vclients_status(vclients_states_count) 
+ 
+        fetch_all_vclients_status_opworks()
+
+        continue
+
         # error, try again later
         if vclients == None:
             continue
