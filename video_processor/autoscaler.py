@@ -9,7 +9,7 @@ if sys.path[0] != __base_path__:
 import boto.opsworks
 import boto.ec2
 import json
-from urllib2 import urlopen, URLError
+import urllib2
 import logging
 import os
 import random
@@ -61,7 +61,7 @@ def get_video_server_queue_info():
     response = None
 
     try:
-        response = urlopen(video_server_ip)
+        response = urllib2.urlopen(video_server_ip)
     except URLError:
         statemon.state.increment('video_server_connection_failed')
         return -1
@@ -70,7 +70,7 @@ def get_video_server_queue_info():
         return -1
     
     try:
-        data = json.load(response)
+        data = json.loads(response)
         percentage = data['size']
 
         if percentage >= 0 and percentage <= 100:
