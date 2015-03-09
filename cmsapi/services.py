@@ -1787,6 +1787,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         if not vmdata:
             statemon.state.increment('video_not_found')
             self.send_json_response('{"error": "vid not found"}', 400)
+            return
 
         state = vmdata.experiment_state
         
