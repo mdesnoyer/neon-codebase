@@ -184,6 +184,7 @@ DefaultThumbnail::GetScaledImage(int height, int width, int & url_size) const{
 
             // a match, url_size is set here
             const char * url = images[i]->GetUrl(url_size);
+            neon_stats[NEON_DEFAULT_IMAGE_PERFECT_FIT]++;
             return url;
         }
     }
@@ -196,6 +197,7 @@ DefaultThumbnail::GetScaledImage(int height, int width, int & url_size) const{
 
             // a match, url_size is set here
             const char * url = images[i]->GetUrl(url_size);
+            neon_stats[NEON_DEFAULT_IMAGE_APPROX_FIT]++;
             return url;
         }
     }
