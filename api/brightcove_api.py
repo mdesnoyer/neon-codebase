@@ -313,9 +313,9 @@ class BrightcoveApi(object):
 
         return remote_url, is_neon_serving
 
-    ################################################################################
+    ##########################################################################
     # Feed Processors
-    ################################################################################
+    ##########################################################################
 
     def get_video_url_to_download(self, b_json_item, frame_width=None):
         '''
@@ -774,7 +774,106 @@ class BrightcoveApi(object):
             raise tornado.gen.Return((None, None))
 
         raise tornado.gen.Return((thumb_url, still_url))
-    
 
-if __name__ == "__main__" :
-    utils.neon.InitNeon()
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def find_videos_by_ids(self, video_ids, video_fields=None,
+                           media_delivery='http'):
+        '''Finds many video information from the brightcove request.
+
+        Inputs:
+        video_ids - list of video ids to get info for
+        video_fields - list of video fields to populate
+        media_delivery - should urls be http, http_ios or default
+
+        Outputs:
+        A dictionary of video->{fields requested}
+        '''
+        results = {}
+
+        MAX_VIDS_PER_REQUEST = 100
+        
+        for i in range(0, len(video_ids), MAX_VIDS_PER_REQUEST):
+            url_params = {
+                ''}
+
+class BrightcoveFeedIterator(object):
+    '''An iterator that walks through entries from a Brightcove feed.
+
+    Automatically deals with paging.
+
+    If you want to do this iteration so that any calls are
+    asynchronous, then you have to manually create a loop like:
+
+    try:
+      while True:
+        item = yield iter.next(async=True)
+    except StopIteration:
+      pass      
+    
+    '''
+    def __init__(self, command, token, request_pool, page_size=100,
+                 output='json', max_items=None, **kwargs):
+        '''Create an iterator
+
+        Inputs:
+        command - Command to execute
+        token - The brightcove token to use
+        request_pool - The request pool to use to send the request
+        page_size - The size of each page when it is requested
+        output - Output type as per the Brightcove API
+        max_items - The maximum number of entries to return
+        kwargs - Any other arguments to pass as url arguments to the command
+        '''
+        self.args = kwargs
+        self.args['command'] = command
+        self.args['token'] = token
+        self.args['page_size'] = page_size
+        self.args['output'] = output
+        self.args['page_number'] = 0
+        self.max_items = max_items
+        self.page_data = []
+        self.request_pool = request_pool
+        self.items_returned = 0
+
+    def __iter__(self):
+        self.args['page_number'] = 0
+        self.items_returned = 0
+        return self
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def next(self):
+        if self.items_returned >= self.max_items:
+            raise StopIteration()
+        
+        if len(self.page_data) == 0:
+            # Get more entries
+            request = tornado.httpclient.HTTPRequest(
+                ('http://api.brightcove.com/services/library?%s' %
+                 urllib.urlencode(self.args)),
+                method='GET',
+                request_timeout=60.0)
+            response = yield tornado.gen.Task(self.request_pool,
+                                              request)
+            if response.error:
+                if response.error.code > 500:
+                    raise BrightcoveApiServerError(
+                        'Error getting entries from Brightcove %s: %s' % 
+                        (request.url, response.error))
+                else:
+                    raise BrightcoveApiClientError(
+                        'Client error getting entries from Brightcove %s: %s' %
+                        (request.url, response.error))
+            self.args['page_number'] += 1
+                
+            json_data = json.load(response.body)
+            self.page_data = json_data['items']
+            self.page_data.reverse()
+
+        if len(self.page_data) == 0
+            # We've gotten all the data
+            raise StopIteration()
+
+        self.items_returned += 1
+        raise tornado.gen.Return(self.page_data.pop())
