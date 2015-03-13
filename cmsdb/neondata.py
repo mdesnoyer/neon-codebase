@@ -3158,7 +3158,15 @@ class VideoMetadata(StoredObject):
 
         raise tornado.gen.Return(serving_url)
 
-class VideoResponse(object):
+class AbstractJsonResponse(object):
+    
+    def to_dict(self):
+        return self.__dict__
+
+    def to_json(self):
+        return json.dumps(self, default=lambda o: o.__dict__)
+
+class VideoResponse(AbstractJsonResponse):
     ''' VideoResponse object that contains list of thumbs for a video 
         # NOTE: this obj is only used to format in to a json response 
     '''
@@ -3180,11 +3188,14 @@ class VideoResponse(object):
         self.winner_thumbnail = winner_thumbnail
         self.serving_url = serving_url
 
-    def to_dict(self):
-        return self.__dict__
-
-    def to_json(self):
-        return json.dumps(self, default=lambda o: o.__dict__)
+class VideoCallbackResponse(AbstractJsonResponse):
+    def __init__(self, jid, vid, fnos=None, thumbs=None, s_url=None, err=None):
+        self.job_id = jid
+        self.video_id = vid
+        self.framenos = fnos if fnos is not None else []
+        self.thumbnails = thumbs if thumbs is not None else []
+        self.serving_url = s_url
+        self.error = err
 
 if __name__ == '__main__':
     # If you call this module you will get a command line that talks

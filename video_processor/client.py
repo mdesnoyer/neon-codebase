@@ -106,6 +106,34 @@ define('extra_workers', default=0,
 define('video_temp_dir', default=None,
        help='Temporary directory to download videos to')
 
+class VideoProcessingError(Exception):
+    '''
+    Exception class which
+    '''
+    def __init__(self, msg, i_vid, job_id, callback_url):
+        self.msg = msg
+        self.vid = i_vid
+        self.job_id = job_id
+        self.callback_url = callback_url
+        self.send_callback()
+        
+    def send_callback(self):
+        vid = neondata.InternalVideoID.to_external(self.vid)
+        cresp = neondata.VideoCallbackResponse(self.job_id, vid,
+                err=self.msg)
+        response_body = cresp.to_dict()
+
+        #CREATE POST REQUEST
+        body = tornado.escape.json_encode(response_body)
+        h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
+        cb_response_request = tornado.httpclient.HTTPRequest(
+                                url=self.callback_url,
+                                method="POST",
+                                headers=h, 
+                                body=body, 
+                                request_timeout=60.0, 
+                                connect_timeout=10.0)
+        utils.http.send_request(cb_response_request) 
 
 class VideoError(Exception): pass
 class BadVideoError(VideoError): pass
