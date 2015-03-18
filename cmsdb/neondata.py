@@ -1742,6 +1742,8 @@ class BrightcovePlatform(AbstractPlatform):
         self.account_created = time.time() #UTC timestamp of account creation
         self.rendition_frame_width = None #Resolution of video to process
         self.video_still_width = 480 #default brightcove still width
+        # the ids of playlist to create video requests from
+        self.playlist_feed_ids = [] 
 
     @classmethod
     def get_ovp(cls):
@@ -1883,6 +1885,11 @@ class BrightcovePlatform(AbstractPlatform):
         ''' Temp method to support backward compatibility '''
         self.get_api().create_brightcove_request_by_tag(self.integration_id)
 
+    def check_playlist_feed_and_create_requests(self):
+        ''' Get playlists and create requests '''
+        
+        for pid in self.playlist_feed_ids:
+            self.get_api().create_request_from_playlist(pid, self.integration_id)
 
     @tornado.gen.coroutine
     def verify_token_and_create_requests_for_video(self, n):

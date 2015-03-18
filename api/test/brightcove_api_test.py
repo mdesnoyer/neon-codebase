@@ -68,6 +68,36 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
 
         self.http_mock.side_effect = do_response
 
+    def _set_videos_to_return(self, videos):
+        '''Define the videos to return. Should be video structures.'''
+        self.videos_to_return = videos
+        def respond_with_videos(request, callback=None):
+            videos = self.videos_to_return
+            parsed = urlparse.urlparse(request.url)
+            params = urlparse.parse_qs(parsed.query)
+            fields = params.get('video_fields', None)
+            if fields:
+                videos = \
+                  [dict([(k, v) for k,v in vid.items() if k in fields])
+                   for vid in videos]
+            retstruct = {
+                'items' : videos,
+                'page_number' : params.get('page_number', 0),
+                'page_size' : params.get('page_size', 100),
+                'total_count' : -1
+            }
+            
+            
+            response = HTTPResponse(request, 200,
+                                    buffer=StringIO(json.dumps(retstruct)))
+            if callback:
+                tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                             response)
+            else:
+                return response
+
+        self.http_mock.side_effect = respond_with_videos
+
     def test_get_current_thumbnail(self):
         self._set_http_response(
             body=('{"videoStillURL": '
@@ -297,6 +327,65 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(url,
                         "http://brightcove.vo.llnwd.net/e1/uds/pd/2294876105001/2294876105001_2635148067001_PA220134.mp4")
 
+    @patch('api.brightcove_api.utils.http.send_request')
+    def test_create_request_from_playlist(self, utils_http):
+        p_response = HTTPResponse(HTTPRequest("http://bcove"), 200,
+                buffer=StringIO(bcove_responses.find_playlist_by_id_response))
+        n_response = HTTPResponse(HTTPRequest("http://neon"), 200,
+                    buffer=StringIO('{"job_id":"j123"}'))
+        def _side_effect(request, callback=None, *args, **kwargs):
+            if "submitvideo" in request.url:
+                return n_response
+            else:
+                return p_response
+
+        utils_http.side_effect = _side_effect
+        a_id = 'test' 
+        i_id = 'i123'
+        nvideos = 2 
+        na = neondata.NeonUserAccount('acct1')
+        na.save()
+        bp = neondata.BrightcovePlatform(a_id, i_id, na.neon_api_key, 'p1', 'rt', 'wt', 
+                last_process_date=21492000000)
+        bp.account_created = 21492000
+        bp.videos['v1'] = 'j1'
+        bp.playlist_feed_ids.append('1234')
+        bp.save()
+        bp.check_playlist_feed_and_create_requests()
+        u_bp = neondata.BrightcovePlatform.get(na.neon_api_key, i_id)
+        self.assertEqual(len(u_bp.get_videos()), nvideos)
+        self.assertListEqual(u_bp.get_videos(), ['v1', '4100953290001'])
+
+    def test_find_videos_by_ids_basic(self):
+        self._set_videos_to_return([
+            {'id': 'vid1',
+             'name': 'myvid1',
+             'accountId': 'acct1'},
+            {'id': 'vid2',
+             'name': 'myvid2',
+             'accountId': 'acct1'}])
+
+        self.assertEquals(
+            self.api.find_videos_by_ids(['vid2', 'vid1']),
+            {'vid2' : {'id' : 'vid2', 'name': 'myvid2',
+                       'accountId' : 'acct1'}},
+            {'vid1' : {'id' : 'vid1', 'name': 'myvid1',
+                       'accountId' : 'acct1'}})
+
+        cargs, kwargs = self.http_mock.call_args
+        urlparsed = urlparse.urlparse(cargs[0].url)
+        urlparams = urlparse.parse_qs(urlparsed.query)
+        self.assertEquals(
+            urlparams,
+            {'command' : 'find_videos_by_ids',
+             'token' : 'read_tok',
+             'video_ids' : 'vid2,vid1',
+             'media_delivery' : 'http',
+             'output': 'json'})
+
+        self.assertEquals(
+            self.api.find_videos_by_ids(['vid2'], video_fields=['name']),
+            {'vid2' : {'name': 'myvid2'}})
 
 if __name__ == "__main__" :
     unittest.main()

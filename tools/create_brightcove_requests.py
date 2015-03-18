@@ -72,6 +72,7 @@ if __name__ == "__main__":
                           "i_id %s" %(api_key, i_id))
                 #retrieve the blob and create the object
                 accnt.check_feed_and_create_api_requests()
+                accnt.check_playlist_feed_and_create_requests()
 
         except Exception as e:
             _log.exception('key=create_brightcove_requests '

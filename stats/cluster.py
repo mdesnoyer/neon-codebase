@@ -815,7 +815,7 @@ class Cluster():
         self.cluster_id = conn.run_jobflow(
             options.cluster_name,
             log_uri='s3://neon-cluster-logs/',
-            ec2_keyname='emr-runner',
+            ec2_keyname=os.path.basename(options.ssh_key).split('.')[0],
             ami_version='3.1.4',
             job_flow_role='EMR_EC2_DefaultRole',
             service_role='EMR_DefaultRole',

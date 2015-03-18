@@ -10,6 +10,7 @@ if sys.path[0] <> base_path:
     sys.path.insert(0, base_path)
 
 import datetime
+import json
 from poster.encode import multipart_encode
 import poster.encode
 from PIL import Image
@@ -404,7 +405,6 @@ class BrightcoveApi(object):
             to_process = False
             vid   = str(item['id'])
             title = item['name']
-
             #Check if neon has processed the videos already 
             if vid not in videos_processed:
                 thumb  = item['thumbnailURL'] 
@@ -775,12 +775,46 @@ class BrightcoveApi(object):
 
         raise tornado.gen.Return((thumb_url, still_url))
 
+    def create_request_from_playlist(self, pid, i_id):
+        ''' create thumbnail api request given a video id 
+            NOTE: currently we only need a sync version of this method
+
+        '''
+
+        url = 'http://api.brightcove.com/services/library?command=find_playlist_by_id' \
+                '&token=%s&media_delivery=http&output=json&playlist_id=%s' %\
+                (self.read_token, pid)
+        req = tornado.httpclient.HTTPRequest(url=url,
+                                             method="GET",
+                                             request_timeout=60.0,
+                                             connect_timeout=10.0)
+        response = utils.http.send_request(req)
+        if response.error:
+            _log.error('key=create_request_from_playlist msg=Unable to get %s'
+                       % url)
+            return False
+       
+        json = tornado.escape.json_decode(response.body)
+        try:
+            items_to_process = json['videos']
+
+        except ValueError, e:
+            _log.exception('json error: %s' % e)
+            return
+
+        except Exception, e:
+            _log.exception('unexpected error: %s' % e)
+            return
+            
+        # Process the publisher feed
+        self.process_publisher_feed(items_to_process, i_id)
+        return
+
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def find_videos_by_ids(self, video_ids, video_fields=None,
                            media_delivery='http'):
         '''Finds many video information from the brightcove request.
-
         Inputs:
         video_ids - list of video ids to get info for
         video_fields - list of video fields to populate
@@ -795,7 +829,34 @@ class BrightcoveApi(object):
         
         for i in range(0, len(video_ids), MAX_VIDS_PER_REQUEST):
             url_params = {
-                ''}
+                'command' : 'find_videos_by_ids',
+                'token' : self.read_token,
+                'video_ids' : ','.join(video_ids[i:(i+MAX_VIDS_PER_REQUEST)]),
+                'media_delivery' : media_delivery,
+                'output' : 'json'
+                }
+            if video_fields is not None:
+                video_fields.append('id')
+                url_params['video_fields'] = ','.join(set(video_fields))
+
+            request = tornado.httpclient.HTTPRequest(
+                '%s?%s' % (self.read_url, urllib.urlencode(url_params)),
+                request_timeout = 60.0)
+            
+            response = yield tornado.gen.Task(
+                BrightcoveApi.read_connection.send_request, request)
+
+            if response.error:
+                _log.error('Error calling find_videos_by_ids: %s' %
+                           response.error)
+                raise response.error
+
+            json_data = json.load(response.buffer)
+            for item in json_data['items']:
+                if item is not None:
+                    results[item['id']] = item
+
+        raise tornado.gen.Return(results)
 
 class BrightcoveFeedIterator(object):
     '''An iterator that walks through entries from a Brightcove feed.
@@ -871,7 +932,7 @@ class BrightcoveFeedIterator(object):
             self.page_data = json_data['items']
             self.page_data.reverse()
 
-        if len(self.page_data) == 0
+        if len(self.page_data) == 0:
             # We've gotten all the data
             raise StopIteration()
 
