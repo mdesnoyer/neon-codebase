@@ -64,6 +64,21 @@ class TestSyncSendRequest(test_utils.neontest.TestCase):
 
         self.assertEqual(found_response, valid_response)
 
+    def test_json_error_out(self):
+        request, valid_response = create_valid_ack()
+        invalid_response = HTTPResponse(request, 200,
+                                        buffer=StringIO('{"error":600}'))
+        self.mock_client().fetch.side_effect = [
+            invalid_response,
+            invalid_response,
+            invalid_response
+            ]
+
+        with self.assertLogExists(logging.WARNING, 'key=http_response_error'):
+            found_response = utils.http.send_request(request, 3)
+
+        self.assertEqual(found_response.error.log_message, '600')
+
     def test_connection_errors(self):
         request, valid_response = create_valid_ack()
         invalid_response = HTTPError(500) 

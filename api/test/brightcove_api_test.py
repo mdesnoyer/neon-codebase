@@ -30,6 +30,7 @@ import test_utils.redis
 import urlparse
 import unittest
 from utils.imageutils import PILImageUtils
+import utils.neon
 
 _log = logging.getLogger(__name__)
 
@@ -77,6 +78,7 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
             params = urlparse.parse_qs(parsed.query)
             fields = params.get('video_fields', None)
             if fields:
+                fields = fields[0].split(',')
                 videos = \
                   [dict([(k, v) for k,v in vid.items() if k in fields])
                    for vid in videos]
@@ -265,7 +267,7 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
             self.assertEqual(img_filename, '"neontn%s.jpg"' % tid)
     
         response = HTTPResponse(HTTPRequest("http://bcove"), 200,
-                buffer=StringIO('"done"'))
+                buffer=StringIO('{"result":{"id":"newtid"}}'))
         write_conn_mock.side_effect = lambda x, callback: callback(response)
         image = PILImageUtils.create_random_image(360, 480) 
         tid = "TID"
@@ -288,13 +290,15 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         '''
         Verify the multipart request construction to brightcove
         '''
-        response = HTTPResponse(HTTPRequest("http://bcove"), 200,
-                buffer=StringIO('"done"'))
-        write_conn_mock.side_effect = lambda x, callback: callback(response)
         r_url = "http://i1.neon-images.com/video_id1?height=10&width=20"
+        response = HTTPResponse(HTTPRequest("http://bcove"), 200,
+                buffer=StringIO('{"result":{"id":"newtid", "remoteUrl":"%s"}}'
+                                % r_url))
+        write_conn_mock.side_effect = lambda x, callback: callback(response)
         resp = yield self.api.add_image("video_id1", 'tid1', 
                                         remote_url=r_url)
-        self.assertEqual(resp, 'done')
+        self.assertEqual(resp, {"id": "newtid",
+                                "remoteUrl":r_url})
         headers = write_conn_mock.call_args[0][0].headers
         self.assertTrue('multipart/form-data' in headers['Content-Type'])
         body = write_conn_mock.call_args[0][0].body
@@ -368,8 +372,8 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         self.assertEquals(
             self.api.find_videos_by_ids(['vid2', 'vid1']),
             {'vid2' : {'id' : 'vid2', 'name': 'myvid2',
-                       'accountId' : 'acct1'}},
-            {'vid1' : {'id' : 'vid1', 'name': 'myvid1',
+                       'accountId' : 'acct1'},
+             'vid1' : {'id' : 'vid1', 'name': 'myvid1',
                        'accountId' : 'acct1'}})
 
         cargs, kwargs = self.http_mock.call_args
@@ -377,15 +381,34 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         urlparams = urlparse.parse_qs(urlparsed.query)
         self.assertEquals(
             urlparams,
-            {'command' : 'find_videos_by_ids',
-             'token' : 'read_tok',
-             'video_ids' : 'vid2,vid1',
-             'media_delivery' : 'http',
-             'output': 'json'})
+            {'command' : ['find_videos_by_ids'],
+             'token' : ['read_tok'],
+             'video_ids' : ['vid2,vid1'],
+             'media_delivery' : ['http'],
+             'output': ['json']})
+
+        self._set_videos_to_return([
+            {'id': 'vid2',
+             'name': 'myvid2',
+             'accountId': 'acct1'}])
 
         self.assertEquals(
             self.api.find_videos_by_ids(['vid2'], video_fields=['name']),
-            {'vid2' : {'name': 'myvid2'}})
+            {'vid2' : {'id': 'vid2', 'name': 'myvid2'}})
+
+    def test_find_videos_by_ids_errors(self):
+        self._set_http_response(body='{"error": "invalid token","code":210}')
+
+        with self.assertLogExists(logging.ERROR, 'invalid token'):
+            with self.assertRaises(api.brightcove_api.BrightcoveApiClientError):
+                self.api.find_videos_by_ids(['vid1'])
+
+        self._set_http_response(body='{"error": "server slow","code":103}')
+
+        with self.assertLogExists(logging.ERROR, 'server slow'):
+            with self.assertRaises(api.brightcove_api.BrightcoveApiServerError):
+                self.api.find_videos_by_ids(['vid1'])
 
 if __name__ == "__main__" :
+    utils.neon.InitNeon()
     unittest.main()

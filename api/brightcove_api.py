@@ -5,9 +5,9 @@ Brightcove API Interface class
 import os
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0, base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 import datetime
 import json
@@ -849,7 +849,10 @@ class BrightcoveApi(object):
             if response.error:
                 _log.error('Error calling find_videos_by_ids: %s' %
                            response.error)
-                raise response.error
+                if response.error['code'] < 200:
+                    raise BrightcoveApiServerError(response.error)
+                else:
+                    raise BrightcoveApiClientError(response.error)
 
             json_data = json.load(response.buffer)
             for item in json_data['items']:
