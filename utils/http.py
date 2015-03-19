@@ -65,6 +65,8 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
                         _log.warning(('key=http_response_error '
                                       'msg=Response err from %s: %s') %
                                       (request.url, data['error']))
+                    response.error = tornado.httpclient.HTTPError(
+                        500, str(data['error']))
                 else:
                     return finish_request(response)
 
