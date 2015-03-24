@@ -74,6 +74,9 @@ def calc_lift_at_first_significant_hour(impressions, conversions):
                 # There isn't statistical significance anywhere so use
                 # the aggregate stats.
                 idx = p_value.index[-1]
+
+                # TODO(mdesnoyer): Playing. only keep data that's significant
+                continue
             else:
                 idx = sig.index[0]
                 
@@ -83,27 +86,24 @@ def calc_lift_at_first_significant_hour(impressions, conversions):
                 cum_ctr[base][idx])
 
             stats['revlift'][base][top] = ((
-                cum_ctr[top][idx] - cum_ctr[base][idx]))# /
-            #    cum_ctr[top][idx])
-            #stats['extra_conversions'][base][top] = (
-            #    cum_conv[top].max() * revlift)
+                cum_ctr[top][idx] - cum_ctr[base][idx]))
 
     return stats
 
-def calc_extra_conversions(conversions, revlift):
+def calc_extra_conversions(impressions, revlift):
     '''Calculate the extra conversions for each thumb relative to the others.
 
     Inputs:
-    conversions - A pandas DataFrame of conversion counts where rows are hours
+    impressions - A pandas DataFrame of impression counts where rows are hours
                   and columns are thumbnails
     revlift - A DataFrame of lift where row and cols are thumbs. cols are baseline
 
     Returns:
     A DataFrame of extra conversions in the same shape as revlift
     '''
-    conv_totals = conversions.sum()
+    impr_totals = impressions.sum()
             
-    retval = revlift.multiply(conv_totals, axis='index')
+    retval = revlift.multiply(impr_totals, axis='index')
     retval = retval.replace(np.inf, 0).replace(-np.inf, 0)
     return retval
 
@@ -116,14 +116,22 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     Returns:
     pandas series of stats we generate
     '''
-    base_sums = data.fillna(0).groupby(['is_base']).sum()
-    neon_sums = data.fillna(0).groupby(level=['type']).sum()
+    data = data.fillna(0)
+    data = data[(data['extra_conversions'] != 0) | data['is_base']]
 
-    lift = base_sums['impr'][True] * base_sums['extra_conversions'][False] / \
-      (base_sums['conv'][True] * base_sums['impr'][False])
+    # Only grab videos that have a baseline and one non-baseline
+    data.groupby(level=1).filter(lambda x: np.any(x['is_base']) 
+                                 and np.any(x['is_base'] == False))
 
-    #lift = base_sums['impr'][True] * neon_sums['extra_conversions']['neon'] / \
-    #  (base_sums['conv'][True] * neon_sums['impr']['neon'])
+    
+    base_sums = data.groupby(['is_base']).sum()
+    neon_sums = data.groupby(level=['type']).sum()
+
+    #lift = base_sums['impr'][True] * base_sums['extra_conversions'][False] / \
+    #  (base_sums['conv'][True] * base_sums['impr'][False])
+
+    lift = base_sums['impr'][True] * neon_sums['extra_conversions']['neon'] / \
+      (base_sums['conv'][True] * neon_sums['impr']['neon'])
     
 
     return pandas.Series({'lift': lift})

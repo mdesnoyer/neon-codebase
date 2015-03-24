@@ -45,6 +45,8 @@ define("min_impressions", default=1000,
        help="Minimum number of impressions for a thumbnail for it to be included.")
 define("baseline_types", default="centerframe",
        help="Comma separated list of thumbnail type to treat as baseline")
+define("do_mobile", default=0, type=int,
+       help="Only collect mobile data if 1")
 
 _log = logging.getLogger(__name__)
 
@@ -74,6 +76,7 @@ def get_video_ids():
     vidRe = re.compile('[0-9a-zA-Z]+_[0-9a-zA-Z]+')
     retval = [x[0] for x in cursor if vidRe.match(x[0])]
     return retval
+    
 
 def collect_stats(thumb_info, video_info,
                   impression_metric=MetricTypes.LOADS,
@@ -113,10 +116,15 @@ def collect_stats(thumb_info, video_info,
             %s is not null and
             regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_',
             1) in (%s)
+            %s
+            %s
             group by thumbnail_id, hr""" %
             (col_map[impression_metric], options.pub_id,
              col_map[impression_metric],
-             ','.join(["'%s'" % x for x in video_info.keys()])))
+             ','.join(["'%s'" % x for x in video_info.keys()]),
+             statutils.get_time_clause(options.start_time,
+                                       options.end_time),
+             statutils.get_mobile_clause(options.do_mobile)))
     else:
         query = (
             """select 
@@ -128,12 +136,14 @@ def collect_stats(thumb_info, video_info,
             regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_',
             1) in (%s) 
             %s
+            %s
             group by thumbnail_id, hr
             """ % (col_map[impression_metric], col_map[conversion_metric],
                    options.pub_id, col_map[impression_metric],
                    ','.join(["'%s'" % x for x in video_info.keys()]),
                    statutils.get_time_clause(options.start_time,
-                                             options.end_time)))
+                                             options.end_time),
+                   statutils.get_mobile_clause(options.do_mobile)))
     cursor.execute(query)
 
     impala_cols = [metadata[0] for metadata in cursor.description]
@@ -228,8 +238,23 @@ def collect_stats(thumb_info, video_info,
 
         video_data[(video.integration_id, video_id)] = thumb_stats
 
-    return pandas.concat(video_data.itervalues(),
-                         keys=video_data.keys()).sortlevel()
+    results = pandas.concat(video_data.itervalues(),
+                            keys=video_data.keys()).sortlevel()
+    index_names = [u'integration_id', u'video_id', u'type', u'rank',
+                   u'thumbnail_id']
+    results.index.names = index_names
+    results.reset_index(inplace=True)
+
+    # Sort so that the videos with the best lift are first
+    sortIdx = results.groupby('video_id').transform(lambda x: x.max()).sort(
+        ['lift', 'thumbnail_id'], ascending=False).index
+    results = results.ix[sortIdx]
+
+    # Now sort within each video first by type, then by lift
+    results = results.groupby('video_id', sort=False).apply(
+        lambda x: x.sort(['type', 'lift'], ascending=False))
+    results = results.set_index(index_names)
+    return results
 
 def get_video_titles(video_ids):
     '''Returns the video titles for a list of video id'''
@@ -252,7 +277,7 @@ def get_video_titles(video_ids):
             _log.error('Could not find job for video id %s' % video_id)
             retval.append('')
             continue
-        retval.append(api_request.video_title)
+        retval.append(api_request.video_title.encode('utf-8'))
     return retval
 
 def calculate_aggregate_stats(video_stats):
@@ -339,12 +364,12 @@ def main():
 	                       x.video_id is not None])
     urls = dict(
         [((video_info[x.video_id].integration_id, x.video_id, x.type, x.rank
-           if x.type =='neon' else 0),
+           if x.type =='neon' else 0, x.key),
           [x.urls[0] if x.urls is not None else x.url,
            title]) 
          for x, title in zip(thumbnail_info.values(), titles)])
     url_index = pandas.MultiIndex.from_tuples(
-        urls.keys(), names=['integration_id', 'video_id', 'type', 'rank'])
+        urls.keys(), names=['integration_id', 'video_id', 'type', 'rank', 'thumbnail_id'])
     urls = pandas.DataFrame(
         urls.values(), index=url_index,
         columns=pandas.MultiIndex.from_tuples([('', 'url'), ('', 'title')]))
@@ -374,10 +399,9 @@ def main():
                                keys=video_stats.keys(),
                                axis=1)
 
-    # TODO Add the video titls and urls back in
-    #video_data = pandas.concat([video_data, urls], join='inner',
-    #                           keys=['data', 'metadata'], axis=1)
-    video_data = video_data.sortlevel()
+    video_data = pandas.merge(video_data, urls, how='left',
+                              left_index=True, right_index=True, sort=False)
+    #video_data = video_data.sortlevel()
     
 
     _log.info('Calculating aggregate statistics')
@@ -402,11 +426,22 @@ def main():
     #          calculate_aggregate_stats(data_dict)
     #    except Exception as e:
     #        _log.exception('Error: %s' % e)
-    
-    with pandas.ExcelWriter(options.output) as writer:
-        video_data.to_excel(writer, sheet_name='Per Video Stats')
+
+    if options.output.endswith('.xls'):
+        with pandas.ExcelWriter(options.output, encoding='utf-8') as writer:
+            video_data.to_excel(writer, sheet_name='Per Video Stats')
+            for sheet_name, data in aggregate_sheets.iteritems():
+                data.to_excel(writer, sheet_name=sheet_name)
+        
+    elif options.output.endswith('.csv'):
+        video_data.to_csv(options.output)
         for sheet_name, data in aggregate_sheets.iteritems():
-            data.to_excel(writer, sheet_name=sheet_name)
+            splits = options.output.rpartition('.')
+            fn = '%s_%s.%s' % (splits[0], sheet_name, splits[1])
+            data.to_csv(fn)
+    else:
+        raise Exception('Unknown output format for %s' % options.output)
+
 
 
 if __name__ == "__main__":

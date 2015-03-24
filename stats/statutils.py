@@ -14,6 +14,9 @@ if sys.path[0] != __base_path__:
 
 from datetime import datetime
 import dateutil.parser
+import logging
+
+_log = logging.getLogger(__name__)
 
 def get_time_clause(start_time=None, end_time=None):
     '''Returns the where clause to make sure the results are between the
@@ -40,3 +43,11 @@ def get_time_clause(start_time=None, end_time=None):
         return ''
 
     return ' and ' + ' and '.join(clauses)
+
+def get_mobile_clause(do_mobile):
+    if do_mobile:
+        _log.info('Only collecting mobile data')
+        return (" and agentinfo_os_name in "
+                "('iPhone', 'Android', 'IPad', 'BlackBerry') ")
+
+    return ''
