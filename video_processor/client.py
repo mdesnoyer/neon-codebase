@@ -82,6 +82,9 @@ statemon.define('extract_frame_error', int)
 statemon.define('running_workers', int)
 statemon.define('workers_cv_processing', int)
 statemon.define('other_worker_completed', int)
+statemon.define('s3url_download_error', int)
+statemon.define('centerframe_extraction_error', int)
+statemon.define('randomframe_extraction_error', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -252,6 +255,7 @@ class VideoProcessor(object):
                 except boto.exception.S3ResponseError as e:
                     _log.warn('Error getting video url %s via boto. '
                               'Falling back on http: %s' % (self.video_url, e))
+                    statemon.state.increment('s3url_download_error')
             
             # Use urllib2
             req = urllib2.Request(self.video_url, headers=self.headers)
@@ -405,6 +409,7 @@ class VideoProcessor(object):
         except Exception, e:
             _log.error("Unexpected error extracting center frame from %s:"
                        " %s" % (self.video_url, e))
+            statemon.state.increment('centerframe_extraction_error')
             raise
 
     def _get_random_frame(self, video_file, nframes=None):
@@ -429,6 +434,7 @@ class VideoProcessor(object):
         except Exception, e:
             _log.error("Unexpected error extracting random frame from %s:"
                            " %s" % (self.video_url, e))
+            statemon.state.increment('randomframe_extraction_error')
             raise
 
     def _get_specific_frame(self, mov, frameno):
@@ -618,7 +624,7 @@ class VideoProcessor(object):
             raise DBError("Error finishing api request")
 
         # Send callbacks and notifications
-        self.send_client_callback_response(video_id, cb_request)
+        self.send_client_callback_response(new_video_metadata.key, cb_request)
         self.send_notifiction_response(api_request)
 
         _log.info('Sucessfully finalized video %s. Is has video id %s' % 
@@ -634,7 +640,8 @@ class VideoProcessor(object):
 
         response_body = {}
         response_body["job_id"] = self.video_metadata.job_id 
-        response_body["video_id"] = self.video_metadata.key 
+        response_body["video_id"] = neondata.InternalVideoID.to_external(
+            self.video_metadata.key)
         response_body["framenos"] = [
             x[0].frameno for x in self.thumbnails 
             if x[0].type == neondata.ThumbnailType.NEON]
@@ -646,6 +653,7 @@ class VideoProcessor(object):
           response_body["thumbnails"][:self.n_thumbs]
         response_body["timestamp"] = str(time.time())
         response_body["serving_url"] = self.video_metadata.get_serving_url()
+        response_body["error"] =  ""
 
         #CREATE POST REQUEST
         body = tornado.escape.json_encode(response_body)
@@ -697,7 +705,7 @@ class VideoProcessor(object):
         title = self.job_params['video_title']
         i_id = self.video_metadata.integration_id
         job_id  = self.job_params['job_id']
-        account = neondata.NeonUserAccount.get_account(api_key)
+        account = neondata.NeonUserAccount.get(api_key)
         if account is None:
             _log.error('Could not get the account for api key %s' %
                        api_key)

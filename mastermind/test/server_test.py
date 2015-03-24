@@ -22,6 +22,7 @@ import fake_tempfile
 import happybase
 import impala.error
 import json
+import gzip
 import logging
 import mastermind.core
 from mock import MagicMock, patch
@@ -54,6 +55,13 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             'cmsdb.neondata.blockingRedis.StrictRedis')
         self.redis_patcher.start()
         
+        # Mock out the callback manager
+        self.callback_patcher = patch(
+            'mastermind.server.utils.sqsmanager.CustomerCallbackManager')
+        self.callback_mock = MagicMock()
+        self.callback_patcher.start().return_value = \
+          self.callback_mock
+        
         self.mastermind = mastermind.core.Mastermind()
         self.directive_publisher = mastermind.server.DirectivePublisher(
             self.mastermind)
@@ -65,6 +73,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
         self.redis_patcher.stop()
+        self.callback_patcher.stop()
 
     def test_good_db_data(self, datamock):
         # Define platforms in the database
@@ -975,10 +984,13 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
 class TestDirectivePublisher(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestDirectivePublisher, self).setUp()
-        
-        self.mastermind = mastermind.core.Mastermind()
-        self.publisher = mastermind.server.DirectivePublisher(
-            self.mastermind)
+
+        # Mock out the callback manager
+        self.callback_patcher = patch(
+            'mastermind.server.utils.sqsmanager.CustomerCallbackManager')
+        self.callback_mock = MagicMock()
+        self.callback_patcher.start().return_value = \
+          self.callback_mock
 
         # Mock out the connection to S3
         self.s3_patcher = patch('mastermind.server.S3Connection')
@@ -997,6 +1009,10 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.datamock = self.neondata_patcher.start()
         self.datamock.RequestState = neondata.RequestState
 
+        self.old_serving_update_delay = options.get(
+            'mastermind.server.serving_update_delay')
+        options._set('mastermind.server.serving_update_delay', 0)
+
         self.mastermind = mastermind.core.Mastermind()
         self.publisher = mastermind.server.DirectivePublisher(
             self.mastermind)
@@ -1004,15 +1020,22 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
 
     def tearDown(self):
         self.neondata_patcher.stop()
+        self.callback_patcher.stop()
         mastermind.server.tempfile = self.real_tempfile
         self.s3_patcher.stop()
+        options._set('mastermind.server.serving_update_delay',
+                     self.old_serving_update_delay)
+        cb_thread = self.publisher._callback_thread
         del self.mastermind
         super(TestDirectivePublisher, self).tearDown()
+        if cb_thread is not None:
+            cb_thread.join(5)
 
     def _parse_directive_file(self, file_data):
         '''Returns expiry, {tracker_id -> account_id},
         {(account_id, video_id) -> json_directive}'''
-        lines = file_data.split('\n')
+        gz = gzip.GzipFile(fileobj=StringIO(file_data), mode='rb')
+        lines = gz.read().split('\n')
         
         # Make sure the expiry is valid
         self.assertRegexpMatches(lines[0], 'expiry=.+')
@@ -1113,11 +1136,15 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.assertIn('mastermind', key_names)
         key_names.remove('mastermind')
         self.assertRegexpMatches(key_names[0], '[0-9]+\.mastermind')
-        
+       
+        # check that mastermind file has a gzip header 
+        mastermind_file = bucket.get_key('mastermind')
+        self.assertEqual(mastermind_file.content_type, 'application/x-gzip')
+
         # Now check the data format in the file
         expiry, tracker_ids, default_thumbs, directives = \
           self._parse_directive_file(
-            bucket.get_key('mastermind').get_contents_as_string())
+            mastermind_file.get_contents_as_string())
         
         # Make sure the expiry is valid
         self.assertGreater(expiry,
@@ -1194,6 +1221,12 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.assertLessEqual(
             dateutil.parser.parse(directives[('acct1', 'acct1_vid2')]['sla']),
             date.datetime.now(dateutil.tz.tzutc()))
+
+        # Verify that the callbacks were sent
+        if self.publisher._callback_thread:
+            self.publisher._callback_thread.join(5)
+        self.callback_mock.schedule_all_callbacks.assert_called_with(
+            set(['acct1_vid1', 'acct1_vid2']))
 
     def test_different_default_urls(self):
         self.mastermind.serving_directive = {
@@ -1309,6 +1342,197 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             },
             directives[('acct1', 'acct1_vid2')])
 
+    def test_serving_url_list_empty(self):
+        self.mastermind.serving_directive = {
+            'acct1_vid2': (('acct1', 'acct1_vid2'), 
+                           [('tid21', 1.0),
+                            ('tid22', 0.0)])}
+        self.mastermind.video_info = self.mastermind.serving_directive
+        self.publisher.update_tracker_id_map({'tai1' : 'acct1',
+                                              'tai2' : 'acct2'})
+
+        self.publisher.update_serving_urls({
+            'acct1_vid2_tid21' : {}})
+
+        with self.assertLogExists(logging.ERROR, 
+                                  ('Could not find all serving URLs for '
+                                   'video: acct1_vid2')):
+            with self.assertLogExists(logging.ERROR,
+                                      ('No serving urls for thumb '
+                                       'acct1_vid2_tid21')):
+                self.publisher._publish_directives()
+
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
+        expiry, tracker_ids, default_thumbs, directives = \
+          self._parse_directive_file(
+            bucket.get_key('mastermind').get_contents_as_string())
+
+    def test_error_when_sending_callback(self):
+        self.callback_mock.schedule_all_callbacks.side_effect = [
+            Exception('Some kind of exception')
+            ]
+        
+        # We will fill the data structures in the mastermind core
+        # directly because it's too complicated to insert them using
+        # the update* functions and mocking out all the db calls.
+        self.mastermind.serving_directive = {
+            'acct1_vid1': (('acct1', 'acct1_vid1'), 
+                           [('tid11', 0.1),
+                            ('tid12', 0.2),
+                            ('tid13', 0.8)]),
+            'acct1_vid2': (('acct1', 'acct1_vid2'), 
+                           [('tid21', 0.0),
+                            ('tid22', 1.0)])}
+        self.mastermind.video_info = self.mastermind.serving_directive
+        
+        self.publisher.update_tracker_id_map({
+            'tai1' : 'acct1',
+            'tai1s' : 'acct1',
+            'tai2p' : 'acct2'})
+        self.publisher.update_default_thumbs({
+            'acct1' : 'acct1_vid1_tid11'}
+            )
+        self.publisher.update_serving_urls(
+            {
+            'acct1_vid1_tid11' : { (640, 480): 't11_640.jpg',
+                                   (160, 90): 't11_160.jpg' },
+            'acct1_vid1_tid12' : { (800, 600): 't12_800.jpg',
+                                   (160, 90): 't12_160.jpg'},
+            'acct1_vid1_tid13' : { (160, 90): 't13_160.jpg'},
+            'acct1_vid2_tid21' : { (1920, 720): 't21_1920.jpg',
+                                   (160, 90): 't21_160.jpg'},
+            'acct1_vid2_tid22' : { (500, 500): 't22_500.jpg',
+                                   (160, 90): 't22_160.jpg'},
+                                   })
+
+        with self.assertLogExists(logging.WARNING,
+                                  'Unexpected error when sending a customer'):
+            self.publisher._publish_directives()
+            if self.publisher._callback_thread:
+                self.publisher._callback_thread.join(5)
+
+        # Make sure that there are two directive files, one is the
+        # REST endpoint and the second is a timestamped one.
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
+        keys = [x for x in bucket.get_all_keys()]
+        key_names = [x.name for x in keys]
+        self.assertEquals(len(key_names), 2)
+        self.assertEquals(keys[0].size,keys[1].size)
+        self.assertIn('mastermind', key_names)
+        key_names.remove('mastermind')
+        self.assertRegexpMatches(key_names[0], '[0-9]+\.mastermind')
+
+class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
+    '''Tests for updates to the database when directives are published.'''
+    def setUp(self):
+        super(TestPublisherStatusUpdatesInDB, self).setUp()
+
+        # Mock out the callback manager
+        self.callback_patcher = patch(
+            'mastermind.server.utils.sqsmanager.CustomerCallbackManager')
+        self.callback_mock = MagicMock()
+        self.callback_patcher.start().return_value = \
+          self.callback_mock
+
+        # Mock out the connection to S3
+        self.s3_patcher = patch('mastermind.server.S3Connection')
+        self.s3conn = test_utils.mock_boto_s3.MockConnection()
+        self.s3_patcher.start().return_value = self.s3conn
+        self.s3conn.create_bucket('neon-image-serving-directives-test')
+
+        # Insert a fake filesystem
+        self.filesystem = fake_filesystem.FakeFilesystem()
+        self.real_tempfile = mastermind.server.tempfile
+        mastermind.server.tempfile = fake_tempfile.FakeTempfileModule(
+            self.filesystem)
+
+        # Start a database
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+
+        # Initialize the data in the database that we actually need
+        neondata.VideoMetadata(
+            'acct1_vid1',
+            tids=['acct1_vid1_tid11', 'acct1_vid1_tid12'],
+            request_id='job1',
+            i_id='int1').save()
+        request = neondata.BrightcoveApiRequest('job1', 'acct1', 'vid1')
+        request.state = neondata.RequestState.FINISHED
+        request.save()
+
+        self.old_serving_update_delay = options.get(
+            'mastermind.server.serving_update_delay')
+        options._set('mastermind.server.serving_update_delay', 0)
+
+        # Create the publisher
+        self.mastermind = mastermind.core.Mastermind()
+        self.publisher = mastermind.server.DirectivePublisher(
+            self.mastermind)
+
+        # Set the state of the publisher and the mastermind core
+        self.mastermind.serving_directive = {
+            'acct1_vid1': (('acct1', 'acct1_vid1'), 
+                           [('tid11', 0.1),
+                            ('tid12', 0.9)])}
+        self.mastermind.video_info = self.mastermind.serving_directive
+        self.publisher.update_tracker_id_map({
+            'tai1' : 'acct1'})
+        self.publisher.update_serving_urls(
+            {
+            'acct1_vid1_tid11' : { (640, 480): 't11_640.jpg',
+                                   (160, 90): 't11_160.jpg' },
+            'acct1_vid1_tid12' : { (800, 600): 't12_800.jpg',
+                                   (160, 90): 't12_160.jpg'}})
+
+        logging.getLogger('mastermind.server').reset_sample_counters()
+
+    def tearDown(self):
+        self.callback_patcher.stop()
+        mastermind.server.tempfile = self.real_tempfile
+        self.s3_patcher.stop()
+        options._set('mastermind.server.serving_update_delay',
+                     self.old_serving_update_delay)
+        self._wait_for_db_updates()
+        cb_thread = self.publisher._callback_thread
+        self.redis.stop()
+        super(TestPublisherStatusUpdatesInDB, self).tearDown()
+        if cb_thread is not None:
+            cb_thread.join(5)
+
+    def _wait_for_db_updates(self):
+        self.publisher.wait_for_pending_modifies()
+
+    def test_update_request_state_add_and_remove_video(self):
+        self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
+                          neondata.RequestState.FINISHED)
+        
+        self.publisher._publish_directives()
+        self._wait_for_db_updates()
+
+        # Make sure that vid1 was changed in the database to serving
+        # because it was just added.
+        self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
+                          neondata.RequestState.SERVING)
+
+        # Now remove the video and make sure it goes back to state finished
+        self.mastermind.remove_video_info('acct1_vid1')
+        self.publisher._publish_directives()
+        self._wait_for_db_updates()
+        self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
+                          neondata.RequestState.FINISHED)
+
+    def test_request_state_when_no_serving_urls(self):
+        self.publisher.update_serving_urls({})
+
+        self.publisher._publish_directives()
+        self._wait_for_db_updates()
+
+        # The video shouldn't serve because there are not valid serving urls
+        self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
+                          neondata.RequestState.FINISHED)
+
+    #TODO(Sunil): re-enable this test and add error cases
+    @unittest.skip('tests the non-async mechanism of updating the serving state')
     def test_update_request_state_to_serving(self):
         '''
         Test the update_request_state logic
@@ -1377,6 +1601,12 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.s3_patcher.start().return_value = self.s3conn
         self.s3conn.create_bucket('neon-image-serving-directives-test')
 
+        # Mock out the callback manager
+        self.callback_patcher = patch(
+            'mastermind.server.utils.sqsmanager.CustomerCallbackManager')
+        self.callback_mock = MagicMock()
+        self.callback_patcher.start().return_value = self.callback_mock
+
         # Insert a fake filesystem
         self.filesystem = fake_filesystem.FakeFilesystem()
         self.real_tempfile = mastermind.server.tempfile
@@ -1434,6 +1664,10 @@ class SmokeTesting(test_utils.neontest.TestCase):
 
         self.activity_watcher = utils.ps.ActivityWatcher()
 
+        self.old_serving_update_delay = options.get(
+            'mastermind.server.serving_update_delay')
+        options._set('mastermind.server.serving_update_delay', 0)
+
         self.mastermind = mastermind.core.Mastermind()
         self.directive_publisher = mastermind.server.DirectivePublisher(
             self.mastermind, activity_watcher=self.activity_watcher)
@@ -1449,8 +1683,11 @@ class SmokeTesting(test_utils.neontest.TestCase):
         mastermind.server.tempfile = self.real_tempfile
         self.hbase_patcher.stop()
         self.cluster_patcher.stop()
+        self.callback_patcher.stop()
         self.s3_patcher.stop()
         self.sqlite_connect_patcher.stop()
+        options._set('mastermind.server.serving_update_delay',
+                     self.old_serving_update_delay)
         self.redis.stop()
         self.directive_publisher.stop()
         self.video_watcher.stop()
@@ -1550,24 +1787,29 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self._add_hbase_entry(1405372146, 'key1_vid1_t1', iv=3, ic=1)
         self._add_hbase_entry(1405372146, 'key1_vid1_t2', iv=1, ic=1)
 
-        # Now start all the threads
-        self.video_watcher.start()
-        self.video_watcher.wait_until_loaded()
-        self.stats_watcher.start()
-        self.stats_watcher.wait_until_loaded()
-        self.directive_publisher.start()
+        # set the db update delay to 0
+        with options._set_bounded('mastermind.server.serving_update_delay', 0):
+            # Now start all the threads
+            self.video_watcher.start()
+            self.video_watcher.wait_until_loaded()
+            self.stats_watcher.start()
+            self.stats_watcher.wait_until_loaded()
+            self.directive_publisher.start()
 
-        time.sleep(1) # Make sure that the directive publisher gets busy
-        self.activity_watcher.wait_for_idle()
+            time.sleep(1) # Make sure that the directive publisher gets busy
+            self.activity_watcher.wait_for_idle()
 
-        # See if there is anything in S3 (which there should be)
-        bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
-        lines = bucket.get_key('mastermind').get_contents_as_string().split('\n')
-        self.assertEqual(len(lines), 5)
-    
-        # Check if the serving state of the video has changed
-        self.assertTrue(
-                self.directive_publisher.video_id_serving_map['key1_vid1'])
+            self.directive_publisher.wait_for_pending_modifies()
+            # See if there is anything in S3 (which there should be)
+            bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
+            data = bucket.get_key('mastermind').get_contents_as_string()
+            gz = gzip.GzipFile(fileobj=StringIO(data), mode='rb')
+            lines = gz.read().split('\n')
+            self.assertEqual(len(lines), 5)
+
+            # check the DB to ensure it has changed
+            req = neondata.VideoMetadata.get_video_request('key1_vid1')
+            self.assertEqual(req.state, neondata.RequestState.SERVING)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

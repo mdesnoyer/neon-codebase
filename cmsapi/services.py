@@ -62,11 +62,51 @@ def CachePrimer():
     '''
     pass
 
-#Monitoring variables
-statemon.define('bad_request', int) #HTTP 400s
-statemon.define('bad_gateway', int) #HTTP 502s
-statemon.define('internal_err', int) #HTTP 500s
+################################################################################
+# Monitoring variables
+################################################################################
 statemon.define('total_requests', int) #all requests 
+
+# HHTP 500s totals and fine-grained issues counters
+statemon.define('bad_gateway', int) # all HTTP 502s
+statemon.define('internal_err', int) # all HTTP 500s
+statemon.define('unexpected_exception', int)
+statemon.define('custom_thumbnail_not_added', int)
+statemon.define('brightcove_api_failure', int)
+statemon.define('account_not_created', int)
+statemon.define('account_not_updated', int)
+statemon.define('ooyala_api_failure', int)
+statemon.define('thumb_metadata_not_saved', int)
+statemon.define('thumb_metadata_not_modified', int)
+statemon.define('db_error', int)
+statemon.define('thumb_updated', int)
+statemon.define('custom_thumb_upload', int)
+statemon.define('abtest_state_update', int)
+
+# HTTP 400s total and fine-grained issues counters
+statemon.define('bad_request', int) #all HTTP 400s
+statemon.define('invalid_api_key', int)
+statemon.define('invalid_method', int)
+statemon.define('invalid_state_request', int)
+statemon.define('invalid_thumbnail_id', int)
+statemon.define('invalid_job_id', int)
+statemon.define('invalid_video_id', int)
+statemon.define('account_id_missing', int)
+statemon.define('account_not_found', int)
+statemon.define('job_not_found', int)
+statemon.define('video_not_found', int)
+statemon.define('api_params_missing', int)
+statemon.define('invalid_video_link', int)
+statemon.define('deprecated', int)
+statemon.define('invalid_image_link', int)
+statemon.define('video_id_missing', int)
+statemon.define('job_creation_fail', int)
+statemon.define('content_type_missing', int)
+statemon.define('integration_id_missing', int)
+statemon.define('thumbnail_args_missing', int)
+statemon.define('invalid_json', int)
+statemon.define('malformed_request', int)
+statemon.define('not_supported', int)
 
 #Place holder images for processing
 placeholder_images = [
@@ -124,6 +164,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             if ctype is None:
                 data = '{"error": "missing content type header use json or\
                 urlencoded"}'
+                statemon.state.increment('content_type_missing')
                 self.send_json_response(data, 400)
                 return
 
@@ -144,6 +185,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     #self.request.arguments.pop(self.request.body)
                     self.request.arguments.update(json_data)
                 except ValueError, e:
+                    statemon.state.increment('invalid_json')
                     self.send_json_response('{"error": "invalid json request"}', 400)
 
         self.api_key = self.request.headers.get('X-Neon-API-Key') 
@@ -155,6 +197,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             else:
                 _log.exception("key=initialize msg=api header missing")
                 data = '{"error": "missing or invalid api key" }'
+                statemon.state.increment('invalid_api_key')
                 self.send_json_response(data, 400)
                 return
 
@@ -184,6 +227,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             data = '{"error":"invalid api_key or account id"}'
             _log.warning(("key=verify_account "
                           "msg=api key doesn't match for account %s") % a_id)
+            statemon.state.increment('invalid_api_key')
             self.send_json_response(data, 400)
             raise tornado.gen.Return(False)
         
@@ -197,7 +241,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             statemon.state.increment('bad_request')
         elif status == 502:
             statemon.state.increment('bad_gateway')
-        elif status > 201:
+        elif status >= 500:
             statemon.state.increment('internal_err')
 
         self.set_header("Content-Type", "application/json")
@@ -209,11 +253,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         ''' unsupported method response'''
         data = '{"error":"api method not supported or REST URI is incorrect"}'
         _log.warn('Received invalid method %s', self.request.uri)
+        statemon.state.increment('invalid_method')
         self.send_json_response(data, 400)
 
     @tornado.gen.coroutine
     def get_platform_account(self, i_type, i_id):
-        
         #Get account/integration
         
         platform_account = None
@@ -260,6 +304,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     _log.error("key=get request msg=  %s" %e)
                     self.send_json_response(
                         '{"error":"malformed request, check API doc"}', 400)
+                    statemon.state.increment('malformed_request')
                     return
                 
                 #Verify Account
@@ -267,10 +312,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 if not is_verified:
                     return
 
-                # return the object from the DB
                 if method == '':
                     yield self.get_account_info(itype, i_id)
-                    #self.send_json_response('{"error":"not yet impl"}', 200)
                     return
 
                 elif method == "status":
@@ -318,6 +361,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                                     video_ids, video_state)
                     
                     elif itype == "youtube_integrations":
+                        statemon.state.increment('not_supported')
                         self.send_json_response("not supported yet", 400)
                        
                 elif method == "videoids":
@@ -327,6 +371,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     _log.warning(('key=account_handler '
                                   'msg=Invalid method in request %s method %s') 
                                   % (self.request.uri, method))
+                    statemon.state.increment('invalid_method')
                     self.send_json_response("API not supported", 400)
 
             elif "jobs" in self.request.uri:
@@ -335,6 +380,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     yield self.get_job_status(job_id)
                     return
                 except:
+                    statemon.state.increment('invalid_job_id')
                     self.send_json_response("invalid api call", 400)
                     return
 
@@ -342,6 +388,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 _log.warning(('key=account_handler '
                               'msg=Account missing in request %s')
                               % self.request.uri)
+                statemon.state.increment('account_id_missing')
                 self.send_json_response("API not supported", 400)
         
         except Exception, e:
@@ -379,6 +426,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     yield self.create_account_and_neon_integration(a_id)
                 except:
                     data = '{"error":"account id not specified"}'
+                    statemon.state.increment('account_id_missing')
                     self.send_json_response(data, 400)                
                 return
 
@@ -395,6 +443,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             elif method == 'create_video_request':
                 if i_id is None:
                     data = '{"error":"integration id not specified"}'
+                    statemon.state.increment('integration_id_missing')
                     self.send_json_response(data, 400)
                     return
 
@@ -402,6 +451,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     yield self.create_brightcove_video_request(i_id)
                 elif "neon_integrations" == itype:
                     yield self.create_neon_video_request_from_ui(i_id)
+                # TODO(Sunil): Expose when necessary
                 #elif "ooyala_integrations" == itype:
                 #    self.create_ooyala_video_request(i_id)
                 else:
@@ -468,6 +518,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     vid = uri_parts[-1]
                     if vid == "null":
                         _log.warn('vid is null')
+                        statemon.state.increment('invalid_video_id')
                         self.send_json_response('{"error": "video id null" }',
                                                 400)
                         return
@@ -497,15 +548,18 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                             return
                     except IOError, e:
                         data = '{"error": "internal error adding custom thumb"}'
+                        statemon.state.increment('custom_thumbnail_not_added')
                         self.send_json_response(data, 500)
                     except tornado.web.MissingArgumentError, e:
                         data = '{"error": "missing thumbnail_id or thumbnails argument"}'
                         _log.warn('Missing argument %s' % e) 
+                        statemon.state.increment('thumbnail_args_missing')
                         self.send_json_response(data, 400)
                         return
                     except Exception, e:
                         _log.exception('Unexpected exception: %s' % e)
                         data = '{"error": "internal error"}'
+                        statemon.state.increment('unexpected_exception')
                         self.send_json_response(data, 500)
 
                     if "brightcove_integrations" == itype:
@@ -519,6 +573,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                             self.get_argument('current_thumbnail', None)
                             if new_tid is None:
                                 data = '{"error": "missing thumbnail_id argument"}'
+                                statemon.state.increment('thumbnail_args_missing')
                                 self.send_json_response(data, 400)
                                 return
                         yield self.update_video_ooyala(i_id, i_vid, new_tid)
@@ -528,6 +583,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     return
             else:
                 _log.error("Method not supported")
+                statemon.state.increment('not_supported')
                 self.set_status(400)
                 self.finish()
         except tornado.web.MissingArgumentError, e:
@@ -553,6 +609,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             self.send_json_response(platform_account.to_json(), 200)
         else:
             data = '{"error":"account not found"}'
+            statemon.state.increment('account_not_found')
             self.send_json_response(data, 400)
 
     @tornado.gen.coroutine
@@ -560,7 +617,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         '''
         Return tracker account id associated with the neon user account
         '''
-        nu = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
+        nu = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                                     self.api_key)
         if nu:
             data = ('{"tracker_account_id":"%s","staging_tracker_account_id":"%s"}'
@@ -568,8 +625,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             self.send_json_response(data, 200)
         else:
             data = '{"error":"account not found"}'
+            statemon.state.increment('account_not_found')
             self.send_json_response(data, 400)
-
 
     def get_neon_videos(self):
         ''' Get Videos which were called from the Neon API '''
@@ -588,7 +645,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             self.send_json_response(json.dumps(req,
                                     default=lambda o: o.__dict__))
             return
-
+        statemon.state.increment('job_not_found')
         self.send_json_response('{"error":"job not found"}', 400)
 
 
@@ -649,6 +706,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         '''
         video_id = self.get_argument('video_id', None)
         if len(video_id) > options.max_videoid_size:
+            statemon.state.increment('invalid_video_id')
             self.send_json_response(
                 '{"error":"video id greater than 128 chars"}', 400)
             return    
@@ -664,6 +722,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         if video_id is None or video_url == "": 
             _log.error("key=create_neon_thumbnail_api_request "
                     "msg=malformed request or missing arguments")
+            statemon.state.increment('malformed_request')
             self.send_json_response('{"error":"missing video_url"}', 400)
             return
         
@@ -689,6 +748,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         except:
             _log.error("key=create_neon_video_request_from_ui "
                     "msg=malformed request or missing arguments")
+            statemon.state.increment('malformed_request')
             self.send_json_response('{"error":"missing video_url"}', 400)
             return
         
@@ -696,6 +756,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         for invalid_url_link in invalid_url_links:
             if invalid_url_link in video_url:
                 data = '{"error":"link given is invalid or not a video file"}'
+                statemon.state.increment('invalid_video_link')
                 self.send_json_response(data, 400)
                 return
 
@@ -717,6 +778,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             ctype = vresponse.headers.get('Content-Type')
             if vresponse.error or ctype is None or ctype.lower() in invalid_content_types:
                 data = '{"error":"link given is invalid or not a video file"}'
+                statemon.state.increment('invalid_video_link')
                 self.send_json_response(data, 400)
                 return
 
@@ -835,6 +897,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         if not platform_account:
             _log.error("key=get_video_status_%s msg=account not found" %i_type)
+            statemon.state.increment('account_not_found')
             self.send_json_response("%s account not found"%i_type, 400)
             return
 
@@ -847,6 +910,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             all_vids = platform_account.get_videos()
             i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
             if vid not in all_vids:
+                statemon.state.increment('video_not_found')
                 self.send_json_response("Video not found", 400)
                 return
             else:
@@ -985,8 +1049,14 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             else:
                 _log.error("key=get_video_status_%s" 
                         " msg=invalid state requested" %i_type)
+                statemon.state.increment('invalid_state_request')
                 self.send_json_response('{"error":"invalid state request"}', 400)
                 return
+
+        # backward compatibilty for recommended videos, hence add 
+        # all the videos to the recommended list
+        if video_state == "recommended":
+            completed_videos.extend(serving_videos)
 
         #3. Populate Completed videos
         keys = [neondata.InternalVideoID.generate(
@@ -1095,6 +1165,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             vid = self.get_argument('video_id')
         except:
             data = '{"error": "video_id not set"}'
+            statemon.state.increment('video_id_missing')
             self.send_json_response(data, 400)
             
         account = yield tornado.gen.Task(
@@ -1110,9 +1181,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 self.send_json_response(data, 200)  
             else:
                 data = '{"error": "failed to create job, bad request"}'
+                statemon.state.increment('job_creation_fail')
                 self.send_json_response(data, 400)  
         else:
             data = '{"error": "no such account"}'
+            statemon.state.increment('account_not_found')
             self.send_json_response(data, 400)
         
     @tornado.gen.coroutine
@@ -1130,6 +1203,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     " msg=account doesnt exist api key=%s " 
                     "i_id=%s"%(self.api_key,i_id))
             data = '{"error": "no such account"}'
+            statemon.state.increment('account_not_found')
             self.send_json_response(data, 400)
             return
 
@@ -1149,6 +1223,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 return
             else:
                 data = '{"error": "brightcove api failure"}'
+                statemon.state.increment('brightcove_api_failure')
                 self.send_json_response(data, 502)
                 return
 
@@ -1160,7 +1235,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         user = neondata.NeonUserAccount(a_id)
         api_key = user.neon_api_key
         nuser_data = yield tornado.gen.Task(
-            neondata.NeonUserAccount.get_account, a_id)
+            neondata.NeonUserAccount.get, a_id)
         if not nuser_data:
             nplatform = neondata.NeonPlatform(a_id, '0', api_key)
             user.add_platform(nplatform)
@@ -1194,6 +1269,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 self.send_json_response(data, 200)
             else:
                 data = '{"error": "account not created"}'
+                statemon.state.increment('account_not_created')
                 self.send_json_response(data, 500)
 
         else:
@@ -1220,10 +1296,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         except Exception,e:
             _log.error("key=create brightcove account msg= %s" %e)
             data = '{"error": "API Params missing"}'
+            statemon.state.increment('api_params_missing')
             self.send_json_response(data, 400)
             return 
 
-        na = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
+        na = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                                     self.api_key)
         #Create and Add Platform Integration
         if na:
@@ -1238,6 +1315,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     a_id, i_id, self.api_key, p_id, 
                     rtoken,wtoken, autosync, curtime) 
                 na.add_platform(bc)
+                
                 #save & update acnt
                 res = yield tornado.gen.Task(na.save_platform, bc)
                 
@@ -1257,17 +1335,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                         bc.verify_token_and_create_requests_for_video,
                         10)
                     
-                    # TODO: investigate further, 
-                    #ReferenceError: weakly-referenced object no longer exists
-                    # (self.subscribed and cmd == 'PUBLISH')):
-                    #Not Async due to tornado redis bug in neon server
-                    #Task(bc.verify_token_and_create_requests_for_video,5)
-                    
                     ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     #TODO : Add expected time of completion !
                     video_response = []
                     if not response:
-                        #TODO : Distinguish between api call failure and bad tokens
+                        #Distinguish between api call failure and bad tokens
                         _log.error("key=create brightcove account " 
                             " msg=brightcove api call failed or token error")
                         data = '{"error": "Read token given is incorrect'  
@@ -1305,6 +1377,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 else:
                     data = '{"error": "platform was not added,\
                                 account creation issue"}'
+                    statemon.state.increment('account_not_created')
                     self.send_json_response(data, 500)
                     return
         else:
@@ -1321,6 +1394,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         except Exception,e:
             _log.error("key=create brightcove account msg= %s" %e)
             data = '{"error": "API Params missing"}'
+            statemon.state.increment('api_params_missing')
             self.send_json_response(data, 400)
             return
 
@@ -1333,6 +1407,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                
             # if auto publish is being turned on   
             if bc.auto_update == False and autosync == True:
+                statemon.state.increment('deprecated')
                 self.send_json_response(
                     '{"error": "autopublish feature has been deprecated"}', 400)
                 return
@@ -1344,12 +1419,14 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 self.send_json_response(data, 200)
             else:
                 data = '{"error": "account not updated"}'
+                statemon.state.increment('account_not_updated')
                 self.send_json_response(data, 500)
         else:
             _log.error("key=update_brightcove_integration " 
                     "msg=no such account %s integration id %s"\
                     % (self.api_key, i_id))
             data = '{"error": "account doesnt exists"}'
+            statemon.state.increment('account_not_found')
             self.send_json_response(data, 400)
    
     ##################################################################
@@ -1377,10 +1454,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         except Exception,e:
             _log.error("key=create_ooyla_account msg= %s" %e)
             data = '{"error": "API Params missing"}'
+            statemon.state.increment('api_params_missing')
             self.send_json_response(data, 400)
             return 
 
-        na = yield tornado.gen.Task(neondata.NeonUserAccount.get_account,
+        na = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                                     self.api_key)
         #Create and Add Platform Integration
         if na:
@@ -1395,8 +1473,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                     partner_code, oo_api_key, oo_secret_key,
                                     autosync)  
                 na.add_platform(oo_account)
+
                 #save & update acnt
                 res = yield tornado.gen.Task(na.save_platform, oo_account)
+                
                 if res:
                     # Set the default experimental strategy for
                     # Ooyala Customers.
@@ -1452,6 +1532,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 else:
                     data = '{"error": "platform was not added,\
                                 account creation issue"}'
+                    statemon.state.increment('account_not_created')
                     self.send_json_response(data, 500)
 
     #2. Update  the Account
@@ -1470,6 +1551,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         except Exception,e:
             _log.error("key=update ooyala account msg= %s" %e)
             data = '{"error": "API Params missing"}'
+            statemon.state.increment('api_params_missing')
             self.send_json_response(data, 400)
             return
 
@@ -1482,17 +1564,18 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             oo.ooyala_api_key = oo_api_key
             oo.api_secret = oo_secret_key 
             oo.autosync = autosync
-            #TODO: Test autosync
             res = yield tornado.gen.Task(oo.save)
             if res:
                 data = ''
                 self.send_json_response(data, 200)
             else:
                 data = '{"error": "account not updated"}'
+                statemon.state.increment('account_not_updated')
                 self.send_json_response(data, 500)
         else:
             _log.error("key=update_ooyala_integration msg=no such account ") 
             data = '{"error": "Account doesnt exists"}'
+            statemon.state.increment('account_not_found')
             self.send_json_response(data, 400)
 
     @tornado.gen.coroutine
@@ -1509,6 +1592,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     " msg=account doesnt exist api key=%s " 
                     "i_id=%s"%(self.api_key,i_id))
             data = '{"error": "no such account"}'
+            statemon.state.increment('account_not_found')
             self.send_json_response(data, 400)
             raise tornado.gen.Return()
 
@@ -1523,6 +1607,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         else:
             if result is None:
                 data = '{"error": "ooyala api failure"}'
+                statemon.state.increment('ooyala_api_failure')
                 self.send_json_response(data, 502)
             else:
                 data = '{"error": "internal error"}'
@@ -1538,6 +1623,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                             itype, i_id)
         if not platform_account:
             _log.error("%s account not found" % itype)
+            statemon.state.increment('account_not_found')
             self.send_json_response('{"error":"%s account not found"}' % itype,
                     400)
             return
@@ -1565,6 +1651,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
         if not vmdata:
             _log.error("Could not find video: %s" % i_vid)
+            statemon.state.increment('video_not_found')
             self.send_json_response("Video not found: %s" % p_vid, 400)
 
         # Figure out the rank of the custom thumbs we know about so far
@@ -1608,6 +1695,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             data = '{"error": "Invalid image link or failed to download image"}'
             _log.exception('Error downloading the image %s: %s' %
                            (thumb_urls, e))
+            statemon.state.increment('invalid_image_link')
             self.send_json_response(data, 400)
             return
         new_tids = [x.key for x in new_thumbs]
@@ -1626,17 +1714,20 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                           %(i_vid, new_tids))
                 data = ''
                 self.send_json_response(data, 202)
+                statemon.state.increment('custom_thumb_upload')
                 return
             else:
                 _log.error('Error modifying the video metadata for vid %s' %
                            i_vid)
                 data = '{"error": "internal error"}'
+                statemon.state.increment('thumb_metadata_not_modified')
                 self.send_json_response(data, 500)
                 return
         else:
             _log.error('Error saving new thumbnail metadata to vid %s' %
                        i_vid)
             data = '{"error": "internal error"}'
+            statemon.state.increment('thumb_metadata_not_saved')
             self.send_json_response(data, 500)
             return
 
@@ -1648,21 +1739,27 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
         if not vmdata:
+            statemon.state.increment('video_not_found')
             self.send_json_response('{"error": "vid not found"}', 400)
             return
         
         if not isinstance(state, bool):
+            statemon.state.increment('malformed_request')
             self.send_json_response(
                 '{"error": "invalid data type or not boolean"}', 400)
             return
 
-        vmdata.testing_enabled = state
-        result = yield tornado.gen.Task(vmdata.save)
+        def _update_video(vm):
+            vm.testing_enabled = state
+        result = yield tornado.gen.Task(neondata.VideoMetadata.modify, i_vid,
+                _update_video)
         
         if not result:
+            statemon.state.increment('db_error')
             self.send_json_response('{"error": "internal db error"}', 500)
             return
 
+        statemon.state.increment('abtest_state_update')
         self.send_json_response('', 202)
 
     ### AB Test State #####
@@ -1688,7 +1785,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
         if not vmdata:
+            statemon.state.increment('video_not_found')
             self.send_json_response('{"error": "vid not found"}', 400)
+            return
 
         state = vmdata.experiment_state
         
@@ -1746,6 +1845,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
        
         invalid_msg = "invalid thumbnail id or thumbnail id not found" 
         if tid is None:
+            statemon.state.increment('invalid_thumbnail_id')
             self.send_json_response(invalid_msg, 400)
 
         prop = self.get_argument('property')
@@ -1760,8 +1860,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         tmdata = yield tornado.gen.Task(neondata.ThumbnailMetadata.modify,
                                         tid, _mod_property)
         if tmdata is None:
+            statemon.state.increment('malformed_request')
             self.send_json_response(invalid_msg, 400)
 
+        statemon.state.increment('thumb_updated')
         self.send_json_response('', 202)
 
 

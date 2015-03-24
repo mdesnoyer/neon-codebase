@@ -291,6 +291,34 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(url,
                         "http://brightcove.vo.llnwd.net/e1/uds/pd/2294876105001/2294876105001_2635148067001_PA220134.mp4")
 
+    @patch('api.brightcove_api.utils.http.send_request')
+    def test_create_request_from_playlist(self, utils_http):
+        p_response = HTTPResponse(HTTPRequest("http://bcove"), 200,
+                buffer=StringIO(bcove_responses.find_playlist_by_id_response))
+        n_response = HTTPResponse(HTTPRequest("http://neon"), 200,
+                    buffer=StringIO('{"job_id":"j123"}'))
+        def _side_effect(request, callback=None, *args, **kwargs):
+            if "submitvideo" in request.url:
+                return n_response
+            else:
+                return p_response
+
+        utils_http.side_effect = _side_effect
+        a_id = 'test' 
+        i_id = 'i123'
+        nvideos = 2 
+        na = neondata.NeonUserAccount('acct1')
+        na.save()
+        bp = neondata.BrightcovePlatform(a_id, i_id, na.neon_api_key, 'p1', 'rt', 'wt', 
+                last_process_date=21492000000)
+        bp.account_created = 21492000
+        bp.videos['v1'] = 'j1'
+        bp.playlist_feed_ids.append('1234')
+        bp.save()
+        bp.check_playlist_feed_and_create_requests()
+        u_bp = neondata.BrightcovePlatform.get(na.neon_api_key, i_id)
+        self.assertEqual(len(u_bp.get_videos()), nvideos)
+        self.assertListEqual(u_bp.get_videos(), ['v1', '4100953290001'])
 
 if __name__ == "__main__" :
     unittest.main()

@@ -121,6 +121,24 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         for val in directive.values():
             self.assertGreater(val, 0.0)
 
+    def test_more_conversions_than_impressions(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
+
+        directive = self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon', model_score=5.8),
+                                               base_conversions=2000,
+                                               base_impressions=200),
+                 build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
+                                               ttype='brightcove'))]))[1]
+
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+        self.assertAlmostEqual(directive['n1'], 1.0/1.1)
+        self.assertAlmostEqual(directive['bc'], 0.1/1.1)
+
     def test_inf_model_score(self):
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
@@ -1264,6 +1282,7 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
         self.redis.stop()
+        super(TestStatusUpdatesInDb, self).tearDown()
 
     def _wait_for_db_updates(self):
         self.mastermind.wait_for_pending_modifies()

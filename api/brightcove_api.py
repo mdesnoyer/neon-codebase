@@ -404,7 +404,11 @@ class BrightcoveApi(object):
         '''
 
         video_urls = {}
-        d_url  = b_json_item['FLVURL']
+        try:
+            d_url  = b_json_item['FLVURL']
+        except KeyError, e:
+            _log.error("missing flvurl")
+            return
 
         #If we get a broken response from brightcove api
         if not b_json_item.has_key('renditions'):
@@ -479,12 +483,15 @@ class BrightcoveApi(object):
             to_process = False
             vid   = str(item['id'])
             title = item['name']
-
             #Check if neon has processed the videos already 
             if vid not in videos_processed:
                 thumb  = item['thumbnailURL'] 
                 still  = item['videoStillURL']
-                d_url  = item['FLVURL']
+                try:
+                    d_url  = item['FLVURL']
+                except KeyError, e:
+                    _log.error("missing flvurl for video %s" % vid)
+                    continue
                 length = item['length']
 
                 d_url = self.get_video_url_to_download(item, 
@@ -495,12 +502,12 @@ class BrightcoveApi(object):
 
                 if thumb is None or still is None or length <0:
                     _log.info("key=process_publisher_feed" 
-                                " msg=%s is a live feed" %vid)
+                                " msg=%s is a live feed" % vid)
                     continue
 
                 if d_url is None:
                     _log.info("key=process_publisher_feed"
-                                " msg=flv url missing for %s" %vid)
+                                " msg=flv url missing for %s" % vid)
                     continue
 
                 resp = self.format_neon_api_request(vid,
@@ -512,30 +519,33 @@ class BrightcoveApi(object):
                 _log.info("creating request for video [topn] %s" % vid)
                 if resp is not None and not resp.error:
                     #Update the videos in customer inbox
-                    bc = cmsdb.neondata.BrightcovePlatform.get(
-                            self.neon_api_key, i_id)
                     r = tornado.escape.json_decode(resp.body)
-                    bc.videos[vid] = r['job_id']
-                    #publishedDate may be null, if video is unscheduled
-                    bc.last_process_date = int(item['publishedDate']) /1000 if item['publishedDate'] else None
-                    bc.save()
+                    
+                    def _update_account(bc):
+                        bc.videos[vid] = r['job_id']
+                        #publishedDate may be null, if video is unscheduled
+                        bc.last_process_date = int(item['publishedDate']) /1000 if item['publishedDate'] else None
+                    bp = cmsdb.neondata.BrightcovePlatform.modify(
+                            self.neon_api_key, i_id, _update_account)
+                else:
+                    _log.error("failed to create request for vid %s" % vid)
 
             else:
                 #Sync the changes in brightcove account to NeonDB
                 #TODO: Sync not just the latest 100 videos
                 job_id = bc.videos[vid]
-                vid_request = cmsdb.neondata.NeonApiRequest.get(
-                    job_id, self.neon_api_key)
-                pub_date = int(item['publishedDate']) if item['publishedDate'] else None
-                vid_request.publish_date = pub_date 
-                vid_request.video_title = title
-                vid_request.save()
+                def _update_request(vid_request):
+                    pub_date = int(item['publishedDate']) if item['publishedDate'] else None
+                    vid_request.publish_date = pub_date 
+                    vid_request.video_title = title
+                request = cmsdb.neondata.NeonApiRequest.modify(
+                    job_id, self.neon_api_key, _update_request)
 
     def sync_neondb_with_brightcovedb(self, items, i_id):
         ''' sync neondb with brightcove metadata '''        
-        bc = cmsdb.neondata.BrightcovePlatform.get(
+        bp = cmsdb.neondata.BrightcovePlatform.get(
             self.neon_api_key, i_id)
-        videos_processed = bc.get_videos() 
+        videos_processed = bp.get_videos() 
         if videos_processed is None:
             videos_processed = [] 
         
@@ -543,13 +553,13 @@ class BrightcoveApi(object):
             vid = str(item['id'])
             title = item['name']
             if vid in videos_processed:
-                job_id = bc.videos[vid]
-                vid_request = cmsdb.neondata.NeonApiRequest.get(
-                    job_id, self.neon_api_key)
-                pub_date = int(item['publishedDate']) if item['publishedDate'] else None
-                vid_request.publish_date = pub_date 
-                vid_request.video_title = title
-                vid_request.save()
+                job_id = bp.videos[vid]
+                def _update_request(vid_request):
+                    pub_date = int(item['publishedDate']) if item['publishedDate'] else None
+                    vid_request.publish_date = pub_date 
+                    vid_request.video_title = title
+                request = cmsdb.neondata.NeonApiRequest.modify(
+                    job_id, self.neon_api_key, _update_request)
 
     def format_neon_api_request(self, id, video_download_url, 
                                 prev_thumbnail=None, request_type='topn',
@@ -706,31 +716,7 @@ class BrightcoveApi(object):
                         " msg=creating request for vid %s" %item['id'])
         self.process_publisher_feed(items_to_process,i_id)
 
-    def sync_individual_video_metadata(self,i_id):
-        '''
-        Sync the video metadata from brightcove to neon db
-
-        #TODO: make this more efficient
-        '''
-        bc = cmsdb.neondata.BrightcovePlatform.get(
-            self.neon_api_key, i_id)
-        videos_processed = bc.get_videos() 
-
-        for vid in videos_processed:
-            response = self.find_video_by_id(vid,i_id)
-            item = tornado.escape.json_decode(response.body)
-            title = item['name']
-            job_id = bc.videos[vid]
-            vid_request = cmsdb.neondata.NeonApiRequest.get(
-                    job_id, self.neon_api_key)
-            pub_date = int(item['publishedDate']) if item['publishedDate'] else None
-            vid_request.publish_date = pub_date 
-            vid_request.title = title
-            #TODO: May be even save current thumbnail
-            vid_request.save()
-
     ############## NEON API INTERFACE ########### 
-
 
     def create_video_request(self, video_id, i_id, create_callback):
         ''' Create neon api request for the particular video '''
@@ -739,7 +725,12 @@ class BrightcoveApi(object):
             ''' vid info callback '''
             if not response.error and "error" not in response.body:
                 data = tornado.escape.json_decode(response.body)
-                v_url = data["FLVURL"]
+                try:
+                    v_url = data["FLVURL"]
+                except KeyError, e:
+                    create_callback(response)
+                    return
+
                 still = data['videoStillURL']
                 vid = str(data["id"])
                 title = data["name"]
@@ -787,11 +778,12 @@ class BrightcoveApi(object):
         
         jid = tornado.escape.json_decode(response.body)
         job_id = jid["job_id"]
-        bc = cmsdb.neondata.BrightcovePlatform.get(
-            self.neon_api_key, i_id)
-        bc.videos[video_id] = job_id
-        bc.save()
-        return True
+        def _update_account(acc):
+            acc.videos[video_id] = job_id
+        bc = cmsdb.neondata.BrightcovePlatform.modify(
+            self.neon_api_key, i_id, _update_account)
+        if bc:
+            return True
 
     def async_get_n_videos(self, n, callback):
         ''' async get n vids '''
@@ -804,60 +796,6 @@ class BrightcoveApi(object):
         ''' sync get n vids '''
         return self.get_publisher_feed(command='find_all_videos',
                                        page_size = n)
-
-    def create_brightcove_request_by_tag(self,i_id):
-        ''' create requests from brightcove tags ''' 
-        url = 'http://api.brightcove.com/services/library?command=' \
-                'search_videos&token=%s&media_delivery=http&output=json' \
-                '&sort_by=publish_date:DESC&any=tag:neon' %self.read_token
-        req = tornado.httpclient.HTTPRequest(url = url,
-                                             method = "GET",
-                                             request_timeout = 60.0,
-                                             connect_timeout = 10.0)
-        
-        response = BrightcoveApi.read_connection.send_request(req)
-        if response.error:
-            return
-
-        #Get publisher feed
-        items_to_process = []  
-        done = False
-        page_no = 0
-
-        while not done: 
-            count = 0
-            #TODO: Keep requesting pages of tagged videos to iterate through, 
-            #for now just look at 1 page (100 vids)
-            
-            json = tornado.escape.json_decode(response.body)
-            page_no += 1
-            try:
-                items = json['items']
-                total = json['total_count']
-                psize = json['page_size']
-                pno   = json['page_number']
-
-            except Exception,e:
-                _log.exception("key=create_brightcove_request_by_tag msg=json error")
-                return
-        
-            for item in items:
-                tags = item['tags']
-                if "neon" in tags or "Neon" in tags:
-                    items_to_process.append(item)
-                    count += 1
-
-            #if we have seen all items or
-            #if we have seen all the new videos since last pub date 
-            #if count < total or psize * (pno +1) > total:
-            #    done = True
-            done = True  #temp hack !
-
-        if len(items_to_process) < 1 :
-            return
-
-        self.process_publisher_feed(items_to_process, i_id)
-        return
 
     #### Verify Read token and create Requests during signup #####
 
@@ -914,66 +852,6 @@ class BrightcoveApi(object):
                         " msg=customer inbox not updated %s" %i_id)
                 raise tornado.gen.Return(result)
 
-    def async_verify_token_and_create_requests(self, i_id, n, callback=None):
-        '''#Verify Tokens and Create Neon requests'''
-
-        @tornado.gen.engine
-        def verify_brightcove_tokens(result):
-            if not result.error:
-                bc = yield tornado.gen.Task(
-                    cmsdb.neondata.BrightcovePlatform.get,
-                    self.neon_api_key, i_id)
-                if not bc:
-                    _log.error("key=verify_brightcove_tokens "
-                                " msg=account not found %s"%i_id)
-                    callback(None)
-                    return
-                
-                
-                vitems = tornado.escape.json_decode(result.body)
-                items = vitems['items']
-                keys = []
-                #create request for each video 
-                for item in items:
-                    vid = str(item['id'])                              
-                    title = item['name']
-                    video_download_url = self.get_video_url_to_download(item)
-                    prev_thumbnail = item['videoStillURL'] #item['thumbnailURL']
-                    keys.append("key"+vid)
-                    self.format_neon_api_request(vid,
-                                                 video_download_url,
-                                                 prev_thumbnail,
-                                                 'topn',
-                                                 i_id,
-                                                 title,
-                            callback=(yield tornado.gen.Callback("key" + vid)))
-
-                result = [] 
-                responses = yield tornado.gen.WaitAll(keys)
-                for response,item in zip(responses,items):
-                    if not response.error:
-                        vid = str(item['id'])
-                        jid = tornado.escape.json_decode(response.body)
-                        job_id = jid["job_id"]
-                        item['job_id'] = job_id 
-                        bc.videos[vid] = job_id 
-                        result.append(item)
-               
-                #Update the videos in customer inbox
-                res = yield tornado.gen.Task(bc.save)
-                if not res:
-                    _log.error("key=async_verify_token_and_create_requests"
-                            " msg=customer inbox not updated %s" %i_id)
-
-                #send result back with job_id
-                callback(result)
-            else:
-                _log.error("key=async_verify_token_and_create_requests" 
-                        " msg=brightcove api failed for %s" %i_id)
-                callback(None)
-        self.async_get_n_videos(5, verify_brightcove_tokens)
-    
-
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_current_thumbnail_url(self, video_id):
@@ -1026,6 +904,40 @@ class BrightcoveApi(object):
 
         raise tornado.gen.Return((thumb_url, still_url))
     
+    def create_request_from_playlist(self, pid, i_id):
+        ''' create thumbnail api request given a video id 
+            NOTE: currently we only need a sync version of this method
+
+        '''
+
+        url = 'http://api.brightcove.com/services/library?command=find_playlist_by_id' \
+                '&token=%s&media_delivery=http&output=json&playlist_id=%s' %\
+                (self.read_token, pid)
+        req = tornado.httpclient.HTTPRequest(url=url,
+                                             method="GET",
+                                             request_timeout=60.0,
+                                             connect_timeout=10.0)
+        response = utils.http.send_request(req)
+        if response.error:
+            _log.error('key=create_request_from_playlist msg=Unable to get %s'
+                       % url)
+            return False
+       
+        json = tornado.escape.json_decode(response.body)
+        try:
+            items_to_process = json['videos']
+
+        except ValueError, e:
+            _log.exception('json error: %s' % e)
+            return
+
+        except Exception, e:
+            _log.exception('unexpected error: %s' % e)
+            return
+            
+        # Process the publisher feed
+        self.process_publisher_feed(items_to_process, i_id)
+        return
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()

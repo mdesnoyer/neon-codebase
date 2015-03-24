@@ -480,7 +480,6 @@ class StoredObject(object):
 
         Returns None if the object could not be created.
         '''
-        
         if obj_dict:
             # Get the class type to create
             try:
@@ -873,8 +872,20 @@ class AbstractHashGenerator(object):
         ''' Abstract hash generator '''
         return hashlib.md5(_input).hexdigest()
 
-class NeonApiKey(object):
+class NeonApiKey(NamespacedStoredObject):
     ''' Static class to generate Neon API Key'''
+
+    def __init__(self, a_id, api_key=None):
+        self.api_key = api_key
+        self.key = NeonApiKey.format_key(a_id) 
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''
+        Returns the class name of the base class of the hierarchy.
+        '''
+        return NeonApiKey.__name__
+    
     @classmethod
     def id_generator(cls, size=24, 
             chars=string.ascii_lowercase + string.digits):
@@ -882,36 +893,73 @@ class NeonApiKey(object):
 
     @classmethod
     def format_key(cls, a_id):
-        ''' format db key '''
-        return cls.__name__.lower() + '_%s' %a_id
+        ''' format db key  neonapikey_{aid}'''
+        return cls.__name__.lower() + '_%s' % a_id
         
     @classmethod
     def generate(cls, a_id):
         ''' generate api key hash
             if present in DB, then return it
+        
+        #NOTE: Generate method directly saves the key
         '''
         api_key = NeonApiKey.id_generator()
+        obj = NeonApiKey(a_id, api_key)
         
-        #save api key mapping
-        db_connection = DBConnection.get(cls)
-        key = NeonApiKey.format_key(a_id)
-        
+        # Check if the api_key for the account id exists in the DB
         _api_key = cls.get_api_key(a_id)
         if _api_key is not None:
             return _api_key 
         else:
-            if db_connection.blocking_conn.set(key, api_key):
+            if obj.save():
                 return api_key
 
+    def to_json(self):
+        #NOTE: This is a misnomer. It is being overriden here since the save()
+        # function uses to_json() and the NeonApiKey is saved as a plain string
+        # in the database
+        
+        return self.api_key
+    
+    @classmethod
+    def _create(cls, key, obj_dict):
+        obj = NeonApiKey(key)
+        obj.value = obj_dict
+        return obj_dict
+    
     @classmethod
     def get_api_key(cls, a_id, callback=None):
         ''' get api key from db '''
+
+        # Use get
+        api_key = cls.get(a_id, callback)
+        return api_key
+
+    @classmethod
+    def get(cls, a_id, callback=None):
+        #NOTE: parent get() method uses json.loads() hence overriden here 
         db_connection = DBConnection.get(cls)
-        key = NeonApiKey.format_key(a_id)
+        key = cls.format_key(a_id)
         if callback:
             db_connection.conn.get(key, callback) 
         else:
             return db_connection.blocking_conn.get(key) 
+   
+    @classmethod
+    def get_many(cls, keys, callback=None):
+        raise NotImplementedError()
+    
+    @classmethod
+    def get_all(cls, keys, callback=None):
+        raise NotImplementedError()
+
+    @classmethod
+    def modify(cls, key, func, create_missing=False, callback=None):
+        raise NotImplementedError()
+    
+    @classmethod
+    def modify_many(cls, keys, func, create_missing=False, callback=None):
+        raise NotImplementedError()
 
 class InternalVideoID(object):
     ''' Internal Video ID Generator '''
@@ -991,7 +1039,7 @@ class TrackerAccountIDMapper(NamespacedStoredObject):
         else:
             return format_tuple(cls.get(tai))
 
-class NeonUserAccount(object):
+class NeonUserAccount(NamespacedStoredObject):
     ''' NeonUserAccount
 
     Every user in the system has a neon account and all other integrations are 
@@ -1022,13 +1070,22 @@ class NeonUserAccount(object):
         # under this account.
         self.default_thumbnail_id = None
     
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return NeonUserAccount.__name__
+
     def get_api_key(self):
         '''
         Get the API key for the account, If already in the DB the generate method
         returns it
         '''
-        # TODO: Refactor when converted to Namespaced object
-        return NeonApiKey.generate(self.account_id) 
+        # Note: On DB retrieval the object gets created again, this may lead to
+        # creation of an addional api key mapping ; hence prevent it
+        # Figure out a cleaner implementation
+        if NeonUserAccount.__name__ not in self.account_id: 
+            return NeonApiKey.generate(self.account_id) 
 
     def get_processing_priority(self):
         return self.processing_priority
@@ -1089,14 +1146,6 @@ class NeonUserAccount(object):
     def to_json(self):
         ''' to json '''
         return json.dumps(self, default=lambda o: o.__dict__)
-    
-    def save(self, callback=None):
-        ''' save instance'''
-        db_connection = DBConnection.get(self)
-        if callback:
-            db_connection.conn.set(self.key, self.to_json(), callback)
-        else:
-            return db_connection.blocking_conn.set(self.key, self.to_json())
     
     def save_platform(self, new_integration, callback=None):
         '''
@@ -1159,16 +1208,6 @@ class NeonUserAccount(object):
             raise IOError("Could not save account data with new default thumb")
 
     @classmethod
-    def get_account(cls, api_key, callback=None):
-        ''' return neon useraccount instance'''
-        db_connection = DBConnection.get(cls)
-        key = "neonuseraccount_%s" %api_key
-        if callback:
-            db_connection.conn.get(key, lambda x: callback(cls.create(x))) 
-        else:
-            return cls.create(db_connection.blocking_conn.get(key))
-    
-    @classmethod
     def create(cls, json_data):
         ''' create obj from json data'''
         if not json_data:
@@ -1191,7 +1230,7 @@ class NeonUserAccount(object):
         accounts = db_connection.blocking_conn.keys(cls.__name__.lower() + "*")
         for accnt in accounts:
             api_key = accnt.split('_')[-1]
-            nu = NeonUserAccount.get_account(api_key)
+            nu = NeonUserAccount.get(api_key)
             nuser_accounts.append(nu)
         return nuser_accounts
     
@@ -1200,7 +1239,7 @@ class NeonUserAccount(object):
         '''
         Get Neon publisher ID; This is also the Tracker Account ID
         '''
-        na = cls.get_account(api_key)
+        na = cls.get(api_key)
         if nc:
             return na.tracker_account_id
 
@@ -1546,6 +1585,25 @@ class AbstractPlatform(NamespacedStoredObject):
         ''' get instance '''
         return super(AbstractPlatform, cls).get(
             cls._generate_subkey(api_key, i_id), callback=callback)
+    
+    @classmethod
+    def modify(cls, api_key, i_id, func, callback=None):
+        return super(AbstractPlatform, cls).modify(
+            cls._generate_subkey(api_key, i_id),
+            func,
+            callback=callback)
+
+    @classmethod
+    def modify_many(cls, keys, func, callback=None):
+        '''Modify many keys.
+
+        Each key must be a tuple of (api_key, i_id)
+        '''
+        return super(AbstractPlatform, cls).modify_many(
+            [cls._generate_subkey(api_key, i_id) for 
+             api_key, i_id in keys],
+            func,
+            callback=callback)
 
     def to_json(self):
         ''' to json '''
@@ -1684,6 +1742,8 @@ class BrightcovePlatform(AbstractPlatform):
         self.account_created = time.time() #UTC timestamp of account creation
         self.rendition_frame_width = None #Resolution of video to process
         self.video_still_width = 480 #default brightcove still width
+        # the ids of playlist to create video requests from
+        self.playlist_feed_ids = [] 
 
     @classmethod
     def get_ovp(cls):
@@ -1870,6 +1930,11 @@ class BrightcovePlatform(AbstractPlatform):
         ''' Temp method to support backward compatibility '''
         self.get_api().create_brightcove_request_by_tag(self.integration_id)
 
+    def check_playlist_feed_and_create_requests(self):
+        ''' Get playlists and create requests '''
+        
+        for pid in self.playlist_feed_ids:
+            self.get_api().create_request_from_playlist(pid, self.integration_id)
 
     @tornado.gen.coroutine
     def verify_token_and_create_requests_for_video(self, n):
@@ -2584,6 +2649,9 @@ class ThumbnailURLMapper(object):
             if imdata given, then generate tid 
     
     THUMBNAIL_URL => (tid)
+    
+    # NOTE: This has been deprecated and hence not being updated to be a stored
+    object
     '''
     
     def __init__(self, thumbnail_url, tid, imdata=None):
@@ -3028,11 +3096,13 @@ class VideoMetadata(StoredObject):
             raise AttributeError("Callbacks not allowed")
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def get_video_requests(cls, i_vids):
         '''
         Get video request objs given video_ids
         '''
-        vms = VideoMetadata.get_many(i_vids)
+        vms = yield tornado.gen.Task(VideoMetadata.get_many, i_vids)
         retval = [None for x in vms]
         request_keys = []
         request_idx = []
@@ -3045,10 +3115,11 @@ class VideoMetadata(StoredObject):
                 request_keys.append(rkey)
                 request_idx.append(cur_idx)
             cur_idx += 1
-        for api_request, idx in zip(NeonApiRequest.get_many(request_keys),
-                                    request_idx):
+          
+        requests = yield tornado.gen.Task(NeonApiRequest.get_many, request_keys)  
+        for api_request, idx in zip(requests, request_idx):
             retval[idx] = api_request
-        return retval
+        raise tornado.gen.Return(retval)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -3069,7 +3140,7 @@ class VideoMetadata(StoredObject):
             raise tornado.gen.Return(self.serving_url)
 
         nu = yield tornado.gen.Task(
-                NeonUserAccount.get_account, self.get_account_id())
+                NeonUserAccount.get, self.get_account_id())
         pub_id = nu.staging_tracker_account_id if staging else \
           nu.tracker_account_id
         serving_url = serving_format % (subdomain_index, pub_id,
@@ -3087,68 +3158,10 @@ class VideoMetadata(StoredObject):
 
         raise tornado.gen.Return(serving_url)
 
-class InMemoryCache(object):
-
-    '''
-    Class to keep data in memory cache to avoid
-    fetching the key from redis db every time
-
-    Every timeout period the cache data is refetched
-    from the DB
-
-    NOTE: Use this only for read only data
-    Currently no timeout for each key
-
-    '''
-    def __init__(self, classname, timeout=3):
-        self.classname = classname
-        self.timeout = timeout
-        self.data = {} # key => object of classname
-        self._thread_pool = ThreadPool(1)
-        self._thread_pool.apply_async(
-            self.update_thread, callback=self._callback)
-        self.rlock = threading.RLock()
-
-    def add_key(self, key):
-        '''
-        Add a key to the cache
-        '''
-        with self.rlock:
-            db_connection = DBConnection.get(self.classname)
-            value = db_connection.blocking_conn.get(key)
-            cls = eval(self.classname)
-            if cls:
-                try:
-                    f_create = getattr(cls, "create")
-                    self.data[key] = f_create(value)
-                    return True
-                except AttributeError, e:
-                    return 
-
-    def get_key(self, key):
-        '''
-        Retrieve key from the cache
-        '''
-        if self.data.has_key(key):
-            return self.data[key] 
-
-    def update_thread(self):
-        '''
-        Update the value of each key
-        '''
-        while True:
-            for key in self.data.keys():
-                self.add_key(key)
-            time.sleep(self.timeout)
-
-    def _callback(self):
-        '''
-        Dummy callback
-        '''
-        print "callback done"
-
 class VideoResponse(object):
-    ''' VideoResponse object that contains list of thumbs for a video '''
+    ''' VideoResponse object that contains list of thumbs for a video 
+        # NOTE: this obj is only used to format in to a json response 
+    '''
     def __init__(self, vid, job_id, status, i_type, i_id, title, duration,
             pub_date, cur_tid, thumbs, abtest=True, winner_thumbnail=None,
             serving_url=None):

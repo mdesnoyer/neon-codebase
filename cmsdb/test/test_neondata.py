@@ -58,6 +58,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
     def test_neon_api_key(self):
         ''' test api key generation '''
+
         #Test key is random on multiple generations
         a_id = "testaccount"
         api_key_1 = NeonApiKey.generate(a_id)
@@ -137,7 +138,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         na.save()
 
         # Retrieve the account
-        NeonUserAccount.get_account(na.neon_api_key,
+        NeonUserAccount.get(na.neon_api_key,
                                     callback=self.stop)
         account = self.wait()
         self.assertIsNotNone(account)
@@ -369,7 +370,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             (ThumbnailServingURLs('key'), get_func),
             (ExperimentStrategy('key'), get_func),
             (NeonUserAccount('key', 'api'),
-             lambda x: x.get_account('api')),
+             lambda x: x.get('key')),
             (NeonPlatform('key', '0', 'api'),
              lambda x: x.get('api', '0')),
             (BrightcovePlatform('a', 'i', 'api'),
@@ -1760,7 +1761,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.assertIsNotNone(account.default_thumbnail_id)
         self.assertEquals(
             account.default_thumbnail_id,
-            NeonUserAccount.get_account(account.neon_api_key).default_thumbnail_id)
+            NeonUserAccount.get(account.neon_api_key).default_thumbnail_id)
 
         # Make sure that the thubmnail info is in the database
         tmeta = ThumbnailMetadata.get(account.default_thumbnail_id)
@@ -1792,7 +1793,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.assertNotEquals(account.default_thumbnail_id, tmeta.key)
         self.assertEquals(
             account.default_thumbnail_id,
-            NeonUserAccount.get_account(account.neon_api_key).default_thumbnail_id)
+            NeonUserAccount.get(account.neon_api_key).default_thumbnail_id)
 
         # Check the data in the new thumb
         tmeta2 = ThumbnailMetadata.get(account.default_thumbnail_id)

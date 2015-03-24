@@ -17,11 +17,24 @@ public:
     Mastermind();
     ~Mastermind();
 
+    enum EINIT_ERRORS {
+        // successful mastermind initializatio, all directives parsed
+        EINIT_SUCCESS = 0,
+        // successful mastermind initialization, however one or more directives were 
+        // rejected
+        EINIT_PARTIAL_SUCCESS,
+        // failed entire mastermind initialization due to a fatal error in file  
+        EINIT_FATAL_ERROR,
+    };
+
     // basic init with empty tables
-    void Init();
+    EINIT_ERRORS Init();
 
     // full init with a json document
-    void Init(const char * mastermindFile, time_t previousMastermindExpiry);
+    EINIT_ERRORS Init(const char * mastermindFile, 
+                      time_t previousMastermindExpiry,
+                      char * error_message,
+                      unsigned error_message_size);
     
     void Shutdown();
     
@@ -39,7 +52,7 @@ public:
     
     static double randZeroToOne();
     
-    static const int MaxLineBufferSize = 40000;
+    static const int MaxLineBufferSize = 500000;
     static char lineBuffer[];
 
     // searches the publisher hashtable
@@ -64,7 +77,10 @@ protected:
     
     // this function reclaims all memory safely
     void Dealloc();
-    void InitSafe(const char * mastermindFile, time_t previousMastermindExpiry);
+    EINIT_ERRORS InitSafe(const char * mastermindFile, 
+                          time_t previousMastermindExpiry,
+                          char * error_message,
+                          unsigned error_message_size);
 
     bool initialized;
     FILE * parseFile;

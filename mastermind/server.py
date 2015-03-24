@@ -16,20 +16,25 @@ import atexit
 from boto.s3.connection import S3Connection
 from boto.emr.connection import EmrConnection
 import boto
+from contextlib import closing
 from cmsdb import neondata
 import cPickle as pickle
 import datetime
 import dateutil.parser
+import gzip
 import happybase
 import impala.dbapi
 import impala.error
 import json
 import logging
 from mastermind.core import VideoInfo, ThumbnailInfo, Mastermind
+import multiprocessing
+import os
 import signal
 import socket
 import stats.cluster
 import struct
+from StringIO import StringIO
 import tempfile
 import time
 import thrift
@@ -37,8 +42,10 @@ import thrift.Thrift
 import threading
 import tornado.ioloop
 import utils.neon
+import utils
 from utils.options import define, options
 import utils.ps
+import utils.sqsmanager
 from utils import statemon
 import zlib
 
@@ -69,17 +76,27 @@ define('publishing_period', type=int, default=300,
        help='Time in seconds between when the directive file is published.')
 define('expiry_buffer', type=int, default=30,
        help='Buffer in seconds for the expiry of the directives file')
+define('serving_update_delay', type=int, default=240,
+       help='delay in seconds to update new videos to serving state')
+
 
 # Monitoring variables
 statemon.define('time_since_stats_update', float) # Time since the last update
 statemon.define('time_since_last_batch_event', float) # Time since the most recent event in the batch db
 statemon.define('time_since_publish', float) # Time since the last publish
-statemon.define('statsdb_error', int)
-statemon.define('incr_statsdb_error', int)
-statemon.define('videodb_error', int)
-statemon.define('publish_error', int)
-statemon.define('serving_urls_missing', int)
-statemon.define('account_default_serving_url_missing', int)
+statemon.define('statsdb_error', int) # error connecting to the stats database
+statemon.define('incr_statsdb_error', int) # error connecting to the hbase 
+statemon.define('videodb_error', int) # error connecting to the video DB
+statemon.define('publish_error', int) # error publishing directive to s3
+statemon.define('serving_urls_missing', int) # missing serving urls for videos
+statemon.define('account_default_serving_url_missing', int) # mising default
+statemon.define('no_videometadata', int) # mising videometadata 
+statemon.define('no_thumbnailmetadata', int) # mising thumb metadata 
+statemon.define('default_serving_thumb_size_mismatch', int) # default thumb size missing 
+statemon.define('pending_modifies', int)
+statemon.define('directive_file_size', int) # file size in bytes 
+statemon.define('unexpected_callback_error', int)
+statemon.define('unexpected_db_update_error', int)
 
 _log = logging.getLogger(__name__)
 
@@ -208,6 +225,7 @@ class VideoDBWatcher(threading.Thread):
             all_video_metadata = neondata.VideoMetadata.get_many(video_ids)
             for video_id, video_metadata in zip(video_ids, all_video_metadata):
                 if video_metadata is None:
+                    statemon.state.increment('no_videometadata')
                     _log.error('Could not find information about video %s' %
                                video_id)
                     continue
@@ -222,6 +240,7 @@ class VideoDBWatcher(threading.Thread):
                     for thumb_id, meta in zip(video_metadata.thumbnail_ids,
                                               thumbs):
                         if meta is None:
+                            statemon.state.increment('no_thumbnailmetadata')
                             _log.error('Could not find metadata for thumb %s' %
                                        thumb_id)
                             data_missing = True
@@ -287,6 +306,11 @@ class StatsDBWatcher(threading.Thread):
                 _log.exception('Uncaught stats DB Error: %s' % e)
                 statemon.state.increment('statsdb_error')
 
+            finally:
+                if self.impala_conn is not None:
+                    self.impala_conn.close()
+                    self.impala_conn = None
+
             # Now we wait so that we don't hit the database too much.
             self._stopped.wait(options.stats_db_polling_delay)
 
@@ -312,73 +336,76 @@ class StatsDBWatcher(threading.Thread):
             _log.info('Found a newer entry in the stats database from %s. '
                       'Processing' % self.last_update.isoformat())
             cursor = self.impala_conn.cursor()
-            last_month = self.last_update - datetime.timedelta(weeks=4)
-            col_map = {
-                neondata.MetricType.LOADS: 'imloadclienttime',
-                neondata.MetricType.VIEWS: 'imvisclienttime',
-                neondata.MetricType.CLICKS: 'imclickclienttime',
-                neondata.MetricType.PLAYS: 'videoplayclienttime'
-                }
+            try:
+                last_month = self.last_update - datetime.timedelta(weeks=4)
+                col_map = {
+                    neondata.MetricType.LOADS: 'imloadclienttime',
+                    neondata.MetricType.VIEWS: 'imvisclienttime',
+                    neondata.MetricType.CLICKS: 'imclickclienttime',
+                    neondata.MetricType.PLAYS: 'videoplayclienttime'
+                    }
 
-            # We are going to walk through the db by tracker id
-            # because it is partitioned that way and it makes the
-            # calls faster
-            for tai_info in neondata.TrackerAccountIDMapper.get_all():
-                if (tai_info.itype != 
-                    neondata.TrackerAccountIDMapper.PRODUCTION):
-                    continue
+                # We are going to walk through the db by tracker id
+                # because it is partitioned that way and it makes the
+                # calls faster
+                for tai_info in neondata.TrackerAccountIDMapper.get_all():
+                    if (tai_info.itype != 
+                        neondata.TrackerAccountIDMapper.PRODUCTION):
+                        continue
 
-                # Build the query for all the data in the last month
-                strategy = strategy_cache.get(tai_info.value)
-                if strategy.conversion_type == neondata.MetricType.PLAYS:
-                    query = (
-                        ("select thumbnail_id, count({imp_type}), "
-                         "sum(cast(imclickclienttime is not null and " 
-                         "(adplayclienttime is not null or "
-                         "videoplayclienttime is not null) as int)) "
-                         "from EventSequences where tai='{tai}' and "
-                         "{imp_type} is not null "
-                         "and servertime < {update_hour:f} "
-                         "and (yr > {yr:d} or "
-                         "(yr = {yr:d} and mnth >= {mnth:d})) "
-                         "group by thumbnail_id").format(
-                            imp_type=col_map[strategy.impression_type],
-                            tai=tai_info.get_tai(),
-                            update_hour=hourtimestamp(self.last_update),
-                            yr=last_month.year,
-                            mnth=last_month.month))
-                else:
-                    query = (
-                        ("select thumbnail_id, count({imp_type}), "
-                         "count({conv_type}) "
-                         "from EventSequences where tai='{tai}' and "
-                         "{imp_type} is not null "
-                         "and servertime < {update_hour:f} "
-                         "and (yr > {yr:d} or "
-                         "(yr = {yr:d} and mnth >= {mnth:d})) "
-                         "group by thumbnail_id").format(
-                            imp_type=col_map[strategy.impression_type],
-                            conv_type=col_map[strategy.conversion_type],
-                            tai=tai_info.get_tai(),
-                            update_hour=hourtimestamp(self.last_update),
-                            yr=last_month.year,
-                            mnth=last_month.month))
-                cursor.execute(query)
+                    # Build the query for all the data in the last month
+                    strategy = strategy_cache.get(tai_info.value)
+                    if strategy.conversion_type == neondata.MetricType.PLAYS:
+                        query = (
+                            ("select thumbnail_id, count({imp_type}), "
+                             "sum(cast(imclickclienttime is not null and " 
+                             "(adplayclienttime is not null or "
+                             "videoplayclienttime is not null) as int)) "
+                             "from EventSequences where tai='{tai}' and "
+                             "{imp_type} is not null "
+                             "and servertime < {update_hour:f} "
+                             "and (yr > {yr:d} or "
+                             "(yr = {yr:d} and mnth >= {mnth:d})) "
+                             "group by thumbnail_id").format(
+                                imp_type=col_map[strategy.impression_type],
+                                tai=tai_info.get_tai(),
+                                update_hour=hourtimestamp(self.last_update),
+                                yr=last_month.year,
+                                mnth=last_month.month))
+                    else:
+                        query = (
+                            ("select thumbnail_id, count({imp_type}), "
+                             "count({conv_type}) "
+                             "from EventSequences where tai='{tai}' and "
+                             "{imp_type} is not null "
+                             "and servertime < {update_hour:f} "
+                             "and (yr > {yr:d} or "
+                             "(yr = {yr:d} and mnth >= {mnth:d})) "
+                             "group by thumbnail_id").format(
+                                imp_type=col_map[strategy.impression_type],
+                                conv_type=col_map[strategy.conversion_type],
+                                tai=tai_info.get_tai(),
+                                update_hour=hourtimestamp(self.last_update),
+                                yr=last_month.year,
+                                mnth=last_month.month))
+                    cursor.execute(query)
 
-                data = []
-                for thumb_id, base_imp, base_conv in cursor:
-                    incr_counts = self._get_incremental_stat_data(
-                        strategy_cache,
-                        thumb_id=thumb_id)[thumb_id]
-                    data.append((self.video_id_cache.find_video_id(thumb_id),
-                                 thumb_id,
-                                 base_imp,
-                                 incr_counts[0],
-                                 base_conv,
-                                 incr_counts[1]))
-                    
-                self.mastermind.update_stats_info(data)
-            _log.info('Finished processing batch stats update')
+                    data = []
+                    for thumb_id, base_imp, base_conv in cursor:
+                        incr_counts = self._get_incremental_stat_data(
+                            strategy_cache,
+                            thumb_id=thumb_id)[thumb_id]
+                        data.append((self.video_id_cache.find_video_id(thumb_id),
+                                     thumb_id,
+                                     base_imp,
+                                     incr_counts[0],
+                                     base_conv,
+                                     incr_counts[1]))
+
+                    self.mastermind.update_stats_info(data)
+                _log.info('Finished processing batch stats update')
+            finally:
+                cursor.close()
         else:
             _log.info('Looking for incremental stats update from host %s' %
                       options.incr_stats_host)
@@ -415,58 +442,64 @@ class StatsDBWatcher(threading.Thread):
         
         cursor = self.impala_conn.cursor()
 
-        # First look at table_build_times to find if the last table was built.
         try:
-            cursor.execute('select max(done_time) from table_build_times')
-            table_build_result = cursor.fetchall()
-            
-            if (len(table_build_result) == 0 or 
-                table_build_result[0][0] is None):
-                _log.error('Cannot determine when the database was last '
-                           'updated')
+
+            # First look at table_build_times to find if the last
+            # table was built.
+            try:
+                cursor.execute('select max(done_time) from table_build_times')
+                table_build_result = cursor.fetchall()
+
+                if (len(table_build_result) == 0 or 
+                    table_build_result[0][0] is None):
+                    _log.error('Cannot determine when the database was last '
+                               'updated')
+                    statemon.state.increment('statsdb_error')
+                    self.is_loaded.set()
+                    return False
+
+                cur_table_build = table_build_result[0][0]
+                if not isinstance(cur_table_build, datetime.datetime):
+                    cur_table_build = \
+                      dateutil.parser.parse(table_build_result[0][0])
+
+                statemon.state.time_since_stats_update = (
+                    datetime.datetime.now() - cur_table_build).total_seconds()
+
+                is_newer = (self.last_table_build is None or 
+                            cur_table_build > self.last_table_build)
+                if not is_newer:
+                    return False
+            except impala.error.RPCError as e:
+                _log.error('SQL Error. Probably a table is not available yet. '
+                           '%s' % e)
                 statemon.state.increment('statsdb_error')
                 self.is_loaded.set()
                 return False
 
-            cur_table_build = table_build_result[0][0]
-            if not isinstance(cur_table_build, datetime.datetime):
-                cur_table_build = \
-                  dateutil.parser.parse(table_build_result[0][0])
 
-            statemon.state.time_since_stats_update = (
-                datetime.datetime.now() - cur_table_build).total_seconds()
-                  
-            is_newer = (self.last_table_build is None or 
-                        cur_table_build > self.last_table_build)
-            if not is_newer:
-                return False
-        except impala.error.RPCError as e:
-            _log.error('SQL Error. Probably a table is not available yet. %s'
-                       % e)
-            statemon.state.increment('statsdb_error')
-            self.is_loaded.set()
-            return False
-        
-
-        try:
-            # Now, find out when the last event we knew about was
-            curtime = datetime.datetime.utcnow()
-            cursor.execute(
-                ('SELECT max(serverTime) FROM videoplays WHERE '
-                 'yr >= {yr:d} or (yr = {yr:d} and mnth >= {mnth:d})').format(
-                     mnth=curtime.month, yr=curtime.year))
-            play_result = cursor.fetchall()
-            if len(play_result) == 0 or play_result[0][0] is None:
-                _log.error('Cannot find any videoplay events')
+            try:
+                # Now, find out when the last event we knew about was
+                curtime = datetime.datetime.utcnow()
+                cursor.execute(
+                    ('SELECT max(serverTime) FROM videoplays WHERE '
+                     'yr >= {yr:d} or (yr = {yr:d} and mnth >= {mnth:d})'
+                     ).format(
+                         mnth=curtime.month, yr=curtime.year))
+                play_result = cursor.fetchall()
+                if len(play_result) == 0 or play_result[0][0] is None:
+                    _log.error('Cannot find any videoplay events')
+                    statemon.state.increment('statsdb_error')
+                    self.is_loaded.set()
+                    return False
+            except impala.error.RPCError as e:
+                _log.error('SQL Error. Probably a table is not available yet. '
+                           '%s' % e)
                 statemon.state.increment('statsdb_error')
                 self.is_loaded.set()
                 return False
-        except impala.error.RPCError as e:
-            _log.error('SQL Error. Probably a table is not available yet. %s'
-                       % e)
-            statemon.state.increment('statsdb_error')
-            self.is_loaded.set()
-            return False
+        finally:
+            cursor.close()
 
         # Update the state variables
         self.last_update = datetime.datetime.utcfromtimestamp(
@@ -516,7 +549,8 @@ class StatsDBWatcher(threading.Thread):
                         row_start = thumb_id
                     else:
                         row_start = '_'.join([
-                            thumb_id, self.last_update.strftime('%Y-%m-%dT%H')])
+                            thumb_id,
+                            self.last_update.strftime('%Y-%m-%dT%H')])
 
                 for key, row in table.scan(row_start=row_start,
                                            row_stop=row_stop,
@@ -526,7 +560,8 @@ class StatsDBWatcher(threading.Thread):
                     else:
                         tid = thumb_id
                     if tid == '':
-                        _log.warn_n('Invalid thumbnail id in key %s' % key, 100)
+                        _log.warn_n('Invalid thumbnail id in key %s' % key,
+                                    100)
                         continue
 
                     strategy = strategy_cache.from_thumb_id(tid)
@@ -544,10 +579,12 @@ class StatsDBWatcher(threading.Thread):
 
                     try:
 
-                        incr_imp = struct.unpack('>q',
-                                                 row.get(impr_col, '\x00'*8))[0]
-                        incr_conv = struct.unpack('>q',
-                                                  row.get(conv_col,'\x00'*8))[0]
+                        incr_imp = struct.unpack(
+                            '>q',
+                            row.get(impr_col, '\x00'*8))[0]
+                        incr_conv = struct.unpack(
+                            '>q',
+                            row.get(conv_col,'\x00'*8))[0]
                         counts[0] += incr_imp
                         counts[1] += incr_conv
                     except struct.error as e:
@@ -677,10 +714,6 @@ class DirectivePublisher(threading.Thread):
         super(DirectivePublisher, self).__init__(name='DirectivePublisher')
         self.mastermind = mastermind
         self.tracker_id_map = tracker_id_map or {}
-        # Keep track of videos for which the directive has been published
-        # This map is used to keep track of video_ids for which serving urls
-        # state has been updated.
-        self.video_id_serving_map = {} # video_id => serving_state
         self.serving_urls = serving_urls or {}
         self.default_sizes = default_sizes or {}
         self.default_thumbs = default_thumbs or {}
@@ -699,10 +732,36 @@ class DirectivePublisher(threading.Thread):
         # instead of relying on the import statement.
         self.S3Connection = S3Connection
 
+        # Set of last video ids in the directive file
+        self.last_published_videos = set([])
+
+        self.callback_manager = utils.sqsmanager.CustomerCallbackManager()
+        self._callback_thread = None
+
+        # Counter for the number of pending modify calls to the database
+        self.pending_modifies = multiprocessing.Value('i', 0)
+        statemon.state.pending_modifies = 0
+        self._lock = multiprocessing.RLock()
+        self.modify_waiter = multiprocessing.Condition()
+
     def __del__(self):
         if self._update_publish_timer and self._update_publish_timer.is_alive():
             self._update_publish_timer.cancel()
         super(DirectivePublisher, self).__del__()
+
+    def _incr_pending_modify(self, count):
+        '''Safely increment the number of pending modifies by count.'''
+        with self._lock:
+            self.pending_modifies.value += count
+
+        with self.modify_waiter:
+            self.modify_waiter.notify_all()
+        statemon.state.pending_modifies = self.pending_modifies.value
+
+    def wait_for_pending_modifies(self):
+        with self.modify_waiter:
+            while self.pending_modifies.value > 0:
+                self.modify_waiter.wait()
 
     def run(self):
         self._stopped.clear()
@@ -754,95 +813,115 @@ class DirectivePublisher(threading.Thread):
             10.0, self._update_time_since_publish)
         self._update_publish_timer.daemon = True
         self._update_publish_timer.start()
-    
-    def _add_video_id_to_serving_map(self, vid):
-        try:
-            self.video_id_serving_map[vid]
-        except KeyError, e:
-            # new video is inserted, by default its serving state
-            # should be false. i.e request state not updated
-            self.video_id_serving_map[vid] = False
-
-    # TODO(Sunil): Do these updates asynchronously
-    def _update_request_state_to_serving(self):
-        ''' update all the new video's serving state 
-            i.e ISP URLs are ready
-        '''
-        vids = []
-        for key, value in self.video_id_serving_map.iteritems():
-            if value == False:
-                vids.append(key)
-        requests = neondata.VideoMetadata.get_video_requests(vids)
-        for vid, request in zip(vids, requests):
-            # TODO(Sunil) : Bulk update
-            if request:
-                if request.state in [neondata.RequestState.ACTIVE, 
-                        neondata.RequestState.SERVING_AND_ACTIVE]:
-                    request.state = neondata.RequestState.SERVING_AND_ACTIVE
-                else:
-                    request.state = neondata.RequestState.SERVING
-                if request.save():
-                    self.video_id_serving_map[vid] = True
 
     def _publish_directives(self):
+
         '''Publishes the directives to S3'''
         # Create the directives file
         _log.info("Building directives file")
-        curtime = datetime.datetime.utcnow()
-        directive_file = tempfile.TemporaryFile()
-        valid_length = options.expiry_buffer + options.publishing_period
-        directive_file.write(
-            'expiry=%s' % 
-            (curtime + datetime.timedelta(seconds=valid_length))
-            .strftime('%Y-%m-%dT%H:%M:%SZ'))
-        with self.lock:
-            self._write_directives(directive_file)
-        directive_file.write('\nend')
+        with closing(tempfile.NamedTemporaryFile('w+b')) as directive_file:
+            # Create the space for the expiry
+            self._write_expiry(directive_file)
 
+            # Write the data
+            with self.lock:
+                written_video_ids = self._write_directives(directive_file)
+            directive_file.write('\nend')
 
-        filename = '%s.%s' % (curtime.strftime('%Y%m%d%H%M%S'),
-                              options.directive_filename)
-        _log.info('Publishing directive to s3://%s/%s' %
-                  (options.s3_bucket, filename))
+            # Overwrite the expiry because write_directives can take a while
+            self._write_expiry(directive_file)
+            directive_file.flush()
+            directive_file.seek(0)
+            curtime = datetime.datetime.utcnow()
 
-        # Create the connection to S3
-        s3conn = self.S3Connection()
-        try:
-            bucket = s3conn.get_bucket(options.s3_bucket)
-        except boto.exception.BotoServerError as e:
-            _log.error('Could not get bucket %s: %s' % (options.s3_bucket,
-                                                         e))
-            statemon.state.increment('publish_error')
-            return
-        except boto.exception.BotoClientError as e:
-            _log.error('Could not get bucket %s: %s' % (options.s3_bucket,
-                                                         e))
-            statemon.state.increment('publish_error')
-            return
-        except socket.error as e:
-            _log.error('Error connecting to S3: %s' % e)
-            statemon.state.increment('publish_error')
-            return
+            with closing(tempfile.NamedTemporaryFile('w+b')) as gzip_file:
+                gzip_stream = gzip.GzipFile(mode='wb',
+                                            compresslevel=7,
+                                            fileobj=gzip_file)
+                gzip_stream.writelines(directive_file)
+                gzip_stream.close()
+                gzip_file.flush()
 
-        # Write the file that is timestamped
-        key = bucket.new_key(filename)
-        key.content_type = 'text/plain'
-        directive_file.seek(0)
-        key.set_contents_from_file(directive_file,
-                                   encrypt_key=True)
+                filename = '%s.%s' % (curtime.strftime('%Y%m%d%H%M%S'),
+                                      options.directive_filename)
+                _log.info('Publishing directive to s3://%s/%s' %
+                          (options.s3_bucket, filename))
 
-        # Copy the file to the REST endpoint
-        key.copy(bucket.name, options.directive_filename, encrypt_key=True,
-                 preserve_acl=True)
+                # Create the connection to S3
+                s3conn = self.S3Connection()
+                try:
+                    bucket = s3conn.get_bucket(options.s3_bucket)
+                except boto.exception.BotoServerError as e:
+                    _log.error('Could not get bucket %s: %s' % 
+                               (options.s3_bucket, e))
+                    statemon.state.increment('publish_error')
+                    return
+                except boto.exception.BotoClientError as e:
+                    _log.error('Could not get bucket %s: %s' % 
+                               (options.s3_bucket, e))
+                    statemon.state.increment('publish_error')
+                    return
+                except socket.error as e:
+                    _log.error('Error connecting to S3: %s' % e)
+                    statemon.state.increment('publish_error')
+                    return
 
-        self.last_publish_time = curtime
+                # Write the file that is timestamped
+                key = bucket.new_key(filename)
+                gzip_file.seek(0)
+                key.set_contents_from_file(
+                    gzip_file,
+                    encrypt_key=True,
+                    headers={'Content-Type': 'application/x-gzip'})
+                statemon.state.directive_file_size = key.size
 
-        # The serving directives for videos are active, update the request state
-        # for videos
-        self._update_request_state_to_serving()
+                # Copy the file to the REST endpoint
+                key.copy(bucket.name, options.directive_filename,
+                         encrypt_key=True,
+                         preserve_acl=True)
+
+                # Schedule updates to the database with the video request state
+                new_serving_videos = (written_video_ids - \
+                                      self.last_published_videos)
+                just_stopped_videos = (self.last_published_videos - \
+                                       written_video_ids)
+                self.last_published_videos = written_video_ids
+                if len(new_serving_videos) > 0:
+                    self._incr_pending_modify(len(new_serving_videos))
+                    t = threading.Timer(
+                        options.serving_update_delay,
+                        self._update_video_serving_state,
+                        (new_serving_videos,
+                         neondata.RequestState.SERVING))
+                    t.daemon = True
+                    t.start()
+                if len(just_stopped_videos) > 0:
+                    self._incr_pending_modify(len(just_stopped_videos))
+                    t = threading.Timer(
+                        options.serving_update_delay,
+                        self._update_video_serving_state,
+                        (just_stopped_videos,
+                         neondata.RequestState.FINISHED))
+                    t.daemon = True
+                    t.start()
+
+                # Send the callbacks for new videos after a delay
+                if self._callback_thread is None:
+                    self._callback_thread = threading.Timer(
+                        options.serving_update_delay,
+                        self._send_callbacks)
+                    self._callback_thread.daemon = True
+                    self._callback_thread.start()
+
+                self.last_publish_time = curtime
 
     def _write_directives(self, stream):
-        '''Write the current directives to the stream.'''
+        '''Write the current directives to the stream.
+
+        Returns the video ids of the directives that were sucessfully written.
+        '''
+        written_video_ids = set([])
+        
         # First write out the tracker id maps
         _log.info("Writing tracker id maps")
         for tracker_id, account_id in self.tracker_id_map.iteritems():
@@ -881,8 +960,6 @@ class DirectivePublisher(threading.Thread):
         serving_urls_missing = 0
         for key, directive in self.mastermind.get_directives():
             account_id, video_id = key
-            # keep track of video_ids in directive file
-            self._add_video_id_to_serving_map(video_id)
             fractions = []
             missing_urls = False
             for thumb_id, frac in directive:
@@ -922,8 +999,10 @@ class DirectivePublisher(threading.Thread):
                 'fractions': fractions
             }
             stream.write('\n' + json.dumps(data))
+            written_video_ids.add(video_id)
 
         statemon.state.serving_urls_missing = serving_urls_missing
+        return written_video_ids
 
     def _get_default_url(self, account_id, thumb_id):
         '''Returns the default url for this thumbnail id.'''
@@ -933,6 +1012,10 @@ class DirectivePublisher(threading.Thread):
             default_size = (160, 90)
         
         serving_urls = unpack_obj(self.serving_urls[thumb_id])
+        if serving_urls is None or len(serving_urls) == 0:
+            _log.error('No serving urls for thumb %s' % thumb_id)
+            raise KeyError('No serving urls for thumb %s' % thumb_id)
+        
         try:
             return serving_urls[tuple(default_size)]
         except KeyError:
@@ -947,7 +1030,50 @@ class DirectivePublisher(threading.Thread):
                       '%s. Using (%i, %i) instead'
                       % (default_size[0], default_size[1], thumb_id,
                          closest_size[0], closest_size[1]))
+            statemon.state.increment('default_serving_thumb_size_mismatch')
             return serving_urls[closest_size]
+
+    def _write_expiry(self, fp):
+        '''Writes the expiry line at the beginning of the file point fp.
+
+        Seeks if necessary.
+        '''
+        fp.seek(0)
+        valid_length = options.expiry_buffer + options.publishing_period
+        fp.write('expiry=%s' % 
+                 (datetime.datetime.utcnow() +
+                  datetime.timedelta(seconds=valid_length))
+                 .strftime('%Y-%m-%dT%H:%M:%SZ'))
+        fp.flush()
+
+    def _update_video_serving_state(self, video_ids, new_state):
+        '''Updates a list of video ids with a new serving state.'''
+        try:
+            request_keys = [(video.job_id, video.get_account_id()) for 
+                            video in neondata.VideoMetadata.get_many(video_ids)
+                            if video is not None]
+            def _set_state(request_dict):
+                for obj in request_dict.itervalues():
+                    if obj is not None:
+                        obj.state = new_state
+            neondata.NeonApiRequest.modify_many(request_keys, _set_state)
+        except Exception as e:
+            statemon.state.increment('unexpected_db_update_error')
+            _log.exception('Unexpected error when updating serving state in '
+                           'database %s' % e)
+        finally:
+            self._incr_pending_modify(-len(video_ids))
+
+    def _send_callbacks(self):
+        try:
+            self.callback_manager.schedule_all_callbacks(
+                self.last_published_videos)
+        except Exception as e:
+            _log.warn('Unexpected error when sending a customer '
+                      'callback: %s' % e)
+            statemon.state.increment('unexpected_callback_error')
+        finally:
+            self._callback_thread = None
         
 def main(activity_watcher = utils.ps.ActivityWatcher()):    
     with activity_watcher.activate():
@@ -980,6 +1106,10 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
             publisher.last_publish_time).total_seconds()
     tornado.ioloop.PeriodicCallback(update_publish_time, 10000)
     tornado.ioloop.IOLoop.current().start()
+
+    publisher.join(300)
+    videoDbThread.join(30)
+    statsDbThread.join(30)
     
 if __name__ == "__main__":
     utils.neon.InitNeon()

@@ -60,6 +60,7 @@ s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
 
 class ClusterException(Exception): pass
 class ClusterInfoError(ClusterException): pass
+class MasterMissingError(ClusterInfoError): pass
 class ClusterConnectionError(ClusterException): pass
 class ClusterCreationError(ClusterException): pass
 class ExecutionError(ClusterException):pass
@@ -667,7 +668,11 @@ class Cluster():
         conn = EmrConnection()
         most_recent = None
         cluster_found = None
-        for cluster in emr_iterator(conn, 'clusters'):
+        for cluster in emr_iterator(conn, 'clusters',
+                                    cluster_states=['STARTING',
+                                                    'BOOTSTRAPPING',
+                                                    'RUNNING',
+                                                    'WAITING']):
             if cluster.name != options.cluster_name:
                 # The cluster has to have the right name to be a possible match
                 continue
@@ -726,7 +731,7 @@ class Cluster():
                     self.master_ip = instance.privateipaddress
 
         if self.master_ip is None:
-            raise ClusterInfoError("Could not find the master ip")
+            raise MasterMissingError("Could not find the master ip")
         _log.info("Found master ip address %s" % self.master_ip)
 
     def _set_requested_core_instances(self):
@@ -810,7 +815,7 @@ class Cluster():
         self.cluster_id = conn.run_jobflow(
             options.cluster_name,
             log_uri='s3://neon-cluster-logs/',
-            ec2_keyname='emr-runner',
+            ec2_keyname=os.path.basename(options.ssh_key).split('.')[0],
             ami_version='3.1.4',
             job_flow_role='EMR_EC2_DefaultRole',
             service_role='EMR_DefaultRole',
