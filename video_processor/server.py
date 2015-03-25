@@ -788,8 +788,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                         res = yield tornado.gen.Task(neondata.NeonPlatform.modify,
                                 api_key, '0', _add_video)
                         if not res:
-                            _log.error("key=thumbnail_handler update account " 
-                                           "  msg=video not added to account")
+                            _log.error("key=update_neon_account" 
+                                           " msg=video id %s not added to"
+                                           " account" % vid)
                             self.send_json_response('{}', 500)
                             statemon.state.increment('add_video_error')
                     else:

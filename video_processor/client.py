@@ -108,7 +108,8 @@ define('video_temp_dir', default=None,
 
 class VideoError(Exception):
     '''
-    Exception class which
+    Exception class which ensures that the callback is
+    send to the client in case of video download or processing errors
     '''
     def __init__(self, msg, job_params):
         self.msg = msg
@@ -126,7 +127,7 @@ class VideoError(Exception):
         body = tornado.escape.json_encode(response_body)
         h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
         
-        of self.callback_url is not None:
+        if self.callback_url is not None:
             cb_response_request = tornado.httpclient.HTTPRequest(
                                     url=self.callback_url,
                                     method="POST",
