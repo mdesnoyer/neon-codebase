@@ -3196,7 +3196,8 @@ class VideoCallbackResponse(AbstractJsonResponse):
         self.thumbnails = thumbs if thumbs is not None else []
         self.serving_url = s_url
         self.error = err
-
+        self.timestamp = str(time.time())
+    
 if __name__ == '__main__':
     # If you call this module you will get a command line that talks
     # to the server. nifty eh?

@@ -666,22 +666,20 @@ class VideoProcessor(object):
 
         '''
 
-        response_body = {}
-        response_body["job_id"] = self.video_metadata.job_id 
-        response_body["video_id"] = neondata.InternalVideoID.to_external(
-            self.video_metadata.key)
-        response_body["framenos"] = [
-            x[0].frameno for x in self.thumbnails 
+        frames = [x[0].frameno for x in self.thumbnails 
             if x[0].type == neondata.ThumbnailType.NEON]
-        response_body["framenos"] = response_body["framenos"][:self.n_thumbs]
-        response_body["thumbnails"] = [
-            x[0].urls[0] for x in self.thumbnails 
+        fnos = frames[:self.n_thumbs]
+        thumbs = [x[0].urls[0] for x in self.thumbnails 
             if x[0].type == neondata.ThumbnailType.NEON]
-        response_body["thumbnails"] = \
-          response_body["thumbnails"][:self.n_thumbs]
-        response_body["timestamp"] = str(time.time())
-        response_body["serving_url"] = self.video_metadata.get_serving_url()
-        response_body["error"] =  ""
+        thumbs = thumbs[:self.n_thumbs]
+
+        cresp = VideoCallbackResponse(self.video_metadata.job_id,
+                neondata.InternalVideoID.to_external(self.video_metadata.key),
+                fnos,
+                thumbs,
+                self.video_metadata.get_serving_url(),
+                err=None)
+        response_body = cresp.to_dict()
 
         #CREATE POST REQUEST
         body = tornado.escape.json_encode(response_body)
