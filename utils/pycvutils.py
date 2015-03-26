@@ -14,7 +14,7 @@ from . import imageutils
 
 _log = logging.getLogger(__name__)
 
-def resize_and_crop(image, h, w, interpolation=cv2.INTER_LANCZOS4):
+def resize_and_crop(image, h, w, interpolation=cv2.INTER_AREA):
     '''Resizes the image and then crops to a new size.
 
     The resize preserves the aspect ratio and then the crop forces the
