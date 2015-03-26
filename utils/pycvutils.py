@@ -14,7 +14,7 @@ from . import imageutils
 
 _log = logging.getLogger(__name__)
 
-def resize_and_crop(image, h, w):
+def resize_and_crop(image, h, w, interpolation=cv2.INTER_LANCZOS4):
     '''Resizes the image and then crops to a new size.
 
     The resize preserves the aspect ratio and then the crop forces the
@@ -31,7 +31,8 @@ def resize_and_crop(image, h, w):
                   float(w) / image.shape[1])
 
     newsize = np.round(np.array([image.shape[0], image.shape[1]])*scaling)
-    big_image = cv2.resize(image, (int(newsize[1]), int(newsize[0])))
+    big_image = cv2.resize(image, (int(newsize[1]), int(newsize[0])),
+                           interpolation=interpolation)
 
     sr = np.floor((newsize[0] - h)/2)
     sc = np.floor((newsize[1] - w)/2)
