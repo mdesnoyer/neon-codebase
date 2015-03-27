@@ -2467,6 +2467,9 @@ class NeonApiRequest(NamespacedStoredObject):
                                                save_objects=True,
                                                async=True)
 
+        # Push a thumbnail serving directive to Kinesis so that it can
+        # be served quickly.
+
 class BrightcoveApiRequest(NeonApiRequest):
     '''
     Brightcove API Request class
