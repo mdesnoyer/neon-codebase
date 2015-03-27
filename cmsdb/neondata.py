@@ -739,6 +739,35 @@ class StoredObject(object):
         db_connection = DBConnection.get(cls)
         db_connection.clear_db()
 
+    @classmethod
+    def subscribe_to_changes(cls, func, pattern='*'):
+        '''Subscribes to changes in the database.
+
+        When a change occurs, func is called with the updated
+        object. The function must be thread safe as it will be called
+        in a thread in a different context.
+
+        Inputs:
+        func - The function to call with the updated object as its one argument
+        pattern - Pattern of keys to subscribe to
+
+        Returns:
+        The pubsub handler, which should have .close() called when it is
+        finished with.
+        '''
+        def _handler(msg):
+            obj = cls.get(msg['data'])
+            func(obj)
+        
+        db_connection = DBConnection.get(cls)
+        p = db_connection.blocking_conn.pubsub(ignore_subscribe_messages=True)
+        if pattern.contains('*'):
+            p.psubscribe(**{'__keyspace@0__:%s' % pattern : _handler})
+        else:
+            p.subscribe(**{'__keyspace@0__:%s' % pattern : _handler})
+        p.run_in_thread(sleep_time=0.1)
+        return p
+
 class NamespacedStoredObject(StoredObject):
     '''An abstract StoredObject that is namespaced by the baseclass classname.
 
@@ -838,6 +867,37 @@ class NamespacedStoredObject(StoredObject):
             func,
             create_missing=create_missing,
             callback=callback)
+
+    @classmethod
+    def subscribe_to_changes(cls, func, pattern='*'):
+        '''Subscribes to changes in this table.
+
+        When a change occurs, func is called with the updated
+        object. The function must be thread safe as it will be called
+        in a thread in a different context.
+
+        Inputs:
+        func - The function to call with the updated object as its one argument
+        pattern - Pattern of keys to subscribe to
+
+        Returns:
+        The pubsub handler, which should have .close() called when it is
+        finished with.
+        '''
+        def _handler(msg):
+            obj = cls.get(msg['data'].partition('_')[2])
+            func(obj)
+        
+        db_connection = DBConnection.get(cls)
+        p = db_connection.blocking_conn.pubsub(ignore_subscribe_messages=True)
+        if pattern.contains('*'):
+            p.psubscribe(**{'__keyspace@0__:%s' % cls.format_key(pattern) : 
+                            _handler})
+        else:
+            p.subscribe(**{'__keyspace@0__:%s' % cls.format_key(pattern) :
+                           _handler})
+        p.run_in_thread(sleep_time=0.1)
+        return p
 
 class DefaultedStoredObject(NamespacedStoredObject):
     '''Namespaced object where a get-like operation will never returns None.
