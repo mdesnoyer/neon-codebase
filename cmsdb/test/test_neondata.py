@@ -2,10 +2,10 @@
 
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
                                          '..'))
-if sys.path[0] <> base_path:
-        sys.path.insert(0,base_path)
+if sys.path[0] != __base_path__:
+        sys.path.insert(0, __base_path__)
 
 import copy
 from concurrent.futures import Future
@@ -737,7 +737,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                           'rgkAluxK9pAC26XCRusctnSfWwzrujq9cTRdmrNpWU4.')
         self.assertEquals(
             obj.get_id(),
-            'dhfaagb0z0h6n685ntysas00_e38ef7abba4c9102b26feb90bc5df3a8')
+            ('e38ef7abba4c9102b26feb90bc5df3a8', 'dhfaagb0z0h6n685ntysas00'))
 
     def test_neonplatform_account_backwards_compatibility(self):
         json_str = "{\"integration_id\": \"0\", \"account_id\": \"161\", \"videos\": {}, \"abtest\": false, \"neon_api_key\": \"hzxts57y7ywcl9onl811b0p4\", \"key\": \"neonplatform_hzxts57y7ywcl9onl811b0p4_0\"}"
@@ -815,55 +815,188 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             self.assertEquals(ExperimentStrategy('not_in_db'),
                               ExperimentStrategy.get('not_in_db',
                                                      log_missing=False))
+
+    class ChangeTrap:
+        '''Helper class to test subscribing to changes.'''
+        def __init__(self):
+            self.args = []
+            self._event = threading.Event()
+            self._pubsub = None
+
+        def __del__(self):
+            self.reset()
+
+        def _handler(self, *args):
+            '''Handler function to give to the subscribe_to_changes'''
+            self.args.append(args)
+            self._event.set()
+
+        def reset(self):
+            self.args = []
+            self.close()
+
+        def close(self):
+            if self._pubsub is not None:
+                self._pubsub.close()
+                self._pubsub = None
+
+        def subscribe(self, cls, pattern='*'):
+            self.reset()
+            self._pubsub = cls.subscribe_to_changes(self._handler,
+                                                    pattern)
+
+        def wait(self, timeout=1.0):
+            '''Wait for an event (or timeout) and return the mock.'''
+            self._event.wait(timeout)
+            self._event.clear()
+            return self.args
+            
     def test_subscribe_to_changes(self):
-        change_event = threading.Event()
-        found_args = []
+        with contextlib.closing(TestNeondata.ChangeTrap()) as trap:
 
-        def _handle_video_change(*args):
-            found_args.append(args)
-            change_event.set()
-
-        # Try a pattern
-        with contextlib.closing(
-            VideoMetadata.subscribe_to_changes(_handle_video_change,
-                                               "acct1_*")) as p:
+            # Try a pattern
+            trap.subscribe(VideoMetadata, 'acct1_*')
             video_meta = VideoMetadata('acct1_vid1', request_id='req1')
             video_meta.save()
-            change_event.wait(1.0)
-            self.assertEquals(len(found_args), 1)
-            self.assertEquals(found_args[0], ('acct1_vid1', video_meta, 'set'))
-            change_event.clear()
+            events = trap.wait()
+            self.assertEquals(len(events), 1)
+            self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
 
-        # Try subscribing to a specific key
-        with contextlib.closing(
-            ThumbnailMetadata.subscribe_to_changes(_handle_video_change,
-                                                   "acct1_vid2_t3")) as p:
+
+            # Try subscribing to a specific key
+            trap.subscribe(ThumbnailMetadata, 'acct1_vid2_t3')
             thumb_meta = ThumbnailMetadata('acct1_vid2_t3', width=654)
             thumb_meta.save()
-            change_event.wait(1.0)
-            self.assertEquals(found_args[-1], ('acct1_vid2_t3', thumb_meta,
-                                               'set'))
-            change_event.clear()
+            events = trap.wait()
+            self.assertEquals(len(events), 1)
+            self.assertEquals(events[0], ('acct1_vid2_t3', thumb_meta, 'set'))
 
-        # Try doing a namespaced object
-        with contextlib.closing(
-            NeonUserAccount.subscribe_to_changes(_handle_video_change,
-                                                 "acct1")) as p:
+            # Try doing a namespaced object
+            trap.subscribe(NeonUserAccount, 'acct1')
             acct_meta = NeonUserAccount('a1', 'acct1', default_size=[45,98])
             acct_meta.save()
-            change_event.wait(1.0)
-            self.assertEquals(found_args[-1], ('acct1', acct_meta, 'set'))
-            change_event.clear()
-        
+            events = trap.wait()
+            self.assertEquals(len(events), 1)
+            self.assertEquals(events[0], ('acct1', acct_meta, 'set'))
+
+    def test_subscribe_changes_to_video_and_thumbs(self):
+        vid_trap = TestNeondata.ChangeTrap()
+        thumb_trap = TestNeondata.ChangeTrap()
+
+        try:
+            vid_trap.subscribe(VideoMetadata, 'acct1_*')
+            thumb_trap.subscribe(ThumbnailMetadata, 'acct1_vid1_*')
+            vid_meta = VideoMetadata('acct1_vid1', request_id='req1',
+                                     tids=['acct1_vid1_t1'])
+            vid_meta.save()
+            thumb_meta = ThumbnailMetadata('acct1_vid1_t1', width=654)
+            thumb_meta.save()
+
+            vid_events = vid_trap.wait()
+            thumb_events = thumb_trap.wait()
+
+            self.assertEquals(len(vid_events), 1)
+            self.assertEquals(vid_events[0], ('acct1_vid1', vid_meta, 'set'))
+            self.assertEquals(len(thumb_events), 1)
+            self.assertEquals(thumb_events[0],
+                              ('acct1_vid1_t1', thumb_meta, 'set'))
+        finally:
+            vid_trap.close()
+            thumb_trap.close()
+
+    def test_subscribe_to_changes_with_modifies(self):
+        with contextlib.closing(TestNeondata.ChangeTrap()) as trap:
+            trap.subscribe(VideoMetadata, 'acct1_*')
+            video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+            video_meta.save()
+            events = trap.wait()
+            self.assertEquals(len(events), 1)
+
+            # Now do a modify that changes the object. Should see a new event
+            def _set_experiment_state(x):
+                x.experiment_state = ExperimentState.RUNNING
+
+            VideoMetadata.modify('acct1_vid1', _set_experiment_state)
+            events = trap.wait()
+            self.assertEquals(len(events), 2)
+            self.assertEquals(events[-1][1].experiment_state,
+                              ExperimentState.RUNNING)
+
+            # Modify again and we should not see a change event
+            VideoMetadata.modify('acct1_vid1', _set_experiment_state)
+            events = trap.wait(0.2)
+            self.assertEquals(len(events), 2)
+
+            # Do a modify that creates a new, default
+            VideoMetadata.modify('acct1_vid3', lambda x: x)
+            new_vid = VideoMetadata.modify('acct1_vid2', lambda x: x,
+                                           create_missing=True)
+            events = trap.wait()
+            self.assertEquals(len(events), 3)
+            self.assertEquals(events[-1], ('acct1_vid2', new_vid, 'set'))
+
+    def test_subscribe_api_request_changes(self):
+        bc_trap = TestNeondata.ChangeTrap()
+        generic_trap = TestNeondata.ChangeTrap()
+
+        try:
+            bc_trap.subscribe(neondata.BrightcoveApiRequest, '*')
+            generic_trap.subscribe(NeonApiRequest)
+
+            # Test a Brightcove request
+            neondata.BrightcoveApiRequest('jobbc', 'acct1').save()
+            bc_events = bc_trap.wait()
+            all_events = generic_trap.wait()
+            self.assertEquals(len(bc_events), 1)
+            self.assertEquals(len(all_events), 1)
+            self.assertEquals(bc_events[0][1].job_id, 'jobbc')
+            self.assertEquals(all_events[0][1].job_id, 'jobbc')
+
+            # Now try a Neon request. the BC one shouldn't be listed
+            NeonApiRequest('jobneon', 'acct1').save()
+            all_events = generic_trap.wait()
+            bc_events = bc_trap.wait(0.1)
+            self.assertEquals(len(bc_events), 1)
+            self.assertEquals(len(all_events), 2)
+            self.assertEquals(all_events[1][1].job_id, 'jobneon')
+
+        finally:
+            bc_trap.close()
+            generic_trap.close()
+
+    def test_subscribe_platform_changes(self):
+        with contextlib.closing(TestNeondata.ChangeTrap()) as trap:
+            trap.subscribe(AbstractPlatform)
+
+            neondata.BrightcovePlatform('a1', 'bc', 'acct1').save()
+            events = trap.wait()
+            self.assertEquals(len(events), 1)
+            self.assertIsInstance(events[0][1], BrightcovePlatform)
+
+            neondata.NeonPlatform('a1', 'neon', 'acct1').save()
+            events = trap.wait()
+            self.assertEquals(len(events), 2)
+            self.assertIsInstance(events[-1][1], NeonPlatform)
+
+            neondata.YoutubePlatform('a1', 'yt', 'acct1').save()
+            events = trap.wait()
+            self.assertEquals(len(events), 3)
+            self.assertIsInstance(events[-1][1], YoutubePlatform)
+
+            neondata.OoyalaPlatform('a1', 'yt', 'acct1').save()
+            events = trap.wait()
+            self.assertEquals(len(events), 4)
+            self.assertIsInstance(events[-1][1], OoyalaPlatform)
+            
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()
         self.connection_patcher = patch('cmsdb.neondata.blockingRedis.StrictRedis')
 
         # For the sake of this test, we will only mock the get() function
-        mock_redis = self.connection_patcher.start()
+        self.mock_redis = self.connection_patcher.start()
         self.mock_responses = MagicMock()
-        mock_redis().get.side_effect = self._mocked_get_func
+        self.mock_redis().get.side_effect = self._mocked_get_func
 
         self.valid_obj = TrackerAccountIDMapper("tai1", "api_key")
 
@@ -883,6 +1016,19 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
             self.io_loop.add_callback(callback, self.mock_responses(key))
         else:
             return self.mock_responses(key)
+
+    def test_subscribe_connection_error(self):
+        self.mock_redis().pubsub().psubscribe.side_effect = [
+            redis.exceptions.ConnectionError(),
+            socket.gaierror()]
+        
+        with self.assertLogExists(logging.ERROR, 'Error subscribing'):
+            with self.assertRaises(neondata.DBConnectionError):
+                NeonUserAccount.subscribe_to_changes(lambda x,y,z: x)
+
+        with self.assertLogExists(logging.ERROR, 'Socket error subscribing'):
+            with self.assertRaises(neondata.DBConnectionError):
+                NeonUserAccount.subscribe_to_changes(lambda x,y,z: x)
 
     def test_async_good_connection(self):
         self.mock_responses.side_effect = [self.valid_obj.to_json()]

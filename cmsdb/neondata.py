@@ -41,6 +41,8 @@ from PIL import Image
 import random
 import re
 import redis as blockingRedis
+import redis.exceptions
+import socket
 import string
 from StringIO import StringIO
 import tornado.ioloop
@@ -55,6 +57,7 @@ import utils.logs
 from utils.imageutils import PILImageUtils
 import utils.neon
 from utils.options import define, options
+from utils import statemon
 import utils.sync
 import utils.s3
 import utils.http 
@@ -81,10 +84,13 @@ define("video_server", default="127.0.0.1", type=str, help="Neon video server")
 define('async_pool_size', type=int, default=10,
        help='Number of processes that can talk simultaneously to the db')
 
+statemon.define('subscription_errors', int)
+
 #constants 
 BCOVE_STILL_WIDTH = 480
 
 class DBStateError(ValueError):pass
+class DBConnectionError(IOError):pass
 
 class DBConnection(object):
     '''Connection to the database.
@@ -464,6 +470,10 @@ class StoredObject(object):
     def format_key(cls, key):
         return key
 
+    @classmethod
+    def is_valid_key(cls, key):
+        return True
+
     def to_dict(self):
         return {
             '_type': self.__class__.__name__,
@@ -702,6 +712,7 @@ class StoredObject(object):
             pipe.multi()
 
             mappings = {}
+            orig_objects = {}
             for key, item in zip(keys, items):
                 if item is None:
                     if create_missing:
@@ -711,12 +722,14 @@ class StoredObject(object):
                         mappings[key] = None
                 else:
                     mappings[key] = create_class._create(key, json.loads(item))
+                    orig_objects[key] = create_class._create(key,
+                                                             json.loads(item))
             try:
                 func(mappings)
             finally:
                 to_set = {}
                 for key, obj in mappings.iteritems():
-                    if obj is not None:
+                    if obj is not None and obj != orig_objects.get(key, None):
                         to_set[key] = obj.to_json()
 
                 if len(to_set) > 0:
@@ -773,12 +786,39 @@ class StoredObject(object):
             message_type = response[0]
             if message_type in pubsub.PUBLISH_MESSAGE_TYPES:
                 ops.append(response[3])
-                keys.append(cls.key2id(response[3].partition(':')[2]))
+                keys.append(cls.key2id(response[2].partition(':')[2]))
 
             response = pubsub.parse_response(block=False)
 
+        # Filter out the invalid keys
+        keys, ops = zip(*filter(lambda x: cls.is_valid_key(x[0]),
+                                zip(*(keys, ops))))
+
         for key, obj, op in zip(*(keys, cls.get_many(keys), ops)):
-            func(key, obj, op)
+            if isinstance(obj, cls):
+                func(key, obj, op)
+
+    @classmethod
+    def _subscribe_pubsub_to_new_pattern(cls, pubsub, func, pattern):
+        try:
+            if '*' in pattern:
+                pubsub.psubscribe(
+                    **{'__keyspace@0__:%s' % cls.format_key(pattern) :
+                       lambda x: cls._handle_all_changes(x, func, pubsub)})
+            else:
+                pubsub.subscribe(
+                    **{'__keyspace@0__:%s' % cls.format_key(pattern) :
+                       lambda x: cls._handle_all_changes(x, func, pubsub)})
+        except redis.exceptions.RedisError as e:
+            msg = 'Error subscribing to channel %s: %s' % (pattern, e)
+            _log.error(msg)
+            statemon.state.increment('subscription_errors')
+            raise DBConnectionError(msg)
+        except socket.error as e:
+            msg = 'Socket error subscribing to channel %s: %s' % (pattern, e)
+            _log.error(msg) 
+            statemon.state.increment('subscription_errors')
+            raise DBConnectionError(msg)
 
     @classmethod
     def subscribe_to_changes(cls, func, pattern='*'):
@@ -798,12 +838,7 @@ class StoredObject(object):
         '''        
         db_connection = DBConnection.get(cls)
         p = db_connection.blocking_conn.pubsub(ignore_subscribe_messages=True)
-        if '*' in pattern:
-            p.psubscribe(**{'__keyspace@0__:%s' % cls.format_key(pattern) :
-                            lambda x: cls._handle_all_changes(x, func, p)})
-        else:
-            p.subscribe(**{'__keyspace@0__:%s' % cls.format_key(pattern) :
-                           lambda x: cls._handle_all_changes(x, func, p)})
+        cls._subscribe_pubsub_to_new_pattern(p, func, pattern)
         p.run_in_thread(sleep_time=0.01)
         return p
 
@@ -1626,7 +1661,7 @@ class AbstractPlatform(NamespacedStoredObject):
                 'neonplatform' : NeonPlatform,
                 'brightcoveplatform' : BrightcovePlatform,
                 'ooyalaplatform' : OoyalaPlatform,
-                'youtubeplatform' : YoutubeApiRequest
+                'youtubeplatform' : YoutubePlatform
                 }
             try:
                 platform = typemap[platform_type]
@@ -1768,6 +1803,18 @@ class AbstractPlatform(NamespacedStoredObject):
         return platform_data
 
     @classmethod
+    def subscribe_to_changes(cls, func, pattern='*'):
+        p = NeonPlatform.subscribe_to_changes(func, pattern)
+        BrightcovePlatform._subscribe_pubsub_to_new_pattern(p, func, pattern)
+        YoutubePlatform._subscribe_pubsub_to_new_pattern(p, func, pattern)
+        OoyalaPlatform._subscribe_pubsub_to_new_pattern(p, func, pattern)
+        return p
+
+    @classmethod
+    def _subscribe_to_changes_impl(cls, func, pattern):
+        return super(AbstractPlatform, cls).subscribe_to_changes(func, pattern)
+
+    @classmethod
     def _erase_all_data(cls):
         ''' erase all data ''' 
         db_connection = DBConnection.get(cls)
@@ -1794,6 +1841,10 @@ class NeonPlatform(AbstractPlatform):
     def get_all_instances(cls, callback=None):
         ''' get all neonplatform instances'''
         return cls._get_all_instances_impl()
+
+    @classmethod
+    def subscribe_to_changes(cls, func, pattern='*'):
+        return cls._subscribe_to_changes_impl(func, pattern)
 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
@@ -1822,6 +1873,10 @@ class BrightcovePlatform(AbstractPlatform):
     def get_ovp(cls):
         ''' return ovp name'''
         return "brightcove"
+
+    @classmethod
+    def subscribe_to_changes(cls, func, pattern='*'):
+        return cls._subscribe_to_changes_impl(func, pattern)
 
     def get_api(self, video_server_uri=None):
         '''Return the Brightcove API object for this platform integration.'''
@@ -2083,6 +2138,10 @@ class YoutubePlatform(AbstractPlatform):
     def get_ovp(cls):
         ''' ovp '''
         return "youtube"
+
+    @classmethod
+    def subscribe_to_changes(cls, func, pattern='*'):
+        return cls._subscribe_to_changes_impl(func, pattern)
     
     def get_access_token(self, callback):
         ''' Get a valid access token, if not valid -- get new one and set expiry'''
@@ -2195,6 +2254,10 @@ class OoyalaPlatform(AbstractPlatform):
     def get_ovp(cls):
         ''' return ovp name'''
         return "ooyala"
+
+    @classmethod
+    def subscribe_to_changes(cls, func, pattern='*'):
+        return cls._subscribe_to_changes_impl(func, pattern)
     
     @classmethod
     def generate_signature(cls, secret_key, http_method, 
@@ -2373,6 +2436,12 @@ class NeonApiRequest(NamespacedStoredObject):
         self.api_method = None
         self.api_param  = None
         self.publish_date = None # Timestamp in ms
+
+    @classmethod
+    def key2id(cls, key):
+        '''Converts a key to an id'''
+        splits = key.split('_')
+        return (splits[2], splits[1])
 
     @classmethod
     def _generate_subkey(cls, job_id, api_key):
@@ -2628,6 +2697,10 @@ class ThumbnailID(AbstractHashGenerator):
     def generate(_input, internal_video_id):
         return '%s_%s' % (internal_video_id, ThumbnailMD5.generate(_input))
 
+    @classmethod
+    def is_valid_key(cls, key):
+        return len(key.split('_')) == 3
+
 class ThumbnailMD5(AbstractHashGenerator):
     '''Static class to generate the thumbnail md5.
 
@@ -2815,6 +2888,10 @@ class ThumbnailMetadata(StoredObject):
         
         # NOTE: If you add more fields here, modify the merge code in
         # api/client, Add unit test to check this
+
+    @classmethod
+    def is_valid_key(cls, key):
+        return ThumbnailID.is_valid_key(key)
 
     def update_phash(self, image):
         '''Update the phash from a PIL image.'''
@@ -3015,6 +3092,10 @@ class VideoMetadata(StoredObject):
         # Serving URL (ISP redirect URL) 
         # NOTE: always use the get_serving_url() method to get the serving_url 
         self.serving_url = None
+
+    @classmethod
+    def is_valid_key(cls, key):
+        return len(key.split('_')) == 2
 
     def get_id(self):
         ''' get internal video id '''
