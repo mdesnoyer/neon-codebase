@@ -54,6 +54,7 @@ class RedisServer:
 
         self.config_file = tempfile.NamedTemporaryFile()
         self.config_file.write('port %i\n' % self.port)
+        self.config_file.write('notify-keyspace-events Kgsz$')
         self.config_file.flush()
 
         _log.info('Redis server on port %i' % self.port)

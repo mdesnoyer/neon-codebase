@@ -223,6 +223,9 @@ class RedisRetryWrapper(object):
                 
         raise AttributeError(attr)
 
+    def pubsub(self, **kwargs):
+        return self.client.pubsub(**kwargs)
+
 class RedisAsyncWrapper(object):
     '''
     Replacement class for tornado-redis 
@@ -451,6 +454,15 @@ class StoredObject(object):
         if classcmp:
             return classcmp
         return cmp(self.__dict__, other.__dict__)
+
+    @classmethod
+    def key2id(cls, key):
+        '''Converts a key to an id'''
+        return key
+
+    @classmethod
+    def format_key(cls, key):
+        return key
 
     def to_dict(self):
         return {
@@ -740,32 +752,59 @@ class StoredObject(object):
         db_connection.clear_db()
 
     @classmethod
+    def _handle_all_changes(cls, msg, func, pubsub):
+        '''Handles any changes to objects subscribed on pubsub.
+
+        Used with subscribe_to_changes.
+
+        Drains the channel of keys that have changed and gets them
+        from the database in one big extraction instead of a ton of
+        small ones. Then, for each object, func is called once.
+
+        Inputs:
+        func - The function to call with each object. 
+        pubsub - The pubsub object we can drain from
+        msg - The message structure for the first event
+        '''
+        keys = [cls.key2id(msg['channel'].partition(':')[2])]
+        ops = [msg['data']]
+        response = pubsub.parse_response(block=False)
+        while response is not None:
+            message_type = response[0]
+            if message_type in pubsub.PUBLISH_MESSAGE_TYPES:
+                ops.append(response[3])
+                keys.append(cls.key2id(response[3].partition(':')[2]))
+
+            response = pubsub.parse_response(block=False)
+
+        for key, obj, op in zip(*(keys, cls.get_many(keys), ops)):
+            func(key, obj, op)
+
+    @classmethod
     def subscribe_to_changes(cls, func, pattern='*'):
         '''Subscribes to changes in the database.
 
-        When a change occurs, func is called with the updated
-        object. The function must be thread safe as it will be called
-        in a thread in a different context.
+        When a change occurs, func is called with the key, the updated
+        object and the operation. The function must be thread safe as
+        it will be called in a thread in a different context.
 
         Inputs:
-        func - The function to call with the updated object as its one argument
+        func - The function to call with signature func(key, obj, op)
         pattern - Pattern of keys to subscribe to
 
         Returns:
         The pubsub handler, which should have .close() called when it is
         finished with.
-        '''
-        def _handler(msg):
-            obj = cls.get(msg['data'])
-            func(obj)
-        
+        '''        
         db_connection = DBConnection.get(cls)
         p = db_connection.blocking_conn.pubsub(ignore_subscribe_messages=True)
-        if pattern.contains('*'):
-            p.psubscribe(**{'__keyspace@0__:%s' % pattern : _handler})
+        if '*' in pattern:
+            p.psubscribe(**{'__keyspace@0__:%s' % cls.format_key(pattern) :
+                            lambda x: cls._handle_all_changes(x, func, p)})
         else:
-            p.subscribe(**{'__keyspace@0__:%s' % pattern : _handler})
-        p.run_in_thread(sleep_time=0.1)
+            p.subscribe(**{'__keyspace@0__:%s' % cls.format_key(pattern) :
+                           lambda x: cls._handle_all_changes(x, func, p)})
+        p.run_in_thread(sleep_time=0.01)
         return p
 
 class NamespacedStoredObject(StoredObject):
@@ -781,7 +820,12 @@ class NamespacedStoredObject(StoredObject):
 
     def get_id(self):
         '''Return the non-namespaced id for the object.'''
-        return re.sub(self._baseclass_name().lower() + '_', '', self.key)
+        return self.key2id(self.key)
+
+    @classmethod
+    def key2id(cls, key):
+        '''Converts a key to an id'''
+        return re.sub(cls._baseclass_name().lower() + '_', '', key)
 
     @classmethod
     def _baseclass_name(cls):
@@ -867,37 +911,6 @@ class NamespacedStoredObject(StoredObject):
             func,
             create_missing=create_missing,
             callback=callback)
-
-    @classmethod
-    def subscribe_to_changes(cls, func, pattern='*'):
-        '''Subscribes to changes in this table.
-
-        When a change occurs, func is called with the updated
-        object. The function must be thread safe as it will be called
-        in a thread in a different context.
-
-        Inputs:
-        func - The function to call with the updated object as its one argument
-        pattern - Pattern of keys to subscribe to
-
-        Returns:
-        The pubsub handler, which should have .close() called when it is
-        finished with.
-        '''
-        def _handler(msg):
-            obj = cls.get(msg['data'].partition('_')[2])
-            func(obj)
-        
-        db_connection = DBConnection.get(cls)
-        p = db_connection.blocking_conn.pubsub(ignore_subscribe_messages=True)
-        if pattern.contains('*'):
-            p.psubscribe(**{'__keyspace@0__:%s' % cls.format_key(pattern) : 
-                            _handler})
-        else:
-            p.subscribe(**{'__keyspace@0__:%s' % cls.format_key(pattern) :
-                           _handler})
-        p.run_in_thread(sleep_time=0.1)
-        return p
 
 class DefaultedStoredObject(NamespacedStoredObject):
     '''Namespaced object where a get-like operation will never returns None.

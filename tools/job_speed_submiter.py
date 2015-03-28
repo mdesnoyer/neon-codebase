@@ -14,7 +14,7 @@ import smtplib
 
 NEON_CMS_URL = "http://services.neon-lab.com"
 
-logging.basicConfig(filename='job_submit_times.log',level=logging.DEBUG, format='%(message)s')
+logging.basicConfig(filename='/home/mdesnoyer/tmp/job_submit_times.log',level=logging.DEBUG, format='%(message)s')
 _log = logging.getLogger(__name__)
 
 

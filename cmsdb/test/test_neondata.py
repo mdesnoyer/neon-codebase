@@ -9,6 +9,7 @@ if sys.path[0] <> base_path:
 
 import copy
 from concurrent.futures import Future
+import contextlib
 import logging
 _log = logging.getLogger(__name__)
 import json
@@ -26,6 +27,7 @@ import time
 import threading
 from tornado.httpclient import HTTPResponse, HTTPRequest
 import tornado.ioloop
+import utils.neon
 from utils.options import options
 from utils.imageutils import PILImageUtils
 import unittest
@@ -813,339 +815,45 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             self.assertEquals(ExperimentStrategy('not_in_db'),
                               ExperimentStrategy.get('not_in_db',
                                                      log_missing=False))
+    def test_subscribe_to_changes(self):
+        change_event = threading.Event()
+        found_args = []
 
-class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
-    def setUp(self):
-        super(TestDbConnectionHandling, self).setUp()
-        self.connection_patcher = patch('cmsdb.neondata.blockingRedis.StrictRedis')
+        def _handle_video_change(*args):
+            found_args.append(args)
+            change_event.set()
 
-        # For the sake of this test, we will only mock the get() function
-        mock_redis = self.connection_patcher.start()
-        self.mock_responses = MagicMock()
-        mock_redis().get.side_effect = self._mocked_get_func
+        # Try a pattern
+        with contextlib.closing(
+            VideoMetadata.subscribe_to_changes(_handle_video_change,
+                                               "acct1_*")) as p:
+            video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+            video_meta.save()
+            change_event.wait(1.0)
+            self.assertEquals(len(found_args), 1)
+            self.assertEquals(found_args[0], ('acct1_vid1', video_meta, 'set'))
+            change_event.clear()
 
-        self.valid_obj = TrackerAccountIDMapper("tai1", "api_key")
+        # Try subscribing to a specific key
+        with contextlib.closing(
+            ThumbnailMetadata.subscribe_to_changes(_handle_video_change,
+                                                   "acct1_vid2_t3")) as p:
+            thumb_meta = ThumbnailMetadata('acct1_vid2_t3', width=654)
+            thumb_meta.save()
+            change_event.wait(1.0)
+            self.assertEquals(found_args[-1], ('acct1_vid2_t3', thumb_meta,
+                                               'set'))
+            change_event.clear()
 
-        # Speed up the retry delays to make the test faster
-        self.old_delay = options.get('cmsdb.neondata.baseRedisRetryWait')
-        options._set('cmsdb.neondata.baseRedisRetryWait', 0.01)
-
-    def tearDown(self):
-        self.connection_patcher.stop()
-        DBConnection.clear_singleton_instance()
-        options._set('cmsdb.neondata.baseRedisRetryWait',
-                     self.old_delay)
-        super(TestDbConnectionHandling, self).tearDown()
-
-    def _mocked_get_func(self, key, callback=None):
-        if callback:
-            self.io_loop.add_callback(callback, self.mock_responses(key))
-        else:
-            return self.mock_responses(key)
-
-    def test_async_good_connection(self):
-        self.mock_responses.side_effect = [self.valid_obj.to_json()]
-        
-        TrackerAccountIDMapper.get("tai1", callback=self.stop)
-        found_obj = self.wait()
-
-        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
-
-    def test_sync_good_connection(self):
-        self.mock_responses.side_effect = [self.valid_obj.to_json()]
-        
-        found_obj = TrackerAccountIDMapper.get("tai1")
-
-        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
-
-    def test_async_some_errors(self):
-        self.mock_responses.side_effect = [
-            redis.ConnectionError("Connection Error"),
-            redis.BusyLoadingError("Loading Error"),
-            socket.timeout("Socket Timeout"),
-            socket.error("Socket Error"),
-            self.valid_obj.to_json()
-            ]
-
-        TrackerAccountIDMapper.get("tai1", callback=self.stop)
-
-        with self.assertLogExists(logging.ERROR, 'Connection Error'):
-            with self.assertLogExists(logging.ERROR, 'Loading Error'):
-                with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
-                    with self.assertLogExists(logging.ERROR, 'Socket Error'):
-                        found_obj = self.wait()
-
-        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
-
-    def test_sync_some_errors(self):
-        self.mock_responses.side_effect = [
-            redis.ConnectionError("Connection Error"),
-            redis.BusyLoadingError("Loading Error"),
-            socket.timeout("Socket Timeout"),
-            socket.error("Socket Error"),
-            self.valid_obj.to_json()
-            ]
-
-        with self.assertLogExists(logging.ERROR, 'Connection Error'):
-            with self.assertLogExists(logging.ERROR, 'Loading Error'):
-                with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
-                    with self.assertLogExists(logging.ERROR, 'Socket Error'):
-                        found_obj =  TrackerAccountIDMapper.get("tai1")
-
-        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
-
-    def test_async_too_many_errors(self):
-        self.mock_responses.side_effect = [
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            ]
-
-        TrackerAccountIDMapper.get("tai1", callback=self.stop)
-        
-        with self.assertRaises(redis.ConnectionError):
-            self.wait()
-
-    def test_sync_too_many_errors(self):
-        self.mock_responses.side_effect = [
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            ]
-        
-        with self.assertRaises(redis.ConnectionError):
-            TrackerAccountIDMapper.get("tai1")
-
-    # TODO(mdesnoyer): Add test for the modify if there is a failure
-    # on one of the underlying commands.
-
-class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
-    '''
-    Thumbnail ID Mapper and other thumbnail helper class tests 
-    '''
-    def setUp(self):
-        super(TestThumbnailHelperClass, self).setUp()
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-
-        self.image = PILImageUtils.create_random_image(360, 480)
-
-    def tearDown(self):
-        self.redis.stop()
-        super(TestThumbnailHelperClass, self).tearDown()
-
-    def test_thumbnail_mapper(self):
-        ''' Thumbnail mappings '''
-
-        url = "http://thumbnail.jpg"
-        vid = "v123"
-        image = PILImageUtils.create_random_image(360, 480)
-        tid = ThumbnailID.generate(image, vid)
-    
-        tdata = ThumbnailMetadata(tid, vid, [], 0, 480, 360,
-                        "ttype", 0, 1, 0)
-        tdata.save()
-        tmap = ThumbnailURLMapper(url, tid)
-        tmap.save()
-        
-        res_tid = ThumbnailURLMapper.get_id(url)
-        self.assertEqual(tid, res_tid)
-
-    def test_thumbnail_get_data(self):
-
-        vid = InternalVideoID.generate('api1', 'vid1')
-        tid = ThumbnailID.generate(self.image, vid)
-        tdata = ThumbnailMetadata(tid, vid, ['one.jpg', 'two.jpg'],
-                                  None, self.image.size[1], self.image.size[0],
-                                  'brightcove', 1.0, '1.2')
-        tdata.save()
-        self.assertEqual(tdata.get_account_id(), 'api1')
-        self.assertEqual(ThumbnailMetadata.get_video_id(tid), vid)
-        self.assertEqual(tdata.rank, 0)
-        self.assertEqual(tdata.urls, ['one.jpg', 'two.jpg'])
-
-    def test_atomic_modify(self):
-        vid = InternalVideoID.generate('api1', 'vid1')
-        tid = ThumbnailID.generate(self.image, vid)
-        tdata = ThumbnailMetadata(tid, vid, ['one.jpg', 'two.jpg'],
-                                  None, self.image.size[1], self.image.size[0],
-                                  'brightcove', 1.0, '1.2')
-        tdata.save()
-
-        thumb = ThumbnailMetadata.modify(tid,
-                                         lambda x: x.urls.append('url3.jpg'))
-        self.assertItemsEqual(thumb.urls, ['one.jpg', 'two.jpg', 'url3.jpg'])
-        self.assertItemsEqual(ThumbnailMetadata.get(tid).urls,
-                              ['one.jpg', 'two.jpg', 'url3.jpg'])
-
-        # Now try asynchronously
-        def setphash(thumb): thumb.phash = 'hash'
-        def setrank(thumb): thumb.rank = 6
-
-        counters = [1, 2]
-        def wrapped_callback(param):
-            counters.pop()
-            self.stop()
-
-        ThumbnailMetadata.modify(tid, setphash, callback=wrapped_callback)
-        ThumbnailMetadata.modify(tid, setrank, callback=wrapped_callback)
-        
-        # if len(counters) is not 0, call self.wait() to service the other
-        # callbacks  
-        while len(counters) > 0:
-            self.wait()
-
-        thumb = ThumbnailMetadata.get(tid)
-        self.assertEqual(thumb.phash, 'hash')
-        self.assertEqual(thumb.rank, 6)
-        self.assertItemsEqual(thumb.urls,
-                              ['one.jpg', 'two.jpg', 'url3.jpg'])
-
-    def test_atomic_modify_many(self):
-        vid1 = InternalVideoID.generate('api1', 'vid1')
-        tid1 = ThumbnailID.generate(self.image, vid1)
-        tdata1 = ThumbnailMetadata(tid1, vid1, ['one.jpg', 'two.jpg'],
-                                   None, self.image.size[1],
-                                   self.image.size[0],
-                                   'brightcove', 1.0, '1.2')
-        vid2 = InternalVideoID.generate('api1', 'vid2')
-        tid2 = ThumbnailID.generate(self.image, vid2)
-        tdata2 = ThumbnailMetadata(tid2, vid2, ['1.jpg', '2.jpg'],
-                                   None, self.image.size[1],
-                                   self.image.size[0],
-                                   'brightcove', 1.0, '1.2')
-        self.assertFalse(tdata2.chosen)
-        self.assertFalse(tdata1.chosen)
-        self.assertTrue(tdata2.enabled)
-        self.assertTrue(tdata1.enabled)
-
-        ThumbnailMetadata.save_all([tdata1, tdata2])
-
-        def _change_thumb_data(d):
-            d[tid1].chosen = True
-            d[tid2].enabled = False
-
-        updated = ThumbnailMetadata.modify_many([tid1, tid2],
-                                                _change_thumb_data)
-        self.assertTrue(updated[tid1].chosen)
-        self.assertFalse(updated[tid2].chosen)
-        self.assertTrue(updated[tid1].enabled)
-        self.assertFalse(updated[tid2].enabled)
-        self.assertTrue(ThumbnailMetadata.get(tid1).chosen)
-        self.assertFalse(ThumbnailMetadata.get(tid2).chosen)
-        self.assertTrue(ThumbnailMetadata.get(tid1).enabled)
-        self.assertFalse(ThumbnailMetadata.get(tid2).enabled)
-
-    def test_create_or_modify(self):
-        vid1 = InternalVideoID.generate('api1', 'vid1')
-        tid1 = ThumbnailID.generate(self.image, vid1)
-        self.assertIsNone(ThumbnailMetadata.get(tid1))
-
-        ThumbnailMetadata.modify(tid1,
-                                 lambda x: x.urls.append('http://image.jpg'),
-                                 create_missing=True)
-
-        val = ThumbnailMetadata.get(tid1)
-        self.assertIsNotNone(val)
-        self.assertEqual(val.urls, ['http://image.jpg'])
-
-    @tornado.testing.gen_test
-    def test_create_or_modify_async(self):
-        vid1 = InternalVideoID.generate('api1', 'vid1')
-        tid1 = ThumbnailID.generate(self.image, vid1)
-        self.assertIsNone(ThumbnailMetadata.get(tid1))
-
-        yield tornado.gen.Task(
-            ThumbnailMetadata.modify,
-            tid1,
-            lambda x: x.urls.append('http://image.jpg'),
-            create_missing=True)
-
-        val = ThumbnailMetadata.get(tid1)
-        self.assertIsNotNone(val)
-        self.assertEqual(val.urls, ['http://image.jpg'])
-
-    def test_create_or_modify_many(self):
-        vid1 = InternalVideoID.generate('api1', 'vid1')
-        tid1 = ThumbnailID.generate(self.image, vid1)
-        tdata1 = ThumbnailMetadata(tid1, vid1, ['one.jpg', 'two.jpg'],
-                                   None, self.image.size[1],
-                                   self.image.size[0],
-                                   'brightcove', 1.0, '1.2')
-        tdata1.save()
-
-        vid2 = InternalVideoID.generate('api1', 'vid2')
-        tid2 = ThumbnailID.generate(self.image, vid2)
-        self.assertIsNone(ThumbnailMetadata.get(tid2))
-
-        def _add_thumb(d):
-            for thumb in d.itervalues():
-                thumb.urls.append('%s.jpg' % thumb.key)
-
-        ThumbnailMetadata.modify_many(
-            [tid1, tid2],
-            _add_thumb,
-            create_missing=True)
-
-        self.assertEqual(ThumbnailMetadata.get(tid1).urls,
-                         ['one.jpg', 'two.jpg', '%s.jpg' % tid1])
-        self.assertEqual(ThumbnailMetadata.get(tid2).urls,
-                         ['%s.jpg' % tid2])
-
-    @tornado.testing.gen_test
-    def test_create_or_modify_many_async(self):
-        vid1 = InternalVideoID.generate('api1', 'vid1')
-        tid1 = ThumbnailID.generate(self.image, vid1)
-        tdata1 = ThumbnailMetadata(tid1, vid1, ['one.jpg', 'two.jpg'],
-                                   None, self.image.size[1],
-                                   self.image.size[0],
-                                   'brightcove', 1.0, '1.2')
-        tdata1.save()
-
-        vid2 = InternalVideoID.generate('api1', 'vid2')
-        tid2 = ThumbnailID.generate(self.image, vid2)
-        self.assertIsNone(ThumbnailMetadata.get(tid2))
-
-        def _add_thumb(d):
-            for thumb in d.itervalues():
-                thumb.urls.append('%s.jpg' % thumb.key)
-
-        yield tornado.gen.Task(
-            ThumbnailMetadata.modify_many,
-            [tid1, tid2],
-            _add_thumb,
-            create_missing=True)
-
-        self.assertEqual(ThumbnailMetadata.get(tid1).urls,
-                         ['one.jpg', 'two.jpg', '%s.jpg' % tid1])
-        self.assertEqual(ThumbnailMetadata.get(tid2).urls,
-                         ['%s.jpg' % tid2])
-        
-
-    def test_read_thumbnail_old_format(self):
-        # Make sure that we're backwards compatible
-        thumb = ThumbnailMetadata._create('2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15', json.loads("{\"video_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001\", \"thumbnail_metadata\": {\"chosen\": false, \"thumbnail_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\", \"model_score\": 4.1698684091322846, \"enabled\": true, \"rank\": 5, \"height\": 232, \"width\": 416, \"model_version\": \"20130924\", \"urls\": [\"https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg\"], \"created_time\": \"2013-12-02 09:55:19\", \"type\": \"neon\", \"refid\": null}, \"key\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\"}"))
-
-        self.assertEqual(thumb.key, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15')
-        self.assertEqual(thumb.video_id, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001')
-        self.assertEqual(thumb.chosen, False)
-        self.assertAlmostEqual(thumb.model_score, 4.1698684091322846)
-        self.assertEqual(thumb.enabled, True)
-        self.assertEqual(thumb.rank, 5)
-        self.assertEqual(thumb.height, 232)
-        self.assertEqual(thumb.width, 416)
-        self.assertEqual(thumb.model_version, '20130924')
-        self.assertEqual(thumb.type, 'neon')
-        self.assertEqual(thumb.created_time, '2013-12-02 09:55:19')
-        self.assertIsNone(thumb.refid)
-        self.assertEqual(thumb.urls, ["https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg"])
-        
-        with self.assertRaises(AttributeError):
-            thumb.thumbnail_id
+        # Try doing a namespaced object
+        with contextlib.closing(
+            NeonUserAccount.subscribe_to_changes(_handle_video_change,
+                                                 "acct1")) as p:
+            acct_meta = NeonUserAccount('a1', 'acct1', default_size=[45,98])
+            acct_meta.save()
+            change_event.wait(1.0)
+            self.assertEquals(found_args[-1], ('acct1', acct_meta, 'set'))
+            change_event.clear()
         
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
@@ -1807,4 +1515,5 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
     
 
 if __name__ == '__main__':
+    utils.neon.InitNeon()
     unittest.main()
