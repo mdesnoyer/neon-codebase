@@ -2879,11 +2879,11 @@ class ThumbnailMetadata(StoredObject):
         self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
         self.phash = phash # Perceptual hash of the image. None if unknown
         
-        # Fraction of traffic currently being served by this thumbnail.
-        # =None indicates that Mastermind doesn't know of the fraction yet
+
+        # DEPRECATED: Use the ThumbnailStatus table instead
         self.serving_frac = serving_frac 
 
-        # The current click through rate seen for this thumbnail
+        # DEPRECATED: Use the ThumbnailStatus table instead
         self.ctr = ctr
         
         # NOTE: If you add more fields here, modify the merge code in
@@ -3052,6 +3052,24 @@ class ThumbnailMetadata(StoredObject):
                         video_metadata.thumbnail_ids):
                     yield thumb
 
+class ThumbnailStatus(DefaultedStoredObject):
+    '''Holds the current status of the thumbnail in the wild.'''
+
+    def __init__(self, thumbnail_id, serving_frac=None, ctr=None):
+        super(ThumbnailStatus, self).__init__(thumbnail_id)
+
+        # The fraction of traffic this thumbnail will get
+        self.serving_frac = serving_frac
+
+        # The currently click through rate for this thumbnail
+        self.ctr = ctr
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return ThumbnailStatus.__name__
+
 class VideoMetadata(StoredObject):
     '''
     Schema for metadata associated with video which gets stored
@@ -3079,11 +3097,12 @@ class VideoMetadata(StoredObject):
         self.frame_size = frame_size #(w,h)
         # Is A/B testing enabled for this video?
         self.testing_enabled = testing_enabled
+
+        # DEPRECATED. Use VideoStatus table instead
         self.experiment_state = \
           experiment_state if testing_enabled else ExperimentState.DISABLED
 
-        # For the multi-armed bandit strategy, the value remaining
-        # from the monte carlo analysis.
+        # DEPRECATED. Use VideoStatus table instead
         self.experiment_value_remaining = experiment_value_remaining
 
         # Will thumbnails for this video be served by our system?
@@ -3116,46 +3135,8 @@ class VideoMetadata(StoredObject):
         '''
         Get the TID that won the A/B test
         '''
-        def almost_equal(a, b, threshold=0.001):
-            return abs(a -b) <= threshold
-
-        tmds = yield tornado.gen.Task(ThumbnailMetadata.get_many,
-                                      self.thumbnail_ids)
-        tid = None
-
-        if self.experiment_state == ExperimentState.COMPLETE:
-            #1. If serving fraction = 1.0 its the winner
-            for tmd in tmds:
-                if tmd.serving_frac == 1.0:
-                    tid = tmd.key
-                    raise tornado.gen.Return(tid)
-
-            #2. Check the experiment strategy 
-            es = ExperimentStrategy.get(self.get_account_id())
-            if es.override_when_done == False:
-
-                #Check if the experiment is in holdback state or exp state
-                if almost_equal(es.exp_frac, es.holdback_frac): 
-                    # we are in experimental state now, find the thumb with the
-                    # experimental fraction
-                    winner_tmd = filter(lambda t: almost_equal(t.serving_frac,
-                                         es.exp_frac), tmds)
-                    if len(winner_tmd) != 1:
-                        _log.error("Error in the logic to determine winner tid")
-                    else:
-                        tid = winner_tmd[0].key
-
-                    raise tornado.gen.Return(tid)
-
-                else:
-                    # Holdback state, return majoriy fraction
-                    pass
-
-            #Pick the max serving fraction
-            max_tmd = max(tmds, key=lambda t: t.serving_frac)
-            tid = max_tmd.key
-
-        raise tornado.gen.Return(tid)
+        video_status = yield tornado.gen.Task(VideoStatus.get, self.key)
+        raise tornado.gen.Return(video_status.winner_tid)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -3311,6 +3292,31 @@ class VideoMetadata(StoredObject):
                                        _update_serving_url)
 
         raise tornado.gen.Return(serving_url)
+
+class VideoStatus(DefaultedStoredObject):
+    '''Stores the status of the video in the wild for often changing entries.
+
+    '''
+    def __init__(self, video_id, experiment_state=ExperimentState.UNKNOWN,
+                 winner_tid=None,
+                 experiment_value_remaining=None):
+        super(VideoStatus, self).__init__(video_id)
+
+        # State of the experiment
+        self.experiment_state = experiment_state
+
+        # Thumbnail id of the winner thumbnail
+        self.winner_tid = winner_tid
+
+        # For the multi-armed bandit strategy, the value remaining
+        # from the monte carlo analysis.
+        self.experiment_value_remaining = experiment_value_remaining
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return VideoStatus.__name__
 
 class VideoResponse(object):
     ''' VideoResponse object that contains list of thumbs for a video 

@@ -500,61 +500,12 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         Test the get_winner_tid logic for a given video id
 
         '''
-        acc_id = 'acct1'
-        na = NeonUserAccount(acc_id)
-        na.save()
-        vid = InternalVideoID.generate(na.neon_api_key, 'vid1')
-        
-        #Set experiment strategy
-        es = ExperimentStrategy(na.neon_api_key)
-        es.chosen_thumb_overrides = True
-        es.override_when_done = True
-        es.save()
-        
-        #Save thumbnails 
-        thumbs = [
-            ThumbnailMetadata('t1', vid, ['t1.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.8),
-            ThumbnailMetadata('t2', vid, ['t2.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.15),
-            ThumbnailMetadata('t3', vid, ['t3.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.01),
-            ThumbnailMetadata('t4', vid, ['t4.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.04),
-            ThumbnailMetadata('t5', vid, ['t5.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.0)
-            ]
-        ThumbnailMetadata.save_all(thumbs)
-        
-        #Save VideoMetadata
-        tids = [thumb.key for thumb in thumbs]
-        v0 = VideoMetadata(vid, tids, 'reqid0', 'v0.mp4', 0, 0, None, 0, None,
-                            True, ExperimentState.COMPLETE)
-        v0.save()
-        
-        #Set up Serving URLs (2 per tid)
-        for thumb in thumbs:
-            inp = ThumbnailServingURLs('%s_%s' % (vid, thumb.key))
-            inp.add_serving_url('http://servingurl_800_600.jpg', 800, 600) 
-            inp.add_serving_url('http://servingurl_120_90.jpg', 120, 90) 
-            inp.save()
-
-        winner_tid = v0.get_winner_tid()     
-        self.assertEqual(winner_tid, 't1')
-
-        # Case 2: chosen_thumb_overrides is False (holdback state)
-        es.chosen_thumb_overrides = False
-        es.override_when_done = False
-        es.exp_frac = 0.2
-        es.save()
-        winner_tid = v0.get_winner_tid()     
-        self.assertEqual(winner_tid, 't1')
-    
-        # Case 3: Experiement is in experimental state
-        es.exp_frac = es.holdback_frac = 0.8
-        es.save()
-        winner_tid = v0.get_winner_tid()     
-        self.assertEqual(winner_tid, 't1')
+        vid = InternalVideoID.generate('acct1', 'vid1')
+        video_meta = VideoMetadata(vid, ['acct1_vid1_t1', 'acct1_vid1_t2'],
+                                    'reqid0','v0.mp4')
+        video_meta.save()
+        neondata.VideoStatus(vid, winner_tid='acct1_vid1_t2').save()
+        self.assertEquals(video_meta.get_winner_tid(), 'acct1_vid1_t2')
 
     def test_video_metadata_methods(self):
         '''
