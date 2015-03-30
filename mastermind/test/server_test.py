@@ -76,8 +76,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.callback_patcher.stop()
 
     def test_good_db_data(self, datamock):
+        datamock.InternalVideoID = neondata.InternalVideoID
         # Define platforms in the database
-
         api_key = "neonapikey"
 
         bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
@@ -178,6 +178,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertTrue(self.watcher.is_loaded.is_set())
 
     def test_serving_url_update(self, datamock):
+        datamock.InternalVideoID = neondata.InternalVideoID
         api_key = "neonapikey"
 
         bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
@@ -242,6 +243,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                           'tai11': 'acct2'})
 
     def test_account_default_thumb_update(self, datamock):
+        datamock.InternalVideoID = neondata.InternalVideoID
         a1 = neondata.NeonUserAccount('a1', 'acct1')
         a1.default_thumbnail_id = 'a1_NOVIDEO_tdef'
         a2 = neondata.NeonUserAccount('a2', 'acct2')
@@ -286,6 +288,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             self.watcher._process_db_data()
 
     def test_video_metadata_missing(self, datamock):
+        datamock.InternalVideoID = neondata.InternalVideoID
         api_key = 'apikey'
         bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
                 abtest=True)
@@ -309,6 +312,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertTrue(self.watcher.is_loaded.is_set())
 
     def test_thumb_metadata_missing(self, datamock):
+        datamock.InternalVideoID = neondata.InternalVideoID
         api_key = 'apikey'
         bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key,  
                 abtest=True)
@@ -361,6 +365,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertTrue(self.watcher.is_loaded.is_set())
 
     def test_serving_disabled(self, datamock):
+        datamock.InternalVideoID = neondata.InternalVideoID
         api_key = "neonapikey"
 
         bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
