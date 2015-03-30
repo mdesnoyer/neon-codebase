@@ -1838,6 +1838,46 @@ class AbstractPlatform(NamespacedStoredObject):
         db_connection = DBConnection.get(cls)
         db_connection.clear_db()
 
+    @classmethod
+    def _delete_many_keys(cls, keys):
+        db_connection = DBConnection.get(cls)
+        for key in keys:
+            db_connection.blocking_conn.delete(key) 
+
+    @classmethod
+    def delete_all_video_related_data(cls, platform_instance, platform_vid):
+        '''
+        Delete all data related to a given video
+
+        request, vmdata, thumbs, thumb serving urls
+        '''
+
+        def _del_video(p_inst):
+            try:
+                p_inst.videos.pop(platform_vid)
+            except KeyError, e:
+                _log.error('no such video to delete')
+                return
+        
+        i_vid = InternalVideoID.generate(platform_instance.neon_api_key, 
+                                        platform_vid)
+        vm = VideoMetadata.get(i_vid)
+        keys_to_delete = []
+        
+        # get all the keys to delete 
+        keys_to_delete.append("request_%s_%s" % (
+                             platform_instance.neon_api_key, vm.job_id))
+        keys_to_delete.append(vm.key)
+        for tid in vm.thumbnail_ids:
+            keys_to_delete.append(tid)
+            #serving urls
+            keys_to_delete.append("thumbnailservingurls_%s" %tid)
+
+        cls._delete_many_keys(keys_to_delete)
+
+        # update platform instance
+        NeonPlatform.modify(platform_instance.neon_api_key, '0', _del_video)
+
 class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API

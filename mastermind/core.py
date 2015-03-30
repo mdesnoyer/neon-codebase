@@ -229,8 +229,7 @@ class Mastermind(object):
 
         for video_id in video_ids:
             try:
-                with self.lock:
-                    directive = self.serving_directive[video_id]
+                directive = self.serving_directive[video_id]
                 video_id = directive[0][1]
                 yield (directive[0],
                        [('_'.join([video_id, thumb_id]), frac)
