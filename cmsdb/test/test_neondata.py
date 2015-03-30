@@ -21,6 +21,7 @@ import redis
 import random
 import socket
 import string
+import subprocess
 import test_utils.neontest
 import test_utils.redis
 import time
@@ -359,6 +360,17 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                          'http://this.jpg')
 
     def test_too_many_open_connections_sync(self):
+        self.maxDiff = 10000
+
+        def _get_open_connection_list():
+            fd_list = subprocess.check_output(
+                ['lsof', '-a', '-d0-65535', 
+                 '-p', str(os.getpid())]).split('\n')
+            fd_list = [x.split() for x in fd_list if x]
+            return [x for x in fd_list if 
+                    x[7] == 'TCP' and 'localhost:%d' % self.redis.port in x[8]]
+                
+        
         # When making calls on various objects, there should only be
         # one connection per object type to the redis server. We're
         # just going to make sure that that is the case
@@ -385,7 +397,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             obj.save()
 
             # Now find the number of open file descriptors
-            start_fd_count = len(os.listdir("/proc/%s/fd" % os.getpid()))
+            start_fd_list = _get_open_connection_list()
 
             def nop(x): pass
 
@@ -394,8 +406,10 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                 read_func(obj)
 
             # Check the file descriptors
-            end_fd_count = len(os.listdir("/proc/%s/fd" % os.getpid()))
-            self.assertEqual(start_fd_count, end_fd_count)
+            end_fd_list = _get_open_connection_list()
+            if len(start_fd_list) != len(end_fd_list):
+                # This will give us more information if it fails
+                self.assertEqual(start_fd_list, end_fd_list)
     
     def test_processed_internal_video_ids(self):
         na = NeonUserAccount('accttest')

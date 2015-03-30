@@ -536,12 +536,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1', ExperimentStrategy('acct1', only_exp_if_chosen=True))
 
         video_info = VideoInfo('acct1', True, [])
-
-        with self.assertLogExists(logging.ERROR,
-                                  'No valid thumbnails for video'):
-            self.assertIsNone(
-                self.mastermind._calculate_current_serving_directive(
-                    video_info))
+        self.assertIsNone(
+            self.mastermind._calculate_current_serving_directive(
+                video_info))
 
         # The lowest rank Neon thumb will be shown if there is no baseline
         video_info.thumbnails.append(
@@ -586,11 +583,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
     def test_too_many_thumbs_disabled(self):
         video_info = VideoInfo('acct1', True, [])
-        with self.assertLogExists(logging.ERROR,
-                                  'No valid thumbnails for video'):
-            self.assertIsNone(
-                self.mastermind._calculate_current_serving_directive(
-                    video_info))
+        self.assertIsNone(
+            self.mastermind._calculate_current_serving_directive(
+                video_info))
 
         # A Neon video is the only one that isn't disabled, so show it
         # at all times and throw a warning.
@@ -668,7 +663,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                   'Could not find the experimental strategy'):
             self.assertIsNone(
                 self.mastermind._calculate_current_serving_directive(
-                    VideoInfo('acct2', True, [])))
+                    VideoInfo('acct2', True, [
+                        build_thumb(ThumbnailMetadata('n1', 'vid1',
+                                                      ttype='neon'))])))
 
     def test_winner_found_override_editor(self):
         self.mastermind.update_experiment_strategy(

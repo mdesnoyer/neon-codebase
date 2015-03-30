@@ -32,7 +32,7 @@ httpagentparser==1.6.0
 avro==1.7.6
 thrift==0.9.1
 paramiko==1.14.0
-pandas==0.14.0
+pandas==0.15.2
 impyla==0.8.1
 dateutils==0.6.6
 winpdb==1.4.8
