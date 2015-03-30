@@ -765,7 +765,7 @@ class StoredObject(object):
         db_connection.clear_db()
 
     @classmethod
-    def _handle_all_changes(cls, msg, func, pubsub):
+    def _handle_all_changes(cls, msg, func, pubsub, get_object):
         '''Handles any changes to objects subscribed on pubsub.
 
         Used with subscribe_to_changes.
@@ -791,24 +791,40 @@ class StoredObject(object):
             response = pubsub.parse_response(block=False)
 
         # Filter out the invalid keys
-        keys, ops = zip(*filter(lambda x: cls.is_valid_key(x[0]),
+        filtered = zip(*filter(lambda x: cls.is_valid_key(x[0]),
                                 zip(*(keys, ops))))
+        if len(filtered) == 0:
+            return
+        keys, ops = filtered
 
-        for key, obj, op in zip(*(keys, cls.get_many(keys), ops)):
-            if isinstance(obj, cls):
-                func(key, obj, op)
+        if get_object:
+            objs = cls.get_many(keys)
+        else:
+            objs = [None for x in range(len(keys))]
+
+        for key, obj, op in zip(*(keys, objs, ops)):
+            if obj is None or isinstance(obj, cls):
+                try:
+                    func(key, obj, op)
+                except Exception as e:
+                    _log.error('Unexpected exception on db change when calling'
+                               ' %s with arguments %s: %s' % 
+                               (func, (key, obj, op), e))
 
     @classmethod
-    def _subscribe_pubsub_to_new_pattern(cls, pubsub, func, pattern):
+    def _subscribe_pubsub_to_new_pattern(cls, pubsub, func, pattern,
+                                         get_object=True):
         try:
             if '*' in pattern:
                 pubsub.psubscribe(
                     **{'__keyspace@0__:%s' % cls.format_key(pattern) :
-                       lambda x: cls._handle_all_changes(x, func, pubsub)})
+                       lambda x: cls._handle_all_changes(x, func, pubsub,
+                                                         get_object)})
             else:
                 pubsub.subscribe(
                     **{'__keyspace@0__:%s' % cls.format_key(pattern) :
-                       lambda x: cls._handle_all_changes(x, func, pubsub)})
+                       lambda x: cls._handle_all_changes(x, func, pubsub,
+                                                         get_object)})
         except redis.exceptions.RedisError as e:
             msg = 'Error subscribing to channel %s: %s' % (pattern, e)
             _log.error(msg)
@@ -821,7 +837,7 @@ class StoredObject(object):
             raise DBConnectionError(msg)
 
     @classmethod
-    def subscribe_to_changes(cls, func, pattern='*'):
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
         '''Subscribes to changes in the database.
 
         When a change occurs, func is called with the key, the updated
@@ -831,6 +847,8 @@ class StoredObject(object):
         Inputs:
         func - The function to call with signature func(key, obj, op)
         pattern - Pattern of keys to subscribe to
+        get_object - If True, the object will be grabbed from the db.
+                     Otherwise, it will be passed into the function as None
 
         Returns:
         The pubsub handler, which should have .close() called when it is
@@ -838,7 +856,7 @@ class StoredObject(object):
         '''        
         db_connection = DBConnection.get(cls)
         p = db_connection.blocking_conn.pubsub(ignore_subscribe_messages=True)
-        cls._subscribe_pubsub_to_new_pattern(p, func, pattern)
+        cls._subscribe_pubsub_to_new_pattern(p, func, pattern, get_object)
         p.run_in_thread(sleep_time=0.01)
         return p
 
@@ -1803,16 +1821,16 @@ class AbstractPlatform(NamespacedStoredObject):
         return platform_data
 
     @classmethod
-    def subscribe_to_changes(cls, func, pattern='*'):
-        p = NeonPlatform.subscribe_to_changes(func, pattern)
-        BrightcovePlatform._subscribe_pubsub_to_new_pattern(p, func, pattern)
-        YoutubePlatform._subscribe_pubsub_to_new_pattern(p, func, pattern)
-        OoyalaPlatform._subscribe_pubsub_to_new_pattern(p, func, pattern)
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        p = NeonPlatform.subscribe_to_changes(func, pattern, get_object)
+        BrightcovePlatform._subscribe_pubsub_to_new_pattern(p, func, pattern, get_object)
+        YoutubePlatform._subscribe_pubsub_to_new_pattern(p, func, pattern, get_object)
+        OoyalaPlatform._subscribe_pubsub_to_new_pattern(p, func, pattern, get_object)
         return p
 
     @classmethod
-    def _subscribe_to_changes_impl(cls, func, pattern):
-        return super(AbstractPlatform, cls).subscribe_to_changes(func, pattern)
+    def _subscribe_to_changes_impl(cls, func, pattern, get_object):
+        return super(AbstractPlatform, cls).subscribe_to_changes(func, pattern, get_object)
 
     @classmethod
     def _erase_all_data(cls):
@@ -1843,8 +1861,8 @@ class NeonPlatform(AbstractPlatform):
         return cls._get_all_instances_impl()
 
     @classmethod
-    def subscribe_to_changes(cls, func, pattern='*'):
-        return cls._subscribe_to_changes_impl(func, pattern)
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        return cls._subscribe_to_changes_impl(func, pattern, get_object)
 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
@@ -1875,8 +1893,8 @@ class BrightcovePlatform(AbstractPlatform):
         return "brightcove"
 
     @classmethod
-    def subscribe_to_changes(cls, func, pattern='*'):
-        return cls._subscribe_to_changes_impl(func, pattern)
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        return cls._subscribe_to_changes_impl(func, pattern, get_object)
 
     def get_api(self, video_server_uri=None):
         '''Return the Brightcove API object for this platform integration.'''
@@ -2140,8 +2158,8 @@ class YoutubePlatform(AbstractPlatform):
         return "youtube"
 
     @classmethod
-    def subscribe_to_changes(cls, func, pattern='*'):
-        return cls._subscribe_to_changes_impl(func, pattern)
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        return cls._subscribe_to_changes_impl(func, pattern, get_object)
     
     def get_access_token(self, callback):
         ''' Get a valid access token, if not valid -- get new one and set expiry'''
@@ -2256,8 +2274,8 @@ class OoyalaPlatform(AbstractPlatform):
         return "ooyala"
 
     @classmethod
-    def subscribe_to_changes(cls, func, pattern='*'):
-        return cls._subscribe_to_changes_impl(func, pattern)
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        return cls._subscribe_to_changes_impl(func, pattern, get_object)
     
     @classmethod
     def generate_signature(cls, secret_key, http_method, 
@@ -2398,9 +2416,10 @@ class RequestState(object):
     ACTIVE     = "active" # Thumbnail selected by editor; Only releavant to BC
     REPROCESS  = "reprocess" #new state added to support clean reprocessing
 
-    # NOTE: This state is being added to save DB lookup calls to determine the active state
-    # This is required for the UI. Re-evaluate this state for new UI
-    # For CMS API response if SERVING_AND_ACTIVE return active state
+    # NOTE: This state is being added to save DB lookup calls to
+    # determine the active state This is required for the
+    # UI. Re-evaluate this state for new UI For CMS API response if
+    # SERVING_AND_ACTIVE return active state
     SERVING_AND_ACTIVE = "serving_active" # indicates there is a chosen thumb & is serving ready 
 
 class NeonApiRequest(NamespacedStoredObject):
@@ -2411,7 +2430,8 @@ class NeonApiRequest(NamespacedStoredObject):
     '''
 
     def __init__(self, job_id, api_key=None, vid=None, title=None, url=None, 
-            request_type=None, http_callback=None, default_thumbnail=None):
+            request_type=None, http_callback=None, default_thumbnail=None,
+            integration_type='neon', integration_id='0'):
         super(NeonApiRequest, self).__init__(
             self._generate_subkey(job_id, api_key))
         self.job_id = job_id
@@ -2425,8 +2445,8 @@ class NeonApiRequest(NamespacedStoredObject):
         self.state = RequestState.SUBMIT
         self.fail_count = 0 # Number of failed processing tries
         
-        self.integration_type = "neon"
-        self.integration_id = '0'
+        self.integration_type = integration_type
+        self.integration_id = integration_id
         self.default_thumbnail = default_thumbnail # URL of a default thumb
 
         #Save the request response

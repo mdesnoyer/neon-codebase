@@ -9,6 +9,7 @@ Copyright 2013 Neon Labs
 from contextlib import contextmanager
 import logging
 import re
+import time
 import tornado.testing
 import unittest
 
@@ -87,6 +88,21 @@ class TestCase(unittest.TestCase):
                 (regexp,
                 '\n'.join(['%s: %s' % (x.levelname, x.getMessage())
                             for x in handler.logs])))
+
+    def assertWaitForEquals(self, func, expected, timeout=5.0):
+        '''Waits for the result of a function to equal val.'''
+        start_time = time.time()
+        found = None
+        while (time.time() - start_time) < timeout:
+            try:
+                found = func()
+                if found == expected:
+                    return
+            except Exception as e:
+                found = '%s: %s' % (e.__class__.__name__, e)
+            time.sleep(0.05)
+        self.fail('Timed out waiting for %s to equal %s. '
+                  'Its value was %s' % (func, expected, found))
 
 class LogCaptureHandler(logging.Handler):
     '''A class that just collects all the logs.'''

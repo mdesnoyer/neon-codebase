@@ -419,6 +419,10 @@ class Mastermind(object):
         (experiment_state, {thumb_id => fraction}, value_left, winner_tid) or 
         None if we had an error
         '''
+        if len(video_info.thumbnails) == 0:
+            # There's no valid thumb yet to show. That's ok. We just ignore this video
+            return None
+        
         try:
             strategy = self.experiment_strategy[video_info.account_id]
         except KeyError:
