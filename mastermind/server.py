@@ -102,6 +102,8 @@ statemon.define('unexpected_callback_error', int)
 statemon.define('unexpected_db_update_error', int)
 
 statemon.define('accounts_subscribed_to', int)
+statemon.define('video_push_updates_received', int)
+statemon.define('thumbnails_serving', int)
 
 _log = logging.getLogger(__name__)
 
@@ -330,6 +332,8 @@ class VideoDBWatcher(threading.Thread):
                 if op == 'del':
                     try:
                         del self.directive_pusher.serving_urls[key]
+                        statemon.state.thumbnails_serving = \
+                          len(self.directive_pusher.serving_urls)
                     except KeyError:
                         pass
                 elif op == 'set':
@@ -352,11 +356,12 @@ class VideoDBWatcher(threading.Thread):
             if account_id not in self._account_subscribers:
                 thumb_pubsub = neondata.ThumbnailMetadata.subscribe_to_changes(
                     lambda key, obj, op: self._schedule_video_update(
-                        '_'.join(key.split('_')[0:2])),
+                        '_'.join(key.split('_')[0:2]), is_push_update=True),
                     pattern='%s_*' % account_id,
                     get_object=False)
                 video_pubsub = neondata.VideoMetadata.subscribe_to_changes(
-                    lambda key, obj, op: self._schedule_video_update(key),
+                    lambda key, obj, op: self._schedule_video_update(
+                        key, is_push_update=True),
                     pattern='%s_*' % account_id,
                     get_object=False)
                 self._account_subscribers[account_id] = (video_pubsub,
@@ -379,7 +384,7 @@ class VideoDBWatcher(threading.Thread):
             if sub:
                 sub.close()
 
-    def _schedule_video_update(self, video_id):
+    def _schedule_video_update(self, video_id, is_push_update=False):
         '''Add a video to the queue to update in the mastermind core.'''
         if neondata.InternalVideoID.is_no_video(video_id):
             return
@@ -387,6 +392,8 @@ class VideoDBWatcher(threading.Thread):
             self._vids_to_update.add(video_id)
             self._vid_processing_done.clear()
             self._vids_waiting.set()
+        if is_push_update:
+            statemond.state.increment('video_push_updates_received')
 
     def _handle_platform_change(self, key, platform, operation,
                                 update_videos=True):
@@ -1033,9 +1040,12 @@ class DirectivePublisher(threading.Thread):
             self.serving_urls = {}
             for k, v in new_map.iteritems():
                 self.serving_urls[k] = pack_obj(v)
+        statemon.state.thumbnails_serving = len(self.serving_urls)
 
     def add_serving_url(self, thumbnail_id, urls):
-        self.serving_urls[thumbnail_id] = urls
+        with self.lock:
+            self.serving_urls[thumbnail_id] = urls
+        statemon.state.thumbnails_serving = len(self.serving_urls)
 
     def update_default_sizes(self, new_map):
         with self.lock:
