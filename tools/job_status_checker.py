@@ -1,0 +1,45 @@
+#!/usr/bin/env python
+
+'''
+Check Status of each video in the logger file and if serving, write the time
+'''
+import os
+import time
+import urllib2
+import json
+import logging
+import sys
+import StringIO
+import smtplib
+
+NEON_CMS_URL = "http://services.neon-lab.com"
+
+logging.basicConfig(filename='job_serving_times.log',level=logging.DEBUG, format='%(message)s')
+_log = logging.getLogger(__name__)
+
+def get_neon_video(account_id, api_key, video_id):
+    '''
+    Get video metadata object from Neon Account
+    ''' 
+
+    video_api_formater = "%s/api/v1/accounts/%s/neon_integrations/0/videos/%s"
+    headers = {"X-Neon-API-Key" : API_KEY }
+    request_url = video_api_formater % (NEON_CMS_URL, account_id, video_id)
+
+    req = urllib2.Request(request_url, headers=headers)
+    res = urllib2.urlopen(req)
+    data = json.loads(res.read())
+    return data["items"][0]["status"]
+
+
+account_id = "159" # Turner Sports account
+API_KEY = "3yd7b8vmrj67b99f7a8o1n30"
+
+with open('job_submit_times.log') as f:
+    for line in f:
+        values = line.split(",")
+        if len(values) < 3:
+            status = get_neon_video(account_id, API_KEY, values[1])
+            if status == "serving":
+                _log.info('%s,%s,%s' % (values[1], status, int(time.time())))
+

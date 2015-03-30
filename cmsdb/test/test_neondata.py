@@ -274,6 +274,45 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         #and did not have an exception
         self.assertTrue(None not in results)
 
+    def test_delete_all_video_related_data(self):
+        # create all video related objects
+        
+        na = NeonUserAccount('ta1')
+        bp = BrightcovePlatform('ta1', 'bp1', na.neon_api_key)
+        bp.save()
+        np = NeonPlatform('ta1', '0', na.neon_api_key)
+        np.save()
+        na.add_platform(bp)
+        na.add_platform(np)
+        na.save()
+
+        req = NeonApiRequest('job1', na.neon_api_key, 'vid1', 't', 't', 'r', 'h')
+        i_vid = InternalVideoID.generate(na.neon_api_key, 'vid1')
+        tid = i_vid + "_t1"
+        thumb = ThumbnailMetadata(tid, i_vid, ['t1.jpg'], None, None, None,
+                              None, None, None)
+        vid = VideoMetadata(i_vid, [thumb.key],
+                           'job1', 'v0.mp4', 0, 0, None, '0')
+        req.save()
+        ThumbnailMetadata.save_all([thumb])
+        VideoMetadata.save_all([vid])
+        np.add_video('dummyv', 'dummyjob')
+        np.add_video('vid1', 'job1')
+        np.save()
+        AbstractPlatform.delete_all_video_related_data(np, 'vid1')
+        
+        # check the keys have been deleted
+        self.assertIsNone(NeonApiRequest.get('job1', na.neon_api_key))
+        self.assertIsNone(ThumbnailMetadata.get(thumb.key))
+        self.assertIsNone(VideoMetadata.get(i_vid))
+
+        # verify account
+        np = NeonPlatform.get(na.neon_api_key, '0')
+        self.assertListEqual(np.get_videos(), [u'dummyv'])
+        
+        #TODO: Add more failure test cases
+
+
     def test_iterate_all_thumbnails(self):
         #NOTE: doesn't work on MAC
 
