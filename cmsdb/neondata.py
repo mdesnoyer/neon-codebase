@@ -879,7 +879,8 @@ class StoredObject(object):
                             error_count = 0
                     except Exception as e:
                         _log.error('Error in thread listening to objects %s. '
-                                   'Pattern "%s"' % (cls.__name__, pattern))
+                                   'Pattern "%s": %s' %
+                                   (cls.__name__, pattern, e))
                         time.sleep((1<<error_count) * 1.0)
                         error_count += 1
 

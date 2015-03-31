@@ -522,8 +522,9 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
             'key1_NOVIDEO_t0')
         self.assertEquals(self.directive_publisher.default_sizes['key1'],
                           [640,480])
-        self.assertEquals(self.directive_publisher.serving_urls['key1_NOVIDEO_t0'],
-                          {(160, 90) : 't_default.jpg'})
+        self.assertEquals(mastermind.server.unpack_obj(
+            self.directive_publisher.serving_urls['key1_NOVIDEO_t0']),
+            {(160, 90) : 't_default.jpg'})
 
         # Now remove the default thumb and make sure it disapears
         self.acct.default_thumbnail_id = None
@@ -613,7 +614,8 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
                                       {(160, 90) : 't1.jpg',
                                        (640, 480) : '640.jpg'}).save()
         self.assertWaitForEquals(
-            lambda: self.directive_publisher.serving_urls['key1_vid1_t1'],
+            lambda: mastermind.server.unpack_obj(
+                self.directive_publisher.serving_urls['key1_vid1_t1']),
             {(160, 90) : 't1.jpg', (640, 480) : '640.jpg'})
 
         # TODO: Test deleting the serving url

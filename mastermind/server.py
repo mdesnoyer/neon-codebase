@@ -109,7 +109,7 @@ _log = logging.getLogger(__name__)
 
 def pack_obj(x):
     '''Package an object so that it is smaller in memory'''
-    return zlib.compress(pickle.dumps(x))
+    return zlib.compress(pickle.dumps(x), 4)
 
 def unpack_obj(x):
     '''Unpack an object that was compressed by pack_obj'''
@@ -393,7 +393,7 @@ class VideoDBWatcher(threading.Thread):
             self._vid_processing_done.clear()
             self._vids_waiting.set()
         if is_push_update:
-            statemond.state.increment('video_push_updates_received')
+            statemon.state.increment('video_push_updates_received')
 
     def _handle_platform_change(self, key, platform, operation,
                                 update_videos=True):
