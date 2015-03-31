@@ -765,7 +765,7 @@ class StoredObject(object):
         db_connection.clear_db()
 
     @classmethod
-    def _handle_all_changes(cls, msg, func, pubsub, get_object):
+    def _handle_all_changes(cls, msg, func, conn_thread, get_object):
         '''Handles any changes to objects subscribed on pubsub.
 
         Used with subscribe_to_changes.
@@ -781,14 +781,14 @@ class StoredObject(object):
         '''
         keys = [cls.key2id(msg['channel'].partition(':')[2])]
         ops = [msg['data']]
-        response = pubsub.parse_response(block=False)
+        response = conn_thread.pubsub.parse_response(block=False)
         while response is not None:
             message_type = response[0]
-            if message_type in pubsub.PUBLISH_MESSAGE_TYPES:
+            if message_type in conn_thread.pubsub.PUBLISH_MESSAGE_TYPES:
                 ops.append(response[3])
                 keys.append(cls.key2id(response[2].partition(':')[2]))
 
-            response = pubsub.parse_response(block=False)
+            response = conn_thread.pubsub.parse_response(block=False)
 
         # Filter out the invalid keys
         filtered = zip(*filter(lambda x: cls.is_valid_key(x[0]),
@@ -812,18 +812,18 @@ class StoredObject(object):
                                (func, (key, obj, op), e))
 
     @classmethod
-    def _subscribe_pubsub_to_new_pattern(cls, pubsub, func, pattern,
+    def _subscribe_pubsub_to_new_pattern(cls, conn_thread, func, pattern,
                                          get_object=True):
         try:
             if '*' in pattern:
-                pubsub.psubscribe(
+                conn_thread.pubsub.psubscribe(
                     **{'__keyspace@0__:%s' % cls.format_key(pattern) :
-                       lambda x: cls._handle_all_changes(x, func, pubsub,
+                       lambda x: cls._handle_all_changes(x, func, conn_thread,
                                                          get_object)})
             else:
-                pubsub.subscribe(
+                conn_thread.pubsub.subscribe(
                     **{'__keyspace@0__:%s' % cls.format_key(pattern) :
-                       lambda x: cls._handle_all_changes(x, func, pubsub,
+                       lambda x: cls._handle_all_changes(x, func, conn_thread,
                                                          get_object)})
         except redis.exceptions.RedisError as e:
             msg = 'Error subscribing to channel %s: %s' % (pattern, e)
@@ -853,27 +853,33 @@ class StoredObject(object):
         Returns:
         The pubsub handler, which should have .close() called when it is
         finished with.
-        '''        
-        db_connection = DBConnection.get(cls)
-        p = db_connection.blocking_conn.pubsub(ignore_subscribe_messages=True)
-        cls._subscribe_pubsub_to_new_pattern(p, func, pattern, get_object)
-
+        '''
+        # TODO(mdesnoyer): Make this connection to the database for
+        # that object once we shard
         class WorkerThread(threading.Thread):
-            def __init__(self, pubsub):
+            def __init__(self):
                 super(WorkerThread, self).__init__()
                 self._running = False
-                self._pubsub = pubsub
+                self._redis = blockingRedis.StrictRedis(options.accountDB,
+                                                        options.dbPort)
+                self.pubsub = self._redis.pubsub(
+                    ignore_subscribe_messages=True)
                 self.daemon = True
+
+            def __del__(self):
+                close()
 
             def run(self):
                 if self._running:
                     return
                 self._running = True
+                cls._subscribe_pubsub_to_new_pattern(self, func,
+                                                     pattern,
+                                                     get_object)
                 error_count = 0
-                while self._running and self._pubsub.subscribed:
+                while self._running and self.pubsub.subscribed:
                     try:
-                        # Reconnections occur inside listen() if necessary
-                        for msg in self._pubsub.listen():
+                        for msg in self.pubsub.listen():
                             # No need to do anything. The message will
                             # be processed inside listen()
                             error_count = 0
@@ -884,13 +890,24 @@ class StoredObject(object):
                         time.sleep((1<<error_count) * 1.0)
                         error_count += 1
 
+                        # Force reconnection
+                        #if self.pubsub.connection is None:
+                            
+                self.close()
+                
+
             def stop(self):
                 self._running = False
                 self.join()
 
-        thread = WorkerThread(p)
+            def close(self):
+                if self.pubsub is not None:
+                    self.pubsub.close()
+                    self.pubsub = None
+
+        thread = WorkerThread()
         thread.start()
-        return p
+        return thread
 
 class NamespacedStoredObject(StoredObject):
     '''An abstract StoredObject that is namespaced by the baseclass classname.
