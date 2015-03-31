@@ -391,8 +391,12 @@ class Mastermind(object):
                     
         try:
             old_directive = self.serving_directive[video_id][1]
-            if new_directive.items() == old_directive:
-                return
+            if len(old_directive) == len(new_directive):
+                # Don't register a change if the max change is less than 0.5%
+                diff = np.fabs(np.subtract([x[1] for x in old_directive],
+                                           new_directive.values()))
+                if max(diff) < 0.005:
+                    return
             
         except KeyError:
             pass
@@ -618,7 +622,7 @@ class Mastermind(object):
                              for x in valid_bandits])
 
         # Run the monte carlo series
-        MC_SAMPLES = 10000.
+        MC_SAMPLES = 1000.
         mc_series = [spstats.beta.rvs(max(1, conv[x]),
                                       max(1, imp[x]),
                                       size=MC_SAMPLES)

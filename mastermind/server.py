@@ -25,7 +25,7 @@ import gzip
 import happybase
 import impala.dbapi
 import impala.error
-import json
+import simplejson as json
 import logging
 from mastermind.core import VideoInfo, ThumbnailInfo, Mastermind
 import multiprocessing
@@ -449,7 +449,7 @@ class VideoDBWatcher(threading.Thread):
         try:
             abtest, serving_enabled = self._platform_options[
                 (video_metadata.get_account_id(),
-                 video_metadata.integration_id)]
+                 str(video_metadata.integration_id))]
         except KeyError:
             statemon.state.increment('no_platform')
             _log.error('Could not find platform information for video %s' %
@@ -485,6 +485,8 @@ class VideoDBWatcher(threading.Thread):
 
             if len(video_ids) == 0:
                 return
+
+            _log.debug('Processing %d video updates' % len(video_ids))
 
             for video_id, video_metadata in zip(*(
                     video_ids,

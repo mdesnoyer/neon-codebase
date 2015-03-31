@@ -34,7 +34,7 @@ import copy
 import datetime
 import errno
 import hashlib
-import json
+import simplejson as json
 import logging
 import multiprocessing
 from PIL import Image
@@ -857,7 +857,38 @@ class StoredObject(object):
         db_connection = DBConnection.get(cls)
         p = db_connection.blocking_conn.pubsub(ignore_subscribe_messages=True)
         cls._subscribe_pubsub_to_new_pattern(p, func, pattern, get_object)
-        p.run_in_thread(sleep_time=0.01)
+
+        class WorkerThread(threading.Thread):
+            def __init__(self, pubsub):
+                super(WorkerThread, self).__init__()
+                self._running = False
+                self._pubsub = pubsub
+                self.daemon = True
+
+            def run(self):
+                if self._running:
+                    return
+                self._running = True
+                error_count = 0
+                while self._running and self._pubsub.subscribed:
+                    try:
+                        # Reconnections occur inside listen() if necessary
+                        for msg in self._pubsub.listen():
+                            # No need to do anything. The message will
+                            # be processed inside listen()
+                            error_count = 0
+                    except Exception as e:
+                        _log.error('Error in thread listening to objects %s. '
+                                   'Pattern "%s"' % (cls.__name__, pattern))
+                        time.sleep((1<<error_count) * 1.0)
+                        error_count += 1
+
+            def stop(self):
+                self._running = False
+                self.join()
+
+        thread = WorkerThread(p)
+        thread.start()
         return p
 
 class NamespacedStoredObject(StoredObject):
@@ -1823,14 +1854,18 @@ class AbstractPlatform(NamespacedStoredObject):
     @classmethod
     def subscribe_to_changes(cls, func, pattern='*', get_object=True):
         p = NeonPlatform.subscribe_to_changes(func, pattern, get_object)
-        BrightcovePlatform._subscribe_pubsub_to_new_pattern(p, func, pattern, get_object)
-        YoutubePlatform._subscribe_pubsub_to_new_pattern(p, func, pattern, get_object)
-        OoyalaPlatform._subscribe_pubsub_to_new_pattern(p, func, pattern, get_object)
+        BrightcovePlatform._subscribe_pubsub_to_new_pattern(p, func, pattern,
+                                                            get_object)
+        YoutubePlatform._subscribe_pubsub_to_new_pattern(p, func, pattern,
+                                                         get_object)
+        OoyalaPlatform._subscribe_pubsub_to_new_pattern(p, func, pattern,
+                                                        get_object)
         return p
 
     @classmethod
     def _subscribe_to_changes_impl(cls, func, pattern, get_object):
-        return super(AbstractPlatform, cls).subscribe_to_changes(func, pattern, get_object)
+        return super(AbstractPlatform, cls).subscribe_to_changes(
+            func, pattern, get_object)
 
     @classmethod
     def _erase_all_data(cls):
