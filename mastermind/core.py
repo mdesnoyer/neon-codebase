@@ -805,12 +805,11 @@ class Mastermind(object):
         '''Modifies the database with the current state of the video.'''
 
         # Update the serving percentages in the database
-        self._incr_pending_modify(1)
+        self._incr_pending_modify(2)
         self.modify_pool.submit(
             _modify_many_serving_fracs,
             self, video_id, new_directive, video_info)
         
-        self._incr_pending_modify(1)
         self.modify_pool.submit(
             _modify_video_info,
             self, video_id, experiment_state, value_left, winner_tid)

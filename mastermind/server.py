@@ -1046,7 +1046,7 @@ class DirectivePublisher(threading.Thread):
 
     def add_serving_url(self, thumbnail_id, urls):
         with self.lock:
-            self.serving_urls[thumbnail_id] = urls
+            self.serving_urls[thumbnail_id] = pack_obj(urls)
         statemon.state.thumbnails_serving = len(self.serving_urls)
 
     def update_default_sizes(self, new_map):
