@@ -92,6 +92,46 @@ BCOVE_STILL_WIDTH = 480
 class DBStateError(ValueError):pass
 class DBConnectionError(IOError):pass
 
+def _get_db_address(class_name, is_writeable=True):
+    '''Function that returns the address to the database for an object.
+
+    Inputs:
+    class_name - Class name of the object to lookup
+    is_writeable - If true, the connection can write to the database.
+                   Otherwise it's read only
+
+    Returns: (host, port)
+    '''
+    #TODO: Add the functionlity to talk to read only database slaves
+    host = options.accountDB 
+    port = options.dbPort
+    if class_name:
+        if class_name == "VideoMetadata":
+            host = options.videoDB
+            port = options.dbPort 
+        elif class_name in ["ThumbnailMetadata", "ThumbnailURLMapper",
+                            "ThumbnailServingURLs"]:
+            host = options.thumbnailDB 
+            port = options.dbPort 
+    return (host, port)
+
+def _object_to_classname(otype=None):
+    '''Returns the class name of an object.
+
+    otype can be a class object, an instance object or the class name
+    as a string.
+    '''
+    cname = None
+    if otype:
+        if isinstance(otype, basestring):
+            cname = otype
+        else:
+            #handle the case for classmethod
+            cname = otype.__class__.__name__ \
+              if otype.__class__.__name__ != "type" else otype.__name__
+    return cname
+    
+
 class DBConnection(object):
     '''Connection to the database.
 
@@ -109,20 +149,7 @@ class DBConnection(object):
 
         DO NOT CALL THIS DIRECTLY. Use the get() function instead
         '''
-        host = options.accountDB 
-        port = options.dbPort 
-
-        if class_name:
-            if class_name in ["AbstractPlatform", "BrightcovePlatform", "NeonApiKey"
-                    "YoutubePlatform", "NeonUserAccount", "OoyalaPlatform", "NeonApiRequest"]:
-                host = options.accountDB 
-                port = options.dbPort 
-            elif class_name == "VideoMetadata":
-                host = options.videoDB
-                port = options.dbPort 
-            elif class_name in ["ThumbnailMetadata", "ThumbnailURLMapper"]:
-                host = options.thumbnailDB 
-                port = options.dbPort 
+        host, port = _get_db_address(class_name)
 
         self.conn, self.blocking_conn = RedisClient.get_client(host, port)
 
@@ -159,14 +186,7 @@ class DBConnection(object):
                 Can be a class object, an instance object or the class name 
                 as a string.
         '''
-        cname = None
-        if otype:
-            if isinstance(otype, basestring):
-                cname = otype
-            else:
-                #handle the case for classmethod
-                cname = otype.__class__.__name__ \
-                      if otype.__class__.__name__ != "type" else otype.__name__ 
+        cname = _object_to_classname(otype)
         
         if not cls._singleton_instance.has_key(cname):
             with cls.__singleton_lock:
@@ -395,6 +415,237 @@ class RedisClient(object):
         RedisClient.bc = RedisRetryWrapper(
                             host, port, socket_timeout=10)
         return RedisClient.c, RedisClient.bc 
+
+class PubSubConnection(threading.Thread):
+    '''Handles a pubsub connection.
+
+    The thread, when running, will service messages on the channels
+    subscribed to.
+    '''
+
+    __singleton_lock = threading.RLock()
+    _singleton_instance = {}
+
+    def __init__(self, class_name):
+        '''Init function.
+
+        DO NOT CALL THIS DIRECTLY. Use the get() function instead
+        '''
+        super(PubSubConnection, self).__init__()
+        host, port = _get_db_address(class_name)
+        self._client = blockingRedis.StrictRedis(host, port)
+        self._pubsub = self._client.pubsub(ignore_subscribe_messages=False)
+
+        self._publock = threading.RLock()
+        self._running = threading.Event()
+        self._exit = False
+
+        # Futures to keep track of pending subscribe and unsubscribe
+        # responses. Keyed by channel name.
+        self._sub_futures = {}
+        self._unsub_futures = {}
+
+        self.daemon = True
+
+    def __del__(self):
+        self.close()
+        self.stop()
+
+    def run(self):
+        error_count = 0
+        while self._running.wait() and not self._exit:            
+            try:
+                with self._publock:
+                    if not self._pubsub.subscribed:
+                        # There are no more subscriptions, so wait
+                        self._running.clear()
+                        continue
+                
+                    # This will cause any callbacks that aren't
+                    # subscribe/unsubscribe messages to be called.
+                    msg = self._pubsub.get_message()
+
+                    self._handle_sub_unsub_messages(msg)
+
+                    # Look for any subscription or unsubscription timeouts
+                    self._handle_timedout_futures(self._unsub_futures)
+                    self._handle_timedout_futures(self._sub_futures)
+
+                    error_count = 0
+                
+            except Exception as e:
+                _log.exception('Error in thread listening to objects %s. '
+                           ': %s' %
+                           (self.__class__.__name__, e))
+                time.sleep((1<<error_count) * 1.0)
+                error_count += 1
+
+                # Force reconnection
+                #if self.pubsub.connection is None:
+            time.sleep(0.05)
+
+    def close(self):
+        if self._pubsub is not None:
+            self._pubsub.close()
+            self._pubsub = None
+
+    def stop(self):
+        '''Stops the thread. It cannot be restarted.'''
+        self._exit = True
+        self._running.set()
+
+    def _handle_sub_unsub_messages(self, msg):
+        '''Handle a subscribe or unsubscribe messages.
+
+        Triggers their callbacks
+        '''
+        if msg is None:
+            return
+        
+        future = None
+        if msg['type'] in \
+          blockingRedis.client.PubSub.UNSUBSCRIBE_MESSAGE_TYPES:
+            future = self._unsub_futures.pop(msg['channel'], None)
+        elif msg['type'] not in \
+          blockingRedis.client.PubSub.PUBLISH_MESSAGE_TYPES:
+            future = self._sub_futures.pop(msg['channel'], None)
+
+        if future[0] is not None:
+            if future[0].set_running_or_notify_cancel():
+                future[0].set_result(msg)
+
+    def _handle_timedout_futures(self, future_dict):
+        '''Handle any futures that have timed out.'''
+        for channel in future_dict:
+            future, deadline = future_dict.get(channel)
+            if time.time() > deadline :
+                if future.set_running_or_notify_cancel():
+                    future.set_exception(DBConnectionError(
+                    'Timeout when changing connection state to channel '
+                    '%s' % channel))
+                del future_dict[channel]
+
+    def get_parsed_message(self):
+        '''Return a parsed message from the channel(s).'''
+        with self._publock:
+            return self._pubsub.parse_response(block=False)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def subscribe(self, func, pattern='*', timeout=10.0):
+        '''Subscribe to channel(s)
+
+        func - Function to run with each data point
+        pattern - Channel to subscribe to
+
+        returns
+        '''
+        pool = concurrent.futures.ThreadPoolExecutor(1)
+        sub_future = yield pool.submit(
+            lambda: self._subscribe_impl(func, pattern, timeout=timeout))
+
+        # Start the thread so that we can receive and service messages
+        self._running.set()
+        if not self.is_alive():
+            self.start()
+
+        yield sub_future
+
+    def _subscribe_impl(self, func, pattern='*', timeout=10.0):
+        try:
+            with self._publock:
+                if '*' in pattern:
+                    self._pubsub.psubscribe(**{pattern: func})
+                else:
+                    self._pubsub.subscribe(**{pattern: func})
+
+                if pattern in self._sub_futures:
+                    return self._sub_futures[pattern]
+                future = concurrent.futures.Future()
+                self._sub_futures[pattern] = (future, time.time()+timeout)
+                return future
+                
+        except redis.exceptions.RedisError as e:
+            msg = 'Error subscribing to channel %s: %s' % (pattern, e)
+            _log.error(msg)
+            statemon.state.increment('subscription_errors')
+            raise DBConnectionError(msg)
+        except socket.error as e:
+            msg = 'Socket error subscribing to channel %s: %s' % (pattern, e)
+            _log.error(msg) 
+            statemon.state.increment('subscription_errors')
+            raise DBConnectionError(msg)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe(self, channel=None, timeout=10.0):
+        '''Unsubscribe from channel.
+
+        channel - Channel to unsubscribe from
+        '''
+        pool = concurrent.futures.ThreadPoolExecutor(1)
+        unsub_future = yield pool.submit(
+            lambda: self._unsubscribe_impl(channel, timeout))
+        yield unsub_future
+
+    def _unsubscribe_impl(self, channel=None, timeout=10.0):
+        try:
+            with self._publock:
+                if channel is None:
+                    self._pubsub.unsubscribe()
+                    self._pubsub.punsubscribe()
+                elif '*' in channel:
+                    self._pubsub.punsubscribe([channel])
+                else:
+                    self._pubsub.unsubscribe([channel])
+                if channel in self._unsub_futures:
+                    return self._unsub_futures[channel]
+                future = concurrent.futures.Future()
+                self._unsub_futures[channel] = (future, time.time()+timeout)
+                return future
+        except redis.exceptions.RedisError as e:
+            msg = 'Error unsubscribing to channel %s: %s' % (channel, e)
+            _log.error(msg)
+            statemon.state.increment('subscription_errors')
+            raise DBConnectionError(msg)
+        except socket.error as e:
+            msg = 'Socket error unsubscribing to channel %s: %s' % (channel, e)
+            _log.error(msg) 
+            statemon.state.increment('subscription_errors')
+            raise DBConnectionError(msg)
+
+
+    @classmethod
+    def get(cls, otype=None):
+        '''
+        Gets a connection for a given object type.
+
+        otype - The object type to get the connection for.
+                Can be a class object, an instance object or the class name 
+                as a string.
+        '''
+        cname = _object_to_classname(otype)
+        
+        if not cls._singleton_instance.has_key(cname):
+            with cls.__singleton_lock:
+                if not cls._singleton_instance.has_key(cname):
+                    cls._singleton_instance[cname] = \
+                      PubSubConnection(cname)
+        return cls._singleton_instance[cname]
+
+    @classmethod
+    def clear_singleton_instance(cls):
+        '''
+        Clear the singleton instance for each of the classes
+
+        NOTE: To be only used by the test code
+        '''
+        for inst in cls._singleton_instance.values():
+            if inst is not None:
+                inst.stop()
+                inst.close()
+        cls._singleton_instance = {}
+    
 
 ##############################################################################
 
@@ -765,7 +1016,7 @@ class StoredObject(object):
         db_connection.clear_db()
 
     @classmethod
-    def _handle_all_changes(cls, msg, func, conn_thread, get_object):
+    def _handle_all_changes(cls, msg, func, conn, get_object):
         '''Handles any changes to objects subscribed on pubsub.
 
         Used with subscribe_to_changes.
@@ -776,19 +1027,19 @@ class StoredObject(object):
 
         Inputs:
         func - The function to call with each object. 
-        pubsub - The pubsub object we can drain from
+        conn - The connection we can drain from
         msg - The message structure for the first event
         '''
         keys = [cls.key2id(msg['channel'].partition(':')[2])]
         ops = [msg['data']]
-        response = conn_thread.pubsub.parse_response(block=False)
+        response = conn.get_parsed_message()
         while response is not None:
             message_type = response[0]
-            if message_type in conn_thread.pubsub.PUBLISH_MESSAGE_TYPES:
+            if message_type in blockingRedis.client.PubSub.PUBLISH_MESSAGE_TYPES:
                 ops.append(response[3])
                 keys.append(cls.key2id(response[2].partition(':')[2]))
 
-            response = conn_thread.pubsub.parse_response(block=False)
+            response = conn.get_parsed_message()
 
         # Filter out the invalid keys
         filtered = zip(*filter(lambda x: cls.is_valid_key(x[0]),
@@ -812,31 +1063,8 @@ class StoredObject(object):
                                (func, (key, obj, op), e))
 
     @classmethod
-    def _subscribe_pubsub_to_new_pattern(cls, conn_thread, func, pattern,
-                                         get_object=True):
-        try:
-            if '*' in pattern:
-                conn_thread.pubsub.psubscribe(
-                    **{'__keyspace@0__:%s' % cls.format_key(pattern) :
-                       lambda x: cls._handle_all_changes(x, func, conn_thread,
-                                                         get_object)})
-            else:
-                conn_thread.pubsub.subscribe(
-                    **{'__keyspace@0__:%s' % cls.format_key(pattern) :
-                       lambda x: cls._handle_all_changes(x, func, conn_thread,
-                                                         get_object)})
-        except redis.exceptions.RedisError as e:
-            msg = 'Error subscribing to channel %s: %s' % (pattern, e)
-            _log.error(msg)
-            statemon.state.increment('subscription_errors')
-            raise DBConnectionError(msg)
-        except socket.error as e:
-            msg = 'Socket error subscribing to channel %s: %s' % (pattern, e)
-            _log.error(msg) 
-            statemon.state.increment('subscription_errors')
-            raise DBConnectionError(msg)
-
-    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def subscribe_to_changes(cls, func, pattern='*', get_object=True):
         '''Subscribes to changes in the database.
 
@@ -849,65 +1077,23 @@ class StoredObject(object):
         pattern - Pattern of keys to subscribe to
         get_object - If True, the object will be grabbed from the db.
                      Otherwise, it will be passed into the function as None
-
-        Returns:
-        The pubsub handler, which should have .close() called when it is
-        finished with.
         '''
-        # TODO(mdesnoyer): Make this connection to the database for
-        # that object once we shard
-        class WorkerThread(threading.Thread):
-            def __init__(self):
-                super(WorkerThread, self).__init__()
-                self._running = False
-                self._redis = blockingRedis.StrictRedis(options.accountDB,
-                                                        options.dbPort)
-                self.pubsub = self._redis.pubsub(
-                    ignore_subscribe_messages=True)
-                self.daemon = True
+        conn = PubSubConnection.get(cls)
+        
+        yield conn.subscribe(
+            lambda x: cls._handle_all_changes(x, func, conn, get_object),
+            '__keyspace@0__:%s' % cls.format_key(pattern),
+            async=True)
 
-            def __del__(self):
-                close()
-
-            def run(self):
-                if self._running:
-                    return
-                self._running = True
-                cls._subscribe_pubsub_to_new_pattern(self, func,
-                                                     pattern,
-                                                     get_object)
-                error_count = 0
-                while self._running and self.pubsub.subscribed:
-                    try:
-                        for msg in self.pubsub.listen():
-                            # No need to do anything. The message will
-                            # be processed inside listen()
-                            error_count = 0
-                    except Exception as e:
-                        _log.error('Error in thread listening to objects %s. '
-                                   'Pattern "%s": %s' %
-                                   (cls.__name__, pattern, e))
-                        time.sleep((1<<error_count) * 1.0)
-                        error_count += 1
-
-                        # Force reconnection
-                        #if self.pubsub.connection is None:
-                            
-                self.close()
-                
-
-            def stop(self):
-                self._running = False
-                self.join()
-
-            def close(self):
-                if self.pubsub is not None:
-                    self.pubsub.close()
-                    self.pubsub = None
-
-        thread = WorkerThread()
-        thread.start()
-        return thread
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        conn = PubSubConnection.get(cls)
+        
+        yield conn.unsubscribe(
+            '__keyspace@0__:%s' % cls.format_key(channel),
+            async=True)
 
 class NamespacedStoredObject(StoredObject):
     '''An abstract StoredObject that is namespaced by the baseclass classname.
@@ -1870,20 +2056,41 @@ class AbstractPlatform(NamespacedStoredObject):
         return platform_data
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def subscribe_to_changes(cls, func, pattern='*', get_object=True):
-        p = NeonPlatform.subscribe_to_changes(func, pattern, get_object)
-        BrightcovePlatform._subscribe_pubsub_to_new_pattern(p, func, pattern,
-                                                            get_object)
-        YoutubePlatform._subscribe_pubsub_to_new_pattern(p, func, pattern,
-                                                         get_object)
-        OoyalaPlatform._subscribe_pubsub_to_new_pattern(p, func, pattern,
-                                                        get_object)
-        return p
+        yield [
+            NeonPlatform.subscribe_to_changes(func, pattern, get_object,
+                                              async=True),
+            BrightcovePlatform.subscribe_to_changes(
+                func, pattern, get_object, async=True),
+            YoutubePlatform.subscribe_to_changes(
+                func, pattern, get_object, async=True),
+            OoyalaPlatform.subscribe_to_changes(
+                func, pattern, get_object, async=True)]
 
     @classmethod
+    @tornado.gen.coroutine
     def _subscribe_to_changes_impl(cls, func, pattern, get_object):
-        return super(AbstractPlatform, cls).subscribe_to_changes(
-            func, pattern, get_object)
+        yield super(AbstractPlatform, cls).subscribe_to_changes(
+            func, pattern, get_object, async=True)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        yield [
+            NeonPlatform.unsubscribe_from_changes(channel, async=True),
+            BrightcovePlatform.unsubscribe_from_changes(channel, async=True),
+            YoutubePlatform.unsubscribe_from_changes(channel, async=True),
+            OoyalaPlatform.unsubscribe_from_changes(channel, async=True)]
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _unsubscribe_from_changes_impl(cls, channel):
+        yield super(AbstractPlatform, cls).unsubscribe_from_changes(
+            channel, async=True)
+    
 
     @classmethod
     def _erase_all_data(cls):
@@ -1954,8 +2161,16 @@ class NeonPlatform(AbstractPlatform):
         return cls._get_all_instances_impl()
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def subscribe_to_changes(cls, func, pattern='*', get_object=True):
-        return cls._subscribe_to_changes_impl(func, pattern, get_object)
+        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        yield cls._unsubscribe_from_changes_impl(channel)
 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
@@ -1986,8 +2201,16 @@ class BrightcovePlatform(AbstractPlatform):
         return "brightcove"
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def subscribe_to_changes(cls, func, pattern='*', get_object=True):
-        return cls._subscribe_to_changes_impl(func, pattern, get_object)
+        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        yield cls._unsubscribe_from_changes_impl(channel)
 
     def get_api(self, video_server_uri=None):
         '''Return the Brightcove API object for this platform integration.'''
@@ -2251,8 +2474,16 @@ class YoutubePlatform(AbstractPlatform):
         return "youtube"
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def subscribe_to_changes(cls, func, pattern='*', get_object=True):
-        return cls._subscribe_to_changes_impl(func, pattern, get_object)
+        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        yield cls._unsubscribe_from_changes_impl(channel)
     
     def get_access_token(self, callback):
         ''' Get a valid access token, if not valid -- get new one and set expiry'''
@@ -2367,8 +2598,16 @@ class OoyalaPlatform(AbstractPlatform):
         return "ooyala"
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def subscribe_to_changes(cls, func, pattern='*', get_object=True):
-        return cls._subscribe_to_changes_impl(func, pattern, get_object)
+        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        yield cls._unsubscribe_from_changes_impl(channel)
     
     @classmethod
     def generate_signature(cls, secret_key, http_method, 

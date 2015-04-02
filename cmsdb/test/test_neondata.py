@@ -56,6 +56,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.maxDiff = 5000
 
     def tearDown(self):
+        neondata.PubSubConnection.clear_singleton_instance()
         self.redis.stop()
         super(TestNeondata, self).tearDown()
 
@@ -825,10 +826,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         def __init__(self):
             self.args = []
             self._event = threading.Event()
-            self._pubsub = None
-
-        def __del__(self):
-            self.reset()
 
         def _handler(self, *args):
             '''Handler function to give to the subscribe_to_changes'''
@@ -837,17 +834,13 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         def reset(self):
             self.args = []
-            self.close()
-
-        def close(self):
-            if self._pubsub is not None:
-                self._pubsub.close()
-                self._pubsub = None
-
+                
         def subscribe(self, cls, pattern='*'):
             self.reset()
-            self._pubsub = cls.subscribe_to_changes(self._handler,
-                                                    pattern)
+            cls.subscribe_to_changes(self._handler, pattern)
+
+        def unsubscribe(self, cls, pattern='*'):
+            cls.unsubscribe_from_changes(pattern)
 
         def wait(self, timeout=1.0):
             '''Wait for an event (or timeout) and return the mock.'''
@@ -856,141 +849,205 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             return self.args
             
     def test_subscribe_to_changes(self):
-        with contextlib.closing(TestNeondata.ChangeTrap()) as trap:
+        trap = TestNeondata.ChangeTrap()
 
-            # Try a pattern
-            trap.subscribe(VideoMetadata, 'acct1_*')
-            video_meta = VideoMetadata('acct1_vid1', request_id='req1')
-            video_meta.save()
-            events = trap.wait()
-            self.assertEquals(len(events), 1)
-            self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
+        # Try a pattern
+        trap.subscribe(VideoMetadata, 'acct1_*')
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        video_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
 
 
-            # Try subscribing to a specific key
-            trap.subscribe(ThumbnailMetadata, 'acct1_vid2_t3')
-            thumb_meta = ThumbnailMetadata('acct1_vid2_t3', width=654)
-            thumb_meta.save()
-            events = trap.wait()
-            self.assertEquals(len(events), 1)
-            self.assertEquals(events[0], ('acct1_vid2_t3', thumb_meta, 'set'))
+        # Try subscribing to a specific key
+        trap.subscribe(ThumbnailMetadata, 'acct1_vid2_t3')
+        thumb_meta = ThumbnailMetadata('acct1_vid2_t3', width=654)
+        thumb_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1_vid2_t3', thumb_meta, 'set'))
 
-            # Try doing a namespaced object
-            trap.subscribe(NeonUserAccount, 'acct1')
-            acct_meta = NeonUserAccount('a1', 'acct1', default_size=[45,98])
-            acct_meta.save()
-            events = trap.wait()
-            self.assertEquals(len(events), 1)
-            self.assertEquals(events[0], ('acct1', acct_meta, 'set'))
+        # Try doing a namespaced object
+        trap.subscribe(NeonUserAccount, 'acct1')
+        acct_meta = NeonUserAccount('a1', 'acct1', default_size=[45,98])
+        acct_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1', acct_meta, 'set'))
 
     def test_subscribe_changes_to_video_and_thumbs(self):
         vid_trap = TestNeondata.ChangeTrap()
         thumb_trap = TestNeondata.ChangeTrap()
 
-        try:
-            vid_trap.subscribe(VideoMetadata, 'acct1_*')
-            thumb_trap.subscribe(ThumbnailMetadata, 'acct1_vid1_*')
-            vid_meta = VideoMetadata('acct1_vid1', request_id='req1',
-                                     tids=['acct1_vid1_t1'])
-            vid_meta.save()
-            thumb_meta = ThumbnailMetadata('acct1_vid1_t1', width=654)
-            thumb_meta.save()
+        vid_trap.subscribe(VideoMetadata, 'acct1_*')
+        thumb_trap.subscribe(ThumbnailMetadata, 'acct1_vid1_*')
+        vid_meta = VideoMetadata('acct1_vid1', request_id='req1',
+                                 tids=['acct1_vid1_t1'])
+        vid_meta.save()
+        thumb_meta = ThumbnailMetadata('acct1_vid1_t1', width=654)
+        thumb_meta.save()
 
-            vid_events = vid_trap.wait()
-            thumb_events = thumb_trap.wait()
+        vid_events = vid_trap.wait()
+        thumb_events = thumb_trap.wait()
 
-            self.assertEquals(len(vid_events), 1)
-            self.assertEquals(vid_events[0], ('acct1_vid1', vid_meta, 'set'))
-            self.assertEquals(len(thumb_events), 1)
-            self.assertEquals(thumb_events[0],
-                              ('acct1_vid1_t1', thumb_meta, 'set'))
-        finally:
-            vid_trap.close()
-            thumb_trap.close()
+        self.assertEquals(len(vid_events), 1)
+        self.assertEquals(vid_events[0], ('acct1_vid1', vid_meta, 'set'))
+        self.assertEquals(len(thumb_events), 1)
+        self.assertEquals(thumb_events[0],
+                          ('acct1_vid1_t1', thumb_meta, 'set'))
 
     def test_subscribe_to_changes_with_modifies(self):
-        with contextlib.closing(TestNeondata.ChangeTrap()) as trap:
-            trap.subscribe(VideoMetadata, 'acct1_*')
-            video_meta = VideoMetadata('acct1_vid1', request_id='req1')
-            video_meta.save()
-            events = trap.wait()
-            self.assertEquals(len(events), 1)
+        trap = TestNeondata.ChangeTrap()
+        
+        trap.subscribe(VideoMetadata, 'acct1_*')
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        video_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
 
-            # Now do a modify that changes the object. Should see a new event
-            def _set_experiment_state(x):
-                x.experiment_state = ExperimentState.RUNNING
+        # Now do a modify that changes the object. Should see a new event
+        def _set_experiment_state(x):
+            x.experiment_state = ExperimentState.RUNNING
 
-            VideoMetadata.modify('acct1_vid1', _set_experiment_state)
-            events = trap.wait()
-            self.assertEquals(len(events), 2)
-            self.assertEquals(events[-1][1].experiment_state,
-                              ExperimentState.RUNNING)
+        VideoMetadata.modify('acct1_vid1', _set_experiment_state)
+        events = trap.wait()
+        self.assertEquals(len(events), 2)
+        self.assertEquals(events[-1][1].experiment_state,
+                          ExperimentState.RUNNING)
 
-            # Modify again and we should not see a change event
-            VideoMetadata.modify('acct1_vid1', _set_experiment_state)
-            events = trap.wait(0.2)
-            self.assertEquals(len(events), 2)
+        # Modify again and we should not see a change event
+        VideoMetadata.modify('acct1_vid1', _set_experiment_state)
+        events = trap.wait(0.2)
+        self.assertEquals(len(events), 2)
 
-            # Do a modify that creates a new, default
-            VideoMetadata.modify('acct1_vid3', lambda x: x)
-            new_vid = VideoMetadata.modify('acct1_vid2', lambda x: x,
-                                           create_missing=True)
-            events = trap.wait()
-            self.assertEquals(len(events), 3)
-            self.assertEquals(events[-1], ('acct1_vid2', new_vid, 'set'))
+        # Do a modify that creates a new, default
+        VideoMetadata.modify('acct1_vid3', lambda x: x)
+        new_vid = VideoMetadata.modify('acct1_vid2', lambda x: x,
+                                       create_missing=True)
+        events = trap.wait()
+        self.assertEquals(len(events), 3)
+        self.assertEquals(events[-1], ('acct1_vid2', new_vid, 'set'))
 
     def test_subscribe_api_request_changes(self):
         bc_trap = TestNeondata.ChangeTrap()
         generic_trap = TestNeondata.ChangeTrap()
 
-        try:
-            bc_trap.subscribe(neondata.BrightcoveApiRequest, '*')
-            generic_trap.subscribe(NeonApiRequest)
+        bc_trap.subscribe(neondata.BrightcoveApiRequest, '*')
+        generic_trap.subscribe(NeonApiRequest)
 
-            # Test a Brightcove request
-            neondata.BrightcoveApiRequest('jobbc', 'acct1').save()
-            bc_events = bc_trap.wait()
-            all_events = generic_trap.wait()
-            self.assertEquals(len(bc_events), 1)
-            self.assertEquals(len(all_events), 1)
-            self.assertEquals(bc_events[0][1].job_id, 'jobbc')
-            self.assertEquals(all_events[0][1].job_id, 'jobbc')
+        # Test a Brightcove request
+        neondata.BrightcoveApiRequest('jobbc', 'acct1').save()
+        bc_events = bc_trap.wait()
+        all_events = generic_trap.wait()
+        self.assertEquals(len(bc_events), 1)
+        self.assertEquals(len(all_events), 1)
+        self.assertEquals(bc_events[0][1].job_id, 'jobbc')
+        self.assertEquals(all_events[0][1].job_id, 'jobbc')
 
-            # Now try a Neon request. the BC one shouldn't be listed
-            NeonApiRequest('jobneon', 'acct1').save()
-            all_events = generic_trap.wait()
-            bc_events = bc_trap.wait(0.1)
-            self.assertEquals(len(bc_events), 1)
-            self.assertEquals(len(all_events), 2)
-            self.assertEquals(all_events[1][1].job_id, 'jobneon')
+        # Now try a Neon request. the BC one shouldn't be listed
+        NeonApiRequest('jobneon', 'acct1').save()
+        all_events = generic_trap.wait()
+        bc_events = bc_trap.wait(0.1)
+        self.assertEquals(len(bc_events), 1)
+        self.assertEquals(len(all_events), 2)
+        self.assertEquals(all_events[1][1].job_id, 'jobneon')
 
-        finally:
-            bc_trap.close()
-            generic_trap.close()
 
     def test_subscribe_platform_changes(self):
-        with contextlib.closing(TestNeondata.ChangeTrap()) as trap:
-            trap.subscribe(AbstractPlatform)
+        trap = TestNeondata.ChangeTrap()
+        trap.subscribe(AbstractPlatform)
 
-            neondata.BrightcovePlatform('a1', 'bc', 'acct1').save()
-            events = trap.wait()
-            self.assertEquals(len(events), 1)
-            self.assertIsInstance(events[0][1], BrightcovePlatform)
+        neondata.BrightcovePlatform('a1', 'bc', 'acct1').save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertIsInstance(events[0][1], BrightcovePlatform)
 
-            neondata.NeonPlatform('a1', 'neon', 'acct1').save()
-            events = trap.wait()
-            self.assertEquals(len(events), 2)
-            self.assertIsInstance(events[-1][1], NeonPlatform)
+        neondata.NeonPlatform('a1', 'neon', 'acct1').save()
+        events = trap.wait()
+        self.assertEquals(len(events), 2)
+        self.assertIsInstance(events[-1][1], NeonPlatform)
 
-            neondata.YoutubePlatform('a1', 'yt', 'acct1').save()
-            events = trap.wait()
-            self.assertEquals(len(events), 3)
-            self.assertIsInstance(events[-1][1], YoutubePlatform)
+        neondata.YoutubePlatform('a1', 'yt', 'acct1').save()
+        events = trap.wait()
+        self.assertEquals(len(events), 3)
+        self.assertIsInstance(events[-1][1], YoutubePlatform)
 
-            neondata.OoyalaPlatform('a1', 'yt', 'acct1').save()
-            events = trap.wait()
-            self.assertEquals(len(events), 4)
-            self.assertIsInstance(events[-1][1], OoyalaPlatform)
+        neondata.OoyalaPlatform('a1', 'oo', 'acct1').save()
+        events = trap.wait()
+        self.assertEquals(len(events), 4)
+        self.assertIsInstance(events[-1][1], OoyalaPlatform)
+
+    def test_unsubscribe_changes(self):
+        plat_trap = TestNeondata.ChangeTrap()
+        plat_trap.subscribe(AbstractPlatform)
+        request_trap = TestNeondata.ChangeTrap()
+        request_trap.subscribe(NeonApiRequest)
+        video_trap = TestNeondata.ChangeTrap()
+        video_trap.subscribe(VideoMetadata, 'acct1_*')
+
+        # Make sure all the subscriptions are working
+        neondata.BrightcovePlatform('a1', 'bc', 'acct1').save()
+        plat_trap.wait()
+        neondata.NeonPlatform('a1', 'neon', 'acct1').save()
+        plat_trap.wait()
+        neondata.YoutubePlatform('a1', 'yt', 'acct1').save()
+        plat_trap.wait()
+        neondata.OoyalaPlatform('a1', 'oo', 'acct1').save()
+        plat_trap.wait()
+        self.assertEquals(len(plat_trap.args), 4)
+        plat_trap.reset()
+        
+        neondata.BrightcoveApiRequest('jobbc', 'acct1').save()
+        request_trap.wait()
+        NeonApiRequest('jobneon', 'acct1').save()
+        request_trap.wait()
+        self.assertEquals(len(request_trap.args), 2)
+        request_trap.reset()
+
+        VideoMetadata('acct1_vid1', request_id='req1').save()
+        video_trap.wait()
+        self.assertEquals(len(video_trap.args), 1)
+        video_trap.reset()
+
+        # Now unsubscribe and make changes
+        plat_trap.unsubscribe(AbstractPlatform)
+        request_trap.unsubscribe(NeonApiRequest)
+        video_trap.unsubscribe(VideoMetadata, 'acct1_*')
+
+        neondata.BrightcovePlatform('a1', 'bc', 'acct2').save()
+        neondata.NeonPlatform('a1', 'neon', 'acct2').save()
+        neondata.YoutubePlatform('a1', 'yt', 'acct2').save()
+        neondata.OoyalaPlatform('a1', 'oo', 'acct2').save()
+        neondata.BrightcoveApiRequest('jobbc', 'acct2').save()
+        NeonApiRequest('jobneon', 'acct2').save()
+        VideoMetadata('acct1_vid2', request_id='req1').save()
+
+        # Now resubscribe and see the changes
+        plat_trap.subscribe(AbstractPlatform)
+        request_trap.subscribe(NeonApiRequest)
+        video_trap.subscribe(VideoMetadata, 'acct1_*')
+
+        neondata.BrightcovePlatform('a1', 'bc', 'acct3').save()
+        plat_trap.wait()
+        neondata.NeonPlatform('a1', 'neon', 'acct3').save()
+        plat_trap.wait()
+        neondata.YoutubePlatform('a1', 'yt', 'acct3').save()
+        plat_trap.wait()
+        neondata.OoyalaPlatform('a1', 'oo', 'acct3').save()
+        plat_trap.wait()
+        self.assertEquals(len(plat_trap.args), 4)
+        
+        neondata.BrightcoveApiRequest('jobbc', 'acct3').save()
+        request_trap.wait()
+        NeonApiRequest('jobneon', 'acct3').save()
+        request_trap.wait()
+        self.assertEquals(len(request_trap.args), 2)
+
+        VideoMetadata('acct1_vid3', request_id='req1').save()
+        video_trap.wait()
+        self.assertEquals(len(video_trap.args), 1)
+        
             
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):

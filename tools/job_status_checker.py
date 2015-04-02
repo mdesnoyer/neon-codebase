@@ -12,7 +12,9 @@ import sys
 import StringIO
 import smtplib
 
-NEON_CMS_URL = "http://services.neon-lab.com"
+#NEON_CMS_URL = "http://services.neon-lab.com"
+NEON_CMS_URL = "http://cmsapi-test-1988789777.us-east-1.elb.amazonaws.com
+"
 
 logging.basicConfig(filename='/home/mdesnoyer/tmp/job_serving_times.log',level=logging.DEBUG, format='%(message)s')
 _log = logging.getLogger(__name__)

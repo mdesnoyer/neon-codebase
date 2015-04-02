@@ -51,6 +51,7 @@ class RedisServer:
         # Clear the singleton instance
         # This is required so that we can use a new connection(port) 
         neondata.DBConnection.clear_singleton_instance()
+        neondata.PubSubConnection.clear_singleton_instance()
 
         self.config_file = tempfile.NamedTemporaryFile()
         self.config_file.write('port %i\n' % self.port)
