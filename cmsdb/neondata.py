@@ -527,6 +527,7 @@ class PubSubConnection(threading.Thread):
 
         if future is not None:
             if future[0].set_running_or_notify_cancel():
+                _log.debug('Changed subscription state to %s' % msg['channel'])
                 future[0].set_result(msg)
 
     def _handle_timedout_futures(self, future_dict):
@@ -538,6 +539,7 @@ class PubSubConnection(threading.Thread):
                     future.set_exception(DBConnectionError(
                     'Timeout when changing connection state to channel '
                     '%s' % channel))
+                    statemon.state.increment('subscription_errors')
                 del future_dict[channel]
 
     def get_parsed_message(self):
