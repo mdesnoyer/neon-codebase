@@ -510,7 +510,7 @@ class PubSubConnection(threading.Thread):
           blockingRedis.client.PubSub.PUBLISH_MESSAGE_TYPES:
             future = self._sub_futures.pop(msg['channel'], None)
 
-        if future[0] is not None:
+        if future is not None:
             if future[0].set_running_or_notify_cancel():
                 future[0].set_result(msg)
 
