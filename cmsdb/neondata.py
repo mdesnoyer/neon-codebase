@@ -224,9 +224,17 @@ class RedisRetryWrapper(object):
         '''
         def RetryWrapper(*args, **kwargs):
             cur_try = 0
+            busy_count = 0
             while True:
                 try:
                     return func(*args, **kwargs)
+                except redis.exceptions.BusyLoadingError as e:
+                    # Redis is busy, so wait
+                    _log.warn_n('Redis is busy on attempt %i. Waiting' %
+                                busy_count, 5)
+                    delay = (1 << busy_count) * 0.2
+                    busy_count += 1
+                    time.sleep(delay)
                 except Exception as e:
                     _log.error('Error talking to redis on attempt %i: %s' % 
                                (cur_try, e))
@@ -308,9 +316,16 @@ class RedisAsyncWrapper(object):
                     
             io_loop = tornado.ioloop.IOLoop.current()
             
-            def _cb(future, cur_try=0):
+            def _cb(future, cur_try=0, busy_count=0):
                 if future.exception() is None:
                     callback(future.result())
+                    return
+                elif isinstance(future.exception(),
+                                redis.exceptions.BusyLoadingError):
+                    _log.warn_n('Redis is busy on attempt %i. Waiting' %
+                                busy_count)
+                    delay = (1 << busy_count) * 0.2
+                    busy_count += 1
                 else:
                     _log.error('Error talking to redis on attempt %i: %s' % 
                                (cur_try, future.exception()))
@@ -319,12 +334,12 @@ class RedisAsyncWrapper(object):
                         raise future.exception()
 
                     delay = (1 << cur_try) * self.base_wait # in seconds
-                    io_loop.add_timeout(
-                        time.time() + delay,
-                        lambda: io_loop.add_future(
-                            RedisAsyncWrapper._get_thread_pool().submit(
-                                func, *args, **kwargs),
-                            lambda x: _cb(x, cur_try)))
+                io_loop.add_timeout(
+                    time.time() + delay,
+                    lambda: io_loop.add_future(
+                        RedisAsyncWrapper._get_thread_pool().submit(
+                            func, *args, **kwargs),
+                        lambda x: _cb(x, cur_try, busy_count)))
 
             future = RedisAsyncWrapper._get_thread_pool().submit(
                 func, *args, **kwargs)

@@ -1118,7 +1118,7 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
         TrackerAccountIDMapper.get("tai1", callback=self.stop)
 
         with self.assertLogExists(logging.ERROR, 'Connection Error'):
-            with self.assertLogExists(logging.ERROR, 'Loading Error'):
+            with self.assertLogExists(logging.WARN, 'Redis is busy'):
                 with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
                     with self.assertLogExists(logging.ERROR, 'Socket Error'):
                         found_obj = self.wait()
@@ -1135,7 +1135,7 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
             ]
 
         with self.assertLogExists(logging.ERROR, 'Connection Error'):
-            with self.assertLogExists(logging.ERROR, 'Loading Error'):
+            with self.assertLogExists(logging.WARN, 'Redis is busy'):
                 with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
                     with self.assertLogExists(logging.ERROR, 'Socket Error'):
                         found_obj =  TrackerAccountIDMapper.get("tai1")
