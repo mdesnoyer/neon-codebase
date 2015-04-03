@@ -55,6 +55,7 @@ define("s3_jar_bucket", default="neon-emr-packages",
 
 from utils import statemon
 statemon.define("master_connection_error", int)
+statemon.define("cluster_creation_error", int)
 
 s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
 
@@ -812,21 +813,30 @@ class Cluster():
         
         conn = EmrConnection()
         _log.info('Creating cluster %s' % options.cluster_name)
-        self.cluster_id = conn.run_jobflow(
-            options.cluster_name,
-            log_uri='s3://neon-cluster-logs/',
-            ec2_keyname=os.path.basename(options.ssh_key).split('.')[0],
-            ami_version='3.1.4',
-            job_flow_role='EMR_EC2_DefaultRole',
-            service_role='EMR_DefaultRole',
-            keep_alive=True,
-            enable_debugging=True,
-            steps=steps,
-            bootstrap_actions=bootstrap_actions,
-            instance_groups=instance_groups,
-            visible_to_all_users=True,
-            api_params = {'Instances.Ec2SubnetId' : 
-                          'subnet-74c10003'})
+        try:
+            self.cluster_id = conn.run_jobflow(
+                options.cluster_name,
+                log_uri='s3://neon-cluster-logs/',
+                ec2_keyname=os.path.basename(options.ssh_key).split('.')[0],
+                ami_version='3.1.4',
+                job_flow_role='EMR_EC2_DefaultRole',
+                service_role='EMR_DefaultRole',
+                keep_alive=True,
+                enable_debugging=True,
+                steps=steps,
+                bootstrap_actions=bootstrap_actions,
+                instance_groups=instance_groups,
+                visible_to_all_users=True,
+                api_params = {'Instances.Ec2SubnetId' : 
+                              'subnet-74c10003'})
+        except boto.exception.EmrResponseError as e:
+            _log.error('Error creating the cluster: %s' % e)
+            statemon.state.increment('cluster_creation_error')
+            # We sleep because this most likely is caused by a bug in
+            # the config and we don't want to piss AWS off by trying
+            # over and over and over and over again
+            time.sleep(30.0)
+            raise
 
         conn.add_tags(self.cluster_id,
                       {'cluster-type' : self.cluster_type,
