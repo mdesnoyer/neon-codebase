@@ -132,12 +132,14 @@ def calc_aggregate_click_based_metrics(data):
      (Mean lift (Positive value is good), p_value, lower 95% confidence bound,
      upper 95% confidence bound)
     '''
-    raw_counts = np.sum(data, axis=0)
-
     np_data = np.array(data)
     extra_clicks = np_data[:,3] - np.multiply(np_data[:,2],
                                               np.divide(np_data[:,1],
                                                         np_data[:,0]))
+    np_data = np_data[np.isfinite(extra_clicks),:]
+    extra_clicks = extra_clicks[np.isfinite(extra_clicks)]
+    
+    raw_counts = np.sum(np_data, axis=0)
 
     lift = raw_counts[0] / (raw_counts[2] * raw_counts[1]) * \
       np.sum(extra_clicks)
