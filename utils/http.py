@@ -172,7 +172,8 @@ class RequestThread(threading.Thread):
 
                 response = send_request(request, ntries=1,
                                         do_logging=do_logging)
-                if response.error is not None:
+                # do not retry if its a client side error, error code <500 
+                if response.error is not None and response.code > 499: 
                     # Do retry logic
                     if (ntries + 1) >= self.max_tries:
                         if do_logging:
