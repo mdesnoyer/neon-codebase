@@ -1700,6 +1700,46 @@ class AbstractPlatform(NamespacedStoredObject):
         db_connection = DBConnection.get(cls)
         db_connection.clear_db()
 
+    @classmethod
+    def _delete_many_keys(cls, keys):
+        db_connection = DBConnection.get(cls)
+        for key in keys:
+            db_connection.blocking_conn.delete(key) 
+
+    @classmethod
+    def delete_all_video_related_data(cls, platform_instance, platform_vid):
+        '''
+        Delete all data related to a given video
+
+        request, vmdata, thumbs, thumb serving urls
+        '''
+
+        def _del_video(p_inst):
+            try:
+                p_inst.videos.pop(platform_vid)
+            except KeyError, e:
+                _log.error('no such video to delete')
+                return
+        
+        i_vid = InternalVideoID.generate(platform_instance.neon_api_key, 
+                                        platform_vid)
+        vm = VideoMetadata.get(i_vid)
+        keys_to_delete = []
+        
+        # get all the keys to delete 
+        keys_to_delete.append("request_%s_%s" % (
+                             platform_instance.neon_api_key, vm.job_id))
+        keys_to_delete.append(vm.key)
+        for tid in vm.thumbnail_ids:
+            keys_to_delete.append(tid)
+            #serving urls
+            keys_to_delete.append("thumbnailservingurls_%s" %tid)
+
+        cls._delete_many_keys(keys_to_delete)
+
+        # update platform instance
+        NeonPlatform.modify(platform_instance.neon_api_key, '0', _del_video)
+
 class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
@@ -2422,6 +2462,9 @@ class NeonApiRequest(NamespacedStoredObject):
                                                save_objects=True,
                                                async=True)
 
+        # Push a thumbnail serving directive to Kinesis so that it can
+        # be served quickly.
+
 class BrightcoveApiRequest(NeonApiRequest):
     '''
     Brightcove API Request class
@@ -3115,7 +3158,15 @@ class VideoMetadata(StoredObject):
 
         raise tornado.gen.Return(serving_url)
 
-class VideoResponse(object):
+class AbstractJsonResponse(object):
+    
+    def to_dict(self):
+        return self.__dict__
+
+    def to_json(self):
+        return json.dumps(self, default=lambda o: o.__dict__)
+
+class VideoResponse(AbstractJsonResponse):
     ''' VideoResponse object that contains list of thumbs for a video 
         # NOTE: this obj is only used to format in to a json response 
     '''
@@ -3137,12 +3188,16 @@ class VideoResponse(object):
         self.winner_thumbnail = winner_thumbnail
         self.serving_url = serving_url
 
-    def to_dict(self):
-        return self.__dict__
-
-    def to_json(self):
-        return json.dumps(self, default=lambda o: o.__dict__)
-
+class VideoCallbackResponse(AbstractJsonResponse):
+    def __init__(self, jid, vid, fnos=None, thumbs=None, s_url=None, err=None):
+        self.job_id = jid
+        self.video_id = vid
+        self.framenos = fnos if fnos is not None else []
+        self.thumbnails = thumbs if thumbs is not None else []
+        self.serving_url = s_url
+        self.error = err
+        self.timestamp = str(time.time())
+    
 if __name__ == '__main__':
     # If you call this module you will get a command line that talks
     # to the server. nifty eh?

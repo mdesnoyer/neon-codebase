@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 import numpy
 import pandas
 from stats import statutils
+import stats.metrics
 import utils.neon
 from utils.options import options, define
 
@@ -42,7 +43,8 @@ _log = logging.getLogger(__name__)
 
 def get_data():
     conn = impala.dbapi.connect(host=options.stats_host,
-                                port=options.stats_port)
+                                port=options.stats_port,
+                                timeout=600)
     cursor = conn.cursor()
 
     _log.info('Finding the interesting thumbnails for video %s' % 
@@ -51,44 +53,56 @@ def get_data():
 
     _log.info('Talking to database')
     thumb_data = []
+    query = (
+        """select cast(floor(imloadservertime/3600)*3600 as timestamp) as hr,
+        thumbnail_id,
+        count(imloadclienttime) as loads,
+        count(imvisclienttime) as views,
+        count(imclickclienttime) as clicks, 
+        count(imclickclienttime)/count(imloadclienttime) as ctr_load,
+        count(imclickclienttime)/count(imvisclienttime) as ctr_view
+        from EventSequences 
+        where imloadclienttime is not null and 
+        thumbnail_id like '%s\_%%' %s 
+        group by thumbnail_id, hr 
+        """ % (options.video_id,
+               statutils.get_time_clause(options.start_time,
+                                         options.end_time)))
+    cursor.execute(query)
+    names = [metadata[0] for metadata in cursor.description]
+    cur_data = [dict(zip(names, row)) for row in cursor 
+                if row[1] in video_info.thumbnail_ids]
+
+    label_map = []
     for thumbnail_id in video_info.thumbnail_ids:
-        query = (
-            """select cast(floor(imloadservertime/3600)*3600 as timestamp) as hr,
-            count(imloadclienttime) as loads,
-            count(imvisclienttime) as views,
-            count(imclickclienttime) as clicks, 
-            count(imclickclienttime)/count(imloadclienttime) as ctr_load,
-            count(imclickclienttime)/count(imvisclienttime) as ctr_view
-            from EventSequences 
-            where imloadclienttime is not null and thumbnail_id = '%s' %s 
-            group by hr 
-            """ % (thumbnail_id,
-                   statutils.get_time_clause(options.start_time,
-                                             options.end_time)))
-        cursor.execute(query)
-        names = [metadata[0] for metadata in cursor.description]
-        cur_data = [dict(zip(names, row)) for row in cursor]
-        if len(cur_data) > 0:
-            thumb_info = neondata.ThumbnailMetadata.get(thumbnail_id)
-            label = '%s_%i' % (thumb_info.type, thumb_info.rank)
-            thumb_data.append((label,
-                               pandas.DataFrame(cur_data,
-                                                columns=names)))
+        thumb_info = neondata.ThumbnailMetadata.get(thumbnail_id)
+        label = '%s_%i' % (thumb_info.type, thumb_info.rank)
+        label_map.append({'thumbnail_id' : thumbnail_id,
+                          'label' : label})
+
+    thumb_data = pandas.merge(pandas.DataFrame(cur_data),
+                              pandas.DataFrame(label_map),
+                              on='thumbnail_id')
+        
 
     _log.info('Flipping data to get one data frame for each statistic')
     data = {}
-    for cur_stat in thumb_data[0][1].columns[1:]:
-        cols = []
-        for thumb_id, table in thumb_data:
-            cols.append(pandas.Series(dict(zip(table['hr'],table[cur_stat])),
-                                      name=[thumb_id]))
+    for cur_stat in ['ctr_load', 'loads', 'views', 'clicks', 'ctr_view']:
+        data[cur_stat] = thumb_data.pivot(index='hr', columns='label',
+                                          values=cur_stat)
 
-        data[cur_stat] = pandas.concat(cols, axis=1,
-                                       keys=[x.name[0] for x in cols])
+    # Add the cumulative ctr graphs
+    data['cum_ctr_views'] = data['clicks'].cumsum().divide(data['views'].cumsum())
+    data['cum_views'] = data['views'].cumsum()
+    data['cum_clicks'] = data['clicks'].cumsum()
     return data
 
 def main():
-    for stat, df in get_data().iteritems():
+    data = get_data()
+    st = stats.metrics.calc_lift_at_first_significant_hour(
+        data['views'], data['clicks'])
+    print('View Lift: %s' % st['lift'])
+    for stat, df in data.iteritems():
         df.plot(title=stat)
 
     plt.show()

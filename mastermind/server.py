@@ -216,6 +216,12 @@ class VideoDBWatcher(threading.Thread):
 
         # Update the video data
         for platform in neondata.AbstractPlatform.get_all_instances():
+            # TODO(mdesnoyer): Remove this hack. it doesn't get rid of
+            # data in memory, but we avoid walking through the entire
+            # database for now.
+            if not platform.serving_enabled:
+                continue
+            
             # Update the experimental strategy for the account
             self.mastermind.update_experiment_strategy(
                 platform.neon_api_key,

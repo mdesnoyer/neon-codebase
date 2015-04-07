@@ -183,15 +183,20 @@ class TestVideoClient(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.ERROR, "Error downloading video"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 vprocessor.download_video_file()
-
         
+        self.assertEqual(self.uc.call_count, 1)
+
         with self.assertLogExists(logging.ERROR, "Error downloading video"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 vprocessor.download_video_file()
                 
+        self.assertEqual(self.uc.call_count, 2)
+        
         with self.assertLogExists(logging.ERROR, "Error saving video to disk"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 vprocessor.download_video_file()
+        self.assertEqual(self.uc.call_count, 3)
+                
 
     @patch('video_processor.client.S3Connection')
     def test_download_s3_video(self, s3_mock):
@@ -237,18 +242,21 @@ class TestVideoClient(test_utils.neontest.TestCase):
 
         vprocessor = self.setup_video_processor(
             "neon", url='s3://customer-videos/some/video.mp4')
-        
+       
         with self.assertLogExists(logging.ERROR, "Client error downloading"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 vprocessor.download_video_file()
-                
+        self.assertEqual(self.uc.call_count, 1)
+        
         with self.assertLogExists(logging.ERROR, "Server error downloading"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 vprocessor.download_video_file()
-
+        self.assertEqual(self.uc.call_count, 2)
+        
         with self.assertLogExists(logging.ERROR, "Error saving video to disk"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 vprocessor.download_video_file()
+        self.assertEqual(self.uc.call_count, 3)
 
     def test_process_video(self):
        
@@ -371,7 +379,6 @@ class TestVideoClient(test_utils.neontest.TestCase):
         vprocessor._get_random_frame(self.test_video_file)
         meta2, img2 = vprocessor.thumbnails[1]
         self.assertNotEqual(meta2.frameno, meta1.frameno)
-
 
 class TestFinalizeResponse(test_utils.neontest.TestCase):
     ''' 
@@ -534,7 +541,6 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertEquals(n_thumbs[0].model_version, 'model1')
         self.assertEquals(n_thumbs[0].filtered, '')
         
-
         # Check that there are thumbnails in s3
         for thumb in thumbs:
             # Check the main archival image
@@ -563,7 +569,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             'framenos' : [6],
             'thumbnails' : [n_thumbs[0].urls[0]],
             'serving_url' : video_data.serving_url,
-            'error' : ""
+            'error' : None
             }
         self.assertDictContainsSubset(expected_response,
                                       api_request.response)
@@ -727,7 +733,6 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
     def test_no_thumbnails_found(self):
         self.vprocessor.thumbnails = []
 
-        
         with self.assertLogExists(logging.WARNING, 'No thumbnails extracted'):
             self.vprocessor.finalize_response()
 
