@@ -397,13 +397,17 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
             {'vid2' : {'id': 'vid2', 'name': 'myvid2'}})
 
     def test_find_videos_by_ids_errors(self):
-        self._set_http_response(body='{"error": "invalid token","code":210}')
+        self._set_http_response(
+            body='{"error": "invalid token","code":210}',
+            error=tornado.httpclient.HTTPError(500, 'invalid token'))
 
         with self.assertLogExists(logging.ERROR, 'invalid token'):
             with self.assertRaises(api.brightcove_api.BrightcoveApiClientError):
                 self.api.find_videos_by_ids(['vid1'])
 
-        self._set_http_response(body='{"error": "server slow","code":103}')
+        self._set_http_response(
+            body='{"error": "server slow","code":103}',
+            error=tornado.httpclient.HTTPError(500, 'server slow'))
 
         with self.assertLogExists(logging.ERROR, 'server slow'):
             with self.assertRaises(api.brightcove_api.BrightcoveApiServerError):

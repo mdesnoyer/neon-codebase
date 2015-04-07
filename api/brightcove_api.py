@@ -849,10 +849,17 @@ class BrightcoveApi(object):
             if response.error:
                 _log.error('Error calling find_videos_by_ids: %s' %
                            response.error)
-                if response.error['code'] < 200:
-                    raise BrightcoveApiServerError(response.error)
-                else:
-                    raise BrightcoveApiClientError(response.error)
+                try:
+                    json_data = json.load(response.buffer)
+                    if json_data['code'] >= 200:
+                        raise BrightcoveApiClientError(response.error)
+                except ValueError:
+                    # It's not JSON data so there was some other error
+                    pass    
+                except KeyError:
+                    # It may be valid json but doesn't have a code
+                    pass
+                raise BrightcoveApiServerError(response.error)
 
             json_data = json.load(response.buffer)
             for item in json_data['items']:
