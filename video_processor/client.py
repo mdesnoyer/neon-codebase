@@ -106,8 +106,37 @@ define('extra_workers', default=0,
 define('video_temp_dir', default=None,
        help='Temporary directory to download videos to')
 
+class VideoError(Exception):
+    '''
+    Exception class which ensures that the callback is
+    send to the client in case of video download or processing errors
+    '''
+    def __init__(self, msg, job_params):
+        self.msg = msg
+        self.vid = job_params['video_id'] 
+        self.job_id = job_params['job_id']
+        self.callback_url = job_params['callback_url']
+        self.send_callback()
+        
+    def send_callback(self):
+        cresp = neondata.VideoCallbackResponse(self.job_id, self.vid,
+                err=self.msg)
+        response_body = cresp.to_dict()
 
-class VideoError(Exception): pass
+        #CREATE POST REQUEST
+        body = tornado.escape.json_encode(response_body)
+        h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
+        
+        if self.callback_url is not None:
+            cb_response_request = tornado.httpclient.HTTPRequest(
+                                    url=self.callback_url,
+                                    method="POST",
+                                    headers=h, 
+                                    body=body, 
+                                    request_timeout=60.0, 
+                                    connect_timeout=10.0)
+            utils.http.send_request(cb_response_request) 
+
 class BadVideoError(VideoError): pass
 class VideoDownloadError(VideoError, IOError): pass  
 class DBError(IOError): pass
@@ -273,30 +302,30 @@ class VideoProcessor(object):
             _log.error("Error downloading video from %s: %s" % 
                        (self.video_url, e))
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e))
+            raise VideoDownloadError(str(e), self.job_params)
 
         except boto.exception.BotoClientError as e:
             _log.error("Client error downloading video %s from S3: %s" %
                        (self.video_url, e))
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e))
+            raise VideoDownloadError(str(e), self.job_params)
 
         except boto.exception.BotoServerError as e:
             _log.error("Server error downloading video %s from S3: %s" %
                        (self.video_url, e))
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e))
+            raise VideoDownloadError(str(e), self.job_params)
 
         except socket.error as e:
             _log.error("Error downloading video from %s: %s" % 
                        (self.video_url, e))
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e))
+            raise VideoDownloadError(str(e), self.job_params)
 
         except IOError as e:
             _log.error("Error saving video to disk: %s" % e)
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e))
+            raise VideoDownloadError(str(e), self.job_params)
 
     def process_video(self, video_file, n_thumbs=1):
         ''' process all the frames from the partial video downloaded '''
@@ -341,7 +370,7 @@ class VideoProcessor(object):
         if duration <= 1e-3:
             _log.error("Video %s has no length" % (self.video_url))
             statemon.state.increment('video_read_error')
-            raise BadVideoError("Video has no length")
+            raise BadVideoError("Video has no length", self.job_params)
 
         #Log long videos
         if duration > 1800:
@@ -638,22 +667,20 @@ class VideoProcessor(object):
 
         '''
 
-        response_body = {}
-        response_body["job_id"] = self.video_metadata.job_id 
-        response_body["video_id"] = neondata.InternalVideoID.to_external(
-            self.video_metadata.key)
-        response_body["framenos"] = [
-            x[0].frameno for x in self.thumbnails 
+        frames = [x[0].frameno for x in self.thumbnails 
             if x[0].type == neondata.ThumbnailType.NEON]
-        response_body["framenos"] = response_body["framenos"][:self.n_thumbs]
-        response_body["thumbnails"] = [
-            x[0].urls[0] for x in self.thumbnails 
+        fnos = frames[:self.n_thumbs]
+        thumbs = [x[0].urls[0] for x in self.thumbnails 
             if x[0].type == neondata.ThumbnailType.NEON]
-        response_body["thumbnails"] = \
-          response_body["thumbnails"][:self.n_thumbs]
-        response_body["timestamp"] = str(time.time())
-        response_body["serving_url"] = self.video_metadata.get_serving_url()
-        response_body["error"] =  ""
+        thumbs = thumbs[:self.n_thumbs]
+
+        cresp = neondata.VideoCallbackResponse(self.video_metadata.job_id,
+                neondata.InternalVideoID.to_external(self.video_metadata.key),
+                fnos,
+                thumbs,
+                self.video_metadata.get_serving_url(),
+                err=None)
+        response_body = cresp.to_dict()
 
         #CREATE POST REQUEST
         body = tornado.escape.json_encode(response_body)
@@ -666,7 +693,6 @@ class VideoProcessor(object):
                                 request_timeout=60.0, 
                                 connect_timeout=10.0)
         return cb_response_request 
-    
  
     def send_client_callback_response(self, video_id, request):
         '''
