@@ -72,6 +72,7 @@ def cat_and_ffmpeg():
 
         # TODO, CAT THEM IN ORDER
         for filename in iglob(os.path.join(options.working_dir, '*.ts')):
+            _log.info('Catting %s' % filename)
             shutil.copyfileobj(open(filename,'rb'), destination)
 
 
@@ -87,6 +88,9 @@ if __name__ == '__main__':
 
         if not os.path.exists(options.working_dir):
             os.makedirs(options.working_dir)
+
+        if os.path.exists(os.path.join(options.working_dir, 'input.ts')):
+            os.remove(os.path.join(options.working_dir, 'input.ts'))
 
         conn = boto.connect_s3(options.access_key, options.secret_key)
 
