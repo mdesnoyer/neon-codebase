@@ -92,11 +92,9 @@ if __name__ == '__main__':
 
         if not os.path.exists(options.working_dir):
             os.makedirs(options.working_dir)
-
-        if os.path.exists(os.path.join(options.working_dir, 'input.ts')):
-            os.remove(os.path.join(options.working_dir, 'input.ts'))
-        if os.path.exists(os.path.join(options.working_dir, 'output.mp4')):
-            os.remove(os.path.join(options.working_dir, 'output.mp4'))
+        else:
+            for fn in os.listdir(options.working_dir):
+                os.remove(os.path.join(optioins.working_dir, fn))
 
         conn = boto.connect_s3(options.access_key, options.secret_key)
 
