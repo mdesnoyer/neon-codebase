@@ -44,9 +44,9 @@ def create_neon_api_request(account_id, api_key, video_id, video_title, video_ur
     '''
     Send video processing request to Neon
     '''
-    video_api_formater = "%s/api/v1/accounts/%s/neon_integrations/0/create_thumbnail_api_request"
+    video_api_formater = "http://services.neon-lab.com/api/v1/accounts/%s/neon_integrations/0/create_thumbnail_api_request"
     headers = {"X-Neon-API-Key" : api_key, "Content-Type" : "application/json"}
-    request_url = video_api_formater % (NEON_CMS_URL, account_id)
+    request_url = video_api_formater % (account_id)
 
     data =     { 
         "video_id": video_id,
