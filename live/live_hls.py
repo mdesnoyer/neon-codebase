@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import os
 import time
-from glob import iglob
+from glob import glob
 import boto
 import boto.s3.connection
 import utils.monitor
@@ -72,7 +72,7 @@ def cat_and_ffmpeg():
     with open(os.path.join(options.working_dir, 'input.ts'), 'wb') as destination:
 
         # TODO, CAT THEM IN ORDER
-        for filename in iglob(os.path.join(options.working_dir, '*.ts')):
+        for filename in glob(os.path.join(options.working_dir, '[0-9]*.ts')):
             _log.info('Catting %s' % filename)
             shutil.copyfileobj(open(filename,'rb'), destination)
 
