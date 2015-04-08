@@ -94,7 +94,7 @@ if __name__ == '__main__':
             os.makedirs(options.working_dir)
         else:
             for fn in os.listdir(options.working_dir):
-                os.remove(os.path.join(optioins.working_dir, fn))
+                os.remove(os.path.join(options.working_dir, fn))
 
         conn = boto.connect_s3(options.access_key, options.secret_key)
 
