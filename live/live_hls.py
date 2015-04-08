@@ -92,6 +92,8 @@ if __name__ == '__main__':
 
         if os.path.exists(os.path.join(options.working_dir, 'input.ts')):
             os.remove(os.path.join(options.working_dir, 'input.ts'))
+        if os.path.exists(os.path.join(options.working_dir, 'output.mp4')):
+            os.remove(os.path.join(options.working_dir, 'output.mp4'))
 
         conn = boto.connect_s3(options.access_key, options.secret_key)
 
