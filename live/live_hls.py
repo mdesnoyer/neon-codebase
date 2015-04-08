@@ -24,6 +24,10 @@ NEON_CMS_URL = "http://services.neon-lab.com"
 account_id = "159" # David Lea Account
 API_KEY = "3yd7b8vmrj67b99f7a8o1n30"
 
+# USE ACCOUNT 257 for NAB
+# KEY 8gnmm5kkmzwrgw89xekwl84n
+#
+
 def create_neon_api_request(account_id, api_key, video_id, video_title, video_url):
     '''
     Send video processing request to Neon
