@@ -101,7 +101,7 @@ if __name__ == '__main__':
             if idx == 0 and os.path.exists(local_fn):
                 exit(1)
 
-            if count < options.loopback_count:
+            if idx < options.loopback_count:
                 download_and_save_segment(os.path.dirname(options.input),
                                           segment)
             elif os.path.exists(local_fn):
