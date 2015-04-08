@@ -127,7 +127,9 @@ if __name__ == '__main__':
         key.set_acl('public-read')
         fullpath = "https://s3.amazonaws.com/neon-test%s" % fname
 
-        create_neon_api_request(account_id, API_KEY, "video%s" % int(time.time()), "video%s" % int(time.time()), fullpath)
+        create_neon_api_request(options.account_id, options.api_key,
+                                "video%s" % int(time.time()),
+                                "video%s" % int(time.time()), fullpath)
     except Exception as e:
         _log.exception('Error running video')
         statemon.state.increment('live_errors')
