@@ -64,8 +64,9 @@ def create_neon_api_request(account_id, api_key, video_id, video_title, video_ur
 
 
 def download_and_save_segment(base_path, ts_url):
-    urllib.urlretrieve('%s/%s' % (base_path, ts_url),
-                       os.path.join(options.working_dir, ts_url))
+    local_fn = os.path.join(options.working_dir, ts_url)
+    if not os.path.exists(local_fn):
+        urllib.urlretrieve('%s/%s' % (base_path, ts_url), local_fn)
 
 def cat_and_ffmpeg():
     with open(os.path.join(options.working_dir, 'input.ts'), 'wb') as destination:
