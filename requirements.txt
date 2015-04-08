@@ -40,3 +40,4 @@ ipdb==0.8
 nose-cov==1.6
 happybase==0.9
 pyhs2==0.6.0
+m3u8==0.2.4
