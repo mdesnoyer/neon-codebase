@@ -97,7 +97,7 @@ if __name__ == '__main__':
             # If the first segment already exists, then exit because we've
             # done this file
             if idx == 0 and os.path.exists(local_fn):
-                return
+                exit(1)
 
             if count < options.loopback_count:
                 download_and_save_segment(os.path.dirname(options.input),
@@ -123,6 +123,8 @@ if __name__ == '__main__':
     except Exception as e:
         _log.exception('Error running video')
         statemon.state.increment('live_errors')
+        utils.monitor.send_statemon_data()
+        exit(1)
 
     finally:
         utils.monitor.send_statemon_data()
