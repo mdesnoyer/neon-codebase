@@ -38,6 +38,7 @@ statemon.define('live_errors', int)
 # KEY 8gnmm5kkmzwrgw89xekwl84n
 #
 
+_log = logging.getLogger(__name__)
 
 def create_neon_api_request(account_id, api_key, video_id, video_title, video_url):
     '''
