@@ -213,7 +213,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                       (120, 90): 't01_120.jpg'},
             api_key+'_0_t02' : { (800, 600): 't02_800.jpg',
                       (120, 90): 't02_120.jpg'}}
-        datamock.ThumbnailServingURLs.get_all.return_value = [
+        datamock.ThumbnailServingURLs.get_many.return_value = [
             neondata.ThumbnailServingURLs(k, v) for k, v in
             serving_urls.iteritems()
             ]
@@ -281,7 +281,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                          (640, 480))
 
     def test_connection_error(self, datamock):
-        datamock.ThumbnailServingURLs.get_all.side_effect = \
+        datamock.AbstractPlatform.get_all_instances.side_effect = \
           redis.ConnectionError
 
         with self.assertRaises(redis.ConnectionError):
@@ -1884,9 +1884,9 @@ class SmokeTesting(test_utils.neontest.TestCase):
         if os.path.exists(f):
             os.remove(f)
         del self.mastermind
-        self.directive_publisher.join(2)
         self.video_watcher.join(2)
         self.video_watcher.__del__()
+        self.directive_publisher.join(2)
         self.stats_watcher.join(2)
         self.redis.stop()
         super(SmokeTesting, self).tearDown()
@@ -1970,10 +1970,11 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self._add_hbase_entry(1405372146, 'key1_vid1_t2', iv=1, ic=1)
 
         # set the db update delay to 0
-        with options._set_bounded('mastermind.server.serving_update_delay', 0):
+        with options._set_bounded('mastermind.server.publishing_period', 1.0):
             # Now start all the threads
             self.video_watcher.start()
             self.video_watcher.wait_until_loaded(5.0)
+            self.video_watcher.subscribe_to_db_changes()
             self.stats_watcher.start()
             self.stats_watcher.wait_until_loaded(5.0)
             self.directive_publisher.start()
@@ -1992,6 +1993,30 @@ class SmokeTesting(test_utils.neontest.TestCase):
             # check the DB to ensure it has changed
             req = neondata.VideoMetadata.get_video_request('key1_vid1')
             self.assertEqual(req.state, neondata.RequestState.SERVING)
+
+            # Trigger a new video via a push
+            job = neondata.NeonApiRequest('job2', 'key1', 'vid2')
+            job.state = neondata.RequestState.FINISHED 
+            job.save()
+        
+            # Create a video with a couple of thumbs in the database
+            vid = neondata.VideoMetadata('key1_vid2', request_id='job2',
+                                         tids=['key1_vid2_t1'],
+                                         i_id='i1')
+            vid.save()
+            platform.add_video('vid2', vid.job_id)
+            platform.save()
+            thumbs =  [neondata.ThumbnailMetadata('key1_vid2_t1', 'key1_vid2',
+                                                  ttype='neon')]
+            neondata.ThumbnailMetadata.save_all(thumbs)
+            neondata.ThumbnailServingURLs.save_all([
+                neondata.ThumbnailServingURLs('key1_vid2_t1',
+                                              {(160, 90) : 't21.jpg'})])
+
+            self.assertWaitForEquals(
+                lambda: 'key1_vid2' in \
+                self.directive_publisher.last_published_videos,
+                True)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

@@ -280,6 +280,15 @@ class VideoDBWatcher(threading.Thread):
         self.directive_pusher.update_default_thumbs(
             dict((x[0], x[2]) for x in account_tups if x[2]))
 
+        # Update the serving urls for the default account thumbs
+        default_thumb_ids = [x[2] for x in account_tups if x[2]]
+        for url_obj in neondata.ThumbnailServingURLs.get_many(
+                default_thumb_ids):
+            if url_obj is not None:
+                self.directive_pusher.add_serving_url(
+                    url_obj.get_thumbnail_id(),
+                    url_obj.size_map)
+
         # Update the platform, which updates the video data
         for platform in neondata.AbstractPlatform.get_all_instances():
             # Update the experimental strategy for the account
@@ -294,14 +303,6 @@ class VideoDBWatcher(threading.Thread):
             for internal_video_id in platform.get_internal_video_ids():
                 self._schedule_video_update(internal_video_id)
             self.process_queued_video_updates()
-
-        # Get an update for the serving urls
-        self.directive_pusher.update_serving_urls(
-            { thumb_id: size_map for thumb_id, size_map in
-              ((x.get_thumbnail_id(), x.size_map) for x in
-              neondata.ThumbnailServingURLs.get_all()) if
-              self.mastermind.is_serving_video(
-                  self.video_id_cache.find_video_id(thumb_id))})
 
         statemon.state.increment('videodb_batch_update')
         self.is_loaded.set()
@@ -329,11 +330,10 @@ class VideoDBWatcher(threading.Thread):
                         str(obj.get_tai()), str(obj.value))))
 
             def _update_serving_url(key, obj, op):
+                _log.info('updating serving urls')
                 if op == 'del':
                     try:
-                        del self.directive_pusher.serving_urls[key]
-                        statemon.state.thumbnails_serving = \
-                          len(self.directive_pusher.serving_urls)
+                        self.directive_pusher.del_serving_url(key)
                     except KeyError:
                         pass
                 elif op == 'set':
@@ -469,11 +469,21 @@ class VideoDBWatcher(threading.Thread):
                 else:
                     thumbnails.append(meta)
 
+            serving_urls = neondata.ThumbnailServingURLs.get_many(
+                video_metadata.thumbnail_ids)
+            for url_obj in serving_urls:
+                if url_obj is not None:
+                    self.directive_pusher.add_serving_url(
+                        url_obj.get_thumbnail_id(),
+                        url_obj.size_map)
+
             self.mastermind.update_video_info(video_metadata,
                                               thumbnails,
                                               abtest)
         else:
             self.mastermind.remove_video_info(video_id)
+            for thumb_id in video_metadata.thumbnail_ids:
+                self.directive_pusher.del_serving_url(thumb_id)
 
     def process_queued_video_updates(self):
         try:
@@ -1046,7 +1056,16 @@ class DirectivePublisher(threading.Thread):
 
     def add_serving_url(self, thumbnail_id, urls):
         with self.lock:
+            _log.info('adding serving url %s' % thumbnail_id)
             self.serving_urls[thumbnail_id] = pack_obj(urls)
+        statemon.state.thumbnails_serving = len(self.serving_urls)
+
+    def del_serving_url(self, thumbnail_id):
+        try:
+            with self.lock:
+                del self.serving_urls[thumbnail_id]
+        except KeyError as e:
+            pass
         statemon.state.thumbnails_serving = len(self.serving_urls)
 
     def update_default_sizes(self, new_map):
