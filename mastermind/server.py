@@ -330,7 +330,6 @@ class VideoDBWatcher(threading.Thread):
                         str(obj.get_tai()), str(obj.value))))
 
             def _update_serving_url(key, obj, op):
-                _log.info('updating serving urls')
                 if op == 'del':
                     try:
                         self.directive_pusher.del_serving_url(key)
@@ -1056,7 +1055,6 @@ class DirectivePublisher(threading.Thread):
 
     def add_serving_url(self, thumbnail_id, urls):
         with self.lock:
-            _log.info('adding serving url %s' % thumbnail_id)
             self.serving_urls[thumbnail_id] = pack_obj(urls)
         statemon.state.thumbnails_serving = len(self.serving_urls)
 
