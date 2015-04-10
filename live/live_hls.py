@@ -157,8 +157,8 @@ if __name__ == '__main__':
         fullpath = "https://s3.amazonaws.com/neon-test%s" % fname
 
         create_neon_api_request(options.account_id, options.api_key,
-                                options.title,
-                                "video%s" % int(time.time()), fullpath)
+                                "video%s" % int(time.time())
+                                options.title, fullpath)
     except Exception as e:
         _log.exception('Error running video')
         statemon.state.increment('live_errors')
