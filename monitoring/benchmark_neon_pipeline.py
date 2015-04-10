@@ -8,9 +8,12 @@ import sys
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
+
+import atexit
 from cmsdb import neondata
 import json
 import redis
+import signal
 import time
 import urllib2
 import utils.http
@@ -19,17 +22,19 @@ import utils.ps
 from utils import statemon
 
 from utils.options import define, options
-define("cmsapi_url", default="http://services.neon-lab.com", help="cmsapi server", type=str)
+define("cmsapi_host", default="services.neon-lab.com", help="cmsapi server", type=str)
 define("isp_host", default="i1.neon-images.com", help="host where the isp is")
 define("account", default="159", help="account id", type=str)
 define("api_key", default="3yd7b8vmrj67b99f7a8o1n30", help="api key", type=str)
-define("publisher_id", default="1032156711", help="pub id", type=str)
 define("sleep", default=1800, help="sleep time", type=int)
+define("attempts_threshold", default=50, help="attempts", type=int)
 
 # counters
 statemon.define('total_time_to_isp', int)
 statemon.define('time_to_serving', int)
 statemon.define('mastermind_to_isp', int)
+statemon.define('job_not_serving', int)
+statemon.define('not_available_in_isp', int)
 
 import logging
 _log = logging.getLogger(__name__)
@@ -60,9 +65,9 @@ def create_neon_api_request(account_id, api_key):
     create random video processing request to Neon
     '''
     
-    video_api_formater = "%s/api/v1/accounts/%s/neon_integrations/0/create_thumbnail_api_request"
+    video_api_formater = "http://%s/api/v1/accounts/%s/neon_integrations/0/create_thumbnail_api_request"
     headers = {"X-Neon-API-Key" : api_key, "Content-Type" : "application/json"}
-    request_url = video_api_formater % (options.cmsapi_url, account_id)
+    request_url = video_api_formater % (options.cmsapi_host, account_id)
     v = int(time.time())
     video_id = "test%d" % v
     video_title = "monitoring"
@@ -73,7 +78,7 @@ def create_neon_api_request(account_id, api_key):
         "video_id": video_id,
         "video_url": video_url, 
         "video_title": video_title,
-        "callback_url": "http://10.0.64.112:8081/testcallback" 
+        "callback_url": None
     }
 
     try:
@@ -117,9 +122,9 @@ def image_available_in_isp(pub, vid):
 def monitor_neon_pipeline():
     
     # reset all the counters
-    statemon.state.time_to_serving = 0 
-    statemon.state.mastermind_to_isp = 0 
-    statemon.state.total_time_to_isp = 0
+    #statemon.state.time_to_serving = 0 
+    #statemon.state.mastermind_to_isp = 0 
+    #statemon.state.total_time_to_isp = 0
     
     start_request = time.time()
 
@@ -129,7 +134,9 @@ def monitor_neon_pipeline():
 
     # Poll the API for job request completion
     job_serving = False
+    attempts = 0 
     while not job_serving:
+        attempts += 1
         request = neondata.NeonApiRequest.get(job_id, options.api_key)
         if request:
             _log.info("current request state is %s" % request.state)
@@ -137,9 +144,15 @@ def monitor_neon_pipeline():
                 job_serving = True
                 continue
         else:
-            _log("request data not found in db")
+            _log.info("request data not found in db")
             return
         time.sleep(30)
+        if attempts > options.attempts_threshold:
+            statemon.state.increment('job_not_serving')
+            # cleanup
+            np = neondata.NeonPlatform.get(options.api_key, '0')
+            neondata.NeonPlatform.delete_all_video_related_data(np, video_id) 
+            return
    
     # time to video serving
     video_serving = time.time() - start_request
@@ -158,10 +171,16 @@ def monitor_neon_pipeline():
     # Query ISP to get the IMG
     isp_start = time.time()
     isp_ready = False
+    attempts = 0
+    acct = NeonUserAccount.get(options.account, options.api_key)
     while not isp_ready:
-        isp_ready = image_available_in_isp(options.publisher_id, video_id)
+        attempts += 1
+        isp_ready = image_available_in_isp(acct.tracker_account_id, video_id)
         if not isp_ready:
             time.sleep(15)
+        if attempts > 20: 
+            statemon.state.increment('not_available_in_isp')
+            break 
     
     isp_serving = time.time() - isp_start 
     statemon.state.mastermind_to_isp = int(isp_serving)
@@ -169,7 +188,7 @@ def monitor_neon_pipeline():
     
     # Now you can delete the video from the database; Write an Internal API
     # delete video; request; thumbnails; serving thumbs
-   
+    
     np = neondata.NeonPlatform.get(options.api_key, '0')
     neondata.NeonPlatform.delete_all_video_related_data(np, video_id) 
     total_time = time.time() - start_request
@@ -179,8 +198,13 @@ def monitor_neon_pipeline():
 
 def main():
     utils.neon.InitNeon()
-    monitor_neon_pipeline()
-    time.sleep(1800)
+
+    atexit.register(utils.ps.shutdown_children)
+    signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
+    
+    while True:
+        monitor_neon_pipeline()
+        time.sleep(options.sleep)
 
 if __name__ == "__main__":
     main()
