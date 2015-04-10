@@ -30,6 +30,7 @@ define("api_key", default="3yd7b8vmrj67b99f7a8o1n30")
 define("working_dir", default="/mnt/neon/vids")
 define("lookback_count", default=36)
 define("input", default='http://bcoveliveios-i.akamaihd.net/hls/live/215156/livemod_hls_trial/account=1845599807001/ba93e11685d24c39b6081cb985bc3bf2/1845599807001_8888_470_910.m3u8')
+define("title", default='Test Video')
 
 from utils import statemon
 statemon.define('live_errors', int)
@@ -143,7 +144,7 @@ if __name__ == '__main__':
         fullpath = "https://s3.amazonaws.com/neon-test%s" % fname
 
         create_neon_api_request(options.account_id, options.api_key,
-                                "video%s" % int(time.time()),
+                                options.title,
                                 "video%s" % int(time.time()), fullpath)
     except Exception as e:
         _log.exception('Error running video')
