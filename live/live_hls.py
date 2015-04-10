@@ -80,7 +80,7 @@ def cat_and_ffmpeg():
             shutil.copyfileobj(open(filename,'rb'), destination)
 
 
-	subprocess.check_call('ffmpeg -i %s -bsf:a aac_adtstoasc -vcodec copy '
+	subprocess.check_call('/usr/local/bin/ffmpeg -i %s -bsf:a aac_adtstoasc -vcodec copy '
                           '-acodec copy %s' % (
                               os.path.join(options.working_dir, 'input.ts'),
                               os.path.join(options.working_dir, 'output.mp4')),
