@@ -90,6 +90,15 @@ def cat_and_ffmpeg():
 if __name__ == '__main__':
     try:
         utils.neon.InitNeon()
+        
+        last_segment=None
+        segment_file = os.path.join(options.working_dir, 'segments.log')
+        if os.path.exists(segment_file):
+            with open(segment_file) as f_stream:
+            	for line in f_stream:
+            	    val = line.strip()
+            	    if val != '':
+            	    	last_segment = val
 
         if not os.path.exists(options.working_dir):
             os.makedirs(options.working_dir)
@@ -120,8 +129,12 @@ if __name__ == '__main__':
 
             # If the first segment already exists, then exit because we've
             # done this file
-            if idx == 0 and os.path.exists(local_fn):
-                exit(1)
+            if idx == 0:
+                if last_segment is not None and last_segment == segment:
+                    exit(1)
+                else:
+                    with open(segment_file, 'w') as f_stream:
+                        f_stream.write(segment)
 
             if idx < options.lookback_count:
                 download_and_save_segment(os.path.dirname(options.input),
