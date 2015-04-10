@@ -20,6 +20,7 @@ from utils import statemon
 
 from utils.options import define, options
 define("cmsapi_url", default="http://services.neon-lab.com", help="cmsapi server", type=str)
+define("isp_host", default="i1.neon-images.com", help="host where the isp is")
 define("account", default="159", help="account id", type=str)
 define("api_key", default="3yd7b8vmrj67b99f7a8o1n30", help="api key", type=str)
 define("publisher_id", default="1032156711", help="pub id", type=str)
@@ -87,7 +88,7 @@ def create_neon_api_request(account_id, api_key):
         pass
 
 def image_available_in_isp(pub, vid):
-    url = "http://i1.neon-images.com/v1/client/%s/neonvid_%s" % (pub, vid)
+    url = "http://%s/v1/client/%s/neonvid_%s" % (options.isp_host, pub, vid)
  
     try:
         cookieprocessor = urllib2.HTTPCookieProcessor()
