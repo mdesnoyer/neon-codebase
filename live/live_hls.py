@@ -98,7 +98,7 @@ if __name__ == '__main__':
 
         conn = boto.connect_s3(options.access_key, options.secret_key)
 
-        variant_m3u8 = m3u8.loads(options.input)
+        variant_m3u8 = m3u8.load(options.input)
         variant_m3u8.is_variant
 
         bandwidth = 0
