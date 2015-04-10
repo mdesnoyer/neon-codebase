@@ -27,7 +27,7 @@ import time
 from utils.options import define, options
 
 define('region', type=str, default="us-east-1", help='region to connect to')
-define('callback_sqs', type=str, default="neon-customer-callback", help='SQS Q')
+define('customer_callback_sqs', type=str, default="neon-customer-callback", help='SQS Q')
 
 statemon.define('callbacks_in_flight', int)
 statemon.define('callback_errors', int)
@@ -117,10 +117,9 @@ class CustomerCallbackManager(SQSManager):
     '''
 
     region = 'us-east-1'
-    sqs_name = 'neon-customer-callback'
 
     def __init__(self):
-        SQSManager.__init__(self, CustomerCallbackManager.sqs_name)
+        SQSManager.__init__(self, options.customer_callback_sqs)
         self.callback_messages = {} # platform video_id => CustomerCallbackMessage obj 
 
     @utils.sync.optional_sync
