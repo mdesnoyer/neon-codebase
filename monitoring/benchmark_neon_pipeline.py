@@ -34,6 +34,7 @@ statemon.define('total_time_to_isp', int)
 statemon.define('time_to_serving', int)
 statemon.define('mastermind_to_isp', int)
 statemon.define('job_not_serving', int)
+statemon.define('exception_thrown', int)
 statemon.define('not_available_in_isp', int)
 
 import logging
@@ -203,7 +204,11 @@ def main():
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
     
     while True:
-        monitor_neon_pipeline()
+        try:
+            monitor_neon_pipeline()
+        except Exception as e:
+            _log.exception('Exception when monitoring')
+            statemon.state.increment('exception_thrown')
         time.sleep(options.sleep)
 
 if __name__ == "__main__":
