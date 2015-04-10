@@ -98,7 +98,19 @@ if __name__ == '__main__':
 
         conn = boto.connect_s3(options.access_key, options.secret_key)
 
-        m3u8_obj = m3u8.load(options.input)
+        variant_m3u8 = m3u8.loads(options.input)
+        variant_m3u8.is_variant
+
+        bandwidth = 0
+        hdurl = ""
+
+        for playlist in variant_m3u8.playlists:
+            if playlist.stream_info.bandwidth > bandwidth:
+                bandwidth = playlist.stream_info.bandwidth
+                hdurl = playlist.uri
+
+        m3u8_obj = m3u8.load(hdurl)
+        #m3u8_obj = m3u8.load(options.input)
 
         # for AK live, we need to download and save the last 12 in the list
         idx = 0
