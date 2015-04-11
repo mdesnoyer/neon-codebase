@@ -175,17 +175,24 @@ class TestSQSCallbackManager(test_utils.neontest.AsyncTestCase):
         self.assertEqual(len(msgs), 0)
 
     def test_error_on_callback(self):
+        self.manager.max_callback_tries = 1
         self.mock_http_response.side_effect = [
+            self.invalid_response,
             self.invalid_response
             ]
         self.manager.add_callback_response('v1', 'http://callback1',
                                            '{"vid": 1}') 
         
-        with self.assertLogExists(logging.ERROR,
+        with self.assertLogExists(logging.WARNING,
                                   'Error sending callback for key v1'):
             self.manager.schedule_all_callbacks(['v1'])
-
         self.assertEqual(self.manager.sq.count(), 1)
+
+        # Now have there be too many errors
+        with self.assertLogExists(logging.ERROR,
+                                  'Too many errors.* v1'):
+            self.manager.schedule_all_callbacks(['v1'])
+        self.assertEqual(self.manager.sq.count(), 0)
 
     def _test_send_callback_response2(self):
         '''
