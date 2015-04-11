@@ -76,8 +76,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.callback_patcher.stop()
 
     def test_good_db_data(self, datamock):
+        datamock.InternalVideoID = neondata.InternalVideoID
         # Define platforms in the database
-
         api_key = "neonapikey"
 
         bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
@@ -87,9 +87,6 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
 
         bcPlatform.add_video(10, 'job12')
         job12 = neondata.NeonApiRequest('job12', api_key, 10)
-        bcPlatform.get_processed_internal_video_ids = MagicMock()
-        bcPlatform.get_processed_internal_video_ids.return_value = [api_key +
-                '_0', api_key + '_10'] 
 
         testPlatform = neondata.BrightcovePlatform('a2', 'i2', api_key, 
                                                    abtest=True)
@@ -98,21 +95,13 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
 
         testPlatform.add_video(2, 'job22')
         job22 = neondata.NeonApiRequest('job22', api_key, 2)
-        testPlatform.get_processed_internal_video_ids = MagicMock()
-        testPlatform.get_processed_internal_video_ids.return_value = [api_key
-        + '_1', api_key + '_2'] 
 
         apiPlatform = neondata.NeonPlatform('a3', '0', api_key, abtest=True)
         apiPlatform.add_video(4, 'job31')
         job31 = neondata.NeonApiRequest('job31', api_key, 4)
-        apiPlatform.get_processed_internal_video_ids = MagicMock()
-        apiPlatform.get_processed_internal_video_ids.return_value = [api_key +
-                '_4'] 
 
         noVidPlatform = neondata.BrightcovePlatform('a4', 'i4', api_key, 
-                                                    abtest=True)
-        noVidPlatform.get_processed_internal_video_ids = MagicMock()
-        noVidPlatform.get_processed_internal_video_ids.return_value = [] 
+                                                    abtest=True) 
         
         datamock.AbstractPlatform.get_all_instances.return_value = \
           [bcPlatform, testPlatform, apiPlatform, noVidPlatform]
@@ -121,16 +110,21 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         vid_meta = {
             api_key + '_0': neondata.VideoMetadata(
                 api_key + '_0',
-                [api_key+'_0_t01',api_key+'_0_t02',api_key+'_0_t03']),
-            api_key + '_10': neondata.VideoMetadata(api_key + '_10', []),
+                [api_key+'_0_t01',api_key+'_0_t02',api_key+'_0_t03'],
+                i_id='i1'),
+            api_key + '_10': neondata.VideoMetadata(api_key + '_10', [],
+                                                    i_id='i1'),
             api_key + '_1': neondata.VideoMetadata(api_key + '_1',
-                                                   [api_key+'_1_t11']),
+                                                   [api_key+'_1_t11'],
+                                                   i_id='i2'),
             api_key + '_2': neondata.VideoMetadata(
                 api_key + '_2',
-                [api_key+'_2_t21', api_key+'_2_t22']),
+                [api_key+'_2_t21', api_key+'_2_t22'],
+                i_id='i2'),
             api_key + '_4': neondata.VideoMetadata(
                 api_key + '_4',
-                [api_key+'_4_t41', api_key+'_4_t42'])
+                [api_key+'_4_t41', api_key+'_4_t42'],
+                i_id='0')
             }
         datamock.VideoMetadata.get_many.side_effect = \
                         lambda vids: [vid_meta[vid] for vid in vids]
@@ -184,6 +178,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertTrue(self.watcher.is_loaded.is_set())
 
     def test_serving_url_update(self, datamock):
+        datamock.InternalVideoID = neondata.InternalVideoID
         api_key = "neonapikey"
 
         bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
@@ -191,16 +186,14 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         bcPlatform.add_video(0, 'job11')
         job11 = neondata.NeonApiRequest('job11', api_key, 0, 
                                         't', 't', 'r', 'h')
-        bcPlatform.get_processed_internal_video_ids = MagicMock()
-        bcPlatform.get_processed_internal_video_ids.return_value = [api_key +
-                '_0'] 
 
         datamock.AbstractPlatform.get_all_instances.return_value = \
           [bcPlatform]
         vid_meta = {
             api_key + '_0': neondata.VideoMetadata(api_key + '_0',
                                                    [api_key+'_0_t01',
-                                                    api_key+'_0_t02']),
+                                                    api_key+'_0_t02'],
+                                                    i_id='i1'),
             }
         datamock.VideoMetadata.get_many.side_effect = \
                         lambda vids: [vid_meta[vid] for vid in vids]
@@ -220,7 +213,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                       (120, 90): 't01_120.jpg'},
             api_key+'_0_t02' : { (800, 600): 't02_800.jpg',
                       (120, 90): 't02_120.jpg'}}
-        datamock.ThumbnailServingURLs.get_all.return_value = [
+        datamock.ThumbnailServingURLs.get_many.return_value = [
             neondata.ThumbnailServingURLs(k, v) for k, v in
             serving_urls.iteritems()
             ]
@@ -250,6 +243,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                           'tai11': 'acct2'})
 
     def test_account_default_thumb_update(self, datamock):
+        datamock.InternalVideoID = neondata.InternalVideoID
         a1 = neondata.NeonUserAccount('a1', 'acct1')
         a1.default_thumbnail_id = 'a1_NOVIDEO_tdef'
         a2 = neondata.NeonUserAccount('a2', 'acct2')
@@ -287,13 +281,14 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                          (640, 480))
 
     def test_connection_error(self, datamock):
-        datamock.ThumbnailServingURLs.get_all.side_effect = \
+        datamock.AbstractPlatform.get_all_instances.side_effect = \
           redis.ConnectionError
 
         with self.assertRaises(redis.ConnectionError):
             self.watcher._process_db_data()
 
     def test_video_metadata_missing(self, datamock):
+        datamock.InternalVideoID = neondata.InternalVideoID
         api_key = 'apikey'
         bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
                 abtest=True)
@@ -301,9 +296,6 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         bcPlatform.add_video('10', 'job12')
         job11 = neondata.NeonApiRequest('job11', api_key, 0)
         job12 = neondata.NeonApiRequest('job12', api_key, 10)
-        bcPlatform.get_processed_internal_video_ids = MagicMock()
-        bcPlatform.get_processed_internal_video_ids.return_value = [api_key +
-                '_0', api_key + '_10'] 
         
         datamock.AbstractPlatform.get_all_instances.return_value = \
           [bcPlatform]
@@ -320,6 +312,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertTrue(self.watcher.is_loaded.is_set())
 
     def test_thumb_metadata_missing(self, datamock):
+        datamock.InternalVideoID = neondata.InternalVideoID
         api_key = 'apikey'
         bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key,  
                 abtest=True)
@@ -328,19 +321,17 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         job11 = neondata.NeonApiRequest('job11', api_key, 0)
         job12 = neondata.NeonApiRequest('job12', api_key, 1)
         
-        bcPlatform.get_processed_internal_video_ids = MagicMock()
-        bcPlatform.get_processed_internal_video_ids.return_value = [api_key +
-                '_0', api_key + '_1'] 
-        
         datamock.AbstractPlatform.get_all_instances.return_value = \
           [bcPlatform]
 
         vid_meta = {
             api_key + '_0': neondata.VideoMetadata(
                 api_key+ '_0',
-                [api_key+'_0_t01',api_key+'_0_t02',api_key+'_0_t03']),
+                [api_key+'_0_t01',api_key+'_0_t02',api_key+'_0_t03'],
+                i_id='i1'),
             api_key + '_1': neondata.VideoMetadata(api_key + '_1',
-                                                   [api_key+'_1_t11']),
+                                                   [api_key+'_1_t11'],
+                                                   i_id='i1'),
             }
         datamock.VideoMetadata.get_many.side_effect = \
                         lambda vids: [vid_meta[vid] for vid in vids]
@@ -374,6 +365,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertTrue(self.watcher.is_loaded.is_set())
 
     def test_serving_disabled(self, datamock):
+        datamock.InternalVideoID = neondata.InternalVideoID
         api_key = "neonapikey"
 
         bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
@@ -381,9 +373,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         bcPlatform.add_video(0, 'job11')
         job11 = neondata.NeonApiRequest('job11', api_key, 0, 
                                         't', 't', 'r', 'h')
-        bcPlatform.get_processed_internal_video_ids = MagicMock()
-        bcPlatform.get_processed_internal_video_ids.return_value = [api_key +
-                '_0', api_key + '_1'] 
+        bcPlatform.add_video(1, 'job12')
+        job12 = neondata.NeonApiRequest('job11', api_key, '1')
 
         datamock.AbstractPlatform.get_all_instances.return_value = \
           [bcPlatform]
@@ -391,9 +382,11 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         vid_meta = {
             api_key + '_0': neondata.VideoMetadata(api_key + '_0',
                                                    [api_key+'_0_t01',
-                                                    api_key+'_0_t02']),
+                                                    api_key+'_0_t02'],
+                                                    i_id='i1'),
             api_key + '_1': neondata.VideoMetadata(api_key + '_1', 
-                                                   [api_key+'_1_t11']),
+                                                   [api_key+'_1_t11'],
+                                                   i_id='i1'),
             }
         datamock.VideoMetadata.get_many.side_effect = \
                         lambda vids: [vid_meta[vid] for vid in vids]
@@ -435,11 +428,197 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
 
         # Finally, disable the account and make sure that there are no
         # directives
-        # TODO(mdesnoyer): Re-enable this check
         bcPlatform.serving_enabled = False
         self.watcher._process_db_data()
-        #self.assertEquals(len([x for x in self.mastermind.get_directives()]),
-        #                  0)
+        self.assertEquals(len([x for x in self.mastermind.get_directives()]),
+                          0)
+
+class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
+    def setUp(self):
+        # Start a database
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+        
+        # Mock out the callback manager
+        self.callback_patcher = patch(
+            'mastermind.server.utils.sqsmanager.CustomerCallbackManager')
+        self.callback_mock = MagicMock()
+        self.callback_patcher.start().return_value = \
+          self.callback_mock
+        
+        self.mastermind = mastermind.core.Mastermind()
+        self.directive_publisher = mastermind.server.DirectivePublisher(
+            self.mastermind)
+        self.watcher = mastermind.server.VideoDBWatcher(
+            self.mastermind,
+            self.directive_publisher)
+        logging.getLogger('mastermind.server').reset_sample_counters()
+
+        # Setup a simple account in the database
+        self.acct = neondata.NeonUserAccount('acct1', 'key1')
+
+        # Setup api request
+        self.job = neondata.NeonApiRequest('job1', 'key1', 'vid1')
+        self.job.save()
+
+        # Create a video with a couple of thumbs in the database
+        self.vid = neondata.VideoMetadata('key1_vid1', request_id='job1',
+                                          tids=['key1_vid1_t1', 'key1_vid1_t2'],
+                                          i_id='i1')
+        self.vid.save()
+        self.platform = neondata.BrightcovePlatform('acct1', 'i1', 'key1',
+                                                    abtest=True)
+        self.platform.add_video('vid1', self.vid.job_id)
+        self.platform.save()
+        self.acct.add_platform(self.platform)
+        self.acct.save()
+        self.thumbs =  [
+            neondata.ThumbnailMetadata('key1_vid1_t1', 'key1_vid1',
+                                       ttype='random'),
+            neondata.ThumbnailMetadata('key1_vid1_t2', 'key1_vid1',
+                                       ttype='neon')]
+        neondata.ThumbnailMetadata.save_all(self.thumbs)
+        neondata.ThumbnailServingURLs.save_all([
+            neondata.ThumbnailServingURLs('key1_vid1_t1',
+                                          {(160, 90) : 't1.jpg'}),
+            neondata.ThumbnailServingURLs('key1_vid1_t2',
+                                          {(160, 90) : 't2.jpg'})])
+        neondata.TrackerAccountIDMapper(
+            'tai1', 'key1', neondata.TrackerAccountIDMapper.PRODUCTION).save()
+        neondata.ExperimentStrategy('key1').save()
+
+        # Run a process cycle and then turn on the subscriptions
+        self.watcher._process_db_data()
+        self.watcher.subscribe_to_db_changes()
+
+    def tearDown(self):
+        self.mastermind.wait_for_pending_modifies()
+        self.watcher.__del__()
+        self.redis.stop()
+        self.callback_patcher.stop()
+
+    def wait_for_video_updates(self):
+        self.watcher.wait_for_queued_videos(3.0)
+        self.watcher.wait_for_video_processing(5.0)
+
+    def parse_directives(self):
+        return dict((x[0], dict(x[1]))
+                    for x in self.mastermind.get_directives())
+
+    def test_add_default_thumb_to_account(self):
+        default_acct_thumb = neondata.ThumbnailMetadata('key1_NOVIDEO_t0',
+                                                        'key1_NOVIDEO',
+                                                        ttype='default',
+                                                        rank=0)
+        default_acct_thumb.save()
+        neondata.ThumbnailServingURLs('key1_NOVIDEO_t0',
+                                      {(160, 90) : 't_default.jpg'}).save()
+        self.acct.default_thumbnail_id = 'key1_NOVIDEO_t0'
+        self.acct.default_size = (640, 480)
+        self.acct.save()
+
+        self.assertWaitForEquals(
+            lambda: self.directive_publisher.default_thumbs['key1'],
+            'key1_NOVIDEO_t0')
+        self.assertEquals(self.directive_publisher.default_sizes['key1'],
+                          [640,480])
+        self.assertEquals(mastermind.server.unpack_obj(
+            self.directive_publisher.serving_urls['key1_NOVIDEO_t0']),
+            {(160, 90) : 't_default.jpg'})
+
+        # Now remove the default thumb and make sure it disapears
+        self.acct.default_thumbnail_id = None
+        self.acct.save()
+
+        self.assertWaitForEquals(
+            lambda: 'key1' in self.directive_publisher.default_thumbs,
+            False)
+
+    def test_turn_off_serving(self):
+        self.platform.serving_enabled = False
+        self.platform.save()
+
+        self.wait_for_video_updates()
+
+        self.assertNotIn('key1', self.watcher._account_subscribers)
+        self.assertEquals(len([x for x in self.mastermind.get_directives()]),
+                          0)
+
+    def test_add_new_video(self):
+        thumb = neondata.ThumbnailMetadata('key1_vid2_t1', 'key1_vid2',
+                                           ttype='random')
+        thumb.save()
+        vid = neondata.VideoMetadata('key1_vid2', request_id='job2',
+                                     tids=['key1_vid2_t1'],
+                                     i_id='i1')
+        vid.save()
+        self.platform.add_video('vid2', vid.job_id)
+        self.platform.save()
+
+        self.wait_for_video_updates()
+
+        directives = self.parse_directives()
+        self.assertEquals(len(directives), 2)
+        self.assertEquals(directives[('key1', 'key1_vid2')],
+                          {'key1_vid2_t1': 1.0})
+
+    def test_modify_video(self):
+        # First modify the video by adding a thumbnail
+        new_thumb = neondata.ThumbnailMetadata('key1_vid1_t3', 'key1_vid1',
+                                               ttype='centerframe')
+        new_thumb.save()
+        self.vid.thumbnail_ids.append(new_thumb.key)
+        self.vid.save()
+
+        self.wait_for_video_updates()
+        self.assertEquals(
+            self.parse_directives(),
+            {('key1', 'key1_vid1') : { 'key1_vid1_t1': 0.99,
+                                       'key1_vid1_t2': 0.01,
+                                       'key1_vid1_t3': 0.0}})
+                          
+
+        # Next modify a thumbnail
+        new_thumb.type = neondata.ThumbnailType.RANDOM
+        new_thumb.rank = -1
+        new_thumb.save()
+
+        self.wait_for_video_updates()
+        self.assertEquals(
+            self.parse_directives(),
+            {('key1', 'key1_vid1') : { 'key1_vid1_t1': 0.0,
+                                       'key1_vid1_t2': 0.01,
+                                       'key1_vid1_t3': 0.99}})
+
+    def test_change_experiment_strategy(self):
+        neondata.ExperimentStrategy('key1', exp_frac=0.1).save()
+
+        def _parse_directives():
+            return dict((x[0], dict(x[1]))
+                        for x in self.mastermind.get_directives())
+        self.assertWaitForEquals(
+            self.parse_directives,
+            {('key1', 'key1_vid1') : { 'key1_vid1_t1': 0.9,
+                                       'key1_vid1_t2': 0.1}})
+
+    def test_add_tracker_id(self):
+        neondata.TrackerAccountIDMapper(
+            'tai2', 'key1', neondata.TrackerAccountIDMapper.STAGING).save()
+
+        self.assertWaitForEquals(
+            lambda : self.directive_publisher.tracker_id_map['tai2'], 
+            'key1')
+
+    def test_change_serving_urls(self):
+        neondata.ThumbnailServingURLs('key1_vid1_t1',
+                                      {(160, 90) : 't1.jpg',
+                                       (640, 480) : '640.jpg'}).save()
+        self.assertWaitForEquals(
+            lambda: mastermind.server.unpack_obj(
+                self.directive_publisher.serving_urls['key1_vid1_t1']),
+            {(160, 90) : 't1.jpg', (640, 480) : '640.jpg'})
+
+        # TODO: Test deleting the serving url
         
 
 class SQLWrapper(object):
@@ -1689,7 +1868,6 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.sqlite_connect_patcher.stop()
         options._set('mastermind.server.serving_update_delay',
                      self.old_serving_update_delay)
-        self.redis.stop()
         self.directive_publisher.stop()
         self.video_watcher.stop()
         self.stats_watcher.stop()
@@ -1706,9 +1884,11 @@ class SmokeTesting(test_utils.neontest.TestCase):
         if os.path.exists(f):
             os.remove(f)
         del self.mastermind
-        self.directive_publisher.join(2)
         self.video_watcher.join(2)
+        self.video_watcher.__del__()
+        self.directive_publisher.join(2)
         self.stats_watcher.join(2)
+        self.redis.stop()
         super(SmokeTesting, self).tearDown()
 
     def _add_hbase_entry(self, timestamp, thumb_id, il=None, iv=None, ic=None,
@@ -1744,7 +1924,8 @@ class SmokeTesting(test_utils.neontest.TestCase):
         
         # Create a video with a couple of thumbs in the database
         vid = neondata.VideoMetadata('key1_vid1', request_id='job1',
-                                     tids=['key1_vid1_t1', 'key1_vid1_t2'])
+                                     tids=['key1_vid1_t1', 'key1_vid1_t2'],
+                                     i_id='i1')
         vid.save()
         platform = neondata.BrightcovePlatform('acct1', 'i1', 'key1',
                                                abtest=True)
@@ -1789,12 +1970,13 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self._add_hbase_entry(1405372146, 'key1_vid1_t2', iv=1, ic=1)
 
         # set the db update delay to 0
-        with options._set_bounded('mastermind.server.serving_update_delay', 0):
+        with options._set_bounded('mastermind.server.publishing_period', 1.0):
             # Now start all the threads
             self.video_watcher.start()
-            self.video_watcher.wait_until_loaded()
+            self.video_watcher.wait_until_loaded(5.0)
+            self.video_watcher.subscribe_to_db_changes()
             self.stats_watcher.start()
-            self.stats_watcher.wait_until_loaded()
+            self.stats_watcher.wait_until_loaded(5.0)
             self.directive_publisher.start()
 
             time.sleep(1) # Make sure that the directive publisher gets busy
@@ -1811,6 +1993,30 @@ class SmokeTesting(test_utils.neontest.TestCase):
             # check the DB to ensure it has changed
             req = neondata.VideoMetadata.get_video_request('key1_vid1')
             self.assertEqual(req.state, neondata.RequestState.SERVING)
+
+            # Trigger a new video via a push
+            job = neondata.NeonApiRequest('job2', 'key1', 'vid2')
+            job.state = neondata.RequestState.FINISHED 
+            job.save()
+        
+            # Create a video with a couple of thumbs in the database
+            vid = neondata.VideoMetadata('key1_vid2', request_id='job2',
+                                         tids=['key1_vid2_t1'],
+                                         i_id='i1')
+            vid.save()
+            platform.add_video('vid2', vid.job_id)
+            platform.save()
+            thumbs =  [neondata.ThumbnailMetadata('key1_vid2_t1', 'key1_vid2',
+                                                  ttype='neon')]
+            neondata.ThumbnailMetadata.save_all(thumbs)
+            neondata.ThumbnailServingURLs.save_all([
+                neondata.ThumbnailServingURLs('key1_vid2_t1',
+                                              {(160, 90) : 't21.jpg'})])
+
+            self.assertWaitForEquals(
+                lambda: 'key1_vid2' in \
+                self.directive_publisher.last_published_videos,
+                True)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

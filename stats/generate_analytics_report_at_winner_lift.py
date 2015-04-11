@@ -229,12 +229,23 @@ def collect_stats(thumb_info, video_info,
         # Put the type and rank columns in the index
         subcols = thumb_stats[[x for x in thumb_stats.columns if x not in 
                                ['type', 'rank']]]
+        if len(subcols) == 1:
+            # Setting the index directly gets messed up when there is only one row
+            idx = pandas.pandas.MultiIndex.from_tuples(
+                [(thumb_stats['type'][0],
+                  thumb_stats['rank'][0], 
+                  thumb_stats.index[0])],
+                names=['type', 'rank', 'thumbnail_id'])
+        elif len(subcols) == 0:
+            continue
+        else:
+            idx = [thumb_stats['type'],
+                   thumb_stats['rank'],
+                   thumb_stats.index]
         thumb_stats = pandas.DataFrame(
             subcols.values,
             columns=subcols.columns,
-            index=[thumb_stats['type'],
-                   thumb_stats['rank'],
-                   thumb_stats.index]).sortlevel()
+            index=idx).sortlevel()
 
         video_data[(video.integration_id, video_id)] = thumb_stats
 

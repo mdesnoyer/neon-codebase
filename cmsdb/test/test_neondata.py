@@ -2,13 +2,14 @@
 
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
                                          '..'))
-if sys.path[0] <> base_path:
-        sys.path.insert(0,base_path)
+if sys.path[0] != __base_path__:
+        sys.path.insert(0, __base_path__)
 
 import copy
 from concurrent.futures import Future
+import contextlib
 import logging
 _log = logging.getLogger(__name__)
 import json
@@ -20,12 +21,14 @@ import redis
 import random
 import socket
 import string
+import subprocess
 import test_utils.neontest
 import test_utils.redis
 import time
 import threading
 from tornado.httpclient import HTTPResponse, HTTPRequest
 import tornado.ioloop
+import utils.neon
 from utils.options import options
 from utils.imageutils import PILImageUtils
 import unittest
@@ -53,6 +56,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.maxDiff = 5000
 
     def tearDown(self):
+        neondata.PubSubConnection.clear_singleton_instance()
         self.redis.stop()
         super(TestNeondata, self).tearDown()
 
@@ -299,7 +303,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         np.add_video('dummyv', 'dummyjob')
         np.add_video('vid1', 'job1')
         np.save()
-        AbstractPlatform.delete_all_video_related_data(np, 'vid1')
+        NeonPlatform.delete_all_video_related_data(np, 'vid1')
         
         # check the keys have been deleted
         self.assertIsNone(NeonApiRequest.get('job1', na.neon_api_key))
@@ -396,6 +400,17 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                          'http://this.jpg')
 
     def test_too_many_open_connections_sync(self):
+        self.maxDiff = 10000
+
+        def _get_open_connection_list():
+            fd_list = subprocess.check_output(
+                ['lsof', '-a', '-d0-65535', 
+                 '-p', str(os.getpid())]).split('\n')
+            fd_list = [x.split() for x in fd_list if x]
+            return [x for x in fd_list if 
+                    x[7] == 'TCP' and 'localhost:%d' % self.redis.port in x[8]]
+                
+        
         # When making calls on various objects, there should only be
         # one connection per object type to the redis server. We're
         # just going to make sure that that is the case
@@ -422,7 +437,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             obj.save()
 
             # Now find the number of open file descriptors
-            start_fd_count = len(os.listdir("/proc/%s/fd" % os.getpid()))
+            start_fd_list = _get_open_connection_list()
 
             def nop(x): pass
 
@@ -431,8 +446,10 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                 read_func(obj)
 
             # Check the file descriptors
-            end_fd_count = len(os.listdir("/proc/%s/fd" % os.getpid()))
-            self.assertEqual(start_fd_count, end_fd_count)
+            end_fd_list = _get_open_connection_list()
+            if len(start_fd_list) != len(end_fd_list):
+                # This will give us more information if it fails
+                self.assertEqual(start_fd_list, end_fd_list)
     
     def test_processed_internal_video_ids(self):
         na = NeonUserAccount('accttest')
@@ -537,61 +554,12 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         Test the get_winner_tid logic for a given video id
 
         '''
-        acc_id = 'acct1'
-        na = NeonUserAccount(acc_id)
-        na.save()
-        vid = InternalVideoID.generate(na.neon_api_key, 'vid1')
-        
-        #Set experiment strategy
-        es = ExperimentStrategy(na.neon_api_key)
-        es.chosen_thumb_overrides = True
-        es.override_when_done = True
-        es.save()
-        
-        #Save thumbnails 
-        thumbs = [
-            ThumbnailMetadata('t1', vid, ['t1.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.8),
-            ThumbnailMetadata('t2', vid, ['t2.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.15),
-            ThumbnailMetadata('t3', vid, ['t3.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.01),
-            ThumbnailMetadata('t4', vid, ['t4.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.04),
-            ThumbnailMetadata('t5', vid, ['t5.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.0)
-            ]
-        ThumbnailMetadata.save_all(thumbs)
-        
-        #Save VideoMetadata
-        tids = [thumb.key for thumb in thumbs]
-        v0 = VideoMetadata(vid, tids, 'reqid0', 'v0.mp4', 0, 0, None, 0, None,
-                            True, ExperimentState.COMPLETE)
-        v0.save()
-        
-        #Set up Serving URLs (2 per tid)
-        for thumb in thumbs:
-            inp = ThumbnailServingURLs('%s_%s' % (vid, thumb.key))
-            inp.add_serving_url('http://servingurl_800_600.jpg', 800, 600) 
-            inp.add_serving_url('http://servingurl_120_90.jpg', 120, 90) 
-            inp.save()
-
-        winner_tid = v0.get_winner_tid()     
-        self.assertEqual(winner_tid, 't1')
-
-        # Case 2: chosen_thumb_overrides is False (holdback state)
-        es.chosen_thumb_overrides = False
-        es.override_when_done = False
-        es.exp_frac = 0.2
-        es.save()
-        winner_tid = v0.get_winner_tid()     
-        self.assertEqual(winner_tid, 't1')
-    
-        # Case 3: Experiement is in experimental state
-        es.exp_frac = es.holdback_frac = 0.8
-        es.save()
-        winner_tid = v0.get_winner_tid()     
-        self.assertEqual(winner_tid, 't1')
+        vid = InternalVideoID.generate('acct1', 'vid1')
+        video_meta = VideoMetadata(vid, ['acct1_vid1_t1', 'acct1_vid1_t2'],
+                                    'reqid0','v0.mp4')
+        video_meta.save()
+        neondata.VideoStatus(vid, winner_tid='acct1_vid1_t2').save()
+        self.assertEquals(video_meta.get_winner_tid(), 'acct1_vid1_t2')
 
     def test_video_metadata_methods(self):
         '''
@@ -774,7 +742,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                           'rgkAluxK9pAC26XCRusctnSfWwzrujq9cTRdmrNpWU4.')
         self.assertEquals(
             obj.get_id(),
-            'dhfaagb0z0h6n685ntysas00_e38ef7abba4c9102b26feb90bc5df3a8')
+            ('e38ef7abba4c9102b26feb90bc5df3a8', 'dhfaagb0z0h6n685ntysas00'))
 
     def test_neonplatform_account_backwards_compatibility(self):
         json_str = "{\"integration_id\": \"0\", \"account_id\": \"161\", \"videos\": {}, \"abtest\": false, \"neon_api_key\": \"hzxts57y7ywcl9onl811b0p4\", \"key\": \"neonplatform_hzxts57y7ywcl9onl811b0p4_0\"}"
@@ -853,348 +821,285 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                               ExperimentStrategy.get('not_in_db',
                                                      log_missing=False))
 
-class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
-    def setUp(self):
-        super(TestDbConnectionHandling, self).setUp()
-        self.connection_patcher = patch('cmsdb.neondata.blockingRedis.StrictRedis')
+    class ChangeTrap:
+        '''Helper class to test subscribing to changes.'''
+        def __init__(self):
+            self.args = []
+            self._event = threading.Event()
 
-        # For the sake of this test, we will only mock the get() function
-        mock_redis = self.connection_patcher.start()
-        self.mock_responses = MagicMock()
-        mock_redis().get.side_effect = self._mocked_get_func
+        def _handler(self, *args):
+            '''Handler function to give to the subscribe_to_changes'''
+            self.args.append(args)
+            self._event.set()
 
-        self.valid_obj = TrackerAccountIDMapper("tai1", "api_key")
+        def reset(self):
+            self.args = []
+                
+        def subscribe(self, cls, pattern='*'):
+            self.reset()
+            cls.subscribe_to_changes(self._handler, pattern)
 
-        # Speed up the retry delays to make the test faster
-        self.old_delay = options.get('cmsdb.neondata.baseRedisRetryWait')
-        options._set('cmsdb.neondata.baseRedisRetryWait', 0.01)
+        def unsubscribe(self, cls, pattern='*'):
+            cls.unsubscribe_from_changes(pattern)
 
-    def tearDown(self):
-        self.connection_patcher.stop()
-        DBConnection.clear_singleton_instance()
-        options._set('cmsdb.neondata.baseRedisRetryWait',
-                     self.old_delay)
-        super(TestDbConnectionHandling, self).tearDown()
+        def wait(self, timeout=1.0):
+            '''Wait for an event (or timeout) and return the mock.'''
+            self._event.wait(timeout)
+            self._event.clear()
+            return self.args
+            
+    def test_subscribe_to_changes(self):
+        trap = TestNeondata.ChangeTrap()
 
-    def _mocked_get_func(self, key, callback=None):
-        if callback:
-            self.io_loop.add_callback(callback, self.mock_responses(key))
-        else:
-            return self.mock_responses(key)
+        # Try a pattern
+        trap.subscribe(VideoMetadata, 'acct1_*')
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        video_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
 
-    def test_async_good_connection(self):
-        self.mock_responses.side_effect = [self.valid_obj.to_json()]
+
+        # Try subscribing to a specific key
+        trap.subscribe(ThumbnailMetadata, 'acct1_vid2_t3')
+        thumb_meta = ThumbnailMetadata('acct1_vid2_t3', width=654)
+        thumb_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1_vid2_t3', thumb_meta, 'set'))
+
+        # Try doing a namespaced object
+        trap.subscribe(NeonUserAccount, 'acct1')
+        acct_meta = NeonUserAccount('a1', 'acct1', default_size=[45,98])
+        acct_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1', acct_meta, 'set'))
+
+    def test_subscribe_changes_to_video_and_thumbs(self):
+        vid_trap = TestNeondata.ChangeTrap()
+        thumb_trap = TestNeondata.ChangeTrap()
+
+        vid_trap.subscribe(VideoMetadata, 'acct1_*')
+        thumb_trap.subscribe(ThumbnailMetadata, 'acct1_vid1_*')
+        vid_meta = VideoMetadata('acct1_vid1', request_id='req1',
+                                 tids=['acct1_vid1_t1'])
+        vid_meta.save()
+        thumb_meta = ThumbnailMetadata('acct1_vid1_t1', width=654)
+        thumb_meta.save()
+
+        vid_events = vid_trap.wait()
+        thumb_events = thumb_trap.wait()
+
+        self.assertEquals(len(vid_events), 1)
+        self.assertEquals(vid_events[0], ('acct1_vid1', vid_meta, 'set'))
+        self.assertEquals(len(thumb_events), 1)
+        self.assertEquals(thumb_events[0],
+                          ('acct1_vid1_t1', thumb_meta, 'set'))
+
+    def test_subscribe_to_changes_with_modifies(self):
+        trap = TestNeondata.ChangeTrap()
         
-        TrackerAccountIDMapper.get("tai1", callback=self.stop)
-        found_obj = self.wait()
+        trap.subscribe(VideoMetadata, 'acct1_*')
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        video_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
 
-        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
+        # Now do a modify that changes the object. Should see a new event
+        def _set_experiment_state(x):
+            x.experiment_state = ExperimentState.RUNNING
 
-    def test_sync_good_connection(self):
-        self.mock_responses.side_effect = [self.valid_obj.to_json()]
+        VideoMetadata.modify('acct1_vid1', _set_experiment_state)
+        events = trap.wait()
+        self.assertEquals(len(events), 2)
+        self.assertEquals(events[-1][1].experiment_state,
+                          ExperimentState.RUNNING)
+
+        # Modify again and we should not see a change event
+        VideoMetadata.modify('acct1_vid1', _set_experiment_state)
+        events = trap.wait(0.2)
+        self.assertEquals(len(events), 2)
+
+        # Do a modify that creates a new, default
+        VideoMetadata.modify('acct1_vid3', lambda x: x)
+        new_vid = VideoMetadata.modify('acct1_vid2', lambda x: x,
+                                       create_missing=True)
+        events = trap.wait()
+        self.assertEquals(len(events), 3)
+        self.assertEquals(events[-1], ('acct1_vid2', new_vid, 'set'))
+
+    def test_subscribe_api_request_changes(self):
+        bc_trap = TestNeondata.ChangeTrap()
+        generic_trap = TestNeondata.ChangeTrap()
+
+        bc_trap.subscribe(neondata.BrightcoveApiRequest, '*')
+        generic_trap.subscribe(NeonApiRequest)
+
+        # Test a Brightcove request
+        neondata.BrightcoveApiRequest('jobbc', 'acct1').save()
+        bc_events = bc_trap.wait()
+        all_events = generic_trap.wait()
+        self.assertEquals(len(bc_events), 1)
+        self.assertEquals(len(all_events), 1)
+        self.assertEquals(bc_events[0][1].job_id, 'jobbc')
+        self.assertEquals(all_events[0][1].job_id, 'jobbc')
+
+        # Now try a Neon request. the BC one shouldn't be listed
+        NeonApiRequest('jobneon', 'acct1').save()
+        all_events = generic_trap.wait()
+        bc_events = bc_trap.wait(0.1)
+        self.assertEquals(len(bc_events), 1)
+        self.assertEquals(len(all_events), 2)
+        self.assertEquals(all_events[1][1].job_id, 'jobneon')
+
+
+    def test_subscribe_platform_changes(self):
+        trap = TestNeondata.ChangeTrap()
+        trap.subscribe(AbstractPlatform)
+
+        neondata.BrightcovePlatform('a1', 'bc', 'acct1').save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertIsInstance(events[0][1], BrightcovePlatform)
+
+        neondata.NeonPlatform('a1', 'neon', 'acct1').save()
+        events = trap.wait()
+        self.assertEquals(len(events), 2)
+        self.assertIsInstance(events[-1][1], NeonPlatform)
+
+        neondata.YoutubePlatform('a1', 'yt', 'acct1').save()
+        events = trap.wait()
+        self.assertEquals(len(events), 3)
+        self.assertIsInstance(events[-1][1], YoutubePlatform)
+
+        neondata.OoyalaPlatform('a1', 'oo', 'acct1').save()
+        events = trap.wait()
+        self.assertEquals(len(events), 4)
+        self.assertIsInstance(events[-1][1], OoyalaPlatform)
+
+    def test_unsubscribe_changes(self):
+        plat_trap = TestNeondata.ChangeTrap()
+        plat_trap.subscribe(AbstractPlatform)
+        request_trap = TestNeondata.ChangeTrap()
+        request_trap.subscribe(NeonApiRequest)
+        video_trap = TestNeondata.ChangeTrap()
+        video_trap.subscribe(VideoMetadata, 'acct1_*')
+
+        # Make sure all the subscriptions are working
+        neondata.BrightcovePlatform('a1', 'bc', 'acct1').save()
+        plat_trap.wait()
+        neondata.NeonPlatform('a1', 'neon', 'acct1').save()
+        plat_trap.wait()
+        neondata.YoutubePlatform('a1', 'yt', 'acct1').save()
+        plat_trap.wait()
+        neondata.OoyalaPlatform('a1', 'oo', 'acct1').save()
+        plat_trap.wait()
+        self.assertEquals(len(plat_trap.args), 4)
+        plat_trap.reset()
         
-        found_obj = TrackerAccountIDMapper.get("tai1")
+        neondata.BrightcoveApiRequest('jobbc', 'acct1').save()
+        request_trap.wait()
+        NeonApiRequest('jobneon', 'acct1').save()
+        request_trap.wait()
+        self.assertEquals(len(request_trap.args), 2)
+        request_trap.reset()
 
-        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
+        VideoMetadata('acct1_vid1', request_id='req1').save()
+        video_trap.wait()
+        self.assertEquals(len(video_trap.args), 1)
+        video_trap.reset()
 
-    def test_async_some_errors(self):
-        self.mock_responses.side_effect = [
-            redis.ConnectionError("Connection Error"),
-            redis.BusyLoadingError("Loading Error"),
-            socket.timeout("Socket Timeout"),
-            socket.error("Socket Error"),
-            self.valid_obj.to_json()
-            ]
+        # Now unsubscribe and make changes
+        plat_trap.unsubscribe(AbstractPlatform)
+        request_trap.unsubscribe(NeonApiRequest)
+        video_trap.unsubscribe(VideoMetadata, 'acct1_*')
 
-        TrackerAccountIDMapper.get("tai1", callback=self.stop)
+        neondata.BrightcovePlatform('a1', 'bc', 'acct2').save()
+        neondata.NeonPlatform('a1', 'neon', 'acct2').save()
+        neondata.YoutubePlatform('a1', 'yt', 'acct2').save()
+        neondata.OoyalaPlatform('a1', 'oo', 'acct2').save()
+        neondata.BrightcoveApiRequest('jobbc', 'acct2').save()
+        NeonApiRequest('jobneon', 'acct2').save()
+        VideoMetadata('acct1_vid2', request_id='req1').save()
 
-        with self.assertLogExists(logging.ERROR, 'Connection Error'):
-            with self.assertLogExists(logging.ERROR, 'Loading Error'):
-                with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
-                    with self.assertLogExists(logging.ERROR, 'Socket Error'):
-                        found_obj = self.wait()
+        # Now resubscribe and see the changes
+        plat_trap.subscribe(AbstractPlatform)
+        request_trap.subscribe(NeonApiRequest)
+        video_trap.subscribe(VideoMetadata, 'acct1_*')
 
-        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
-
-    def test_sync_some_errors(self):
-        self.mock_responses.side_effect = [
-            redis.ConnectionError("Connection Error"),
-            redis.BusyLoadingError("Loading Error"),
-            socket.timeout("Socket Timeout"),
-            socket.error("Socket Error"),
-            self.valid_obj.to_json()
-            ]
-
-        with self.assertLogExists(logging.ERROR, 'Connection Error'):
-            with self.assertLogExists(logging.ERROR, 'Loading Error'):
-                with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
-                    with self.assertLogExists(logging.ERROR, 'Socket Error'):
-                        found_obj =  TrackerAccountIDMapper.get("tai1")
-
-        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
-
-    def test_async_too_many_errors(self):
-        self.mock_responses.side_effect = [
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            ]
-
-        TrackerAccountIDMapper.get("tai1", callback=self.stop)
+        neondata.BrightcovePlatform('a1', 'bc', 'acct3').save()
+        plat_trap.wait()
+        neondata.NeonPlatform('a1', 'neon', 'acct3').save()
+        plat_trap.wait()
+        neondata.YoutubePlatform('a1', 'yt', 'acct3').save()
+        plat_trap.wait()
+        neondata.OoyalaPlatform('a1', 'oo', 'acct3').save()
+        plat_trap.wait()
+        self.assertEquals(len(plat_trap.args), 4)
         
-        with self.assertRaises(redis.ConnectionError):
-            self.wait()
+        neondata.BrightcoveApiRequest('jobbc', 'acct3').save()
+        request_trap.wait()
+        NeonApiRequest('jobneon', 'acct3').save()
+        request_trap.wait()
+        self.assertEquals(len(request_trap.args), 2)
 
-    def test_sync_too_many_errors(self):
-        self.mock_responses.side_effect = [
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            ]
+        VideoMetadata('acct1_vid3', request_id='req1').save()
+        video_trap.wait()
+        self.assertEquals(len(video_trap.args), 1)
+
+    def test_subscribe_changes_after_db_connection_loss(self):
+        trap = TestNeondata.ChangeTrap()
         
-        with self.assertRaises(redis.ConnectionError):
-            TrackerAccountIDMapper.get("tai1")
+        # Try initial change
+        trap.subscribe(VideoMetadata, 'acct1_*')
+        trap.subscribe(VideoMetadata, 'acct2_*')
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        video_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
+        trap.reset()
+        video_meta2 = VideoMetadata('acct2_vid1', request_id='req2')
+        video_meta2.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct2_vid1', video_meta2, 'set'))
+        trap.reset()
 
-    # TODO(mdesnoyer): Add test for the modify if there is a failure
-    # on one of the underlying commands.
+        # Now unsubscribe from account 2
+        trap.unsubscribe(VideoMetadata, 'acct2_*')
 
-class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
-    '''
-    Thumbnail ID Mapper and other thumbnail helper class tests 
-    '''
-    def setUp(self):
-        super(TestThumbnailHelperClass, self).setUp()
+        # Now force a connection loss by stopping the server
+        self.redis.stop(clear_singleton=False)
+        self.assertWaitForEquals(
+            lambda: neondata.PubSubConnection.get(VideoMetadata).connected, False)
+
+        # Start a new server
         self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
+        self.redis.start(clear_singleton=False)
+        self.assertWaitForEquals(
+            lambda: neondata.PubSubConnection.get(VideoMetadata).connected, True)
 
-        self.image = PILImageUtils.create_random_image(360, 480)
-
-    def tearDown(self):
-        self.redis.stop()
-        super(TestThumbnailHelperClass, self).tearDown()
-
-    def test_thumbnail_mapper(self):
-        ''' Thumbnail mappings '''
-
-        url = "http://thumbnail.jpg"
-        vid = "v123"
-        image = PILImageUtils.create_random_image(360, 480)
-        tid = ThumbnailID.generate(image, vid)
-    
-        tdata = ThumbnailMetadata(tid, vid, [], 0, 480, 360,
-                        "ttype", 0, 1, 0)
-        tdata.save()
-        tmap = ThumbnailURLMapper(url, tid)
-        tmap.save()
-        
-        res_tid = ThumbnailURLMapper.get_id(url)
-        self.assertEqual(tid, res_tid)
-
-    def test_thumbnail_get_data(self):
-
-        vid = InternalVideoID.generate('api1', 'vid1')
-        tid = ThumbnailID.generate(self.image, vid)
-        tdata = ThumbnailMetadata(tid, vid, ['one.jpg', 'two.jpg'],
-                                  None, self.image.size[1], self.image.size[0],
-                                  'brightcove', 1.0, '1.2')
-        tdata.save()
-        self.assertEqual(tdata.get_account_id(), 'api1')
-        self.assertEqual(ThumbnailMetadata.get_video_id(tid), vid)
-        self.assertEqual(tdata.rank, 0)
-        self.assertEqual(tdata.urls, ['one.jpg', 'two.jpg'])
-
-    def test_atomic_modify(self):
-        vid = InternalVideoID.generate('api1', 'vid1')
-        tid = ThumbnailID.generate(self.image, vid)
-        tdata = ThumbnailMetadata(tid, vid, ['one.jpg', 'two.jpg'],
-                                  None, self.image.size[1], self.image.size[0],
-                                  'brightcove', 1.0, '1.2')
-        tdata.save()
-
-        thumb = ThumbnailMetadata.modify(tid,
-                                         lambda x: x.urls.append('url3.jpg'))
-        self.assertItemsEqual(thumb.urls, ['one.jpg', 'two.jpg', 'url3.jpg'])
-        self.assertItemsEqual(ThumbnailMetadata.get(tid).urls,
-                              ['one.jpg', 'two.jpg', 'url3.jpg'])
-
-        # Now try asynchronously
-        def setphash(thumb): thumb.phash = 'hash'
-        def setrank(thumb): thumb.rank = 6
-
-        counters = [1, 2]
-        def wrapped_callback(param):
-            counters.pop()
-            self.stop()
-
-        ThumbnailMetadata.modify(tid, setphash, callback=wrapped_callback)
-        ThumbnailMetadata.modify(tid, setrank, callback=wrapped_callback)
-        
-        # if len(counters) is not 0, call self.wait() to service the other
-        # callbacks  
-        while len(counters) > 0:
-            self.wait()
-
-        thumb = ThumbnailMetadata.get(tid)
-        self.assertEqual(thumb.phash, 'hash')
-        self.assertEqual(thumb.rank, 6)
-        self.assertItemsEqual(thumb.urls,
-                              ['one.jpg', 'two.jpg', 'url3.jpg'])
-
-    def test_atomic_modify_many(self):
-        vid1 = InternalVideoID.generate('api1', 'vid1')
-        tid1 = ThumbnailID.generate(self.image, vid1)
-        tdata1 = ThumbnailMetadata(tid1, vid1, ['one.jpg', 'two.jpg'],
-                                   None, self.image.size[1],
-                                   self.image.size[0],
-                                   'brightcove', 1.0, '1.2')
-        vid2 = InternalVideoID.generate('api1', 'vid2')
-        tid2 = ThumbnailID.generate(self.image, vid2)
-        tdata2 = ThumbnailMetadata(tid2, vid2, ['1.jpg', '2.jpg'],
-                                   None, self.image.size[1],
-                                   self.image.size[0],
-                                   'brightcove', 1.0, '1.2')
-        self.assertFalse(tdata2.chosen)
-        self.assertFalse(tdata1.chosen)
-        self.assertTrue(tdata2.enabled)
-        self.assertTrue(tdata1.enabled)
-
-        ThumbnailMetadata.save_all([tdata1, tdata2])
-
-        def _change_thumb_data(d):
-            d[tid1].chosen = True
-            d[tid2].enabled = False
-
-        updated = ThumbnailMetadata.modify_many([tid1, tid2],
-                                                _change_thumb_data)
-        self.assertTrue(updated[tid1].chosen)
-        self.assertFalse(updated[tid2].chosen)
-        self.assertTrue(updated[tid1].enabled)
-        self.assertFalse(updated[tid2].enabled)
-        self.assertTrue(ThumbnailMetadata.get(tid1).chosen)
-        self.assertFalse(ThumbnailMetadata.get(tid2).chosen)
-        self.assertTrue(ThumbnailMetadata.get(tid1).enabled)
-        self.assertFalse(ThumbnailMetadata.get(tid2).enabled)
-
-    def test_create_or_modify(self):
-        vid1 = InternalVideoID.generate('api1', 'vid1')
-        tid1 = ThumbnailID.generate(self.image, vid1)
-        self.assertIsNone(ThumbnailMetadata.get(tid1))
-
-        ThumbnailMetadata.modify(tid1,
-                                 lambda x: x.urls.append('http://image.jpg'),
-                                 create_missing=True)
-
-        val = ThumbnailMetadata.get(tid1)
-        self.assertIsNotNone(val)
-        self.assertEqual(val.urls, ['http://image.jpg'])
-
-    @tornado.testing.gen_test
-    def test_create_or_modify_async(self):
-        vid1 = InternalVideoID.generate('api1', 'vid1')
-        tid1 = ThumbnailID.generate(self.image, vid1)
-        self.assertIsNone(ThumbnailMetadata.get(tid1))
-
-        yield tornado.gen.Task(
-            ThumbnailMetadata.modify,
-            tid1,
-            lambda x: x.urls.append('http://image.jpg'),
-            create_missing=True)
-
-        val = ThumbnailMetadata.get(tid1)
-        self.assertIsNotNone(val)
-        self.assertEqual(val.urls, ['http://image.jpg'])
-
-    def test_create_or_modify_many(self):
-        vid1 = InternalVideoID.generate('api1', 'vid1')
-        tid1 = ThumbnailID.generate(self.image, vid1)
-        tdata1 = ThumbnailMetadata(tid1, vid1, ['one.jpg', 'two.jpg'],
-                                   None, self.image.size[1],
-                                   self.image.size[0],
-                                   'brightcove', 1.0, '1.2')
-        tdata1.save()
-
-        vid2 = InternalVideoID.generate('api1', 'vid2')
-        tid2 = ThumbnailID.generate(self.image, vid2)
-        self.assertIsNone(ThumbnailMetadata.get(tid2))
-
-        def _add_thumb(d):
-            for thumb in d.itervalues():
-                thumb.urls.append('%s.jpg' % thumb.key)
-
-        ThumbnailMetadata.modify_many(
-            [tid1, tid2],
-            _add_thumb,
-            create_missing=True)
-
-        self.assertEqual(ThumbnailMetadata.get(tid1).urls,
-                         ['one.jpg', 'two.jpg', '%s.jpg' % tid1])
-        self.assertEqual(ThumbnailMetadata.get(tid2).urls,
-                         ['%s.jpg' % tid2])
-
-    @tornado.testing.gen_test
-    def test_create_or_modify_many_async(self):
-        vid1 = InternalVideoID.generate('api1', 'vid1')
-        tid1 = ThumbnailID.generate(self.image, vid1)
-        tdata1 = ThumbnailMetadata(tid1, vid1, ['one.jpg', 'two.jpg'],
-                                   None, self.image.size[1],
-                                   self.image.size[0],
-                                   'brightcove', 1.0, '1.2')
-        tdata1.save()
-
-        vid2 = InternalVideoID.generate('api1', 'vid2')
-        tid2 = ThumbnailID.generate(self.image, vid2)
-        self.assertIsNone(ThumbnailMetadata.get(tid2))
-
-        def _add_thumb(d):
-            for thumb in d.itervalues():
-                thumb.urls.append('%s.jpg' % thumb.key)
-
-        yield tornado.gen.Task(
-            ThumbnailMetadata.modify_many,
-            [tid1, tid2],
-            _add_thumb,
-            create_missing=True)
-
-        self.assertEqual(ThumbnailMetadata.get(tid1).urls,
-                         ['one.jpg', 'two.jpg', '%s.jpg' % tid1])
-        self.assertEqual(ThumbnailMetadata.get(tid2).urls,
-                         ['%s.jpg' % tid2])
-        
-
-    def test_read_thumbnail_old_format(self):
-        # Make sure that we're backwards compatible
-        thumb = ThumbnailMetadata._create('2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15', json.loads("{\"video_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001\", \"thumbnail_metadata\": {\"chosen\": false, \"thumbnail_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\", \"model_score\": 4.1698684091322846, \"enabled\": true, \"rank\": 5, \"height\": 232, \"width\": 416, \"model_version\": \"20130924\", \"urls\": [\"https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg\"], \"created_time\": \"2013-12-02 09:55:19\", \"type\": \"neon\", \"refid\": null}, \"key\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\"}"))
-
-        self.assertEqual(thumb.key, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15')
-        self.assertEqual(thumb.video_id, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001')
-        self.assertEqual(thumb.chosen, False)
-        self.assertAlmostEqual(thumb.model_score, 4.1698684091322846)
-        self.assertEqual(thumb.enabled, True)
-        self.assertEqual(thumb.rank, 5)
-        self.assertEqual(thumb.height, 232)
-        self.assertEqual(thumb.width, 416)
-        self.assertEqual(thumb.model_version, '20130924')
-        self.assertEqual(thumb.type, 'neon')
-        self.assertEqual(thumb.created_time, '2013-12-02 09:55:19')
-        self.assertIsNone(thumb.refid)
-        self.assertEqual(thumb.urls, ["https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg"])
-        
-        with self.assertRaises(AttributeError):
-            thumb.thumbnail_id
-        
+        # Now change the video and make sure we get the event for
+        # account 1, but not 2
+        video_meta.serving_enabled=False
+        video_meta2.save()
+        video_meta.serving_enabled=False
+        video_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
+            
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()
         self.connection_patcher = patch('cmsdb.neondata.blockingRedis.StrictRedis')
 
         # For the sake of this test, we will only mock the get() function
-        mock_redis = self.connection_patcher.start()
+        self.mock_redis = self.connection_patcher.start()
         self.mock_responses = MagicMock()
-        mock_redis().get.side_effect = self._mocked_get_func
+        self.mock_redis().get.side_effect = self._mocked_get_func
 
         self.valid_obj = TrackerAccountIDMapper("tai1", "api_key")
 
@@ -1214,6 +1119,19 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
             self.io_loop.add_callback(callback, self.mock_responses(key))
         else:
             return self.mock_responses(key)
+
+    def test_subscribe_connection_error(self):
+        self.mock_redis().pubsub().psubscribe.side_effect = [
+            redis.exceptions.ConnectionError(),
+            socket.gaierror()]
+        
+        with self.assertLogExists(logging.ERROR, 'Error subscribing'):
+            with self.assertRaises(neondata.DBConnectionError):
+                NeonUserAccount.subscribe_to_changes(lambda x,y,z: x)
+
+        with self.assertLogExists(logging.ERROR, 'Socket error subscribing'):
+            with self.assertRaises(neondata.DBConnectionError):
+                NeonUserAccount.subscribe_to_changes(lambda x,y,z: x)
 
     def test_async_good_connection(self):
         self.mock_responses.side_effect = [self.valid_obj.to_json()]
@@ -1242,7 +1160,7 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
         TrackerAccountIDMapper.get("tai1", callback=self.stop)
 
         with self.assertLogExists(logging.ERROR, 'Connection Error'):
-            with self.assertLogExists(logging.ERROR, 'Loading Error'):
+            with self.assertLogExists(logging.WARN, 'Redis is busy'):
                 with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
                     with self.assertLogExists(logging.ERROR, 'Socket Error'):
                         found_obj = self.wait()
@@ -1259,7 +1177,7 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
             ]
 
         with self.assertLogExists(logging.ERROR, 'Connection Error'):
-            with self.assertLogExists(logging.ERROR, 'Loading Error'):
+            with self.assertLogExists(logging.WARN, 'Redis is busy'):
                 with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
                     with self.assertLogExists(logging.ERROR, 'Socket Error'):
                         found_obj =  TrackerAccountIDMapper.get("tai1")
@@ -1846,4 +1764,5 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
     
 
 if __name__ == '__main__':
+    utils.neon.InitNeon()
     unittest.main()
