@@ -45,20 +45,21 @@ class RedisServer:
         if self.port is None:
             self.port = net.find_free_port()
 
-    def start(self):
+    def start(self, clear_singleton=True):
         ''' Start on a random port and set cmsdb.neondata.dbPort '''
 
         # Clear the singleton instance
         # This is required so that we can use a new connection(port) 
-        neondata.DBConnection.clear_singleton_instance()
-        neondata.PubSubConnection.clear_singleton_instance()
+        if clear_singleton:
+            neondata.DBConnection.clear_singleton_instance()
+            neondata.PubSubConnection.clear_singleton_instance()
 
         self.config_file = tempfile.NamedTemporaryFile()
         self.config_file.write('port %i\n' % self.port)
         self.config_file.write('notify-keyspace-events Kgsz$')
         self.config_file.flush()
 
-        _log.info('Redis server on port %i' % self.port)
+        _log.info('Redis server started on port %i' % self.port)
 
         self.proc = subprocess.Popen([
             '/usr/bin/env', 'redis-server',

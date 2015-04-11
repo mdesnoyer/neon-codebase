@@ -85,6 +85,7 @@ define('async_pool_size', type=int, default=10,
        help='Number of processes that can talk simultaneously to the db')
 
 statemon.define('subscription_errors', int)
+statemon.define('pubsub_errors', int)
 
 #constants 
 BCOVE_STILL_WIDTH = 480
@@ -494,6 +495,7 @@ class PubSubConnection(threading.Thread):
                            (self.__class__.__name__, e))
                 time.sleep((1<<error_count) * 1.0)
                 error_count += 1
+                statemon.state.increment('pubsub_errors')
 
                 # Force reconnection
                 #if self.pubsub.connection is None:

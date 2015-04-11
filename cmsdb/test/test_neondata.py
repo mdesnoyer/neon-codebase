@@ -303,7 +303,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         np.add_video('dummyv', 'dummyjob')
         np.add_video('vid1', 'job1')
         np.save()
-        AbstractPlatform.delete_all_video_related_data(np, 'vid1')
+        NeonPlatform.delete_all_video_related_data(np, 'vid1')
         
         # check the keys have been deleted
         self.assertIsNone(NeonApiRequest.get('job1', na.neon_api_key))
@@ -1047,7 +1047,29 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         VideoMetadata('acct1_vid3', request_id='req1').save()
         video_trap.wait()
         self.assertEquals(len(video_trap.args), 1)
+
+    def test_subscribe_changes_after_db_connection_loss(self):
+        trap = TestNeondata.ChangeTrap()
         
+        # Try initial change
+        trap.subscribe(VideoMetadata, 'acct1_*')
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        video_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
+        trap.reset()
+
+        # Now force a connection loss by stopping the server
+        self.redis.stop()
+        self.redis.start(clear_singleton=False)
+
+        # Now change the video and make sure we get the event
+        video_meta.serving_enabled=False
+        video_meta.save()
+        events = trap.wait(3.0)
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
             
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
