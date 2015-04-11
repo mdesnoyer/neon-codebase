@@ -448,9 +448,10 @@ class PubSubConnection(threading.Thread):
         DO NOT CALL THIS DIRECTLY. Use the get() function instead
         '''
         super(PubSubConnection, self).__init__()
-        host, port = _get_db_address(class_name)
-        self._client = blockingRedis.StrictRedis(host, port)
-        self._pubsub = self._client.pubsub(ignore_subscribe_messages=False)
+        self.class_name = class_name
+        self._client = None
+        self._pubsub = None
+        self.connected = False
 
         self._publock = threading.RLock()
         self._running = threading.Event()
@@ -461,18 +462,45 @@ class PubSubConnection(threading.Thread):
         self._sub_futures = {}
         self._unsub_futures = {}
 
+        # The channels subscribed to. pattern => function
+        self._channels = {}
+
+        self.connect()
+
         self.daemon = True
 
     def __del__(self):
         self.close()
         self.stop()
 
+    def connect(self):
+        '''Connects to the database. This is a blocking call.'''
+        self.close()
+        with self._publock:
+            host, port = _get_db_address(self.class_name)
+            _log.info(
+                'Connecting to redis at %s:%s for subscriptions of class %s' %
+                (host, port, self.class_name))
+            self._client = blockingRedis.StrictRedis(host, port)
+            self._pubsub = self._client.pubsub(ignore_subscribe_messages=False)
+
+            # Re-subscribe to channels
+            for pattern, func in self._channels.items():
+                self._subscribe_impl(func, pattern)
+
+            self.connected = True
+                
+
+    def subscribed(self):
+        '''Returns true if we are subscribed to something.'''
+        return len(self._channels) > 0 or len(self._unsub_futures) > 0
+
     def run(self):
         error_count = 0
         while self._running.wait() and not self._exit:            
             try:
                 with self._publock:
-                    if not self._pubsub.subscribed:
+                    if not self.subscribed():
                         # There are no more subscriptions, so wait
                         self._running.clear()
                         continue
@@ -493,18 +521,22 @@ class PubSubConnection(threading.Thread):
                 _log.exception('Error in thread listening to objects %s. '
                            ': %s' %
                            (self.__class__.__name__, e))
+                self.connected = False
                 time.sleep((1<<error_count) * 1.0)
                 error_count += 1
                 statemon.state.increment('pubsub_errors')
 
                 # Force reconnection
-                #if self.pubsub.connection is None:
+                self.connect()
             time.sleep(0.05)
 
     def close(self):
-        if self._pubsub is not None:
-            self._pubsub.close()
-            self._pubsub = None
+        with self._publock:
+            if self._pubsub is not None:
+                self._pubsub.close()
+                self._pubsub = None
+                self._client = None
+                self.connected = False
 
     def stop(self):
         '''Stops the thread. It cannot be restarted.'''
@@ -557,8 +589,11 @@ class PubSubConnection(threading.Thread):
         func - Function to run with each data point
         pattern - Channel to subscribe to
 
-        returns
+        returns nothing
         '''
+        with self._publock:
+            self._channels[pattern] = func
+        
         pool = concurrent.futures.ThreadPoolExecutor(1)
         sub_future = yield pool.submit(
             lambda: self._subscribe_impl(func, pattern, timeout=timeout))
@@ -602,6 +637,15 @@ class PubSubConnection(threading.Thread):
 
         channel - Channel to unsubscribe from
         '''
+        with self._publock:
+            try:
+                if channel is None:
+                    self._channels = {}
+                else:
+                    del self._channels[channel]
+            except KeyError:
+                return
+            
         pool = concurrent.futures.ThreadPoolExecutor(1)
         unsub_future = yield pool.submit(
             lambda: self._unsubscribe_impl(channel, timeout))
@@ -617,6 +661,7 @@ class PubSubConnection(threading.Thread):
                     self._pubsub.punsubscribe([channel])
                 else:
                     self._pubsub.unsubscribe([channel])
+                self._running.set()
                 if channel in self._unsub_futures:
                     return self._unsub_futures[channel]
                 future = concurrent.futures.Future()
@@ -659,11 +704,12 @@ class PubSubConnection(threading.Thread):
 
         NOTE: To be only used by the test code
         '''
-        for inst in cls._singleton_instance.values():
-            if inst is not None:
-                inst.stop()
-                inst.close()
-        cls._singleton_instance = {}
+        with cls.__singleton_lock:
+            for inst in cls._singleton_instance.values():
+                if inst is not None:
+                    inst.stop()
+                    inst.close()
+            cls._singleton_instance = {}
     
 
 ##############################################################################

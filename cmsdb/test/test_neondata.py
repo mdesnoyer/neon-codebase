@@ -1053,21 +1053,41 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         
         # Try initial change
         trap.subscribe(VideoMetadata, 'acct1_*')
+        trap.subscribe(VideoMetadata, 'acct2_*')
         video_meta = VideoMetadata('acct1_vid1', request_id='req1')
         video_meta.save()
         events = trap.wait()
         self.assertEquals(len(events), 1)
         self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
         trap.reset()
+        video_meta2 = VideoMetadata('acct2_vid1', request_id='req2')
+        video_meta2.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct2_vid1', video_meta2, 'set'))
+        trap.reset()
+
+        # Now unsubscribe from account 2
+        trap.unsubscribe(VideoMetadata, 'acct2_*')
 
         # Now force a connection loss by stopping the server
-        self.redis.stop()
-        self.redis.start(clear_singleton=False)
+        self.redis.stop(clear_singleton=False)
+        self.assertWaitForEquals(
+            lambda: neondata.PubSubConnection.get(VideoMetadata).connected, False)
 
-        # Now change the video and make sure we get the event
+        # Start a new server
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start(clear_singleton=False)
+        self.assertWaitForEquals(
+            lambda: neondata.PubSubConnection.get(VideoMetadata).connected, True)
+
+        # Now change the video and make sure we get the event for
+        # account 1, but not 2
+        video_meta.serving_enabled=False
+        video_meta2.save()
         video_meta.serving_enabled=False
         video_meta.save()
-        events = trap.wait(3.0)
+        events = trap.wait()
         self.assertEquals(len(events), 1)
         self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
             
