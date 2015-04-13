@@ -25,7 +25,7 @@ import gzip
 import happybase
 import impala.dbapi
 import impala.error
-import json
+import simplejson as json
 import logging
 from mastermind.core import VideoInfo, ThumbnailInfo, Mastermind
 import multiprocessing
@@ -64,8 +64,8 @@ define('incr_stats_col_family', default='evts',
        help='Column family to grab in the incremental stats db')
 
 # Video db options
-define('video_db_polling_delay', default=261, type=float,
-       help='Number of seconds between polls of the video db')
+define('video_db_polling_delay', default=1967, type=float,
+       help='Number of seconds between batch polls of the video db')
 
 # Publishing options
 define('s3_bucket', default='neon-image-serving-directives-test',
@@ -82,27 +82,34 @@ define('serving_update_delay', type=int, default=240,
 
 # Monitoring variables
 statemon.define('time_since_stats_update', float) # Time since the last update
-statemon.define('time_since_last_batch_event', float) # Time since the most recent event in the batch db
+statemon.define('time_since_last_batch_event', float) # Time since the most recent event in the stats db
 statemon.define('time_since_publish', float) # Time since the last publish
 statemon.define('statsdb_error', int) # error connecting to the stats database
 statemon.define('incr_statsdb_error', int) # error connecting to the hbase 
+statemon.define('videodb_batch_update', int) # Count of the nubmer of batch updates from the video db
 statemon.define('videodb_error', int) # error connecting to the video DB
 statemon.define('publish_error', int) # error publishing directive to s3
 statemon.define('serving_urls_missing', int) # missing serving urls for videos
 statemon.define('account_default_serving_url_missing', int) # mising default
 statemon.define('no_videometadata', int) # mising videometadata 
+statemon.define('no_platform', int) # mising platform information 
 statemon.define('no_thumbnailmetadata', int) # mising thumb metadata 
+statemon.define('unexpected_video_handle_error', int) # Error when handling video
 statemon.define('default_serving_thumb_size_mismatch', int) # default thumb size missing 
 statemon.define('pending_modifies', int)
 statemon.define('directive_file_size', int) # file size in bytes 
 statemon.define('unexpected_callback_error', int)
 statemon.define('unexpected_db_update_error', int)
 
+statemon.define('accounts_subscribed_to', int)
+statemon.define('video_push_updates_received', int)
+statemon.define('thumbnails_serving', int)
+
 _log = logging.getLogger(__name__)
 
 def pack_obj(x):
     '''Package an object so that it is smaller in memory'''
-    return zlib.compress(pickle.dumps(x))
+    return zlib.compress(pickle.dumps(x), 4)
 
 def unpack_obj(x):
     '''Unpack an object that was compressed by pack_obj'''
@@ -159,6 +166,33 @@ class ExperimentStrategyCache(object):
         thumb = neondata.ThumbnailMetadata(thumb_id)
         return self.get(thumb.get_account_id())
 
+class VideoUpdater(threading.Thread):
+    '''This thread processes queued video changes.
+
+    We use this so that a number of changes can get merged into a
+    single update.
+    
+    '''
+    def __init__(self, video_db_watcher):
+        super(VideoUpdater, self).__init__(name='VideoUpdater')
+        self.video_db_watcher = video_db_watcher
+        self.daemon = True
+        self._stopped = threading.Event()
+
+    def run(self):
+        while not self._stopped.is_set():
+            try:
+                self.video_db_watcher.wait_for_queued_videos()
+                self.video_db_watcher.process_queued_video_updates()
+            except Exception as e:
+                _log.error('Unexpected error when processing queued video '
+                           'updates %s' % e)
+                statemon.state.increment('unexpected_video_handle_error')
+
+    def stop(self):
+        '''Stop this thread safely and allow it to finish what is is doing.'''
+        self._stopped.set()
+
 class VideoDBWatcher(threading.Thread):
     '''This thread polls the video database for changes.'''
     def __init__(self, mastermind, directive_pusher,
@@ -176,11 +210,41 @@ class VideoDBWatcher(threading.Thread):
 
         self._stopped = threading.Event()
 
+        # Objects to subscribe to changes in the database
+        self._table_subscribers = []
+        self._account_subscribers = {}
+        self._subscribe_lock = threading.RLock()
+
+        self._vid_lock = threading.RLock()
+        # Set of videos to update
+        self._vids_to_update = set()
+        self._vids_waiting = threading.Event()
+        self._vid_processing_done = threading.Event()
+        self._video_updater = VideoUpdater(self)
+        self._platform_options_lock = threading.RLock()
+        # Options for the platform
+        # (api_key, integration_id) -> (abtest, serving_enabled)
+        self._platform_options = {} 
+
+    def __del__(self):
+        self.stop()
+        del self._video_updater
+        for sub in self._table_subscribers:
+            if sub is not None:
+                sub.close()
+        for subs in self._account_subscribers.itervalues():
+            for sub in subs:
+                if sub is not None:
+                    sub.close()
+
     def run(self):
         while not self._stopped.is_set():
             try:
                 with self.activity_watcher.activate():
                     self._process_db_data()
+
+                    if not self._video_updater.is_alive():
+                        self._video_updater.start()
 
             except Exception as e:
                 _log.exception('Uncaught video DB Error: %s' % e)
@@ -189,16 +253,18 @@ class VideoDBWatcher(threading.Thread):
             # Now we wait so that we don't hit the database too much.
             self._stopped.wait(options.video_db_polling_delay)
 
-    def wait_until_loaded(self):
+    def wait_until_loaded(self, timeout=None):
         '''Blocks until the data is loaded.'''
-        self.is_loaded.wait()
+        if not self.is_loaded.wait(timeout):
+            raise TimeoutException("Waiting too long for video data to load")
 
     def stop(self):
         '''Stop this thread safely and allow it to finish what is is doing.'''
         self._stopped.set()
+        self._video_updater.stop()
 
     def _process_db_data(self):
-        _log.info('Polling the video database')
+        _log.info('Polling the video database for a full batch update')
 
         # Get an update for the tracker id map
         self.directive_pusher.update_tracker_id_map(
@@ -214,63 +280,243 @@ class VideoDBWatcher(threading.Thread):
         self.directive_pusher.update_default_thumbs(
             dict((x[0], x[2]) for x in account_tups if x[2]))
 
-        # Update the video data
+        # Update the serving urls for the default account thumbs
+        default_thumb_ids = [x[2] for x in account_tups if x[2]]
+        for url_obj in neondata.ThumbnailServingURLs.get_many(
+                default_thumb_ids):
+            if url_obj is not None:
+                self.directive_pusher.add_serving_url(
+                    url_obj.get_thumbnail_id(),
+                    url_obj.size_map)
+
+        # Update the platform, which updates the video data
         for platform in neondata.AbstractPlatform.get_all_instances():
-            # TODO(mdesnoyer): Remove this hack. it doesn't get rid of
-            # data in memory, but we avoid walking through the entire
-            # database for now.
-            if not platform.serving_enabled:
-                continue
-            
             # Update the experimental strategy for the account
             self.mastermind.update_experiment_strategy(
                 platform.neon_api_key,
                 neondata.ExperimentStrategy.get(platform.neon_api_key))
             
-            video_ids = platform.get_processed_internal_video_ids()
-            all_video_metadata = neondata.VideoMetadata.get_many(video_ids)
-            for video_id, video_metadata in zip(video_ids, all_video_metadata):
-                if video_metadata is None:
-                    statemon.state.increment('no_videometadata')
-                    _log.error('Could not find information about video %s' %
-                               video_id)
-                    continue
+            self._handle_platform_change(platform.get_id(), platform, 'set',
+                                         update_videos=False)
 
-                if (platform.serving_enabled and 
-                    video_metadata.serving_enabled):
+            # Force the videos to update
+            for internal_video_id in platform.get_internal_video_ids():
+                self._schedule_video_update(internal_video_id)
+            self.process_queued_video_updates()
 
-                    thumbnails = []
-                    data_missing = False
-                    thumbs = neondata.ThumbnailMetadata.get_many(
-                        video_metadata.thumbnail_ids)
-                    for thumb_id, meta in zip(video_metadata.thumbnail_ids,
-                                              thumbs):
-                        if meta is None:
-                            statemon.state.increment('no_thumbnailmetadata')
-                            _log.error('Could not find metadata for thumb %s' %
-                                       thumb_id)
-                            data_missing = True
-                        else:
-                            thumbnails.append(meta)
-
-                    if data_missing:
-                        continue
-
-                    self.mastermind.update_video_info(video_metadata,
-                                                      thumbnails,
-                                                      platform.abtest)
-                else:                
-                    self.mastermind.remove_video_info(video_id)
-
-        # Get an update for the serving urls
-        self.directive_pusher.update_serving_urls(
-            { thumb_id: size_map for thumb_id, size_map in
-              ((x.get_thumbnail_id(), x.size_map) for x in
-              neondata.ThumbnailServingURLs.get_all()) if
-              self.mastermind.is_serving_video(
-                  self.video_id_cache.find_video_id(thumb_id))})
-        
+        statemon.state.increment('videodb_batch_update')
         self.is_loaded.set()
+
+    def subscribe_to_db_changes(self):
+        '''Subscribe to all the changes we care about in the database.'''
+        with self._subscribe_lock:
+            self._table_subscribers.append(
+                neondata.NeonUserAccount.subscribe_to_changes(
+                    self._handle_account_change))
+
+            self._table_subscribers.append(
+                neondata.AbstractPlatform.subscribe_to_changes(
+                    self._handle_platform_change))
+
+            self._table_subscribers.append(
+                neondata.ExperimentStrategy.subscribe_to_changes(
+                    lambda key, obj, op: 
+                    self.mastermind.update_experiment_strategy(key, obj)))
+
+            self._table_subscribers.append(
+                neondata.TrackerAccountIDMapper.subscribe_to_changes(
+                    lambda key, obj, op: 
+                    self.directive_pusher.add_to_tracker_id_map(
+                        str(obj.get_tai()), str(obj.value))))
+
+            def _update_serving_url(key, obj, op):
+                if op == 'del':
+                    try:
+                        self.directive_pusher.del_serving_url(key)
+                    except KeyError:
+                        pass
+                elif op == 'set':
+                    if self.mastermind.is_serving_video(
+                            self.video_id_cache.find_video_id(key)):
+                        self.directive_pusher.add_serving_url(key,
+                                                              obj.size_map)
+            self._table_subscribers.append(
+                neondata.ThumbnailServingURLs.subscribe_to_changes(
+                _update_serving_url))
+
+            if not self._video_updater.is_alive():
+                self._video_updater.start()
+
+    def _subscribe_to_video_changes(self, account_id):
+        '''Subscribe to changes to video and thumbnail objects for a given 
+           account.
+        '''
+        with self._subscribe_lock:
+            if account_id not in self._account_subscribers:
+                thumb_pubsub = neondata.ThumbnailMetadata.subscribe_to_changes(
+                    lambda key, obj, op: self._schedule_video_update(
+                        '_'.join(key.split('_')[0:2]), is_push_update=True),
+                    pattern='%s_*' % account_id,
+                    get_object=False)
+                video_pubsub = neondata.VideoMetadata.subscribe_to_changes(
+                    lambda key, obj, op: self._schedule_video_update(
+                        key, is_push_update=True),
+                    pattern='%s_*' % account_id,
+                    get_object=False)
+                self._account_subscribers[account_id] = (video_pubsub,
+                                                         thumb_pubsub)
+                statemon.state.accounts_subscribed_to = \
+                  len(self._account_subscribers)
+
+    def _unsubscribe_from_video_changes(self, account_id):
+        '''Unsubscribe from changes to videos in a given account'''
+        pubsubs = []
+        with self._subscribe_lock:
+            try:
+                pubsubs = self._account_subscribers.pop(account_id)
+                statemon.state.accounts_subscribed_to = \
+                  len(self._account_subscribers)
+            except KeyError:
+                return
+        
+        for sub in pubsubs:
+            if sub:
+                sub.close()
+
+    def _schedule_video_update(self, video_id, is_push_update=False):
+        '''Add a video to the queue to update in the mastermind core.'''
+        if neondata.InternalVideoID.is_no_video(video_id):
+            return
+        with self._vid_lock:
+            self._vids_to_update.add(video_id)
+            self._vid_processing_done.clear()
+            self._vids_waiting.set()
+        if is_push_update:
+            statemon.state.increment('video_push_updates_received')
+
+    def _handle_platform_change(self, key, platform, operation,
+                                update_videos=True):
+        '''Handler for when a platform object changes in the database'''
+        # TODO: Handle deletion
+        if operation != 'set' or platform is None:
+            return
+
+        # If there are new settings, then trigger a bunch of updates 
+        new_options = (platform.abtest, platform.serving_enabled)
+        plat_tup = tuple(key.split('_'))
+        with self._platform_options_lock:
+            old_options = self._platform_options.get(plat_tup, None)
+            if new_options != old_options:
+                self._platform_options[plat_tup] = new_options
+            else:
+                return
+
+        if platform.serving_enabled:
+            self._subscribe_to_video_changes(platform.neon_api_key)
+        else:
+            self._unsubscribe_from_video_changes(platform.neon_api_key)
+
+        if update_videos:
+            for internal_video_id in platform.get_internal_video_ids():
+                self._schedule_video_update(internal_video_id)
+
+    def _handle_account_change(self, account_id, account, operation):
+        '''Handler for when a NeonUserAccount object changes in the database.'''
+
+        if operation == 'set' and account is not None:
+            # Subscribe to this account if we aren't subscribed yet
+            self._subscribe_to_video_changes(account_id)
+
+            # Update default size and default thumbs
+            self.directive_pusher.default_sizes[account_id] = \
+              account.default_size
+            if account.default_thumbnail_id is not None:
+                self.directive_pusher.default_thumbs[account_id] = \
+                  account.default_thumbnail_id
+            else:
+                try:
+                    del self.directive_pusher.default_thumbs[account_id]
+                except KeyError: pass
+
+    def _handle_video_update(self, video_id, video_metadata):
+        '''Processes a new video state for a single video.'''
+        if video_metadata is None:
+            statemon.state.increment('no_videometadata')
+            _log.error('Could not find information about video %s' % video_id)
+            return
+
+        try:
+            abtest, serving_enabled = self._platform_options[
+                (video_metadata.get_account_id(),
+                 str(video_metadata.integration_id))]
+        except KeyError:
+            statemon.state.increment('no_platform')
+            _log.error('Could not find platform information for video %s' %
+                       video_id)
+            return
+
+        if serving_enabled and video_metadata.serving_enabled:
+            thumbnails = []
+            thumbs = neondata.ThumbnailMetadata.get_many(
+                video_metadata.thumbnail_ids)
+            for thumb_id, meta in zip(video_metadata.thumbnail_ids, thumbs):
+                if meta is None:
+                    statemon.state.increment('no_thumbnailmetadata')
+                    _log.error('Could not find metadata for thumb %s' %
+                               thumb_id)
+                    return
+                else:
+                    thumbnails.append(meta)
+
+            serving_urls = neondata.ThumbnailServingURLs.get_many(
+                video_metadata.thumbnail_ids)
+            for url_obj in serving_urls:
+                if url_obj is not None:
+                    self.directive_pusher.add_serving_url(
+                        url_obj.get_thumbnail_id(),
+                        url_obj.size_map)
+
+            self.mastermind.update_video_info(video_metadata,
+                                              thumbnails,
+                                              abtest)
+        else:
+            self.mastermind.remove_video_info(video_id)
+            for thumb_id in video_metadata.thumbnail_ids:
+                self.directive_pusher.del_serving_url(thumb_id)
+
+    def process_queued_video_updates(self):
+        try:
+            # Get the list of video ids to process now
+            with self._vid_lock:
+                video_ids = list(self._vids_to_update)
+                self._vids_to_update = set()
+                self._vids_waiting.clear()
+
+            if len(video_ids) == 0:
+                return
+
+            _log.debug('Processing %d video updates' % len(video_ids))
+
+            for video_id, video_metadata in zip(*(
+                    video_ids,
+                    neondata.VideoMetadata.get_many(video_ids))):
+                try:
+                    self._handle_video_update(video_id, video_metadata)
+                except Exception as e:
+                    _log.error('Error when updating video %s: %s'
+                               % (video_id, e))
+                    statemon.state.increment('unexpected_video_handle_error')
+        finally:
+            with self._vid_lock:
+                if len(self._vids_to_update) == 0:
+                    self._vid_processing_done.set()
+
+    def wait_for_queued_videos(self, timeout=None):
+        return self._vids_waiting.wait(timeout)
+
+    def wait_for_video_processing(self, timeout=None):
+        return self._vid_processing_done.wait(timeout)
+        
 
 def hourtimestamp(dt):
     'Converts a datetime to a timestamp and rounds down to the nearest hour'
@@ -294,9 +540,10 @@ class StatsDBWatcher(threading.Thread):
         self.is_loaded = threading.Event()
         self._stopped = threading.Event()
 
-    def wait_until_loaded(self):
+    def wait_until_loaded(self, timeout=None):
         '''Blocks until the data is loaded.'''
-        self.is_loaded.wait()
+        if not self.is_loaded.wait(timeout):
+            raise TimeoutException("Waiting too long for stats data to load")
 
     def stop(self):
         '''Stop this thread safely and allow it to finish what is is doing.'''
@@ -712,8 +959,8 @@ class DirectivePublisher(threading.Thread):
         mastermind - The mastermind.core.Mastermind object that has the logic
         tracker_id_map - A map of tracker_id -> account_id
         serving_urls - A map of thumbnail_id -> { (width, height) -> url }
-        default_widths - A map of account_id (aka api_key) -> 
-                                             default thumbnail width
+        default_sizes - A map of account_id (aka api_key) -> 
+                                             default thumbnail (w,h)
         default_thumbs - A map of account_id (aka api_key) ->
                                              default thumbnail id
         '''
@@ -794,6 +1041,9 @@ class DirectivePublisher(threading.Thread):
     def update_tracker_id_map(self, new_map):
         with self.lock:
             self.tracker_id_map = new_map
+            
+    def add_to_tracker_id_map(self, tracker_id, account_id):
+        self.tracker_id_map[tracker_id] = account_id
 
     def update_serving_urls(self, new_map):
         with self.lock:
@@ -801,6 +1051,20 @@ class DirectivePublisher(threading.Thread):
             self.serving_urls = {}
             for k, v in new_map.iteritems():
                 self.serving_urls[k] = pack_obj(v)
+        statemon.state.thumbnails_serving = len(self.serving_urls)
+
+    def add_serving_url(self, thumbnail_id, urls):
+        with self.lock:
+            self.serving_urls[thumbnail_id] = pack_obj(urls)
+        statemon.state.thumbnails_serving = len(self.serving_urls)
+
+    def del_serving_url(self, thumbnail_id):
+        try:
+            with self.lock:
+                del self.serving_urls[thumbnail_id]
+        except KeyError as e:
+            pass
+        statemon.state.thumbnails_serving = len(self.serving_urls)
 
     def update_default_sizes(self, new_map):
         with self.lock:
@@ -1092,6 +1356,7 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
                                        activity_watcher)
         videoDbThread.start()
         videoDbThread.wait_until_loaded()
+        videoDbThread.subscribe_to_db_changes()
         statsDbThread = StatsDBWatcher(mastermind, video_id_cache,
                                        activity_watcher)
         statsDbThread.start()

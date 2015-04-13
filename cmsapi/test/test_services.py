@@ -1297,6 +1297,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertTrue(serving_url in vresponse["serving_url"])
         self.assertEqual(vresponse["winner_thumbnail"], None)
 
+    @unittest.skip('Incomplete test. TODO: fill out when Ooyala is used')
     def test_get_abtest_state(self):
         '''
         A/B test state response
@@ -1339,18 +1340,22 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         TMD = neondata.ThumbnailMetadata
         #Save thumbnails 
         thumbs = [
-            TMD('%s_t1' % i_vid, i_vid, ['t1.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.8),
-            TMD('%s_t2' % i_vid, i_vid, ['t2.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.2),
+            TMD('%s_t1' % i_vid, i_vid, ['t1.jpg']),
+            TMD('%s_t2' % i_vid, i_vid, ['t2.jpg']),
             ]
         TMD.save_all(thumbs)
+        TS = neondata.ThumbnailStatus
+        TS('%s_t1' % i_vid, 0.8, 0.02).save()
+        TS('%s_t2' % i_vid, 0.2, 0.01).save()
         
         #Save VideoMetadata
         tids = [thumb.key for thumb in thumbs]
-        v = neondata.VideoMetadata(i_vid, tids, job_id, 'v0.mp4', 0, 0,
-                None, 0, (120, 90), True, neondata.ExperimentState.COMPLETE)
+        v = neondata.VideoMetadata(i_vid, tids, job_id, 'v0.mp4')
         v.save()
+        neondata.VideoStatus(
+            i_vid,
+            experiment_state=neondata.ExperimentState.COMPLETE,
+            winner_tid=thumbs[0].key).save()
        
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos?video_id=%s'
@@ -1358,11 +1363,17 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         resp = self.get_request(url, self.api_key)
         vresponse = json.loads(resp.body)["items"][0]
 
-        expected_vresponse = neondata.VideoResponse(vid, job_id, "finished", "neon",
-                "0", title, None, None, None, thumbs, True, thumbs[0].key)
-
-        self.assertEqual(vresponse["winner_thumbnail"],
-                expected_vresponse.winner_thumbnail)
+        self.assertEqual(vresponse["winner_thumbnail"], thumbs[0].key)
+        self.assertEqual(vresponse["status"], "finished")
+        self.assertEqual(vresponse["thumbnails"][0]["thumbnail_id"],
+                         '%s_t1' % i_vid)
+        self.assertAlmostEqual(vresponse["thumbnails"][0]["serving_frac"], 0.8)
+        self.assertAlmostEqual(vresponse["thumbnails"][0]["ctr"], 0.02)
+        self.assertEqual(vresponse["thumbnails"][1]["thumbnail_id"],
+                         '%s_t2' % i_vid)
+        self.assertAlmostEqual(vresponse["thumbnails"][1]["serving_frac"], 0.2)
+        self.assertAlmostEqual(vresponse["thumbnails"][1]["ctr"], 0.01)
+        self.assertNotIn('key', vresponse["thumbnails"][0])
 
     def test_get_abtest_state(self):
         '''
@@ -1372,39 +1383,33 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.api_key = self.create_neon_account()
         
         ext_vid = 'vid1'
-        vid = neondata.InternalVideoID.generate(self.api_key, ext_vid) 
+        vid = neondata.InternalVideoID.generate(self.api_key, ext_vid)
         
-        #Set experiment strategy
-        es = neondata.ExperimentStrategy(self.api_key)
-        es.chosen_thumb_overrides = True
-        es.save()
-       
-        TMD = neondata.ThumbnailMetadata
-
         #Save thumbnails 
+        TMD = neondata.ThumbnailMetadata
         thumbs = [
             TMD('%s_t1' % vid, vid, ['t1.jpg'], None, None, None,
                               None, None, None, serving_frac=0.8),
             TMD('%s_t2' % vid, vid, ['t2.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.15),
-            TMD('%s_t3' % vid, vid, ['t3.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.01),
-            TMD('%s_t4' % vid, vid, ['t4.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.04),
+                              None, None, None, serving_frac=0.15)
             ]
         TMD.save_all(thumbs)
         
         #Save VideoMetadata
         tids = [thumb.key for thumb in thumbs]
-        v0 = neondata.VideoMetadata(vid, tids, 'reqid0', 'v0.mp4', 0, 0,
-                None, 0, (120, 90), True, neondata.ExperimentState.RUNNING)
+        v0 = neondata.VideoMetadata(vid, tids, 'reqid0', 'v0.mp4',
+                                    frame_size=(120,90))
         v0.save()
+        vid_status = neondata.VideoStatus(
+            vid,
+            experiment_state=neondata.ExperimentState.RUNNING)
+        vid_status.save()
        
         #Set up Serving URLs 
         for thumb in thumbs:
             inp = neondata.ThumbnailServingURLs('%s' % thumb.key)
-            inp.add_serving_url('http://servingurl_800_600.jpg', 800, 600) 
-            inp.add_serving_url('http://servingurl_120_90.jpg', 120, 90) 
+            inp.add_serving_url('http://%s_800_600.jpg' % thumb.key, 800, 600) 
+            inp.add_serving_url('http://%s_120_90.jpg' % thumb.key, 120, 90) 
             inp.save()
         
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
@@ -1417,13 +1422,15 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(res['state'], "running") 
         self.assertEqual(res['data'], []) 
         
-        v0.experiment_state = neondata.ExperimentState.COMPLETE
-        v0.save()
+        vid_status.experiment_state = neondata.ExperimentState.COMPLETE
+        vid_status.winner_tid = '%s_t2' % vid
+        vid_status.save()
         
         # AB test complete 
         expected_data = json.loads('{"state": "complete", "data": [{"url":\
-        "http://servingurl_800_600.jpg", "width": 800, "height": 600}, {"url":\
-        "http://servingurl_120_90.jpg", "width": 120, "height": 90}]}')
+        "http://%s_t2_800_600.jpg", "width": 800, "height": 600}, {"url":\
+        "http://%s_t2_120_90.jpg", "width": 120, "height": 90}]}' %
+            (vid, vid))
         
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                             '%s/abteststate/%s' %(self.a_id, "0", ext_vid))  
@@ -1434,7 +1441,7 @@ class TestServices(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(res['state'], "complete") 
         self.assertEqual(res['data'], expected_data['data'])
         self.assertEqual(res['original_thumbnail'],
-                            "http://servingurl_120_90.jpg")
+                            "http://%s_t2_120_90.jpg" % vid)
 
         
 

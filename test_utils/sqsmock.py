@@ -24,6 +24,8 @@ class SQSQueueMock:
     def __init__(self, filename, create=False):
         self.lock = threading.RLock()
 
+        self.attributes = {}
+
         try:
             open(filename)
         except IOError:
@@ -79,6 +81,9 @@ class SQSQueueMock:
         return True
 
     def get_messages(self, num_messages=1, visibility_timeout=None, attributes=None):
+        attributes_to_return = []
+        if attributes is not None:
+            attributes_to_return = attributes.split(',')
         messages = []
         try:
             with self.lock:
@@ -88,7 +93,13 @@ class SQSQueueMock:
         i = 0
         while i < num_messages and len(prev_data) > 0:
             try:
-                messages.append(prev_data[i])
+                msg = prev_data[i]
+                for attr in attributes_to_return:
+                    try:
+                        msg.attributes[attr] = self.attributes[attr]
+                    except KeyError:
+                        pass
+                messages.append(msg)
             except IndexError:
                 pass
             i += 1
@@ -168,6 +179,6 @@ class SQSConnectionMock:
     def delete_message(self, queue, message):
         return queue.delete_message(message)
         
-    def create_queue(self, name):
+    def create_queue(self, name, visibility_timeout=None):
         a = SQSQueueMock(name, create=True)
         return a
