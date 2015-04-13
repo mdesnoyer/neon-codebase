@@ -38,9 +38,13 @@ statemon.define('mastermind_to_isp', int)
 statemon.define('job_not_serving', int)
 statemon.define('exception_thrown', int)
 statemon.define('not_available_in_isp', int)
+statemon.define('request_not_in_db', int)
 
 import logging
 _log = logging.getLogger(__name__)
+
+class RunningTooLongError(Exception): pass
+
 
 class MyHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
     '''
@@ -131,73 +135,75 @@ def monitor_neon_pipeline():
     start_request = time.time()
 
     # Create a video request for test account
-    video_id, job_id = create_neon_api_request(options.account, options.api_key)
-    _log.info('created video request vid %s job %s' % (video_id, job_id))
+    try:
+        video_id, job_id = create_neon_api_request(options.account, options.api_key)
+        _log.info('created video request vid %s job %s' % (video_id, job_id))
 
-    # Poll the API for job request completion
-    job_serving = False
-    attempts = 0 
-    while not job_serving:
-        attempts += 1
-        request = neondata.NeonApiRequest.get(job_id, options.api_key)
-        if request:
-            _log.info("current request state is %s" % request.state)
-            if request.state == "serving":
-                job_serving = True
-                continue
-        else:
-            _log.warn("request data not found in db")
-        time.sleep(30)
-        if attempts > options.attempts_threshold:
-            statemon.state.increment('job_not_serving')
-            # cleanup
-            np = neondata.NeonPlatform.get(options.api_key, '0')
-            neondata.NeonPlatform.delete_all_video_related_data(np, video_id) 
-            return
-   
-    # time to video serving
-    video_serving = time.time() - start_request
-    statemon.state.time_to_serving = int(video_serving)
-    _log.info("video is in serving state, took %s" % video_serving)
+        # Poll the API for job request completion
+        job_serving = False
+        attempts = 0 
+        while not job_serving:
+            attempts += 1
+            request = neondata.NeonApiRequest.get(job_id, options.api_key)
+            if request:
+                _log.info("current request state is %s" % request.state)
+                if request.state == "serving":
+                    job_serving = True
+                    continue
+            else:
+                _log.warn("request data not found in db")
+                statemon.state.increment('request_not_in_db')
+                # Should we attempt to cleanup in this case ?
 
-    # TODO(Sunil): track the image creation times as well
-    # IF Serving.....
-    # Poll the DB for Thumbnail serving generation
-    #vm = neondata.VideoMetadata.get(i_vid)
-    #if vm:
-    #    thumbs = neondata.ThumbnailMetadata.get_many(vm.thumbnail_ids)
-    #    if thumbs[0]:
-    #        thumbs[0].created
+            time.sleep(30)
+            if attempts > options.attempts_threshold:
+                statemon.state.increment('job_not_serving')
+                raise RunningTooLongError
 
-    # Query ISP to get the IMG
-    isp_start = time.time()
-    isp_ready = False
-    attempts = 0
-    acct = neondata.NeonUserAccount.get(options.account, options.api_key)
-    while not isp_ready:
-        attempts += 1
-        isp_ready = image_available_in_isp(acct.tracker_account_id, video_id)
-        if not isp_ready:
-            time.sleep(15)
-        if attempts > 20: 
-            statemon.state.increment('not_available_in_isp')
-            break 
-    
-    isp_serving = time.time() - isp_start 
-    statemon.state.mastermind_to_isp = int(isp_serving)
-    _log.info("video is in ISP, took %s s from mastermind to ISP" % isp_serving)
-    
-    # Now you can delete the video from the database; Write an Internal API
-    # delete video; request; thumbnails; serving thumbs
-    
-    np = neondata.NeonPlatform.get(options.api_key, '0')
-    neondata.NeonPlatform.delete_all_video_related_data(np, video_id,
-            really_delete_keys=True)
+        # time to video serving
+        video_serving = time.time() - start_request
+        statemon.state.time_to_serving = int(video_serving)
+        _log.info("video is in serving state, took %s" % video_serving)
 
-    total_time = time.time() - start_request
-    statemon.state.total_time_to_isp = int(total_time)
+        # TODO(Sunil): track the image creation times as well
+        # IF Serving.....
+        # Poll the DB for Thumbnail serving generation
+        #vm = neondata.VideoMetadata.get(i_vid)
+        #if vm:
+        #    thumbs = neondata.ThumbnailMetadata.get_many(vm.thumbnail_ids)
+        #    if thumbs[0]:
+        #        thumbs[0].created
 
-    _log.info("total pipeline time %s" % total_time)
+        # Query ISP to get the IMG
+        isp_start = time.time()
+        isp_ready = False
+        attempts = 0
+        acct = neondata.NeonUserAccount.get(options.api_key)
+        while not isp_ready:
+            attempts += 1
+            isp_ready = image_available_in_isp(acct.tracker_account_id, video_id)
+            if not isp_ready:
+                time.sleep(15)
+            if attempts > 20: 
+                statemon.state.increment('not_available_in_isp')
+                raise RunningTooLongError
+        
+        isp_serving = time.time() - isp_start 
+        statemon.state.mastermind_to_isp = int(isp_serving)
+        _log.info("video is in ISP, took %s s from mastermind to ISP" % isp_serving)
+        
+        # Now you can delete the video from the database; Write an Internal API
+        # delete video; request; thumbnails; serving thumbs
+        
+        total_time = time.time() - start_request
+        statemon.state.total_time_to_isp = int(total_time)
+        _log.info("total pipeline time %s" % total_time)
+
+    finally:
+        # cleanup
+        np = neondata.NeonPlatform.get(options.api_key, '0')
+        neondata.NeonPlatform.delete_all_video_related_data(np, video_id,
+                really_delete_keys=True)
 
 def main():
     utils.neon.InitNeon()
