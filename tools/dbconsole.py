@@ -28,7 +28,7 @@ _log = logging.getLogger(__name__)
 from utils.options import define, options
 define("aws_region", default="us-east-1", type=str,
        help="Region to look for the production db")
-define("layer_name", default="redis", type=str,
+define("layer_name", default="dbslave", type=str,
        help="Layer shortname for the db")
 define("stack_name", default="Neon Serving Stack V2",
        help="Name of the stack")
