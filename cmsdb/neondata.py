@@ -477,7 +477,7 @@ class PubSubConnection(threading.Thread):
             address = _get_db_address(self.class_name)
             _log.info(
                 'Connecting to redis at %s for subscriptions of class %s' %
-                (self._address, self.class_name))
+                (address, self.class_name))
             self._client = blockingRedis.StrictRedis(address[0],
                                                      address[1])
             self._pubsub = self._client.pubsub(ignore_subscribe_messages=False)

@@ -146,8 +146,7 @@ def monitor_neon_pipeline():
                 job_serving = True
                 continue
         else:
-            _log.info("request data not found in db")
-            return
+            _log.warn("request data not found in db")
         time.sleep(30)
         if attempts > options.attempts_threshold:
             statemon.state.increment('job_not_serving')
@@ -174,7 +173,7 @@ def monitor_neon_pipeline():
     isp_start = time.time()
     isp_ready = False
     attempts = 0
-    acct = NeonUserAccount.get(options.account, options.api_key)
+    acct = neondata.NeonUserAccount.get(options.account, options.api_key)
     while not isp_ready:
         attempts += 1
         isp_ready = image_available_in_isp(acct.tracker_account_id, video_id)
