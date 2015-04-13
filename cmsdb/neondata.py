@@ -92,7 +92,6 @@ BCOVE_STILL_WIDTH = 480
 
 class DBStateError(ValueError):pass
 class DBConnectionError(IOError):pass
-
 def _get_db_address(class_name, is_writeable=True):
     '''Function that returns the address to the database for an object.
 
@@ -104,16 +103,17 @@ def _get_db_address(class_name, is_writeable=True):
     Returns: (host, port)
     '''
     #TODO: Add the functionlity to talk to read only database slaves
-    host = options.accountDB 
-    port = options.dbPort
+
+    # This function can get called a lot, so all the options lookups
+    # are done without introspection.
+    host = options.get('cmsdb.neondata.accountDB')
+    port = options.get('cmsdb.neondata.dbPort')
     if class_name:
         if class_name == "VideoMetadata":
-            host = options.videoDB
-            port = options.dbPort 
+            host = options.get('cmsdb.neondata.videoDB')
         elif class_name in ["ThumbnailMetadata", "ThumbnailURLMapper",
                             "ThumbnailServingURLs"]:
-            host = options.thumbnailDB 
-            port = options.dbPort 
+            host = options.get('cmsdb.neondata.thumbnailDB')
     return (host, port)
 
 def _object_to_classname(otype=None):
@@ -150,9 +150,8 @@ class DBConnection(object):
 
         DO NOT CALL THIS DIRECTLY. Use the get() function instead
         '''
-        host, port = _get_db_address(class_name)
-
-        self.conn, self.blocking_conn = RedisClient.get_client(host, port)
+        self.conn = RedisAsyncWrapper(class_name, socket_timeout=10)
+        self.blocking_conn = RedisRetryWrapper(class_name, socket_timeout=10)
 
     def fetch_keys_from_db(self, key_prefix, callback=None):
         ''' fetch keys that match a prefix '''
@@ -215,19 +214,45 @@ class RedisRetryWrapper(object):
 
     '''
 
-    def __init__(self, *args, **kwargs):
-        self.client = blockingRedis.StrictRedis(*args, **kwargs)
-        self.max_tries = options.maxRedisRetries
-        self.base_wait = options.baseRedisRetryWait
+    def __init__(self, class_name, **kwargs):
+        self.conn_kwargs = kwargs
+        self.conn_address = None
+        self.class_name = class_name
+        self.client = None
+        self.connection = None
+        self._connect()
 
-    def _get_wrapped_retry_func(self, func):
+    def _connect(self):
+        db_address = _get_db_address(self.class_name)
+        if db_address != self.conn_address:
+            # Reconnect to database because the address has changed
+            self._disconnect()
+            
+            self.connection = blockingRedis.ConnectionPool(
+                host=db_address[0], port=db_address[1],
+                **self.conn_kwargs)
+            self.client = blockingRedis.StrictRedis(
+                connection_pool=self.connection)
+            self.conn_address = db_address
+
+    def _disconnect(self):
+        if self.client is not None:
+            self.connection.disconnect()
+            self.connection = None
+            self.client = None
+            self.conn_address = None
+
+    def _get_wrapped_retry_func(self, attr):
         '''Returns an blocking retry function wrapped around the given func.
         '''
         def RetryWrapper(*args, **kwargs):
             cur_try = 0
             busy_count = 0
+            
             while True:
                 try:
+                    self._connect()
+                    func = getattr(self.client, attr)
                     return func(*args, **kwargs)
                 except redis.exceptions.BusyLoadingError as e:
                     # Redis is busy, so wait
@@ -240,11 +265,11 @@ class RedisRetryWrapper(object):
                     _log.error('Error talking to redis on attempt %i: %s' % 
                                (cur_try, e))
                     cur_try += 1
-                    if cur_try == self.max_tries:
+                    if cur_try == options.maxRedisRetries:
                         raise
 
                     # Do an exponential backoff
-                    delay = (1 << cur_try) * self.base_wait # in seconds
+                    delay = (1 << cur_try) * options.baseRedisRetryWait # in seconds
                     time.sleep(delay)
         return RetryWrapper
 
@@ -254,11 +279,12 @@ class RedisRetryWrapper(object):
         if hasattr(self.client, attr):
             if hasattr(getattr(self.client, attr), '__call__'):
                 return self._get_wrapped_retry_func(
-                    getattr(self.client, attr))
+                    attr)
                 
         raise AttributeError(attr)
 
     def pubsub(self, **kwargs):
+        self._connect()
         return self.client.pubsub(**kwargs)
 
 class RedisAsyncWrapper(object):
@@ -281,10 +307,36 @@ class RedisAsyncWrapper(object):
     _thread_pools = {}
     _pool_lock = multiprocessing.RLock()
     
-    def __init__(self, host='127.0.0.1', port=6379):
-        self.client = blockingRedis.StrictRedis(host, port, socket_timeout=10)
-        self.max_tries = options.maxRedisRetries
-        self.base_wait = options.baseRedisRetryWait
+    def __init__(self, class_name, **kwargs):
+        self.conn_kwargs = kwargs
+        self.conn_address = None
+        self.class_name = class_name
+        self.client = None
+        self.connection = None
+        self._lock = threading.RLock()
+        self._connect()
+
+    def _connect(self):
+        db_address = _get_db_address(self.class_name)
+        if db_address != self.conn_address:
+            with self._lock:
+                # Reconnect to database because the address has changed
+                self._disconnect()
+            
+                self.connection = blockingRedis.ConnectionPool(
+                    host=db_address[0], port=db_address[1],
+                    **self.conn_kwargs)
+                self.client = blockingRedis.StrictRedis(
+                    connection_pool=self.connection)
+                self.conn_address = db_address
+
+    def _disconnect(self):
+        with self._lock:
+            if self.client is not None:
+                self.connection.disconnect()
+                self.connection = None
+                self.client = None
+                self.conn_address = None
 
     @classmethod
     def _get_thread_pool(cls):
@@ -298,7 +350,7 @@ class RedisAsyncWrapper(object):
                 cls._thread_pools[os.getpid()] = pool
                 return pool
 
-    def _get_wrapped_async_func(self, func):
+    def _get_wrapped_async_func(self, attr):
         '''Returns an asynchronous function wrapped around the given func.
 
         The asynchronous call has a callback keyword added to it
@@ -331,10 +383,12 @@ class RedisAsyncWrapper(object):
                     _log.error('Error talking to redis on attempt %i: %s' % 
                                (cur_try, future.exception()))
                     cur_try += 1
-                    if cur_try == self.max_tries:
+                    if cur_try == options.maxRedisRetries:
                         raise future.exception()
 
-                    delay = (1 << cur_try) * self.base_wait # in seconds
+                    delay = (1 << cur_try) * options.baseRedisRetryWait # in seconds
+                self._connect()
+                func = getattr(self.client, attr)
                 io_loop.add_timeout(
                     time.time() + delay,
                     lambda: io_loop.add_future(
@@ -342,6 +396,8 @@ class RedisAsyncWrapper(object):
                             func, *args, **kwargs),
                         lambda x: _cb(x, cur_try, busy_count)))
 
+            self._connect()
+            func = getattr(self.client, attr)
             future = RedisAsyncWrapper._get_thread_pool().submit(
                 func, *args, **kwargs)
             io_loop.add_future(future, _cb)
@@ -352,45 +408,15 @@ class RedisAsyncWrapper(object):
         '''Allows us to wrap all of the redis-py functions.'''
         if hasattr(self.client, attr):
             if hasattr(getattr(self.client, attr), '__call__'):
-                return self._get_wrapped_async_func(
-                    getattr(self.client, attr))
+                return self._get_wrapped_async_func(attr)
                 
         raise AttributeError(attr)
     
     def pipeline(self):
         ''' pipeline '''
         #TODO(Sunil) make this asynchronous
+        self._connect()
         return self.client.pipeline()
-    
-class DBConnectionCheck(threading.Thread):
-
-    ''' Watchdog thread class to check the DB connection objects '''
-    def __init__(self):
-        super(DBConnectionCheck, self).__init__()
-        self.interval = options.watchdogInterval
-        self.daemon = True
-
-    def run(self):
-        ''' run loop ''' 
-        while True:
-            try:
-                for key, value in DBConnection._singleton_instance.iteritems():
-                    DBConnection.update_instance(key)
-                    value.blocking_conn.get("dummy")
-            except RuntimeError, e:
-                #ignore if dict size changes while iterating
-                #a new class just created its own dbconn object
-                pass
-            except Exception, e:
-                _log.exception("key=DBConnection check msg=%s"%e)
-            
-            time.sleep(self.interval)
-
-#start watchdog thread for the DB connection
-#Disable for now, some issue with connection pool, throws reconnection
-#error, I think its due to each object having too many stored connections
-#DBCHECK_THREAD = DBConnectionCheck()
-#DBCHECK_THREAD.start()
 
 def _erase_all_data():
     '''Erases all the data from the redis databases.
@@ -402,35 +428,6 @@ def _erase_all_data():
     ThumbnailMetadata._erase_all_data()
     ThumbnailURLMapper._erase_all_data()
     VideoMetadata._erase_all_data()
-
-class RedisClient(object):
-    '''
-    Static class for REDIS configuration
-    '''
-    #static variables
-    host = '127.0.0.1'
-    port = 6379
-    client = None
-    blocking_client = None
-
-    def __init__(self, host='127.0.0.1', port=6379):
-        self.client = RedisAsyncWrapper(host, port)
-        self.blocking_client = RedisRetryWrapper(host, port)
-    
-    @staticmethod
-    def get_client(host=None, port=None):
-        '''
-        return connection objects (blocking and non blocking)
-        '''
-        if host is None:
-            host = RedisClient.host 
-        if port is None:
-            port = RedisClient.port
-        
-        RedisClient.c = RedisAsyncWrapper(host, port)
-        RedisClient.bc = RedisRetryWrapper(
-                            host, port, socket_timeout=10)
-        return RedisClient.c, RedisClient.bc 
 
 class PubSubConnection(threading.Thread):
     '''Handles a pubsub connection.
@@ -452,6 +449,7 @@ class PubSubConnection(threading.Thread):
         self._client = None
         self._pubsub = None
         self.connected = False
+        self._address = None
 
         self._publock = threading.RLock()
         self._running = threading.Event()
@@ -475,13 +473,13 @@ class PubSubConnection(threading.Thread):
 
     def connect(self):
         '''Connects to the database. This is a blocking call.'''
-        self.close()
         with self._publock:
-            host, port = _get_db_address(self.class_name)
+            address = _get_db_address(self.class_name)
             _log.info(
-                'Connecting to redis at %s:%s for subscriptions of class %s' %
-                (host, port, self.class_name))
-            self._client = blockingRedis.StrictRedis(host, port)
+                'Connecting to redis at %s for subscriptions of class %s' %
+                (self._address, self.class_name))
+            self._client = blockingRedis.StrictRedis(address[0],
+                                                     address[1])
             self._pubsub = self._client.pubsub(ignore_subscribe_messages=False)
 
             # Re-subscribe to channels
@@ -489,7 +487,11 @@ class PubSubConnection(threading.Thread):
                 self._subscribe_impl(func, pattern)
 
             self.connected = True
-                
+            self._address = address
+
+    def reconnect(self):
+        self.close()
+        self.connect()
 
     def subscribed(self):
         '''Returns true if we are subscribed to something.'''
@@ -504,6 +506,9 @@ class PubSubConnection(threading.Thread):
                         # There are no more subscriptions, so wait
                         self._running.clear()
                         continue
+
+                    if self._address != _get_db_address(self.class_name):
+                        self.reconnect()
                 
                     # This will cause any callbacks that aren't
                     # subscribe/unsubscribe messages to be called.
@@ -527,7 +532,7 @@ class PubSubConnection(threading.Thread):
                 statemon.state.increment('pubsub_errors')
 
                 # Force reconnection
-                self.connect()
+                self.reconnect()
             time.sleep(0.05)
 
     def close(self):

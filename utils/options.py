@@ -221,6 +221,11 @@ class OptionParser(object):
         This is mostly a helper for debugging since pdb breaks the
         local to global name conversion. In your code, you're better
         off just doing options.local_name
+
+        The only other time you would want to call this is if you are
+        in a tight loop and want to avoid the introspection, which is
+        slow.
+        
          ''' 
         with self.__dict__['lock']:
             return self._options[global_name].value()

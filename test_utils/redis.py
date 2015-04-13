@@ -91,7 +91,7 @@ class RedisServer:
         # next test can use a new connection(port)
         if clear_singleton:
             neondata.PubSubConnection.clear_singleton_instance()
-        neondata.DBConnection.clear_singleton_instance()
+            neondata.DBConnection.clear_singleton_instance()
 
         self.config_file.close()
         options._set('cmsdb.neondata.dbPort', self.old_port)

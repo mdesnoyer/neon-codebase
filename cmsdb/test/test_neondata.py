@@ -1090,6 +1090,127 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         events = trap.wait()
         self.assertEquals(len(events), 1)
         self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
+
+    def test_subscribe_changes_db_address_change(self):
+        trap = TestNeondata.ChangeTrap()
+        
+        # Try initial change
+        trap.subscribe(VideoMetadata, 'acct1_*')
+        trap.subscribe(VideoMetadata, 'acct2_*')
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        video_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
+        trap.reset()
+        video_meta2 = VideoMetadata('acct2_vid1', request_id='req2')
+        video_meta2.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct2_vid1', video_meta2, 'set'))
+        trap.reset()
+
+        # Now unsubscribe from account 2
+        trap.unsubscribe(VideoMetadata, 'acct2_*')
+
+        # Now start a new server, which will change the connection address
+        temp_redis = test_utils.redis.RedisServer()
+        temp_redis.start(clear_singleton=False)
+        self.assertNotEquals(temp_redis.port, self.redis.port)
+        try:
+            self.assertWaitForEquals(
+            lambda: neondata.PubSubConnection.get(VideoMetadata)._address,
+                ('0.0.0.0', temp_redis.port))
+            
+            # Now change the video and make sure we get the event for
+            # account 1, but not 2
+            video_meta.serving_enabled=False
+            video_meta2.save()
+            video_meta.serving_enabled=False
+            video_meta.save()
+            events = trap.wait()
+            self.assertEquals(len(events), 1)
+            self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
+
+        finally:
+            temp_redis.stop(clear_singleton=False)
+
+        self.assertWaitForEquals(
+            lambda: neondata.PubSubConnection.get(VideoMetadata)._address,
+                ('0.0.0.0', self.redis.port))
+
+        # Now we're connected back to the first server, so make sure
+        # the state didn't get that change. We'll lose some state
+        # change, but oh well
+        self.assertTrue(VideoMetadata.get('acct1_vid1').serving_enabled)
+
+    @tornado.testing.gen_test
+    def test_async_change_db_connection(self):
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        yield tornado.gen.Task(video_meta.save)
+
+        # force a connection loss and restart. This will change the
+        # port we are talking to.
+        self.redis.stop(clear_singleton=False)
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start(clear_singleton=False)
+
+        # We won't get continuity in the database, but that's ok for this test
+        yield tornado.gen.Task(video_meta.save)
+        found_val = yield tornado.gen.Task(VideoMetadata.get, 'acct1_vid1')
+        self.assertEquals(found_val, video_meta)
+
+    def test_sync_change_db_connection(self):
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        video_meta.save()
+
+        # force a connection loss and restart. This will change the
+        # port we are talking to.
+        self.redis.stop(clear_singleton=False)
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start(clear_singleton=False)
+
+        # We won't get continuity in the database, but that's ok for this test
+        video_meta.save()
+        found_val = VideoMetadata.get('acct1_vid1')
+        self.assertEquals(found_val, video_meta)
+
+    @tornado.testing.gen_test
+    def test_async_talk_to_different_db(self):
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        yield tornado.gen.Task(video_meta.save)
+        self.assertEquals(VideoMetadata.get('acct1_vid1'), video_meta)
+
+        # Start a new database, this should cause neondata to talk to it
+        temp_redis = test_utils.redis.RedisServer()
+        temp_redis.start(clear_singleton=False)
+        try:
+            found_val = yield tornado.gen.Task(VideoMetadata.get, 'acct1_vid1')
+            self.assertIsNone(found_val)
+
+        finally:
+          temp_redis.stop(clear_singleton=False)
+
+        # Now try getting data from the original database again
+        found_val = yield tornado.gen.Task(VideoMetadata.get, 'acct1_vid1')
+        self.assertEquals(found_val, video_meta)
+
+    def test_sync_talk_to_different_db(self):
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        video_meta.save()
+        self.assertEquals(VideoMetadata.get('acct1_vid1'), video_meta)
+
+        # Start a new database, this should cause neondata to talk to it
+        temp_redis = test_utils.redis.RedisServer()
+        temp_redis.start(clear_singleton=False)
+        try:
+            self.assertIsNone(VideoMetadata.get('acct1_vid1'))
+
+        finally:
+          temp_redis.stop(clear_singleton=False)
+
+        # Now try getting data from the original database again
+        self.assertEquals(VideoMetadata.get('acct1_vid1'), video_meta)
             
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
