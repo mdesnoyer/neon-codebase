@@ -2987,16 +2987,6 @@ class NeonApiRequest(NamespacedStoredObject):
         except AttributeError:
             thumb_url = None
 
-        if thumb_url is None:
-            # Fallback to the old previous_thumbnail
-            
-            # TODO(sunil): remove this once the video api server only
-            # handles default thumbnail.
-            try:
-                thumb_url = self.previous_thumbnail
-            except AttributeError:
-                thumb_url = None
-
         if not thumb_url:
             # No default thumb to upload
             return

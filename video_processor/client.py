@@ -623,10 +623,6 @@ class VideoProcessor(object):
             raise DBError("Error writing video data to database")
         self.video_metadata = new_video_metadata
 
-        # Save the default thumbnail
-        # TODO(sunil): Remove this function once this functionality is
-        # in the video api server.
-        api_request.save_default_thumbnail(cdn_metadata)
         def _set_serving_enabled(video_obj):
             video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
         new_video_metadata = neondata.VideoMetadata.modify(

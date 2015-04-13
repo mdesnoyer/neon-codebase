@@ -357,6 +357,20 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(video.url, 'http://testurl/video.mp4')
         self.assertEquals(video.integration_id, self.na.integration_id)
         self.assertEquals(video.job_id, json.loads(response.body)['job_id'])
+    
+
+    def test_broken_default_thumb(self):
+        vals = {
+           "api_key": self.api_key, 
+           "video_url": "http://testurl/video.mp4", 
+           "video_id": 'neonapivid123',
+           "topn":2, 
+           "callback_url": "http://callback_push_url", 
+           "video_title": "test_title",
+           "default_thumbnail": "test_title",
+            }
+        response = self.make_api_request(vals)
+        self.assertEquals(response.code, 201)
 
     def test_neon_api_request_invalid_id(self):
         resp = self.add_request("neonap_-ivid123") 

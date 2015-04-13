@@ -232,7 +232,7 @@ class FairWeightedRequestQueue(object):
         
         # if priority > # of queues, then consider all priorities > len(Qs) as
         # the lowest priority
-        pindex = min(p, len(self.pqs))
+        pindex = min(p, len(self.pqs) -1)
         key = api_request.key
         item = RequestData(key, api_request)
         ret = self.pqs[pindex].put(key, item)
