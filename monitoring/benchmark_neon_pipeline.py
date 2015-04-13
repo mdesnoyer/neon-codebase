@@ -28,6 +28,8 @@ define("account", default="159", help="account id", type=str)
 define("api_key", default="3yd7b8vmrj67b99f7a8o1n30", help="api key", type=str)
 define("sleep", default=1800, help="sleep time", type=int)
 define("attempts_threshold", default=50, help="attempts", type=int)
+define("test_video", default="https://neon-test.s3.amazonaws.com/output.mp4",
+       help='Video to test with')
 
 # counters
 statemon.define('total_time_to_isp', int)
@@ -72,8 +74,7 @@ def create_neon_api_request(account_id, api_key):
     v = int(time.time())
     video_id = "test%d" % v
     video_title = "monitoring"
-    video_url = "https://dl.dropboxusercontent.com/s/r0zte3nt97zaeib/GOPR0140.MP4?dl=0&x=%s" % video_id
-    #video_url = "https://neon-test.s3.amazonaws.com/output.mp4?x=%s" % video_id
+    video_url = "%s?x=%s" % (options.test_video, video_id)
 
     data =     { 
         "video_id": video_id,
