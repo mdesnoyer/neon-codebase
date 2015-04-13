@@ -186,7 +186,9 @@ def monitor_neon_pipeline():
     # delete video; request; thumbnails; serving thumbs
     
     np = neondata.NeonPlatform.get(options.api_key, '0')
-    neondata.NeonPlatform.delete_all_video_related_data(np, video_id) 
+    neondata.NeonPlatform.delete_all_video_related_data(np, video_id,
+            really_delete_keys=True)
+
     total_time = time.time() - start_request
     statemon.state.total_time_to_isp = int(total_time)
 
