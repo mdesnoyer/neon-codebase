@@ -303,7 +303,8 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         np.add_video('dummyv', 'dummyjob')
         np.add_video('vid1', 'job1')
         np.save()
-        NeonPlatform.delete_all_video_related_data(np, 'vid1')
+        NeonPlatform.delete_all_video_related_data(np, 'vid1',
+                really_delete_keys=True)
         
         # check the keys have been deleted
         self.assertIsNone(NeonApiRequest.get('job1', na.neon_api_key))

@@ -2170,17 +2170,26 @@ class AbstractPlatform(NamespacedStoredObject):
 
     @classmethod
     def _delete_many_keys(cls, keys):
+        #TODO: (Sunil/ Mark) have individual methods in each
+        # of the stored objects to delete the keys
         db_connection = DBConnection.get(cls)
         for key in keys:
             db_connection.blocking_conn.delete(key) 
 
     @classmethod
-    def delete_all_video_related_data(cls, platform_instance, platform_vid):
+    def delete_all_video_related_data(cls, platform_instance, platform_vid,
+            *args, **kwargs):
         '''
         Delete all data related to a given video
 
         request, vmdata, thumbs, thumb serving urls
+        
+        #NOTE: Don't you dare call this method unless you really want to delete 
         '''
+        
+        do_you_want_to_delete = kwargs.get('really_delete_keys', False)
+        if do_you_want_to_delete == False:
+            return
 
         def _del_video(p_inst):
             try:
