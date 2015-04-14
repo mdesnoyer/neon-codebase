@@ -13,7 +13,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-from api.brightcove_api
+import api.brightcove_api
 import atexit
 from cmsdb import neondata
 import datetime
@@ -31,12 +31,13 @@ from utils import statemon
 define("poll_period", default=300, help="Period (s) to poll brightcove",
        type=int)
 
-statemon.define('new_images_found')
-statemon.define('cycles_complete')
-statemon.define('bc_api_clienterror')
-statemon.define('bc_api_servererror')
-statemon.define('unexpected_exception')
-statemon.define('video_not_found')
+statemon.define('new_images_found', int)
+statemon.define('cycles_complete', int)
+statemon.define('bc_api_clienterror', int)
+statemon.define('bc_api_servererror', int)
+statemon.define('unexpected_exception', int)
+statemon.define('video_not_found', int)
+statemon.define('cant_get_image', int)
 statemon.define('cycle_runtime', float)
 
 _log = logging.getLogger(__name__)
@@ -48,11 +49,24 @@ def normalize_url(url):
     parse = urlparse.urlparse(url)
     return '%s%s' % (parse.netloc, parse.path)
 
-def get_url_from_bc_response(response, image_type='thumbnail'):
-    bc_url = response.get(image_type + 'URL', None)
-    if not bc_url:
-        return response[image_type].get('remoteUrl', None)
-    return bc_url
+def get_urls_from_bc_response(response):
+    urls = []
+    for image_type in ['thumbnail', 'videoStill']:
+        urls.append(response.get(image_type + 'URL', None))
+        if response.get(image_type, None) is not None:
+            urls.append(response[image_type].get('remoteUrl', None))
+
+    return [x for x in urls if x is not None]
+
+def extract_image_info(response, field):
+    '''Extracts a list of fields from the images in the response.'''
+    vals = []
+    for image_type in ['thumbnail', 'videoStill']:
+        fields = response.get(image_type, None)
+        if fields is not None:
+            vals.append(fields.get(field, None))
+
+    return [x for x in vals if x is not None]
 
 @tornado.gen.coroutine
 def process_one_account(platform):
@@ -79,7 +93,7 @@ def process_one_account(platform):
                                            e))
         statemon.state.increment('bc_api_clienterror')
         return
-    except api.Brightcove_api.BrightcoveApiServerError as e:
+    except api.brightcove_api.BrightcoveApiServerError as e:
         _log.error('Server error calling brightcove api for account %s, '
                    'integration %s. %s' % (platform.neon_api_key,
                                            platform.integration_id,
@@ -89,19 +103,20 @@ def process_one_account(platform):
 
     for bc_video_id, data in bc_video_info.iteritems():
         # Get information from the response
-        bc_thumb_ids = [data['thumbnail']['id'], data['videoStill']['id']]
-        bc_ref_ids = [data['thumbnail']['referenceId'],
-                      data['thumbnail']['referenceId']]
-        bc_urls = [normalize_url(get_url_from_bc_response(data)),
-                   normalize_url(get_url_from_bc_response(data, 'videoStill'))]
+        bc_thumb_ids = extract_image_info(data, 'id')
+        bc_ref_ids = extract_image_info(data, 'referenceId')
+        bc_urls = [normalize_url(x) for x in get_urls_from_bc_response(data)]
 
         # Function that will set the external id in the ThumbnailMetadata
+        external_id = None
+        if len(bc_thumb_ids) > 0:
+            external_id = bc_thumb_ids[0]
         def _set_external_id(obj):
-            obj.external_id = bc_thumb_ids[0] or bc_thumb_ids[1]
+            obj.external_id = external_id
         
         # Process each video
-        video_id = InternalVideoID.generate(platform.neon_api_key,
-                                            bc_video_id)
+        video_id = neondata.InternalVideoID.generate(platform.neon_api_key,
+                                                     bc_video_id)
         vid_meta = yield tornado.gen.Task(neondata.VideoMetadata.get,
                                           video_id)
         if not vid_meta:
@@ -131,7 +146,7 @@ def process_one_account(platform):
                 if thumb.refid in bc_ref_ids:
                     found_thumb = True
 
-                    yield tornado.gen.Task(ThumbnailMetadata.modify,
+                    yield tornado.gen.Task(neondata.ThumbnailMetadata.modify,
                                            thumb.key,
                                            _set_external_id)
             else:
@@ -143,25 +158,42 @@ def process_one_account(platform):
                     
                     # Now update the external id because we didn't
                     # know about it before.
-                    yield tornado.gen.Task(ThumbnailMetadata.modify,
+                    yield tornado.gen.Task(neondata.ThumbnailMetadata.modify,
                                            thumb.key,
                                            _set_external_id)
                 
 
         if not found_thumb:
-            # Add the new thumbnail to our system
-            new_thumb = ThumbnailMetadata(
-                None,
-                ttype=neondata.ThumbnailType.BRIGHTCOVE,
-                rank = min_rank-1,
-                external_id = bc_thumb_ids[0] or bc_thumb_ids[1]
-                )
-            yield vid_meta.download_and_add_thumbnail(
-                new_thumb,
-                get_url_from_bc_response(data, 'videoStill'),
-                save_objects=True,
-                async=True)
-            statemon.state.increment('new_images_found')
+            urls = get_urls_from_bc_response(data)
+            added_image = False
+            for url in urls[::-1]:
+                # Add the new thumbnail to our system
+                try:
+                    new_thumb = neondata.ThumbnailMetadata(
+                        None,
+                        ttype=neondata.ThumbnailType.BRIGHTCOVE,
+                        rank = min_rank-1,
+                        external_id = external_id
+                        )
+                    yield vid_meta.download_and_add_thumbnail(
+                        new_thumb,
+                        url,
+                        save_objects=True,
+                        async=True)
+            
+                    _log.info(
+                        'Found new thumbnail %s for video %s at Brigthcove.' %
+                        (external_id, vid_meta.key))
+                    statemon.state.increment('new_images_found')
+                    added_image = True
+                    break
+                except IOError:
+                    # Error getting the image, so keep going
+                    pass
+            if not added_image:
+                _log.error('Could not find valid image to add to video %s. '
+                           'Tried urls %s' % (vid_meta.key, urls))
+                statemon.state.increment('cant_get_image')
             
 
 @tornado.gen.coroutine
