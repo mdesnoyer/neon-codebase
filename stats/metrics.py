@@ -64,9 +64,11 @@ def calc_lift_at_first_significant_hour(impressions, conversions):
             p_value = p_value.where(p_value > 0.5, 1 - p_value)
 
             # Find where the first hour of statististical significance is
+            #sig = p_value[(p_value > 0.95) & (cum_imp[base] > 500) & 
+            #              (cum_imp[top] > 500) & (cum_conv[base] > 5) &
+            #              (cum_conv[top] > 5)]
             sig = p_value[(p_value > 0.95) & (cum_imp[base] > 500) & 
-                          (cum_imp[top] > 500) & (cum_conv[base] > 5) &
-                          (cum_conv[top] > 5)]
+                          (cum_imp[top] > 500)]
             if len(sig) == 0:
                 # There isn't statistical significance anywhere so use
                 # the aggregate stats.
