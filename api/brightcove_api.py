@@ -816,7 +816,7 @@ class BrightcoveApi(object):
                            media_delivery='http'):
         '''Finds many video information from the brightcove request.
         Inputs:
-        video_ids - list of video ids to get info for
+        video_ids - list of brightcove video ids to get info for
         video_fields - list of video fields to populate
         media_delivery - should urls be http, http_ios or default
 
