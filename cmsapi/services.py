@@ -1063,10 +1063,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             self.api_key, vid) for vid in completed_videos] #get internal vids
 
         if len(keys) > 0:
-            video_results = yield tornado.gen.Task(
-                            neondata.VideoMetadata.get_many, keys)
+            video_results = yield [
+                tornado.gen.Task(neondata.VideoMetadata.get_many, keys),
+                tornado.gen.Task(neondata.VideoStatus.get_many, keys)]
             tids = []
-            for vresult in video_results:
+            for vresult, vstatus in zip(*video_results):
                 if vresult:
                     # extend list of tids
                     tids.extend(vresult.thumbnail_ids)
@@ -1079,27 +1080,28 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     result[vid].serving_url = yield tornado.gen.Task(
                                                 vresult.get_serving_url) 
 
-                    # If there is a winner, populate the winner thumbnail
-                    if vresult.experiment_state == \
-                        neondata.ExperimentState.COMPLETE:
-                            winner_tid = yield tornado.gen.Task(
-                                            vresult.get_winner_tid)
-                            if winner_tid:
-                                result[vid].winner_thumbnail = winner_tid
+                    # Populate the state of the video
+                    if vstatus is not None:
+                        result[vid].winner_thumbnail = vstatus.winner_tid
                 
             # Get all the thumbnail data for videos that are done
-            thumbnails = yield tornado.gen.Task(
-                            neondata.ThumbnailMetadata.get_many, tids)
-            for thumb in thumbnails:
+            thumbnail_results = yield [
+                tornado.gen.Task(neondata.ThumbnailMetadata.get_many, tids),
+                tornado.gen.Task(neondata.ThumbnailStatus.get_many, tids)]
+            for thumb, thumb_status in zip(*thumbnail_results):
                 # if thumbnail and thumb is not centerframe or random
                 if thumb and thumb.type not in [neondata.ThumbnailType.CENTERFRAME, 
                         neondata.ThumbnailType.RANDOM]:
                     vid = neondata.InternalVideoID.to_external(thumb.video_id)
-                    tdata = thumb.to_dict_for_video_response()
                     if not result.has_key(vid):
                         _log.debug("key=get_video_status_%s"
                                 " msg=video deleted %s"%(i_type, vid))
                     else:
+                        tdata = thumb.to_dict_for_video_response()
+                        tdata.update(
+                            ((k, v) for k,v in 
+                             thumb_status.__dict__.iteritems()
+                             if k != 'key'))
                         result[vid].thumbnails.append(tdata)
             
         #4. Set the default thumbnail for each of the video
@@ -1783,13 +1785,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         '''
 
         i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
-        vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
-        if not vmdata:
+        video_status = yield tornado.gen.Task(neondata.VideoStatus.get, i_vid)
+        if not video_status:
             statemon.state.increment('video_not_found')
             self.send_json_response('{"error": "vid not found"}', 400)
             return
 
-        state = vmdata.experiment_state
+        state = video_status.experiment_state
         
         response = {}
         response['state'] = state
@@ -1804,7 +1806,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             # If override == true, then pick highest
             # else filter all > exp_frac ; then max frac
 
-            winner_tid = yield tornado.gen.Task(vmdata.get_winner_tid)
+            winner_tid = video_status.winner_tid
             if winner_tid:
                 s_urls = yield tornado.gen.Task(
                     neondata.ThumbnailServingURLs.get,
@@ -1817,11 +1819,18 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     s_url['height'] = size_tup[1]
                     rdata.append(s_url)
                 response['data'] = rdata
+
+                video_meta = yield tornado.gen.Task(neondata.VideoMetadata.get,
+                                                    i_vid)
+                if not video_meta:
+                    statemon.state.increment('video_not_found')
+                    self.send_json_response('{"error": "vid not found"}', 400)
+                    return
                 
                 # Get original sized thumbnail or max resolution 
                 try:
-                    o_url = s_urls.get_serving_url(vmdata.frame_size[0],
-                        vmdata.frame_size[1])
+                    o_url = s_urls.get_serving_url(video_meta.frame_size[0],
+                        video_meta.frame_size[1])
                 except KeyError, e:
                     # TODO: get nearest to original frame_size
                     # For IGN this is sufficient, enhance this when needed
