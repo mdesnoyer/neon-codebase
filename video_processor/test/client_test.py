@@ -288,6 +288,31 @@ class TestVideoClient(test_utils.neontest.TestCase):
                  x[0].type == neondata.ThumbnailType.CENTERFRAME]), 1)
         self.assertNotIn(float('-inf'), 
                          [x[0].model_score for x in vprocessor.thumbnails])
+    
+    @unittest.skip('refactor the test')
+    def test_process_video_after_int_error(self):
+       
+        '''
+        Verify video gets in to valid state after failing a couple of times
+        and being in INT_ERROR state
+        '''
+        
+        vprocessor = self.setup_video_processor("neon", url='http://video.com')
+        self.api_request.state = neondata.RequestState.INT_ERROR
+        self.api_request.failed_count = 2
+        self.api_request.save()
+
+        vprocessor.process_video(self.test_video_file, n_thumbs=5)
+        
+        # Check that the model was called correctly
+        self.assertTrue(self.model.choose_thumbnails.called)
+        
+        api_request = neondata.NeonApiRequest.get(self.api_request.job_id,
+                                    self.na.neon_api_key)
+        self.assertEquals(api_request.state, neondata.RequestState.INT_ERROR)
+        
+        #verify video metadata has been populated
+        self.assertEqual(vprocessor.video_metadata.duration, 8.8)
 
     def test_somebody_else_processed_first(self):
         # Try when somebody else was sucessful
@@ -691,6 +716,57 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertEquals(n_thumbs[0].urls, [
             'http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
             re.sub('_', '/', n_thumbs[0].key)])
+    
+    def test_processing_after_requeue(self):
+        '''
+        Test processing video after a failed first attempt due to either internal error or
+        customer error (failed to download default thumb)
+        '''
+        
+        # create basic videometadata object 
+        video_meta = neondata.VideoMetadata(
+            self.video_id,
+            tids = [],
+            duration=97.0,
+            model_version='old_model',
+            serving_enabled=False)
+        video_meta.save()
+
+        # Write the request to the db
+        api_request = neondata.BrightcoveApiRequest(
+            'job1', self.api_key, 'vid1',
+            'some fun video',
+            'http://video.mp4', None, None, 'pubid',
+            'http://callback.com', 'int1',
+            'http://default_thumb.jpg')
+        
+        for state in [neondata.RequestState.INT_ERROR,
+                neondata.RequestState.CUSTOMER_ERROR]:
+            api_request.state = state 
+            api_request.fail_count = 1
+            api_request.save()
+
+            self.vprocessor.finalize_response()
+
+            # Make sure that the api request is updated
+            api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+            if state == neondata.RequestState.INT_ERROR:
+                self.assertEquals(api_request.state, 
+                        neondata.RequestState.FINISHED)
+            if state == neondata.RequestState.CUSTOMER_ERROR:
+                self.assertEquals(api_request.state,
+                        neondata.RequestState.CUSTOMER_ERROR)
+                # Ensure that the callback wasn't called
+                self.assertEquals(self.mock_sqs_manager().
+                          add_callback_response.call_count, 0)
+
+            # Check the video metadata in the database
+            video_data = neondata.VideoMetadata.get(self.video_id)
+            self.assertEquals(video_data.url, 'http://video.mp4')
+            self.assertEquals(video_data.integration_id, '0')
+            self.assertTrue(video_data.serving_enabled)
+            self.assertIsNotNone(video_data.serving_url)
+            self.mock_sqs_manager().add_callback_response.reset_mock() 
 
     def test_default_thumb_already_saved(self):
         # Add the video and the default thumb to the database

@@ -1324,7 +1324,9 @@ class DirectivePublisher(threading.Thread):
                             if video is not None]
             def _set_state(request_dict):
                 for obj in request_dict.itervalues():
-                    if obj is not None:
+                    # Handle customer_error videos. Don't change their states
+                    if obj is not None and obj.state not in \
+                        [neondata.RequestState.CUSTOMER_ERROR]:
                         obj.state = new_state
             neondata.NeonApiRequest.modify_many(request_keys, _set_state)
         except Exception as e:

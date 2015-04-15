@@ -56,6 +56,7 @@ statemon.define('duplicate_requests', int)
 statemon.define('add_video_error', int)
 statemon.define('dequeue_requests', int)
 statemon.define('queue_size_bytes', int) #size of the queue in bytes of video
+statemon.define('default_thumb_error', int)
 #invalid url while retrieving headers
 statemon.define('get_content_length_error', int) 
 statemon.define('job_timedout', int)
@@ -95,7 +96,7 @@ class DBCache(object):
     def get_customer_priority(cls, api_key):
         priority = 1 # by default return priority=1
         try:
-            # invalidate the cache 
+            # invalidate the cache (a very naive implementation) 
             if cls.last_priority_check + options.priority_check < time.time():
                 cls.last_priority_check = time.time()
                 cls.customer_priorities = {}
@@ -827,11 +828,35 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             return
 
         except IOError, e:
+            _log.error("IOError for video %s msg=%s" % (vid, e))
             self.send_json_response('{"error":"%s"}' % e, 400)
+            return
+        
+        except neondata.DefaultThumbDownloadError, e:
+            _log.warn("Default thumbnail download failed for vid %s" % vid)
+            statemon.state.increment('default_thumb_error')
+            def _update_state(req):
+                req.state = neondata.RequestState.CUSTOMER_ERROR
+                req.state.msg =\
+                            "failed to download default thumbnail %s" % e
+            result = yield tornado.gen.Task(
+                          neondata.NeonApiRequest.modify, api_request.job_id, 
+                          api_request.api_key,
+                          _update_state)
+            if result:
+                self.set_status(201)
+            else:
+                response_data = '{"error":"failed to update job state", '\
+                        '"job_id": "%s" }' % api_request.job_id
+                self.set_status(502)
+            
+            self.write(response_data)
+            self.finish()
+            # TODO Send callback to the client with error message
             return
 
         except Exception, e:
-            _log.exception("key=thumbnail_handler msg= %s"%e)
+            _log.exception("key=thumbnail_handler msg= %s" % e)
             self.send_json_response('{"error":"%s"}' % e, 500)
             statemon.state.increment('add_video_error')
             return

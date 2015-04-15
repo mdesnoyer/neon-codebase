@@ -507,6 +507,8 @@ class VideoProcessor(object):
         # get api request object
         somebody_else_finished = [False]
         def _flag_for_finalize(req):
+            
+
             if req.state in [neondata.RequestState.PROCESSING,
                              neondata.RequestState.SUBMIT,
                              neondata.RequestState.REQUEUED,
@@ -514,6 +516,9 @@ class VideoProcessor(object):
                              neondata.RequestState.FAILED,
                              neondata.RequestState.INT_ERROR]:
                 req.state = neondata.RequestState.FINALIZING
+            elif req.state == neondata.RequestState.CUSTOMER_ERROR:
+                # Don't change the state
+                return
             else:
                 somebody_else_finished[0] = True
         try:
@@ -623,18 +628,22 @@ class VideoProcessor(object):
             raise DBError("Error writing video data to database")
         self.video_metadata = new_video_metadata
 
+        # Save the default thumbnail
+        # A second attempt to save the default thumb
+        api_request.save_default_thumbnail(cdn_metadata)
         def _set_serving_enabled(video_obj):
             video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
         new_video_metadata = neondata.VideoMetadata.modify(
             self.video_metadata.key,
             _set_serving_enabled)
-
+        
         # Build the callback request
         cb_request = self.build_callback_request()
 
         # Tell the database that the request is done
         def _flag_request_done_in_db(request):
-            request.state = neondata.RequestState.FINISHED
+            if request.state != neondata.RequestState.CUSTOMER_ERROR:
+                request.state = neondata.RequestState.FINISHED
             request.publish_date = time.time() *1000.0
             request.response = tornado.escape.json_decode(cb_request.body)
         try:
@@ -649,7 +658,9 @@ class VideoProcessor(object):
             raise DBError("Error finishing api request")
 
         # Send callbacks and notifications
-        self.send_client_callback_response(new_video_metadata.key, cb_request)
+        # Callback is sent only if there wasn't a customer error
+        if api_request.state != neondata.RequestState.CUSTOMER_ERROR:
+            self.send_client_callback_response(new_video_metadata.key, cb_request)
         self.send_notifiction_response(api_request)
 
         _log.info('Sucessfully finalized video %s. Is has video id %s' % 

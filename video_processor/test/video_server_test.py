@@ -255,11 +255,11 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         # Mock out the image download
         self.im_download_mocker = patch(
             'utils.imageutils.PILImageUtils.download_image')
-        im_download_mock = self.im_download_mocker.start()
+        self.im_download_mock = self.im_download_mocker.start()
         self.random_image = PILImageUtils.create_random_image(480, 640)
         image_future = concurrent.futures.Future()
         image_future.set_result(self.random_image)
-        im_download_mock.return_value = image_future
+        self.im_download_mock.return_value = image_future
 
         # Mock out cloudinary
         self.cloudinary_patcher = patch('cmsdb.cdnhosting.CloudinaryHosting')
@@ -367,10 +367,18 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
            "topn":2, 
            "callback_url": "http://callback_push_url", 
            "video_title": "test_title",
-           "default_thumbnail": "test_title",
+           "default_thumbnail": "http://broken_image",
             }
+        
+        def _image_exception(*args, **kwargs):
+            raise IOError
+        self.im_download_mock.side_effect = _image_exception 
         response = self.make_api_request(vals)
         self.assertEquals(response.code, 201)
+
+        # Check video entry in DB 
+        video = neondata.VideoMetadata.get('%s_neonapivid123' % self.api_key)
+        self.assertIsNotNone(video)
 
     def test_neon_api_request_invalid_id(self):
         resp = self.add_request("neonap_-ivid123") 

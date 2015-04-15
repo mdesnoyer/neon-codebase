@@ -90,8 +90,10 @@ statemon.define('pubsub_errors', int)
 #constants 
 BCOVE_STILL_WIDTH = 480
 
+class DefaultThumbDownloadError(Exception):pass
 class DBStateError(ValueError):pass
 class DBConnectionError(IOError):pass
+
 def _get_db_address(class_name, is_writeable=True):
     '''Function that returns the address to the database for an object.
 
@@ -2062,7 +2064,9 @@ class AbstractPlatform(NamespacedStoredObject):
         i_vids = []
         processed_state = [RequestState.FINISHED, 
                             RequestState.ACTIVE,
-                            RequestState.REPROCESS, RequestState.SERVING, 
+                            RequestState.REPROCESS, 
+                            RequestState.SERVING, 
+                            RequestState.CUSTOMER_ERROR,
                             RequestState.SERVING_AND_ACTIVE]
         request_keys = [(v, self.neon_api_key) for v in
                         self.videos.values()]
@@ -2071,7 +2075,6 @@ class AbstractPlatform(NamespacedStoredObject):
             if api_request and api_request.state in processed_state:
                 i_vids.append(InternalVideoID.generate(self.neon_api_key, 
                                                         api_request.video_id)) 
-                
         return i_vids
 
     @classmethod
@@ -2824,6 +2827,7 @@ class RequestState(object):
     FINISHED   = "finished"
     SERVING    = "serving" # Thumbnails are ready to be served 
     INT_ERROR  = "internal_error" # Neon had some code error
+    CUSTOMER_ERROR = "customer_error" # customer request had a partial error 
     ACTIVE     = "active" # Thumbnail selected by editor; Only releavant to BC
     REPROCESS  = "reprocess" #new state added to support clean reprocessing
 
@@ -2860,13 +2864,23 @@ class NeonApiRequest(NamespacedStoredObject):
         self.integration_id = integration_id
         self.default_thumbnail = default_thumbnail # URL of a default thumb
 
-        #Save the request response
+        # Save the request response
         self.response = {}  
 
-        #API Method
+        # API Method
         self.api_method = None
         self.api_param  = None
         self.publish_date = None # Timestamp in ms
+       
+        # field used to store error message on partial error, explict error or 
+        # additional information about the request
+        self.msg = None
+
+    def set_message(self, msg):
+        ''' set message string 
+            @msg: string
+        '''
+        self.msg = msg
 
     @classmethod
     def key2id(cls, key):
@@ -2986,6 +3000,16 @@ class NeonApiRequest(NamespacedStoredObject):
             thumb_url = self.default_thumbnail
         except AttributeError:
             thumb_url = None
+
+        if thumb_url is None:
+            # Fallback to the old previous_thumbnail
+            
+            # TODO(sunil): remove this once the video api server only
+            # handles default thumbnail.
+            try:
+                thumb_url = self.previous_thumbnail
+            except AttributeError:
+                thumb_url = None
 
         if not thumb_url:
             # No default thumb to upload
@@ -3634,8 +3658,13 @@ class VideoMetadata(StoredObject):
                        just this object is updated along with the thumbnail
                        object.
         '''
-        image = yield utils.imageutils.PILImageUtils.download_image(image_url,
-                                                                    async=True)
+        try:
+            image = yield utils.imageutils.PILImageUtils.download_image(image_url,
+                    async=True)
+        except IOError, e:
+            _log.warn("IOError while downloading image %s" % image_url)
+            raise DefaultThumbDownloadError
+
         thumb.urls.append(image_url)
         thumb = yield self.add_thumbnail(thumb, image, cdn_metadata,
                                          save_objects, async=True)
