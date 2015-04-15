@@ -837,8 +837,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             statemon.state.increment('default_thumb_error')
             def _update_state(req):
                 req.state = neondata.RequestState.CUSTOMER_ERROR
-                req.state.msg =\
-                            "failed to download default thumbnail %s" % e
+                req.set_message("failed to download default thumbnail %s" % e)
             result = yield tornado.gen.Task(
                           neondata.NeonApiRequest.modify, api_request.job_id, 
                           api_request.api_key,
