@@ -2079,33 +2079,36 @@ class AbstractPlatform(NamespacedStoredObject):
         ''' ovp string '''
         raise NotImplementedError
 
+
     @classmethod
-    def get_all_instances(cls, callback=None):
+    def get_all(cls, callback=None):
         '''Returns a list of all the platform instances from the db.'''
         instances = []
-        instances.extend(NeonPlatform.get_all_instances())
-        instances.extend(BrightcovePlatform.get_all_instances())
-        instances.extend(OoyalaPlatform.get_all_instances())
+        if callback:
+            lock = threading.RLock()
+            call_counter = [4]
+            def _process_instances(x):
+                instances.extend(x)
+                with lock:
+                    call_counter[0] -= 1
+                    if call_counter[0] == 0:
+                        callback(instances)
+            NeonPlatform.get_all(_process_instances)
+            BrightcovePlatform.get_all(_process_instances)
+            OoyalaPlatform.get_all(_process_instances)
+            YoutubePlatform.get_all(_process_instances)
+            return
+        else:
+            instances.extend(NeonPlatform.get_all())
+            instances.extend(BrightcovePlatform.get_all())
+            instances.extend(OoyalaPlatform.get_all())
+            instances.extend(YoutubePlatform.get_all())
         return instances
 
     @classmethod
-    def _get_all_instances_impl(cls, callback=None):
+    def _get_all_impl(cls, callback=None):
         '''Implements get_all_instances for a single platform type.'''
-        platforms = cls.get_all_platform_data()
-        instances = [] 
-        for pdata in platforms:
-            platform = None
-            
-            try:
-                obj_dict = json.loads(pdata)
-                platform = cls._create(obj_dict['key'], obj_dict)
-            except ValueError, e:
-                pass
-
-            if platform:
-                instances.append(platform)
-
-        return instances
+        return super(AbstractPlatform, cls).get_all(callback=callback)
 
     @classmethod
     def get_all_platform_data(cls):
@@ -2235,9 +2238,9 @@ class NeonPlatform(AbstractPlatform):
         return "neon"
     
     @classmethod
-    def get_all_instances(cls, callback=None):
+    def get_all(cls, callback=None):
         ''' get all neonplatform instances'''
-        return cls._get_all_instances_impl()
+        return cls._get_all_impl(callback)
 
     @classmethod
     @utils.sync.optional_sync
@@ -2473,9 +2476,8 @@ class BrightcovePlatform(AbstractPlatform):
         http_client.fetch(req, callback)
 
     @classmethod
-    def get_all_instances(cls, callback=None):
-        ''' get all brightcove instances'''
-        return cls._get_all_instances_impl()
+    def get_all(cls, callback=None):
+        return cls._get_all_impl(callback)
 
 class YoutubePlatform(AbstractPlatform):
     ''' Youtube platform integration '''
@@ -2600,9 +2602,8 @@ class YoutubePlatform(AbstractPlatform):
         pass
     
     @classmethod
-    def get_all_instances(cls, callback=None):
-        ''' get all brightcove instances'''
-        return cls._get_all_instances_impl()
+    def get_all(cls, callback=None):
+        return cls._get_all_impl(callback)
 
 class OoyalaPlatform(AbstractPlatform):
     '''
@@ -2760,9 +2761,8 @@ class OoyalaPlatform(AbstractPlatform):
         raise tornado.gen.Return(True)
     
     @classmethod
-    def get_all_instances(cls, callback=None):
-        ''' get all brightcove instances'''
-        return cls._get_all_instances_impl()
+    def get_all(cls, callback=None):
+        return cls._get_all_impl(callback)
 
 #######################
 # Request Blobs 
@@ -3431,7 +3431,7 @@ class ThumbnailMetadata(StoredObject):
                   ThumbnailMetadata objects.
         '''
 
-        for platform in AbstractPlatform.get_all_instances():
+        for platform in AbstractPlatform.get_all():
             for video_id in platform.get_internal_video_ids():
                 video_metadata = VideoMetadata.get(video_id)
                 if video_metadata is None:

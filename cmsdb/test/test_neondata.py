@@ -110,6 +110,27 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                 TrackerAccountIDMapper.get_neon_account_id('tracker_3'),
                 ('account_3', TrackerAccountIDMapper.PRODUCTION))
 
+    def test_get_all_platforms_sync(self):
+        NeonPlatform('acct1', api_key='acct1').save()
+        BrightcovePlatform('acct2', 'i_bc', 'acct2').save()
+        OoyalaPlatform('acct3', 'i_oo', 'acct3').save()
+        YoutubePlatform('acct4', 'i_yt', 'acct4').save()
+
+        objs = AbstractPlatform.get_all()
+
+        self.assertEquals(len(objs), 4)
+
+    @tornado.testing.gen_test
+    def test_get_all_platforms_async(self):
+        NeonPlatform('acct1', api_key='acct1').save()
+        BrightcovePlatform('acct2', 'i_bc', 'acct2').save()
+        OoyalaPlatform('acct3', 'i_oo', 'acct3').save()
+        YoutubePlatform('acct4', 'i_yt', 'acct4').save()
+
+        objs = yield tornado.gen.Task(AbstractPlatform.get_all)
+
+        self.assertEquals(len(objs), 4)
+
     def test_default_bcplatform_settings(self):
         ''' brightcove defaults ''' 
 

@@ -66,7 +66,7 @@ def extract_image_info(response, field):
         if fields is not None:
             vals.append(fields.get(field, None))
 
-    return [x for x in vals if x is not None]
+    return [str(x) for x in vals if x is not None]
 
 @tornado.gen.coroutine
 def process_one_account(platform):
@@ -78,6 +78,7 @@ def process_one_account(platform):
 
     # Get information from Brightcove about all the videos we know about
     bc_video_ids = platform.get_videos()
+    
     try:
         bc_video_info = yield bc_api.find_videos_by_ids(
             bc_video_ids,
@@ -85,7 +86,8 @@ def process_one_account(platform):
                             'videoStill',
                             'videoStillURL',
                             'thumbnail',
-                            'thumbnailURL'])
+                            'thumbnailURL'],
+            async=True)
     except api.brightcove_api.BrightcoveApiClientError as e:
         _log.error('Client error calling brightcove api for account %s, '
                    'integration %s. %s' % (platform.neon_api_key,
@@ -199,7 +201,7 @@ def process_one_account(platform):
 @tornado.gen.coroutine
 def run_one_cycle():
     platforms = yield tornado.gen.Task(
-        neondata.BrightcovePlatform.get_all_instances)
+        neondata.BrightcovePlatform.get_all)
     yield [process_one_account(x) for x in platforms if x is not None]
 
 @tornado.gen.coroutine
@@ -212,7 +214,7 @@ def main(run_flag):
         except Exception as e:
             _log.exception('Unexpected exception when ingesting from '
                            'Brightcove')
-            statemone.state.increment('unexpected_exception')
+            statemon.state.increment('unexpected_exception')
         cycle_runtime = (datetime.datetime.now() - start_time).total_seconds()
         statemon.state.cycle_runtime = cycle_runtime
 
