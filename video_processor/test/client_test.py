@@ -457,11 +457,11 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         # Mock out the image download
         self.im_download_mocker = patch(
             'utils.imageutils.PILImageUtils.download_image')
-        im_download_mock = self.im_download_mocker.start()
+        self.im_download_mock = self.im_download_mocker.start()
         self.random_image = PILImageUtils.create_random_image(480, 640)
         image_future = Future()
         image_future.set_result(self.random_image)
-        im_download_mock.return_value = image_future
+        self.im_download_mock.return_value = image_future
 
         # Mock out http requests
         self.http_mocker = patch('video_processor.client.utils.http.send_request')
@@ -620,6 +620,38 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertEquals(video_dict['video_id'], 'vid1')
         self.assertEquals(video_dict['title'], 'some fun video')
         self.assertEquals(len(video_dict['thumbnails']), 3)
+    
+    
+    def test_broken_default_thumb(self):
+        '''
+        Test to validate the flow when default thumb is broken
+        '''
+
+        def _image_exception(*args, **kwargs):
+            raise IOError
+        self.im_download_mock.side_effect = _image_exception 
+        self.vprocessor.finalize_response()
+
+        # Make sure that the api request is updated
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                neondata.RequestState.CUSTOMER_ERROR)
+
+        # check state variable
+        state_vars = video_processor.client.statemon.state.get_all_variables()
+        self.assertEqual(
+                state_vars.get('video_processor.client.default_thumb_error').value,
+                1)
+
+        # check callback scheduled 
+        self.assertEqual(self.mock_sqs_manager().add_callback_response.call_count,
+                1)
+
+        # Check the video metadata in the database
+        video_data = neondata.VideoMetadata.get(self.video_id)
+        self.assertEquals(len(video_data.thumbnail_ids), 3) # no default thumb
+        self.assertTrue(video_data.serving_enabled)
+
 
     def test_reprocess(self):
         # Add the results from the previous run to the database
@@ -720,7 +752,8 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
     def test_processing_after_requeue(self):
         '''
         Test processing video after a failed first attempt due to either internal error or
-        customer error (failed to download default thumb)
+        failed 
+        error (failed to download default thumb)
         '''
         
         # create basic videometadata object 
@@ -741,7 +774,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             'http://default_thumb.jpg')
         
         for state in [neondata.RequestState.INT_ERROR,
-                neondata.RequestState.CUSTOMER_ERROR]:
+                neondata.RequestState.FAILED]:
             api_request.state = state 
             api_request.fail_count = 1
             api_request.save()
@@ -750,15 +783,8 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
 
             # Make sure that the api request is updated
             api_request = neondata.NeonApiRequest.get('job1', self.api_key)
-            if state == neondata.RequestState.INT_ERROR:
-                self.assertEquals(api_request.state, 
+            self.assertEquals(api_request.state, 
                         neondata.RequestState.FINISHED)
-            if state == neondata.RequestState.CUSTOMER_ERROR:
-                self.assertEquals(api_request.state,
-                        neondata.RequestState.CUSTOMER_ERROR)
-                # Ensure that the callback wasn't called
-                self.assertEquals(self.mock_sqs_manager().
-                          add_callback_response.call_count, 0)
 
             # Check the video metadata in the database
             video_data = neondata.VideoMetadata.get(self.video_id)
@@ -767,6 +793,11 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             self.assertTrue(video_data.serving_enabled)
             self.assertIsNotNone(video_data.serving_url)
             self.mock_sqs_manager().add_callback_response.reset_mock() 
+            
+            state_vars = video_processor.client.statemon.state.get_all_variables()
+            self.assertEqual(
+                state_vars.get('video_processor.client.default_thumb_error').value,
+                0)
 
     def test_default_thumb_already_saved(self):
         # Add the video and the default thumb to the database

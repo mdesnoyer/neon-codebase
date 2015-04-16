@@ -375,10 +375,20 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.im_download_mock.side_effect = _image_exception 
         response = self.make_api_request(vals)
         self.assertEquals(response.code, 201)
-
         # Check video entry in DB 
         video = neondata.VideoMetadata.get('%s_neonapivid123' % self.api_key)
         self.assertIsNotNone(video)
+
+        # Check request state and message
+        resp = json.loads(response.body)
+        api_request = neondata.NeonApiRequest.get(resp['job_id'], self.api_key)
+        self.assertEqual(api_request.state, neondata.RequestState.SUBMIT)
+        self.assertIsNotNone(api_request.msg)
+        
+        state_vars = video_processor.server.statemon.state.get_all_variables()
+        self.assertEqual(
+                state_vars.get('video_processor.server.default_thumb_error').value,
+                1)
 
     def test_neon_api_request_invalid_id(self):
         resp = self.add_request("neonap_-ivid123") 
@@ -706,7 +716,7 @@ class QueueSmokeTest(test_utils.neontest.TestCase):
         # verify that the add metadata thread ran and we were able
         # to collect some data on size of Q in # of bytes 
         state_vars = video_processor.server.statemon.state.get_all_variables()
-        qsize = ['video_processor.server.queue_size_bytes']
+        qsize = state_vars.get('video_processor.server.queue_size_bytes').value
         self.assertGreater(qsize, 0)
 
 class TestJobManager(test_utils.neontest.AsyncTestCase):

@@ -510,7 +510,6 @@ class VideoProcessor(object):
         somebody_else_finished = [False]
         def _flag_for_finalize(req):
             
-
             if req.state in [neondata.RequestState.PROCESSING,
                              neondata.RequestState.SUBMIT,
                              neondata.RequestState.REQUEUED,
@@ -629,7 +628,6 @@ class VideoProcessor(object):
             statemon.state.increment('save_vmdata_error')
             raise DBError("Error writing video data to database")
         self.video_metadata = new_video_metadata
-
         try:
             # A second attempt to save the default thumb
             api_request.save_default_thumbnail(cdn_metadata)
@@ -641,14 +639,12 @@ class VideoProcessor(object):
                 self.video_metadata.key,
                 _set_serving_enabled)
         
-            # Build the callback request
-            cb_request = self.build_callback_request()
 
             # Everything is fine at this point, so lets mark it finished
             api_request.state = neondata.RequestState.FINISHED
 
         except neondata.DefaultThumbDownloadError, e:
-            _log.warn("Default thumbnail download failed for vid %s" % vid)
+            _log.warn("Default thumbnail download failed for vid %s" % video_id)
             statemon.state.increment('default_thumb_error')
             err_msg = "Failed to download default thumbnail error=%s" % e
             api_request.state = neondata.RequestState.CUSTOMER_ERROR
@@ -657,15 +653,22 @@ class VideoProcessor(object):
             # build the callback response with error message here
             # Its probably ok that its sent through SQS. Evaluate if this needs
             # to be immediate to the customer
-            cb_request = self.build_callback_request(error=err_msg)
+            #cb_request = self.build_callback_request(error=err_msg)
             
             # TODO: write test to validate the states
 
         finally:
 
+            # Build the callback request
+            err_msg = None
+            if api_request.state == neondata.RequestState.CUSTOMER_ERROR:
+                err_msg = api_request.msg
+            cb_request = self.build_callback_request(err_msg)
+
             # Update the database that the request is done with the processing 
             # Cleanly or with some acceptable errors (CUSTOMER_ERROR)
             def _flag_request_done_in_db(request):
+                request.state = api_request.state
                 request.publish_date = time.time() *1000.0
                 request.response = tornado.escape.json_decode(cb_request.body)
             try:
@@ -680,7 +683,7 @@ class VideoProcessor(object):
                 raise DBError("Error finishing api request")
 
             # Send callbacks and notifications
-
+            
             self.send_client_callback_response(new_video_metadata.key, cb_request)
             self.send_notifiction_response(api_request)
 
@@ -688,7 +691,7 @@ class VideoProcessor(object):
                       (self.video_url, self.video_metadata.key))
         
 
-    def build_callback_request(self):
+    def build_callback_request(self, err_msg=None):
         '''
         build callback request that will be sent to the callback url
         which was specified when the request was created
@@ -707,7 +710,7 @@ class VideoProcessor(object):
                 fnos,
                 thumbs,
                 self.video_metadata.get_serving_url(),
-                err=None)
+                err=err_msg)
         response_body = cresp.to_dict()
 
         #CREATE POST REQUEST
