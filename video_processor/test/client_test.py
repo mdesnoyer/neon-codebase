@@ -642,6 +642,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertEqual(
                 state_vars.get('video_processor.client.default_thumb_error').value,
                 1)
+        video_processor.client.statemon.state._reset_values()
 
         # check callback scheduled 
         self.assertEqual(self.mock_sqs_manager().add_callback_response.call_count,
