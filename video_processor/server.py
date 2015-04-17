@@ -668,7 +668,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             api_request = None 
             http_callback = params.get(CALLBACK_URL, None)
             default_thumbnail = params.get('default_thumbnail', None)
-            
             # Verify essential parameters
             try:
                 api_key = params[API_KEY]
@@ -680,6 +679,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
 
                 title = params[VIDEO_TITLE]
                 url = params[VIDEO_DOWNLOAD_URL]
+                if not default_thumbnail:
+                    _log.info("no default image for the video %s" % vid)
                 
 
             except KeyError, e:
@@ -836,13 +837,13 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             _log.warn("Default thumbnail download failed for vid %s" % vid)
             statemon.state.increment('default_thumb_error')
             # Should the state be updated here too?
-            def _update_state(req):
+            def _update_request_message(req):
                 req.set_message("failed to download default thumbnail %s" % e)
             
             result = yield tornado.gen.Task(
                           neondata.NeonApiRequest.modify, api_request.job_id, 
                           api_request.api_key,
-                          _update_state)
+                          _update_request_image)
             # Even if the request state is not updated, its ok. since we'll try
             # to handle the upload on the video client again. Hence best effort 
             self.set_status(201)
