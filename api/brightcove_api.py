@@ -825,7 +825,7 @@ class BrightcoveApi(object):
         '''
         results = {}
 
-        MAX_VIDS_PER_REQUEST = 100
+        MAX_VIDS_PER_REQUEST = 50
         
         for i in range(0, len(video_ids), MAX_VIDS_PER_REQUEST):
             url_params = {

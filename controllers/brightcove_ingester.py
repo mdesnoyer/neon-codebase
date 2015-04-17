@@ -20,6 +20,8 @@ import datetime
 import logging
 import signal
 import multiprocessing
+import os.path
+import re
 import tornado.ioloop
 import tornado.gen
 import urlparse
@@ -47,6 +49,11 @@ def normalize_url(url):
     if url is None:
         return None
     parse = urlparse.urlparse(url)
+    if re.compile('brightcove').search(parse.netloc):
+        # Brightcove can move the image around, but its basename will
+        # remain the same, so if it is a brightcove url, only look at
+        # the basename.
+        return '%s%s' % (parse.netloc, os.path.basename(parse.path))
     return '%s%s' % (parse.netloc, parse.path)
 
 def get_urls_from_bc_response(response):

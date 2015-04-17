@@ -104,6 +104,40 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
         self.assertEquals(self.cdn_mock.call_count, 0)
 
     @tornado.testing.gen_test
+    def test_match_moved_bc_urls(self):
+        self.mock_bc_response.side_effect = [{
+            'v1': { 'id' : 'v1',
+                    'videoStillURL' : 'http://brightcove.com/3/vid_still.jpg?x=5',
+                    'videoStill' : {
+                        'id' : 'still_id',
+                        'referenceId' : None,
+                        'remoteUrl' : None
+                    },
+                    'thumbnailURL' : 'http://brightcove.com/3/thumb_still.jpg?x=8',
+                    'thumbnail' : {
+                        'id' : 123456,
+                        'referenceId' : None,
+                        'remoteUrl' : None
+                    }
+                }
+            }]
+        ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
+                          ['http://brightcove.com/4/vid_still.jpg'],
+                          ttype=ThumbnailType.BRIGHTCOVE,
+                          rank=1).save()
+
+        yield controllers.brightcove_ingester.process_one_account(
+            self.platform)
+
+        # Check that the external id was set
+        self.assertEquals(ThumbnailMetadata.get('acct1_v1_bc1').external_id,
+                          '123456')
+
+        # Make sure no image was uploaded
+        self.assertEquals(self.im_download_mock.call_count, 0)
+        self.assertEquals(self.cdn_mock.call_count, 0)
+
+    @tornado.testing.gen_test
     def test_match_remote_urls(self):
         self.mock_bc_response.side_effect = [{
             'v1': { 'id' : 'v1',
