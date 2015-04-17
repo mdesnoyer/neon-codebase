@@ -843,7 +843,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             result = yield tornado.gen.Task(
                           neondata.NeonApiRequest.modify, api_request.job_id, 
                           api_request.api_key,
-                          _update_request_image)
+                          _update_request_message)
             # Even if the request state is not updated, its ok. since we'll try
             # to handle the upload on the video client again. Hence best effort 
             self.set_status(201)
