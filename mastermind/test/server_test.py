@@ -84,21 +84,27 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                                                  abtest=False)
         bcPlatform.add_video(0, 'job11')
         job11 = neondata.NeonApiRequest('job11', api_key, 0)
+        job11.state = neondata.RequestState.FINISHED
 
+        # a job in submit state, without any thumbnails
         bcPlatform.add_video(10, 'job12')
         job12 = neondata.NeonApiRequest('job12', api_key, 10)
+        job12.state = neondata.RequestState.SUBMIT
 
         testPlatform = neondata.BrightcovePlatform('a2', 'i2', api_key, 
                                                    abtest=True)
         testPlatform.add_video(1, 'job21')
         job21 = neondata.NeonApiRequest('job21', api_key, 1)
+        job21.state = neondata.RequestState.FINISHED
 
         testPlatform.add_video(2, 'job22')
         job22 = neondata.NeonApiRequest('job22', api_key, 2)
+        job22.state = neondata.RequestState.FINISHED
 
         apiPlatform = neondata.NeonPlatform('a3', '0', api_key, abtest=True)
         apiPlatform.add_video(4, 'job31')
         job31 = neondata.NeonApiRequest('job31', api_key, 4)
+        job31.state = neondata.RequestState.CUSTOMER_ERROR
 
         noVidPlatform = neondata.BrightcovePlatform('a4', 'i4', api_key, 
                                                     abtest=True) 
@@ -174,6 +180,9 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             directives[(api_key, api_key+'_4')][api_key+'_4_t41'], 0.0)
         self.assertGreater(
             directives[(api_key, api_key+'_4')][api_key+'_4_t42'], 0.0)
+        # video in submit state without thumbnails shouldn't be in
+        # the directive file
+        self.assertFalse(directives.has_key((api_key, api_key+'_10')))
 
         self.assertTrue(self.watcher.is_loaded.is_set())
 
