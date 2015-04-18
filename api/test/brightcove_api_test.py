@@ -30,6 +30,7 @@ import test_utils.redis
 import urlparse
 import unittest
 from utils.imageutils import PILImageUtils
+import utils.neon
 
 _log = logging.getLogger(__name__)
 
@@ -67,6 +68,37 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
                 return response
 
         self.http_mock.side_effect = do_response
+
+    def _set_videos_to_return(self, videos):
+        '''Define the videos to return. Should be video structures.'''
+        self.videos_to_return = videos
+        def respond_with_videos(request, callback=None):
+            videos = self.videos_to_return
+            parsed = urlparse.urlparse(request.url)
+            params = urlparse.parse_qs(parsed.query)
+            fields = params.get('video_fields', None)
+            if fields:
+                fields = fields[0].split(',')
+                videos = \
+                  [dict([(k, v) for k,v in vid.items() if k in fields])
+                   for vid in videos]
+            retstruct = {
+                'items' : videos,
+                'page_number' : params.get('page_number', 0),
+                'page_size' : params.get('page_size', 100),
+                'total_count' : -1
+            }
+            
+            
+            response = HTTPResponse(request, 200,
+                                    buffer=StringIO(json.dumps(retstruct)))
+            if callback:
+                tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                             response)
+            else:
+                return response
+
+        self.http_mock.side_effect = respond_with_videos
 
     def test_get_current_thumbnail(self):
         self._set_http_response(
@@ -214,6 +246,7 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(len(u_bp.get_videos()), nvideos)
 
     @patch('api.brightcove_api.BrightcoveApi.write_connection.send_request') 
+    @tornado.testing.gen_test 
     def test_add_image(self, write_conn_mock):
         def verify():
             '''
@@ -231,34 +264,41 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
             c_disposition = img_data.split('\r\n')[1]
             #ex: 'Content-Disposition: form-data; name="filePath"; filename="neontnTID.jpg"'
             img_filename = c_disposition.split(';')[-1].split("=")[-1]
-            self.assertEqual(img_filename, '"neontn%s.jpg"' %tid)
+            self.assertEqual(img_filename, '"neontn%s.jpg"' % tid)
     
         response = HTTPResponse(HTTPRequest("http://bcove"), 200,
-                buffer=StringIO('done'))
-        write_conn_mock.return_value = response
+                buffer=StringIO('{"result":{"id":"newtid"}}'))
+        write_conn_mock.side_effect = lambda x, callback: callback(response)
         image = PILImageUtils.create_random_image(360, 480) 
         tid = "TID"
         
         #verify image name
-        self.api.add_image("video_id1", image, reference_id=tid, tid=tid)
+        yield self.api.add_image("video_id1", tid, image=image,
+                                 reference_id=tid)
         verify()
+        write_conn_mock.reset()
         
         #verify image name
-        self.api.add_image("video_id1", image, reference_id="still-%s" %tid, tid=tid)
+        self.api.add_image("video_id1", tid, image=image,
+                           reference_id="still-%s" % tid)
         verify()
-    
-    @patch('api.brightcove_api.BrightcoveApi.write_connection.send_request') 
+
+    @patch('api.brightcove_api.BrightcoveApi.write_connection.send_request')
+    @tornado.testing.gen_test 
     def test_add_remote_image(self, write_conn_mock):
 
         '''
         Verify the multipart request construction to brightcove
         '''
-        response = HTTPResponse(HTTPRequest("http://bcove"), 200,
-                buffer=StringIO('done'))
-        write_conn_mock.return_value = response
         r_url = "http://i1.neon-images.com/video_id1?height=10&width=20"
-        response = self.api.add_image("video_id1", remote_url=r_url)
-        self.assertEqual(response.code, 200)
+        response = HTTPResponse(HTTPRequest("http://bcove"), 200,
+                buffer=StringIO('{"result":{"id":"newtid", "remoteUrl":"%s"}}'
+                                % r_url))
+        write_conn_mock.side_effect = lambda x, callback: callback(response)
+        resp = yield self.api.add_image("video_id1", 'tid1', 
+                                        remote_url=r_url)
+        self.assertEqual(resp, {"id": "newtid",
+                                "remoteUrl":r_url})
         headers = write_conn_mock.call_args[0][0].headers
         self.assertTrue('multipart/form-data' in headers['Content-Type'])
         body = write_conn_mock.call_args[0][0].body
@@ -320,5 +360,59 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(len(u_bp.get_videos()), nvideos)
         self.assertListEqual(u_bp.get_videos(), ['v1', '4100953290001'])
 
+    def test_find_videos_by_ids_basic(self):
+        self._set_videos_to_return([
+            {'id': 'vid1',
+             'name': 'myvid1',
+             'accountId': 'acct1'},
+            {'id': 'vid2',
+             'name': 'myvid2',
+             'accountId': 'acct1'}])
+
+        self.assertEquals(
+            self.api.find_videos_by_ids(['vid2', 'vid1']),
+            {'vid2' : {'id' : 'vid2', 'name': 'myvid2',
+                       'accountId' : 'acct1'},
+             'vid1' : {'id' : 'vid1', 'name': 'myvid1',
+                       'accountId' : 'acct1'}})
+
+        cargs, kwargs = self.http_mock.call_args
+        urlparsed = urlparse.urlparse(cargs[0].url)
+        urlparams = urlparse.parse_qs(urlparsed.query)
+        self.assertEquals(
+            urlparams,
+            {'command' : ['find_videos_by_ids'],
+             'token' : ['read_tok'],
+             'video_ids' : ['vid2,vid1'],
+             'media_delivery' : ['http'],
+             'output': ['json']})
+
+        self._set_videos_to_return([
+            {'id': 'vid2',
+             'name': 'myvid2',
+             'accountId': 'acct1'}])
+
+        self.assertEquals(
+            self.api.find_videos_by_ids(['vid2'], video_fields=['name']),
+            {'vid2' : {'id': 'vid2', 'name': 'myvid2'}})
+
+    def test_find_videos_by_ids_errors(self):
+        self._set_http_response(
+            body='{"error": "invalid token","code":210}',
+            error=tornado.httpclient.HTTPError(500, 'invalid token'))
+
+        with self.assertLogExists(logging.ERROR, 'invalid token'):
+            with self.assertRaises(api.brightcove_api.BrightcoveApiClientError):
+                self.api.find_videos_by_ids(['vid1'])
+
+        self._set_http_response(
+            body='{"error": "server slow","code":103}',
+            error=tornado.httpclient.HTTPError(500, 'server slow'))
+
+        with self.assertLogExists(logging.ERROR, 'server slow'):
+            with self.assertRaises(api.brightcove_api.BrightcoveApiServerError):
+                self.api.find_videos_by_ids(['vid1'])
+
 if __name__ == "__main__" :
+    utils.neon.InitNeon()
     unittest.main()

@@ -109,7 +109,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         noVidPlatform = neondata.BrightcovePlatform('a4', 'i4', api_key, 
                                                     abtest=True) 
         
-        datamock.AbstractPlatform.get_all_instances.return_value = \
+        datamock.AbstractPlatform.get_all.return_value = \
           [bcPlatform, testPlatform, apiPlatform, noVidPlatform]
 
         # Define the video meta data
@@ -196,7 +196,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         job11 = neondata.NeonApiRequest('job11', api_key, 0, 
                                         't', 't', 'r', 'h')
 
-        datamock.AbstractPlatform.get_all_instances.return_value = \
+        datamock.AbstractPlatform.get_all.return_value = \
           [bcPlatform]
         vid_meta = {
             api_key + '_0': neondata.VideoMetadata(api_key + '_0',
@@ -290,7 +290,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                          (640, 480))
 
     def test_connection_error(self, datamock):
-        datamock.AbstractPlatform.get_all_instances.side_effect = \
+        datamock.AbstractPlatform.get_all.side_effect = \
           redis.ConnectionError
 
         with self.assertRaises(redis.ConnectionError):
@@ -306,7 +306,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         job11 = neondata.NeonApiRequest('job11', api_key, 0)
         job12 = neondata.NeonApiRequest('job12', api_key, 10)
         
-        datamock.AbstractPlatform.get_all_instances.return_value = \
+        datamock.AbstractPlatform.get_all.return_value = \
           [bcPlatform]
         datamock.VideoMetadata.get_many.return_value = [None, None] 
 
@@ -330,7 +330,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         job11 = neondata.NeonApiRequest('job11', api_key, 0)
         job12 = neondata.NeonApiRequest('job12', api_key, 1)
         
-        datamock.AbstractPlatform.get_all_instances.return_value = \
+        datamock.AbstractPlatform.get_all.return_value = \
           [bcPlatform]
 
         vid_meta = {
@@ -385,7 +385,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         bcPlatform.add_video(1, 'job12')
         job12 = neondata.NeonApiRequest('job11', api_key, '1')
 
-        datamock.AbstractPlatform.get_all_instances.return_value = \
+        datamock.AbstractPlatform.get_all.return_value = \
           [bcPlatform]
 
         vid_meta = {

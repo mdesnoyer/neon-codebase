@@ -90,7 +90,7 @@ statemon.define('pubsub_errors', int)
 #constants 
 BCOVE_STILL_WIDTH = 480
 
-class DefaultThumbDownloadError(Exception):pass
+class DefaultThumbDownloadError(IOError):pass
 class DBStateError(ValueError):pass
 class DBConnectionError(IOError):pass
 
@@ -2082,33 +2082,36 @@ class AbstractPlatform(NamespacedStoredObject):
         ''' ovp string '''
         raise NotImplementedError
 
+
     @classmethod
-    def get_all_instances(cls, callback=None):
+    def get_all(cls, callback=None):
         '''Returns a list of all the platform instances from the db.'''
         instances = []
-        instances.extend(NeonPlatform.get_all_instances())
-        instances.extend(BrightcovePlatform.get_all_instances())
-        instances.extend(OoyalaPlatform.get_all_instances())
+        if callback:
+            lock = threading.RLock()
+            call_counter = [4]
+            def _process_instances(x):
+                instances.extend(x)
+                with lock:
+                    call_counter[0] -= 1
+                    if call_counter[0] == 0:
+                        callback(instances)
+            NeonPlatform.get_all(_process_instances)
+            BrightcovePlatform.get_all(_process_instances)
+            OoyalaPlatform.get_all(_process_instances)
+            YoutubePlatform.get_all(_process_instances)
+            return
+        else:
+            instances.extend(NeonPlatform.get_all())
+            instances.extend(BrightcovePlatform.get_all())
+            instances.extend(OoyalaPlatform.get_all())
+            instances.extend(YoutubePlatform.get_all())
         return instances
 
     @classmethod
-    def _get_all_instances_impl(cls, callback=None):
+    def _get_all_impl(cls, callback=None):
         '''Implements get_all_instances for a single platform type.'''
-        platforms = cls.get_all_platform_data()
-        instances = [] 
-        for pdata in platforms:
-            platform = None
-            
-            try:
-                obj_dict = json.loads(pdata)
-                platform = cls._create(obj_dict['key'], obj_dict)
-            except ValueError, e:
-                pass
-
-            if platform:
-                instances.append(platform)
-
-        return instances
+        return super(AbstractPlatform, cls).get_all(callback=callback)
 
     @classmethod
     def get_all_platform_data(cls):
@@ -2238,9 +2241,9 @@ class NeonPlatform(AbstractPlatform):
         return "neon"
     
     @classmethod
-    def get_all_instances(cls, callback=None):
+    def get_all(cls, callback=None):
         ''' get all neonplatform instances'''
-        return cls._get_all_instances_impl()
+        return cls._get_all_impl(callback)
 
     @classmethod
     @utils.sync.optional_sync
@@ -2310,10 +2313,6 @@ class BrightcovePlatform(AbstractPlatform):
         callback(True): success
         '''
         bc = self.get_api()
-      
-        #update the default still size, if set
-        if self.video_still_width != BCOVE_STILL_WIDTH:
-            bc.update_still_width(self.video_still_width) 
 
         #Get video metadata
         platform_vid = InternalVideoID.to_external(i_vid)
@@ -2348,102 +2347,61 @@ class BrightcovePlatform(AbstractPlatform):
             callback(None)
             return
         
-        #Update the database with video first
-        #Get previous thumbnail and new thumb
-        modified_thumbs = [] 
-        new_thumb, old_thumb = ThumbnailMetadata.enable_thumbnail(
-            thumbnails, new_tid)
-        modified_thumbs.append(new_thumb)
-        if old_thumb is None:
-            #old_thumb can be None if there was no neon thumb before
-            _log.debug("key=update_thumbnail" 
-                    " msg=set thumbnail in DB %s tid %s"%(i_vid, new_tid))
-        else:
-            modified_thumbs.append(old_thumb)
-      
-        #Don't reflect change in the DB, used by AB Controller methods
-        if nosave == False:
-            if new_thumb is not None:
-                res = yield tornado.gen.Task(ThumbnailMetadata.save_all,
-                                             modified_thumbs)  
-                if not res:
-                    _log.error("key=update_thumbnail msg=[pre-update]" 
-                            " ThumbnailMetadata save_all failed for %s" %new_tid)
-                    callback(False)
-                    return
-            else:
-                callback(False)
-                return
-        
 
         # Update the new_tid as the thumbnail for the video
-        thumb_res = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,
-                                           platform_vid,
-                                           t_url,
-                                           new_tid,
-                                           fsize,
-                                           image_suffix=thumb_type)
-        if thumb_res is None:
-            callback(None)
+        try:
+            image = utils.imageutils.PILImageUtils.download_image(
+                t_url)
+            update_response = yield bc.update_thumbnail_and_videostill(
+                platform_vid,
+                new_tid,
+                image=image,
+                still_size=(self.video_still_width, None))
+        except Exception as e:
+            _log.error('Error updating the thumbnail and video still to '
+                       'Brightcove for video %s %s' % (i_vid, e))
+            callback(False)
             return
 
-        tref, sref = thumb_res[0], thumb_res[1]
-        if not sref:
-            _log.error("key=update_thumbnail msg=brightcove error" 
-                    " update video still for video %s %s" %(i_vid, new_tid))
+        thumb_bc_id, still_bc_id = update_response
+
+        def _update_external_tid(thumb_obj):
+            thumb_obj.external_id = thumb_bc_id
+
+        yield tornado.gen.Task(ThumbnailMetadata.modify,
+                               new_tid,
+                               _update_external_tid)
 
         #NOTE: When the call is made from brightcove controller, do not 
         #save the changes in the db, this is just a temp change for A/B testing
         if nosave:
-            callback(tref)
+            callback(True)
             return
 
-        if not tref:
-            _log.error("key=update_thumbnail msg=failed to" 
-                    " enable thumb %s for %s" %(new_tid, i_vid))
+        # Save the correct thumb to chosen in the database
+        def _set_chosen(thumb_dict):
+            for thumb_id, thumb in thumb_dict.iteritems():
+                if thumb is not None:
+                    thumb.chosen = thumb_id == new_tid
+        ret = yield tornado.gen.Task(
+            ThumbnailMetadata.modify_many, tids, _set_chosen)
+        if not ret:
+            _log.error("Error updating thumbnails in database")
+            callback(False)
+
+        # Update the request state
+        def _set_active(obj):
+            obj.state = RequestState.ACTIVE
+        ret = yield tornado.gen.Task(
+            NeonApiRequest.modify,
+            vmdata.job_id,
+            self.neon_api_key,
+            _set_active)
+        if not ret:
+            _log.error("Error updating request state in database")
+            callback(False)
             
-            # Thumbnail was not update via the brightcove api, revert the DB changes
-            modified_thumbs = []
-            
-            #get old thumbnail tid to revert to, this was the tid 
-            #that was previously live before this request
-            old_tid = "no_thumb" if old_thumb is None \
-                    else old_thumb.key
-            new_thumb, old_thumb = ThumbnailMetadata.enable_thumbnail(
-                                    thumbnails, old_tid)
-            modified_thumbs.append(new_thumb)
-            if old_thumb: 
-                modified_thumbs.append(old_thumb)
-            
-            if new_thumb is not None:
-                res = yield tornado.gen.Task(ThumbnailMetadata.save_all,
-                                             modified_thumbs)  
-                if res:
-                    callback(False) #return False coz bcove thumb not updated
-                    return
-                else:
-                    _log.error("key=update_thumbnail msg=ThumbnailMetadata save_all" 
-                            "failed for video=%s cur_db_tid=%s cur_bcove_tid=%s," 
-                            "DB not reverted" %(i_vid, new_tid, old_tid))
-                    
-                    #The tid that was passed to the method is reflected in the DB,
-                    #but not on Brightcove.the old_tid is the current bcove thumbnail
-                    callback(False)
-            else:
-                #Why was new_thumb None?
-                _log.error("key=update_thumbnail msg=enable_thumbnail"
-                        "new_thumb data missing") 
-                callback(False)
-        else:
-            #Success      
-            #Update the request state to Active to facilitate faster filtering
-            vid_request = NeonApiRequest.get(vmdata.job_id, self.neon_api_key)
-            vid_request.state = RequestState.ACTIVE
-            ret = vid_request.save()
-            if not ret:
-                _log.error("key=update_thumbnail msg=%s state not updated to active"
-                        %vid_request.key)
-            callback(True)
+        callback(True)
 
     def create_job(self, vid, callback):
         ''' Create neon job for particular video '''
@@ -2521,9 +2479,8 @@ class BrightcovePlatform(AbstractPlatform):
         http_client.fetch(req, callback)
 
     @classmethod
-    def get_all_instances(cls, callback=None):
-        ''' get all brightcove instances'''
-        return cls._get_all_instances_impl()
+    def get_all(cls, callback=None):
+        return cls._get_all_impl(callback)
 
 class YoutubePlatform(AbstractPlatform):
     ''' Youtube platform integration '''
@@ -2648,9 +2605,8 @@ class YoutubePlatform(AbstractPlatform):
         pass
     
     @classmethod
-    def get_all_instances(cls, callback=None):
-        ''' get all brightcove instances'''
-        return cls._get_all_instances_impl()
+    def get_all(cls, callback=None):
+        return cls._get_all_impl(callback)
 
 class OoyalaPlatform(AbstractPlatform):
     '''
@@ -2776,7 +2732,7 @@ class OoyalaPlatform(AbstractPlatform):
         #Get previous thumbnail and new thumb
         modified_thumbs = [] 
         new_thumb, old_thumb = ThumbnailMetadata.enable_thumbnail(
-                                    thumbnails, new_tid)
+            thumbnails, new_tid)
         modified_thumbs.append(new_thumb)
         if old_thumb is None:
             #old_thumb can be None if there was no neon thumb before
@@ -2808,9 +2764,8 @@ class OoyalaPlatform(AbstractPlatform):
         raise tornado.gen.Return(True)
     
     @classmethod
-    def get_all_instances(cls, callback=None):
-        ''' get all brightcove instances'''
-        return cls._get_all_instances_impl()
+    def get_all(cls, callback=None):
+        return cls._get_all_impl(callback)
 
 #######################
 # Request Blobs 
@@ -3307,9 +3262,11 @@ class ThumbnailMetadata(StoredObject):
                  width=None, height=None, ttype=None,
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None,
-                 serving_frac=None, frameno=None, filtered=None, ctr=None):
+                 serving_frac=None, frameno=None, filtered=None, ctr=None,
+                 external_id=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
+        self.external_id = external_id # External id if appropriate
         self.urls = urls or []  # List of all urls associated with single image
         self.created_time = created or datetime.datetime.now().strftime(
             "%Y-%m-%d %H:%M:%S")# Timestamp when thumbnail was created 
@@ -3335,7 +3292,7 @@ class ThumbnailMetadata(StoredObject):
         self.ctr = ctr
         
         # NOTE: If you add more fields here, modify the merge code in
-        # api/client, Add unit test to check this
+        # video_processor/client, Add unit test to check this
 
     @classmethod
     def is_valid_key(cls, key):
@@ -3488,7 +3445,7 @@ class ThumbnailMetadata(StoredObject):
                   ThumbnailMetadata objects.
         '''
 
-        for platform in AbstractPlatform.get_all_instances():
+        for platform in AbstractPlatform.get_all():
             for video_id in platform.get_internal_video_ids():
                 video_metadata = VideoMetadata.get(video_id)
                 if video_metadata is None:
@@ -3662,8 +3619,9 @@ class VideoMetadata(StoredObject):
             image = yield utils.imageutils.PILImageUtils.download_image(image_url,
                     async=True)
         except IOError, e:
-            _log.warn("IOError while downloading image %s" % image_url)
-            raise DefaultThumbDownloadError
+            msg = "IOError while downloading image %s" % image_url
+            _log.warn(msg)
+            raise DefaultThumbDownloadError(msg)
 
         thumb.urls.append(image_url)
         thumb = yield self.add_thumbnail(thumb, image, cdn_metadata,
