@@ -56,6 +56,7 @@ statemon.define('duplicate_requests', int)
 statemon.define('add_video_error', int)
 statemon.define('dequeue_requests', int)
 statemon.define('queue_size_bytes', int) #size of the queue in bytes of video
+statemon.define('default_thumb_error', int)
 #invalid url while retrieving headers
 statemon.define('get_content_length_error', int) 
 statemon.define('job_timedout', int)
@@ -95,7 +96,7 @@ class DBCache(object):
     def get_customer_priority(cls, api_key):
         priority = 1 # by default return priority=1
         try:
-            # invalidate the cache 
+            # invalidate the cache (a very naive implementation) 
             if cls.last_priority_check + options.priority_check < time.time():
                 cls.last_priority_check = time.time()
                 cls.customer_priorities = {}
@@ -232,7 +233,7 @@ class FairWeightedRequestQueue(object):
         
         # if priority > # of queues, then consider all priorities > len(Qs) as
         # the lowest priority
-        pindex = min(p, len(self.pqs))
+        pindex = min(p, len(self.pqs) -1)
         key = api_request.key
         item = RequestData(key, api_request)
         ret = self.pqs[pindex].put(key, item)
@@ -667,7 +668,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             api_request = None 
             http_callback = params.get(CALLBACK_URL, None)
             default_thumbnail = params.get('default_thumbnail', None)
-            
             # Verify essential parameters
             try:
                 api_key = params[API_KEY]
@@ -679,6 +679,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
 
                 title = params[VIDEO_TITLE]
                 url = params[VIDEO_DOWNLOAD_URL]
+                if not default_thumbnail:
+                    _log.info("no default image for the video %s" % vid)
                 
 
             except KeyError, e:
@@ -827,11 +829,30 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             return
 
         except IOError, e:
+            _log.error("IOError for video %s msg=%s" % (vid, e))
             self.send_json_response('{"error":"%s"}' % e, 400)
+            return
+        
+        except neondata.DefaultThumbDownloadError, e:
+            _log.warn("Default thumbnail download failed for vid %s" % vid)
+            statemon.state.increment('default_thumb_error')
+            # Should the state be updated here too?
+            def _update_request_message(req):
+                req.set_message("failed to download default thumbnail %s" % e)
+            
+            result = yield tornado.gen.Task(
+                          neondata.NeonApiRequest.modify, api_request.job_id, 
+                          api_request.api_key,
+                          _update_request_message)
+            # Even if the request state is not updated, its ok. since we'll try
+            # to handle the upload on the video client again. Hence best effort 
+            self.set_status(201)
+            self.write(response_data)
+            self.finish()
             return
 
         except Exception, e:
-            _log.exception("key=thumbnail_handler msg= %s"%e)
+            _log.exception("key=thumbnail_handler msg= %s" % e)
             self.send_json_response('{"error":"%s"}' % e, 500)
             statemon.state.increment('add_video_error')
             return

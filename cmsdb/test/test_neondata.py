@@ -110,6 +110,27 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                 TrackerAccountIDMapper.get_neon_account_id('tracker_3'),
                 ('account_3', TrackerAccountIDMapper.PRODUCTION))
 
+    def test_get_all_platforms_sync(self):
+        NeonPlatform('acct1', api_key='acct1').save()
+        BrightcovePlatform('acct2', 'i_bc', 'acct2').save()
+        OoyalaPlatform('acct3', 'i_oo', 'acct3').save()
+        YoutubePlatform('acct4', 'i_yt', 'acct4').save()
+
+        objs = AbstractPlatform.get_all()
+
+        self.assertEquals(len(objs), 4)
+
+    @tornado.testing.gen_test
+    def test_get_all_platforms_async(self):
+        NeonPlatform('acct1', api_key='acct1').save()
+        BrightcovePlatform('acct2', 'i_bc', 'acct2').save()
+        OoyalaPlatform('acct3', 'i_oo', 'acct3').save()
+        YoutubePlatform('acct4', 'i_yt', 'acct4').save()
+
+        objs = yield tornado.gen.Task(AbstractPlatform.get_all)
+
+        self.assertEquals(len(objs), 4)
+
     def test_default_bcplatform_settings(self):
         ''' brightcove defaults ''' 
 
@@ -200,36 +221,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         self.assertNotEqual(self.bp_conn, self.vm_conn)
 
-    @unittest.skip("DBconn check disabled")
-    def test_db_connection_error(self):
-        ''' #Verify that database connection is re-established 
-        after config change '''
-        ap = AbstractPlatform()
-        db = DBConnection.get(ap)
-        key = "fookey"
-        val = "fooval"
-        self.assertTrue(db.blocking_conn.set(key, val))
-        self.redis.stop()
-        
-        #try fetching the key after db has been stopped
-        try :
-            db.blocking_conn.get(key)
-        except Exception,e:
-            print e
-            #assert exception is ConnectionError 
-
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-        
-        #Trigger a change in the options, so that the watchdog thread 
-        #can update the connection
-        options._set("cmsdb.neondata.dbPort", self.redis.port)
-        check_interval = options.get("cmsdb.neondata.watchdogInterval")
-        time.sleep(check_interval + 0.5)
-        
-        #try any db operation
-        self.assertTrue(db.blocking_conn.set(key, val))
-
     #TODO: Test Async DB Connection
     
     def test_db_connection(self):
@@ -303,7 +294,8 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         np.add_video('dummyv', 'dummyjob')
         np.add_video('vid1', 'job1')
         np.save()
-        NeonPlatform.delete_all_video_related_data(np, 'vid1')
+        NeonPlatform.delete_all_video_related_data(np, 'vid1',
+                really_delete_keys=True)
         
         # check the keys have been deleted
         self.assertIsNone(NeonApiRequest.get('job1', na.neon_api_key))
@@ -1073,13 +1065,15 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         # Now force a connection loss by stopping the server
         self.redis.stop(clear_singleton=False)
         self.assertWaitForEquals(
-            lambda: neondata.PubSubConnection.get(VideoMetadata).connected, False)
+            lambda: neondata.PubSubConnection.get(VideoMetadata).connected,
+            False)
 
         # Start a new server
         self.redis = test_utils.redis.RedisServer()
         self.redis.start(clear_singleton=False)
         self.assertWaitForEquals(
-            lambda: neondata.PubSubConnection.get(VideoMetadata).connected, True)
+            lambda: neondata.PubSubConnection.get(VideoMetadata).connected,
+            True)
 
         # Now change the video and make sure we get the event for
         # account 1, but not 2

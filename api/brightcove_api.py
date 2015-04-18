@@ -5,14 +5,16 @@ Brightcove API Interface class
 import os
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0, base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 import datetime
+import json
 from poster.encode import multipart_encode
 import poster.encode
 from PIL import Image
+import re
 from StringIO import StringIO
 import cmsdb.neondata 
 import time
@@ -39,6 +41,10 @@ define('max_read_connections', default=20, type=int,
        help='Maximum number of read connections to Brightcove')
 define('max_retries', default=5, type=int,
        help='Maximum number of retries when sending a Brightcove error')
+
+class BrightcoveApiError(IOError): pass
+class BrightcoveApiClientError(BrightcoveApiError): pass
+class BrightcoveApiServerError(BrightcoveApiError): pass
 
 class BrightcoveApi(object): 
 
@@ -70,14 +76,6 @@ class BrightcoveApi(object):
         self.STILL_SIZE = 480, 360
         self.account_created = account_created
 
-    def update_still_width(self, width):
-        '''
-        Set the still width
-        Ignore the height as we scale the image based on aspect ratio of the 
-        original image
-        '''
-        self.STILL_SIZE = (width, self.STILL_SIZE[1])
-
     def format_get(self, url, data=None):
         if data is not None:
             if isinstance(data, dict):
@@ -105,39 +103,40 @@ class BrightcoveApi(object):
         else:
             BrightcoveApi.read_connection.send_request(req, find_vid_callback)
 
-    def add_image(self, video_id, im=None, atype='thumbnail', callback=None,
-                  **kwargs):
-        '''
-        Add Image brightcove api helper method
-        : remote_url sets the url to 3rd party url 
-        : image creates a new asset and the url is on brightcove servers
+    @tornado.gen.coroutine
+    def add_image(self, video_id, tid, image=None, remote_url=None,
+                  atype='thumbnail', reference_id=None):
+        '''Add Image brightcove api helper method
         
         #NOTE: When uploading an image with a reference ID that already
         #exists, the image is not
         updated. Although other metadata like displayName is updated.
-        
-        ReferenceID for thumbnails are of the form v2_TID
-        ReferenceID for stills are of the form v2_still-TID
 
+        Inputs:
+        video_id - Brightcove video id
+        tid - Internal Neon thumbnail id for the image
+        image - The image to upload
+        remote_url - The remote url to set for this image
+        atype - Type of image being uploaded. Either "thumbnail" or "videostill"
+        reference_id - Reference id for the image to send to brightcove
+
+        returns:
+        dictionary of the JSON of the brightcove response
         '''
         #help.brightcove.com/developer/docs/mediaapi/add_image.cfm
         
-        reference_id = kwargs.get('reference_id', None)
         if reference_id:
             reference_id = "v2_%s" %reference_id #V2 ref ID
-        
-        #use this keyword to identify if it is a neon image or not
-        image_suffix = kwargs.get('image_suffix', '')
-        image_fname = 'neonthumbnail%s-%s.jpg' % (image_suffix, video_id) 
-        
-        #TID of the Image being uploaded, to be used to construct the image fname 
-        tid = kwargs.get('tid', None)
-        remote_url = kwargs.get('remote_url', None)
+
+        im = image            
+        image_fname = 'neontn%s.jpg' % (tid) 
 
         outer = {}
         params = {}
         params["token"] = self.write_token 
-        params["video_id"] = video_id 
+        params["video_id"] = video_id
+        params["filename"] = image_fname
+        params["resize"] = False
         image = {} 
         if reference_id is not None:
             image["referenceId"] = reference_id
@@ -159,10 +158,6 @@ class BrightcoveApi(object):
         outer["method"] = "add_image"
 
         body = tornado.escape.json_encode(outer)
-        
-        #Use TID to name the file
-        if tid is not None:
-            image_fname = 'neontn%s.jpg' % (tid)
 
         if remote_url:
             post_param = []
@@ -197,204 +192,131 @@ class BrightcoveApi(object):
                                              body=body,
                                              request_timeout=60.0,
                                              connect_timeout=10.0)
-            
-        return BrightcoveApi.write_connection.send_request(req, callback)
-    
-    def update_thumbnail_and_videostill(self, video_id, image, tid, 
-            frame_size=None, resize=True): 
-    
-        ''' add thumbnail and videostill in to brightcove account.  used
-            by neon client to update thumbnail, Image gets sent to the
-            method call
 
-            tid is used as the reference id of the thumbnail
-            for videoStill still- is prepended to the tid to generate refid
-        '''
-        
-        #If url is passed, then set thumbnail using the remote url 
-        #(not used currently)
+        response = yield tornado.gen.Task(
+            BrightcoveApi.write_connection.send_request,
+            req)
+        if response.error:
+            if response.error.code >= 500:
+                raise BrightcoveApiServerError(
+                    'Internal Brightcove error when uploading %s for tid %s %s'
+                    % (atype, tid, response.error))
+            elif response.error.code >= 400:
+                raise BrightcoveApiClientError(
+                    'Client error when uploading %s for tid %s %s'
+                    % (atype, tid, response.error))
+            raise BrightcoveApiClientError(
+                'Unexpected error when uploading %s for tid %s %s'
+                % (atype, tid, response.error))
 
-        if isinstance(image, basestring):
-            rt = self.add_image(video_id, remote_url=image, atype='thumbnail')
-            rv = self.add_image(video_id, remote_url=image, atype='videostill')
-        else:
-            #initialize thumb and still with image, use the original image that
-            #is not resized
-            bcove_thumb = bcove_still = image
-
-            #Always save the Image with the aspect ratio of the video
-
-            if resize:
-                if frame_size is None:
-                    #resize to brightcove default size
-                    bcove_thumb = image.resize(self.THUMB_SIZE)
-                    bcove_still = image.resize(self.STILL_SIZE)
-                else:
-                    bcove_thumb = PILImageUtils.resize(image,
-                                                       im_w=self.THUMB_SIZE[0])
-                    bcove_still = PILImageUtils.resize(image,
-                                                       im_w=self.STILL_SIZE[0])
-
-            
-            rt = self.add_image(video_id,
-                                bcove_thumb,
-                                atype='thumbnail',
-                                reference_id=tid,
-                                tid=tid)
-            rv = self.add_image(video_id,
-                                bcove_still,
-                                atype='videostill',
-                                reference_id='still-%s'%tid,
-                                tid=tid)
-        
-        tref_id = None ; vref_id = None
-        #Get thumbnail name, referenceId params
-        if rt and not rt.error:
-            add_image_val = tornado.escape.json_decode(rt.body)
-            tref_id = add_image_val["result"]["referenceId"]
-        if rv and not rv.error:
-            add_image_val = tornado.escape.json_decode(rv.body)
-            vref_id = add_image_val["result"]["referenceId"]
-
-        return ((rt is not None and rv is not None), tref_id, vref_id)
-        
-
-    def enable_thumbnail_from_url(self, video_id, url, frame_size=None,
-                                  tid=None):
-        '''
-        Enable a particular thumbnail in the brightcove account
-        '''
-
-        headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
-            (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
-            Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
-        req = tornado.httpclient.HTTPRequest(url=url,
-                                             method="GET",
-                                             headers=headers,
-                                             request_timeout=60.0,
-                                             connect_timeout=10.0)
-        response = utils.http.send_request(req)
-        imfile = StringIO(response.body)
         try:
-            image =  Image.open(imfile)
-        except Exception,e:
-            _log.exception("Image format error %s" %e )
+            json_response = tornado.escape.json_decode(response.body)
+        except Exception:
+            raise BrightcoveApiServerError(
+                'Invalid JSON received from Brightcove: %s' %
+                response.body)
 
-        #TODO: Resize to the aspect ratio of video; key by width
-        thumbnail_id = tid
-        if frame_size is None:
-            #resize to brightcove default size
-            bcove_thumb = image.resize(self.THUMB_SIZE)
-            bcove_still = image.resize(self.STILL_SIZE)
-        else:
-            bcove_thumb = PILImageUtils.resize(image, im_w=self.THUMB_SIZE[0])
-            bcove_still = PILImageUtils.resize(image, im_w=self.STILL_SIZE[0])
+        raise tornado.gen.Return(json_response['result'])
 
-
-        rt = self.add_image(video_id,image, atype='thumbnail',
-                            reference_id=tid,
-                            tid=tid)
-        rv = self.add_image(video_id,image, atype='videostill',
-                            reference_id=tid if not tid else "still-" + tid,
-                            tid=tid)
-       
-        tref_id = None ; vref_id = None
-        #Get thumbnail name, referenceId params
-        if rt and not rt.error:
-            add_image_val = tornado.escape.json_decode(rt.body)
-            tref_id = add_image_val["result"]["referenceId"]
-        if rv and not rv.error:
-            add_image_val = tornado.escape.json_decode(rv.body)
-            vref_id = add_image_val["result"]["referenceId"]
-
-        return ((rt is not None and rv is not None), tref_id, vref_id)
+    @tornado.gen.coroutine
+    def update_thumbnail_and_videostill(self,
+                                        video_id,
+                                        tid,
+                                        image=None,
+                                        remote_url=None,
+                                        thumb_size=None,
+                                        still_size=None): 
     
+        ''' add thumbnail and videostill in to brightcove account.  
 
-    def async_enable_thumbnail_from_url(self, video_id, img_url, 
-                                       thumbnail_id, frame_size=None,
-                                       image_suffix="",
-                                       callback=None):
+        Inputs:
+        video_id - brightcove video id
+        tid - Thumbnail id to update reference id with
+        image - PIL image to set the image with. Either this or remote_url
+                must be set.
+        remote_url - A remote url to push into brightcove that points to the
+                     image
+        thumb_size - (width, height) of the thumbnail
+        still_size - (width, height) of the video still image
+
+        Returns:
+        (brightcove_thumb_id, brightcove_still_id)
         '''
-        Enable thumbnail async
+        thumb_size = thumb_size or self.THUMB_SIZE
+        still_size = still_size or self.STILL_SIZE
+        if image is not None:
+            # Upload an image and set it as the thumbnail
+            thumb = PILImageUtils.resize(image,
+                                         im_w=thumb_size[0],
+                                         im_h=thumb_size[1])
+            still = PILImageUtils.resize(image,
+                                         im_w=still_size[0],
+                                         im_h=still_size[1])
+
+            responses = yield [self.add_image(video_id,
+                                              tid,
+                                              image=thumb,
+                                              atype='thumbnail',
+                                              reference_id=tid),
+                               self.add_image(video_id,
+                                              tid,
+                                              image=still,
+                                              atype='videostill',
+                                              reference_id='still-%s'%tid)]
+            raise tornado.gen.Return([x['id'] for x in responses])
+        
+        elif remote_url is not None:
+            # Set the thumbnail as a remote url. If it is a neon
+            # serving url, then add the requested size to the url
+            thumb_url, is_thumb_neon_url = self._build_remote_url(
+                remote_url, thumb_size)
+            thumb_reference_id = tid
+            if is_thumb_neon_url:
+                thumb_reference_id = 'thumbservingurl-%s' % video_id
+                
+            still_url, is_still_neon_url = self._build_remote_url(
+                remote_url, still_size)
+            still_reference_id = tid
+            if is_still_neon_url:
+                still_reference_id = 'stillservingurl-%s' % video_id
+
+            responses = yield [self.add_image(video_id,
+                                              tid,
+                                              remote_url=thumb_url,
+                                              atype='thumbnail',
+                                              reference_id=thumb_reference_id),
+                               self.add_image(video_id,
+                                              tid,
+                                              remote_url=still_url,
+                                              atype='videostill',
+                                              reference_id=still_reference_id)]
+            
+            raise tornado.gen.Return([x['id'] for x in responses])
+
+        else:
+            raise TypeError('Either image or remote_url must be set')
+
+    def _build_remote_url(self, url_base, size):
+        '''Create a remote url. 
+
+        If the base is a neon serving url, tack on the size params.
+
+        returns (remote_url, is_neon_serving)
         '''
+        remote_url = url_base
+        neon_url_re = re.compile('/neonvid_[0-9a-zA-Z_\.]+$')
+        is_neon_serving = neon_url_re.search(url_base) is not None
+        if is_neon_serving:
+            arams = zip(('width', 'height'), size)
+            param_str = '&'.join(['%s=%i' % x for x in params if x[1]])
+            if params_str:
+                remote_url = '%s?%s' % (url_base, params_str)
 
-        self.img_result = []  
-        reference_id = thumbnail_id
-       
-        def add_image_callback(result):
-            if not result.error and len(result.body) > 0:
-                self.img_result.append(tornado.escape.json_decode(result.body))
-            else:
-                self.img_result.append(None)
+        return remote_url, is_neon_serving
 
-            if len(self.img_result) == 2:
-                thumb = False
-                still = False 
-                try:
-                    for res in self.img_result:
-                        if res and not res["error"]:
-                            if res["result"]["type"] == 'THUMBNAIL':
-                                thumb = res["result"]["referenceId"]
-                            elif res["result"]["type"] == 'VIDEO_STILL':
-                                still = res["result"]["referenceId"]
-                        else:
-                            _log.error("key=async_update_thumbnail"
-                                    " msg=brightcove api error for %s %s" 
-                                    %(video_id, res["error"]))
-                except:
-                    pass
-
-                callback_value = (thumb, still)
-                callback(callback_value)
-
-        @tornado.gen.engine
-        def image_data_callback(image_response):
-            if not image_response.error:
-                imfile = StringIO(image_response.body)
-                image =  Image.open(imfile)
-                srefid = reference_id if not reference_id else "still-" + reference_id
-                
-                if frame_size is None:
-                    #resize to brightcove default size
-                    bcove_thumb = image.resize(self.THUMB_SIZE)
-                    bcove_still = image.resize(self.STILL_SIZE)
-                else:
-                    bcove_thumb = PILImageUtils.resize(image,
-                                                       im_w=self.THUMB_SIZE[0])
-                    bcove_still = PILImageUtils.resize(image,
-                                                       im_w=self.STILL_SIZE[0])
-
-                
-                #TODO : use generator task. Don't you dare. This code
-                #is complicated enough as is
-                self.add_image(video_id,
-                               bcove_thumb,
-                               atype='thumbnail', 
-                               reference_id=reference_id,
-                               image_suffix=image_suffix,
-                               tid=thumbnail_id,
-                               callback=add_image_callback)
-                self.add_image(video_id,
-                               bcove_still,
-                               atype='videostill',
-                               reference_id=srefid,
-                               tid=thumbnail_id,
-                               image_suffix=image_suffix,
-                               callback=add_image_callback)
-            else:
-                _log.error('key=async_update_thumbnail ' 
-                        'msg=failed to download image for %s' %thumbnail_id)
-                callback(None)
-
-        req = tornado.httpclient.HTTPRequest(url=img_url,
-                                             method="GET",
-                                             request_timeout=60.0,
-                                             connect_timeout=5.0)
-        utils.http.send_request(req, callback=image_data_callback)
-
-    ################################################################################
+    ##########################################################################
     # Feed Processors
-    ################################################################################
+    ##########################################################################
 
     def get_video_url_to_download(self, b_json_item, frame_width=None):
         '''
@@ -746,57 +668,6 @@ class BrightcoveApi(object):
 
         self.find_video_by_id(video_id, get_vid_info)
 
-    def create_request_by_video_id(self, video_id, i_id):
-        ''' create thumbnail api request given a video id '''
-
-        url = 'http://api.brightcove.com/services/library?command=find_video_by_id' \
-                '&token=%s&media_delivery=http&output=json&video_id=%s' %(self.read_token,video_id) 
-        req = tornado.httpclient.HTTPRequest(url=url,
-                                             method="GET",
-                                             request_timeout=60.0,
-                                             connect_timeout=10.0)
-        response = BrightcoveApi.read_connection.send_request(req)
-        if response.error:
-            _log.error('key=create_request_by_video_id msg=Unable to get %s'
-                       % url)
-            return False
-            
-        resp = tornado.escape.json_decode(response.body)
-        still = resp['videoStillURL']
-        video_url = self.get_video_url_to_download(resp)
-        response = self.format_neon_api_request(resp['id'],
-                                                video_url, 
-                                                still, 
-                                                request_type='topn', 
-                                                i_id=i_id,
-                                                title=resp['name'])
-        if not response or response.error:
-            _log.error(('key=create_request_by_video_id '
-                        'msg=Unable to create request for video %s')
-                        % video_id)
-            return False
-        
-        jid = tornado.escape.json_decode(response.body)
-        job_id = jid["job_id"]
-        def _update_account(acc):
-            acc.videos[video_id] = job_id
-        bc = cmsdb.neondata.BrightcovePlatform.modify(
-            self.neon_api_key, i_id, _update_account)
-        if bc:
-            return True
-
-    def async_get_n_videos(self, n, callback):
-        ''' async get n vids '''
-        self.get_publisher_feed(command='find_all_videos',
-                                page_size = n,
-                                callback = callback)
-        return
-    
-    def get_n_videos(self, n):
-        ''' sync get n vids '''
-        return self.get_publisher_feed(command='find_all_videos',
-                                       page_size = n)
-
     #### Verify Read token and create Requests during signup #####
 
     @tornado.gen.coroutine
@@ -903,7 +774,7 @@ class BrightcoveApi(object):
             raise tornado.gen.Return((None, None))
 
         raise tornado.gen.Return((thumb_url, still_url))
-    
+
     def create_request_from_playlist(self, pid, i_id):
         ''' create thumbnail api request given a video id 
             NOTE: currently we only need a sync version of this method
@@ -939,5 +810,141 @@ class BrightcoveApi(object):
         self.process_publisher_feed(items_to_process, i_id)
         return
 
-if __name__ == "__main__" :
-    utils.neon.InitNeon()
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def find_videos_by_ids(self, video_ids, video_fields=None,
+                           media_delivery='http'):
+        '''Finds many video information from the brightcove request.
+        Inputs:
+        video_ids - list of brightcove video ids to get info for
+        video_fields - list of video fields to populate
+        media_delivery - should urls be http, http_ios or default
+
+        Outputs:
+        A dictionary of video->{fields requested}
+        '''
+        results = {}
+
+        MAX_VIDS_PER_REQUEST = 50
+        
+        for i in range(0, len(video_ids), MAX_VIDS_PER_REQUEST):
+            url_params = {
+                'command' : 'find_videos_by_ids',
+                'token' : self.read_token,
+                'video_ids' : ','.join(video_ids[i:(i+MAX_VIDS_PER_REQUEST)]),
+                'media_delivery' : media_delivery,
+                'output' : 'json'
+                }
+            if video_fields is not None:
+                video_fields.append('id')
+                url_params['video_fields'] = ','.join(set(video_fields))
+
+            request = tornado.httpclient.HTTPRequest(
+                '%s?%s' % (self.read_url, urllib.urlencode(url_params)),
+                request_timeout = 60.0)
+            
+            response = yield tornado.gen.Task(
+                BrightcoveApi.read_connection.send_request, request)
+
+            if response.error:
+                _log.error('Error calling find_videos_by_ids: %s' %
+                           response.error)
+                try:
+                    json_data = json.load(response.buffer)
+                    if json_data['code'] >= 200:
+                        raise BrightcoveApiClientError(response.error)
+                except ValueError:
+                    # It's not JSON data so there was some other error
+                    pass    
+                except KeyError:
+                    # It may be valid json but doesn't have a code
+                    pass
+                raise BrightcoveApiServerError(response.error)
+
+            json_data = json.load(response.buffer)
+            for item in json_data['items']:
+                if item is not None:
+                    results[item['id']] = item
+
+        raise tornado.gen.Return(results)
+
+class BrightcoveFeedIterator(object):
+    '''An iterator that walks through entries from a Brightcove feed.
+
+    Automatically deals with paging.
+
+    If you want to do this iteration so that any calls are
+    asynchronous, then you have to manually create a loop like:
+
+    try:
+      while True:
+        item = yield iter.next(async=True)
+    except StopIteration:
+      pass      
+    
+    '''
+    def __init__(self, command, token, request_pool, page_size=100,
+                 output='json', max_items=None, **kwargs):
+        '''Create an iterator
+
+        Inputs:
+        command - Command to execute
+        token - The brightcove token to use
+        request_pool - The request pool to use to send the request
+        page_size - The size of each page when it is requested
+        output - Output type as per the Brightcove API
+        max_items - The maximum number of entries to return
+        kwargs - Any other arguments to pass as url arguments to the command
+        '''
+        self.args = kwargs
+        self.args['command'] = command
+        self.args['token'] = token
+        self.args['page_size'] = page_size
+        self.args['output'] = output
+        self.args['page_number'] = 0
+        self.max_items = max_items
+        self.page_data = []
+        self.request_pool = request_pool
+        self.items_returned = 0
+
+    def __iter__(self):
+        self.args['page_number'] = 0
+        self.items_returned = 0
+        return self
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def next(self):
+        if self.items_returned >= self.max_items:
+            raise StopIteration()
+        
+        if len(self.page_data) == 0:
+            # Get more entries
+            request = tornado.httpclient.HTTPRequest(
+                ('http://api.brightcove.com/services/library?%s' %
+                 urllib.urlencode(self.args)),
+                method='GET',
+                request_timeout=60.0)
+            response = yield tornado.gen.Task(self.request_pool,
+                                              request)
+            if response.error:
+                if response.error.code > 500:
+                    raise BrightcoveApiServerError(
+                        'Error getting entries from Brightcove %s: %s' % 
+                        (request.url, response.error))
+                else:
+                    raise BrightcoveApiClientError(
+                        'Client error getting entries from Brightcove %s: %s' %
+                        (request.url, response.error))
+            self.args['page_number'] += 1
+                
+            json_data = json.load(response.body)
+            self.page_data = json_data['items']
+            self.page_data.reverse()
+
+        if len(self.page_data) == 0:
+            # We've gotten all the data
+            raise StopIteration()
+
+        self.items_returned += 1
+        raise tornado.gen.Return(self.page_data.pop())

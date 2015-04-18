@@ -28,12 +28,13 @@ _log = logging.getLogger(__name__)
 from utils.options import define, options
 define("aws_region", default="us-east-1", type=str,
        help="Region to look for the production db")
-define("layer_name", default="redis", type=str,
+define("layer_name", default="dbslave", type=str,
        help="Layer shortname for the db")
 define("stack_name", default="Neon Serving Stack V2",
        help="Name of the stack")
 define("redis_port", default=6379,
        help="Port where redis is listening on the host")
+define("forward_port", default=1, help="If 1, then setup port forwarding")
 
 def find_db_address():
     conn = boto.opsworks.connect_to_region(options.aws_region)
@@ -58,7 +59,13 @@ def find_db_address():
                         (options.layer_name, options.stack_name))
 
     # Find the instance ip
-    ip =conn.describe_instances(layer_id=layer_id)['Instances'][0]['PrivateIp']
+    ip = None
+    for instance in conn.describe_instances(layer_id=layer_id)['Instances']:
+        try:
+            ip = instance['PrivateIp']
+            break
+        except KeyError:
+            pass
     _log.info('Found db at %s' % ip)
     return ip
 
@@ -92,19 +99,26 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
 
     random.seed()
-    local_port = random.randint(10000, 12000)
-    proc = forward_port(local_port)
+    proc = None
+    if options.forward_port:
+        db_address = 'localhost'
+        db_port = random.randint(10000, 12000)
+        proc = forward_port(db_port)
+    else:
+        db_address = find_db_address()
+        db_port = options.redis_port
     try:
         # Set the options for connecting to the db
-        options._set('cmsdb.neondata.dbPort', local_port)
-        options._set('cmsdb.neondata.accountDB', 'localhost')
-        options._set('cmsdb.neondata.thumbnailDB', 'localhost')
-        options._set('cmsdb.neondata.videoDB', 'localhost')
+        options._set('cmsdb.neondata.dbPort', db_port)
+        options._set('cmsdb.neondata.accountDB', db_address)
+        options._set('cmsdb.neondata.thumbnailDB', db_address)
+        options._set('cmsdb.neondata.videoDB', db_address)
 
         # Enter the console
         ipdb.set_trace()
         #code.interact(local=locals())
 
     finally:
-        proc.terminate()
+        if proc is not None:
+            proc.terminate()
     

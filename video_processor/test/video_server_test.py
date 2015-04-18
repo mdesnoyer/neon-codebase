@@ -255,11 +255,11 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         # Mock out the image download
         self.im_download_mocker = patch(
             'utils.imageutils.PILImageUtils.download_image')
-        im_download_mock = self.im_download_mocker.start()
+        self.im_download_mock = self.im_download_mocker.start()
         self.random_image = PILImageUtils.create_random_image(480, 640)
         image_future = concurrent.futures.Future()
         image_future.set_result(self.random_image)
-        im_download_mock.return_value = image_future
+        self.im_download_mock.return_value = image_future
 
         # Mock out cloudinary
         self.cloudinary_patcher = patch('cmsdb.cdnhosting.CloudinaryHosting')
@@ -357,6 +357,38 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(video.url, 'http://testurl/video.mp4')
         self.assertEquals(video.integration_id, self.na.integration_id)
         self.assertEquals(video.job_id, json.loads(response.body)['job_id'])
+    
+
+    def test_broken_default_thumb(self):
+        vals = {
+           "api_key": self.api_key, 
+           "video_url": "http://testurl/video.mp4", 
+           "video_id": 'neonapivid123',
+           "topn":2, 
+           "callback_url": "http://callback_push_url", 
+           "video_title": "test_title",
+           "default_thumbnail": "http://broken_image",
+            }
+        
+        def _image_exception(*args, **kwargs):
+            raise IOError
+        self.im_download_mock.side_effect = _image_exception 
+        response = self.make_api_request(vals)
+        self.assertEquals(response.code, 201)
+        # Check video entry in DB 
+        video = neondata.VideoMetadata.get('%s_neonapivid123' % self.api_key)
+        self.assertIsNotNone(video)
+
+        # Check request state and message
+        resp = json.loads(response.body)
+        api_request = neondata.NeonApiRequest.get(resp['job_id'], self.api_key)
+        self.assertEqual(api_request.state, neondata.RequestState.SUBMIT)
+        self.assertIsNotNone(api_request.msg)
+        
+        state_vars = video_processor.server.statemon.state.get_all_variables()
+        self.assertEqual(
+                state_vars.get('video_processor.server.default_thumb_error').value,
+                1)
 
     def test_neon_api_request_invalid_id(self):
         resp = self.add_request("neonap_-ivid123") 
@@ -684,7 +716,7 @@ class QueueSmokeTest(test_utils.neontest.TestCase):
         # verify that the add metadata thread ran and we were able
         # to collect some data on size of Q in # of bytes 
         state_vars = video_processor.server.statemon.state.get_all_variables()
-        qsize = ['video_processor.server.queue_size_bytes']
+        qsize = state_vars.get('video_processor.server.queue_size_bytes').value
         self.assertGreater(qsize, 0)
 
 class TestJobManager(test_utils.neontest.AsyncTestCase):

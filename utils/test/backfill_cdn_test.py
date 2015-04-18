@@ -45,8 +45,6 @@ class TestBackfillCDN(test_utils.neontest.AsyncTestCase):
         self.http_call_patcher = \
           patch('utils.http.send_request')
         self.http_mock = self.http_call_patcher.start()
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start() 
         
         metadata = neondata.AkamaiCDNHostingMetadata(key=None,
                 host='http://akamai',

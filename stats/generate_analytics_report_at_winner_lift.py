@@ -71,7 +71,7 @@ def get_video_ids():
     thumbnail_id is not NULL and
     tai='%s' %s""" % (options.pub_id, 
                       statutils.get_time_clause(options.start_time,
-                                                  options.end_time)))
+                                                options.end_time)))
 
     vidRe = re.compile('[0-9a-zA-Z]+_[0-9a-zA-Z]+')
     retval = [x[0] for x in cursor if vidRe.match(x[0])]
@@ -229,19 +229,13 @@ def collect_stats(thumb_info, video_info,
         # Put the type and rank columns in the index
         subcols = thumb_stats[[x for x in thumb_stats.columns if x not in 
                                ['type', 'rank']]]
-        if len(subcols) == 1:
-            # Setting the index directly gets messed up when there is only one row
-            idx = pandas.pandas.MultiIndex.from_tuples(
-                [(thumb_stats['type'][0],
-                  thumb_stats['rank'][0], 
-                  thumb_stats.index[0])],
-                names=['type', 'rank', 'thumbnail_id'])
-        elif len(subcols) == 0:
+        if len(subcols) == 0:
             continue
-        else:
-            idx = [thumb_stats['type'],
-                   thumb_stats['rank'],
-                   thumb_stats.index]
+        
+        idx = pandas.pandas.MultiIndex.from_tuples(
+            [x for x in zip(*(thumb_stats['type'], thumb_stats['rank'],
+                              thumb_stats.index))],
+            names=['type', 'rank', 'thumbnail_id'])
         thumb_stats = pandas.DataFrame(
             subcols.values,
             columns=subcols.columns,
