@@ -290,7 +290,7 @@ class VideoDBWatcher(threading.Thread):
                     url_obj.size_map)
 
         # Update the platform, which updates the video data
-        for platform in neondata.AbstractPlatform.get_all_instances():
+        for platform in neondata.AbstractPlatform.get_all():
             # Update the experimental strategy for the account
             self.mastermind.update_experiment_strategy(
                 platform.neon_api_key,

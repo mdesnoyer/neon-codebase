@@ -122,7 +122,7 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
                 }
             }]
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
-                          ['http://brightcove.com/4/vid_still.jpg'],
+                          ['http://bcsecure01-a.akamaihd.net/4/vid_still.jpg'],
                           ttype=ThumbnailType.BRIGHTCOVE,
                           rank=1).save()
 
