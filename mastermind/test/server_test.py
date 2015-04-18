@@ -84,21 +84,27 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                                                  abtest=False)
         bcPlatform.add_video(0, 'job11')
         job11 = neondata.NeonApiRequest('job11', api_key, 0)
+        job11.state = neondata.RequestState.FINISHED
 
+        # a job in submit state, without any thumbnails
         bcPlatform.add_video(10, 'job12')
         job12 = neondata.NeonApiRequest('job12', api_key, 10)
+        job12.state = neondata.RequestState.SUBMIT
 
         testPlatform = neondata.BrightcovePlatform('a2', 'i2', api_key, 
                                                    abtest=True)
         testPlatform.add_video(1, 'job21')
         job21 = neondata.NeonApiRequest('job21', api_key, 1)
+        job21.state = neondata.RequestState.FINISHED
 
         testPlatform.add_video(2, 'job22')
         job22 = neondata.NeonApiRequest('job22', api_key, 2)
+        job22.state = neondata.RequestState.FINISHED
 
         apiPlatform = neondata.NeonPlatform('a3', '0', api_key, abtest=True)
         apiPlatform.add_video(4, 'job31')
         job31 = neondata.NeonApiRequest('job31', api_key, 4)
+        job31.state = neondata.RequestState.CUSTOMER_ERROR
 
         noVidPlatform = neondata.BrightcovePlatform('a4', 'i4', api_key, 
                                                     abtest=True) 
@@ -174,6 +180,9 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             directives[(api_key, api_key+'_4')][api_key+'_4_t41'], 0.0)
         self.assertGreater(
             directives[(api_key, api_key+'_4')][api_key+'_4_t42'], 0.0)
+        # video in submit state without thumbnails shouldn't be in
+        # the directive file
+        self.assertFalse(directives.has_key((api_key, api_key+'_10')))
 
         self.assertTrue(self.watcher.is_loaded.is_set())
 
@@ -1994,27 +2003,42 @@ class SmokeTesting(test_utils.neontest.TestCase):
             req = neondata.VideoMetadata.get_video_request('key1_vid1')
             self.assertEqual(req.state, neondata.RequestState.SERVING)
 
-            # Trigger a new video via a push
-            job = neondata.NeonApiRequest('job2', 'key1', 'vid2')
-            job.state = neondata.RequestState.FINISHED 
-            job.save()
+            # Trigger new videos with different states via a push (finished, customer_error)
+            for i in [2, 3]:
+                job = neondata.NeonApiRequest('job%d'%i, 'key1', 'vid%d'%i)
+                if i == 2:
+                    job.state = neondata.RequestState.FINISHED 
+                if i == 3:
+                    job.state = neondata.RequestState.CUSTOMER_ERROR
+                job.save()
         
-            # Create a video with a couple of thumbs in the database
-            vid = neondata.VideoMetadata('key1_vid2', request_id='job2',
-                                         tids=['key1_vid2_t1'],
-                                         i_id='i1')
-            vid.save()
-            platform.add_video('vid2', vid.job_id)
-            platform.save()
-            thumbs =  [neondata.ThumbnailMetadata('key1_vid2_t1', 'key1_vid2',
-                                                  ttype='neon')]
-            neondata.ThumbnailMetadata.save_all(thumbs)
-            neondata.ThumbnailServingURLs.save_all([
-                neondata.ThumbnailServingURLs('key1_vid2_t1',
-                                              {(160, 90) : 't21.jpg'})])
+                # Create a video with a couple of thumbs in the database
+                vid = neondata.VideoMetadata('key1_vid%d'%i,
+                                        request_id='job%d'%i,
+                                        tids=['key1_vid%d_t1'%i],
+                                        i_id='i1')
+                vid.save()
+                platform.add_video('vid%d'%i, vid.job_id)
+                platform.save()
+                thumbs =  [neondata.ThumbnailMetadata('key1_vid%d_t1'%i,
+                            'key1_vid%d'%i,
+                             ttype='neon')]
+                neondata.ThumbnailMetadata.save_all(thumbs)
+                neondata.ThumbnailServingURLs.save_all([
+                    neondata.ThumbnailServingURLs('key1_vid%d_t1'%i,
+                                                  {(160, 90) : 't21.jpg'})])
 
             self.assertWaitForEquals(
                 lambda: 'key1_vid2' in \
+                self.directive_publisher.last_published_videos,
+                True)
+
+            # Check state for the customer_error video and ensure its in the 
+            # list of last published videos
+            self.assertEquals(neondata.NeonApiRequest.get('job3', 'key1').state,
+                          neondata.RequestState.CUSTOMER_ERROR)
+            self.assertWaitForEquals(
+                lambda: 'key1_vid3' in \
                 self.directive_publisher.last_published_videos,
                 True)
 
