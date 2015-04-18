@@ -90,7 +90,7 @@ statemon.define('pubsub_errors', int)
 #constants 
 BCOVE_STILL_WIDTH = 480
 
-class DefaultThumbDownloadError(Exception):pass
+class DefaultThumbDownloadError(IOError):pass
 class DBStateError(ValueError):pass
 class DBConnectionError(IOError):pass
 
@@ -3619,8 +3619,9 @@ class VideoMetadata(StoredObject):
             image = yield utils.imageutils.PILImageUtils.download_image(image_url,
                     async=True)
         except IOError, e:
-            _log.warn("IOError while downloading image %s" % image_url)
-            raise DefaultThumbDownloadError
+            msg = "IOError while downloading image %s" % image_url
+            _log.warn(msg)
+            raise DefaultThumbDownloadError(msg)
 
         thumb.urls.append(image_url)
         thumb = yield self.add_thumbnail(thumb, image, cdn_metadata,

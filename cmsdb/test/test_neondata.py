@@ -221,36 +221,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         self.assertNotEqual(self.bp_conn, self.vm_conn)
 
-    @unittest.skip("DBconn check disabled")
-    def test_db_connection_error(self):
-        ''' #Verify that database connection is re-established 
-        after config change '''
-        ap = AbstractPlatform()
-        db = DBConnection.get(ap)
-        key = "fookey"
-        val = "fooval"
-        self.assertTrue(db.blocking_conn.set(key, val))
-        self.redis.stop()
-        
-        #try fetching the key after db has been stopped
-        try :
-            db.blocking_conn.get(key)
-        except Exception,e:
-            print e
-            #assert exception is ConnectionError 
-
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-        
-        #Trigger a change in the options, so that the watchdog thread 
-        #can update the connection
-        options._set("cmsdb.neondata.dbPort", self.redis.port)
-        check_interval = options.get("cmsdb.neondata.watchdogInterval")
-        time.sleep(check_interval + 0.5)
-        
-        #try any db operation
-        self.assertTrue(db.blocking_conn.set(key, val))
-
     #TODO: Test Async DB Connection
     
     def test_db_connection(self):
@@ -1095,13 +1065,15 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         # Now force a connection loss by stopping the server
         self.redis.stop(clear_singleton=False)
         self.assertWaitForEquals(
-            lambda: neondata.PubSubConnection.get(VideoMetadata).connected, False)
+            lambda: neondata.PubSubConnection.get(VideoMetadata).connected,
+            False)
 
         # Start a new server
         self.redis = test_utils.redis.RedisServer()
         self.redis.start(clear_singleton=False)
         self.assertWaitForEquals(
-            lambda: neondata.PubSubConnection.get(VideoMetadata).connected, True)
+            lambda: neondata.PubSubConnection.get(VideoMetadata).connected,
+            True)
 
         # Now change the video and make sure we get the event for
         # account 1, but not 2
