@@ -2048,8 +2048,7 @@ class AbstractPlatform(NamespacedStoredObject):
 
     def get_videos(self):
         ''' list of external video ids '''
-        if len(self.videos) > 0:
-            return self.videos.keys()
+        return self.videos.keys()
     
     def get_internal_video_ids(self):
         ''' return list of internal video ids for the account ''' 
