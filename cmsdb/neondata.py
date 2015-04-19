@@ -3622,7 +3622,7 @@ class VideoMetadata(StoredObject):
                 image_url, e)
             _log.warn(msg)
             raise ThumbDownloadError(msg)
-        except httpclient.HTTPError as e:
+        except tornado.httpclient.HTTPError as e:
             msg = "HTTP Error while dowloading image %s: %s" % (
                 image_url, e)
             _log.warn(msg)
