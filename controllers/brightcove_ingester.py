@@ -73,7 +73,7 @@ def extract_image_info(response, field):
         if fields is not None:
             vals.append(fields.get(field, None))
 
-    return [str(x) for x in vals if x is not None]
+    return [unicode(x) for x in vals if x is not None]
 
 @tornado.gen.coroutine
 def process_one_account(platform):
