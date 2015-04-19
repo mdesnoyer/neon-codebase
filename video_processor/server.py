@@ -827,13 +827,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
         except ValueError, e:
             self.send_json_response('{"error":"%s"}' % e, 400)
             return
-
-        except IOError, e:
-            _log.error("IOError for video %s msg=%s" % (vid, e))
-            self.send_json_response('{"error":"%s"}' % e, 400)
-            return
         
-        except neondata.DefaultThumbDownloadError, e:
+        except neondata.ThumbDownloadError, e:
             _log.warn("Default thumbnail download failed for vid %s" % vid)
             statemon.state.increment('default_thumb_error')
             # Should the state be updated here too?
@@ -849,6 +844,11 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             self.set_status(201)
             self.write(response_data)
             self.finish()
+            return
+        
+        except IOError, e:
+            _log.error("IOError for video %s msg=%s" % (vid, e))
+            self.send_json_response('{"error":"%s"}' % e, 400)
             return
 
         except Exception, e:
