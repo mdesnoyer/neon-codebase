@@ -763,6 +763,7 @@ class LogLines(TrackerDataHandler):
                 statemon.state.increment(ref=self.not_interesting_counter,
                                          safe=False)
                 self.set_status(200)
+                self.add_header("content-type", "application/javascript") 
                 self.finish()
                 return
             except Exception, err:
@@ -777,6 +778,7 @@ class LogLines(TrackerDataHandler):
                                                self.schema_url)
             try:
                 yield self.flume_buffer.send(data)
+                self.add_header("content-type", "application/javascript") 
                 self.set_status(200)
                 
             except Exception, err:
@@ -814,6 +816,7 @@ class TestTracker(TrackerDataHandler):
             return
         
         self.set_status(200)
+        self.add_header("content-type", "application/javascript") 
         self.finish()
 
 ###########################################
