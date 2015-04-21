@@ -643,7 +643,7 @@ class VideoProcessor(object):
             # Everything is fine at this point, so lets mark it finished
             api_request.state = neondata.RequestState.FINISHED
 
-        except neondata.DefaultThumbDownloadError, e:
+        except neondata.ThumbDownloadError, e:
             _log.warn("Default thumbnail download failed for vid %s" % video_id)
             statemon.state.increment('default_thumb_error')
             err_msg = "Failed to download default thumbnail error=%s" % e
