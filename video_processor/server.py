@@ -700,7 +700,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             # Generate JOB ID  
             # Use Params that can change to generate UUID, support same
             # video to be processed with diff params
-            intermediate = api_key + str(vid) + api_method + str(api_param) 
+            intermediate = api_key + str(vid) + api_method + str(api_param)
             job_id = hashlib.md5(intermediate).hexdigest()
           
             # Identify Request Type

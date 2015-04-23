@@ -626,33 +626,37 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         '''
         Test to validate the flow when default thumb is broken
         '''
+        return_values = [IOError, HTTPError(404), HTTPError(500)]
 
+        # test for diff exceptions
         def _image_exception(*args, **kwargs):
-            raise IOError
-        self.im_download_mock.side_effect = _image_exception 
-        self.vprocessor.finalize_response()
+            raise return_values.pop(0) 
+        
+        self.im_download_mock.side_effect = _image_exception
+        for i in range(3):
+            self.vprocessor.finalize_response()
 
-        # Make sure that the api request is updated
-        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
-        self.assertEquals(api_request.state,
-                neondata.RequestState.CUSTOMER_ERROR)
+            # Make sure that the api request is updated
+            api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+            self.assertEquals(api_request.state,
+                    neondata.RequestState.CUSTOMER_ERROR)
 
-        # check state variable
-        state_vars = video_processor.client.statemon.state.get_all_variables()
-        self.assertEqual(
-                state_vars.get('video_processor.client.default_thumb_error').value,
-                1)
-        video_processor.client.statemon.state._reset_values()
+            # check state variable
+            state_vars = video_processor.client.statemon.state.get_all_variables()
+            self.assertEqual(
+                    state_vars.get('video_processor.client.default_thumb_error').value,
+                    1)
+            video_processor.client.statemon.state._reset_values()
 
-        # check callback scheduled 
-        self.assertEqual(self.mock_sqs_manager().add_callback_response.call_count,
-                1)
+            # check callback scheduled 
+            self.assertEqual(self.mock_sqs_manager().add_callback_response.call_count,
+                    1)
 
-        # Check the video metadata in the database
-        video_data = neondata.VideoMetadata.get(self.video_id)
-        self.assertEquals(len(video_data.thumbnail_ids), 3) # no default thumb
-        self.assertTrue(video_data.serving_enabled)
-
+            # Check the video metadata in the database
+            video_data = neondata.VideoMetadata.get(self.video_id)
+            self.assertEquals(len(video_data.thumbnail_ids), 3) # no default thumb
+            self.assertTrue(video_data.serving_enabled)
+            self.mock_sqs_manager().add_callback_response.reset_mock()
 
     def test_reprocess(self):
         # Add the results from the previous run to the database
