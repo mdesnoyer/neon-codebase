@@ -112,13 +112,42 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     pandas series of stats we generate
     '''
     data = data.fillna(0)
-    data = data[(data['extra_conversions'] != 0) | data['is_base']]
+    all_data = data[(data['extra_conversions'] != 0) | data['is_base']]
+
+    # Get the data from videos where there was a statistically
+    # significant lift
+    sig_data = all_data.copy()
+    sig_data = sig_data.groupby(level=1).filter(
+        lambda x: np.any(x['p_value']>0.95)
+        and np.any(x['is_base']) 
+        and np.any(x['is_base'] ==False))
 
     # Only grab videos that have a baseline and one non-baseline
-    data.groupby(level=1).filter(lambda x: np.any(x['is_base']) 
-                                 and np.any(x['is_base'] == False))
+    all_data = all_data.groupby(level=1).filter(
+        lambda x: np.any(x['is_base']) 
+        and np.any(x['is_base'] == False))
 
+    neon_winners = sig_data[(sig_data['extra_conversions'] > 0) & 
+                            (sig_data['p_value'] > 0.95)]
+
+    lots_of_clicks = all_data.groupby(level=1).filter(
+        lambda x: np.sum(x['conv']) > 100)
+
+    no_runaways = all_data.groupby(level=1).filter(
+        lambda x: np.sum(x['extra_conversions']) > -50 or
+        np.sum(x['conv']) < 50)
     
+
+    return pandas.Series(
+        {'significant_video_count' : sig_data.groupby(level=1).ngroups,
+         'total_video_count' : all_data.groupby(level=1).ngroups,
+         'total_neon_winners' : neon_winners.groupby(level=1).ngroups,
+         'significant lift': calc_lift_from_dataframe(sig_data),
+         'all_lift' : calc_lift_from_dataframe(all_data),
+         'lots_clicks_lift' : calc_lift_from_dataframe(lots_of_clicks),
+         'no_runaways' : calc_lift_from_dataframe(no_runaways)})
+
+def calc_lift_from_dataframe(data):
     base_sums = data.groupby(['is_base']).sum()
     neon_sums = data.groupby(level=['type']).sum()
 
@@ -127,9 +156,8 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
 
     lift = base_sums['impr'][True] * neon_sums['extra_conversions']['neon'] / \
       (base_sums['conv'][True] * neon_sums['impr']['neon'])
-    
 
-    return pandas.Series({'lift': lift})
+    return lift
 
 def calc_thumb_stats(baseCounts, thumbCounts):
     '''Calculates statistics for a thumbnail relative to a baseline.

@@ -411,7 +411,7 @@ def main():
 
     _log.info('Calculating aggregate statistics')
     aggregate_sheets = {}
-    aggregate_sheets['Overall'] = calculate_aggregate_stats(video_stats)
+    #aggregate_sheets['Overall'] = calculate_aggregate_stats(video_stats)
 
 
     
