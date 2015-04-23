@@ -109,8 +109,10 @@ class OptionParser(object):
 
     def __del__(self):
         timer = self.__dict__['_config_poll_timer']
-        if timer is not None and time.is_alive():
+        if timer is not None and timer.is_alive():
             timer.cancel()
+        self.__dict__['_config_poll_timer'] = None
+        
 
     def __getattr__(self, name):
         with self.__dict__['lock']:
