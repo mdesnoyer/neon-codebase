@@ -6,6 +6,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import binascii
 import logging
 import urllib2
 import urllib
@@ -15,10 +16,12 @@ import m3u8
 import shutil
 import subprocess
 import os
+from Crypto.Cipher import AES
 import time
 from glob import glob
 import boto
 import boto.s3.connection
+import urlparse
 import utils.monitor
 import utils.neon
 
@@ -64,24 +67,34 @@ def create_neon_api_request(account_id, api_key, video_id, video_title, video_ur
     return api_resp["job_id"]
 
 
-def download_and_save_segment(base_path, ts_url):
-    local_fn = os.path.join(options.working_dir, ts_url)
+def download_and_save_segment(base_path, ts_url, cipher=None):
+    urlparsed = urlparse.urlparse(ts_url)
+    local_fn = '%s/%s' % (options.working_dir, urlparsed.path)
+    local_dir = os.path.dirname(local_fn)
+    if not os.path.exists(local_dir):
+        os.makedirs(local_dir)
     if not os.path.exists(local_fn):
-        
         _log.info('downloading %s' % ts_url)
-        urllib.urlretrieve('%s/%s' % (base_path, ts_url), local_fn)
+        if not urlparsed.netloc:
+            ts_url = '%s/%s' % (base_path, ts_url)
+        urlstream = urllib2.urlopen(ts_url)
+        data = urlstream.read()
+        if cipher is not None:
+            data = cipher.decrypt(data)
+        with open(local_fn, 'wb') as out_file:
+            out_file.write(data)
+    return local_fn
 
-def cat_and_ffmpeg():
+def cat_and_ffmpeg(segment_files):
     with open(os.path.join(options.working_dir, 'input.ts'), 'wb') as destination:
 
         # TODO, CAT THEM IN ORDER
-        valid_files = glob(os.path.join(options.working_dir, '[0-9]*.ts'))
-        for filename in sorted(valid_files):
+        for filename in reversed(segment_files):
             _log.info('Catting %s' % filename)
             shutil.copyfileobj(open(filename,'rb'), destination)
 
 
-	subprocess.check_call('/usr/local/bin/ffmpeg -i %s -bsf:a aac_adtstoasc -vcodec copy '
+	subprocess.check_call('/usr/bin/ffmpeg -i %s -absf aac_adtstoasc -vcodec copy '
                           '-acodec copy %s' % (
                               os.path.join(options.working_dir, 'input.ts'),
                               os.path.join(options.working_dir, 'output.mp4')),
@@ -104,7 +117,9 @@ if __name__ == '__main__':
             os.makedirs(options.working_dir)
         else:
             for fn in os.listdir(options.working_dir):
-                os.remove(os.path.join(options.working_dir, fn))
+                path = os.path.join(options.working_dir, fn)
+                if os.path.isfile(path):
+                    os.remove(os.path.join(options.working_dir, fn))
 
         conn = boto.connect_s3(options.access_key, options.secret_key)
 
@@ -119,11 +134,18 @@ if __name__ == '__main__':
                 bandwidth = playlist.stream_info.bandwidth
                 hdurl = playlist.uri
 
-        m3u8_obj = m3u8.load(hdurl)
-        #m3u8_obj = m3u8.load(options.input)
+        hdurl = '%s/%s' % (os.path.dirname(options.input), hdurl)
+        #m3u8_obj = m3u8.load(hdurl)
+        m3u8_obj = m3u8.load(options.input)
+        cipher=None
+        if m3u8_obj.key is not None:
+            encr_key = urllib2.urlopen(m3u8_obj.key.uri)
+            iv = binascii.unhexlify(m3u8_obj.key.iv.split('X')[1])
+            cipher = AES.new(encr_key.read(), AES.MODE_CBC, IV=iv)
 
         # for AK live, we need to download and save the last 12 in the list
         idx = 0
+        segment_files = []
         for segment in reversed(m3u8_obj.files):
             local_fn = os.path.join(options.working_dir, segment)
 
@@ -137,14 +159,15 @@ if __name__ == '__main__':
                         f_stream.write(segment)
 
             if idx < options.lookback_count:
-                download_and_save_segment(os.path.dirname(options.input),
-                                          segment)
+                local_fn = download_and_save_segment(os.path.dirname(hdurl),
+                                                     segment, cipher)
+                segment_files.append(local_fn)
             elif os.path.exists(local_fn):
                 # Delete older segments
                 os.remove(local_fn)
             idx += 1
 
-        cat_and_ffmpeg()
+        cat_and_ffmpeg(segment_files)
 
         bucket = conn.get_bucket("neon-test")
 
