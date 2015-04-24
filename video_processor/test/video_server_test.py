@@ -363,32 +363,40 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         vals = {
            "api_key": self.api_key, 
            "video_url": "http://testurl/video.mp4", 
-           "video_id": 'neonapivid123',
+           "video_id": '', 
            "topn":2, 
            "callback_url": "http://callback_push_url", 
            "video_title": "test_title",
            "default_thumbnail": "http://broken_image",
             }
         
-        def _image_exception(*args, **kwargs):
-            raise IOError
-        self.im_download_mock.side_effect = _image_exception 
-        response = self.make_api_request(vals)
-        self.assertEquals(response.code, 201)
-        # Check video entry in DB 
-        video = neondata.VideoMetadata.get('%s_neonapivid123' % self.api_key)
-        self.assertIsNotNone(video)
-
-        # Check request state and message
-        resp = json.loads(response.body)
-        api_request = neondata.NeonApiRequest.get(resp['job_id'], self.api_key)
-        self.assertEqual(api_request.state, neondata.RequestState.SUBMIT)
-        self.assertIsNotNone(api_request.msg)
+        return_values = [IOError, HTTPError(404), HTTPError(500)]
+        N = len(return_values)
         
-        state_vars = video_processor.server.statemon.state.get_all_variables()
-        self.assertEqual(
-                state_vars.get('video_processor.server.default_thumb_error').value,
-                1)
+        def _image_exception(*args, **kwargs):
+            raise return_values.pop(0) 
+        self.im_download_mock.side_effect = _image_exception 
+        for i in range(N):
+            vid = "neonapivid123%s" % i 
+            vals['video_url'] = "http://testurl%s/video.mp4"  %vid
+            vals['video_id'] = vid 
+            response = self.make_api_request(vals)
+            self.assertEquals(response.code, 201)
+            # Check video entry in DB 
+            video = neondata.VideoMetadata.get('%s_%s' % (self.api_key, vid))
+            self.assertIsNotNone(video)
+
+            # Check request state and message
+            resp = json.loads(response.body)
+            api_request = neondata.NeonApiRequest.get(resp['job_id'], self.api_key)
+            self.assertEqual(api_request.state, neondata.RequestState.SUBMIT)
+            self.assertIsNotNone(api_request.msg)
+            
+            state_vars = video_processor.server.statemon.state.get_all_variables()
+            self.assertEqual(
+                    state_vars.get('video_processor.server.default_thumb_error').value,
+                    1)
+            video_processor.server.statemon.state._reset_values()
 
     def test_neon_api_request_invalid_id(self):
         resp = self.add_request("neonap_-ivid123") 
