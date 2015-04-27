@@ -76,7 +76,6 @@ if __name__ == "__main__":
                 i_id = accnt.integration_id 
                 _log.info("key=brightcove_request msg= internal account %s "
                           "i_id %s" %(api_key, i_id))
-                #retrieve the blob and create the object
                 accnt.check_feed_and_create_api_requests()
                 accnt.check_playlist_feed_and_create_requests()
 
