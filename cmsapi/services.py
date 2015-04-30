@@ -139,10 +139,11 @@ class GetVideoStatusResponse(object):
     def to_json(self):
         ''' to json''' 
         for item in self.items:
-            for thumb in item['thumbnails']:
-                score = thumb['model_score']
-                if score == float('-inf') or score == '-inf' or score is None:
-                    thumb['model_score'] =  -1 * sys.maxint
+            if item:
+                for thumb in item['thumbnails']:
+                    score = thumb['model_score']
+                    if score == float('-inf') or score == '-inf' or score is None:
+                        thumb['model_score'] =  -1 * sys.maxint
 
         return json.dumps(self, default=lambda o: o.__dict__)
 
@@ -861,6 +862,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
          Check cached videos to reduce the multiget ( lazy load)
          Aggregrate results and format for the client
         '''
+        
         #counters 
         c_published = 0
         c_processing = 0
@@ -874,6 +876,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         a_videos = []
         serving_videos = []
         f_videos = [] #failed videos 
+        
+        # flag that indicates if an empty video [] should be returned
+        insert_non_existent_videos = False
+        if vids is not None:
+            insert_non_existent_videos = True 
 
         page_no = 0 
         page_size = 300
@@ -896,9 +903,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                             i_type, i_id)
 
         if not platform_account:
-            _log.error("key=get_video_status_%s msg=account not found" %i_type)
+            _log.error("key=get_video_status_%s msg=account not found" % i_type)
             statemon.state.increment('account_not_found')
-            self.send_json_response("%s account not found"%i_type, 400)
+            self.send_json_response("%s account not found" % i_type, 400)
             return
 
         
@@ -955,13 +962,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             try:
                 job_request_keys.append((platform_account.videos[vid],
                                          self.api_key))
-            except:
-                pass #job id not found
+            except KeyError, e:
+                #job id not found
+                job_request_keys.append(("dummy","dummy"))
  
         #2 Get Job status
         # jobs that have completed, used to reduce # of keys to fetch 
         completed_videos = [] 
-
         # Get all requests and populate video response object in advance
         requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_many,
                     job_request_keys) 
@@ -1108,42 +1115,47 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         tid_key = "thumbnail_id"
         for res in result:
             vres = result[res]
-            platform_thumb_id = None
-            for thumb in vres.thumbnails:
-                if thumb['chosen'] == True:
-                    vres.current_thumbnail = thumb[tid_key]
-                    if "neon" in thumb['type']:
-                        vres.status = "active"
+            if vres:
+                platform_thumb_id = None
+                for thumb in vres.thumbnails:
+                    if thumb['chosen'] == True:
+                        vres.current_thumbnail = thumb[tid_key]
+                        if "neon" in thumb['type']:
+                            vres.status = "active"
 
-                if thumb['type'] == i_type:
-                    platform_thumb_id = thumb[tid_key]
+                    if thumb['type'] == i_type:
+                        platform_thumb_id = thumb[tid_key]
 
-            if vres.status == "finished" and vres.current_thumbnail == 0:
-                vres.current_thumbnail = platform_thumb_id
+                if vres.status == "finished" and vres.current_thumbnail == 0:
+                    vres.current_thumbnail = platform_thumb_id
 
         #6. Set ab test state
-        
         #convert to dict and count total counts for each state
         vresult = []
         for res in result:
             vres = result[res]
             if vres and vres.video_id in vids: #filter videos by state 
                 vresult.append(vres.to_dict())
-            
+            else:
+                if insert_non_existent_videos:
+                    vresult.append([])
         c_processing = len(p_videos)
         c_recommended = len(r_videos)
         c_published = len(a_videos)
         c_failed = len(f_videos)
         c_serving = len(serving_videos)
 
-        if i_type == "brightcove":
-            #Sort brightcove videos by video_id, since publish_date 
-            #is not currently set on ingest of videos
-            s_vresult = sorted(vresult, 
-                               key=lambda k: int(k['video_id']), reverse=True)
-        else:
-            s_vresult = sorted(vresult, 
-                               key=lambda k: k['publish_date'], reverse=True)
+        s_vresult = vresult
+        # no sorting required since csv was requested
+        if not insert_non_existent_videos:
+            if i_type == "brightcove":
+                #Sort brightcove videos by video_id, since publish_date 
+                #is not currently set on ingest of videos
+                s_vresult = sorted(vresult, 
+                                   key=lambda k: int(k['video_id']), reverse=True)
+            else:
+                s_vresult = sorted(vresult, 
+                                   key=lambda k: k['publish_date'], reverse=True)
            
         #2c Pagination, case: There are more vids than page_size
         if len(s_vresult) > page_size:
