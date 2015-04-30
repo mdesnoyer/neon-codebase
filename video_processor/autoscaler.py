@@ -7,286 +7,230 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import boto.opsworks
-import boto.ec2
 import json
 import urllib2
 import logging
-import os
-import random
 import time
+import utils.neon
 from utils import statemon
 
-#Monitoring
+_log = logging.getLogger(__name__)
+
+from utils.options import define, options
+define("video_server", default="localhost", type=str, help="Video server api to get Queue Stats")
+define('video_server_auth', default='secret_token',help='Secret token for talking with the video processing server')
+define("aws_region", default="us-east-1", type=str, help="Region to look for the vclients")
+define("stack_id", default="eb842d2e-b9e3-471e-b4eb-70aa7b40f2c6", type=str, help="The stack ID")
+define("layer_id", default="XXXXX-XXXXX-XXXXX-XXXXX", type=str, help="The instance layer ID")
+define("ami_id", default="ami-dadfb6b2", type=str, help="AMI ID to be used to create the instance")
+define("instance_type", default="t2.small", type=str, help="The instance type")
+define("minimum_instances", default=8, type=int, help="Minimum number of instances to keep")
+define("maximum_instances", default=20, type=int, help="Maximum number of instances to launch")
+define("mb_per_vclient", default=500, type=int, help="Number of MB one client can process")
+define("enable_batch_termination", default=0, type=int, help="When 0 only one instance is stopped per iteration. If 1 multiple instances can be stopped per interation")
+
+# Monitoring
 statemon.define('video_server_connection_failed', int)
 statemon.define('boto_connection_failed', int)
 statemon.define('boto_vclient_launch', int)
 statemon.define('boto_vclient_terminate', int)
 
-from utils.options import define, options
-define("aws_region", default="us-west-2", type=str,
-       help="Region to look for the vclients")
+# Operational Values
+# Set on startup with the values from options.
+# Used in unit tests to change the behaviour according to test.
+MINIMUM_VCLIENTS  = 0
+MAXIMUM_VCLIENTS  = 0
+BYTES_PER_VCLIENT = 0
+ENABLE_BATCH_TERMINATION = False
 
-AWS_REGION = 'us-west-2'
-AWS_ACCESS_KEY_ID = 'AKIAIHEAXZIPN7HC5YBQ'
-AWS_SECRET_ACCESS_KEY = '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'
-
-#
-video_server_ip = 'http://localhost'
-
-# 
-INITIAL_SLEEP       = 1
+# Sleep Constants
 NORMAL_SLEEP        = 1
-SCALE_UP_SLEEP      = 1
-SCALE_DOWN_SLEEP    = 1
+SCALE_UP_SLEEP      = 5
 
-# to indicate that the process should quit
-shutdown = False
-
-# 
-high_water_mark = 80 
-low_water_mark = 10
-
-#
-minimum_vclients    = 8
-maximum_vclients    = 20
-SCALE_UP_FACTOR     = 0.2
-SCALE_DOWN_FACTOR   = 0.1
-
-# vclients states count
-vclients_state_count = None
+# To indicate that the process should quit
+SHUTDOWN = False
 
 
 def get_video_server_queue_info():
-
+    '''
+    Request the queue info from the video server.
+    :returns: None or a dict containing the Q size (size) and total number of bytes to be processed (bytes).
+    '''
     response = None
 
     try:
-        response = urllib2.urlopen(video_server_ip)
-    except URLError:
-        statemon.state.increment('video_server_connection_failed')
-        return -1
+        client_url = 'http://%s:8081/queuestats' %options.video_server
+        headers = {'X-Neon-Auth': options.video_server_auth}
+
+        request = urllib2.Request(client_url, None, headers)
+        response = urllib2.urlopen(request, timeout=5)
     except:
         statemon.state.increment('video_server_connection_failed')
-        return -1
-    
+        return response
+
     try:
-        data = json.loads(response)
-        percentage = data['size']
+        data = json.loads(response.read())
 
-        if percentage >= 0 and percentage <= 100:
-            return percentage
-        else: 
-            return -1
-    except:
-        return -1
+        if data['size'] > 0 and data['bytes'] <= 0:
+            _log.warn("Queue returning size > 0 with bytes <= 0")
+        elif data['size'] <= 0 and data['bytes'] > 0:
+            _log.warn("Queue returning size <= 0 with bytes > 0")
 
+        return data
+    except Exception, e:
+        _log.error("Failed to read/convert data to json: %s" %e)
+        return response
 
-def is_scaling_in_progress(vclients):
-      
-    instances =  vclients['pending'] + vclients['shutting-down'] + vclients['stopping'] 
-
-    if instances > 0: 
-        return True;
-
-    return False
-
-
-def fetch_all_vclients_status(vclients):
-
-    import pdb; pdb.set_trace()
-
-    # open connection to AWS in our region
-    conn = boto.ec2.connect_to_region(AWS_REGION,
-                                      aws_access_key_id='AKIAIHEAXZIPN7HC5YBQ',
-                                      aws_secret_access_key='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')
-
-    if conn == None:
-        statemon.state.increment('boto_connection_failed')
-        return None
-
-    # only inquire about video clients
-    reservations = conn.get_all_instances(filters={"tag:opsworks:layer:vclient" : "Video Client"})
-    
-    if reservations == None:
-        return None
- 
-    # extract instances
-    vclient_instances = [i for r in reservations for i in r.instances]
-
-    # count all vclients by their current state 
-    for v in vclient_instances:
-        if v.state == 'pending':
-            vclients['pending'] += 1
-        elif v.state == 'running':
-            vclients['running'] += 1
-        elif v.state == 'shutting-down':
-            vclients['shutting-down'] += 1
-        elif v.state == 'terminated':
-            vclients['terminated'] += 1
-        elif v.state == 'stopping':
-            vclients['stopping'] += 1
-        elif v.state == 'stopped':
-            vclients['stopped'] += 1 
-
-    print vclients
-    return vclient_instances 
-
-
-def fetch_all_vclients_status_opworks():
-    
-    import pdb; pdb.set_trace()
-    
+def get_vclients(status_list):
+    '''
+    Retrive video clients from the video client layer filtering by Status.
+    :param status_list: The instances status to filter for.
+    :returns: List containing filtered instances.
+    '''
     conn = boto.opsworks.connect_to_region(options.aws_region)
 
-    if(conn == None):
-        return None
+    if conn == None:
+        statemon.state.increment('boto_connection_failed')
+        return []
 
-    conn.describe_instances( layer_id='Video Client')
+    instancesList = conn.describe_instances(stack_id=options.stack_id, layer_id=options.layer_id, instance_ids=None)['Instances']
+    filterInstanceList = [i for i in instancesList if i['Status'] in status_list]
+    return filterInstanceList
 
+def get_num_operational_vclients():
+    '''
+    Retrive the total number of active video clients.
+    :returns: Total number.
+    '''
+    # Instances in these states are considered in the count of active video client instances
+    VALID_OPERATIONAL_STATUS = ['rebooting', 'requested', 'pending', 'booting', 'running_setup', 'online']
+    return len(get_vclients(VALID_OPERATIONAL_STATUS))
+
+def get_number_vclient_to_change():
+    '''
+    Calculates the number of instances needed to be added or removed.
+    :returns: Negative number for removal, Positive for addition or zero for no change.
+    '''
+    queue_info = get_video_server_queue_info()
+
+    if queue_info == None:
+        return 0
+
+    should_have_num_vclients = min(MAXIMUM_VCLIENTS, max(MINIMUM_VCLIENTS, min(queue_info['size'], queue_info['bytes'] / (BYTES_PER_VCLIENT if BYTES_PER_VCLIENT > 0 else max(1, queue_info['bytes'])))))
+    diff_num_clients = should_have_num_vclients - get_num_operational_vclients()
+    return diff_num_clients
 
 def start_new_instances(instances_needed):
-    print 'starting %d vclients' %instances_needed
-    
-    # open connection to AWS in our region
-    conn = boto.ec2.connect_to_region(AWS_REGION, 
-                                      aws_access_key_id=AWS_ACCESS_KEY_ID, 
-                                      aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
-    
-    if conn == None:
+    '''
+    Instantiates new video clients.
+    :param instances_needed: Number of instances to create.
+    :returns: Total number of newly created instances.
+    '''
+    conn = boto.opsworks.connect_to_region(options.aws_region)
+
+    if conn == None: 
         statemon.state.increment('boto_connection_failed')
-        return None
+        return 0
 
-    # launch here 
-    statemon.state.increment('boto_vclient_launch')
+    # launch the number of instances needed 
+    num_instances_created = 0
+    for x in range(instances_needed):
+        result_id = conn.create_instance(
+            stack_id = options.stack_id,
+            layer_ids = [options.layer_id],
+            instance_type = options.instance_type,
+            auto_scaling_type = None,
+            hostname = None,
+            os = None,
+            ami_id = options.ami_id,
+            ssh_key_name = None,
+            availability_zone = None,
+            virtualization_type = None,
+            subnet_id = None,
+            architecture = None,
+            root_device_type = None,
+            install_updates_on_boot = None,
+            ebs_optimized = None
+        )
 
+        #_log.info("Launch instance number %s with result %s", x, result_id)
+        if result_id != None:
+            num_instances_created += 1
+            statemon.state.increment('boto_vclient_launch')
 
-def terminate_instances(instances_needed, vclients):
-    print 'terminating %d vclients' %instances_needed
+    return num_instances_created
 
-     # open connection to AWS in our region
-    conn = boto.ec2.connect_to_region(AWS_REGION,
-                                      aws_access_key_id=AWS_ACCESS_KEY_ID,
-                                      aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
-    
-    if conn == None:
+def terminate_instances(instances_needed):
+    '''
+    Stops and terminates video clients, waits on termination of the instances.
+    :param instances_needed: Number of instances to terminate.
+    :returns: Total number of instances terminated by this method.
+    '''
+    conn = boto.opsworks.connect_to_region(options.aws_region)
+    if conn == None: 
         statemon.state.increment('boto_connection_failed')
-        return None
+        return 0
 
-    # terminate the number of instances needed 
-    statemon.state.increment('boto_vclient_terminate')
+    instancesOnlineList = get_vclients(['online'])
 
+    # terminate the number of instances needed
+    instanceIdToTerminateList = []
+    for x in instancesOnlineList:
+        result_stop = conn.stop_instance(x['InstanceId'])
+        instanceIdToTerminateList.append(x['InstanceId']) 
+        #_log.info("Stop instance number %s with result %s", len(instanceIdToTerminateList), result_stop)
 
-def handle_low_load(vclients_states_count, vclients):
-    import pdb; pdb.set_trace()
+        if len(instanceIdToTerminateList) == instances_needed:
+            break
 
-    # minimum capacity already reached, no further action
-    if vclients_states_count['running'] <= minimum_vclients:
-        return
+    num_instances_terminated = 0
+    while (num_instances_terminated < instances_needed):
+        stoppedInstanceList = get_vclients(['stopped'])
+        for x in stoppedInstanceList:
+            result_terminated = conn.delete_instance(x['InstanceId'], delete_elastic_ip=None, delete_volumes=None)
+            num_instances_terminated += 1
+            statemon.state.increment('boto_vclient_terminate')
+            #_log.info("Terminate instance number %s with result %s", num_instances_terminated, result_terminated)
 
-    # calculate how many vclients do we need to terminate, at least one
-    instances_needed = max(1, int(vclients_states_count['running'] * SCALE_DOWN_FACTOR))
+        # Protected for terminated instance outside of script
+        # Note: Instances terminate outside of script do not go towards the count 
+        terminatedList = get_vclients(['terminated']) 
+        instances_terminated = len([i for i in terminatedList if i['InstanceId'] in instanceIdToTerminateList]) == len(instanceIdToTerminateList)
+        if instances_terminated:
+            break
 
-    # calculate the actual number of instances we can terminate before reaching
-    # the minimum allowable 
-    limit = vclients_states_count['running'] - minimum_vclients
+    return num_instances_terminated
 
-    # pick the smallest number
-    instances_needed = min(limit, instances_needed)
-
-    # terminate a number of vclients from the list 
-    # of running instances
-    terminate_instances(instances_needed, vclients)
-
-
-def handle_high_load(vclients):
-    import pdb; pdb.set_trace()
-
-    # alert, max capacity already reached
-    if vclients['running'] >= maximum_vclients:
-        return
-
-    # calculate how many new vclients do we need
-    if  vclients['running'] <= 0:
-        # none running, therefore start the minimum
-        instances_needed = minimum_vclients
-    else:
-        # increase the number of vclients by a factor, at least by one
-        instances_needed = max(1, int(vclients['running'] * SCALE_UP_FACTOR))
-
-        # calculate the max of instances we can actually launch
-        # before we reach the maximum allowable
-        limit = maximum_vclients - vclients['running']
-
-        # pick the smaller number
-        instances_needed = min(limit, instances_needed)
-
-    start_new_instances(instances_needed)
-
-
-###################################################################
-# runloop
-###################################################################
 def runloop():
-
-    # import pdb; pdb.set_trace()
-
-    sleep_time = INITIAL_SLEEP 
-    
-    while(shutdown == False):
-
-        # to hold the counts of all vclients and the state they're in
-        vclients_states_count = {'pending':0,'running':0,'shutting-down':0,
-                'terminated':0,'stopping':0,'stopped':0} 
-
-        # periodic sleep
-        time.sleep(sleep_time)
+    '''
+    Constantly checks number of clients to add or remove and performs correct action.
+    '''
+    while(not SHUTDOWN):
         sleep_time = NORMAL_SLEEP
 
-        # get all video clients states (running, stopped, pending, etc))
-        #vclients = None
-        #vclients = fetch_all_vclients_status(vclients_states_count) 
- 
-        fetch_all_vclients_status_opworks()
+        number = get_number_vclient_to_change()
+        if number > 0:
+            sleep_time = SCALE_UP_SLEEP
+            start_new_instances(number)
+        elif number < 0:
+            # Here we are stopping and terminating "number" of vclients, if batch termination is enabled. 
+            # If we want to terminate clients at slower rate (so that we do not lose out on startup times)
+            # set ENABLE_BATCH_TERMINATION to False which will result in only one instance being stopped within the loop
+            # The next time we go through the loop we will shut down another if we still need to.
+            terminate_instances(abs(number) if ENABLE_BATCH_TERMINATION else 1)
 
-        continue
-
-        # error, try again later
-        if vclients == None:
-            continue
-
-        # Here we check that no vclients are in the process of shutting down or 
-        # starting up. This would be indicative that we migth have crashed and
-        # restarted, or that some human intervention is going on.
-        # As a safeguard, we do not take any action when vclient instances
-        # are in transitory states.  
-        if is_scaling_in_progress(vclients_states_count) == True:
-            continue
-
-        # get video server queue size
-        queue_size = get_queue_size() 
-
-        # error, try again later
-        if(queue_size < 0):
-            continue
-
-        # scale up, the video server queue is growing
-        if queue_size > high_water_mark:
-            handle_high_load(vclients_states_count)
-            sleep_time = SCALE_UP_SLEEP            
-
-        # scale down, the video server queue is low
-        elif queue_size < low_water_mark:
-            handle_low_load(vclients_states_count, vclients)
-            sleep_time = SCALE_DOWN_SLEEP
-
+        time.sleep(sleep_time)
 
 def main():
-    # import pdb; pdb.set_trace()
+    utils.neon.InitNeon()
+
+    # Store configuration values performing any necessary calculations
+    MINIMUM_VCLIENTS    = options.minimum_instances
+    MAXIMUM_VCLIENTS    = options.maximum_instances
+    BYTES_PER_VCLIENT   = options.mb_per_vclient*1048576
+    ENABLE_BATCH_TERMINATION = options.enable_batch_termination
+
     runloop()
 
 if __name__ == "__main__":
-        main()
-
-
-
-
+    main()

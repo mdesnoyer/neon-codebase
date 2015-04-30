@@ -840,6 +840,26 @@ class HealthCheckHandler(tornado.web.RequestHandler):
         self.set_status(503)
         self.finish()
 
+class QueueStatsHandler(tornado.web.RequestHandler):
+    ''' Queue Stats API handler '''
+    def initialize(self, job_manager):
+        super(QueueStatsHandler, self).initialize()
+        self.job_manager = job_manager
+
+    @tornado.gen.coroutine
+    def get(self, *args, **kwargs):
+        if self.request.headers.has_key('X-Neon-Auth'):
+            if not _verify_neon_auth(self.request.headers.get('X-Neon-Auth')):
+                raise tornado.web.HTTPError(400)
+        else:
+            raise tornado.web.HTTPError(400)
+            
+        qsize = statemon.state.server_queue
+        qbytes = statemon.state.queue_size_bytes
+        self.write('{"size": %d, "bytes": %d}' %(qsize, qbytes))
+        self.set_status(200)
+        self.finish()
+
 ###########################################
 # Create Tornado server application
 ###########################################
@@ -850,7 +870,7 @@ class Server(object):
         self.application = tornado.web.Application([
             (r'/api/v1/submitvideo/(.*)', GetThumbnailsHandler,
              dict(job_manager=self.job_manager)),
-            #(r"/stats", StatsHandler),
+            (r"/queuestats", QueueStatsHandler, dict(job_manager=self.job_manager)),
             (r"/dequeue", DequeueHandler, dict(job_manager=self.job_manager)),
             (r"/requeue", RequeueHandler, dict(job_manager=self.job_manager,
                                                  reprocess=False)),
