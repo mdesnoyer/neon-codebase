@@ -1138,7 +1138,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 vresult.append(vres.to_dict())
             else:
                 if insert_non_existent_videos:
-                    vresult.append([])
+                    vresult.append({})
         c_processing = len(p_videos)
         c_recommended = len(r_videos)
         c_published = len(a_videos)
