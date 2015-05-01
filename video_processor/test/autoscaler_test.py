@@ -259,14 +259,16 @@ class TestAutoScaler(unittest.TestCase):
         resp = video_processor.autoscaler.get_number_vclient_to_change()
         self.assertEqual(resp, -7)
 
+    @patch('boto.opsworks.layer1.OpsWorksConnection.start_instance')
     @patch('boto.opsworks.layer1.OpsWorksConnection.create_instance')
     @patch('boto.opsworks.connect_to_region')
-    def test_start_new_instances(self, mock_connect_to_region, mock_create_instance):
+    def test_start_new_instances(self, mock_connect_to_region, mock_create_instance, mock_start_instance):
         num_instances_to_create = 5
         instancesCreated = { "InstanceId": "5f9adeaa-c94c-42c6-aeef-28a5376002cd" }
 
         mock_connect_to_region.return_value = boto.opsworks.layer1.OpsWorksConnection()
         mock_create_instance.return_value = instancesCreated
+        mock_start_instance.return_value = None
 
         resp = video_processor.autoscaler.start_new_instances(num_instances_to_create)
         self.assertEqual(resp, num_instances_to_create)

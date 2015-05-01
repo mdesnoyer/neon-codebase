@@ -21,7 +21,7 @@ define("video_server", default="localhost", type=str, help="Video server api to 
 define('video_server_auth', default='secret_token',help='Secret token for talking with the video processing server')
 define("aws_region", default="us-east-1", type=str, help="Region to look for the vclients")
 define("stack_id", default="eb842d2e-b9e3-471e-b4eb-70aa7b40f2c6", type=str, help="The stack ID")
-define("layer_id", default="XXXXX-XXXXX-XXXXX-XXXXX", type=str, help="The instance layer ID")
+define("layer_id", default="599ee960-1122-49d7-ac74-e281fe71b54b", type=str, help="The instance layer ID")
 define("ami_id", default="ami-dadfb6b2", type=str, help="AMI ID to be used to create the instance")
 define("instance_type", default="t2.small", type=str, help="The instance type")
 define("minimum_instances", default=8, type=int, help="Minimum number of instances to keep")
@@ -50,6 +50,8 @@ SCALE_UP_SLEEP      = 5
 # To indicate that the process should quit
 SHUTDOWN = False
 
+# Instances in these states are considered in the count of active video client instances
+VALID_OPERATIONAL_STATUS = ['rebooting', 'requested', 'pending', 'booting', 'running_setup', 'online']
 
 def get_video_server_queue_info():
     '''
@@ -83,7 +85,7 @@ def get_video_server_queue_info():
 
 def get_vclients(status_list):
     '''
-    Retrive video clients from the video client layer filtering by Status.
+    Retrieve video clients from the video client layer filtering by Status.
     :param status_list: The instances status to filter for.
     :returns: List containing filtered instances.
     '''
@@ -93,17 +95,15 @@ def get_vclients(status_list):
         statemon.state.increment('boto_connection_failed')
         return []
 
-    instancesList = conn.describe_instances(stack_id=options.stack_id, layer_id=options.layer_id, instance_ids=None)['Instances']
+    instancesList = conn.describe_instances(layer_id = options.layer_id)['Instances']
     filterInstanceList = [i for i in instancesList if i['Status'] in status_list]
     return filterInstanceList
 
 def get_num_operational_vclients():
     '''
-    Retrive the total number of active video clients.
+    Retrieve the total number of active video clients.
     :returns: Total number.
     '''
-    # Instances in these states are considered in the count of active video client instances
-    VALID_OPERATIONAL_STATUS = ['rebooting', 'requested', 'pending', 'booting', 'running_setup', 'online']
     return len(get_vclients(VALID_OPERATIONAL_STATUS))
 
 def get_number_vclient_to_change():
@@ -135,28 +135,19 @@ def start_new_instances(instances_needed):
     # launch the number of instances needed 
     num_instances_created = 0
     for x in range(instances_needed):
-        result_id = conn.create_instance(
+        InstanceId = conn.create_instance(
             stack_id = options.stack_id,
             layer_ids = [options.layer_id],
-            instance_type = options.instance_type,
-            auto_scaling_type = None,
-            hostname = None,
-            os = None,
             ami_id = options.ami_id,
-            ssh_key_name = None,
-            availability_zone = None,
-            virtualization_type = None,
-            subnet_id = None,
-            architecture = None,
-            root_device_type = None,
-            install_updates_on_boot = None,
-            ebs_optimized = None
-        )
+            instance_type = options.instance_type,
+            os = 'Custom'
+        )['InstanceId']
 
-        #_log.info("Launch instance number %s with result %s", x, result_id)
-        if result_id != None:
+        if InstanceId != None:
+            conn.start_instance(InstanceId)
             num_instances_created += 1
             statemon.state.increment('boto_vclient_launch')
+            #_log.info("Launch instance number %s with id %s", x, InstanceId)
 
     return num_instances_created
 
@@ -171,26 +162,26 @@ def terminate_instances(instances_needed):
         statemon.state.increment('boto_connection_failed')
         return 0
 
-    instancesOnlineList = get_vclients(['online'])
+    instancesValidList = get_vclients(VALID_OPERATIONAL_STATUS)
 
     # terminate the number of instances needed
     instanceIdToTerminateList = []
-    for x in instancesOnlineList:
-        result_stop = conn.stop_instance(x['InstanceId'])
+    for x in instancesValidList:
+        conn.stop_instance(x['InstanceId'])
         instanceIdToTerminateList.append(x['InstanceId']) 
-        #_log.info("Stop instance number %s with result %s", len(instanceIdToTerminateList), result_stop)
+        #_log.info("Stop instance number %s with result %s", len(instanceIdToTerminateList), x['InstanceId'])
 
         if len(instanceIdToTerminateList) == instances_needed:
             break
 
     num_instances_terminated = 0
-    while (num_instances_terminated < instances_needed):
+    while (num_instances_terminated < len(instanceIdToTerminateList)):
         stoppedInstanceList = get_vclients(['stopped'])
         for x in stoppedInstanceList:
-            result_terminated = conn.delete_instance(x['InstanceId'], delete_elastic_ip=None, delete_volumes=None)
+            conn.delete_instance(x['InstanceId'])
             num_instances_terminated += 1
             statemon.state.increment('boto_vclient_terminate')
-            #_log.info("Terminate instance number %s with result %s", num_instances_terminated, result_terminated)
+            #_log.info("Terminate instance number %s", num_instances_terminated)
 
         # Protected for terminated instance outside of script
         # Note: Instances terminate outside of script do not go towards the count 
@@ -225,6 +216,7 @@ def main():
     utils.neon.InitNeon()
 
     # Store configuration values performing any necessary calculations
+    global MINIMUM_VCLIENTS, MAXIMUM_VCLIENTS, BYTES_PER_VCLIENT, ENABLE_BATCH_TERMINATION
     MINIMUM_VCLIENTS    = options.minimum_instances
     MAXIMUM_VCLIENTS    = options.maximum_instances
     BYTES_PER_VCLIENT   = options.mb_per_vclient*1048576
