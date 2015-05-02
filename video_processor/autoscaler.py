@@ -35,17 +35,9 @@ statemon.define('boto_connection_failed', int)
 statemon.define('boto_vclient_launch', int)
 statemon.define('boto_vclient_terminate', int)
 
-# Operational Values
-# Set on startup with the values from options.
-# Used in unit tests to change the behaviour according to test.
-MINIMUM_VCLIENTS  = 0
-MAXIMUM_VCLIENTS  = 0
-BYTES_PER_VCLIENT = 0
-ENABLE_BATCH_TERMINATION = False
-
 # Sleep Constants
-NORMAL_SLEEP        = 1
-SCALE_UP_SLEEP      = 5
+NORMAL_SLEEP    = 1
+SCALE_UP_SLEEP  = 5
 
 # To indicate that the process should quit
 SHUTDOWN = False
@@ -116,7 +108,8 @@ def get_number_vclient_to_change():
     if queue_info == None:
         return 0
 
-    should_have_num_vclients = min(MAXIMUM_VCLIENTS, max(MINIMUM_VCLIENTS, min(queue_info['size'], queue_info['bytes'] / (BYTES_PER_VCLIENT if BYTES_PER_VCLIENT > 0 else max(1, queue_info['bytes'])))))
+    mb_per_vclient = options.mb_per_vclient * 1048576
+    should_have_num_vclients = min(options.maximum_instances, max(options.minimum_instances, min(queue_info['size'], queue_info['bytes'] / (mb_per_vclient if mb_per_vclient > 0 else max(1, queue_info['bytes'])))))
     diff_num_clients = should_have_num_vclients - get_num_operational_vclients()
     return diff_num_clients
 
@@ -206,22 +199,14 @@ def runloop():
         elif number < 0:
             # Here we are stopping and terminating "number" of vclients, if batch termination is enabled. 
             # If we want to terminate clients at slower rate (so that we do not lose out on startup times)
-            # set ENABLE_BATCH_TERMINATION to False which will result in only one instance being stopped within the loop
+            # set enable_batch_termination to False which will result in only one instance being stopped within the loop
             # The next time we go through the loop we will shut down another if we still need to.
-            terminate_instances(abs(number) if ENABLE_BATCH_TERMINATION else 1)
+            terminate_instances(abs(number) if options.enable_batch_termination else 1)
 
         time.sleep(sleep_time)
 
 def main():
     utils.neon.InitNeon()
-
-    # Store configuration values performing any necessary calculations
-    global MINIMUM_VCLIENTS, MAXIMUM_VCLIENTS, BYTES_PER_VCLIENT, ENABLE_BATCH_TERMINATION
-    MINIMUM_VCLIENTS    = options.minimum_instances
-    MAXIMUM_VCLIENTS    = options.maximum_instances
-    BYTES_PER_VCLIENT   = options.mb_per_vclient*1048576
-    ENABLE_BATCH_TERMINATION = options.enable_batch_termination
-
     runloop()
 
 if __name__ == "__main__":

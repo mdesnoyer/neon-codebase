@@ -17,17 +17,18 @@ import utils.neon
 import video_processor.autoscaler
 import boto.opsworks.layer1
 from StringIO import StringIO
+from utils.options import define, options
 
 _log = logging.getLogger(__name__)
-
-# Default values
-MAXIMUM_VCLIENTS = 20
-MINIMUM_VCLIENTS = 3
-BYTES_PER_VCLIENT = 10*1024*1024 # 10MB
 
 class TestAutoScaler(unittest.TestCase):
     def setUp(self):
         super(TestAutoScaler, self).setUp()
+
+        # Default values
+        options._set('video_processor.autoscaler.minimum_instances', 3)
+        options._set('video_processor.autoscaler.maximum_instances', 20)
+        options._set('video_processor.autoscaler.mb_per_vclient', 10)
 
     def tearDown(self):
         super(TestAutoScaler, self).tearDown()
@@ -69,7 +70,7 @@ class TestAutoScaler(unittest.TestCase):
     @patch('boto.opsworks.layer1.OpsWorksConnection.describe_instances')
     @patch('boto.opsworks.connect_to_region')
     def test_get_num_operational_vclients(self, mock_connect_to_region, mock_describe_instances):
-        instancesDict = { "Instances": [ 
+        instancesDict = { "Instances": [
             {"Status":"shutting_down", "InstanceId":"0"},
             {"Status":"online", "InstanceId":"1"},
             {"Status":"pending", "InstanceId":"2"}
@@ -88,17 +89,13 @@ class TestAutoScaler(unittest.TestCase):
     @patch('video_processor.autoscaler.get_num_operational_vclients')
     @patch('video_processor.autoscaler.urllib2.urlopen')
     def test_maximum_vclients_is_not_exceeded(self, mock_urlopen, mock_num_oper_vclients):
-        video_processor.autoscaler.MAXIMUM_VCLIENTS = MAXIMUM_VCLIENTS
-        video_processor.autoscaler.MINIMUM_VCLIENTS = MINIMUM_VCLIENTS
-        video_processor.autoscaler.BYTES_PER_VCLIENT = BYTES_PER_VCLIENT
-
-        qsize = video_processor.autoscaler.MAXIMUM_VCLIENTS + 100
-        qbytes = video_processor.autoscaler.BYTES_PER_VCLIENT * qsize
+        qsize = options.get('video_processor.autoscaler.maximum_instances') + 100
+        qbytes = options.get('video_processor.autoscaler.mb_per_vclient') * qsize * 1048576
 
         mock_num_oper_vclients.return_value = 0
         mock_urlopen.return_value = StringIO('{"size": %d, "bytes": %d}' %(qsize, qbytes))
         resp = video_processor.autoscaler.get_number_vclient_to_change()
-        self.assertEqual(resp, 20) 
+        self.assertEqual(resp, 20)
 
         mock_num_oper_vclients.return_value = 5
         mock_urlopen.return_value = StringIO('{"size": %d, "bytes": %d}' %(qsize, qbytes))
@@ -113,12 +110,8 @@ class TestAutoScaler(unittest.TestCase):
     @patch('video_processor.autoscaler.get_num_operational_vclients')
     @patch('video_processor.autoscaler.urllib2.urlopen')
     def test_minimum_vclients_are_maintained(self, mock_urlopen, mock_num_oper_vclients):
-        video_processor.autoscaler.MAXIMUM_VCLIENTS = MAXIMUM_VCLIENTS
-        video_processor.autoscaler.MINIMUM_VCLIENTS = MINIMUM_VCLIENTS
-        video_processor.autoscaler.BYTES_PER_VCLIENT = BYTES_PER_VCLIENT
-
-        qsize = video_processor.autoscaler.MINIMUM_VCLIENTS - 1
-        qbytes = video_processor.autoscaler.BYTES_PER_VCLIENT * qsize
+        qsize = options.get('video_processor.autoscaler.minimum_instances') - 1
+        qbytes = options.get('video_processor.autoscaler.mb_per_vclient') * qsize * 1048576
 
         mock_num_oper_vclients.return_value = 0
         mock_urlopen.return_value = StringIO('{"size": %d, "bytes": %d}' %(qsize, qbytes))
@@ -133,12 +126,8 @@ class TestAutoScaler(unittest.TestCase):
     @patch('video_processor.autoscaler.get_num_operational_vclients')
     @patch('video_processor.autoscaler.urllib2.urlopen')
     def test_get_number_vclients_to_change_for_scaling_up(self, mock_urlopen, mock_num_oper_vclients):
-        video_processor.autoscaler.MAXIMUM_VCLIENTS = MAXIMUM_VCLIENTS
-        video_processor.autoscaler.MINIMUM_VCLIENTS = MINIMUM_VCLIENTS
-        video_processor.autoscaler.BYTES_PER_VCLIENT = BYTES_PER_VCLIENT
-
         qsize = 5
-        qbytes = video_processor.autoscaler.BYTES_PER_VCLIENT * qsize
+        qbytes = options.get('video_processor.autoscaler.mb_per_vclient') * qsize * 1048576
 
         mock_num_oper_vclients.return_value = 0
         mock_urlopen.return_value = StringIO('{"size": %d, "bytes": %d}' %(qsize, qbytes))
@@ -153,12 +142,8 @@ class TestAutoScaler(unittest.TestCase):
     @patch('video_processor.autoscaler.get_num_operational_vclients')
     @patch('video_processor.autoscaler.urllib2.urlopen')
     def test_get_number_vclients_to_change_for_scaling_down(self, mock_urlopen, mock_num_oper_vclients):
-        video_processor.autoscaler.MAXIMUM_VCLIENTS = MAXIMUM_VCLIENTS
-        video_processor.autoscaler.MINIMUM_VCLIENTS = MINIMUM_VCLIENTS
-        video_processor.autoscaler.BYTES_PER_VCLIENT = BYTES_PER_VCLIENT
-
         qsize = 5
-        qbytes = video_processor.autoscaler.BYTES_PER_VCLIENT * qsize
+        qbytes = options.get('video_processor.autoscaler.mb_per_vclient') * qsize * 1048576
 
         mock_num_oper_vclients.return_value = 7
         mock_urlopen.return_value = StringIO('{"size": %d, "bytes": %d}' %(qsize, qbytes))
@@ -173,12 +158,8 @@ class TestAutoScaler(unittest.TestCase):
     @patch('video_processor.autoscaler.get_num_operational_vclients')
     @patch('video_processor.autoscaler.urllib2.urlopen')
     def test_get_number_vclients_to_change_for_no_scaling(self, mock_urlopen, mock_num_oper_vclients):
-        video_processor.autoscaler.MAXIMUM_VCLIENTS = MAXIMUM_VCLIENTS
-        video_processor.autoscaler.MINIMUM_VCLIENTS = MINIMUM_VCLIENTS
-        video_processor.autoscaler.BYTES_PER_VCLIENT = BYTES_PER_VCLIENT
-
         qsize = 8
-        qbytes = video_processor.autoscaler.BYTES_PER_VCLIENT * qsize
+        qbytes = options.get('video_processor.autoscaler.mb_per_vclient') * qsize * 1048576
 
         mock_num_oper_vclients.return_value = 8
         mock_urlopen.return_value = StringIO('{"size": %d, "bytes": %d}' %(qsize, qbytes))
@@ -188,20 +169,16 @@ class TestAutoScaler(unittest.TestCase):
     @patch('video_processor.autoscaler.get_num_operational_vclients')
     @patch('video_processor.autoscaler.urllib2.urlopen')
     def test_get_number_vclients_to_change_according_to_bytes_to_process(self, mock_urlopen, mock_num_oper_vclients):
-        video_processor.autoscaler.MAXIMUM_VCLIENTS = MAXIMUM_VCLIENTS
-        video_processor.autoscaler.MINIMUM_VCLIENTS = MINIMUM_VCLIENTS
-        video_processor.autoscaler.BYTES_PER_VCLIENT = BYTES_PER_VCLIENT
-
         # Bytes > Queue size
         qsize = 8
-        qbytes = video_processor.autoscaler.BYTES_PER_VCLIENT * (qsize*2.5)
+        qbytes = options.get('video_processor.autoscaler.mb_per_vclient') * (qsize*1048576*2.5)
         mock_num_oper_vclients.return_value = 8
         mock_urlopen.return_value = StringIO('{"size": %d, "bytes": %d}' %(qsize, qbytes))
         resp = video_processor.autoscaler.get_number_vclient_to_change()
         self.assertEqual(resp, 0)
 
         qsize = 5
-        qbytes = video_processor.autoscaler.BYTES_PER_VCLIENT * (qsize*2.5)
+        qbytes = options.get('video_processor.autoscaler.mb_per_vclient') * (qsize*1048576*2.5)
         mock_num_oper_vclients.return_value = 8
         mock_urlopen.return_value = StringIO('{"size": %d, "bytes": %d}' %(qsize, qbytes))
         resp = video_processor.autoscaler.get_number_vclient_to_change()
@@ -209,14 +186,14 @@ class TestAutoScaler(unittest.TestCase):
 
         # Bytes < Queue size
         qsize = 8
-        qbytes = video_processor.autoscaler.BYTES_PER_VCLIENT * (qsize/2)
+        qbytes = options.get('video_processor.autoscaler.mb_per_vclient') * (qsize*1048576/2)
         mock_num_oper_vclients.return_value = 4
         mock_urlopen.return_value = StringIO('{"size": %d, "bytes": %d}' %(qsize, qbytes))
         resp = video_processor.autoscaler.get_number_vclient_to_change()
         self.assertEqual(resp, 0)
 
         qsize = 8
-        qbytes = video_processor.autoscaler.BYTES_PER_VCLIENT * (qsize/2)
+        qbytes = options.get('video_processor.autoscaler.mb_per_vclient') * (qsize*1048576/2)
         mock_num_oper_vclients.return_value = 8
         mock_urlopen.return_value = StringIO('{"size": %d, "bytes": %d}' %(qsize, qbytes))
         resp = video_processor.autoscaler.get_number_vclient_to_change()
@@ -225,33 +202,29 @@ class TestAutoScaler(unittest.TestCase):
     @patch('video_processor.autoscaler.get_num_operational_vclients')
     @patch('video_processor.autoscaler.urllib2.urlopen')
     def test_get_number_vclients_to_change_with_negative_bytes(self, mock_urlopen, mock_num_oper_vclients):
-        video_processor.autoscaler.MAXIMUM_VCLIENTS = MAXIMUM_VCLIENTS
-        video_processor.autoscaler.MINIMUM_VCLIENTS = MINIMUM_VCLIENTS
-        video_processor.autoscaler.BYTES_PER_VCLIENT = BYTES_PER_VCLIENT
-
         qsize = 10
-        qbytes = video_processor.autoscaler.BYTES_PER_VCLIENT * -1
+        qbytes = options.get('video_processor.autoscaler.mb_per_vclient') * (1048576*-1)
         mock_num_oper_vclients.return_value = 10
         mock_urlopen.return_value = StringIO('{"size": %d, "bytes": %d}' %(qsize, qbytes))
         resp = video_processor.autoscaler.get_number_vclient_to_change()
         self.assertEqual(resp, -7)
 
         qsize = 0
-        qbytes = video_processor.autoscaler.BYTES_PER_VCLIENT * 1
+        qbytes = options.get('video_processor.autoscaler.mb_per_vclient') * (1048576*-1)
         mock_num_oper_vclients.return_value = 10
         mock_urlopen.return_value = StringIO('{"size": %d, "bytes": %d}' %(qsize, qbytes))
         resp = video_processor.autoscaler.get_number_vclient_to_change()
         self.assertEqual(resp, -7)
 
-        video_processor.autoscaler.BYTES_PER_VCLIENT = 0
+        options._set('video_processor.autoscaler.mb_per_vclient', 0)
         qsize = 3
-        qbytes = BYTES_PER_VCLIENT*20
+        qbytes = options.get('video_processor.autoscaler.mb_per_vclient') * (1048576*20)
         mock_num_oper_vclients.return_value = 10
         mock_urlopen.return_value = StringIO('{"size": %d, "bytes": %d}' %(qsize, qbytes))
         resp = video_processor.autoscaler.get_number_vclient_to_change()
         self.assertEqual(resp, -7)
 
-        video_processor.autoscaler.BYTES_PER_VCLIENT = 0
+        options._set('video_processor.autoscaler.mb_per_vclient', 0)
         qsize = 3
         qbytes = 0
         mock_num_oper_vclients.return_value = 10
@@ -279,13 +252,13 @@ class TestAutoScaler(unittest.TestCase):
     @patch('boto.opsworks.connect_to_region')
     def test_terminate_instances(self, mock_connect_to_region, mock_describe_instances, mock_stop_instance, mock_delete_instance):
         num_instances_to_terminate = 3
-        instancesDict = { "Instances": [ 
+        instancesDict = { "Instances": [
             {"Status":"online", "InstanceId":"0"},
             {"Status":"online", "InstanceId":"1"},
             {"Status":"online", "InstanceId":"2"},
             {"Status":"terminated", "InstanceId":"3"}
         ] }
-        instancesStoppedDict = { "Instances": [ 
+        instancesStoppedDict = { "Instances": [
             {"Status":"stopped", "InstanceId":"0"}
         ] }
 
@@ -303,16 +276,16 @@ class TestAutoScaler(unittest.TestCase):
     @patch('boto.opsworks.connect_to_region')
     def test_terminate_instances_exits_if_instances_are_killed_outside(self, mock_connect_to_region, mock_describe_instances, mock_stop_instance, mock_delete_instance):
         num_instances_to_terminate = 3
-        instancesDict = { "Instances": [ 
+        instancesDict = { "Instances": [
             {"Status":"online", "InstanceId":"0"},
             {"Status":"online", "InstanceId":"1"},
             {"Status":"online", "InstanceId":"2"},
             {"Status":"terminated", "InstanceId":"3"}
         ] }
-        instancesStoppedDict = { "Instances": [ 
-            {"Status":"stopped", "InstanceId":"0"} 
+        instancesStoppedDict = { "Instances": [
+            {"Status":"stopped", "InstanceId":"0"}
         ] }
-        instancesTerminatedDict = { "Instances": [ 
+        instancesTerminatedDict = { "Instances": [
             {"Status":"terminated", "InstanceId":"0"},
             {"Status":"terminated", "InstanceId":"1"},
             {"Status":"terminated", "InstanceId":"2"}
