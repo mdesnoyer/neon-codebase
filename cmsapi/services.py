@@ -1843,7 +1843,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 try:
                     o_url = s_urls.get_serving_url(video_meta.frame_size[0],
                         video_meta.frame_size[1])
-                except KeyError, e:
+                except Exception, e:
+                    # On any kind of exception
                     # TODO: get nearest to original frame_size
                     # For IGN this is sufficient, enhance this when needed
                     s_tup = max(s_urls.size_map, key=lambda item:item[0])
