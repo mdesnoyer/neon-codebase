@@ -162,7 +162,7 @@ def start_new_instances(instances_needed):
     # launch the number of instances needed
     num_instances_created = 0
     for x in range(instances_needed):
-        InstanceId = conn.create_instance(
+        instance_id = conn.create_instance(
             stack_id=options.stack_id,
             layer_ids=[options.layer_id],
             ami_id=options.ami_id,
@@ -170,11 +170,11 @@ def start_new_instances(instances_needed):
             os='Custom'
         )['InstanceId']
 
-        if InstanceId is not None:
-            conn.start_instance(InstanceId)
+        if instance_id is not None:
+            conn.start_instance(instance_id)
             num_instances_created += 1
             statemon.state.increment('boto_vclient_launch')
-            # _log.info("Launch instance number %s with id %s", x, InstanceId)
+            # _log.info("Launch instance number %s with id %s", x, instance_id)
 
     return num_instances_created
 
@@ -190,24 +190,25 @@ def terminate_instances(instances_needed):
         statemon.state.increment('boto_connection_failed')
         return 0
 
-    instancesValidList = get_vclients(VALID_OPERATIONAL_STATUS)
+    instances_valid_list = get_vclients(VALID_OPERATIONAL_STATUS)
+    # Note: Need to create a sort list with OnLine first
 
     # terminate the number of instances needed
-    instanceIdToTerminateList = []
-    for x in instancesValidList:
+    instances_id_to_terminate_list = []
+    for x in instances_valid_list:
         conn.stop_instance(x['InstanceId'])
-        instanceIdToTerminateList.append(x['InstanceId'])
+        instances_id_to_terminate_list.append(x['InstanceId'])
         # _log.info("Stop instance number %s - %s",
-        #          len(instanceIdToTerminateList),
+        #          len(instances_id_to_terminate_list),
         #          x['InstanceId'])
 
-        if len(instanceIdToTerminateList) == instances_needed:
+        if len(instances_id_to_terminate_list) == instances_needed:
             break
 
     num_instances_terminated = 0
-    while (num_instances_terminated < len(instanceIdToTerminateList)):
-        stoppedInstanceList = get_vclients(['stopped'])
-        for x in stoppedInstanceList:
+    while (num_instances_terminated < len(instances_id_to_terminate_list)):
+        stopped_instance_list = get_vclients(['stopped'])
+        for x in stopped_instance_list:
             conn.delete_instance(x['InstanceId'])
             num_instances_terminated += 1
             statemon.state.increment('boto_vclient_terminate')
@@ -215,10 +216,10 @@ def terminate_instances(instances_needed):
 
         # Protected for terminated instance outside of script
         # Instances terminate outside of script do not go towards the count
-        terminatedList = get_vclients(['terminated'])
-        ids = [i for i in terminatedList
-               if i['InstanceId'] in instanceIdToTerminateList]
-        instances_terminated = len(ids) == len(instanceIdToTerminateList)
+        terminated_list = get_vclients(['terminated'])
+        ids = [i for i in terminated_list
+               if i['InstanceId'] in instances_id_to_terminate_list]
+        instances_terminated = len(ids) == len(instances_id_to_terminate_list)
         if instances_terminated:
             break
 
