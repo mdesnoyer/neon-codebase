@@ -40,6 +40,10 @@ define("mb_per_vclient", default=500, type=int,
 define("enable_batch_termination", default=0, type=int,
        help="When 0 only one instance is stopped per iteration." +
        "If 1 multiple instances can be stopped per interation")
+define("normal_sleep", default=60, type=int,
+       help="Standby time (in seconds) to execute loop again")
+define("scale_up_sleep", default=300, type=int,
+       help="Standby time (in seconds) after launch new instances")
 
 # Monitoring
 statemon.define('video_server_connection_failed', int)
@@ -47,19 +51,17 @@ statemon.define('boto_connection_failed', int)
 statemon.define('boto_vclient_launch', int)
 statemon.define('boto_vclient_terminate', int)
 
-# Sleep Constants
-NORMAL_SLEEP = 1
-SCALE_UP_SLEEP = 5
-
 # To indicate that the process should quit
 SHUTDOWN = False
 
 # Instances in these states are considered in the count of
 # active video client instances
+# When terminating: Instances are sorted according to their status.
+# They are killed in the same order as the list.
 VALID_OPERATIONAL_STATUS = [
-    'rebooting',
     'requested',
     'pending',
+    'rebooting',
     'booting',
     'running_setup',
     'online'
@@ -118,6 +120,18 @@ def get_vclients(status_list):
     return filter_list
 
 
+def get_ordered_vclients_termination_list():
+    '''
+    Retrieve video clients from the video client layer.
+    Filtered and ordered by Status.
+    :returns: Ordered list
+    '''
+    return sorted(
+        get_vclients(VALID_OPERATIONAL_STATUS),
+        key=lambda k: VALID_OPERATIONAL_STATUS.index(k['Status'])
+    )
+
+
 def get_num_operational_vclients():
     '''
     Retrieve the total number of active video clients.
@@ -133,7 +147,6 @@ def get_number_vclient_to_change():
               Positive for addition or zero for no change.
     '''
     queue_info = get_video_server_queue_info()
-
     if queue_info is None:
         return 0
 
@@ -189,9 +202,7 @@ def terminate_instances(instances_needed):
     if conn is None:
         statemon.state.increment('boto_connection_failed')
         return 0
-
-    instances_valid_list = get_vclients(VALID_OPERATIONAL_STATUS)
-    # Note: Need to create a sort list with OnLine first
+    instances_valid_list = get_ordered_vclients_termination_list()
 
     # terminate the number of instances needed
     instances_id_to_terminate_list = []
@@ -226,17 +237,24 @@ def terminate_instances(instances_needed):
     return num_instances_terminated
 
 
-def runloop():
+def is_shutdown():
+    '''
+    To indicate that the process should quit or not
+    '''
+    return SHUTDOWN
+
+
+def run_loop():
     '''
     Constantly checks number of clients to add or remove and
     performs correct action.
     '''
-    while(not SHUTDOWN):
-        sleep_time = NORMAL_SLEEP
+    while(not is_shutdown()):
+        sleep_time = options.normal_sleep
 
         number = get_number_vclient_to_change()
         if number > 0:
-            sleep_time = SCALE_UP_SLEEP
+            sleep_time = options.scale_up_sleep
             start_new_instances(number)
         elif number < 0:
             # Here we are stopping and terminating "number" of vclients,
@@ -255,7 +273,7 @@ def runloop():
 
 def main():
     utils.neon.InitNeon()
-    runloop()
+    run_loop()
 
 if __name__ == "__main__":
     main()
