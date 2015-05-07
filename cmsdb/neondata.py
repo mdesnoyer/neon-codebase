@@ -2766,6 +2766,22 @@ class OoyalaPlatform(AbstractPlatform):
     def get_all(cls, callback=None):
         return cls._get_all_impl(callback)
 
+
+class OptimizelyPlatform(AbstractPlatform):
+    '''
+    
+    '''
+    def __init__(self, a_id, i_id='', api_key=''):
+        '''
+        '''
+        # TODO(Anderson) fill in the params as required by optimizely
+        super(OoyalaPlatform, self).__init__(api_key, i_id)
+        self.neon_api_key = api_key
+        self.account_id = a_id
+        self.integration_id = i_id
+
+
+
 #######################
 # Request Blobs 
 ######################
@@ -3081,6 +3097,19 @@ class YoutubeApiRequest(NeonApiRequest):
         thumbnail in the request.
         '''
         return ThumbnailType.YOUTUBE
+
+class OptimizelyApiRequest(NeonApiRequest):
+    '''
+    '''
+    def __init__(self, job_id, api_key=None, i_id=None, vid=None, title=None,
+            url=None, http_callback=None, default_thumbnail=None):
+        super(OptimizelyApiRequest, self).__init__(
+            job_id, api_key, vid, title, url,
+            request_type='optimizely')
+
+        # TODO(Sunil):  Fill in the required params once Anderson figures out
+        # the params required for an optimizely API request
+
 
 ###############################################################################
 ## Thumbnail store T_URL => TID => Metadata
