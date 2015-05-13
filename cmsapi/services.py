@@ -363,7 +363,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     
                     elif itype == "youtube_integrations":
                         statemon.state.increment('not_supported')
-                        self.send_json_response("not supported yet", 400)
+                        self.send_json_response(
+                            '{"error": "not supported yet"}', 400)
                        
                 elif method == "videoids":
                     yield self.get_all_video_ids(itype, i_id)
@@ -373,7 +374,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                   'msg=Invalid method in request %s method %s') 
                                   % (self.request.uri, method))
                     statemon.state.increment('invalid_method')
-                    self.send_json_response("API not supported", 400)
+                    self.send_json_response(
+                            '{"error": "api not supported yet"}', 400)
 
             elif "jobs" in self.request.uri:
                 try:
@@ -382,7 +384,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     return
                 except:
                     statemon.state.increment('invalid_job_id')
-                    self.send_json_response("invalid api call", 400)
+                    self.send_json_response(
+                            '{"error": "invalid api call"}', 400)
                     return
 
             else:
@@ -390,7 +393,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                               'msg=Account missing in request %s')
                               % self.request.uri)
                 statemon.state.increment('account_id_missing')
-                self.send_json_response("API not supported", 400)
+                self.send_json_response(
+                            '{"error": "api not supported yet"}', 400)
         
         except Exception, e:
             # Catch all block to send a generic message on internal failure
@@ -905,7 +909,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         if not platform_account:
             _log.error("key=get_video_status_%s msg=account not found" % i_type)
             statemon.state.increment('account_not_found')
-            self.send_json_response("%s account not found" % i_type, 400)
+            self.send_json_response('{"error":"%s account not found"}' % i_type, 400)
             return
 
         
