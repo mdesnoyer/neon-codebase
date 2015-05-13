@@ -363,7 +363,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     
                     elif itype == "youtube_integrations":
                         statemon.state.increment('not_supported')
-                        self.send_json_response("not supported yet", 400)
+                        self.send_json_response(
+                            '{"error": "not supported yet"}', 400)
                        
                 elif method == "videoids":
                     yield self.get_all_video_ids(itype, i_id)
@@ -373,7 +374,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                   'msg=Invalid method in request %s method %s') 
                                   % (self.request.uri, method))
                     statemon.state.increment('invalid_method')
-                    self.send_json_response("API not supported", 400)
+                    self.send_json_response(
+                            '{"error": "api not supported yet"}', 400)
 
             elif "jobs" in self.request.uri:
                 try:
@@ -382,7 +384,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     return
                 except:
                     statemon.state.increment('invalid_job_id')
-                    self.send_json_response("invalid api call", 400)
+                    self.send_json_response(
+                            '{"error": "invalid api call"}', 400)
                     return
 
             else:
@@ -390,7 +393,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                               'msg=Account missing in request %s')
                               % self.request.uri)
                 statemon.state.increment('account_id_missing')
-                self.send_json_response("API not supported", 400)
+                self.send_json_response(
+                            '{"error": "api not supported yet"}', 400)
         
         except Exception, e:
             # Catch all block to send a generic message on internal failure
@@ -905,7 +909,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         if not platform_account:
             _log.error("key=get_video_status_%s msg=account not found" % i_type)
             statemon.state.increment('account_not_found')
-            self.send_json_response("%s account not found" % i_type, 400)
+            self.send_json_response('{"error":"%s account not found"}' % i_type, 400)
             return
 
         
@@ -918,7 +922,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
             if vid not in all_vids:
                 statemon.state.increment('video_not_found')
-                self.send_json_response("Video not found", 400)
+                self.send_json_response('{"total_count": 1, "items":[{}],\
+                        "error":"video not found"}', 400)
                 return
             else:
                 v = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)   
@@ -1138,7 +1143,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 vresult.append(vres.to_dict())
             else:
                 if insert_non_existent_videos:
-                    vresult.append([])
+                    vresult.append({})
         c_processing = len(p_videos)
         c_recommended = len(r_videos)
         c_published = len(a_videos)
@@ -1843,7 +1848,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 try:
                     o_url = s_urls.get_serving_url(video_meta.frame_size[0],
                         video_meta.frame_size[1])
-                except KeyError, e:
+                except Exception, e:
+                    # On any kind of exception
                     # TODO: get nearest to original frame_size
                     # For IGN this is sufficient, enhance this when needed
                     s_tup = max(s_urls.size_map, key=lambda item:item[0])
