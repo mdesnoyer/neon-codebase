@@ -918,7 +918,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
             if vid not in all_vids:
                 statemon.state.increment('video_not_found')
-                self.send_json_response("Video not found", 400)
+                self.send_json_response('{"total_count": 1, "items":[{}],\
+                        "error":"video not found"}', 400)
                 return
             else:
                 v = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)   
