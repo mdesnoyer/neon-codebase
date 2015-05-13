@@ -65,6 +65,7 @@ _log = logging.getLogger(__name__)
 #Monitoring
 statemon.define('processed_video', int)
 statemon.define('processing_error', int)
+statemon.define('video_fetch_error', int)
 statemon.define('dequeue_error', int)
 statemon.define('save_tmdata_error', int)
 statemon.define('save_vmdata_error', int)
@@ -235,7 +236,7 @@ class VideoProcessor(object):
 
         except VideoError as e:
             # Flag that the job failed getting the data
-            statemon.state.increment('processing_error')
+            statemon.state.increment('video_fetch_error')
 
             def _write_failure(request):
                 request.state = neondata.RequestState.FAILED
