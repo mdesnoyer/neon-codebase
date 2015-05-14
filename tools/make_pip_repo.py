@@ -50,8 +50,8 @@ def build_index():
         if pkg_match:
             pkg_name = pkg_match.group(1)
             new_index += (
-                '<a href="http://s3-us-west-1.amazonaws.com/%s/%s">%s</a><br>\n' %
-                (options.s3bucket, os.path.basename(pkg_fn), pkg_name))
+                '<a href="./%s">%s</a><br>\n' %
+                (os.path.basename(pkg_fn), pkg_name))
 
     return new_index
                           

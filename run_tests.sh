@@ -10,6 +10,8 @@
 CURDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd ${CURDIR}
 
+. neon-deps.sh
+
 if [ $# -eq 0 ] ; then
     BUILDTYPE=Debug
 else
