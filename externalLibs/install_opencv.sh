@@ -1,9 +1,13 @@
 #!/bin/bash
+cat <<EOF
 # -------------------------------------------------
-# build OpenCV
+# Build OpenCV
 # -------------------------------------------------
+EOF
 # https://sites.google.com/a/neon-lab.com/engineering/system-setup/dependencies#TOC-OpenCV
-set -e
+
+PS4="+OPENCV: "
+set -ex
 
 # default: install CUDA libraries (run 'with_cuda=false ./install_opencv.sh')
 if ${with_cuda:-true} ; then
@@ -21,7 +25,7 @@ fi
 # Install CMake
 # Install QT (For better UI components)
 # Install I/O libraries:
-sudo apt-get install \
+sudo apt-get install --yes \
  cmake \
  libqt4-dev \
  libtiff4-dev libjasper-dev libavformat-dev libswscale-dev libavcodec-dev libjpeg-dev libpng-dev libv4l-dev

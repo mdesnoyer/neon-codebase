@@ -26,7 +26,7 @@ case $(uname -s) in                                                             
     esac
 
     # Python 2.7
-    sudo apt-get install \
+    sudo apt-get install --yes \
       python-dev \
       python-pip
     sudo pip install "virtualenv>1.11.1"
@@ -34,14 +34,14 @@ case $(uname -s) in                                                             
     # GCC 4.6
     # GFortran
     # CMake > 2.8
-    sudo apt-get install \
+    sudo apt-get install --yes \
       build-essential \
       gfortran \
       cmake
 
     # Libraries
     # https://sites.google.com/a/neon-lab.com/engineering/system-setup/dependencies#TOC-Libraries
-    sudo apt-get install \
+    sudo apt-get install --yes \
       libatlas-base-dev \
       libyaml-0-2 \
       libmysqlclient-dev \
@@ -51,9 +51,11 @@ case $(uname -s) in                                                             
       libcurl4-openssl-dev \
       libjpeg-dev
 
-    sudo ln -s /usr/lib/x86_64-linux-gnu/libjpeg.so /usr/lib
-    sudo ln -s /usr/lib/x86_64-linux-gnu/libfreetype.so /usr/lib
-    sudo ln -s /usr/lib/x86_64-linux-gnu/libz.so /usr/lib
+    for lib in libjpeg.so libfreetype.so libz.so ; do
+      if ! readlink -e /usr/lib/x86_64-linux-gnu/${lib} ; then
+    	sudo ln -s /usr/lib/x86_64-linux-gnu/${lib} /usr/lib
+      fi
+    done 
 
     cd $dir/externalLibs
     # libunwind 
@@ -64,7 +66,7 @@ case $(uname -s) in                                                             
       tar -xzf libunwind-0.99-beta.tar.gz
       cd libunwind-0.99-beta
       ./configure CFLAGS=-U_FORTIFY_SOURCE LDFLAGS=-L`pwd`/src/.libs
-      sudo make install
+      sudo make install --yes
       cd ..
     fi
 
@@ -76,21 +78,21 @@ case $(uname -s) in                                                             
       tar -xzf gperftools-2.1.tar.gz
       cd gperftools-2.1
       ./configure
-      sudo make install
+      sudo make install --yes
       cd ..
     fi
 
     # https://sites.google.com/a/neon-lab.com/engineering/system-setup/dependencies#TOC-Fast-Fourier-Transform-Package-FFTW3-
-    sudo apt-get install fftw3-dev
+    sudo apt-get install --yes fftw3-dev
 
     # GFlags
     ./install_gflags.sh
 
     # MySQL - https://sites.google.com/a/neon-lab.com/engineering/system-setup/dependencies#TOC-MySql
-    sudo apt-get install mysql-client
+    sudo apt-get install --yes mysql-client
 
     # Redis - https://sites.google.com/a/neon-lab.com/engineering/system-setup/dependencies#TOC-Redis
-    sudo apt-get install redis-server
+    sudo apt-get install --yes redis-server
 
     # PCRE Perl lib (required for http rewrite module of nginx)
     #apt-get install libpcre3 libpcre3-dev

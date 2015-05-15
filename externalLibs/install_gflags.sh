@@ -1,14 +1,21 @@
 #!/bin/bash
+cat <<EOF
 # ---------------------------------
 # Install GFlags
 # ---------------------------------
+EOF
 # https://sites.google.com/a/neon-lab.com/engineering/system-setup/dependencies#TOC-GFLAGS
 
+PS4="+GFLAGS: "
 set -ex
 
+if ! dpkg -l libgflags0 libgflags2 libgflags-dev ; then
+
+echo "GFlags libraries are not installed. Building."
+
 # Install Required Packages
-sudo apt-get install \
- devscripts
+sudo apt-get install --yes \
+ devscripts \
  debhelper
 
 # - Install RSA Key and configure GPG Keyring (NOTE: the key value may change! the correct keyring will be reported when you attempt to acquire the package via the dget command if it's not correct)
@@ -28,4 +35,8 @@ sudo dpkg -i *gflags*.deb || \
 sudo apt-get install -f
 
 # Adapted from http://askubuntu.com/questions/312173/installing-gflags-12-04
+else
+  echo "GFlags libraries are already installed."
+fi 
 
+# vim: set ts=2 sts=2 sw=2 expandtab

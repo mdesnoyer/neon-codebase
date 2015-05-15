@@ -1,13 +1,16 @@
 #!/bin/bash
+cat <<EOF
 # -----------------------------------------
 # Hadoop (EMR) libraries and packages
 # -----------------------------------------
-# Add the cdh5 apt repo by first creating a new file /etc/apt/sources.list.d/cloudera.list and adding the following lines:
-set -e
+EOF
 
+PS4="+HADOOP: "
+set -ex
 
 lsb_codename=$(lsb_release --codename --short)
 
+# Add the cdh5 apt repo 
 curl  -s http://archive.cloudera.com/cdh5/ubuntu/${lsb_codename}/amd64/cdh/cloudera.list | sudo tee /etc/apt/sources.list.d/cloudera.list
 
 # Then add the key and update:
@@ -15,7 +18,7 @@ curl -s http://archive.cloudera.com/cdh5/ubuntu/${lsb_codename}/amd64/cdh/archiv
 
 # Install the java ppa
 # http://www.webupd8.org/2012/01/install-oracle-java-jdk-7-in-ubuntu-via.html
-sudo add-apt-repository --yes ppa:webupd8team/java
+echo yes |sudo add-apt-repository --yes ppa:webupd8team/java
 #oracle-java7-set-default
 
 # Update Apt
