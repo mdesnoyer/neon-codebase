@@ -1,12 +1,14 @@
 
 #!/bin/bash
 # -----------------------------------------------------------
-# Build the local Neon External Libraries: PProf & libunwind
+# Build the Neon External Libraries and their dependencies in the proper order
 # -----------------------------------------------------------
 # https://sites.google.com/a/neon-lab.com/engineering/system-setup/dependencies
 #
 set -e
-dir=$(dirname $0)
+
+NEON_ROOT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$NEON_ROOT_DIR"
 
 case $(uname -s) in                                                                                                                                                                    ( Darwin )
     echo "ERROR: OSX is not supported." 1>&2
@@ -49,7 +51,8 @@ case $(uname -s) in                                                             
       libboost1.46-dev \
       libfreetype6-dev \
       libcurl4-openssl-dev \
-      libjpeg-dev
+      libjpeg-dev \
+      libsasl2-dev
 
     for lib in libjpeg.so libfreetype.so libz.so ; do
       if ! readlink -e /usr/lib/x86_64-linux-gnu/${lib} ; then
@@ -57,7 +60,7 @@ case $(uname -s) in                                                             
       fi
     done 
 
-    cd $dir/externalLibs
+    cd $NEON_ROOT_DIR/externalLibs
     # libunwind 
     printf "Checking libunwind: "
     if readlink -e /usr/local/lib/libunwind-x86_64.so ; then
@@ -93,6 +96,9 @@ case $(uname -s) in                                                             
 
     # Redis - https://sites.google.com/a/neon-lab.com/engineering/system-setup/dependencies#TOC-Redis
     sudo apt-get install --yes redis-server
+
+    # Python - 
+    $NEON_ROOT_DIR/install_python_deps.sh
 
     # PCRE Perl lib (required for http rewrite module of nginx)
     #apt-get install libpcre3 libpcre3-dev

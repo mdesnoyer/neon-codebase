@@ -15,3 +15,5 @@ case $REGION in
     export NEON_DEPS_URL="${PROTO}://s3-us-west-1.amazonaws.com/neon-dependencies/index.html"
   ;;
 esac
+
+echo "Pip index url: ${NEON_DEPS_URL}"
