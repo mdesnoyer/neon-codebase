@@ -66,6 +66,7 @@ statemon.define('bad_request', int)
 statemon.define('neon_requests', int)
 statemon.define('brightcove_requests', int)
 statemon.define('ooyala_requests', int)
+statemon.define('optimizely_requests', int)
 
 # Constants
 TOP_THUMBNAILS = "topn"
@@ -718,6 +719,18 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 api_request.autosync = autosync
                 statemon.state.increment('brightcove_requests')
 
+            elif "optimizely" in self.request.uri:
+                request_type = "optimizely"
+                i_id = params[INTEGRATION_ID]
+                access_token = params["access_token"]
+                autosync = params["autosync"]
+                api_request = neondata.OptimizelyApiRequest(
+                    job_id, api_key, vid, title, url,
+                    i_id, access_token, http_callback,
+                    default_thumbnail=default_thumbnail)
+                api_request.autosync = autosync
+                statemon.state.increment('optimizely_requests')
+
             elif "ooyala" in self.request.uri:
                 request_type = "ooyala"
                 oo_api_key = params["oo_api_key"]
@@ -791,6 +804,26 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                                 api_key, '0', _add_video)
                         if not res:
                             _log.error("key=update_neon_account" 
+                                           " msg=video id %s not added to"
+                                           " account" % vid)
+                            self.send_json_response('{}', 500)
+                            statemon.state.increment('add_video_error')
+                    else:
+                        _log.error("account not found or api key error")
+                        self.send_json_response('{}', 400)
+                        return
+
+                elif request_type == 'optimizely':
+                    oplatform = yield tornado.gen.Task(
+                        neondata.OptimizelyPlatform.get, api_key, i_id)
+
+                    if oplatform:
+                        def _add_video(np): 
+                            np.add_video(vid, job_id)
+                        res = yield tornado.gen.Task(neondata.OptimizelyPlatform.modify,
+                                api_key, i_id, _add_video)
+                        if not res:
+                            _log.error("key=update_optimizely_platform" 
                                            " msg=video id %s not added to"
                                            " account" % vid)
                             self.send_json_response('{}', 500)

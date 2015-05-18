@@ -52,6 +52,7 @@ import threading
 import time
 import api.brightcove_api #coz of cyclic import 
 import api.youtube_api
+import api.optimizely_api
 import utils.botoutils
 import utils.logs
 from utils.imageutils import PILImageUtils
@@ -1983,10 +1984,11 @@ class AbstractPlatform(NamespacedStoredObject):
             '''
             platform_type = key.split('_')[0]
             typemap = {
-                'neonplatform' : NeonPlatform,
-                'brightcoveplatform' : BrightcovePlatform,
-                'ooyalaplatform' : OoyalaPlatform,
-                'youtubeplatform' : YoutubePlatform
+                'neonplatform': NeonPlatform,
+                'brightcoveplatform': BrightcovePlatform,
+                'ooyalaplatform': OoyalaPlatform,
+                'youtubeplatform': YoutubePlatform,
+                'optimizelyplatform': OptimizelyPlatform
                 }
             try:
                 platform = typemap[platform_type]
@@ -2099,6 +2101,7 @@ class AbstractPlatform(NamespacedStoredObject):
             BrightcovePlatform.get_all(_process_instances)
             OoyalaPlatform.get_all(_process_instances)
             YoutubePlatform.get_all(_process_instances)
+            OptimizelyPlatformPlatform.get_all(_process_instances)
             return
         else:
             instances.extend(NeonPlatform.get_all())
@@ -2769,18 +2772,78 @@ class OoyalaPlatform(AbstractPlatform):
 
 class OptimizelyPlatform(AbstractPlatform):
     '''
-    
+    Optimizely Platform
     '''
-    def __init__(self, a_id, i_id='', api_key=''):
+    def __init__(self, a_id, i_id='', api_key='', access_token=None,
+                 auto_update=False, abtest=True, last_process_date=None):
         '''
+        Init optimizely platform
+
+        Partner code, o_api_token are essential
+        for api calls to optimizely
         '''
-        # TODO(Anderson) fill in the params as required by optimizely
-        super(OoyalaPlatform, self).__init__(api_key, i_id)
-        self.neon_api_key = api_key
+        super(OptimizelyPlatform, self).__init__(api_key, i_id, abtest)
         self.account_id = a_id
-        self.integration_id = i_id
+        self.access_token = access_token
+        self.last_process_date = last_process_date
+        self.auto_update = auto_update
 
+        self.optimizely_project_id = 0
 
+    @classmethod
+    def get_ovp(cls):
+        ''' ovp '''
+        return "optimizely"
+
+    def get_api(self):
+        ''' Return the Optimizely API object for this platform integration. '''
+        return api.optimizely_api.OptimizelyApi(self.access_token)
+
+    @tornado.gen.coroutine
+    def get_or_create_project(self, callback=None):
+        OPTIMIZELY_PROJECT_NAME = "neon-lab"
+
+        o_api = self.get_api()
+        project_list = o_api.get_projects()
+        if project_list["status_code"] != 200:
+            raise tornado.gen.Return(project_list)
+
+        # check if default optimizely project exists
+        filter_list = [
+            i for i in project_list['data']
+            if i['project_name'] == OPTIMIZELY_PROJECT_NAME
+        ]
+
+        if (len(filter_list) == 0):
+            project_create = o_api.create_project(OPTIMIZELY_PROJECT_NAME)
+            if project_create["status_code"] != 201:
+                raise tornado.gen.Return(project_create)
+
+            self.optimizely_project_id = project_create['data']['id']
+        else:
+            # Get first one in list: Should be check been active?
+            self.optimizely_project_id = filter_list[0]['id']
+
+        success = yield tornado.gen.Task(self.save)
+        if not success:
+            raise Exception("Could not save optimizely data")
+
+        response = o_api.create_response(
+            code=200,
+            string="OK",
+            data={"id": self.optimizely_project_id}
+        )
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def create_experiment(self, video_id, callback=None):
+        _log.warn("create_experiment")
+        video = VideoMetadata.get_video_request(video_id)
+        raise Exception("Need Implementation")
+
+    @classmethod
+    def get_all(cls, callback=None):
+        return cls._get_all_impl(callback)
 
 #######################
 # Request Blobs 
@@ -3098,18 +3161,23 @@ class YoutubeApiRequest(NeonApiRequest):
         '''
         return ThumbnailType.YOUTUBE
 
+
 class OptimizelyApiRequest(NeonApiRequest):
     '''
+    Optimizely API Request class
     '''
-    def __init__(self, job_id, api_key=None, i_id=None, vid=None, title=None,
-            url=None, http_callback=None, default_thumbnail=None):
+    def __init__(self, job_id, api_key=None, vid=None, title=None,
+                 url=None, i_id=None, access_token=None, http_callback=None,
+                 default_thumbnail=None):
         super(OptimizelyApiRequest, self).__init__(
             job_id, api_key, vid, title, url,
-            request_type='optimizely')
-
-        # TODO(Sunil):  Fill in the required params once Anderson figures out
-        # the params required for an optimizely API request
-
+            request_type='optimizely',
+            http_callback=http_callback,
+            default_thumbnail=default_thumbnail)
+        self.integration_type = "optimizely"
+        self.access_token = access_token
+        self.integration_id = i_id
+        self.autosync = False
 
 ###############################################################################
 ## Thumbnail store T_URL => TID => Metadata

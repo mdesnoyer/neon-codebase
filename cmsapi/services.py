@@ -268,6 +268,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             platform_account = yield tornado.gen.Task(
                                         neondata.BrightcovePlatform.get,
                                         self.api_key, i_id)
+        elif "optimizely" in i_type:
+            platform_account = yield tornado.gen.Task(
+                                        neondata.OptimizelyPlatform.get,
+                                        self.api_key, i_id)
         elif "ooyala" in i_type:
             platform_account = yield tornado.gen.Task(
                                         neondata.OoyalaPlatform.get,
@@ -440,6 +444,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 elif "ooyala_integrations" in self.request.uri:
                     yield self.create_ooyala_integration()
 
+                elif "optimizely_integrations" in self.request.uri:
+                    yield self.create_optimizely_integration()
             #Video Request creation   
             elif method == 'create_video_request':
                 if i_id is None:
@@ -450,8 +456,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
                 if "brightcove_integrations" == itype:
                     yield self.create_brightcove_video_request(i_id)
+
                 elif "neon_integrations" == itype:
                     yield self.create_neon_video_request_from_ui(i_id)
+
+                elif "optimizely_integrations" == itype:
+                    yield self.create_optimizely_video_request(i_id)
+
                 # TODO(Sunil): Expose when necessary
                 #elif "ooyala_integrations" == itype:
                 #    self.create_ooyala_video_request(i_id)
@@ -1442,7 +1453,241 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             data = '{"error": "account doesnt exists"}'
             statemon.state.increment('account_not_found')
             self.send_json_response(data, 400)
-   
+
+    ##################################################################
+    # Optimizely Methods
+    ##################################################################
+
+    @tornado.gen.coroutine
+    def create_optimizely_integration(self):
+        '''
+        Create Optimizely Integration
+        '''
+        try:
+            _log.warn("Create Optimizely Integration")
+            a_id = self.request.uri.split('/')[-2]
+            i_id = InputSanitizer.to_string(
+                self.get_argument("integration_id"))
+            access_token = InputSanitizer.to_string(
+                self.get_argument("access_token"))
+            autosync = InputSanitizer.to_bool(
+                self.get_argument("auto_update"))
+        except Exception, e:
+            _log.error("key=create_optimizely_account msg= %s" % e)
+            data = '{"error": "API Params missing"}'
+            statemon.state.increment('api_params_missing')
+            self.send_json_response(data, 400)
+            return
+
+        na = yield tornado.gen.Task(neondata.NeonUserAccount.get,
+                                    self.api_key)
+
+        # Create and Add Platform Integration
+        if na:
+            # Check if integration exists
+            if len(na.integrations) > 0 and i_id in na.integrations:
+                data = '{"error": "integration already exists"}'
+                self.send_json_response(data, 409)
+            else:
+                curtime = time.time()
+                oc = neondata.OptimizelyPlatform(
+                    a_id, i_id, self.api_key, access_token,
+                    True, True, curtime)
+                na.add_platform(oc)
+
+                # Save & Update acnt
+                res = yield tornado.gen.Task(na.save_platform, oc)
+
+                if res:
+                    # Set the default experimental strategy for
+                    # Optimizely Customers.
+                    strategy = neondata.ExperimentStrategy(
+                        self.api_key, only_exp_if_chosen=True)
+                    res = yield tornado.gen.Task(strategy.save)
+                    if not res:
+                        _log.error('Bad database response when adding the'
+                                   'default strategy for Optimizely account %s'
+                                   % self.api_key)
+
+                    response = yield tornado.gen.Task(
+                        oc.get_or_create_project)
+
+                    # Todo: Try to access optimizely with this credentials
+                    if response["status_code"] not in [200, 201]:
+                        _log.error("key=create_optimizely_account"
+                                    " msg=optimizely api call failed")
+                        data = '{"error":"' + response["status_string"] + '"}'
+                        self.send_json_response(data, 502)
+                        return
+
+                    data = '{"status": "integration created"}'
+                    self.send_json_response(data, 201)
+                    return
+                else:
+                    data = '{"error": "platform was not added, \
+                                account creation issue"}'
+                    statemon.state.increment('account_not_created')
+                    self.send_json_response(data, 500)
+
+    @tornado.gen.coroutine
+    def create_optimizely_video_request(self, i_id):
+        _log.warn("Create Optimizely Video Request")
+
+        def get_params(param_name):
+            param_value = None
+            try:
+                param_value = self.get_argument(param_name)
+            except:
+                _log.error("key=create_neon_video_request_from_ui "
+                           "msg=malformed request or missing arguments")
+                statemon.state.increment('malformed_request')
+                self.send_json_response(
+                    '{"error": "missing %s"}' % param_name, 400
+                )
+            return param_value
+
+        def fix_video_url(video_url):
+            return video_url.replace(
+                "www.dropbox.com",
+                "dl.dropboxusercontent.com"
+            )
+
+        def check_invalid_video_url(video_url):
+            invalid_url_links = ["youtube.com", "youtu.be"]
+            for invalid_url_link in invalid_url_links:
+                if invalid_url_link in video_url:
+                    data = '{"error":"link given is invalid or not a video file"}'
+                    statemon.state.increment('invalid_video_link')
+                    self.send_json_response(data, 400)
+                    return True
+            return False
+
+        def get_video_response(video_id, job_id, video_title):
+            t_urls = [] 
+            thumbs = []
+            im_index = int(hashlib.md5(video_id).hexdigest(), 16) \
+                                        % len(placeholder_images)
+            placeholder_url = placeholder_images[im_index] 
+            t_urls.append(placeholder_url)
+            ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            tm = neondata.ThumbnailMetadata(0, video_id, t_urls, ctime, 0, 0,
+                                            neondata.ThumbnailType.CENTERFRAME,
+                                            0, 0)
+            thumbs.append(tm.to_dict_for_video_response())
+            vr = neondata.VideoResponse(
+                video_id,
+                job_id,
+                neondata.RequestState.PROCESSING,
+                "neon",
+                "0",
+                video_title,
+                None, #duration
+                time.time() * 1000,
+                0, 
+                thumbs)
+
+            return vr.to_json()
+
+        # get params
+        video_url = get_params('video_url')
+        video_title = get_params('title')
+        default_thumbnail = get_params('default_thumbnail')
+        optimizely_edit_url = get_params('optimizely_edit_url')
+        if not all([video_url, video_title, optimizely_edit_url]):
+            return
+
+        # get platform
+        oc = yield tornado.gen.Task(
+            self.get_platform_account, "optimizely", i_id)
+
+        if not oc:
+            data = '{"error":"account not found"}'
+            statemon.state.increment('account_not_found')
+            self.send_json_response(data, 400)
+            return
+
+        video_url = fix_video_url(video_url)
+        if check_invalid_video_url(video_url):
+            return
+
+        # is_validate_link
+        invalid_content_types = [
+            'text/html', 'text/plain', 'application/json',
+            'application/x-www-form-urlencoded',
+            'text/html; charset=utf-8', 'text/html;charset=utf-8']
+
+        http_client = tornado.httpclient.AsyncHTTPClient()
+        headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
+            (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
+            Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
+
+        req = tornado.httpclient.HTTPRequest(
+            url=video_url, headers=headers,
+            use_gzip=False, request_timeout=1.5)
+        vresponse = yield tornado.gen.Task(http_client.fetch, req)
+
+        # If timeout, Ignore for now, may be a valid slow link.
+        if vresponse.code != 599:
+            ctype = vresponse.headers.get('Content-Type')
+            if vresponse.error or ctype is None or ctype.lower() in invalid_content_types:
+                data = '{"error":"link given is invalid or not a video file"}'
+                statemon.state.increment('invalid_video_link')
+                self.send_json_response(data, 400)
+                return
+
+        # submit_video_to_video_server
+        video_id = hashlib.md5(video_url).hexdigest()
+        v_title = video_url.split('//')[-1] if video_title is None else video_title
+        request_body = {
+            "topn": 3,
+            "integration_id": i_id,
+            "access_token": oc.access_token,
+            "api_key": self.api_key,
+            "video_id": video_id,
+            "video_title": v_title,
+            "video_url": video_url,
+            "default_thumbnail": default_thumbnail,
+            "callback_url": None,
+            "autosync": oc.auto_update
+        }
+        host = "localhost" if options.local == 1 else options.video_server
+        client_url = 'http://%s:8081/api/v1/submitvideo/optimizely' % host
+
+        body = tornado.escape.json_encode(request_body)
+        headers = tornado.httputil.HTTPHeaders({
+            "Content-Type": "application/json"
+        })
+        req = tornado.httpclient.HTTPRequest(
+            url=client_url,
+            method="POST",
+            headers=headers,
+            body=body,
+            request_timeout=30.0,
+            connect_timeout=10.0)
+
+        result = yield tornado.gen.Task(utils.http.send_request, req)
+
+        if result.code == 409:
+            data = '{"error":"url already processed","video_id":"%s"}' % video_id
+            self.send_json_response(data, 409)
+            return
+
+        if result.error:
+            _log.error("key=create_optimizely_video_request "
+                    "msg=thumbnail api error %s" % result.error)
+            data = '{"error":"neon thumbnail api error"}'
+            self.send_json_response(data, 502)
+            return
+
+        # Todo: Need fix the return with correctly data
+        job_id = json.loads(result.body)["job_id"] # get job id from response
+        data = get_video_response(video_id, job_id, video_title)
+
+        # resp_exp = yield tornado.gen.Task(oc.create_experiment(video_id))
+        self.send_json_response(data, 200)
+        return
+
+
     ##################################################################
     # Ooyala Methods
     ##################################################################
