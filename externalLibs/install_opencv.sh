@@ -9,6 +9,13 @@ EOF
 PS4="+OPENCV: "
 set -ex
 
+CURDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd ${CURDIR}
+## Disable virtualenv if one is active
+#if [[ $VIRTUAL_ENV ]] ; then
+#  deactivate
+#fi
+
 # default: install CUDA libraries (run 'with_cuda=false ./install_opencv.sh')
 if ${with_cuda:-true} ; then
   # If CUDA is desired:
@@ -50,7 +57,8 @@ fi
 tar -xzf opencv-2.4.6.tar.gz
 mkdir $release_dir
 cd $release_dir
-cmake -D CMAKE_BUILD_TYPE=RELEASE -D WITH_QT=ON -D BUILD_PYTHON_SUPPORT=ON -D CMAKE_INSTALL_PREFIX=${PREFIX:-/usr/local} -D WITH_CUDA=ON -D WITH_CUBLAS=ON  ..
+cmake -D CMAKE_BUILD_TYPE=RELEASE -D WITH_QT=ON -D BUILD_PYTHON_SUPPORT=ON -D CMAKE_INSTALL_PREFIX=/usr/local -D WITH_CUDA=ON -D WITH_CUBLAS=ON  ..
+make
 sudo make install
-
+sudo mv /usr/local/lib/python2.7/site-packages/cv* /usr/local/lib/python2.7/dist-packages/
 # vim: set ts=2 sts=2 sw=2 expandtab #

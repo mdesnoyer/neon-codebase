@@ -101,7 +101,7 @@ case $(uname -s) in                                                             
     $NEON_ROOT_DIR/install_python_deps.sh
 
     # PCRE Perl lib (required for http rewrite module of nginx)
-    #apt-get install libpcre3 libpcre3-dev
+    sudo apt-get install --yes libpcre3 libpcre3-dev
 
     # Ruby
     ./install_ruby.sh
