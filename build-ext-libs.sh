@@ -39,7 +39,8 @@ case $(uname -s) in                                                             
     sudo apt-get install --yes \
       build-essential \
       gfortran \
-      cmake
+      cmake \
+      pkg-config
 
     # Libraries
     # https://sites.google.com/a/neon-lab.com/engineering/system-setup/dependencies#TOC-Libraries
@@ -52,7 +53,8 @@ case $(uname -s) in                                                             
       libfreetype6-dev \
       libcurl4-openssl-dev \
       libjpeg-dev \
-      libsasl2-dev
+      libsasl2-dev \
+      libavutil-dev
 
     for lib in libjpeg.so libfreetype.so libz.so ; do
       if ! readlink -e /usr/lib/x86_64-linux-gnu/${lib} ; then
@@ -69,7 +71,7 @@ case $(uname -s) in                                                             
       tar -xzf libunwind-0.99-beta.tar.gz
       cd libunwind-0.99-beta
       ./configure CFLAGS=-U_FORTIFY_SOURCE LDFLAGS=-L`pwd`/src/.libs
-      sudo make install --yes
+      sudo make install
       cd ..
     fi
 

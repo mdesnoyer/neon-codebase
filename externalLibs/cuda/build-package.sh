@@ -20,8 +20,11 @@
 cuda_version=5.0.35
 cuda=cuda_${cuda_version}_linux_64_ubuntu11.10-1.run
 cuda_path=$HOME/src/package-cuda
+cuda_deb=$HOME/src/cuda-${cuda_version}_amd64.deb
+
 if ! [ -d ${cuda_path}/lib64 ] ; then
   if ! [ -f $cuda ] ; then
+    echo "Downloading CUDA Toolkit"
     if ${cuda_from_s3:-true} ; then
       aws s3 cp s3://neon-apt-us-east-1/${cuda} .
     else
@@ -29,9 +32,12 @@ if ! [ -d ${cuda_path}/lib64 ] ; then
     fi
   fi
 chmod +x ./${cuda}
+echo "Building CUDA Toolkit: ${cuda_version}"
 sudo ./${cuda} -silent -toolkit -toolkitpath=${cuda_path}/usr/local
 fi
 
+
+echo "Building CUDA Toolkit: ${cuda_deb}"
 # use FPM to build the .deb - https://github.com/jordansissel/fpm/wiki/PackageMakeInstall
 fpm -s dir -t deb --name cuda --version ${cuda_version} --iteration 1 \
   -C ${cuda_path} \
@@ -41,6 +47,6 @@ fpm -s dir -t deb --name cuda --version ${cuda_version} --iteration 1 \
   --url "https://developer.nvidia.com/cuda-zone" \
   --after-install after-install.sh \
   --after-remove after-remove.sh \
-  -p $HOME/src/cuda-${cuda_version}_amd64.deb \
+  -p ${cuda_deb}
   --exclude doc \
   usr/local
