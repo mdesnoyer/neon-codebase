@@ -6,7 +6,7 @@ cat <<EOF
 EOF
 
 PS4="+RUBY: "
-set -e
+#set -e
 
 # Install rvm
 sudo apt-get install --yes curl

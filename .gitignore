@@ -75,3 +75,6 @@ CTestResults.xml
 
 #### VIM ####
 *.sw[a-z]
+
+#### Nvidia CUDA ####
+cuda*.run

@@ -11,6 +11,8 @@ set -ex
 
 if ! dpkg -l libgflags0 libgflags2 libgflags-dev ; then
 
+if ! sudo dpkg -i libgflags*.deb  ; then
+
 echo "GFlags libraries are not installed. Building."
 
 # Install Required Packages
@@ -38,5 +40,5 @@ sudo apt-get install -f
 else
   echo "GFlags libraries are already installed."
 fi 
-
+fi
 # vim: set ts=2 sts=2 sw=2 expandtab
