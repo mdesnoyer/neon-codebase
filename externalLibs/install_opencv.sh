@@ -11,33 +11,34 @@ set -ex
 
 CURDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd ${CURDIR}
-## Disable virtualenv if one is active
-#if [[ $VIRTUAL_ENV ]] ; then
-#  deactivate
-#fi
 
 # default: install CUDA libraries (run 'with_cuda=false ./install_opencv.sh')
-if ${with_cuda:-true} ; then
-  # If CUDA is desired:
-  sudo apt-get install --yes libxi-dev libxmu-dev freeglut3-dev build-essential binutils-gold
-  if ! readlink -e /usr/lib/x86_64-linux-gnu/libglut.so ; then
-    sudo ln -s /usr/lib/x86_64-linux-gnu/libglut.so /usr/lib/
-  fi
-  cuda=cuda_5.0.35_linux_64_ubuntu11.10-1.run
-  cuda_path=/usr/local/cuda-5.0
-  if ! [ -d ${cuda_path}/lib64 ] ; then
-    if ${cuda_from_s3:-true} ; then
-      sudo pip install awscli
-      aws s3 cp s3://neon-apt-us-east-1/${cuda} .
-    else
-      wget http://developer.download.nvidia.com/compute/cuda/5_0/rel-update-1/installers/${cuda} .
-    fi
-    chmod +x ./${cuda}
-    sudo ./${cuda} -silent -toolkit -toolkitpath=${cuda_path}
-    echo "export PATH=\$PATH:${cuda_path}/bin" >> ~/.bash_profile
-    echo "export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${cuda_path}/lib64:/lib" >> ~/.bash_profile 
-  fi
-  source ~/.bash_profile
+#if ${with_cuda:-true} ; then
+#  # If CUDA is desired:
+#  sudo apt-get install --yes libxi-dev libxmu-dev freeglut3-dev build-essential binutils-gold
+#  if ! readlink -e /usr/lib/x86_64-linux-gnu/libglut.so ; then
+#    sudo ln -s /usr/lib/x86_64-linux-gnu/libglut.so /usr/lib/
+#  fi
+#  cuda=cuda_5.0.35_linux_64_ubuntu11.10-1.run
+#  cuda_path=/usr/local/cuda-5.0
+#  if ! [ -d ${cuda_path}/lib64 ] ; then
+#    if ${cuda_from_s3:-true} ; then
+#      sudo pip install awscli
+#      aws s3 cp s3://neon-apt-us-east-1/${cuda} .
+#    else
+#      wget http://developer.download.nvidia.com/compute/cuda/5_0/rel-update-1/installers/${cuda} .
+#    fi
+#    chmod +x ./${cuda}
+#    sudo ./${cuda} -silent -toolkit -toolkitpath=${cuda_path}
+#    echo "export PATH=\$PATH:${cuda_path}/bin" >> ~/.bash_profile
+#    echo "export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${cuda_path}/lib64:/lib" >> ~/.bash_profile 
+#  fi
+#  source ~/.bash_profile
+#fi
+
+if ! dpkg -l cuda ; then
+  echo "ERROR: Neon Labs built CUDA .deb package is required" 1>&2
+  exit 2
 fi
 
 # Install CMake
