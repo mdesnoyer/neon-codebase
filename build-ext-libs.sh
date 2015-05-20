@@ -27,34 +27,7 @@ case $(uname -s) in                                                             
         ;;
     esac
 
-    # Python 2.7
-    sudo apt-get install --yes \
-      python-dev \
-      python-pip
-    sudo pip install "virtualenv>1.11.1"
-
-    # GCC 4.6
-    # GFortran
-    # CMake > 2.8
-    sudo apt-get install --yes \
-      build-essential \
-      gfortran \
-      cmake \
-      pkg-config
-
-    # Libraries
-    # https://sites.google.com/a/neon-lab.com/engineering/system-setup/dependencies#TOC-Libraries
-    sudo apt-get install --yes \
-      libatlas-base-dev \
-      libyaml-0-2 \
-      libmysqlclient-dev \
-      libboost1.46-dbg \
-      libboost1.46-dev \
-      libfreetype6-dev \
-      libcurl4-openssl-dev \
-      libjpeg-dev \
-      libsasl2-dev \
-      libavutil-dev
+    ./install_python_deps.sh
 
     for lib in libjpeg.so libfreetype.so libz.so ; do
       if ! readlink -e /usr/lib/x86_64-linux-gnu/${lib} ; then
@@ -98,9 +71,6 @@ case $(uname -s) in                                                             
 
     # Redis - https://sites.google.com/a/neon-lab.com/engineering/system-setup/dependencies#TOC-Redis
     sudo apt-get install --yes redis-server
-
-    # Python - 
-    $NEON_ROOT_DIR/install_python_deps.sh
 
     # PCRE Perl lib (required for http rewrite module of nginx)
     sudo apt-get install --yes libpcre3 libpcre3-dev
