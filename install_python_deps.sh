@@ -44,8 +44,8 @@ sudo apt-get install --yes \
   libavformat-dev \
   libavutil-dev \
   libswscale-dev \
-  libtiff4-dev libjasper-dev libavformat-dev libswscale-dev libavcodec-dev libjpeg-dev libpng-dev libv4l-dev \
-  fftw3-dev
+  libtiff4-dev libjasper-dev libavformat-dev libswscale-dev libavcodec-dev libjpeg-dev libpng12-dev libv4l-dev \
+  libfftw3-dev
 
 . neon_repos.sh
 

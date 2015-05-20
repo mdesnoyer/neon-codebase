@@ -27,8 +27,6 @@ case $(uname -s) in                                                             
         ;;
     esac
 
-    ./install_python_deps.sh
-
     for lib in libjpeg.so libfreetype.so libz.so ; do
       if ! readlink -e /usr/lib/x86_64-linux-gnu/${lib} ; then
     	sudo ln -s /usr/lib/x86_64-linux-gnu/${lib} /usr/lib
@@ -56,12 +54,12 @@ case $(uname -s) in                                                             
       tar -xzf gperftools-2.1.tar.gz
       cd gperftools-2.1
       ./configure
-      sudo make install --yes
+      sudo make install 
       cd ..
     fi
 
     # https://sites.google.com/a/neon-lab.com/engineering/system-setup/dependencies#TOC-Fast-Fourier-Transform-Package-FFTW3-
-    sudo apt-get install --yes fftw3-dev
+    sudo apt-get install --yes libfftw3-dev
 
     # GFlags
     ./install_gflags.sh

@@ -32,13 +32,20 @@ cmake -D CMAKE_BUILD_TYPE=RELEASE -D WITH_QT=ON -D BUILD_PYTHON_SUPPORT=ON -D CM
 make
 sudo make install DESTDIR=${opencv_path}
 
+# dist-packages vs. site-packages in a virtualenv
+# * http://stackoverflow.com/questions/9387928/whats-the-difference-between-dist-packages-and-site-packages
+# * http://stackoverflow.com/questions/19210964/on-ubuntu-how-to-get-virtualenv-to-use-dist-packages
+# we do this so that with this package installed, virtualenv's will be able to use OpenCV module 'cv'
+cd ${opencv_path}/usr/local/lib/python2.7
+mv dist-packages site-packages
+
 cd $CURDIR
 echo "Packaging OpenCV: ${opencv_deb}"
 # use FPM to build the .deb - https://github.com/jordansissel/fpm/wiki/PackageMakeInstall
-fpm -s dir -t deb --name opencv --version ${opencv_version} --iteration 1 \
+fpm -s dir -t deb --name opencv --version ${opencv_version} --iteration 2 \
   -C ${opencv_path} \
   --force \
-  --description "OpenCV with header files and Python 2.7 module (Neon Labs)" \
+  --description "OpenCV with header files and Python 2.7 module for virtualenvs (Neon Labs)" \
   --maintainer "build@neon-lab.com" \
   --url "http://opencv.org/" \
   --after-install after-install.sh \

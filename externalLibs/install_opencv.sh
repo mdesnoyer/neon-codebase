@@ -16,7 +16,7 @@ if ${opencv_package_install:-true} ; then
   aws s3 cp s3://neon-apt-us-east-1/precise/pool/main/a/apt-transport-s3/apt-transport-s3_0.1.0_amd64.deb /var/tmp/
   sudo dpkg -i /var/tmp/apt-transport-s3_0.1.0_amd64.deb
   cat <<EOF |sudo tee /etc/apt/sources.list.d/neon.list
-  deb s3://s3.amazonaws.com/neon-apt-us-east-1/precise precise main
+  deb [arch=amd64] s3://s3.amazonaws.com/neon-apt-us-east-1/precise precise main
 EOF
   sudo apt-get update
   sudo apt-get install cuda opencv
