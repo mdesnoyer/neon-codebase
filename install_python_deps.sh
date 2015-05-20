@@ -47,13 +47,13 @@ cd "$NEON_ROOT_DIR"
 
 . neon_repos.sh
 
-echo "PRE REQUIREMENTS: "
-sudo pip install -r ${NEON_ROOT_DIR}/pre_requirements.txt --no-index --find-links ${NEON_DEPS_URL}
-
-echo "LOCAL PACKAGES: Pyleargist linked to NumpPy"
-sudo pip install --global-option="build_ext" --global-option="--include-dirs=/usr/local/lib/python2.7/dist-packages/numpy/core/include" --no-index externalLibs/pyleargist
-
 . enable_env
+
+echo "PRE REQUIREMENTS: "
+pip install -r ${NEON_ROOT_DIR}/pre_requirements.txt --no-index --find-links ${NEON_DEPS_URL}
+echo "LOCAL PACKAGES: Pyleargist linked to NumpPy"
+pip install --global-option="build_ext" --global-option="--include-dirs=/usr/local/lib/python2.7/dist-packages/numpy/core/include" --no-index externalLibs/pyleargist
+
 pip install -r ${NEON_ROOT_DIR}/pre_requirements.txt --no-index --find-links ${NEON_DEPS_URL}
 pip install --global-option="build_ext" --global-option="--include-dirs=${VIRTUAL_ENV}/lib/python2.7/site-packages/numpy/core/include" --no-index externalLibs/pyleargist
 echo "REQUIREMENTS: "
