@@ -873,14 +873,39 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         items = json.loads(resp.body)['items']
         result_vids = [x['video_id'] for x in items]
         self.assertItemsEqual(result_vids, test_video_ids)
-        
+       
+    def test_request_invalid_video(self):
+        ''' invalid video id '''
+
+        self._setup_initial_brightcove_state()
+
+        ordered_videos = sorted(self._get_videos(), reverse=True)
+        test_video_ids = ordered_videos[:2]
+
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
-                '%s/videos/?video_ids=%s'
-                %(self.a_id, self.b_id, video_ids))
+                '%s/videos?video_ids=invalidvideoID'
+                %(self.a_id, self.b_id))
         resp = self.get_request(url, self.api_key)
         items = json.loads(resp.body)['items']
-        result_vids = [x['video_id'] for x in items]
-        self.assertItemsEqual(result_vids, test_video_ids)
+        self.assertItemsEqual(items[0], {})
+
+    def test_invalid_video_ids_request(self):
+        self._setup_initial_brightcove_state()
+
+        ordered_videos = sorted(self._get_videos(), reverse=True)
+        test_video_ids = ordered_videos[:2]
+        video_ids = ",".join(test_video_ids)
+
+        url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
+                '%s/videos/?video_ids=15238901589,%s'
+                %(self.a_id, self.b_id, video_ids))
+        jresp = self.get_request(url, self.api_key)
+        resp = json.loads(jresp.body)
+        self.assertEqual(resp["total_count"], 3)
+        self.assertEqual(len(resp["items"]), 3)
+
+        #result_vids = [x['video_id'] for x in items]
+        #self.assertItemsEqual(result_vids, test_video_ids)
     
     def test_invalid_model_scores(self):
         ''' test filtering of invalid model scores like -inf, nan '''

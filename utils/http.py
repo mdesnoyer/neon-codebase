@@ -142,7 +142,7 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
 
 class RequestThread(threading.Thread):
     '''A thread that serially sends http requests.'''
-    def __init__(self, q, max_tries):
+    def __init__(self, q, max_tries, rc=None):
         '''Constructor
 
         q - A Queue.Queue that this thread will consume from.
@@ -155,6 +155,7 @@ class RequestThread(threading.Thread):
         self.max_tries = max_tries
         self.daemon = True
         self._stopped = threading.Event()
+        self.retry_codes = rc or [400, 401, 402, 403, 405, 408, 501, 502, 503]
 
     def stop(self):
         self._stopped.set()
@@ -175,7 +176,9 @@ class RequestThread(threading.Thread):
 
                 response = send_request(request, ntries=1,
                                         do_logging=do_logging)
-                if response.error is not None:
+                if response.error is not None and response.code not in\
+                    self.retry_codes:
+                   
                     # Do retry logic
                     if (ntries + 1) >= self.max_tries:
                         if do_logging:
