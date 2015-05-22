@@ -148,6 +148,8 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
          'no_runaways' : calc_lift_from_dataframe(no_runaways)})
 
 def calc_lift_from_dataframe(data):
+    if len(data) == 0:
+        return float('nan')
     base_sums = data.groupby(['is_base']).sum()
     neon_sums = data.groupby(level=['type']).sum()
 
