@@ -54,8 +54,7 @@ class BatchProcessManager(threading.Thread):
         super(BatchProcessManager, self).__init__()
         
         self.cluster = cluster
-        self.last_output_path = \
-          stats.batch_processor.get_last_sucessful_batch_output(self.cluster)
+        self.last_output_path = None
 
         self._ready_to_run = threading.Event()
         self._stopped = threading.Event()
@@ -66,6 +65,7 @@ class BatchProcessManager(threading.Thread):
 
     def run(self):
         self._ready_to_run.set()
+        self.build_impala_tables(self.last_output_path)
         while not self._stopped.is_set():
             self._ready_to_run.clear()
 
@@ -76,14 +76,7 @@ class BatchProcessManager(threading.Thread):
                 was_running = stats.batch_processor.wait_for_running_batch_job(
                     self.cluster)
                 if was_running:
-                    last_path = stats.batch_processor.get_last_sucessful_batch_output(self.cluster)
-                    if (last_path != self.last_output_path and 
-                        last_path is not None):
-                        self.last_output_path = last_path
-                        stats.batch_processor.build_impala_tables(
-                            self.last_output_path,
-                            self.cluster,
-                            timeout = (options.batch_period * 4))
+                    self.build_impala_tables(None)
             except Exception as e:
                 _log.exception('Error finding the running batch job: %s' % e)
                 continue
@@ -104,11 +97,11 @@ class BatchProcessManager(threading.Thread):
                     self.cluster, options.input_path,
                     cleaned_output_path,
                     timeout = (options.batch_period * 10))
-                self.last_output_path = cleaned_output_path
                 stats.batch_processor.build_impala_tables(
                     cleaned_output_path,
                     self.cluster,
                     timeout = (options.batch_period * 4))
+                self.last_output_path = cleaned_output_path
                 statemon.state.increment('successful_batch_runs')
                 statemon.state.last_batch_success = 1
             except Exception as e:
@@ -156,7 +149,44 @@ class BatchProcessManager(threading.Thread):
     def schedule_run(self):
         self._ready_to_run.set()
             
-                
+    def build_impala_tables(self, data_path=None, force=False):
+        '''Build the impala tables from a given input data.
+
+        Inputs:
+        data_path - Path to get input data from. If it is None, then we try
+                    to find the last sucessful batch output
+        force - Force a rebuild even if we think this path was already 
+                processed.
+        '''
+        try:
+            if data_path is None:
+                data_path = \
+                  stats.batch_processor.get_last_sucessful_batch_output(
+                    self.cluster)
+            if (data_path is not None and (
+                    force or 
+                    data_path != self.last_output_path)):
+                self.cluster.change_instance_group_size(
+                    'TASK', new_size=self.n_task_instances)
+                stats.batch_processor.build_impala_tables(
+                    data_path,
+                    self.cluster,
+                    timeout = (options.batch_period * 4))
+                self.last_output_path = data_path
+
+        except Exception as e:
+            _log.exception('Error building the impala tables')
+
+        finally:
+            try:
+                if not self._ready_to_run.is_set():
+                    self.cluster.change_instance_group_size('TASK',
+                                                            new_size=0)
+                utils.monitor.send_statemon_data()
+            except Exception as e:
+                _log.exception('Error shrinking task instance group: %s'
+                               % e)
+                statemon.state.increment('cluster_resize_failures')
 
 def main():
     _log.info('Looking up cluster %s' % options.cluster_type)
@@ -187,10 +217,9 @@ def main():
                                'sucessful batch job was, so we cannot '
                                'rebuild the Impala tables')
                 else:
-                    stats.batch_processor.build_impala_tables(
+                    batch_processor.build_impala_tables(
                         batch_processor.last_output_path,
-                        cluster,
-                        timeout = (options.batch_period * 4))
+                        force=True)
                     batch_processor.schedule_run()
             cluster.set_public_ip(options.cluster_ip)
         except Exception as e:
