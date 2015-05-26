@@ -52,7 +52,6 @@ import threading
 import time
 import api.brightcove_api #coz of cyclic import 
 import api.youtube_api
-import api.optimizely_api
 import utils.botoutils
 import utils.logs
 from utils.imageutils import PILImageUtils
@@ -64,7 +63,7 @@ import utils.s3
 import utils.http 
 import urllib
 import warnings
-
+import controllers
 
 _log = logging.getLogger(__name__)
 
@@ -832,7 +831,13 @@ class StoredObject(object):
                 data_dict = obj_dict['_data']
                 classname = obj_dict['_type']
                 try:
+
+                    for i in controllers.neon_controller.ControllerBase.__subclasses__():
+                        if i.__name__ not in globals():
+                            globals()[i.__name__] = i
+
                     classtype = globals()[classname]
+
                 except KeyError:
                     _log.error('Unknown class of type %s in database key %s'
                                % (classname, key))
@@ -1503,6 +1508,9 @@ class NeonUserAccount(NamespacedStoredObject):
         # Default thumbnail to show if we don't have one for a video
         # under this account.
         self.default_thumbnail_id = None
+
+        # User controllers association
+        self.controllers = {}
     
     @classmethod
     def _baseclass_name(cls):
@@ -1533,6 +1541,13 @@ class NeonUserAccount(NamespacedStoredObject):
             self.integrations = {}
 
         self.integrations[platform.integration_id] = platform.get_ovp()
+
+    def add_controller(self, controller):
+        '''Adds a controller object to the account.'''
+        if len(self.controllers) == 0:
+            self.controllers = {}
+
+        self.controllers[controller.platform_id] = controller.get_ovp()
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -1591,6 +1606,18 @@ class NeonUserAccount(NamespacedStoredObject):
         pipe = db_connection.blocking_conn.pipeline()
         pipe.set(self.key, self.to_json())
         pipe.set(new_integration.key, new_integration.to_json()) 
+        callback(pipe.execute())
+
+    def save_controller(self, new_controller, callback=None):
+        '''
+        Save Neon User account and corresponding controller object
+        '''
+
+        #temp: changing this to a blocking pipeline call   
+        db_connection = DBConnection.get(self)
+        pipe = db_connection.blocking_conn.pipeline()
+        pipe.set(self.key, self.to_json())
+        pipe.set(new_controller.key, new_controller.to_json()) 
         callback(pipe.execute())
 
     @utils.sync.optional_sync
@@ -1987,8 +2014,7 @@ class AbstractPlatform(NamespacedStoredObject):
                 'neonplatform': NeonPlatform,
                 'brightcoveplatform': BrightcovePlatform,
                 'ooyalaplatform': OoyalaPlatform,
-                'youtubeplatform': YoutubePlatform,
-                'optimizelyplatform': OptimizelyPlatform
+                'youtubeplatform': YoutubePlatform
                 }
             try:
                 platform = typemap[platform_type]
@@ -2101,7 +2127,6 @@ class AbstractPlatform(NamespacedStoredObject):
             BrightcovePlatform.get_all(_process_instances)
             OoyalaPlatform.get_all(_process_instances)
             YoutubePlatform.get_all(_process_instances)
-            OptimizelyPlatformPlatform.get_all(_process_instances)
             return
         else:
             instances.extend(NeonPlatform.get_all())
@@ -2770,81 +2795,6 @@ class OoyalaPlatform(AbstractPlatform):
         return cls._get_all_impl(callback)
 
 
-class OptimizelyPlatform(AbstractPlatform):
-    '''
-    Optimizely Platform
-    '''
-    def __init__(self, a_id, i_id='', api_key='', access_token=None,
-                 auto_update=False, abtest=True, last_process_date=None):
-        '''
-        Init optimizely platform
-
-        Partner code, o_api_token are essential
-        for api calls to optimizely
-        '''
-        super(OptimizelyPlatform, self).__init__(api_key, i_id, abtest)
-        self.account_id = a_id
-        self.access_token = access_token
-        self.last_process_date = last_process_date
-        self.auto_update = auto_update
-
-        self.optimizely_project_id = 0
-
-    @classmethod
-    def get_ovp(cls):
-        ''' ovp '''
-        return "optimizely"
-
-    def get_api(self):
-        ''' Return the Optimizely API object for this platform integration. '''
-        return api.optimizely_api.OptimizelyApi(self.access_token)
-
-    @tornado.gen.coroutine
-    def get_or_create_project(self, callback=None):
-        OPTIMIZELY_PROJECT_NAME = "neon-lab"
-
-        o_api = self.get_api()
-        project_list = o_api.get_projects()
-        if project_list["status_code"] != 200:
-            raise tornado.gen.Return(project_list)
-
-        # check if default optimizely project exists
-        filter_list = [
-            i for i in project_list['data']
-            if i['project_name'] == OPTIMIZELY_PROJECT_NAME
-        ]
-
-        if (len(filter_list) == 0):
-            project_create = o_api.create_project(OPTIMIZELY_PROJECT_NAME)
-            if project_create["status_code"] != 201:
-                raise tornado.gen.Return(project_create)
-
-            self.optimizely_project_id = project_create['data']['id']
-        else:
-            # Get first one in list: Should be check been active?
-            self.optimizely_project_id = filter_list[0]['id']
-
-        success = yield tornado.gen.Task(self.save)
-        if not success:
-            raise Exception("Could not save optimizely data")
-
-        response = o_api.create_response(
-            code=200,
-            string="OK",
-            data={"id": self.optimizely_project_id}
-        )
-        raise tornado.gen.Return(response)
-
-    @tornado.gen.coroutine
-    def create_experiment(self, video_id, callback=None):
-        _log.warn("create_experiment")
-        video = VideoMetadata.get_video_request(video_id)
-        raise Exception("Need Implementation")
-
-    @classmethod
-    def get_all(cls, callback=None):
-        return cls._get_all_impl(callback)
-
 #######################
 # Request Blobs 
 ######################
@@ -3161,23 +3111,6 @@ class YoutubeApiRequest(NeonApiRequest):
         '''
         return ThumbnailType.YOUTUBE
 
-
-class OptimizelyApiRequest(NeonApiRequest):
-    '''
-    Optimizely API Request class
-    '''
-    def __init__(self, job_id, api_key=None, vid=None, title=None,
-                 url=None, i_id=None, access_token=None, http_callback=None,
-                 default_thumbnail=None):
-        super(OptimizelyApiRequest, self).__init__(
-            job_id, api_key, vid, title, url,
-            request_type='optimizely',
-            http_callback=http_callback,
-            default_thumbnail=default_thumbnail)
-        self.integration_type = "optimizely"
-        self.access_token = access_token
-        self.integration_id = i_id
-        self.autosync = False
 
 ###############################################################################
 ## Thumbnail store T_URL => TID => Metadata
@@ -3870,7 +3803,51 @@ class VideoCallbackResponse(AbstractJsonResponse):
         self.serving_url = s_url
         self.error = err
         self.timestamp = str(time.time())
-    
+
+
+class VideoControllerMetaData(NamespacedStoredObject):
+    def __init__(self, api_key, platform_id='', c_type='',
+                 experiment_id='', video_id='', last_process_date=None):
+
+        super(VideoControllerMetaData, self).__init__(
+            self._generate_subkey(api_key, video_id))
+
+        self.controllers = [{
+            "controller_type": c_type,
+            "platform_id": platform_id,
+            "experiment_id": experiment_id,
+            "video_id": video_id,
+            "last_process_date": last_process_date
+        }]
+
+    def append_controller(cls, c_type, platform_id, experiment_id,
+                          video_id, last_process_date):
+        cls.controllers.append({
+            "controller_type": c_type,
+            "platform_id": platform_id,
+            "experiment_id": experiment_id,
+            "video_id": video_id,
+            "last_process_date": last_process_date
+        })
+
+    @classmethod
+    def _generate_subkey(cls, api_key, video_id):
+        return '_'.join([api_key, video_id])
+
+    @classmethod
+    def get(self, api_key, video_id, callback=None):
+        return super(VideoControllerMetaData, self).get(
+            self._generate_subkey(api_key, video_id),
+            callback=callback)
+
+    @classmethod
+    def _baseclass_name(cls):
+        return cls.get_ovp()
+
+    @classmethod
+    def get_ovp(cls):
+        return VideoControllerMetaData.__name__
+
 if __name__ == '__main__':
     # If you call this module you will get a command line that talks
     # to the server. nifty eh?
