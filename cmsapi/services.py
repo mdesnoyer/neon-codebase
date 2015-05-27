@@ -438,12 +438,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 #POST /accounts/:account_id/brightcove_integrations
                 if "brightcove_integrations" in self.request.uri:
                     yield self.create_brightcove_integration()
-                
+
                 elif "ooyala_integrations" in self.request.uri:
                     yield self.create_ooyala_integration()
 
                 elif "optimizely_integrations" in self.request.uri:
-                    yield self.create_controller_integration(ControllerType.OPTIMIZELY)
+                    yield self.create_controller_integration(
+                        ControllerType.OPTIMIZELY)
 
             #Video Request creation
             elif method == 'create_video_request':
@@ -464,7 +465,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 #    self.create_ooyala_video_request(i_id)
                 else:
                     self.method_not_supported()
-            
+
             # Experiment controller request creation
             elif method == 'experiment':
                 if i_id is None:
@@ -474,7 +475,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     return
 
                 if "optimizely_integrations" == itype:
-                    yield self.create_controller_experiment(ControllerType.OPTIMIZELY)
+                    yield self.create_controller_experiment(
+                        ControllerType.OPTIMIZELY)
                 else:
                     self.method_not_supported()
 
@@ -1477,7 +1479,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 self.get_argument("integration_id"))
             access_token = InputSanitizer.to_string(
                 self.get_argument("access_token"))
-        except Exception, e:
+        except Exception as e:
             _log.error("key=create_controller_integration msg= %s" % e)
             data = '{"error": "API Params missing"}'
             statemon.state.increment('api_params_missing')
@@ -1574,10 +1576,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
             # verify video exist
             i_vid = neondata.InternalVideoID.generate(self.api_key, video_id)
-            v = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
+            vmd = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
 
             # submit video
-            if v is None:
+            if vmd is None:
                 yield self.submit_neon_video_request(
                     self.api_key,
                     video_id,

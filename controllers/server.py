@@ -6,6 +6,7 @@ if sys.path[0] != __base_path__:
 
 import logging
 import datetime
+import time
 import utils.neon
 import utils.ps
 import signal
@@ -30,8 +31,9 @@ define('s3_bucket', default='neon-image-serving-directives-test',
        help='Bucket to publish the serving directives to')
 define('directive_filename', default='mastermind',
        help='Filename in the S3 bucket that will hold the directive.')
-define("interval", default=10, type=int,
-       help="Standby time (in seconds) to execute loop again. Must be between 60 and 1200.")
+define("interval", default=60, type=int,
+       help="Standby time (in seconds) to execute loop again. \
+            Must be between 60 and 1200.")
 define("start_time", default="time_year_...", type=str,
        help="curtime.strftime('%Y%m%d%H%M%S')")
 
@@ -117,17 +119,21 @@ class S3DirectiveWatcher(threading.Thread):
             statemon.state.increment('reading_error')
             return
 
-        # list files in bucket
-        self.last_update_time = self.last_update_time - datetime.timedelta(hours=1)  # remove
-
         # getting the last hour
         now = datetime.datetime.utcnow()
         bucket_listing = bucket.list(
             prefix=self.last_update_time.strftime('%Y%m%d%H'))
 
+        def compare_dates(date1, date2):
+            date_format = "%Y-%m-%dT%H:%M:%S.%fZ"
+            if (datetime.datetime.strptime(date1, date_format) >= date2):
+                return True
+            return False
+
+        # filter file by last modified
         filename_list = [
             i for i in bucket_listing
-            if datetime.datetime.strptime(i.last_modified, "%Y-%m-%dT%H:%M:%S.%fZ") >= self.last_update_time
+            if compare_dates(i.last_modified, self.last_update_time)
         ]
 
         # getting the current hour
@@ -136,35 +142,51 @@ class S3DirectiveWatcher(threading.Thread):
             for key in bucket_listing:
                 filename_list.append(key)
 
-        # filter by last modified
+        # for each file get in S3
         for rs in filename_list:
             # parse the file to json
             file_content = bucket.get_key(rs.name).get_contents_as_string()
             parsed = self.parse_directive_file(file_content)
 
             for key, value in parsed.iteritems():
+                #  get video metada
                 vmd = yield tornado.gen.Task(
                     VideoControllerMetaData.get,
                     value['aid'], value['vid'])
                 if vmd:
+                    # for each experiment - update directives
                     for i in vmd.controllers:
                         ctr = yield tornado.gen.Task(
                             Controller.get,
                             i['controller_type'],
                             value['aid'], i['platform_id'])
-                        ctr.update_experiment_with_directives(value)
 
+                        try:
+                            yield tornado.gen.Task(
+                                ctr.update_experiment_with_directives,
+                                i['experiment_id'], value)
+
+                            # update controller - last process date
+                            vmd.update_controller(
+                                i['controller_type'], i['platform_id'],
+                                i['experiment_id'], i['video_id'],
+                                time.time())
+                            yield tornado.gen.Task(vmd.save)
+
+                        except ValueError as e:
+                            _log.error("key=read_directives"
+                                       " msg=controller api call failed")
+                            _log.error(e.message)
+
+        # update time
         self.last_update_time = datetime.datetime.utcnow()
         return
 
     def parse_directive_file(self, file_data):
-        '''Returns expiry, {tracker_id -> account_id},
-        {(account_id, video_id) -> json_directive}'''
+        '''{(account_id, video_id) -> json_directive}'''
         gz = gzip.GzipFile(fileobj=StringIO(file_data), mode='rb')
         lines = gz.read().split('\n')
 
-        # Split the data lines into tracker id maps, default thumb
-        # maps and directives
         directives = {}
         for line in lines[1:]:
             if len(line.strip()) == 0:
@@ -183,7 +205,7 @@ class S3DirectiveWatcher(threading.Thread):
 
 def main(activity_watcher=utils.ps.ActivityWatcher()):
     # validate min and max values to interval option
-    if (options.interval < 10) or (options.interval > 1200):  # 1 min or 20 min
+    if (options.interval < 60) or (options.interval > 1200):  # 1 min or 20 min
         raise Exception("Invalid interval argument")
         return
 

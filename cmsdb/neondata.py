@@ -3830,6 +3830,19 @@ class VideoControllerMetaData(NamespacedStoredObject):
             "last_process_date": last_process_date
         })
 
+    def update_controller(cls, c_type, platform_id, experiment_id,
+                          video_id, last_process_date):
+        item = [
+            i for i in cls.controllers
+            if (i['controller_type'] == c_type and
+                i['platform_id'] == platform_id and
+                i['experiment_id'] == experiment_id and
+                i['video_id'] == video_id)
+        ]
+        if len(item) > 0:
+            item[0]['last_process_date'] = last_process_date
+        return
+
     @classmethod
     def _generate_subkey(cls, api_key, video_id):
         return '_'.join([api_key, video_id])
