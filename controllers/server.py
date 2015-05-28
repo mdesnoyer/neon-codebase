@@ -32,10 +32,8 @@ define('s3_bucket', default='neon-image-serving-directives-test',
 define('directive_filename', default='mastermind',
        help='Filename in the S3 bucket that will hold the directive.')
 define("interval", default=60, type=int,
-       help="Standby time (in seconds) to execute loop again. \
-            Must be between 60 and 1200.")
-define("start_time", default="time_year_...", type=str,
-       help="curtime.strftime('%Y%m%d%H%M%S')")
+       help=("Standby time (in seconds) to execute loop again."
+             "Must be between 60 and 1200."))
 
 # Monitoring variables
 statemon.define('reading_error', int)  # error reading directive to s3
@@ -64,11 +62,8 @@ class S3DirectiveWatcher(threading.Thread):
         super(S3DirectiveWatcher, self).__del__()
 
     def run(self):
-
         self._stopped.clear()
         while not self._stopped.is_set():
-            last_woke_up = datetime.datetime.utcnow()
-
             try:
                 with self.activity_watcher.activate():
                     self.read_directives()
@@ -76,9 +71,7 @@ class S3DirectiveWatcher(threading.Thread):
                 _log.exception('Uncaught exception when reading %s' % e)
                 statemon.state.increment('reading_error')
 
-            self._stopped.wait(options.interval -
-                               (datetime.datetime.utcnow() -
-                                last_woke_up).total_seconds())
+            self._stopped.wait(options.interval)
 
     def stop(self):
         '''Stop this thread safely and allow it to finish what is is doing.'''
@@ -152,7 +145,7 @@ class S3DirectiveWatcher(threading.Thread):
                 #  get video metada
                 vmd = yield tornado.gen.Task(
                     neondata.VideoControllerMetaData.get,
-                    value['aid'], value['vid'])
+                    value['aid'], value['vid'].split('_', 1)[1])
                 if vmd:
                     api_key = vmd.get_api_key()
                     # for each experiment - update directives
@@ -162,10 +155,8 @@ class S3DirectiveWatcher(threading.Thread):
                         if rs.last_modified <= i['last_process_date']:
                             continue
 
-                        ctr = yield tornado.gen.Task(
-                            neon_controller.Controller.get,
-                            i['controller_type'],
-                            api_key, i['platform_id'])
+                        ctr = neon_controller.Controller.get(
+                            i['controller_type'], api_key, i['platform_id'])
 
                         try:
                             state = yield tornado.gen.Task(
@@ -202,9 +193,7 @@ class S3DirectiveWatcher(threading.Thread):
                 break
             data = json.loads(line)
             if data['type'] == 'dir':
-                key = neondata.VideoControllerMetaData._generate_subkey(
-                    data['aid'], data['vid'])
-                directives[key] = data
+                directives[data['vid']] = data
 
         return directives
 

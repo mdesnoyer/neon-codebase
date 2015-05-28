@@ -1392,8 +1392,6 @@ class ControllerResultsRetriever(threading.Thread):
             self._stopped.wait(options.controller_results_retriever_delay)
 
     def _results_retriever(self):
-        _log.warn("_results_retriever")
-
         data = []
         vmds = neondata.VideoControllerMetaData.get_all()
         for vmd in vmds:
@@ -1407,17 +1405,15 @@ class ControllerResultsRetriever(threading.Thread):
                     c['controller_type'],
                     api_key, c['platform_id'])
 
-                values = ctr.retrieve_experiment_results(c)
-                data.append(
-                    self.video_id_cache.find_video_id(values['thumb_id']),
-                    values['thumb_id'],
-                    values['visitors'],
-                    None,
-                    values['conversions'],
-                    None
-                )
+                for s in ctr.retrieve_experiment_results(c):
+                    data.append((
+                        self.video_id_cache.find_video_id(s['thumb_id']),
+                        s['thumb_id'],
+                        s['visitors'],
+                        None,
+                        s['conversions'],
+                        None))
 
-        _log.warn(data)
         self.mastermind.update_stats_info(data)
         self.is_loaded.set()
 

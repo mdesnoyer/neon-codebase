@@ -675,7 +675,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     ## Submit a video request to Neon Video Server
     @tornado.gen.coroutine
     def submit_neon_video_request(self, api_key, video_id, video_url, 
-                    video_title, topn, callback_url, default_thumbnail):
+                    video_title, topn, callback_url, default_thumbnail,
+                    response_success=True):
 
         '''
         Create the call in to the Video Server
@@ -720,7 +721,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             return
 
         #Success
-        self.send_json_response(result.body, 201)
+        if response_success:
+            self.send_json_response(result.body, 201)
     
     @tornado.gen.coroutine
     def create_neon_thumbnail_api_request(self):
@@ -1564,6 +1566,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         if not all([video_id, video_url]):
             return
 
+        # check video_id
+        if len(video_id) > options.max_videoid_size:
+            statemon.state.increment('invalid_video_id')
+            self.send_json_response(
+                '{"error":"video id greater than 128 chars"}', 400)
+            return
+
         # get specific params for Optimizely
         extras = {}
         if c_type == neon_controller.ControllerType.OPTIMIZELY:
@@ -1575,9 +1584,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 return
 
             js_component = self.get_argument('js_component', None)
-            if (js_component is not None and "THUMB_URL" not in js_component):
-                data = {"error": "js_component must contain \
-                    the THUMB_URL token"}
+            token = "\"THUMB_URL\""
+            if (js_component is not None and token not in js_component):
+                data = {"error": "js_component must contain the %s" % token}
                 self.send_json_response(data, 400)
                 return
 
@@ -1588,16 +1597,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 'ovid_to_tid': {}
             }
 
-        # check video_id
-        if len(video_id) > options.max_videoid_size:
-            statemon.state.increment('invalid_video_id')
-            self.send_json_response(
-                '{"error":"video id greater than 128 chars"}', 400)
-            return
-
-        # create experiment
         try:
-            yield cr.verify_experiment(i_id, experiment_id, video_id, extras)
+            # create or append a experiment
+            data = yield tornado.gen.Task(
+                cr.verify_experiment,
+                i_id, experiment_id, video_id, extras)
 
             # verify video exist
             i_vid = neondata.InternalVideoID.generate(self.api_key, video_id)
@@ -1612,11 +1616,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     video_url.split('//')[-1],
                     self.get_argument('topn', 1),
                     self.get_argument('callback_url', None),
-                    self.get_argument('default_thumbnail', None))
-            else:
-                self.send_json_response({
-                    "status": "using existing video %s" % video_id
-                    }, 200)
+                    self.get_argument('default_thumbnail', None),
+                    False
+                )
+            self.send_json_response(data, 201)
         except ValueError as e:
             _log.error("key=create_controller_experiment"
                        " msg=controller api call failed")

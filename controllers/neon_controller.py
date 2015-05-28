@@ -15,7 +15,6 @@ import time
 from utils import statemon
 from cmsdb import neondata
 from cmsdb.neondata import NamespacedStoredObject
-
 _log = logging.getLogger(__name__)
 
 # Monitoring
@@ -30,7 +29,7 @@ class ControllerType(object):
 class ControllerExperimentState(object):
     ''' Controller Experiment state enumeration '''
     PENDING = 'pending'
-    IN_PROGRESS = "in_progress"
+    INPROGRESS = "inprogress"
     COMPLETE = 'complete'
 
 
@@ -104,10 +103,9 @@ class OptimizelyController(ControllerBase):
             raise ValueError("could not verify %s experiment. code: %s" % (
                 self.get_ovp(), exp_response["status_code"]))
 
-        # get primary goal
-        p_goal_id = exp_response['data']['primary_goal_id']
+        # get primary goal for experiment
         if extras['goal_id'] is None:
-            extras['goal_id'] = p_goal_id
+            extras['goal_id'] = exp_response['data']['primary_goal_id']
 
         # Check if goal exist in Optimizely
         goal_response = self.read_goal(goal_id=extras['goal_id'])
@@ -116,10 +114,26 @@ class OptimizelyController(ControllerBase):
                 self.get_ovp(), goal_response["status_code"]))
 
         if goal_response['data']['goal_type'] == 2:
-            raise ValueError("Invalid goal_id. goal cannot be of \
-                type engagement. set primary goal in optimizely \
-                or provide a different goal_id")
+            raise ValueError(
+                "Invalid goal_id. goal cannot be of "
+                "type engagement. set primary goal in optimizely "
+                "or provide a different goal_id")
 
+        # formatter js_component
+        if extras['js_component'] is None:
+            extras['js_component'] = (
+                "$.each($(\"imgSELECTOR\"), function(element) {"
+                "    $(this).attr(\"src\", \"THUMB_URL\");"
+                "}); "
+                "$.each($(\"videoSELECTOR\"), function(element) {"
+                "    $(this).attr(\"poster\", \"THUMB_URL\");"
+                "}); "
+                "$.each($(\"divSELECTOR\"), function(element) {"
+                "    $(this).css({\"background-image\": \"url(THUMB_URL)\"});"
+                "}); "
+            ).replace('SELECTOR', extras['element_id'])
+
+        # create or append new experiment
         vd = yield tornado.gen.Task(
             neondata.VideoControllerMetaData.get,
             self.api_key, video_id)
@@ -140,16 +154,21 @@ class OptimizelyController(ControllerBase):
                 self.api_key, self.platform_id,
                 self.get_ovp(), experiment_id, video_id, extras, 0)
 
-        vd.save()
-        raise tornado.gen.Return(None)
+        yield tornado.gen.Task(vd.save)
+
+        # return data
+        data = {
+            'experiment_id': experiment_id,
+            'video_id': video_id,
+            'goal_id': extras['goal_id'],
+            'element_id': extras['element_id'],
+            'js_component': extras['js_component']
+        }
+        raise tornado.gen.Return(data)
 
     @tornado.gen.coroutine
     def update_experiment_with_directives(self, vcmd, directive):
-        '''
-        Definations:
-          - The description of the variation in optimizely should be the id of the thumbnail.
-        '''
-        state = ControllerExperimentState.IN_PROGRESS
+        state = ControllerExperimentState.INPROGRESS
         experiment_id = vcmd['experiment_id']
 
         # retrieve list of variations in experiment optimizely
@@ -160,7 +179,7 @@ class OptimizelyController(ControllerBase):
 
         # iterate optimizely variations to "disable" variation not used
         for var in v_list_resp['data']:
-            if var['id'] in vcmd['extras']['ovid_to_tid']:
+            if str(var['id']) in vcmd['extras']['ovid_to_tid']:
                 continue
 
             # Variation exists in optimizely BUT
@@ -169,14 +188,14 @@ class OptimizelyController(ControllerBase):
                 continue
 
             # Update the variation to set weight = 0
-            # TODO: How I get the thumbnail using this variation
-            # to submit a new thumbnail for video?
-            resp = self.update_variation(variation_id=var['id'], weight=0,
-                                         is_paused=True)
-            if resp["status_code"] != 202:
+            response = self.update_variation(variation_id=var['id'], weight=0,
+                                             is_paused=True)
+            if response["status_code"] == 404:
+                continue
+            elif response["status_code"] != 202:
                 raise ValueError(
                     "could not update %s variation. code: %s" % (
-                        self.get_ovp(), resp["status_code"]))
+                        self.get_ovp(), response["status_code"]))
 
         # iterate fractions to create/update variation in optimizely
         for thumb in directive['fractions']:
@@ -187,44 +206,38 @@ class OptimizelyController(ControllerBase):
             # Get the variation key by thumbnail id
             for key, value in vcmd['extras']['ovid_to_tid'].iteritems():
                 if value == thumb['tid']:
-                    variation_id = key
+                    variation_id = int(key)
 
             # Update or Remove a variation
             if variation_id is not None:
                 var = self.get_value_list(v_list_resp['data'], 'id',
                                           variation_id)
+
                 # Variation not found. Assuming Delete
                 if var is None:
-                    vcmd['extras']['ovid_to_tid'].pop(variation_id, None)
+                    vcmd['extras']['ovid_to_tid'].pop(str(variation_id), None)
                 else:
                     # Update variation
-                    if (var['weight'] == frac_calc and
-                       var['is_paused'] == False):
+                    if var['weight'] == frac_calc:
                         continue
-
                     response = self.update_variation(
                         variation_id=var['id'], weight=frac_calc,
                         is_paused=False)
 
-                    if response["status_code"] != 202:
+                    if response["status_code"] == 404:
+                        # Optimizely BUG: If a variation has been deleted.
+                        # I still get the variation when call the variations list.
+                        # Any access to variation by ID. I receive 404.
+                        vcmd['extras']['ovid_to_tid'].pop(
+                            str(variation_id), None)
+                        var = None
+                    elif response["status_code"] != 202:
                         raise ValueError(
                             "could not update %s variation. code: %s" % (
                                 self.get_ovp(), response["status_code"]))
 
             if var is None:
                 # Create new variation
-                if vcmd['extras']['js_component'] is None:
-                    vcmd['extras']['js_component'] = 
-                        "$.each($('imgSELECTOR_TOKEN'), function(element) { \
-                            $(this).attr('src', 'THUMB_URL'); \
-                        }); \
-                        $.each($('videoSELECTOR_TOKEN'), function(element) { \
-                            $(this).attr('poster', 'THUMB_URL'); \
-                        }); \
-                        $.each($('divSELECTOR_TOKEN'), function(element) { \
-                            $(this).css({'background-image': 'url(THUMB_URL)'}); \
-                        });".replace("SELECTOR_TOKEN", vcmd['extras']['element_id'])
-                
                 js_component = vcmd['extras']['js_component']
                 vcmd['extras']['js_component'] = js_component.replace(
                     "THUMB_URL", thumb['imgs'][0]['url'])
@@ -262,22 +275,29 @@ class OptimizelyController(ControllerBase):
         experiment_id = vcmd['experiment_id']
         exp_status = self.get_experiments_status(experiment_id=experiment_id)
         if exp_status["status_code"] != 200:
-            raise ValueError("could not verify %s experiment status. code: %s" % (
-                self.get_ovp(), exp_status["status_code"]))
+            raise ValueError(
+                "could not verify %s experiment status. code: %s" % (
+                    self.get_ovp(), exp_status["status_code"]))
 
         data = []
         for exp in exp_status['data']:
-            if exp['goal_id'] != vcmd['extras']['goal_id']:
+            variation_id = str(exp['variation_id'])
+            goal_id = str(exp['goal_id'])
+
+            # I do not know this variation
+            if variation_id not in vcmd['extras']['ovid_to_tid']:
+                continue
+            # I do not want this goal
+            if goal_id != vcmd['extras']['goal_id']:
                 continue
 
             item = {
-                'thumb_id': exp['variation_name'],
+                'thumb_id': vcmd['extras']['ovid_to_tid'][variation_id],
                 'visitors': exp['visitors'],
                 'conversions': exp['conversions'],
                 'conversion_rate': exp['conversion_rate']
             }
             data.append(item)
-
         return data
 
     ###########################################################################
@@ -329,7 +349,6 @@ class OptimizelyController(ControllerBase):
                 pass
             response_data["status_string"] = "OK"
 
-        # _log.warn(response_data)
         return response_data
 
     def get_projects(self):
@@ -640,7 +659,7 @@ class Controller(object):
             raise ValueError("Integration already exists")
 
         controller = Controller(c_type, api_key, platform_id, access_key)
-        token_response = yield controller.verify_account()
+        token_response = yield tornado.gen.Task(controller.verify_account)
         if token_response is not None:
             raise ValueError("could not verify %s access. code: %s" % (
                 c_type, token_response["status_code"]))
