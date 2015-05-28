@@ -35,7 +35,7 @@ def get_time_clause(start_time=None, end_time=None):
         end_time = dateutil.parser.parse(end_time)
         clauses.extend([
             '(yr < {year} or (yr = {year} and mnth <= {month}))'.format(
-                year=start_time.year, month=start_time.month),
+                year=end_time.year, month=end_time.month),
             "cast(serverTime as timestamp) <= '%s'" % 
             end_time.strftime('%Y-%m-%d %H:%M:%S')])
 

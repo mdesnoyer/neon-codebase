@@ -254,7 +254,9 @@ class Cluster():
         extra_ops = {
             'mapreduce.output.fileoutputformat.compress' : 'true',
             'avro.output.codec' : 'snappy',
-            'mapreduce.job.reduce.slowstart.completedmaps' : '1.0'
+            'mapreduce.job.reduce.slowstart.completedmaps' : '1.0',
+            'mapreduce.task.timeout' : 1800000,
+            'mapreduce.reduce.speculative': 'false'
         }
 
         # If the requested map memory is different, set it
@@ -799,7 +801,9 @@ class Cluster():
                  '--yarn-key-value',
                  'yarn.resourcemanager.container.liveness-monitor.interval-ms=120000',
                  '--yarn-key-value',
-                 'yarn.log-aggregation-enable=true'])]
+                 'yarn.log-aggregation-enable=true',
+                 '--yarn-key-value',
+                 'yarn.scheduler.maximum-allocation-mb=12000'])]
             
         steps = [
             boto.emr.step.InstallHiveStep('0.11.0.2')]
