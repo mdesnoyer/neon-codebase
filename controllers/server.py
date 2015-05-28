@@ -23,9 +23,9 @@ import json
 from boto.s3.connection import S3Connection
 from utils import statemon
 from utils.options import define, options
+from cmsdb import neondata
+from controllers import neon_controller
 _log = logging.getLogger(__name__)
-from controllers.neon_controller import Controller
-from cmsdb.neondata import VideoControllerMetaData
 
 define('s3_bucket', default='neon-image-serving-directives-test',
        help='Bucket to publish the serving directives to')
@@ -151,26 +151,32 @@ class S3DirectiveWatcher(threading.Thread):
             for key, value in parsed.iteritems():
                 #  get video metada
                 vmd = yield tornado.gen.Task(
-                    VideoControllerMetaData.get,
+                    neondata.VideoControllerMetaData.get,
                     value['aid'], value['vid'])
                 if vmd:
+                    api_key = vmd.get_api_key()
                     # for each experiment - update directives
                     for i in vmd.controllers:
+                        if i['state'] == neon_controller.ControllerExperimentState.COMPLETE:
+                            continue
+                        if rs.last_modified <= i['last_process_date']:
+                            continue
+
                         ctr = yield tornado.gen.Task(
-                            Controller.get,
+                            neon_controller.Controller.get,
                             i['controller_type'],
-                            value['aid'], i['platform_id'])
+                            api_key, i['platform_id'])
 
                         try:
-                            yield tornado.gen.Task(
+                            state = yield tornado.gen.Task(
                                 ctr.update_experiment_with_directives,
-                                i['experiment_id'], value)
+                                i, value)
 
                             # update controller - last process date
                             vmd.update_controller(
                                 i['controller_type'], i['platform_id'],
                                 i['experiment_id'], i['video_id'],
-                                time.time())
+                                state, time.time(), i['extras'])
                             yield tornado.gen.Task(vmd.save)
 
                         except ValueError as e:
@@ -196,7 +202,7 @@ class S3DirectiveWatcher(threading.Thread):
                 break
             data = json.loads(line)
             if data['type'] == 'dir':
-                key = VideoControllerMetaData._generate_subkey(
+                key = neondata.VideoControllerMetaData._generate_subkey(
                     data['aid'], data['vid'])
                 directives[key] = data
 

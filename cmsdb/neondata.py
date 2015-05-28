@@ -64,7 +64,6 @@ import utils.http
 import urllib
 import warnings
 import controllers
-
 _log = logging.getLogger(__name__)
 
 define("thumbnailBucket", default="host-thumbnails", type=str,
@@ -3807,31 +3806,37 @@ class VideoCallbackResponse(AbstractJsonResponse):
 
 class VideoControllerMetaData(NamespacedStoredObject):
     def __init__(self, api_key, platform_id='', c_type='',
-                 experiment_id='', video_id='', last_process_date=None):
-
+                 experiment_id='', video_id='', extras={},
+                 last_process_date=None):
         super(VideoControllerMetaData, self).__init__(
             self._generate_subkey(api_key, video_id))
 
+        state = controllers.neon_controller.ControllerExperimentState.PENDING
         self.controllers = [{
             "controller_type": c_type,
             "platform_id": platform_id,
             "experiment_id": experiment_id,
             "video_id": video_id,
+            "extras": extras,
+            "state": state,
             "last_process_date": last_process_date
         }]
 
     def append_controller(cls, c_type, platform_id, experiment_id,
-                          video_id, last_process_date):
+                          video_id, extras, last_process_date):
+        state = controllers.neon_controller.ControllerExperimentState.PENDING
         cls.controllers.append({
             "controller_type": c_type,
             "platform_id": platform_id,
             "experiment_id": experiment_id,
             "video_id": video_id,
+            "extras": extras,
+            "state": state,
             "last_process_date": last_process_date
         })
 
     def update_controller(cls, c_type, platform_id, experiment_id,
-                          video_id, last_process_date):
+                          video_id, state, last_process_date, extras=None):
         item = [
             i for i in cls.controllers
             if (i['controller_type'] == c_type and
@@ -3840,8 +3845,14 @@ class VideoControllerMetaData(NamespacedStoredObject):
                 i['video_id'] == video_id)
         ]
         if len(item) > 0:
+            if extras is not None:
+                item[0]['extras'] = extras
+            item[0]['state'] = state
             item[0]['last_process_date'] = last_process_date
         return
+
+    def get_api_key(cls):
+        return cls.get_id().split('_', 1)[0];
 
     @classmethod
     def _generate_subkey(cls, api_key, video_id):

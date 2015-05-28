@@ -30,13 +30,13 @@ import traceback
 import utils.neon
 import utils.logs
 import utils.http
-from controllers.neon_controller import ControllerType, Controller
+import utils.sync
 
+from controllers import neon_controller
 from StringIO import StringIO
 from cmsdb import neondata
 from utils.inputsanitizer import InputSanitizer
 from utils import statemon
-import utils.sync
 from utils.options import define, options
 
 define("thumbnailBucket", default="host-thumbnails", type=str,
@@ -444,7 +444,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
                 elif "optimizely_integrations" in self.request.uri:
                     yield self.create_controller_integration(
-                        ControllerType.OPTIMIZELY)
+                        neon_controller.ControllerType.OPTIMIZELY)
 
             #Video Request creation
             elif method == 'create_video_request':
@@ -476,7 +476,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
                 if "optimizely_integrations" == itype:
                     yield self.create_controller_experiment(
-                        ControllerType.OPTIMIZELY)
+                        neon_controller.ControllerType.OPTIMIZELY)
                 else:
                     self.method_not_supported()
 
@@ -1497,8 +1497,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             return
 
         try:
-            cr = yield Controller.create(c_type, self.api_key,
-                                         i_id, access_token)
+            cr = yield tornado.gen.Task(
+                neon_controller.Controller.create,
+                c_type, self.api_key, i_id, access_token)
 
             # Associate controller with neon user account
             na.add_controller(cr)
@@ -1550,7 +1551,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             return
 
         # get controller
-        cr = yield Controller.get(c_type, self.api_key, i_id)
+        cr = neon_controller.Controller.get(c_type, self.api_key, i_id)
         if cr is None:
             data = {"error": "User integration for %s not found" % c_type}
             self.send_json_response(data, 400)
@@ -1563,6 +1564,30 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         if not all([video_id, video_url]):
             return
 
+        # get specific params for Optimizely
+        extras = {}
+        if c_type == neon_controller.ControllerType.OPTIMIZELY:
+            element_id = self.get_argument('element_id', "#%s" % video_id)
+            prefix = element_id.startswith('.') or element_id.startswith('#')
+            if not prefix:
+                data = {"error": "element_id must start with '.' or '#'"}
+                self.send_json_response(data, 400)
+                return
+
+            js_component = self.get_argument('js_component', None)
+            if (js_component is not None and "THUMB_URL" not in js_component):
+                data = {"error": "js_component must contain \
+                    the THUMB_URL token"}
+                self.send_json_response(data, 400)
+                return
+
+            extras = {
+                'goal_id': self.get_argument('goal_id', None),
+                'element_id': element_id,
+                'js_component': js_component,
+                'ovid_to_tid': {}
+            }
+
         # check video_id
         if len(video_id) > options.max_videoid_size:
             statemon.state.increment('invalid_video_id')
@@ -1572,7 +1597,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         # create experiment
         try:
-            yield cr.verify_experiment(i_id, experiment_id, video_id)
+            yield cr.verify_experiment(i_id, experiment_id, video_id, extras)
 
             # verify video exist
             i_vid = neondata.InternalVideoID.generate(self.api_key, video_id)
