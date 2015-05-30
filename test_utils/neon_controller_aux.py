@@ -7,8 +7,9 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import logging
 import datetime
-
+_log = logging.getLogger(__name__)
 
 class OptimizelyApiAux:
     def __init__(self):
@@ -21,6 +22,8 @@ class OptimizelyApiAux:
         self.variations = []
         self.goals = []
 
+        self.varitions_update_made = 0
+
     def increment_id(self, variable):
         variable += 1
         return variable
@@ -30,20 +33,25 @@ class OptimizelyApiAux:
 
     def get_item_by_id(self, dictionary, id):
         data = [i for i in dictionary if i['id'] == id]
-        return data[0]
+        if len(data) > 0:
+            return data[0]
+        return None
 
     def response_project_create(
-            self, project_name=None,
+            self, project_id=None, project_name=None,
             project_status=None, include_jquery=None,
             project_javascript=None, enable_force_variation=None,
             exclude_disabled_experiments=None, exclude_names=None,
             ip_anonymization=None, ip_filter=None):
         now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-        self.project_id = self.increment_id(self.project_id)
+        if project_id is None:
+            project_id = self.increment_id(self.project_id)
+            self.project_id = project_id
+
         data = {
-            'id': self.project_id,
+            'id': project_id,
             'code_revision': 1,
-            'socket_token': 'AAM7hIkAze5LQo32UCpky8VKG9zJPxLn~%s' % self.project_id,
+            'socket_token': 'AAM7hIkAze5LQo32UCpky8VKG9zJPxLn~%s' % project_id,
             'account_id': 2828420149,
             'project_name': project_name,
             'exclude_disabled_experiments': exclude_disabled_experiments if exclude_disabled_experiments is not None else False,
@@ -69,7 +77,6 @@ class OptimizelyApiAux:
             project_javascript=None, enable_force_variation=None,
             exclude_disabled_experiments=None, exclude_names=None,
             ip_anonymization=None, ip_filter=None):
-
         now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         data = {
             'project_name': project_name,
@@ -89,11 +96,11 @@ class OptimizelyApiAux:
         project.update(data)
         return project
 
-    def response_project_list(self):
-        return self.projects
-
     def response_project_read(self, project_id):
         return self.get_item_by_id(self.projects, project_id)
+
+    def response_project_list(self):
+        return self.projects
 
     def response_experiment_create(
             self, experiment_id=None, project_id=None, audience_ids=None,
@@ -101,7 +108,6 @@ class OptimizelyApiAux:
             description=None, edit_url=None, status=None,
             custom_css=None, custom_js=None,
             percentage_included=None, url_conditions=None):
-
         now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         if experiment_id is None:
             experiment_id = self.increment_id(self.experiment_id)
@@ -143,7 +149,6 @@ class OptimizelyApiAux:
             description=None, edit_url=None, status=None,
             custom_css=None, custom_js=None,
             percentage_included=None, url_conditions=None):
-
         now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         data = {
             'description': description,
@@ -164,11 +169,11 @@ class OptimizelyApiAux:
         experiment.update(data)
         return experiment
 
-    def response_experiment_list(self):
-        return self.experiments
-
     def response_experiment_read(self, experiment_id):
         return self.get_item_by_id(self.experiments, experiment_id)
+
+    def response_experiment_list(self):
+        return self.experiments
 
     def response_experiment_status(self):
         data = []
@@ -197,14 +202,15 @@ class OptimizelyApiAux:
         return data
 
     def response_variation_create(
-            self, project_id=None, experiment_id=None,
+            self, variation_id=None, project_id=None, experiment_id=None,
             description=None, is_paused=None, js_component=None,
             weight=None):
-
         now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-        self.variation_id = self.increment_id(self.variation_id)
+        if variation_id is None:
+            variation_id = self.increment_id(self.variation_id)
+            self.variation_id = variation_id
         data = {
-            'id': self.variation_id,
+            'id': variation_id,
             'experiment_id': experiment_id,
             'project_id': project_id,
             'description': description if description is not None else '',
@@ -221,7 +227,6 @@ class OptimizelyApiAux:
             self, variation_id=None, description=None,
             is_paused=None, js_component=None,
             weight=None):
-
         data = {
             "description": description,
             "is_paused": is_paused,
@@ -229,10 +234,14 @@ class OptimizelyApiAux:
             "weight": weight
         }
         data = self.remove_none_values(data)
-
         variation = self.get_item_by_id(self.variations, variation_id)
         variation.update(data)
+
+        self.varitions_update_made += 1
         return variation
+
+    def response_variation_read(self, variation_id):
+        return self.get_item_by_id(self.variations, variation_id)
 
     def response_variation_list(self):
         return self.variations
@@ -243,7 +252,6 @@ class OptimizelyApiAux:
             selector=None, target_to_experiments=None,
             target_urls=None, target_url_match_types=None,
             urls=None, url_match_types=None, is_editable=None):
-
         now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         if goal_id is None:
             goal_id = self.increment_id(self.goal_id)
@@ -278,7 +286,6 @@ class OptimizelyApiAux:
             selector=None, target_to_experiments=None,
             target_urls=None, target_url_match_types=None,
             urls=None, url_match_types=None, is_editable=None):
-
         data = {
             "title": title,
             "goal_type": goal_type,
