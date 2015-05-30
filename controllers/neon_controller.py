@@ -11,7 +11,6 @@ from utils.http import RequestPool
 import tornado.gen
 import tornado.httpclient
 import logging
-import time
 from utils import statemon
 from cmsdb import neondata
 from cmsdb.neondata import NamespacedStoredObject
@@ -85,13 +84,12 @@ class OptimizelyController(ControllerBase):
     # Abstract Methods
     ###########################################################################
 
-    @tornado.gen.coroutine
     def verify_account(self):
         # check token
         token_response = self.get_projects()
         if token_response["status_code"] != 200:
-            raise tornado.gen.Return(token_response)
-        raise tornado.gen.Return(None)
+            return token_response
+        return None
 
     @tornado.gen.coroutine
     def verify_experiment(self, platform_id, experiment_id, video_id,
@@ -118,6 +116,12 @@ class OptimizelyController(ControllerBase):
                 "Invalid goal_id. goal cannot be of "
                 "type engagement. set primary goal in optimizely "
                 "or provide a different goal_id")
+
+        # TODO: New implementation (Check element_id in the page)
+        # Do a request to URL of experiment and parse HTML to find the element_id
+        # Generating the correct js_component to put in variation
+        # Raise exception if element in page not found
+        edit_url = exp_response['data']['edit_url']
 
         # formatter js_component
         if extras['js_component'] is None:
@@ -302,6 +306,7 @@ class OptimizelyController(ControllerBase):
 
     ###########################################################################
     # API Methods
+    # Documentation from: http://developers.optimizely.com/rest/
     ###########################################################################
 
     def create_response(self, code=200, string="", data={}):
@@ -659,7 +664,7 @@ class Controller(object):
             raise ValueError("Integration already exists")
 
         controller = Controller(c_type, api_key, platform_id, access_key)
-        token_response = yield tornado.gen.Task(controller.verify_account)
+        token_response = controller.verify_account()
         if token_response is not None:
             raise ValueError("could not verify %s access. code: %s" % (
                 c_type, token_response["status_code"]))

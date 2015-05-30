@@ -1,5 +1,5 @@
 '''
-Optimizely Helper to Test
+Neon Controller Helper Test
 '''
 import os.path
 import sys
@@ -10,12 +10,16 @@ if sys.path[0] != __base_path__:
 import datetime
 
 
-class OptimizelyAux:
+class OptimizelyApiAux:
     def __init__(self):
-        self.project_id = self.experiment_id = 0
-        self.variation_id = self.goal_id = 0
-        self.projects = self.experiments = []
-        self.variations = self.goals = []
+        self.project_id = 0
+        self.experiment_id = 0
+        self.variation_id = 0
+        self.goal_id = 0
+        self.projects = []
+        self.experiments = []
+        self.variations = []
+        self.goals = []
 
     def increment_id(self, variable):
         variable += 1
@@ -34,7 +38,6 @@ class OptimizelyAux:
             project_javascript=None, enable_force_variation=None,
             exclude_disabled_experiments=None, exclude_names=None,
             ip_anonymization=None, ip_filter=None):
-
         now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         self.project_id = self.increment_id(self.project_id)
         data = {
@@ -93,23 +96,26 @@ class OptimizelyAux:
         return self.get_item_by_id(self.projects, project_id)
 
     def response_experiment_create(
-            self, project_id=None, audience_ids=None,
+            self, experiment_id=None, project_id=None, audience_ids=None,
             activation_mode=None, conditional_code=None,
             description=None, edit_url=None, status=None,
             custom_css=None, custom_js=None,
             percentage_included=None, url_conditions=None):
 
         now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-        self.experiment_id = self.increment_id(self.experiment_id)
+        if experiment_id is None:
+            experiment_id = self.increment_id(self.experiment_id)
+            self.experiment_id = experiment_id
+
         data = {
-            'id': self.experiment_id,
+            'id': experiment_id,
             'project_id': project_id,
             'percentage_included': percentage_included if percentage_included is not None else 10000,
             'is_multivariate': False,
             'variation_ids': [2898660203, 2898660204],
             'status': status if status is not None else 'Not started',
             'display_goal_order_lst': ['2911340090'],
-            'shareable_results_link': 'https://app.optimizely.com/results?token=AAKr42QAQQik8Yz2IJS839D1Wmr3qIwY&experiment_id=%s' % self.experiment_id,
+            'shareable_results_link': 'https://app.optimizely.com/results?token=AAKr42QAQQik8Yz2IJS839D1Wmr3qIwY&experiment_id=%s' % experiment_id,
             'conditional_code': conditional_code,
             'primary_goal_id': 2911340090,
             'details': '',
@@ -160,6 +166,9 @@ class OptimizelyAux:
 
     def response_experiment_list(self):
         return self.experiments
+
+    def response_experiment_read(self, experiment_id):
+        return self.get_item_by_id(self.experiments, experiment_id)
 
     def response_experiment_status(self):
         data = []
@@ -229,18 +238,21 @@ class OptimizelyAux:
         return self.variations
 
     def response_goal_create(
-            self, project_id=None, title=None, goal_type=None,
+            self, goal_id=None, project_id=None, title=None, goal_type=None,
             archived=None, description=None, experiment_ids=None,
             selector=None, target_to_experiments=None,
             target_urls=None, target_url_match_types=None,
             urls=None, url_match_types=None, is_editable=None):
 
         now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-        self.goal_id = self.increment_id(self.goal_id)
+        if goal_id is None:
+            goal_id = self.increment_id(self.goal_id)
+            self.goal_id = goal_id
+
         data = {
-            'id': self.goal_id,
+            'id': goal_id,
             'project_id': project_id,
-            'goal_type': 0,
+            'goal_type': goal_type,
             'title': title,
             'selector': selector if selector is not None else '',
             'archived': archived if archived is not None else False,
@@ -286,6 +298,9 @@ class OptimizelyAux:
         goal = self.get_item_by_id(self.goals, goal_id)
         goal.update(data)
         return goal
+
+    def response_goal_read(self, goal_id):
+        return self.get_item_by_id(self.goals, goal_id)
 
     def response_goal_list(self):
         return self.goals
