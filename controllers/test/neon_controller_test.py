@@ -48,44 +48,31 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         self.optimizely_api_aux = neon_controller_aux.OptimizelyApiAux()
         self.generate_data_for_optimizely()
 
-        # Default Video Controller MetaData to use
-        self.vcmd_default = self.create_default_video_controller_meta_data()
+        # variable of update_success's control
+        self.n_var_update_calls = 0
+        self.n_var_update_success_calls = 0
 
-        # S3 fractions file
-        self.fractions_s3_file = self.generate_fractions_s3_file()
         super(TestControllerOptimizely, self).setUp()
 
     def tearDown(self):
         self.redis.stop()
         super(TestControllerOptimizely, self).tearDown()
 
-    def get_value_in_list(self, _list, key, value):
-        new_list = [t for t in _list if t[key] == value]
-        if len(new_list) > 0:
-            return new_list[0]
-        return None
-
     def generate_data_for_optimizely(self):
-        pj = self.optimizely_api_aux.response_project_create(
+        pj = self.optimizely_api_aux.project_create(
             project_name=PROJECT_NAME)
-        exp = self.optimizely_api_aux.response_experiment_create(
+        exp = self.optimizely_api_aux.experiment_create(
             experiment_id=EXPERIMENT_ID, project_id=pj['id'],
             description="thumb_id",
             edit_url="https://www.neon-lab.com/videos/")
-        goal = self.optimizely_api_aux.response_goal_create(
+        goal = self.optimizely_api_aux.goal_create(
             goal_id=GOAL_ID, project_id=pj['id'], title="Video Image Clicks",
             goal_type=0, selector="div.video > img",
             target_to_experiments=True, experiment_ids=[exp['id']])
-        goal_type2 = self.optimizely_api_aux.response_goal_create(
+        goal_type2 = self.optimizely_api_aux.goal_create(
             project_id=pj['id'], title="Engagement",
             goal_type=2, selector="", target_to_experiments=True,
             experiment_ids=[exp['id']])
-        for idx, var in enumerate([5000, 5000, 0]):
-            # is_paused = True if (v == 0) else False,
-            self.optimizely_api_aux.response_variation_create(
-                project_id=pj['id'], experiment_id=exp['id'],
-                description="Variation #%s" % idx, is_paused=False,
-                js_component='', weight=var)
 
     def create_default_video_controller_meta_data(self):
         vcmd = neondata.VideoControllerMetaData(
@@ -104,96 +91,41 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         vcmd.save()
         return vcmd
 
-    def generate_fractions_s3_file(self):
-        return {
+    def generate_fractions_s3_file(self, thumbs_pct=[]):
+        directive = {
             "type": "dir",
             "aid": ACCOUNT_ID,
             "vid": VIDEO_ID,
             "sla": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "fractions": [{
-                "pct": 0.8,
-                "tid": "thumb1",
-                "default_url": "http://neon/thumb1_480_640.jpg",
-                "imgs": [{
-                    "h": 480,
-                    "w": 640,
-                    "url": "http://neon/thumb1_480_640.jpg"
-                }, {
-                    "h": 600,
-                    "w": 800,
-                    "url": "http://neon/thumb1_600_800.jpg"
-                }]
-              },
-              {
-                "pct": 0.2,
-                "tid": "thumb2",
-                "default_url": "http://neon/thumb2_480_640.jpg",
-                "imgs": [{
-                    "h": 480,
-                    "w": 640,
-                    "url": "http://neon/thumb2_480_640.jpg"
-                }, {
-                    "h": 600,
-                    "w": 800,
-                    "url": "http://neon/thumb2_600_800.jpg"
-                }]
-            }]
+            "fractions": []
         }
 
-    ###########################################################################
-    # Update Experiment With Directives
-    ###########################################################################
-    @patch('controllers.neon_controller.utils.http.send_request')
-    @patch('controllers.neon_controller.OptimizelyController.verify_account')
-    @tornado.testing.gen_test
-    def test_update_experiment_with_get_variations_bad_request(
-                                        self, mock_verify_account, mock_http):
-        mock_verify_account.return_value = None
-        controller = yield neon_controller.Controller.create(
-                CONTROLLER_TYPE, ACCOUNT_ID, PLATFORM_ID, ACCESS_TOKEN)
+        for i in range(len(thumbs_pct)):
+            fraction = {
+                "pct": thumbs_pct[i],
+                "tid": "thumb%s" % i,
+                "default_url": "http://neon/thumb%s_480_640.jpg" % i,
+                "imgs": [{
+                    "h": 480,
+                    "w": 640,
+                    "url": "http://neon/thumb%s_480_640.jpg" % i
+                }, {
+                    "h": 600,
+                    "w": 800,
+                    "url": "http://neon/thumb%s_600_800.jpg" % i
+                }]
+            }
+            directive['fractions'].append(fraction)
 
-        mock_http.return_value = HTTPResponse(
-            HTTPRequest(OPTMIZELY_ENDPOINT, method='GET'), 400,
-            buffer=StringIO(json.dumps('timeout')))
+        return directive
 
-        with self.assertRaises(ValueError) as e:
-            yield controller.update_experiment_with_directives(
-                self.vcmd_default.controllers[0], self.fractions_s3_file)
-        self.assertTrue("code: 400" in str(e.exception))
-
-    @patch('controllers.neon_controller.utils.http.send_request')
-    @patch('controllers.neon_controller.OptimizelyController.verify_account')
-    @tornado.testing.gen_test
-    def test_update_experiment_with_variations_to_disable(
-                                        self, mock_verify_account, mock_http):
-        mock_verify_account.return_value = None
-        controller = yield neon_controller.Controller.create(
-                CONTROLLER_TYPE, ACCOUNT_ID, PLATFORM_ID, ACCESS_TOKEN)
-
-        def _side_effect(request, callback=None, *args, **kwargs):
-            id = int(request.url.rsplit('/', 1)[1])
-            if "variations" in request.url and request.method == 'GET':
-                return HTTPResponse(
-                    HTTPRequest(OPTMIZELY_ENDPOINT, method='PUT'), 200,
-                    buffer=StringIO(json.dumps(
-                        self.optimizely_api_aux.response_variation_list())))
-            elif "variations" in request.url and request.method == 'PUT':
-                return HTTPResponse(
-                    HTTPRequest(OPTMIZELY_ENDPOINT, method='PUT'), 200,
-                    buffer=StringIO(json.dumps(
-                        self.optimizely_api_aux.response_variation_update(
-                            variation_id=id, weight=0, is_paused=True))))
-            elif "experiments" in request.url and request.method == 'PUT':
-                return HTTPResponse(
-                    HTTPRequest(OPTMIZELY_ENDPOINT, method='PUT'), 200,
-                    buffer=StringIO(json.dumps(
-                        self.optimizely_api_aux.response_experiment_update(
-                            experiment_id=id, percentage_included=10000,
-                            status="Running"))))
-
-        mock_http.side_effect = _side_effect
-        yield controller.update_experiment_with_directives(
-                self.vcmd_default.controllers[0], {'fractions': None})
+    def get_item_in_list(self, _list, key, value):
+        new_list = [i for i in _list if i[key] == value]
+        if len(new_list) == 1:
+            return new_list[0]
+        elif len(new_list) > 1:
+            return new_list
+        return None
 
     ###########################################################################
     # GET and CREATE
@@ -260,19 +192,20 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
     ###########################################################################
     # Verify Experiment
     ###########################################################################
-    def _side_effect_to_verity_experiment(self, request, callback=None, *args, **kwargs):
+    def _side_effect_to_verity_experiment(
+                                self, request, callback=None, *args, **kwargs):
         id = int(request.url.rsplit('/', 1)[1])
         if "experiments" in request.url:
             return HTTPResponse(
                 HTTPRequest(OPTMIZELY_ENDPOINT, method='GET'), 200,
                 buffer=StringIO(json.dumps(
-                    self.optimizely_api_aux.response_experiment_read(
+                    self.optimizely_api_aux.experiment_read(
                         experiment_id=id))))
         elif "goals" in request.url:
             return HTTPResponse(
                 HTTPRequest(OPTMIZELY_ENDPOINT, method='GET'), 200,
                 buffer=StringIO(json.dumps(
-                    self.optimizely_api_aux.response_goal_read(
+                    self.optimizely_api_aux.goal_read(
                         goal_id=GOAL_ID))))
 
     @patch('controllers.neon_controller.utils.http.send_request')
@@ -280,7 +213,6 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_verify_experiment_with_experiment_not_found(
                                         self, mock_verify_account, mock_http):
-
         mock_verify_account.return_value = None
         controller = yield neon_controller.Controller.create(
                 CONTROLLER_TYPE, ACCOUNT_ID, PLATFORM_ID, ACCESS_TOKEN)
@@ -308,7 +240,7 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 return HTTPResponse(
                     HTTPRequest(OPTMIZELY_ENDPOINT, method='GET'), 200,
                     buffer=StringIO(json.dumps(
-                        self.optimizely_api_aux.response_experiment_read(
+                        self.optimizely_api_aux.experiment_read(
                             EXPERIMENT_ID))))
             elif "goals" in request.url:
                 return HTTPResponse(
@@ -336,13 +268,13 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 return HTTPResponse(
                     HTTPRequest(OPTMIZELY_ENDPOINT, method='GET'), 200,
                     buffer=StringIO(json.dumps(
-                        self.optimizely_api_aux.response_experiment_read(
+                        self.optimizely_api_aux.experiment_read(
                             EXPERIMENT_ID))))
             elif "goals" in request.url:
                 return HTTPResponse(
                     HTTPRequest(OPTMIZELY_ENDPOINT, method='GET'), 200,
-                    buffer=StringIO(json.dumps(self.get_value_in_list(
-                        self.optimizely_api_aux.response_goal_list(),
+                    buffer=StringIO(json.dumps(self.get_item_in_list(
+                        self.optimizely_api_aux.goal_list(),
                         'goal_type', 2))))
 
         mock_http.side_effect = _side_effect
@@ -362,7 +294,7 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 CONTROLLER_TYPE, ACCOUNT_ID, PLATFORM_ID, ACCESS_TOKEN)
 
         experiment_id = EXPERIMENT_ID + 1
-        self.optimizely_api_aux.response_experiment_create(
+        self.optimizely_api_aux.experiment_create(
             experiment_id=experiment_id, project_id=1,
             description="thumb_id",
             edit_url="https://www.neon-lab.com/videos/")
@@ -375,11 +307,33 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
 
         response = yield controller.verify_experiment(
             PLATFORM_ID, experiment_id, VIDEO_ID, extras)
+        self.assertEquals(response['goal_id'], GOAL_ID)
         self.assertEquals(response['goal_id'], extras['goal_id'])
         self.assertEquals(response['element_id'], extras['element_id'])
         self.assertEquals(response['js_component'], extras['js_component'])
         self.assertEquals(response['experiment_id'], experiment_id)
-        self.assertEquals(response['goal_id'], GOAL_ID)
+
+        vcmd = yield tornado.gen.Task(
+            neondata.VideoControllerMetaData.get,
+            ACCOUNT_ID, VIDEO_ID)
+        vcmd_ctr = vcmd.controllers[0]
+        vcmd_ctr_extras = vcmd_ctr['extras']
+
+        self.assertEquals(len(vcmd.controllers), 1)
+        self.assertEquals(
+            vcmd_ctr['controller_type'],
+            neon_controller.ControllerType.OPTIMIZELY)
+        self.assertEquals(vcmd_ctr['platform_id'], PLATFORM_ID)
+        self.assertEquals(vcmd_ctr['video_id'], VIDEO_ID)
+        self.assertEquals(vcmd_ctr['last_process_date'], 0)
+        self.assertEquals(
+            vcmd_ctr['state'],
+            neon_controller.ControllerExperimentState.PENDING)
+        self.assertEquals(vcmd_ctr['experiment_id'], experiment_id)
+        self.assertEquals(vcmd_ctr_extras['goal_id'], extras['goal_id'])
+        self.assertEquals(vcmd_ctr_extras['element_id'], extras['element_id'])
+        self.assertEquals(
+            vcmd_ctr_extras['js_component'], extras['js_component'])
 
     @patch('controllers.neon_controller.utils.http.send_request')
     @patch('controllers.neon_controller.OptimizelyController.verify_account')
@@ -394,6 +348,7 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         extras = {'goal_id': GOAL_ID, 'element_id': '', 'js_component': ''}
 
         # call again
+        self.create_default_video_controller_meta_data()
         with self.assertRaises(ValueError) as e:
             yield controller.verify_experiment(
                 PLATFORM_ID, EXPERIMENT_ID, VIDEO_ID, extras)
@@ -409,6 +364,7 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 CONTROLLER_TYPE, ACCOUNT_ID, PLATFORM_ID, ACCESS_TOKEN)
 
         extras = {'goal_id': GOAL_ID, 'element_id': '', 'js_component': ''}
+        self.create_default_video_controller_meta_data()
         vd = neondata.VideoControllerMetaData(
             ACCOUNT_ID, PLATFORM_ID, neon_controller.ControllerType.OPTIMIZELY,
             '123456', VIDEO_ID, extras, 0)
@@ -422,6 +378,284 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
             neondata.VideoControllerMetaData.get,
             ACCOUNT_ID, VIDEO_ID)
         self.assertEquals(len(vmd.controllers), 2)
+
+    ###########################################################################
+    # Update Experiment With Directives
+    ###########################################################################
+    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('controllers.neon_controller.OptimizelyController.verify_account')
+    @tornado.testing.gen_test
+    def test_update_experiment_with_get_variations_bad_request(
+                                        self, mock_verify_account, mock_http):
+        mock_verify_account.return_value = None
+        controller = yield neon_controller.Controller.create(
+                CONTROLLER_TYPE, ACCOUNT_ID, PLATFORM_ID, ACCESS_TOKEN)
+
+        mock_http.return_value = HTTPResponse(
+            HTTPRequest(OPTMIZELY_ENDPOINT, method='GET'), 400,
+            buffer=StringIO(json.dumps('timeout')))
+
+        vcmd = self.create_default_video_controller_meta_data()
+        with self.assertRaises(ValueError) as e:
+            yield controller.update_experiment_with_directives(
+                vcmd.controllers[0],
+                self.generate_fractions_s3_file)
+        self.assertTrue("code: 400" in str(e.exception))
+
+    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('controllers.neon_controller.OptimizelyController.verify_account')
+    @tornado.testing.gen_test
+    def test_update_experiment_with_variations_to_disable(
+                                        self, mock_verify_account, mock_http):
+        mock_verify_account.return_value = None
+        controller = yield neon_controller.Controller.create(
+                CONTROLLER_TYPE, ACCOUNT_ID, PLATFORM_ID, ACCESS_TOKEN)
+
+        # 1-With Update, 2-With Update, 3-NoChange - 4-With 404
+        for idx, var in enumerate([5000, 4000, 0, 1000]):
+            is_paused = True if var == 0 else False
+            self.optimizely_api_aux.variation_create(
+                project_id=1, experiment_id=EXPERIMENT_ID,
+                description="Variation #%s" % idx, is_paused=is_paused,
+                js_component='', weight=var)
+
+        def _side_effect(request, callback=None, *args, **kwargs):
+            id = 0
+            try:
+                id = int(request.url.rsplit('/', 1)[1])
+            except:
+                id = int(request.url.rsplit('/', 2)[1])
+
+            if "variations" in request.url and request.method == 'GET':
+                return HTTPResponse(
+                    HTTPRequest(OPTMIZELY_ENDPOINT, method='PUT'), 200,
+                    buffer=StringIO(json.dumps(
+                        self.optimizely_api_aux.variation_list(
+                            experiment_id=id))))
+            elif "variations" in request.url and request.method == 'PUT':
+                _code = 202
+                _buffer = None
+                if self.n_var_update_success_calls < 2:
+                    self.n_var_update_success_calls += 1
+                    rb = json.loads(request.body)
+                    _buffer = StringIO(json.dumps(
+                        self.optimizely_api_aux.variation_update(
+                            variation_id=id, weight=rb['weight'],
+                            is_paused=rb['is_paused'])))
+                else:
+                    _code = 404
+                    _buffer = StringIO(json.dumps('not found'))
+                    self.optimizely_api_aux.variation_remove(
+                        variation_id=id)
+                return HTTPResponse(
+                    HTTPRequest(OPTMIZELY_ENDPOINT, method='PUT'), _code,
+                    buffer=_buffer)
+            elif "experiments" in request.url and request.method == 'PUT':
+                return HTTPResponse(
+                    HTTPRequest(OPTMIZELY_ENDPOINT, method='PUT'), 202,
+                    buffer=StringIO(json.dumps(
+                        self.optimizely_api_aux.experiment_update(
+                            experiment_id=id, percentage_included=10000,
+                            status="Running"))))
+
+        mock_http.side_effect = _side_effect
+        vcmd = self.create_default_video_controller_meta_data()
+        yield controller.update_experiment_with_directives(
+            vcmd.controllers[0], {'fractions': []})
+
+        self.assertEquals(self.n_var_update_success_calls, 2)
+        lv = self.optimizely_api_aux.variation_list(
+            experiment_id=EXPERIMENT_ID)
+        for x in lv:
+            self.assertEquals(x['weight'], 0)
+            self.assertEquals(x['is_paused'], True)
+
+    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('controllers.neon_controller.OptimizelyController.verify_account')
+    @tornado.testing.gen_test
+    def test_update_experiment_with_update_create_and_delete(
+                        self, mock_verify_account, mock_http):
+        mock_verify_account.return_value = None
+        controller = yield neon_controller.Controller.create(
+                CONTROLLER_TYPE, ACCOUNT_ID, PLATFORM_ID, ACCESS_TOKEN)
+
+        # 1-With Update, 2-NotChange, 3-Remove,
+        # 4-Delete with 404(And Create), 5-Create
+
+        vcmd = self.create_default_video_controller_meta_data()
+        vcmd_ovid_to_tid = vcmd.controllers[0]['extras']['ovid_to_tid']
+        for idx, var in enumerate([2000, 2000, 1000, 5000]):
+            is_paused = True if var == 0 else False
+            v = self.optimizely_api_aux.variation_create(
+                project_id=1, experiment_id=EXPERIMENT_ID,
+                description="Variation #%s" % idx, is_paused=is_paused,
+                js_component='', weight=var)
+            variation_id = str(v['id'])
+            vcmd_ovid_to_tid[variation_id] = "thumb%s" % idx
+
+            if idx == 2:
+                self.optimizely_api_aux.variation_remove(idx+1)
+        vcmd.save()
+        before_variations = len(vcmd_ovid_to_tid)
+
+        # Create S3 fractions file based on variation list by experiment
+        fractions_s3_file = self.generate_fractions_s3_file(
+            [0.1, 0.2, 0.5, 0.2])
+
+        def _side_effect(request, callback=None, *args, **kwargs):
+            id = 0
+            try:
+                id = int(request.url.rsplit('/', 1)[1])
+            except:
+                id = int(request.url.rsplit('/', 2)[1])
+
+            if "variations" in request.url and request.method == 'GET':
+                return HTTPResponse(
+                    HTTPRequest(OPTMIZELY_ENDPOINT, method='PUT'), 200,
+                    buffer=StringIO(json.dumps(
+                        self.optimizely_api_aux.variation_list(
+                            experiment_id=id))))
+            elif "variations" in request.url and request.method == 'PUT':
+                _code = 202
+                _buffer = None
+                self.n_var_update_calls += 1
+                if self.n_var_update_calls >= 2:
+                    _code = 404
+                    _buffer = StringIO(json.dumps('not found'))
+                else:
+                    self.n_var_update_success_calls += 1
+                    rb = json.loads(request.body)
+                    _buffer = StringIO(json.dumps(
+                        self.optimizely_api_aux.variation_update(
+                            variation_id=id, weight=rb['weight'],
+                            is_paused=rb['is_paused'])))
+                return HTTPResponse(
+                    HTTPRequest(OPTMIZELY_ENDPOINT, method='PUT'), _code,
+                    buffer=_buffer)
+            elif "variations" in request.url and request.method == 'POST':
+                rb = json.loads(request.body)
+                return HTTPResponse(
+                    HTTPRequest(OPTMIZELY_ENDPOINT, method='POST'), 201,
+                    buffer=StringIO(json.dumps(
+                        self.optimizely_api_aux.variation_create(
+                            experiment_id=id,
+                            weight=rb['weight'], is_paused=rb['is_paused'],
+                            js_component=rb['js_component'],
+                            description=rb['description']))))
+            elif "experiments" in request.url and request.method == 'PUT':
+                return HTTPResponse(
+                    HTTPRequest(OPTMIZELY_ENDPOINT, method='PUT'), 202,
+                    buffer=StringIO(json.dumps(
+                        self.optimizely_api_aux.experiment_update(
+                            experiment_id=id, percentage_included=10000,
+                            status="Running"))))
+
+        mock_http.side_effect = _side_effect
+        response = yield controller.update_experiment_with_directives(
+            vcmd.controllers[0], fractions_s3_file)
+
+        variation_list = self.optimizely_api_aux.variation_list(
+            experiment_id=EXPERIMENT_ID)
+        for v in variation_list:
+            variation_id = v['id']
+            has_key = str(variation_id) in vcmd_ovid_to_tid
+
+            if variation_id == 1:
+                self.assertEquals(v['weight'], 1000)
+                self.assertEquals(v['is_paused'], False)
+                self.assertEquals(has_key, True)
+            elif variation_id == 2:
+                self.assertEquals(v['weight'], 2000)
+                self.assertEquals(v['is_paused'], False)
+                self.assertEquals(has_key, True)
+            elif variation_id == 3:
+                pass
+            elif variation_id == 4:
+                self.assertEquals(has_key, False)
+            elif variation_id == 5:
+                self.assertEquals(v['weight'], 5000)
+                self.assertEquals(v['is_paused'], False)
+                self.assertEquals(v['description'], 'thumb2')
+                self.assertEquals(has_key, True)
+            elif variation_id == 6:
+                self.assertEquals(v['weight'], 2000)
+                self.assertEquals(v['is_paused'], False)
+                self.assertEquals(v['description'], 'thumb3')
+                self.assertEquals(has_key, True)
+        self.assertTrue(str(3) not in vcmd_ovid_to_tid)
+
+        after_variations = len(vcmd_ovid_to_tid)
+        self.assertEquals(before_variations, 4)  # before calls
+        self.assertEquals(after_variations, 4)  # 2 deletes and 2 inserts
+        self.assertEquals(self.n_var_update_success_calls, 1)  # one update
+        self.assertEquals(
+            response, neon_controller.ControllerExperimentState.INPROGRESS)
+
+        experiment_read = self.optimizely_api_aux.experiment_read(
+            experiment_id=EXPERIMENT_ID)
+        self.assertEquals(experiment_read['percentage_included'], 10000)
+        self.assertEquals(experiment_read['status'], 'Running')
+
+    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('controllers.neon_controller.OptimizelyController.verify_account')
+    @tornado.testing.gen_test
+    def test_update_experiment_with_change_state(
+                                        self, mock_verify_account, mock_http):
+        mock_verify_account.return_value = None
+        controller = yield neon_controller.Controller.create(
+                CONTROLLER_TYPE, ACCOUNT_ID, PLATFORM_ID, ACCESS_TOKEN)
+
+        vcmd = self.create_default_video_controller_meta_data()
+        vcmd_ovid_to_tid = vcmd.controllers[0]['extras']['ovid_to_tid']
+        for idx, var in enumerate([5000, 4000, 0, 1000]):
+            is_paused = True if var == 0 else False
+            v = self.optimizely_api_aux.variation_create(
+                project_id=1, experiment_id=EXPERIMENT_ID,
+                description="Variation #%s" % idx, is_paused=is_paused,
+                js_component='', weight=var)
+            variation_id = str(v['id'])
+            vcmd_ovid_to_tid[variation_id] = "thumb%s" % idx
+        vcmd.save()
+
+        # Create S3 fractions file based on variation list by experiment
+        fractions_s3_file = self.generate_fractions_s3_file(
+            [0.0, 1.0, 0.0, 0.0])
+
+        def _side_effect(request, callback=None, *args, **kwargs):
+            id = 0
+            try:
+                id = int(request.url.rsplit('/', 1)[1])
+            except:
+                id = int(request.url.rsplit('/', 2)[1])
+
+            if "variations" in request.url and request.method == 'GET':
+                return HTTPResponse(
+                    HTTPRequest(OPTMIZELY_ENDPOINT, method='PUT'), 200,
+                    buffer=StringIO(json.dumps(
+                        self.optimizely_api_aux.variation_list(
+                            experiment_id=id))))
+            elif "variations" in request.url and request.method == 'PUT':
+                rb = json.loads(request.body)
+                return HTTPResponse(
+                    HTTPRequest(OPTMIZELY_ENDPOINT, method='PUT'), 202,
+                    buffer=StringIO(json.dumps(
+                        self.optimizely_api_aux.variation_update(
+                            variation_id=id, weight=rb['weight'],
+                            is_paused=rb['is_paused']))))
+            elif "experiments" in request.url and request.method == 'PUT':
+                return HTTPResponse(
+                    HTTPRequest(OPTMIZELY_ENDPOINT, method='PUT'), 202,
+                    buffer=StringIO(json.dumps(
+                        self.optimizely_api_aux.experiment_update(
+                            experiment_id=id, percentage_included=10000,
+                            status="Running"))))
+
+        mock_http.side_effect = _side_effect
+        response = yield controller.update_experiment_with_directives(
+            vcmd.controllers[0], fractions_s3_file)
+
+        self.assertEquals(
+            response, neon_controller.ControllerExperimentState.COMPLETE)
 
 
 class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
@@ -443,7 +677,7 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
     # Projects
     ###########################################################################
     def create_new_project_response(self):
-        return self.optimizely_api_aux.response_project_create(
+        return self.optimizely_api_aux.project_create(
             project_name=self.project_name)
 
     @patch('controllers.neon_controller.utils.http.send_request')
@@ -502,7 +736,7 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
 
         # update project
         project_create = self.create_new_project_response()
-        project_update = self.optimizely_api_aux.response_project_update(
+        project_update = self.optimizely_api_aux.project_update(
             project_id=project_create['id'],
             project_name="neonlabupdate",
             ip_filter="0.0.0.0")
@@ -534,7 +768,7 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         # get list projects
         for x in range(0, 3):
             self.create_new_project_response()
-        project_list = self.optimizely_api_aux.response_project_list()
+        project_list = self.optimizely_api_aux.project_list()
         mock_http.return_value = HTTPResponse(
             HTTPRequest(OPTMIZELY_ENDPOINT), 200,
             buffer=StringIO(json.dumps(project_list)))
@@ -549,7 +783,7 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
     # Experiments
     ##########################################################################
     def create_new_experiment_response(self, project_id):
-        return self.optimizely_api_aux.response_experiment_create(
+        return self.optimizely_api_aux.experiment_create(
             project_id=project_id,
             description="video_id_video_title",
             edit_url="https://www.neon-lab.com/videos/")
@@ -624,7 +858,7 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
 
         # update experiment
         experiment_create = self.create_new_experiment_response(1)
-        experiment_update = self.optimizely_api_aux.response_experiment_update(
+        experiment_update = self.optimizely_api_aux.experiment_update(
             experiment_id=experiment_create["id"],
             status="Paused")
 
@@ -669,7 +903,7 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         # get list experiments
         for x in range(0, 3):
             self.create_new_experiment_response(project_id)
-        experiment_list = self.optimizely_api_aux.response_experiment_list()
+        experiment_list = self.optimizely_api_aux.experiment_list()
         mock_http.return_value = HTTPResponse(
             HTTPRequest(OPTMIZELY_ENDPOINT), 200,
             buffer=StringIO(json.dumps(experiment_list)))
@@ -690,7 +924,7 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
                 CONTROLLER_TYPE, ACCOUNT_ID, PLATFORM_ID, ACCESS_TOKEN)
 
         # get list experiment status
-        exp_status = self.optimizely_api_aux.response_experiment_status()
+        exp_status = self.optimizely_api_aux.experiment_status()
         mock_http.return_value = HTTPResponse(
             HTTPRequest(OPTMIZELY_ENDPOINT), 200,
             buffer=StringIO(json.dumps(exp_status)))
@@ -706,7 +940,7 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
     # Variations
     ##########################################################################
     def create_new_variation_response(self, experiment_id):
-        return self.optimizely_api_aux.response_variation_create(
+        return self.optimizely_api_aux.variation_create(
             project_id=1,
             experiment_id=experiment_id,
             description="Variation #2",
@@ -776,7 +1010,7 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
 
         # update variation
         variation_create = self.create_new_variation_response(1)
-        variation_update = self.optimizely_api_aux.response_variation_update(
+        variation_update = self.optimizely_api_aux.variation_update(
             variation_id=variation_create["id"],
             description="Change name variation #2",
             weight=7777,
@@ -830,7 +1064,7 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         # get list variations
         for x in range(0, 3):
             self.create_new_variation_response(experiment_id)
-        variation_list = self.optimizely_api_aux.response_variation_list()
+        variation_list = self.optimizely_api_aux.variation_list()
         mock_http.return_value = HTTPResponse(
             HTTPRequest(OPTMIZELY_ENDPOINT), 200,
             buffer=StringIO(json.dumps(variation_list)))
@@ -846,7 +1080,7 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
     # Goals
     ##########################################################################
     def create_new_goal_response(self, project_id):
-        return self.optimizely_api_aux.response_goal_create(
+        return self.optimizely_api_aux.goal_create(
             project_id=project_id,
             title="Add to images clicks",
             goal_type=0,
@@ -922,7 +1156,7 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
 
         # update goal
         goal_create = self.create_new_goal_response(1)
-        goal_update = self.optimizely_api_aux.response_goal_update(
+        goal_update = self.optimizely_api_aux.goal_update(
             goal_id=goal_create["id"],
             title="Change - Add to images clicks",
             goal_type=1,
@@ -979,7 +1213,7 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         # get list goals
         for x in range(0, 3):
             self.create_new_goal_response(project_id)
-        goal_list = self.optimizely_api_aux.response_goal_list()
+        goal_list = self.optimizely_api_aux.goal_list()
         mock_http.return_value = HTTPResponse(
             HTTPRequest(OPTMIZELY_ENDPOINT), 200,
             buffer=StringIO(json.dumps(goal_list)))

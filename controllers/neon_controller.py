@@ -214,7 +214,7 @@ class OptimizelyController(ControllerBase):
 
             # Update or Remove a variation
             if variation_id is not None:
-                var = self.get_value_list(v_list_resp['data'], 'id',
+                var = self.get_item_in_list(v_list_resp['data'], 'id',
                                           variation_id)
 
                 # Variation not found. Assuming Delete
@@ -256,7 +256,7 @@ class OptimizelyController(ControllerBase):
                         "could not create %s variation. code: %s" % (
                             self.get_ovp(), response["status_code"]))
 
-                variation_id = response['data']['id']
+                variation_id = str(response['data']['id'])
                 vcmd['extras']['ovid_to_tid'][variation_id] = thumb['tid']
 
         # Update experiment - Start
@@ -269,7 +269,7 @@ class OptimizelyController(ControllerBase):
                     self.get_ovp(), exp_resp["status_code"]))
 
         # check experiment is completed
-        is_done = self.get_value_list(directive['fractions'], 'pct', '1.0')
+        is_done = self.get_item_in_list(directive['fractions'], 'pct', 1.0)
         if is_done is not None:
             state = ControllerExperimentState.COMPLETE
 
@@ -641,10 +641,12 @@ class OptimizelyController(ControllerBase):
     def remove_none_values(self, _dict):
         return dict((k, v) for k, v in _dict.iteritems() if v is not None)
 
-    def get_value_list(self, _list, key, value):
-        new_list = [t for t in _list if t[key] == value]
-        if len(new_list) > 0:
+    def get_item_in_list(self, _list, key, value):
+        new_list = [i for i in _list if i[key] == value]
+        if len(new_list) == 1:
             return new_list[0]
+        elif len(new_list) > 1:
+            return new_list
         return None
 
 

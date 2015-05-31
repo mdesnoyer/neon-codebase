@@ -11,6 +11,7 @@ import logging
 import datetime
 _log = logging.getLogger(__name__)
 
+
 class OptimizelyApiAux:
     def __init__(self):
         self.project_id = 0
@@ -22,8 +23,6 @@ class OptimizelyApiAux:
         self.variations = []
         self.goals = []
 
-        self.varitions_update_made = 0
-
     def increment_id(self, variable):
         variable += 1
         return variable
@@ -31,13 +30,15 @@ class OptimizelyApiAux:
     def remove_none_values(self, _dict):
         return dict((k, v) for k, v in _dict.iteritems() if v is not None)
 
-    def get_item_by_id(self, dictionary, id):
-        data = [i for i in dictionary if i['id'] == id]
-        if len(data) > 0:
-            return data[0]
+    def get_item_in_list(self, _list, key, value):
+        new_list = [i for i in _list if i[key] == value]
+        if len(new_list) == 1:
+            return new_list[0]
+        elif len(new_list) > 1:
+            return new_list
         return None
 
-    def response_project_create(
+    def project_create(
             self, project_id=None, project_name=None,
             project_status=None, include_jquery=None,
             project_javascript=None, enable_force_variation=None,
@@ -71,7 +72,7 @@ class OptimizelyApiAux:
         self.projects.append(data)
         return data
 
-    def response_project_update(
+    def project_update(
             self, project_id=None, project_name=None,
             project_status=None, include_jquery=None,
             project_javascript=None, enable_force_variation=None,
@@ -92,17 +93,17 @@ class OptimizelyApiAux:
         }
         data = self.remove_none_values(data)
 
-        project = self.get_item_by_id(self.projects, project_id)
+        project = self.get_item_in_list(self.projects, 'id', project_id)
         project.update(data)
         return project
 
-    def response_project_read(self, project_id):
-        return self.get_item_by_id(self.projects, project_id)
+    def project_read(self, project_id):
+        return self.get_item_in_list(self.projects, 'id', project_id)
 
-    def response_project_list(self):
+    def project_list(self):
         return self.projects
 
-    def response_experiment_create(
+    def experiment_create(
             self, experiment_id=None, project_id=None, audience_ids=None,
             activation_mode=None, conditional_code=None,
             description=None, edit_url=None, status=None,
@@ -143,7 +144,7 @@ class OptimizelyApiAux:
         self.experiments.append(data)
         return data
 
-    def response_experiment_update(
+    def experiment_update(
             self, experiment_id=None, audience_ids=None,
             activation_mode=None, conditional_code=None,
             description=None, edit_url=None, status=None,
@@ -165,17 +166,17 @@ class OptimizelyApiAux:
         }
         data = self.remove_none_values(data)
 
-        experiment = self.get_item_by_id(self.experiments, experiment_id)
+        experiment = self.get_item_in_list(self.experiments, 'id', experiment_id)
         experiment.update(data)
         return experiment
 
-    def response_experiment_read(self, experiment_id):
-        return self.get_item_by_id(self.experiments, experiment_id)
+    def experiment_read(self, experiment_id):
+        return self.get_item_in_list(self.experiments, 'id', experiment_id)
 
-    def response_experiment_list(self):
+    def experiment_list(self):
         return self.experiments
 
-    def response_experiment_status(self):
+    def experiment_status(self):
         data = []
         for x in range(0, 3):
             item = {
@@ -201,7 +202,7 @@ class OptimizelyApiAux:
             data.append(item)
         return data
 
-    def response_variation_create(
+    def variation_create(
             self, variation_id=None, project_id=None, experiment_id=None,
             description=None, is_paused=None, js_component=None,
             weight=None):
@@ -223,7 +224,7 @@ class OptimizelyApiAux:
         self.variations.append(data)
         return data
 
-    def response_variation_update(
+    def variation_update(
             self, variation_id=None, description=None,
             is_paused=None, js_component=None,
             weight=None):
@@ -234,19 +235,27 @@ class OptimizelyApiAux:
             "weight": weight
         }
         data = self.remove_none_values(data)
-        variation = self.get_item_by_id(self.variations, variation_id)
+        variation = self.get_item_in_list(self.variations, 'id', variation_id)
         variation.update(data)
-
-        self.varitions_update_made += 1
         return variation
 
-    def response_variation_read(self, variation_id):
-        return self.get_item_by_id(self.variations, variation_id)
+    def variation_remove(self, variation_id):
+        self.variations[:] = [
+            v for v in self.variations
+            if v.get('id') != variation_id
+        ]
+        return True
 
-    def response_variation_list(self):
+    def variation_read(self, variation_id):
+        return self.get_item_in_list(self.variations, 'id', variation_id)
+
+    def variation_list(self, experiment_id=None):
+        if experiment_id is not None:
+            return self.get_item_in_list(
+                self.variations, 'experiment_id', experiment_id)
         return self.variations
 
-    def response_goal_create(
+    def goal_create(
             self, goal_id=None, project_id=None, title=None, goal_type=None,
             archived=None, description=None, experiment_ids=None,
             selector=None, target_to_experiments=None,
@@ -280,7 +289,7 @@ class OptimizelyApiAux:
         self.goals.append(data)
         return data
 
-    def response_goal_update(
+    def goal_update(
             self, goal_id=None, title=None, goal_type=None,
             archived=None, description=None, experiment_ids=None,
             selector=None, target_to_experiments=None,
@@ -302,12 +311,12 @@ class OptimizelyApiAux:
         }
         data = self.remove_none_values(data)
 
-        goal = self.get_item_by_id(self.goals, goal_id)
+        goal = self.get_item_in_list(self.goals, 'id', goal_id)
         goal.update(data)
         return goal
 
-    def response_goal_read(self, goal_id):
-        return self.get_item_by_id(self.goals, goal_id)
+    def goal_read(self, goal_id):
+        return self.get_item_in_list(self.goals, 'id', goal_id)
 
-    def response_goal_list(self):
+    def goal_list(self):
         return self.goals
