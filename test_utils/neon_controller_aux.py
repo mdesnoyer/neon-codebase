@@ -8,7 +8,8 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import logging
-import datetime
+from datetime import datetime, timedelta
+from random import randint
 _log = logging.getLogger(__name__)
 
 
@@ -30,11 +31,11 @@ class OptimizelyApiAux:
     def remove_none_values(self, _dict):
         return dict((k, v) for k, v in _dict.iteritems() if v is not None)
 
-    def get_item_in_list(self, _list, key, value):
+    def get_item_in_list(self, _list, key, value, asArray=None):
         new_list = [i for i in _list if i[key] == value]
-        if len(new_list) == 1:
+        if len(new_list) == 1 and asArray is None:
             return new_list[0]
-        elif len(new_list) > 1:
+        elif len(new_list) >= 1:
             return new_list
         return None
 
@@ -44,7 +45,7 @@ class OptimizelyApiAux:
             project_javascript=None, enable_force_variation=None,
             exclude_disabled_experiments=None, exclude_names=None,
             ip_anonymization=None, ip_filter=None):
-        now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         if project_id is None:
             project_id = self.increment_id(self.project_id)
             self.project_id = project_id
@@ -78,7 +79,7 @@ class OptimizelyApiAux:
             project_javascript=None, enable_force_variation=None,
             exclude_disabled_experiments=None, exclude_names=None,
             ip_anonymization=None, ip_filter=None):
-        now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         data = {
             'project_name': project_name,
             'project_status': project_status,
@@ -109,7 +110,7 @@ class OptimizelyApiAux:
             description=None, edit_url=None, status=None,
             custom_css=None, custom_js=None,
             percentage_included=None, url_conditions=None):
-        now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         if experiment_id is None:
             experiment_id = self.increment_id(self.experiment_id)
             self.experiment_id = experiment_id
@@ -150,7 +151,7 @@ class OptimizelyApiAux:
             description=None, edit_url=None, status=None,
             custom_css=None, custom_js=None,
             percentage_included=None, url_conditions=None):
-        now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         data = {
             'description': description,
             'edit_url': edit_url,
@@ -166,47 +167,60 @@ class OptimizelyApiAux:
         }
         data = self.remove_none_values(data)
 
-        experiment = self.get_item_in_list(self.experiments, 'id', experiment_id)
+        experiment = self.get_item_in_list(
+            self.experiments, 'id', experiment_id)
         experiment.update(data)
         return experiment
 
     def experiment_read(self, experiment_id):
         return self.get_item_in_list(self.experiments, 'id', experiment_id)
 
-    def experiment_list(self):
+    def experiment_list(self, project_id=None):
+        if project_id is not None:
+            return self.get_item_in_list(
+                self.experiments, 'project_id', project_id, True)
         return self.experiments
 
-    def experiment_status(self):
+    def experiment_status(self, experiment_id):
+        project_id = self.experiment_read(
+            experiment_id=experiment_id)['project_id']
+
         data = []
-        for x in range(0, 3):
-            item = {
-                'conversions': 0,
-                'status': 'baseline',
-                'visitors_until_statistically_significant': 100000,
-                'visitors': 0,
-                'baseline_id': '2898660203',
-                'difference_confidence_interval_max': None,
-                'statistical_significance': 0,
-                'goal_name': 'Engagement',
-                'variation_id': '2898660203',
-                'improvement': 0,
-                'variation_name': 'Original',
-                'conversion_rate': 0,
-                'is_revenue': False,
-                'goal_id': 2911340090,
-                'end_time': '2015-05-14T17:58:05Z',
-                'begin_time': '2015-05-14T17:46:36Z',
-                'difference_confidence_interval_min': None,
-                'difference': 0
-            }
-            data.append(item)
+        g_list = self.goal_list(project_id=project_id)
+        v_list = self.variation_list(experiment_id=experiment_id)
+        begin = datetime.now() - timedelta(days=1)
+        end = datetime.now() + timedelta(days=1)
+        for variation in v_list:
+            for goal in g_list:
+                visitors = randint(100, 5000)
+                conversions = randint(50, 3000)
+                data.append({
+                    'variation_id': str(variation['id']),
+                    'variation_name': variation['description'],
+                    'goal_id': goal['id'],
+                    'goal_name': goal['title'],
+                    'baseline_id': str(variation['id']),
+                    'begin_time': begin.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    'end_time': end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    'visitors': visitors,
+                    'conversions': conversions,
+                    'conversion_rate': round((float(conversions) / visitors), 2),
+                    'status': 'baseline',
+                    'improvement': 0,
+                    'statistical_significance': 0,
+                    'difference': 0,
+                    'difference_confidence_interval_min': 0,
+                    'difference_confidence_interval_max': 0,
+                    'visitors_until_significance': 100,
+                    'is_revenue': False
+                })
         return data
 
     def variation_create(
             self, variation_id=None, project_id=None, experiment_id=None,
             description=None, is_paused=None, js_component=None,
             weight=None):
-        now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         if variation_id is None:
             variation_id = self.increment_id(self.variation_id)
             self.variation_id = variation_id
@@ -252,7 +266,7 @@ class OptimizelyApiAux:
     def variation_list(self, experiment_id=None):
         if experiment_id is not None:
             return self.get_item_in_list(
-                self.variations, 'experiment_id', experiment_id)
+                self.variations, 'experiment_id', experiment_id, True)
         return self.variations
 
     def goal_create(
@@ -261,7 +275,7 @@ class OptimizelyApiAux:
             selector=None, target_to_experiments=None,
             target_urls=None, target_url_match_types=None,
             urls=None, url_match_types=None, is_editable=None):
-        now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         if goal_id is None:
             goal_id = self.increment_id(self.goal_id)
             self.goal_id = goal_id
@@ -318,5 +332,8 @@ class OptimizelyApiAux:
     def goal_read(self, goal_id):
         return self.get_item_in_list(self.goals, 'id', goal_id)
 
-    def goal_list(self):
+    def goal_list(self, project_id=None):
+        if project_id is not None:
+            return self.get_item_in_list(
+                self.goals, 'project_id', project_id, True)
         return self.goals
