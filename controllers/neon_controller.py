@@ -97,6 +97,7 @@ class OptimizelyController(ControllerBase):
 
         # Check if experiment exist in Optimizely
         exp_response = self.read_experiment(experiment_id=experiment_id)
+
         if exp_response["status_code"] != 200:
             raise ValueError("could not verify %s experiment. code: %s" % (
                 self.get_ovp(), exp_response["status_code"]))
@@ -215,8 +216,7 @@ class OptimizelyController(ControllerBase):
             # Update or Remove a variation
             if variation_id is not None:
                 var = self.get_item_in_list(v_list_resp['data'], 'id',
-                                          variation_id)
-
+                                            variation_id)
                 # Variation not found. Assuming Delete
                 if var is None:
                     vcmd['extras']['ovid_to_tid'].pop(str(variation_id), None)
@@ -224,12 +224,13 @@ class OptimizelyController(ControllerBase):
                     # Update variation
                     if var['weight'] == frac_calc:
                         continue
+
                     response = self.update_variation(
                         variation_id=var['id'], weight=frac_calc,
                         is_paused=False)
 
                     if response["status_code"] == 404:
-                        # Optimizely BUG: If a variation has been deleted.
+                        # Optimizely Issue: If a variation has been deleted.
                         # I still get the variation when call the variations list.
                         # Any access to variation by ID. I receive 404.
                         vcmd['extras']['ovid_to_tid'].pop(
@@ -240,8 +241,8 @@ class OptimizelyController(ControllerBase):
                             "could not update %s variation. code: %s" % (
                                 self.get_ovp(), response["status_code"]))
 
+            # Create new variation
             if var is None:
-                # Create new variation
                 js_component = vcmd['extras']['js_component']
                 vcmd['extras']['js_component'] = js_component.replace(
                     "THUMB_URL", thumb['imgs'][0]['url'])

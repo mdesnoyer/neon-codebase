@@ -1473,9 +1473,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
     @tornado.gen.coroutine
     def create_controller_integration(self, c_type):
-        '''
-        Create Controller Integration
-        '''
+        ''' Create Controller Integration '''
         try:
             i_id = InputSanitizer.to_string(
                 self.get_argument("integration_id"))
@@ -1520,26 +1518,23 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
     @tornado.gen.coroutine
     def create_controller_experiment(self, c_type, i_id="0"):
-        def get_params(param_name):
-            param_value = None
-            try:
-                param_value = self.get_argument(param_name)
-                if (param_value == ""):
-                    raise
-            except:
-                _log.error("create_controller_experiment "
-                           "msg=malformed request or missing arguments")
-                statemon.state.increment('malformed_request')
-                self.send_json_response(
-                    {"error": "missing %s" % param_name}, 400
-                )
-            return param_value
+        ''' Create Controller Experiment '''
+        try:
+            experiment_id = InputSanitizer.to_string(
+                self.get_argument("experiment_id"))
+            video_id = InputSanitizer.to_string(
+                self.get_argument("video_id"))
+            video_url = InputSanitizer.to_string(
+                self.get_argument("video_url"))
 
-        def fix_video_url(video_url):
-            return video_url.replace(
-                "www.dropbox.com",
-                "dl.dropboxusercontent.com"
-            )
+            video_url = video_url.replace("www.dropbox.com",
+                                          "dl.dropboxusercontent.com")
+        except Exception as e:
+            _log.error("key=create_controller_experiment msg= %s" % e)
+            data = '{"error": "API Params missing"}'
+            statemon.state.increment('api_params_missing')
+            self.send_json_response(data, 400)
+            return
 
         # check user
         na = yield tornado.gen.Task(
@@ -1557,13 +1552,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         if cr is None:
             data = {"error": "User integration for %s not found" % c_type}
             self.send_json_response(data, 400)
-            return
-
-        # get params
-        experiment_id = get_params('experiment_id')
-        video_id = get_params('video_id')
-        video_url = get_params('video_url')
-        if not all([video_id, video_url]):
             return
 
         # check video_id
@@ -1584,14 +1572,20 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 return
 
             js_component = self.get_argument('js_component', None)
+            if js_component is not None:
+                js_component = InputSanitizer.to_string(js_component)
             token = "\"THUMB_URL\""
             if (js_component is not None and token not in js_component):
                 data = {"error": "js_component must contain the %s" % token}
                 self.send_json_response(data, 400)
                 return
 
+            goal_id = self.get_argument('goal_id', None)
+            if goal_id is not None:
+                goal_id = InputSanitizer.to_string(goal_id)
+
             extras = {
-                'goal_id': self.get_argument('goal_id', None),
+                'goal_id': goal_id,
                 'element_id': element_id,
                 'js_component': js_component,
                 'ovid_to_tid': {}
@@ -1612,7 +1606,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 yield self.submit_neon_video_request(
                     self.api_key,
                     video_id,
-                    fix_video_url(video_url),
+                    video_url,
                     video_url.split('//')[-1],
                     self.get_argument('topn', 1),
                     self.get_argument('callback_url', None),

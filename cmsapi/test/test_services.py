@@ -35,6 +35,8 @@ import unittest
 import urllib
 from utils.imageutils import PILImageUtils
 from utils.options import define, options
+import controllers.neon_controller as neon_controller
+import test_utils.neon_controller_aux as neon_controller_aux
 import utils.neon
 import logging
 _log = logging.getLogger(__name__)
@@ -2093,6 +2095,322 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
                 'auto_update': False}
         response = self.put_request(url, vals, self.api_key, jsonheader=True)
         self.assertEqual(response.code, 400)
+
+###############################################
+# Optimizely Integration Test
+###############################################
+
+
+class TestOptimizelyIntegration(tornado.testing.AsyncHTTPTestCase):
+    ''' Optimizely Integration Test '''
+
+    @classmethod
+    def setUpClass(cls):
+        super(TestOptimizelyIntegration, cls).setUpClass()
+
+    def setUp(self):
+        super(TestOptimizelyIntegration, self).setUp()
+
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+
+        # Optimizely api http mock
+        # Http Connection pool Mock
+        self.cp_sync_patcher = \
+            patch('utils.http.tornado.httpclient.HTTPClient')
+        self.cp_async_patcher = \
+            patch('utils.http.tornado.httpclient.AsyncHTTPClient')
+        self.cp_mock_client = self.cp_sync_patcher.start()
+        self.cp_mock_async_client = self.cp_async_patcher.start()
+
+        self.cp_mock_client().fetch.side_effect = \
+            self._success_http_side_effect
+        self.cp_mock_async_client().fetch.side_effect = \
+            self._success_http_side_effect
+        self.optimizely_api_aux = neon_controller_aux.OptimizelyApiAux()
+
+        self.a_id = "77trcufrh25ztyru4gx7eq95"
+        self.i_id = "0"
+        self.access_token = "5851ee8c6358f0d46850dd60fe3d17e5:aff12cb2"
+        self.controller_type = neon_controller.ControllerType.OPTIMIZELY
+
+        self.experiment_id = "2889571145"
+        self.video_id = self.a_id + "_99987212"
+        self.video_url = "http://test.mp4"
+        self.element_id = "#element_id"
+        self.js_component = "$(\"#element_id\").attr(\"src\", \"THUMB_URL\")"
+        self.goal_id = "12345"
+
+        self.job_ids = []
+
+    def tearDown(self):
+        self.cp_sync_patcher.stop()
+        self.cp_async_patcher.stop()
+        self.redis.stop()
+
+    def get_app(self):
+        return services.application
+
+    def remove_none_values(self, _dict):
+        return dict((k, v) for k, v in _dict.iteritems() if v is not None)
+
+    def _success_http_side_effect(self, *args, **kwargs):
+        ''' Generic success http side effects for all patched http calls
+            for this test '''
+
+        def _neon_submit_job_response():
+            ''' video server response on job submit '''
+            job_id = str(random.random())
+            self.job_ids.append(job_id)
+            request = \
+                tornado.httpclient.HTTPRequest('http://thumbnail.neon-lab.com')
+            response = tornado.httpclient.HTTPResponse(
+                request, 200, buffer=StringIO('{"job_id":"%s"}' % job_id))
+            return response
+
+        # ################### HTTP request/responses #################
+        http_req = args[0]
+        if "callback" in kwargs:
+            callback = kwargs["callback"]
+        else:
+            callback = args[1] if len(args) >= 2 else None
+
+        # print "----> ", http_req.url, callback
+        if "projects" in http_req.url:
+            data = json.dumps({'status_code': 200})
+            request = tornado.httpclient.HTTPRequest(http_req.url)
+            response = tornado.httpclient.HTTPResponse(
+                request, 200, buffer=StringIO(data))
+            if callback:
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                                    response)
+            else:
+                return response
+        elif "experiments" in http_req.url and http_req.method == 'GET':
+            id = int(http_req.url.rsplit('/', 1)[1])
+            data = json.dumps(self.optimizely_api_aux.experiment_create(
+                experiment_id=id, project_id=1, description="thumb_id",
+                edit_url="https://www.neon-lab.com/videos/"))
+            request = tornado.httpclient.HTTPRequest(http_req.url)
+            response = tornado.httpclient.HTTPResponse(
+                request, 200, buffer=StringIO(data))
+            if callback:
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                                    response)
+            else:
+                return response
+        elif "goals" in http_req.url and http_req.method == 'GET':
+            id = int(http_req.url.rsplit('/', 1)[1])
+            data = json.dumps(self.optimizely_api_aux.goal_create(
+                goal_id=id, project_id=1, goal_type=0,
+                title="Video Image Clicks", selector="div.video > img",
+                target_to_experiments=True, experiment_ids=[]))
+            request = tornado.httpclient.HTTPRequest(http_req.url)
+            response = tornado.httpclient.HTTPResponse(
+                request, 200, buffer=StringIO(data))
+            if callback:
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                                    response)
+            else:
+                return response
+        elif "api/v1/submitvideo" in http_req.url:
+            response = _neon_submit_job_response()
+            if callback:
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                                    response)
+            return response
+        else:
+            headers = {"Content-Type": "application/json"}
+            request = tornado.httpclient.HTTPRequest('http://neon-lab.com')
+            response = tornado.httpclient.HTTPResponse(
+                request, 200, headers=headers,
+                buffer=StringIO('someplaindata'))
+            if callback:
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                                    response)
+            return response
+
+    def post_request(self, url, vals, apikey):
+        headers = {
+            'X-Neon-API-Key': apikey,
+            'Content-Type': 'application/x-www-form-urlencoded'}
+        body = urllib.urlencode(vals)
+        self.http_client.fetch(url,
+                               callback=self.stop,
+                               method="POST",
+                               body=body,
+                               headers=headers)
+        response = self.wait()
+        return response
+
+    def create_neon_account(self):
+        vals = {'account_id': self.a_id}
+        uri = self.get_url('/api/v1/accounts')
+        response = self.post_request(uri, vals, "")
+        api_key = json.loads(response.body)["neon_api_key"]
+        return api_key
+
+    def create_optimizely_integration(self):
+        end_point = '/api/v1/accounts/%s/optimizely_integrations'
+
+        url = self.get_url(end_point % self.a_id)
+        vals = {
+            'integration_id': self.i_id,
+            'access_token': self.access_token
+        }
+        vals = self.remove_none_values(vals)
+
+        self.api_key = self.create_neon_account()
+        self.assertEqual(
+            self.api_key,
+            neondata.NeonApiKey.get_api_key(self.a_id))
+        resp = self.post_request(url, vals, self.api_key)
+        return resp
+
+    def create_optimizely_experiment(self, create_integration=True):
+        end_point = \
+            '/api/v1/accounts/%s/optimizely_integrations/%s/experiment'
+
+        if create_integration:
+            self.create_optimizely_integration()
+        else:
+            self.api_key = self.create_neon_account()
+
+        url = self.get_url(end_point % (self.a_id, self.i_id))
+        vals = {
+            'experiment_id': self.experiment_id,
+            'video_id': self.video_id,
+            'video_url': self.video_url,
+            'element_id': self.element_id,
+            'js_component': self.js_component,
+            'goal_id': self.goal_id
+        }
+        vals = self.remove_none_values(vals)
+
+        resp = self.post_request(url, vals, self.api_key)
+        return resp
+
+    def test_optimizely_integration_success(self):
+        resp = self.create_optimizely_integration()
+
+        nuser = neondata.NeonUserAccount.get(self.api_key)
+        controller = neon_controller.Controller.get(
+            self.controller_type, self.api_key, self.i_id)
+
+        self.assertEquals(resp.body, '{"status": "integration created"}')
+        self.assertEqual(resp.code, 201)
+        self.assertEqual(len(nuser.controllers), 1)
+        self.assertEqual(nuser.controllers[self.i_id], self.controller_type)
+        self.assertEqual(controller.platform_id, self.i_id)
+        self.assertEqual(controller.access_token, self.access_token)
+
+    def test_optimizely_integration_with_invalid_arguments(self):
+        check_params = ['integration_id', 'access_token']
+        for param in check_params:
+            if param == 'integration_id':
+                self.i_id = None
+            elif param == 'access_token':
+                self.access_token = None
+
+            resp = self.create_optimizely_integration()
+            self.assertEquals(resp.body, '{"error": "API Params missing"}')
+            self.assertEqual(resp.code, 400)
+
+    def test_optimizely_integration_already_exist(self):
+        self.create_optimizely_integration()  # create first
+        resp = self.create_optimizely_integration()  # call again
+        self.assertEquals(resp.body, '{"error": "Integration already exists"}')
+        self.assertEqual(resp.code, 502)
+
+    @patch('controllers.neon_controller.OptimizelyController.verify_account')
+    def test_optimizely_integration_with_invalid_token(self, mock_v_account):
+        mock_v_account.return_value = {
+            'status_code': 401,
+            'status_string': 'Authentication failed',
+            'data': {}
+        }
+
+        resp = self.create_optimizely_integration()
+        self.assertEquals(
+            resp.body,
+            '{"error": "could not verify optimizely access. code: 401"}')
+        self.assertEqual(resp.code, 502)
+
+    def test_optimizely_experiment_success(self):
+        resp = self.create_optimizely_experiment()
+        resp_data = json.loads(resp.body)
+
+        vcmd = neondata.VideoControllerMetaData.get(
+            self.api_key, self.video_id)
+
+        self.assertIsNotNone(vcmd)
+        self.assertEqual(resp_data['experiment_id'], self.experiment_id)
+        self.assertEqual(resp_data['element_id'], self.element_id)
+        self.assertEqual(resp_data['video_id'], self.video_id)
+        self.assertEqual(resp_data['goal_id'], self.goal_id)
+        self.assertIsNotNone(resp_data['js_component'])
+        self.assertEqual(resp.code, 201)
+
+    def test_optimizely_experiment_success_with_element_id_none(self):
+        self.element_id = None
+        resp = self.create_optimizely_experiment()
+        resp_data = json.loads(resp.body)
+
+        self.assertEqual(resp_data['element_id'], "#" + self.video_id)
+
+    def test_optimizely_experiment_success_with_js_component_none(self):
+        self.js_component = None
+        resp = self.create_optimizely_experiment()
+        resp_data = json.loads(resp.body)
+
+        self.assertTrue(self.element_id in resp_data['js_component'])
+        self.assertNotEqual(resp_data['js_component'], self.js_component)
+        self.assertIsNotNone(resp_data['js_component'])
+
+    def test_optimizely_experiment_with_invalid_arguments(self):
+        check_params = ['experiment_id', 'video_id', 'video_url']
+        for param in check_params:
+            if param == 'experiment_id':
+                self.experiment_id = None
+            elif param == 'video_id':
+                self.video_id = None
+            elif param == 'video_url':
+                self.video_url = None
+
+            resp = self.create_optimizely_experiment()
+            self.assertEquals(resp.body, '{"error": "API Params missing"}')
+            self.assertEqual(resp.code, 400)
+
+    def test_optimizely_experiment_with_invalid_integration(self):
+        resp = self.create_optimizely_experiment(create_integration=False)
+        self.assertEquals(
+            resp.body,
+            '{"error": "User integration for optimizely not found"}')
+        self.assertEqual(resp.code, 400)
+
+    def test_optimizely_experiment_with_invalid_video_id(self):
+        self.video_id = 'x' * 129
+        resp = self.create_optimizely_experiment()
+        self.assertEquals(
+            resp.body,
+            '{"error":"video id greater than 128 chars"}')
+        self.assertEqual(resp.code, 400)
+
+    def test_optimizely_experiment_with_wrong_element_id(self):
+        self.element_id = "element_id"
+        resp = self.create_optimizely_experiment()
+        self.assertEquals(
+            resp.body,
+            '{"error": "element_id must start with \'.\' or \'#\'"}')
+        self.assertEqual(resp.code, 400)
+
+    def test_optimizely_experiment_with_wrong_js_component(self):
+        self.js_component = "alert(\"js_component\");"
+        resp = self.create_optimizely_experiment()
+        self.assertEquals(
+            resp.body,
+            '{"error": "js_component must contain the \\"THUMB_URL\\""}')
+        self.assertEqual(resp.code, 400)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
