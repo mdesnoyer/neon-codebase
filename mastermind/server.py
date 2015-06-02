@@ -1363,7 +1363,7 @@ class ControllerResultsRetriever(threading.Thread):
         self.mastermind = mastermind
         self.video_id_cache = video_id_cache
         self.activity_watcher = activity_watcher
-        self.last_update = None # Time of the most recent data
+        self.last_update = None  # Time of the most recent data
 
         # Is the initial data loaded
         self.is_loaded = threading.Event()
@@ -1393,12 +1393,14 @@ class ControllerResultsRetriever(threading.Thread):
 
     def _results_retriever(self):
         data = []
-        vmds = neondata.VideoControllerMetaData.get_all()
-        for vmd in vmds:
-            api_key = vmd.get_api_key()
 
-            for c in vmd.controllers:
-                if c['state'] != neon_controller.ControllerExperimentState.INPROGRESS:
+        vcmds = neondata.VideoControllerMetaData.get_all()
+        for vcmd in vcmds:
+            api_key = vcmd.get_api_key()
+
+            for c in vcmd.controllers:
+                state = neon_controller.ControllerExperimentState.INPROGRESS
+                if c['state'] != state:
                     continue
 
                 ctr = neon_controller.Controller.get(

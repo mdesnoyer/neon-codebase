@@ -43,6 +43,7 @@ import unittest
 import utils.neon
 from utils.options import options
 import utils.ps
+import controllers.neon_controller as neon_controller
 
 STAGING = neondata.TrackerAccountIDMapper.STAGING
 PROD = neondata.TrackerAccountIDMapper.PRODUCTION
@@ -2041,6 +2042,109 @@ class SmokeTesting(test_utils.neontest.TestCase):
                 lambda: 'key1_vid3' in \
                 self.directive_publisher.last_published_videos,
                 True)
+
+###############################################
+# Controller Results Retriever Test
+###############################################
+
+
+class TestControllerResultsRetriever(test_utils.neontest.AsyncTestCase):
+    ''' Controller Results Retriever Test '''
+    def setUp(self):
+        super(TestControllerResultsRetriever, self).setUp()
+
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+
+        self.mastermind = MagicMock()
+        self.retriever = mastermind.server.ControllerResultsRetriever(
+            self.mastermind)
+
+        self.i_id = "0"
+        self.controller_type = neon_controller.ControllerType.OPTIMIZELY
+        self.create_default_video_controller_meta_data(
+            a_id='1', exp_id='1', video_id='1', goal_id='1')
+        self.create_default_video_controller_meta_data(
+            a_id='2', exp_id='2', video_id='2', goal_id='2',
+            state=neon_controller.ControllerExperimentState.INPROGRESS)
+
+    def tearDown(self):
+        self.redis.stop()
+
+    def create_default_video_controller_meta_data(self, a_id, exp_id, video_id,
+                                                  goal_id, state=None):
+        vcmd = neondata.VideoControllerMetaData(
+            a_id,
+            self.i_id,
+            self.controller_type,
+            exp_id,
+            video_id,
+            {
+                'goal_id': str(goal_id),
+                'element_id': '#1',
+                'js_component': "$(\"img#1\").attr(\"src\", \"THUMB_URL\")",
+                'ovid_to_tid': {}
+            },
+            0)
+
+        if state is not None:
+            vcmd.controllers[0]['state'] = state
+
+        vcmd.save()
+        return vcmd
+
+    @patch('controllers.neon_controller.Controller.get')
+    def test_results_retriever_vcmd_in_progress(self, mock_ctr_get):
+        self.retriever._results_retriever()
+
+        mock_ctr_get.assert_called_with(
+            neon_controller.ControllerType.OPTIMIZELY, "2", self.i_id)
+        self.assertEqual(mock_ctr_get.call_count, 1)
+
+    @patch('mastermind.server.VideoIdCache.find_video_id')
+    @patch('controllers.neon_controller.OptimizelyController.retrieve_experiment_results')
+    @patch('controllers.neon_controller.OptimizelyController.verify_account')
+    @tornado.testing.gen_test
+    def test_results_retriever_experiment_results(self, mock_verify_account,
+                                                  mock_exp_results,
+                                                  mock_find_video_id):
+        mock_verify_account.return_value = None
+        yield neon_controller.Controller.create(
+                self.controller_type, '2', self.i_id, 'x')
+
+        self.mastermind.update_stats_info = MagicMock()
+        mock_find_video_id.return_value = 'video_id0'
+        mock_exp_results.return_value = [{
+            'thumb_id': 'thumb_id0',
+            'visitors': 1300,
+            'conversions': 600,
+            'conversion_rate': round((float(600) / 1300), 2)
+        }]
+
+        self.retriever._results_retriever()
+
+        mock_exp_results.assert_called_with({
+            'controller_type': 'optimizely',
+            'platform_id': '0',
+            'video_id': '2',
+            'last_process_date': 0,
+            'state': 'inprogress',
+            'extras': {
+                'js_component': '$("img#1").attr("src", "THUMB_URL")',
+                'element_id': '#1',
+                'goal_id': '2',
+                'ovid_to_tid': {}
+            },
+            'experiment_id': '2'}
+        )
+
+        self.mastermind.update_stats_info.assert_called_with([(
+            'video_id0',
+            'thumb_id0',
+            1300,
+            None,
+            600,
+            None)])
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
