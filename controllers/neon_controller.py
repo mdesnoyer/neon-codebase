@@ -14,10 +14,12 @@ import logging
 from utils import statemon
 from cmsdb import neondata
 from cmsdb.neondata import NamespacedStoredObject
+from bs4 import BeautifulSoup
 _log = logging.getLogger(__name__)
 
 # Monitoring
 statemon.define('optimizely_response_failed', int)
+statemon.define('experiment_url_response_failed', int)
 
 
 class ControllerType(object):
@@ -118,25 +120,11 @@ class OptimizelyController(ControllerBase):
                 "type engagement. set primary goal in optimizely "
                 "or provide a different goal_id")
 
-        # TODO: New implementation (Check element_id in the page)
-        # Do a request to URL of experiment and parse HTML to find the element_id
-        # Generating the correct js_component to put in variation
-        # Raise exception if element in page not found
-        edit_url = exp_response['data']['edit_url']
-
-        # formatter js_component
+        # Parse the HTML
         if extras['js_component'] is None:
-            extras['js_component'] = (
-                "$.each($(\"imgSELECTOR\"), function(element) {"
-                "    $(this).attr(\"src\", \"THUMB_URL\");"
-                "}); "
-                "$.each($(\"videoSELECTOR\"), function(element) {"
-                "    $(this).attr(\"poster\", \"THUMB_URL\");"
-                "}); "
-                "$.each($(\"divSELECTOR\"), function(element) {"
-                "    $(this).css({\"background-image\": \"url(THUMB_URL)\"});"
-                "}); "
-            ).replace('SELECTOR', extras['element_id'])
+            extras['js_component'] = self.check_element_id_on_page(
+                exp_response['data']['edit_url'],
+                extras['element_id'])
 
         # create or append new experiment
         vd = yield tornado.gen.Task(
@@ -306,6 +294,99 @@ class OptimizelyController(ControllerBase):
         return data
 
     ###########################################################################
+    # Helper Methods
+    ###########################################################################
+
+    def do_http_request(self, url, method, headers, body):
+        request = tornado.httpclient.HTTPRequest(
+            url=url,
+            method=method,
+            headers=headers,
+            body=body,
+            request_timeout=60.0,
+            connect_timeout=5.0)
+        return self.http_request_pool.send_request(request)
+
+    def check_element_id_on_page(self, exp_url, element_id):
+        SUPPORTED_TAGS = ['img', 'video', 'div']
+        is_id = element_id.startswith('#')
+        replace_elm_id = element_id[1:]
+
+        # Do request
+        headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
+            (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
+            Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
+
+        response = self.do_http_request(exp_url, 'GET', headers, None)
+        if response.error:
+            _log.error("Failed to access Experiment URL: %s" % response.error)
+            statemon.state.increment('experiment_url_response_failed')
+            raise ValueError(
+                "could not verify %s experiment URL. code: %s" % (
+                    self.get_ovp(), response.code))
+
+        # Parse HTML
+        soup = BeautifulSoup(response.body)
+
+        # Get the element by ID or by Class
+        elements = None
+        if (is_id):
+            elements = soup.find_all(id=replace_elm_id)
+        else:
+            elements = soup.find_all(class_=replace_elm_id)
+
+        # Check element exist
+        if len(elements) == 0:
+            raise ValueError("could not found the element '%s'" % element_id)
+
+        # If ID, just have one element
+        if is_id and len(elements) > 1:
+            raise ValueError(
+                "the element '%s' are duplicated in the page" % element_id)
+
+        # Check element tag is supported
+        for elm in elements:
+            supported = elm.name in SUPPORTED_TAGS
+            if not supported:
+                raise ValueError(
+                    "tag not supported by element '%s' with '%s' type. "
+                    "the supported tags are: [%s]" % (
+                        element_id,
+                        elm.name,
+                        ', '.join(SUPPORTED_TAGS)))
+
+        # Generate js_component that will be injected in the page
+        _js_component = ''
+        first_element = elements[0]
+        if first_element.name == 'img':
+            _js_component = \
+                "$.each($(\"imgSELECTOR\"), function(element) {" \
+                "    $(this).attr(\"src\", \"THUMB_URL\");" \
+                "}); "
+        elif first_element.name == 'video':
+            _js_component = \
+                "$.each($(\"videoSELECTOR\"), function(element) {" \
+                "    $(this).attr(\"poster\", \"THUMB_URL\");" \
+                "}); "
+        elif first_element.name == 'div':
+            _js_component = \
+                "$.each($(\"divSELECTOR\"), function(element) {" \
+                "    $(this).css({\"background-image\": \"url(THUMB_URL)\"});"\
+                "}); "
+        return _js_component.replace('SELECTOR', element_id)
+
+    def remove_none_values(self, _dict):
+        return dict((k, v) for k, v in _dict.iteritems() if v is not None)
+
+    def get_item_in_list(self, _list, key, value):
+        new_list = [i for i in _list if i[key] == value]
+        if len(new_list) == 1:
+            return new_list[0]
+        elif len(new_list) > 1:
+            return new_list
+        return None
+
+    ###########################################################################
     # API Methods
     # Documentation from: http://developers.optimizely.com/rest/
     ###########################################################################
@@ -318,7 +399,7 @@ class OptimizelyController(ControllerBase):
         }
         return response_data
 
-    def send_request(self, relative_path, http_method='GET', body=None):
+    def send_request(self, relative_path, method='GET', body=None):
         '''
         Make request to Optimizely RESP API
         '''
@@ -327,20 +408,11 @@ class OptimizelyController(ControllerBase):
             "Token": self.access_token,
             "Content-Type": "application/json"
         })
-        request_body = tornado.escape.json_encode(body)
-        if (http_method == 'GET') or (http_method == 'DELETE'):
-            request_body = None
+        req_body = tornado.escape.json_encode(body)
+        if (method == 'GET') or (method == 'DELETE'):
+            req_body = None
 
-        request = tornado.httpclient.HTTPRequest(
-            url=client_url,
-            method=http_method,
-            headers=headers,
-            body=request_body,
-            request_timeout=60.0,
-            connect_timeout=5.0
-        )
-
-        response = self.http_request_pool.send_request(request)
+        response = self.do_http_request(client_url, method, headers, req_body)
         response_data = self.create_response(code=response.code)
 
         if response.error:
@@ -634,21 +706,6 @@ class OptimizelyController(ControllerBase):
         '''
         relative_path = "goals/%s" % goal_id
         return self.send_request(relative_path, "DELETE")
-
-    ###########################################################################
-    # Helper Methods
-    ###########################################################################
-
-    def remove_none_values(self, _dict):
-        return dict((k, v) for k, v in _dict.iteritems() if v is not None)
-
-    def get_item_in_list(self, _list, key, value):
-        new_list = [i for i in _list if i[key] == value]
-        if len(new_list) == 1:
-            return new_list[0]
-        elif len(new_list) > 1:
-            return new_list
-        return None
 
 
 class Controller(object):
