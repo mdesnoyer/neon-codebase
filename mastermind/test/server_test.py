@@ -2070,6 +2070,7 @@ class TestControllerResultsRetriever(test_utils.neontest.AsyncTestCase):
 
     def tearDown(self):
         self.redis.stop()
+        super(TestControllerResultsRetriever, self).tearDown()
 
     def create_default_video_controller_meta_data(self, a_id, exp_id, video_id,
                                                   goal_id, state=None):

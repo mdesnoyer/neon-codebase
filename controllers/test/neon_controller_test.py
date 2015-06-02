@@ -198,19 +198,24 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
     ###########################################################################
     def _side_effect_to_verity_experiment(
                                 self, request, callback=None, *args, **kwargs):
-        id = int(request.url.rsplit('/', 1)[1])
         if "experiments" in request.url:
+            id = int(request.url.rsplit('/', 1)[1])
             return HTTPResponse(
                 HTTPRequest(OPTMIZELY_ENDPOINT, method='GET'), 200,
                 buffer=StringIO(json.dumps(
                     self.optimizely_api_aux.experiment_read(
                         experiment_id=id))))
         elif "goals" in request.url:
+            id = int(request.url.rsplit('/', 1)[1])
             return HTTPResponse(
                 HTTPRequest(OPTMIZELY_ENDPOINT, method='GET'), 200,
                 buffer=StringIO(json.dumps(
                     self.optimizely_api_aux.goal_read(
                         goal_id=self.goal_id))))
+        elif "www.neon-lab.com" in request.url:
+            return HTTPResponse(
+                HTTPRequest(OPTMIZELY_ENDPOINT, method='GET'), 200,
+                buffer=StringIO(self.html_aux.get_html()))
 
     @patch('controllers.neon_controller.utils.http.send_request')
     @patch('controllers.neon_controller.OptimizelyController.verify_account')
@@ -304,18 +309,21 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
             edit_url="https://www.neon-lab.com/videos/")
 
         mock_http.side_effect = self._side_effect_to_verity_experiment
+        element_name = "element_id"
         extras = {
             'goal_id': self.goal_id,
-            'element_id': '#11',
-            'js_component': '$(\"#11\").attr(\"src\": \"http://fake/1.png\");'}
+            'element_id': '.%s' % element_name,
+            'js_component': None}
 
+        self.html_aux = neon_controller_aux.HTMLAux(
+            "class_img", element_name)
         response = yield controller.verify_experiment(
-            self.i_id, experiment_id, self.video_id, extras)
+            self.i_id, experiment_id, self.video_id, dict(extras))
         self.assertEquals(response['goal_id'], self.goal_id)
         self.assertEquals(response['goal_id'], extras['goal_id'])
         self.assertEquals(response['element_id'], extras['element_id'])
-        self.assertEquals(response['js_component'], extras['js_component'])
         self.assertEquals(response['experiment_id'], experiment_id)
+        self.assertIsNotNone(response['js_component'])
 
         vcmd = yield tornado.gen.Task(
             neondata.VideoControllerMetaData.get,
@@ -336,8 +344,7 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         self.assertEquals(vcmd_ctr['experiment_id'], experiment_id)
         self.assertEquals(vcmd_ctr_extras['goal_id'], extras['goal_id'])
         self.assertEquals(vcmd_ctr_extras['element_id'], extras['element_id'])
-        self.assertEquals(
-            vcmd_ctr_extras['js_component'], extras['js_component'])
+        self.assertIsNotNone(vcmd_ctr_extras['js_component'])
 
     @patch('controllers.neon_controller.utils.http.send_request')
     @patch('controllers.neon_controller.OptimizelyController.verify_account')
@@ -350,7 +357,7 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
 
         mock_http.side_effect = self._side_effect_to_verity_experiment
         extras = \
-            {'goal_id': self.goal_id, 'element_id': '', 'js_component': ''}
+            {'goal_id': self.goal_id, 'element_id': '#11', 'js_component': ''}
 
         # call again
         self.create_default_video_controller_meta_data()
@@ -369,7 +376,7 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         extras = \
-            {'goal_id': self.goal_id, 'element_id': '', 'js_component': ''}
+            {'goal_id': self.goal_id, 'element_id': '#11', 'js_component': ''}
         self.create_default_video_controller_meta_data()
         vd = neondata.VideoControllerMetaData(
             self.a_id, self.i_id, neon_controller.ControllerType.OPTIMIZELY,
@@ -384,6 +391,118 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
             neondata.VideoControllerMetaData.get,
             self.a_id, self.video_id)
         self.assertEquals(len(vmd.controllers), 2)
+
+    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('controllers.neon_controller.OptimizelyController.verify_account')
+    @tornado.testing.gen_test
+    def test_check_element_id_on_page_with_success(self, mock_verify_account,
+                                                   mock_http):
+        mock_verify_account.return_value = None
+        controller = yield neon_controller.Controller.create(
+                self.controller_type, self.a_id, self.i_id, self.access_token)
+
+        mock_http.side_effect = self._side_effect_to_verity_experiment
+        url = "https://www.neon-lab.com/videos/"
+        element_name = "element_id"
+
+        # 1 - With Element Tag - Image
+        element_id = "#%s" % element_name
+        self.html_aux = neon_controller_aux.HTMLAux("id_img", element_name)
+        _js_component = \
+            "$.each($(\"imgSELECTOR\"), function(element) {" \
+            "    $(this).attr(\"src\", \"THUMB_URL\");" \
+            "}); ".replace('SELECTOR', element_id)
+
+        response = controller.check_element_id_on_page(url, element_id)
+        self.assertEquals(response, _js_component)
+
+        # 2 - With Element Tag - Video
+        element_id = "#%s" % element_name
+        self.html_aux = neon_controller_aux.HTMLAux("id_video", element_name)
+        _js_component = \
+            "$.each($(\"videoSELECTOR\"), function(element) {" \
+            "    $(this).attr(\"poster\", \"THUMB_URL\");" \
+            "}); ".replace('SELECTOR', element_id)
+
+        response = controller.check_element_id_on_page(url, element_id)
+        self.assertEquals(response, _js_component)
+
+        # 3 - With Element Tag - Div
+        element_id = ".%s" % element_name
+        self.html_aux = neon_controller_aux.HTMLAux("class_div", element_name)
+        _js_component = \
+            "$.each($(\"divSELECTOR\"), function(element) {" \
+            "    $(this).css({\"background-image\": \"url(THUMB_URL)\"});"\
+            "}); ".replace('SELECTOR', element_id)
+
+        response = controller.check_element_id_on_page(url, element_id)
+        self.assertEquals(response, _js_component)
+
+    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('controllers.neon_controller.OptimizelyController.verify_account')
+    @tornado.testing.gen_test
+    def test_check_element_id_on_page_with_errors(self, mock_verify_account,
+                                                  mock_http):
+        mock_verify_account.return_value = None
+        controller = yield neon_controller.Controller.create(
+                self.controller_type, self.a_id, self.i_id, self.access_token)
+
+        mock_http.side_effect = self._side_effect_to_verity_experiment
+        url = "https://www.neon-lab.com/videos/"
+        element_name = "element_id"
+
+        # 1 - With Element Not Found
+        element_id = "#%s" % element_name
+        self.html_aux = neon_controller_aux.HTMLAux("id_img", "id_img")
+        with self.assertRaises(ValueError) as e:
+            controller.check_element_id_on_page(url, element_id)
+        self.assertTrue("could not found the element" in str(e.exception))
+
+        # 2 - Wih Element ID Duplicated
+        element_id = "#%s" % element_name
+        self.html_aux = neon_controller_aux.HTMLAux(
+            "id_duplicate", element_name)
+        with self.assertRaises(ValueError) as e:
+            controller.check_element_id_on_page(url, element_id)
+        self.assertTrue("duplicated" in str(e.exception))
+
+        # 3 - With Tag Not Supported by ID
+        element_id = "#%s" % element_name
+        self.html_aux = neon_controller_aux.HTMLAux(
+            "id_not_supported", element_name)
+        with self.assertRaises(ValueError) as e:
+            controller.check_element_id_on_page(url, element_id)
+        self.assertTrue("tag not supported by element" in str(e.exception))
+
+        # 4 - With Tag Not Supported by CLASS
+        element_id = ".%s" % element_name
+        self.html_aux = neon_controller_aux.HTMLAux(
+            "class_not_supported", element_name)
+        with self.assertRaises(ValueError) as e:
+            controller.check_element_id_on_page(url, element_id)
+        self.assertTrue("tag not supported by element" in str(e.exception))
+
+    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('controllers.neon_controller.OptimizelyController.verify_account')
+    @tornado.testing.gen_test
+    def test_check_element_id_on_page_with_bad_url(self, mock_verify_account,
+                                                   mock_http):
+        mock_verify_account.return_value = None
+        controller = yield neon_controller.Controller.create(
+                self.controller_type, self.a_id, self.i_id, self.access_token)
+
+        mock_http.return_value = HTTPResponse(
+            HTTPRequest(OPTMIZELY_ENDPOINT), 400,
+            buffer=StringIO("error"))
+
+        url = "https://www.neon-lab.com/videos/"
+        element_id = "#12345"
+
+        with self.assertRaises(ValueError) as e:
+            controller.check_element_id_on_page(url, element_id)
+        self.assertTrue(
+            "could not verify optimizely experiment URL. code: 400" in
+            str(e.exception))
 
     ###########################################################################
     # Update Experiment With Directives
@@ -724,7 +843,6 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
             self.assertGreater(s['visitors'], 0)
             self.assertGreater(s['conversions'], 0)
             self.assertGreater(s['conversion_rate'], 0)
-
 
 class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
     # Test cases that do requests to optimizely API

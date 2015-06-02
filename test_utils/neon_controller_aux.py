@@ -13,6 +13,59 @@ from random import randint
 _log = logging.getLogger(__name__)
 
 
+class HTMLAux:
+    def __init__(self, tag, value):
+        self.html = self.generate_html().replace(tag, value)
+
+    def generate_html(self):
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head><title>The Http Html Parser</title></head>
+        <body>
+            <div id="page">
+                <!-- ID Duplicate -->
+                <img id="id_duplicate" src="http://neon-lab.com/images/tmp.png" width="200" height="200"></img>
+                <img id="id_duplicate" src="http://neon-lab.com/images/tmp.png" width="200" height="200"></img>
+
+                <!-- TAG Not Supported -->
+                <span id="id_not_supported"><p>tag not supported</p></span>
+                <div>
+                    <img class="class_not_supported" src="http://neon-lab.com/images/tmp.png" width="200" height="200"></img>
+                    <input class="class_not_supported" type="text" name="text1">
+                </div>
+
+                <!-- Image Tags -->
+                <img id="id_img" src="http://neon-lab.com/images/tmp.png" width=200 height="200"></img>
+                <img class="class_img" src="http://neon-lab.com/images/tmp.png" width=200 height="200"></img>
+                <img class="class_img" src="http://neon-lab.com/images/tmp.png" width=200 height="200"></img>
+
+                <!-- Video Tags -->
+                <video id="id_video" controls poster="http://neon-lab.com/images/tmp.png" width="320" height="240">
+                   <source src="movie.mp4" type="video/mp4">
+                   <source src="movie.ogg" type="video/ogg">
+                   Your browser does not support the video tag.
+                </video>
+                <video class="class_video" controls poster="http://neon-lab.com/images/tmp.png" width="320" height="240">
+                   <source src="movie.mp4" type="video/mp4">
+                </video>
+                <video class="class_video" controls poster="http://neon-lab.com/images/tmp.png" width="320" height="240">
+                   <source src="movie.mp4" type="video/mp4">
+                </video>
+
+                <!-- Div Tags -->
+                <div id="id_div" style="background-image: url('http://neon-lab.com/images/tmp.png'); width: 200px; height: 200px;"></div>
+                <div class="class_div" style="background-image: url('http://neon-lab.com/images/tmp.png'); width: 200px; height: 200px;"></div>
+                <div class="class_div" style="background-image: url('http://neon-lab.com/images/tmp.png'); width: 200px; height: 200px;"></div>
+            </div>
+        </body>
+        </html>
+        """
+
+    def get_html(self):
+        return self.html
+
+
 class OptimizelyApiAux:
     def __init__(self):
         self.project_id = 0

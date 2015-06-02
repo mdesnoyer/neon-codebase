@@ -2213,6 +2213,16 @@ class TestOptimizelyIntegration(tornado.testing.AsyncHTTPTestCase):
                                                                     response)
             else:
                 return response
+        elif "www.neon-lab.com" in http_req.url:
+            data = self.html_aux.get_html()
+            request = tornado.httpclient.HTTPRequest(http_req.url)
+            response = tornado.httpclient.HTTPResponse(
+                request, 200, buffer=StringIO(data))
+            if callback:
+                return tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                                    response)
+            else:
+                return response
         elif "api/v1/submitvideo" in http_req.url:
             response = _neon_submit_job_response()
             if callback:
@@ -2360,6 +2370,9 @@ class TestOptimizelyIntegration(tornado.testing.AsyncHTTPTestCase):
 
     def test_optimizely_experiment_success_with_js_component_none(self):
         self.js_component = None
+        self.html_aux = neon_controller_aux.HTMLAux(
+            "id_video", self.element_id[1:])
+
         resp = self.create_optimizely_experiment()
         resp_data = json.loads(resp.body)
 
