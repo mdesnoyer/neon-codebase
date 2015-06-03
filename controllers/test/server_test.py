@@ -161,6 +161,7 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
 
         out = StringIO()
         with gzip.GzipFile(fileobj=out, mode="w") as f:
+            f.write('expiry=2015-06-03T13:49:46Z\n')
             f.write(json.dumps(directive_data))
             f.write('\nend')
         return out.getvalue()
@@ -170,7 +171,7 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
         lines = gz.read().split('\n')
 
         directives = {}
-        for line in lines:
+        for line in lines[1:]:
             if len(line.strip()) == 0:
                 # It's an empty line
                 continue
@@ -253,21 +254,23 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
         yield self.directive_watcher.read_directives()
         self.assertEqual(mock_get.call_count, 0)
 
-    '''
     @patch('controllers.neon_controller.OptimizelyController.update_experiment_with_directives')
     @patch('controllers.neon_controller.OptimizelyController.verify_account')
     @tornado.testing.gen_test
     def test_read_directives_call_update_experiment(self, mock_verify_account,
-                                                  mock_update):
+                                                    mock_update):
         mock_verify_account.return_value = None
         yield neon_controller.Controller.create(
                 ControllerType.OPTIMIZELY, '1', '0', 'x')
+
+        state_future = Future()
+        state_future.set_result(ControllerExperimentState.INPROGRESS)
+        mock_update.return_value = state_future
 
         yield self.directive_watcher.read_directives()
         mock_update.assert_called_with(
             self.vcmd1.controllers[0], self.unzip_file(self.item_now['data'])['1_1'], callback=ANY
         )
-    '''
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

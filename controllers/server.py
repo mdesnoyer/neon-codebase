@@ -113,7 +113,7 @@ class S3DirectiveWatcher(threading.Thread):
             statemon.state.increment('reading_error')
             return
 
-        # getting the last hour
+        # getting within hour of last updated
         now = datetime.datetime.utcnow()
         bucket_listing = bucket.list(
             prefix=self.last_update_time.strftime('%Y%m%d%H'))
@@ -187,7 +187,7 @@ class S3DirectiveWatcher(threading.Thread):
         lines = gz.read().split('\n')
 
         directives = {}
-        for line in lines:
+        for line in lines[1:]:
             if len(line.strip()) == 0:
                 # It's an empty line
                 continue
