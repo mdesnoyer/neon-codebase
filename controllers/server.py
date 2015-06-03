@@ -95,6 +95,7 @@ class S3DirectiveWatcher(threading.Thread):
     def read_directives(self):
         # Create the connection to S3
         s3conn = self.S3Connection()
+
         try:
             bucket = s3conn.get_bucket(options.s3_bucket)
         except boto.exception.BotoServerError as e:
@@ -117,23 +118,17 @@ class S3DirectiveWatcher(threading.Thread):
         bucket_listing = bucket.list(
             prefix=self.last_update_time.strftime('%Y%m%d%H'))
 
-        def compare_dates(date1, date2):
-            date_format = "%Y-%m-%dT%H:%M:%S.%fZ"
-            if (datetime.datetime.strptime(date1, date_format) >= date2):
-                return True
-            return False
+        # getting the current hour
+        if (self.last_update_time.hour < now.hour):
+            bucket_listing_now = bucket.list(prefix=now.strftime('%Y%m%d%H'))
+            for key in bucket_listing_now:
+                bucket_listing.append(key)
 
         # filter file by last modified
         filename_list = [
             i for i in bucket_listing
-            if compare_dates(i.last_modified, self.last_update_time)
+            if self.compare_dates(i.last_modified, self.last_update_time)
         ]
-
-        # getting the current hour
-        if (self.last_update_time.hour < now.hour):
-            bucket_listing = bucket.list(prefix=now.strftime('%Y%m%d%H'))
-            for key in bucket_listing:
-                filename_list.append(key)
 
         # for each file get in S3
         for rs in filename_list:
@@ -143,16 +138,23 @@ class S3DirectiveWatcher(threading.Thread):
 
             for key, value in parsed.iteritems():
                 #  get video metada
-                vmd = yield tornado.gen.Task(
+                vcmd = yield tornado.gen.Task(
                     neondata.VideoControllerMetaData.get,
                     value['aid'], value['vid'].split('_', 1)[1])
-                if vmd:
-                    api_key = vmd.get_api_key()
+                if vcmd:
+                    api_key = vcmd.get_api_key()
                     # for each experiment - update directives
-                    for i in vmd.controllers:
-                        if i['state'] == neon_controller.ControllerExperimentState.COMPLETE:
+
+                    for i in vcmd.controllers:
+                        state = \
+                            neon_controller.ControllerExperimentState.COMPLETE
+                        if i['state'] == state:
                             continue
-                        if rs.last_modified <= i['last_process_date']:
+                        last_modified_epoch = (
+                            self.datetime_from_modified(rs.last_modified) -
+                            datetime.datetime(1970, 1, 1)).total_seconds()
+
+                        if last_modified_epoch <= i['last_process_date']:
                             continue
 
                         ctr = neon_controller.Controller.get(
@@ -164,11 +166,11 @@ class S3DirectiveWatcher(threading.Thread):
                                 i, value)
 
                             # update controller - last process date
-                            vmd.update_controller(
+                            vcmd.update_controller(
                                 i['controller_type'], i['platform_id'],
                                 i['experiment_id'], i['video_id'],
-                                state, time.time(), i['extras'])
-                            yield tornado.gen.Task(vmd.save)
+                                state, last_modified_epoch, i['extras'])
+                            yield tornado.gen.Task(vcmd.save)
 
                         except ValueError as e:
                             _log.error("key=read_directives"
@@ -185,7 +187,7 @@ class S3DirectiveWatcher(threading.Thread):
         lines = gz.read().split('\n')
 
         directives = {}
-        for line in lines[1:]:
+        for line in lines:
             if len(line.strip()) == 0:
                 # It's an empty line
                 continue
@@ -196,6 +198,15 @@ class S3DirectiveWatcher(threading.Thread):
                 directives[data['vid']] = data
 
         return directives
+
+    def compare_dates(self, date1, date2):
+        if self.datetime_from_modified(date1) >= date2:
+            return True
+        return False
+
+    def datetime_from_modified(self, date_str):
+        date_format = "%Y-%m-%dT%H:%M:%S.%fZ"
+        return datetime.datetime.strptime(date_str, date_format)
 
 
 def main(activity_watcher=utils.ps.ActivityWatcher()):
