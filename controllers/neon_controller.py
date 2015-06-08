@@ -5,12 +5,11 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import abc
-import json
-import utils.http
-from utils.http import RequestPool
 import tornado.gen
 import tornado.httpclient
 import logging
+import utils.http
+from utils.http import RequestPool
 from utils import statemon
 from cmsdb import neondata
 from cmsdb.neondata import NamespacedStoredObject

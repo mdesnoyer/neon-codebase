@@ -6,7 +6,6 @@ if sys.path[0] != __base_path__:
 
 import logging
 import datetime
-import time
 import utils.neon
 import utils.ps
 import signal
@@ -17,14 +16,14 @@ import tornado.gen
 import tornado.ioloop
 import boto
 import socket
-from StringIO import StringIO
 import gzip
 import json
 from boto.s3.connection import S3Connection
-from utils import statemon
-from utils.options import define, options
 from cmsdb import neondata
 from controllers import neon_controller
+from utils import statemon
+from utils.options import define, options
+from StringIO import StringIO
 _log = logging.getLogger(__name__)
 
 define('s3_bucket', default='neon-image-serving-directives-test',

@@ -15,16 +15,14 @@ import unittest
 import utils.neon
 import test_utils.neontest
 import test_utils.redis
-import redis
-import controllers.neon_controller as neon_controller
-import test_utils.neon_controller_aux as neon_controller_aux
 import tornado.gen
 import datetime
+import controllers.neon_controller as neon_controller
+import test_utils.neon_controller_aux as neon_controller_aux
 from cmsdb import neondata
-from mock import patch, MagicMock
+from mock import patch
 from tornado.httpclient import HTTPRequest, HTTPResponse
 from StringIO import StringIO
-from concurrent.futures import Future
 _log = logging.getLogger(__name__)
 
 # Global Constants

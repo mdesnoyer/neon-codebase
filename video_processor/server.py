@@ -37,7 +37,6 @@ import utils.http
 import utils.neon
 import utils.ps
 from utils import statemon
-import controllers.neon_controller
 
 #Tornado options
 from utils.options import define, options
