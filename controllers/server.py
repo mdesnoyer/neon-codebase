@@ -137,14 +137,14 @@ class S3DirectiveWatcher(threading.Thread):
 
             for key, value in parsed.iteritems():
                 #  get video metada
-                vcmd = yield tornado.gen.Task(
-                    neondata.VideoControllerMetaData.get,
+                ecmd = yield tornado.gen.Task(
+                    neondata.ExperimentControllerMetaData.get,
                     value['aid'], value['vid'].split('_', 1)[1])
-                if vcmd:
-                    api_key = vcmd.get_api_key()
+                if ecmd:
+                    api_key = ecmd.get_api_key()
                     # for each experiment - update directives
 
-                    for i in vcmd.controllers:
+                    for i in ecmd.controllers:
                         state = \
                             neon_controller.ControllerExperimentState.COMPLETE
                         if i['state'] == state:
@@ -165,11 +165,11 @@ class S3DirectiveWatcher(threading.Thread):
                                 i, value)
 
                             # update controller - last process date
-                            vcmd.update_controller(
+                            ecmd.update_controller(
                                 i['controller_type'], i['platform_id'],
                                 i['experiment_id'], i['video_id'],
                                 state, last_modified_epoch, i['extras'])
-                            yield tornado.gen.Task(vcmd.save)
+                            yield tornado.gen.Task(ecmd.save)
 
                         except ValueError as e:
                             _log.error("key=read_directives"

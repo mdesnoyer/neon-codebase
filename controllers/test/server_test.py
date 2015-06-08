@@ -77,12 +77,12 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
 
         self.i_id = "0"
         self.controller_type = ControllerType.OPTIMIZELY
-        self.vcmd1 = self.create_default_video_controller_meta_data(
+        self.ecmd1 = self.create_default_experiment_controller_meta_data(
             a_id='1', exp_id='1', video_id='1', goal_id='1')
-        self.vcmd2 = self.create_default_video_controller_meta_data(
+        self.ecmd2 = self.create_default_experiment_controller_meta_data(
             a_id='2', exp_id='2', video_id='2', goal_id='2',
             state=ControllerExperimentState.INPROGRESS)
-        self.vcmd3 = self.create_default_video_controller_meta_data(
+        self.ecmd3 = self.create_default_experiment_controller_meta_data(
             a_id='3', exp_id='3', video_id='3', goal_id='3',
             state=ControllerExperimentState.INPROGRESS)
 
@@ -91,21 +91,21 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
                 datetime.utcnow().strftime('%Y%m%d%H%M%S'), 'mastermind'),
             'last_modified': datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
             'data': self.generate_gzipstring_with_directive(
-                self.vcmd1, [0.2, 0.7, 0.1])
+                self.ecmd1, [0.2, 0.7, 0.1])
         }
         self.item_one_hour_ago = {
             'name': '%s.%s' % (
                 (datetime.utcnow() - timedelta(hours=1)).strftime('%Y%m%d%H%M%S'), 'mastermind'),
             'last_modified': datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
             'data': self.generate_gzipstring_with_directive(
-                self.vcmd2, [0.1, 0.7, 0.2])
+                self.ecmd2, [0.1, 0.7, 0.2])
         }
         self.item_two_hours_ago = {
             'name': '%s.%s' % (
                 (datetime.utcnow() - timedelta(hours=2)).strftime('%Y%m%d%H%M%S'), 'mastermind'),
             'last_modified': datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
             'data': self.generate_gzipstring_with_directive(
-                self.vcmd2, [0.1, 0.7, 0.2])
+                self.ecmd2, [0.1, 0.7, 0.2])
         }
 
         self.s3conn = MockS3Connection([
@@ -117,26 +117,27 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
         self.redis.stop()
         super(TestS3DirectiveWatcher, self).tearDown()
 
-    def create_default_video_controller_meta_data(self, a_id, exp_id, video_id,
-                                                  goal_id, state=None):
-        vcmd = neondata.VideoControllerMetaData(
+    def create_default_experiment_controller_meta_data(self, a_id, exp_id,
+                                                       video_id, goal_id,
+                                                       state=None):
+        ecmd = neondata.ExperimentControllerMetaData(
             a_id, self.i_id, self.controller_type,
             exp_id, video_id,
             {'goal_id': str(goal_id), 'ovid_to_tid': {}},
             0)
 
         if state is not None:
-            vcmd.controllers[0]['state'] = state
+            ecmd.controllers[0]['state'] = state
 
-        vcmd.save()
-        return vcmd
+        ecmd.save()
+        return ecmd
 
-    def generate_gzipstring_with_directive(self, vcmd, thumbs_pct=[]):
+    def generate_gzipstring_with_directive(self, ecmd, thumbs_pct=[]):
         directive_data = {
             "type": "dir",
-            "aid": vcmd.get_api_key(),
+            "aid": ecmd.get_api_key(),
             "vid": "%s_%s" % (
-                vcmd.get_api_key(), vcmd.controllers[0]['video_id']),
+                ecmd.get_api_key(), ecmd.controllers[0]['video_id']),
             "sla": datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
             "fractions": []
         }
@@ -224,7 +225,7 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
         mock_compare_dates.assert_has_calls(calls, any_order=True)
         self.assertEqual(mock_compare_dates.call_count, 2)
 
-    @patch('cmsdb.neondata.VideoControllerMetaData.get')
+    @patch('cmsdb.neondata.ExperimentControllerMetaData.get')
     def test_read_directives_check_get_metadata(self, mock_get):
         self.directive_watcher.read_directives()
         mock_get.assert_called_with('1', '1', callback=ANY)
@@ -233,9 +234,9 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
     @patch('controllers.neon_controller.Controller.get')
     @tornado.testing.gen_test
     def test_read_directives_check_metadata_state(self, mock_get):
-        self.vcmd1.controllers[0]['state'] = \
+        self.ecmd1.controllers[0]['state'] = \
             ControllerExperimentState.COMPLETE
-        self.vcmd1.save()
+        self.ecmd1.save()
 
         yield self.directive_watcher.read_directives()
         self.assertEqual(mock_get.call_count, 0)
@@ -246,9 +247,9 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
         last_modified_epoch = (
             (datetime.utcnow() + timedelta(hours=1)) -
             datetime(1970, 1, 1)).total_seconds()
-        self.vcmd1.controllers[0]['last_process_date'] = \
+        self.ecmd1.controllers[0]['last_process_date'] = \
             last_modified_epoch
-        self.vcmd1.save()
+        self.ecmd1.save()
 
         yield self.directive_watcher.read_directives()
         self.assertEqual(mock_get.call_count, 0)
@@ -269,7 +270,7 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
 
         yield self.directive_watcher.read_directives()
         mock_update.assert_called_with(
-            self.vcmd1.controllers[0], self.unzip_file(self.item_now['data'])['1_1'], callback=ANY
+            self.ecmd1.controllers[0], self.unzip_file(self.item_now['data'])['1_1'], callback=ANY
         )
     '''
 if __name__ == '__main__':

@@ -76,8 +76,8 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
             goal_type=2, selector="", target_to_experiments=True,
             experiment_ids=[exp['id']])
 
-    def create_default_video_controller_meta_data(self):
-        vcmd = neondata.VideoControllerMetaData(
+    def create_default_experiment_controller_meta_data(self):
+        ecmd = neondata.ExperimentControllerMetaData(
             self.a_id,
             self.i_id,
             neon_controller.ControllerType.OPTIMIZELY,
@@ -90,8 +90,8 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 'ovid_to_tid': {}
             },
             0)
-        vcmd.save()
-        return vcmd
+        ecmd.save()
+        return ecmd
 
     def generate_fractions_s3_file(self, thumbs_pct=[]):
         directive = {
@@ -323,26 +323,26 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         self.assertEquals(response['experiment_id'], experiment_id)
         self.assertIsNotNone(response['js_component'])
 
-        vcmd = yield tornado.gen.Task(
-            neondata.VideoControllerMetaData.get,
+        ecmd = yield tornado.gen.Task(
+            neondata.ExperimentControllerMetaData.get,
             self.a_id, self.video_id)
-        vcmd_ctr = vcmd.controllers[0]
-        vcmd_ctr_extras = vcmd_ctr['extras']
+        ecmd_ctr = ecmd.controllers[0]
+        ecmd_ctr_extras = ecmd_ctr['extras']
 
-        self.assertEquals(len(vcmd.controllers), 1)
+        self.assertEquals(len(ecmd.controllers), 1)
         self.assertEquals(
-            vcmd_ctr['controller_type'],
+            ecmd_ctr['controller_type'],
             neon_controller.ControllerType.OPTIMIZELY)
-        self.assertEquals(vcmd_ctr['platform_id'], self.i_id)
-        self.assertEquals(vcmd_ctr['video_id'], self.video_id)
-        self.assertEquals(vcmd_ctr['last_process_date'], 0)
+        self.assertEquals(ecmd_ctr['platform_id'], self.i_id)
+        self.assertEquals(ecmd_ctr['video_id'], self.video_id)
+        self.assertEquals(ecmd_ctr['last_process_date'], 0)
         self.assertEquals(
-            vcmd_ctr['state'],
+            ecmd_ctr['state'],
             neon_controller.ControllerExperimentState.PENDING)
-        self.assertEquals(vcmd_ctr['experiment_id'], experiment_id)
-        self.assertEquals(vcmd_ctr_extras['goal_id'], extras['goal_id'])
-        self.assertEquals(vcmd_ctr_extras['element_id'], extras['element_id'])
-        self.assertIsNotNone(vcmd_ctr_extras['js_component'])
+        self.assertEquals(ecmd_ctr['experiment_id'], experiment_id)
+        self.assertEquals(ecmd_ctr_extras['goal_id'], extras['goal_id'])
+        self.assertEquals(ecmd_ctr_extras['element_id'], extras['element_id'])
+        self.assertIsNotNone(ecmd_ctr_extras['js_component'])
 
     @patch('controllers.neon_controller.utils.http.send_request')
     @patch('controllers.neon_controller.OptimizelyController.verify_account')
@@ -358,7 +358,7 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
             {'goal_id': self.goal_id, 'element_id': '#11', 'js_component': ''}
 
         # call again
-        self.create_default_video_controller_meta_data()
+        self.create_default_experiment_controller_meta_data()
         with self.assertRaises(ValueError) as e:
             yield controller.verify_experiment(
                 self.i_id, self.experiment_id, self.video_id, extras)
@@ -375,20 +375,20 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
 
         extras = \
             {'goal_id': self.goal_id, 'element_id': '#11', 'js_component': ''}
-        self.create_default_video_controller_meta_data()
-        vd = neondata.VideoControllerMetaData(
+        self.create_default_experiment_controller_meta_data()
+        ecmd = neondata.ExperimentControllerMetaData(
             self.a_id, self.i_id, neon_controller.ControllerType.OPTIMIZELY,
             '123456', self.video_id, extras, 0)
-        vd.save()
+        ecmd.save()
 
         mock_http.side_effect = self._side_effect_to_verity_experiment
         yield controller.verify_experiment(
             self.i_id, self.experiment_id, self.video_id, extras)
 
-        vmd = yield tornado.gen.Task(
-            neondata.VideoControllerMetaData.get,
+        ecmd = yield tornado.gen.Task(
+            neondata.ExperimentControllerMetaData.get,
             self.a_id, self.video_id)
-        self.assertEquals(len(vmd.controllers), 2)
+        self.assertEquals(len(ecmd.controllers), 2)
 
     @patch('controllers.neon_controller.utils.http.send_request')
     @patch('controllers.neon_controller.OptimizelyController.verify_account')
@@ -518,10 +518,10 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
             HTTPRequest(OPTMIZELY_ENDPOINT, method='GET'), 400,
             buffer=StringIO(json.dumps('timeout')))
 
-        vcmd = self.create_default_video_controller_meta_data()
+        ecmd = self.create_default_experiment_controller_meta_data()
         with self.assertRaises(ValueError) as e:
             yield controller.update_experiment_with_directives(
-                vcmd.controllers[0],
+                ecmd.controllers[0],
                 self.generate_fractions_s3_file)
         self.assertTrue("code: 400" in str(e.exception))
 
@@ -582,9 +582,9 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                             status="Running"))))
 
         mock_http.side_effect = _side_effect
-        vcmd = self.create_default_video_controller_meta_data()
+        ecmd = self.create_default_experiment_controller_meta_data()
         yield controller.update_experiment_with_directives(
-            vcmd.controllers[0], {'fractions': []})
+            ecmd.controllers[0], {'fractions': []})
 
         self.assertEquals(self.n_var_update_success_calls, 2)
         lv = self.optimizely_api_aux.variation_list(
@@ -605,8 +605,8 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         # 1-With Update, 2-NotChange, 3-Remove,
         # 4-Delete with 404(And Create), 5-Create
 
-        vcmd = self.create_default_video_controller_meta_data()
-        vcmd_ovid_to_tid = vcmd.controllers[0]['extras']['ovid_to_tid']
+        ecmd = self.create_default_experiment_controller_meta_data()
+        ecmd_ovid_to_tid = ecmd.controllers[0]['extras']['ovid_to_tid']
         for idx, var in enumerate([2000, 2000, 1000, 5000]):
             is_paused = True if var == 0 else False
             v = self.optimizely_api_aux.variation_create(
@@ -614,12 +614,12 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 description="Variation #%s" % idx, is_paused=is_paused,
                 js_component='', weight=var)
             variation_id = str(v['id'])
-            vcmd_ovid_to_tid[variation_id] = "thumb%s" % idx
+            ecmd_ovid_to_tid[variation_id] = "thumb%s" % idx
 
             if idx == 2:
                 self.optimizely_api_aux.variation_remove(idx+1)
-        vcmd.save()
-        before_variations = len(vcmd_ovid_to_tid)
+        ecmd.save()
+        before_variations = len(ecmd_ovid_to_tid)
 
         # Create S3 fractions file based on variation list by experiment
         fractions_s3_file = self.generate_fractions_s3_file(
@@ -675,13 +675,13 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
 
         mock_http.side_effect = _side_effect
         response = yield controller.update_experiment_with_directives(
-            vcmd.controllers[0], fractions_s3_file)
+            ecmd.controllers[0], fractions_s3_file)
 
         variation_list = self.optimizely_api_aux.variation_list(
             experiment_id=self.experiment_id)
         for v in variation_list:
             variation_id = v['id']
-            has_key = str(variation_id) in vcmd_ovid_to_tid
+            has_key = str(variation_id) in ecmd_ovid_to_tid
 
             if variation_id == 1:
                 self.assertEquals(v['weight'], 1000)
@@ -705,9 +705,9 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 self.assertEquals(v['is_paused'], False)
                 self.assertEquals(v['description'], 'thumb3')
                 self.assertEquals(has_key, True)
-        self.assertTrue(str(3) not in vcmd_ovid_to_tid)
+        self.assertTrue(str(3) not in ecmd_ovid_to_tid)
 
-        after_variations = len(vcmd_ovid_to_tid)
+        after_variations = len(ecmd_ovid_to_tid)
         self.assertEquals(before_variations, 4)  # before calls
         self.assertEquals(after_variations, 4)  # 2 deletes and 2 inserts
         self.assertEquals(self.n_var_update_success_calls, 1)  # one update
@@ -728,8 +728,8 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         controller = yield neon_controller.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
-        vcmd = self.create_default_video_controller_meta_data()
-        vcmd_ovid_to_tid = vcmd.controllers[0]['extras']['ovid_to_tid']
+        ecmd = self.create_default_experiment_controller_meta_data()
+        ecmd_ovid_to_tid = ecmd.controllers[0]['extras']['ovid_to_tid']
         for idx, var in enumerate([5000, 4000, 0, 1000]):
             is_paused = True if var == 0 else False
             v = self.optimizely_api_aux.variation_create(
@@ -737,8 +737,8 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 description="Variation #%s" % idx, is_paused=is_paused,
                 js_component='', weight=var)
             variation_id = str(v['id'])
-            vcmd_ovid_to_tid[variation_id] = "thumb%s" % idx
-        vcmd.save()
+            ecmd_ovid_to_tid[variation_id] = "thumb%s" % idx
+        ecmd.save()
 
         # Create S3 fractions file based on variation list by experiment
         fractions_s3_file = self.generate_fractions_s3_file(
@@ -775,7 +775,7 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
 
         mock_http.side_effect = _side_effect
         response = yield controller.update_experiment_with_directives(
-            vcmd.controllers[0], fractions_s3_file)
+            ecmd.controllers[0], fractions_s3_file)
 
         self.assertEquals(
             response, neon_controller.ControllerExperimentState.COMPLETE)
@@ -796,9 +796,9 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
             HTTPRequest(OPTMIZELY_ENDPOINT), 400,
             buffer=StringIO(json.dumps("not found")))
 
-        vcmd = self.create_default_video_controller_meta_data()
+        ecmd = self.create_default_experiment_controller_meta_data()
         with self.assertRaises(ValueError) as e:
-            controller.retrieve_experiment_results(vcmd.controllers[0])
+            controller.retrieve_experiment_results(ecmd.controllers[0])
         self.assertTrue("code: 400" in str(e.exception))
 
     @patch('controllers.neon_controller.utils.http.send_request')
@@ -810,8 +810,8 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         controller = yield neon_controller.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
-        vcmd = self.create_default_video_controller_meta_data()
-        vcmd_ovid_to_tid = vcmd.controllers[0]['extras']['ovid_to_tid']
+        ecmd = self.create_default_experiment_controller_meta_data()
+        ecmd_ovid_to_tid = ecmd.controllers[0]['extras']['ovid_to_tid']
         for idx, var in enumerate([5000, 4000, 0, 1000]):
             is_paused = True if var == 0 else False
             v = self.optimizely_api_aux.variation_create(
@@ -820,8 +820,8 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 js_component='', weight=var)
             if idx != 0:
                 variation_id = str(v['id'])
-                vcmd_ovid_to_tid[variation_id] = "thumb%s" % idx
-        vcmd.save()
+                ecmd_ovid_to_tid[variation_id] = "thumb%s" % idx
+        ecmd.save()
 
         mock_http.return_value = HTTPResponse(
             HTTPRequest(OPTMIZELY_ENDPOINT), 200,
@@ -829,12 +829,12 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 self.optimizely_api_aux.experiment_status(
                     experiment_id=self.experiment_id))))
 
-        response = controller.retrieve_experiment_results(vcmd.controllers[0])
+        response = controller.retrieve_experiment_results(ecmd.controllers[0])
         self.assertEquals(len(response), 3)
 
         for s in response:
             has_thumb = False
-            for key, value in vcmd_ovid_to_tid.iteritems():
+            for key, value in ecmd_ovid_to_tid.iteritems():
                 if value == s['thumb_id']:
                     has_thumb = True
             self.assertEquals(has_thumb, True)

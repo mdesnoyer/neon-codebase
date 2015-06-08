@@ -3804,11 +3804,11 @@ class VideoCallbackResponse(AbstractJsonResponse):
         self.timestamp = str(time.time())
 
 
-class VideoControllerMetaData(NamespacedStoredObject):
+class ExperimentControllerMetaData(NamespacedStoredObject):
     def __init__(self, api_key, platform_id='', c_type='',
                  experiment_id='', video_id='', extras={},
                  last_process_date=None):
-        super(VideoControllerMetaData, self).__init__(
+        super(ExperimentControllerMetaData, self).__init__(
             self._generate_subkey(api_key, video_id))
 
         state = controllers.neon_controller.ControllerExperimentState.PENDING
@@ -3860,13 +3860,13 @@ class VideoControllerMetaData(NamespacedStoredObject):
 
     @classmethod
     def get(cls, api_key, video_id, callback=None):
-        return super(VideoControllerMetaData, cls).get(
+        return super(ExperimentControllerMetaData, cls).get(
             cls._generate_subkey(api_key, video_id),
             callback=callback)
 
     @classmethod
     def _baseclass_name(cls):
-        return VideoControllerMetaData.__name__
+        return ExperimentControllerMetaData.__name__
 
 
 if __name__ == '__main__':

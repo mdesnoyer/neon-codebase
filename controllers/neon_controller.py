@@ -45,11 +45,11 @@ class ControllerBase(NamespacedStoredObject):
         return
 
     @abc.abstractmethod
-    def update_experiment_with_directives(self, vcmd, directive):
+    def update_experiment_with_directives(self, ecmd, directive):
         return
 
     @abc.abstractmethod
-    def retrieve_experiment_results(self, vcmd, experiment_id):
+    def retrieve_experiment_results(self, ecmd, experiment_id):
         return
 
     @abc.abstractmethod
@@ -130,27 +130,27 @@ class OptimizelyController(ControllerBase):
                 extras['element_id'])
 
         # create or append new experiment
-        vd = yield tornado.gen.Task(
-            neondata.VideoControllerMetaData.get,
+        ecmd = yield tornado.gen.Task(
+            neondata.ExperimentControllerMetaData.get,
             self.api_key, video_id)
 
-        if vd:
+        if ecmd:
             e_list = [
-                i for i in vd.controllers
+                i for i in ecmd.controllers
                 if i['experiment_id'] == experiment_id
             ]
             if len(e_list) > 0:
                 raise ValueError("Experiment already exists")
                 return
             else:
-                vd.append_controller(self.get_name(), platform_id,
-                                     experiment_id, video_id, extras, 0)
+                ecmd.append_controller(self.get_name(), platform_id,
+                                       experiment_id, video_id, extras, 0)
         else:
-            vd = neondata.VideoControllerMetaData(
+            ecmd = neondata.ExperimentControllerMetaData(
                 self.api_key, self.platform_id,
                 self.get_name(), experiment_id, video_id, extras, 0)
 
-        yield tornado.gen.Task(vd.save)
+        yield tornado.gen.Task(ecmd.save)
 
         # return data
         data = {
@@ -163,9 +163,9 @@ class OptimizelyController(ControllerBase):
         raise tornado.gen.Return(data)
 
     @tornado.gen.coroutine
-    def update_experiment_with_directives(self, vcmd, directive):
+    def update_experiment_with_directives(self, ecmd, directive):
         state = ControllerExperimentState.INPROGRESS
-        experiment_id = vcmd['experiment_id']
+        experiment_id = ecmd['experiment_id']
 
         # retrieve list of variations in experiment optimizely
         v_list_resp = self.get_variations(experiment_id=experiment_id)
@@ -175,7 +175,7 @@ class OptimizelyController(ControllerBase):
 
         # iterate optimizely variations to "disable" variation not used
         for var in v_list_resp['data']:
-            if str(var['id']) in vcmd['extras']['ovid_to_tid']:
+            if str(var['id']) in ecmd['extras']['ovid_to_tid']:
                 continue
 
             # Variation exists in optimizely BUT
@@ -200,7 +200,7 @@ class OptimizelyController(ControllerBase):
             frac_calc = int(10000 * thumb['pct'])
 
             # Get the variation key by thumbnail id
-            for key, value in vcmd['extras']['ovid_to_tid'].iteritems():
+            for key, value in ecmd['extras']['ovid_to_tid'].iteritems():
                 if value == thumb['tid']:
                     variation_id = int(key)
 
@@ -210,7 +210,7 @@ class OptimizelyController(ControllerBase):
                                             variation_id)
                 # Variation not found. Assuming Delete
                 if var is None:
-                    vcmd['extras']['ovid_to_tid'].pop(str(variation_id), None)
+                    ecmd['extras']['ovid_to_tid'].pop(str(variation_id), None)
                 else:
                     # Update variation
                     if var['weight'] == frac_calc:
@@ -224,7 +224,7 @@ class OptimizelyController(ControllerBase):
                         # Optimizely Issue: If a variation has been deleted.
                         # I still get the variation when call the variations list.
                         # Any access to variation by ID. I receive 404.
-                        vcmd['extras']['ovid_to_tid'].pop(
+                        ecmd['extras']['ovid_to_tid'].pop(
                             str(variation_id), None)
                         var = None
                     elif response["status_code"] != 202:
@@ -234,13 +234,13 @@ class OptimizelyController(ControllerBase):
 
             # Create new variation
             if var is None:
-                js_component = vcmd['extras']['js_component']
-                vcmd['extras']['js_component'] = js_component.replace(
+                js_component = ecmd['extras']['js_component']
+                ecmd['extras']['js_component'] = js_component.replace(
                     "THUMB_URL", thumb['imgs'][0]['url'])
 
                 response = self.create_variation(
                     experiment_id=experiment_id, weight=frac_calc,
-                    js_component=vcmd['extras']['js_component'],
+                    js_component=ecmd['extras']['js_component'],
                     is_paused=False, description=thumb['tid'])
 
                 if response["status_code"] != 201:
@@ -249,7 +249,7 @@ class OptimizelyController(ControllerBase):
                             self.get_name(), response["status_code"]))
 
                 variation_id = str(response['data']['id'])
-                vcmd['extras']['ovid_to_tid'][variation_id] = thumb['tid']
+                ecmd['extras']['ovid_to_tid'][variation_id] = thumb['tid']
 
         # Update experiment - Start
         exp_resp = self.update_experiment(experiment_id=experiment_id,
@@ -267,8 +267,8 @@ class OptimizelyController(ControllerBase):
 
         raise tornado.gen.Return(state)
 
-    def retrieve_experiment_results(self, vcmd):
-        experiment_id = vcmd['experiment_id']
+    def retrieve_experiment_results(self, ecmd):
+        experiment_id = ecmd['experiment_id']
         exp_status = self.get_experiments_status(experiment_id=experiment_id)
         if exp_status["status_code"] != 200:
             raise ValueError(
@@ -281,14 +281,14 @@ class OptimizelyController(ControllerBase):
             goal_id = str(exp['goal_id'])
 
             # I do not know this variation
-            if variation_id not in vcmd['extras']['ovid_to_tid']:
+            if variation_id not in ecmd['extras']['ovid_to_tid']:
                 continue
             # I do not want this goal
-            if goal_id != vcmd['extras']['goal_id']:
+            if goal_id != ecmd['extras']['goal_id']:
                 continue
 
             item = {
-                'thumb_id': vcmd['extras']['ovid_to_tid'][variation_id],
+                'thumb_id': ecmd['extras']['ovid_to_tid'][variation_id],
                 'visitors': exp['visitors'],
                 'conversions': exp['conversions'],
                 'conversion_rate': exp['conversion_rate']

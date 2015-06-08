@@ -2350,10 +2350,10 @@ class TestOptimizelyIntegration(tornado.testing.AsyncHTTPTestCase):
         resp = self.create_optimizely_experiment()
         resp_data = json.loads(resp.body)
 
-        vcmd = neondata.VideoControllerMetaData.get(
+        ecmd = neondata.ExperimentControllerMetaData.get(
             self.api_key, self.video_id)
 
-        self.assertIsNotNone(vcmd)
+        self.assertIsNotNone(ecmd)
         self.assertEqual(resp_data['experiment_id'], self.experiment_id)
         self.assertEqual(resp_data['element_id'], self.element_id)
         self.assertEqual(resp_data['video_id'], self.video_id)

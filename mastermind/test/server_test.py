@@ -2062,9 +2062,9 @@ class TestControllerResultsRetriever(test_utils.neontest.AsyncTestCase):
 
         self.i_id = "0"
         self.controller_type = neon_controller.ControllerType.OPTIMIZELY
-        self.create_default_video_controller_meta_data(
+        self.create_default_experiment_controller_meta_data(
             a_id='1', exp_id='1', video_id='1', goal_id='1')
-        self.create_default_video_controller_meta_data(
+        self.create_default_experiment_controller_meta_data(
             a_id='2', exp_id='2', video_id='2', goal_id='2',
             state=neon_controller.ControllerExperimentState.INPROGRESS)
 
@@ -2072,9 +2072,10 @@ class TestControllerResultsRetriever(test_utils.neontest.AsyncTestCase):
         self.redis.stop()
         super(TestControllerResultsRetriever, self).tearDown()
 
-    def create_default_video_controller_meta_data(self, a_id, exp_id, video_id,
-                                                  goal_id, state=None):
-        vcmd = neondata.VideoControllerMetaData(
+    def create_default_experiment_controller_meta_data(self, a_id, exp_id,
+                                                       video_id, goal_id,
+                                                       state=None):
+        ecmd = neondata.ExperimentControllerMetaData(
             a_id,
             self.i_id,
             self.controller_type,
@@ -2089,13 +2090,14 @@ class TestControllerResultsRetriever(test_utils.neontest.AsyncTestCase):
             0)
 
         if state is not None:
-            vcmd.controllers[0]['state'] = state
+            ecmd.controllers[0]['state'] = state
 
-        vcmd.save()
-        return vcmd
+        ecmd.save()
+        return ecmd
 
     @patch('controllers.neon_controller.Controller.get')
-    def test_results_retriever_vcmd_in_progress(self, mock_ctr_get):
+    def test_results_retriever_experiment_controller_in_progress(self,
+                                                                 mock_ctr_get):
         self.retriever._results_retriever()
 
         mock_ctr_get.assert_called_with(

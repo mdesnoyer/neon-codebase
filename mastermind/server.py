@@ -1394,11 +1394,11 @@ class ControllerResultsRetriever(threading.Thread):
     def _results_retriever(self):
         data = []
 
-        vcmds = neondata.VideoControllerMetaData.get_all()
-        for vcmd in vcmds:
-            api_key = vcmd.get_api_key()
+        ecmds = neondata.ExperimentControllerMetaData.get_all()
+        for ecmd in ecmds:
+            api_key = ecmd.get_api_key()
 
-            for c in vcmd.controllers:
+            for c in ecmd.controllers:
                 state = neon_controller.ControllerExperimentState.INPROGRESS
                 if c['state'] != state:
                     continue
