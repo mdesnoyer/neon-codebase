@@ -157,7 +157,7 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         with self.assertRaises(ValueError) as e:
             yield neon_controller.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
-        self.assertEquals("Integration already exists", str(e.exception))
+        self.assertEquals("Controller already exists", str(e.exception))
 
     @patch('controllers.neon_controller.utils.http.send_request')
     @patch('controllers.neon_controller.OptimizelyController.verify_account')

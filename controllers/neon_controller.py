@@ -720,7 +720,7 @@ class Controller(object):
     def create(cls, c_type, api_key, platform_id, access_key):
         controller = Controller.get(c_type, api_key, platform_id)
         if controller:
-            raise ValueError("Integration already exists")
+            raise ValueError("Controller already exists")
 
         controller = Controller(c_type, api_key, platform_id, access_key)
         token_response = controller.verify_account()

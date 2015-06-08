@@ -2329,7 +2329,7 @@ class TestOptimizelyIntegration(tornado.testing.AsyncHTTPTestCase):
     def test_optimizely_integration_already_exist(self):
         self.create_optimizely_integration()  # create first
         resp = self.create_optimizely_integration()  # call again
-        self.assertEquals(resp.body, '{"error": "Integration already exists"}')
+        self.assertEquals(resp.body, '{"error": "Controller already exists"}')
         self.assertEqual(resp.code, 502)
 
     @patch('controllers.neon_controller.OptimizelyController.verify_account')
