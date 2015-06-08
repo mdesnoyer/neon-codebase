@@ -3822,10 +3822,10 @@ class VideoControllerMetaData(NamespacedStoredObject):
             "last_process_date": last_process_date
         }]
 
-    def append_controller(cls, c_type, platform_id, experiment_id,
+    def append_controller(self, c_type, platform_id, experiment_id,
                           video_id, extras, last_process_date):
         state = controllers.neon_controller.ControllerExperimentState.PENDING
-        cls.controllers.append({
+        self.controllers.append({
             "controller_type": c_type,
             "platform_id": platform_id,
             "experiment_id": experiment_id,
@@ -3835,10 +3835,10 @@ class VideoControllerMetaData(NamespacedStoredObject):
             "last_process_date": last_process_date
         })
 
-    def update_controller(cls, c_type, platform_id, experiment_id,
+    def update_controller(self, c_type, platform_id, experiment_id,
                           video_id, state, last_process_date, extras=None):
         item = [
-            i for i in cls.controllers
+            i for i in self.controllers
             if (i['controller_type'] == c_type and
                 i['platform_id'] == platform_id and
                 i['experiment_id'] == experiment_id and
@@ -3851,17 +3851,17 @@ class VideoControllerMetaData(NamespacedStoredObject):
             item[0]['last_process_date'] = last_process_date
         return
 
-    def get_api_key(cls):
-        return cls.get_id().split('_', 1)[0];
+    def get_api_key(self):
+        return self.get_id().split('_', 1)[0]
 
     @classmethod
     def _generate_subkey(cls, api_key, video_id):
         return '_'.join([api_key, video_id])
 
     @classmethod
-    def get(self, api_key, video_id, callback=None):
-        return super(VideoControllerMetaData, self).get(
-            self._generate_subkey(api_key, video_id),
+    def get(cls, api_key, video_id, callback=None):
+        return super(VideoControllerMetaData, cls).get(
+            cls._generate_subkey(api_key, video_id),
             callback=callback)
 
     @classmethod

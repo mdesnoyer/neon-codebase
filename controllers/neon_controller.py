@@ -66,20 +66,20 @@ class OptimizelyController(ControllerBase):
         self.access_token = access_token
 
     @classmethod
-    def _generate_subkey(self, api_key, platform_id):
+    def _generate_subkey(cls, api_key, platform_id):
         return '_'.join([api_key, platform_id])
 
     @classmethod
-    def get(self, api_key, platform_id, callback=None):
-        return super(OptimizelyController, self).get(
-            self._generate_subkey(api_key, platform_id), callback=callback)
+    def get(cls, api_key, platform_id, callback=None):
+        return super(OptimizelyController, cls).get(
+            cls._generate_subkey(api_key, platform_id), callback=callback)
 
     @classmethod
-    def _baseclass_name(self):
-        return self.get_ovp()
+    def _baseclass_name(cls):
+        return cls.get_ovp()
 
     @classmethod
-    def get_ovp(self):
+    def get_ovp(cls):
         return ControllerType.OPTIMIZELY
 
     ###########################################################################
