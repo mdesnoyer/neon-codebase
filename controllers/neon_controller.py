@@ -52,6 +52,10 @@ class ControllerBase(NamespacedStoredObject):
     def retrieve_experiment_results(self, vcmd, experiment_id):
         return
 
+    @abc.abstractmethod
+    def get_name(cls):
+        return
+
 
 class OptimizelyController(ControllerBase):
     base_url = 'https://www.optimizelyapis.com/experiment/v1/'
@@ -75,10 +79,10 @@ class OptimizelyController(ControllerBase):
 
     @classmethod
     def _baseclass_name(cls):
-        return cls.get_ovp()
+        return cls.get_name()
 
     @classmethod
-    def get_ovp(cls):
+    def get_name(cls):
         return ControllerType.OPTIMIZELY
 
     ###########################################################################
@@ -101,7 +105,7 @@ class OptimizelyController(ControllerBase):
 
         if exp_response["status_code"] != 200:
             raise ValueError("could not verify %s experiment. code: %s" % (
-                self.get_ovp(), exp_response["status_code"]))
+                self.get_name(), exp_response["status_code"]))
 
         # get primary goal for experiment
         if extras['goal_id'] is None:
@@ -111,7 +115,7 @@ class OptimizelyController(ControllerBase):
         goal_response = self.read_goal(goal_id=extras['goal_id'])
         if goal_response["status_code"] != 200:
             raise ValueError("could not verify %s goal. code: %s" % (
-                self.get_ovp(), goal_response["status_code"]))
+                self.get_name(), goal_response["status_code"]))
 
         if goal_response['data']['goal_type'] == 2:
             raise ValueError(
@@ -139,12 +143,12 @@ class OptimizelyController(ControllerBase):
                 raise ValueError("Experiment already exists")
                 return
             else:
-                vd.append_controller(self.get_ovp(), platform_id,
+                vd.append_controller(self.get_name(), platform_id,
                                      experiment_id, video_id, extras, 0)
         else:
             vd = neondata.VideoControllerMetaData(
                 self.api_key, self.platform_id,
-                self.get_ovp(), experiment_id, video_id, extras, 0)
+                self.get_name(), experiment_id, video_id, extras, 0)
 
         yield tornado.gen.Task(vd.save)
 
@@ -167,7 +171,7 @@ class OptimizelyController(ControllerBase):
         v_list_resp = self.get_variations(experiment_id=experiment_id)
         if v_list_resp["status_code"] != 200:
             raise ValueError("could not verify %s variation. code: %s" % (
-                self.get_ovp(), v_list_resp["status_code"]))
+                self.get_name(), v_list_resp["status_code"]))
 
         # iterate optimizely variations to "disable" variation not used
         for var in v_list_resp['data']:
@@ -187,7 +191,7 @@ class OptimizelyController(ControllerBase):
             elif response["status_code"] != 202:
                 raise ValueError(
                     "could not update %s variation. code: %s" % (
-                        self.get_ovp(), response["status_code"]))
+                        self.get_name(), response["status_code"]))
 
         # iterate fractions to create/update variation in optimizely
         for thumb in directive['fractions']:
@@ -226,7 +230,7 @@ class OptimizelyController(ControllerBase):
                     elif response["status_code"] != 202:
                         raise ValueError(
                             "could not update %s variation. code: %s" % (
-                                self.get_ovp(), response["status_code"]))
+                                self.get_name(), response["status_code"]))
 
             # Create new variation
             if var is None:
@@ -242,7 +246,7 @@ class OptimizelyController(ControllerBase):
                 if response["status_code"] != 201:
                     raise ValueError(
                         "could not create %s variation. code: %s" % (
-                            self.get_ovp(), response["status_code"]))
+                            self.get_name(), response["status_code"]))
 
                 variation_id = str(response['data']['id'])
                 vcmd['extras']['ovid_to_tid'][variation_id] = thumb['tid']
@@ -254,7 +258,7 @@ class OptimizelyController(ControllerBase):
         if exp_resp["status_code"] != 202:
             raise ValueError(
                 "could not update %s experiment. code: %s" % (
-                    self.get_ovp(), exp_resp["status_code"]))
+                    self.get_name(), exp_resp["status_code"]))
 
         # check experiment is completed
         is_done = self.get_item_in_list(directive['fractions'], 'pct', 1.0)
@@ -269,7 +273,7 @@ class OptimizelyController(ControllerBase):
         if exp_status["status_code"] != 200:
             raise ValueError(
                 "could not verify %s experiment status. code: %s" % (
-                    self.get_ovp(), exp_status["status_code"]))
+                    self.get_name(), exp_status["status_code"]))
 
         data = []
         for exp in exp_status['data']:
@@ -322,7 +326,7 @@ class OptimizelyController(ControllerBase):
             statemon.state.increment('experiment_url_response_failed')
             raise ValueError(
                 "could not verify %s experiment URL. code: %s" % (
-                    self.get_ovp(), response.code))
+                    self.get_name(), response.code))
 
         # Parse HTML
         soup = BeautifulSoup(response.body)

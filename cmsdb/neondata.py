@@ -1546,7 +1546,7 @@ class NeonUserAccount(NamespacedStoredObject):
         if len(self.controllers) == 0:
             self.controllers = {}
 
-        self.controllers[controller.platform_id] = controller.get_ovp()
+        self.controllers[controller.platform_id] = controller.get_name()
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -3866,11 +3866,8 @@ class VideoControllerMetaData(NamespacedStoredObject):
 
     @classmethod
     def _baseclass_name(cls):
-        return cls.get_ovp()
-
-    @classmethod
-    def get_ovp(cls):
         return VideoControllerMetaData.__name__
+
 
 if __name__ == '__main__':
     # If you call this module you will get a command line that talks
