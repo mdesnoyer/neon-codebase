@@ -30,25 +30,23 @@ import traceback
 import utils.neon
 import utils.logs
 import utils.http
-
+import utils.sync
 from StringIO import StringIO
 from cmsdb import neondata
 from utils.inputsanitizer import InputSanitizer
 from utils import statemon
-import utils.sync
 from utils.options import define, options
+import logging
+_log = logging.getLogger(__name__)
 
 define("thumbnailBucket", default="host-thumbnails", type=str,
         help="S3 bucket to Host thumbnails ")
 define("port", default=8083, help="run on the given port", type=int)
 define("local", default=0, help="call local service", type=int)
-define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
+define("video_server", default="localhost", help="thumbnails.neon api", type=str)
 define("max_videoid_size", default=128, help="max vid size", type=int)
 # max tid size = vid_size + 40(md5 hexdigest)
 define("max_tid_size", default=168, help="max tid size", type=int)
-
-import logging
-_log = logging.getLogger(__name__)
 
 def sig_handler(sig, frame):
     ''' signal handler'''
@@ -268,6 +266,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             platform_account = yield tornado.gen.Task(
                                         neondata.BrightcovePlatform.get,
                                         self.api_key, i_id)
+
         elif "ooyala" in i_type:
             platform_account = yield tornado.gen.Task(
                                         neondata.OoyalaPlatform.get,
@@ -440,11 +439,15 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 #POST /accounts/:account_id/brightcove_integrations
                 if "brightcove_integrations" in self.request.uri:
                     yield self.create_brightcove_integration()
-                
+
                 elif "ooyala_integrations" in self.request.uri:
                     yield self.create_ooyala_integration()
 
-            #Video Request creation   
+                elif "optimizely_integrations" in self.request.uri:
+                    yield self.create_controller_integration(
+                        neondata.ControllerType.OPTIMIZELY)
+
+            #Video Request creation
             elif method == 'create_video_request':
                 if i_id is None:
                     data = '{"error":"integration id not specified"}'
@@ -454,11 +457,27 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
                 if "brightcove_integrations" == itype:
                     yield self.create_brightcove_video_request(i_id)
+
                 elif "neon_integrations" == itype:
                     yield self.create_neon_video_request_from_ui(i_id)
+
                 # TODO(Sunil): Expose when necessary
                 #elif "ooyala_integrations" == itype:
                 #    self.create_ooyala_video_request(i_id)
+                else:
+                    self.method_not_supported()
+
+            # Experiment controller request creation
+            elif method == 'experiment':
+                if i_id is None:
+                    data = '{"error":"integration id not specified"}'
+                    statemon.state.increment('integration_id_missing')
+                    self.send_json_response(data, 400)
+                    return
+
+                if "optimizely_integrations" == itype:
+                    yield self.create_controller_experiment(
+                        neondata.ControllerType.OPTIMIZELY)
                 else:
                     self.method_not_supported()
 
@@ -657,7 +676,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     ## Submit a video request to Neon Video Server
     @tornado.gen.coroutine
     def submit_neon_video_request(self, api_key, video_id, video_url, 
-                    video_title, topn, callback_url, default_thumbnail):
+                    video_title, topn, callback_url, default_thumbnail,
+                    response_success=True):
 
         '''
         Create the call in to the Video Server
@@ -693,16 +713,18 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             data = '{"error":"request already processed","video_id":"%s","job_id":"%s"}'\
                     % (video_id, job_id)
             self.send_json_response(data, 409)
-            return
+            raise tornado.gen.Return(True)
         if result.error:
             _log.error("key=create_neon_thumbnail_api_request "
                     "msg=thumbnail api error %s" %result.error)
             data = '{"error":"neon thumbnail api error"}'
             self.send_json_response(data, 502)
-            return
+            raise tornado.gen.Return(False)
 
         #Success
-        self.send_json_response(result.body, 201)
+        if response_success:
+            self.send_json_response(result.body, 201)
+        raise tornado.gen.Return(True)
     
     @tornado.gen.coroutine
     def create_neon_thumbnail_api_request(self):
@@ -1447,7 +1469,163 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             data = '{"error": "account doesnt exists"}'
             statemon.state.increment('account_not_found')
             self.send_json_response(data, 400)
-   
+
+    ##################################################################
+    # Optimizely Methods
+    ##################################################################
+
+    @tornado.gen.coroutine
+    def create_controller_integration(self, c_type):
+        ''' Create Controller Integration '''
+        try:
+            i_id = InputSanitizer.to_string(
+                self.get_argument("integration_id"))
+            access_token = InputSanitizer.to_string(
+                self.get_argument("access_token"))
+        except Exception as e:
+            _log.error("key=create_controller_integration msg= %s" % e)
+            data = '{"error": "API Params missing"}'
+            statemon.state.increment('api_params_missing')
+            self.send_json_response(data, 400)
+            return
+
+        na = yield tornado.gen.Task(
+            neondata.NeonUserAccount.get,
+            self.api_key)
+
+        if not na:
+            data = '{"error":"account not found"}'
+            statemon.state.increment('account_not_found')
+            self.send_json_response(data, 400)
+            return
+
+        try:
+            cr = yield neondata.Controller.create(
+                c_type, self.api_key, i_id, access_token)
+
+            # Associate controller with neon user account
+            na.add_controller(cr)
+            yield tornado.gen.Task(na.save_controller, cr)
+
+        except ValueError as e:
+            _log.error("key=create_controller_integration"
+                       " msg=controller api call failed")
+            data = {"error": e.message}
+            self.send_json_response(data, 502)
+            return
+
+        data = '{"status": "integration created"}'
+        self.send_json_response(data, 201)
+        return
+
+    @tornado.gen.coroutine
+    def create_controller_experiment(self, c_type, i_id="0"):
+        ''' Create Controller Experiment '''
+        try:
+            experiment_id = InputSanitizer.to_string(
+                self.get_argument("experiment_id"))
+            video_id = InputSanitizer.to_string(
+                self.get_argument("video_id"))
+            video_url = InputSanitizer.to_string(
+                self.get_argument("video_url"))
+
+            video_url = video_url.replace("www.dropbox.com",
+                                          "dl.dropboxusercontent.com")
+        except Exception as e:
+            _log.error("key=create_controller_experiment msg= %s" % e)
+            data = '{"error": "API Params missing"}'
+            statemon.state.increment('api_params_missing')
+            self.send_json_response(data, 400)
+            return
+
+        # check user
+        na = yield tornado.gen.Task(
+            neondata.NeonUserAccount.get,
+            self.api_key)
+
+        if not na:
+            data = '{"error":"account not found"}'
+            statemon.state.increment('account_not_found')
+            self.send_json_response(data, 400)
+            return
+
+        # get controller
+        cr = neondata.Controller.get(c_type, self.api_key, i_id)
+        if cr is None:
+            data = {"error": "User integration for %s not found" % c_type}
+            self.send_json_response(data, 400)
+            return
+
+        # check video_id
+        if len(video_id) > options.max_videoid_size:
+            statemon.state.increment('invalid_video_id')
+            self.send_json_response(
+                '{"error":"video id greater than 128 chars"}', 400)
+            return
+
+        # get specific params for Optimizely
+        extras = {}
+        if c_type == neondata.ControllerType.OPTIMIZELY:
+            element_id = self.get_argument('element_id', "#%s" % video_id)
+            prefix = element_id.startswith('.') or element_id.startswith('#')
+            if not prefix:
+                data = {"error": "element_id must start with '.' or '#'"}
+                self.send_json_response(data, 400)
+                return
+
+            js_component = self.get_argument('js_component', None)
+            if js_component is not None:
+                js_component = InputSanitizer.to_string(js_component)
+            token = "\"THUMB_URL\""
+            if (js_component is not None and token not in js_component):
+                data = {"error": "js_component must contain the %s" % token}
+                self.send_json_response(data, 400)
+                return
+
+            goal_id = self.get_argument('goal_id', None)
+            if goal_id is not None:
+                goal_id = InputSanitizer.to_string(goal_id)
+
+            extras = {
+                'goal_id': goal_id,
+                'element_id': element_id,
+                'js_component': js_component,
+                'ovid_to_tid': {}
+            }
+
+        # verify video exist to submit
+        i_vid = neondata.InternalVideoID.generate(self.api_key, video_id)
+        vmd = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
+        if vmd is None:
+            video_submit = yield self.submit_neon_video_request(
+                self.api_key,
+                video_id,
+                video_url,
+                video_url.split('//')[-1],
+                self.get_argument('topn', 1),
+                self.get_argument('callback_url', None),
+                self.get_argument('default_thumbnail', None),
+                False
+            )
+
+            if video_submit is False:
+                return
+
+        try:
+            # create or append a experiment
+            data = yield cr.verify_experiment(
+                i_id, experiment_id, video_id, extras)
+
+            self.send_json_response(data, 201)
+        except ValueError as e:
+            _log.error("key=create_controller_experiment"
+                       " msg=controller api call failed")
+            data = {"error": e.message}
+            self.send_json_response(data, 502)
+            return
+
+        return
+
     ##################################################################
     # Ooyala Methods
     ##################################################################

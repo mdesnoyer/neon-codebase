@@ -79,6 +79,9 @@ define('expiry_buffer', type=int, default=30,
 define('serving_update_delay', type=int, default=240,
        help='delay in seconds to update new videos to serving state')
 
+# Controller Results Retriever options
+define('controller_results_retriever_delay', default=247, type=float,
+       help='Number of seconds between polls of the results retriever')
 
 # Monitoring variables
 statemon.define('time_since_stats_update', float) # Time since the last update
@@ -104,6 +107,8 @@ statemon.define('unexpected_db_update_error', int)
 statemon.define('accounts_subscribed_to', int)
 statemon.define('video_push_updates_received', int)
 statemon.define('thumbnails_serving', int)
+
+statemon.define('controller_results_retriever_error', int)  # errors
 
 _log = logging.getLogger(__name__)
 
@@ -1346,12 +1351,82 @@ class DirectivePublisher(threading.Thread):
             statemon.state.increment('unexpected_callback_error')
         finally:
             self._callback_thread = None
-        
-def main(activity_watcher = utils.ps.ActivityWatcher()):    
+
+
+class ControllerResultsRetriever(threading.Thread):
+    '''This thread polls the stats from controller for changes.'''
+    def __init__(self, mastermind, video_id_cache=VideoIdCache(),
+                 activity_watcher=utils.ps.ActivityWatcher()):
+        super(ControllerResultsRetriever, self).__init__(
+            name='ControllerResultsRetriever')
+        self.mastermind = mastermind
+        self.video_id_cache = video_id_cache
+        self.activity_watcher = activity_watcher
+        self.last_update = None  # Time of the most recent data
+
+        # Is the initial data loaded
+        self.is_loaded = threading.Event()
+        self._stopped = threading.Event()
+
+    def wait_until_loaded(self, timeout=None):
+        '''Blocks until the data is loaded.'''
+        if not self.is_loaded.wait(timeout):
+            raise TimeoutException("Waiting too long for stats data to load")
+
+    def stop(self):
+        '''Stop this thread safely and allow it to finish what is is doing.'''
+        self._stopped.set()
+
+    def run(self):
+        while not self._stopped.is_set():
+            try:
+                with self.activity_watcher.activate():
+                    self._results_retriever()
+
+            except Exception as e:
+                _log.exception('Uncaught exception when reading %s' % e)
+                statemon.state.increment('controller_results_retriever_error')
+
+            # Now we wait so that we don't hit the database too much.
+            self._stopped.wait(options.controller_results_retriever_delay)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _results_retriever(self):
+        data = []
+        ecmds = yield tornado.gen.Task(
+            neondata.ExperimentControllerMetaData.get_all)
+
+        for ecmd in ecmds:
+            api_key = ecmd.get_api_key()
+
+            for c in ecmd.controllers:
+                state = neondata.ControllerExperimentState.INPROGRESS
+                if c['state'] != state:
+                    continue
+
+                ctr = neondata.Controller.get(
+                    c['controller_type'], api_key, c['platform_id'])
+
+                exp_results = yield ctr.retrieve_experiment_results(c)
+                for s in exp_results:
+                    data.append((
+                        self.video_id_cache.find_video_id(s['thumb_id']),
+                        s['thumb_id'],
+                        s['visitors'],
+                        None,
+                        s['conversions'],
+                        None))
+
+        self.mastermind.update_stats_info(data)
+        self.is_loaded.set()
+
+
+def main(activity_watcher=utils.ps.ActivityWatcher()):
     with activity_watcher.activate():
         mastermind = Mastermind()
         video_id_cache = VideoIdCache()
-        publisher = DirectivePublisher(mastermind, 
+        publisher = DirectivePublisher(mastermind,
                                        activity_watcher=activity_watcher)
 
         videoDbThread = VideoDBWatcher(mastermind, publisher, video_id_cache,
@@ -1359,10 +1434,16 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
         videoDbThread.start()
         videoDbThread.wait_until_loaded()
         videoDbThread.subscribe_to_db_changes()
+
         statsDbThread = StatsDBWatcher(mastermind, video_id_cache,
                                        activity_watcher)
         statsDbThread.start()
         statsDbThread.wait_until_loaded()
+
+        controllerRetrieverThread = ControllerResultsRetriever(
+            mastermind, video_id_cache, activity_watcher)
+        controllerRetrieverThread.start()
+        controllerRetrieverThread.wait_until_loaded()
 
         publisher.start()
 
@@ -1370,6 +1451,8 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
     atexit.register(publisher.stop)
     atexit.register(videoDbThread.stop)
     atexit.register(statsDbThread.stop)
+    atexit.register(controllerRetrieverThread.stop)
+
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
     signal.signal(signal.SIGINT, lambda sig, y: sys.exit(-sig))
 
@@ -1383,7 +1466,8 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
     publisher.join(300)
     videoDbThread.join(30)
     statsDbThread.join(30)
-    
+    controllerRetrieverThread.join(30)
+
 if __name__ == "__main__":
     utils.neon.InitNeon()
     main()
