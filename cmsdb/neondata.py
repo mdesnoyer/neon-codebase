@@ -3808,6 +3808,8 @@ class ExperimentControllerMetaData(NamespacedStoredObject):
     def __init__(self, api_key, platform_id='', c_type='',
                  experiment_id='', video_id='', extras={},
                  last_process_date=None):
+        # video_id: is the external video id as provided by
+        # the customer when registering the experiment
         super(ExperimentControllerMetaData, self).__init__(
             self._generate_subkey(api_key, video_id))
 
