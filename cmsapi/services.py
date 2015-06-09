@@ -31,13 +31,13 @@ import utils.neon
 import utils.logs
 import utils.http
 import utils.sync
-
-from controllers import neon_controller
 from StringIO import StringIO
 from cmsdb import neondata
 from utils.inputsanitizer import InputSanitizer
 from utils import statemon
 from utils.options import define, options
+import logging
+_log = logging.getLogger(__name__)
 
 define("thumbnailBucket", default="host-thumbnails", type=str,
         help="S3 bucket to Host thumbnails ")
@@ -47,9 +47,6 @@ define("video_server", default="localhost", help="thumbnails.neon api", type=str
 define("max_videoid_size", default=128, help="max vid size", type=int)
 # max tid size = vid_size + 40(md5 hexdigest)
 define("max_tid_size", default=168, help="max tid size", type=int)
-
-import logging
-_log = logging.getLogger(__name__)
 
 def sig_handler(sig, frame):
     ''' signal handler'''
@@ -444,7 +441,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
                 elif "optimizely_integrations" in self.request.uri:
                     yield self.create_controller_integration(
-                        neon_controller.ControllerType.OPTIMIZELY)
+                        neondata.ControllerType.OPTIMIZELY)
 
             #Video Request creation
             elif method == 'create_video_request':
@@ -476,7 +473,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
                 if "optimizely_integrations" == itype:
                     yield self.create_controller_experiment(
-                        neon_controller.ControllerType.OPTIMIZELY)
+                        neondata.ControllerType.OPTIMIZELY)
                 else:
                     self.method_not_supported()
 
@@ -1498,7 +1495,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             return
 
         try:
-            cr = yield neon_controller.Controller.create(
+            cr = yield neondata.Controller.create(
                 c_type, self.api_key, i_id, access_token)
 
             # Associate controller with neon user account
@@ -1548,7 +1545,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             return
 
         # get controller
-        cr = neon_controller.Controller.get(c_type, self.api_key, i_id)
+        cr = neondata.Controller.get(c_type, self.api_key, i_id)
         if cr is None:
             data = {"error": "User integration for %s not found" % c_type}
             self.send_json_response(data, 400)
@@ -1563,7 +1560,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         # get specific params for Optimizely
         extras = {}
-        if c_type == neon_controller.ControllerType.OPTIMIZELY:
+        if c_type == neondata.ControllerType.OPTIMIZELY:
             element_id = self.get_argument('element_id', "#%s" % video_id)
             prefix = element_id.startswith('.') or element_id.startswith('#')
             if not prefix:

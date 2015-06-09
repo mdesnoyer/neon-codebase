@@ -43,7 +43,6 @@ import unittest
 import utils.neon
 from utils.options import options
 import utils.ps
-import controllers.neon_controller as neon_controller
 import concurrent.futures
 
 STAGING = neondata.TrackerAccountIDMapper.STAGING
@@ -2063,20 +2062,20 @@ class TestControllerResultsRetriever(test_utils.neontest.AsyncTestCase):
 
         # Mock for create controller
         self.verify_account_mocker = patch(
-            'controllers.neon_controller.OptimizelyController.verify_account')
+            'cmsdb.neondata.OptimizelyController.verify_account')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.return_value = None
 
         self.i_id = "0"
-        self.controller_type = neon_controller.ControllerType.OPTIMIZELY
+        self.controller_type = neondata.ControllerType.OPTIMIZELY
         self.ecmd1 = self.create_default_experiment_controller_meta_data(
             a_id='1', exp_id='1', video_id='1', goal_id='1')
         self.ecmd2 = self.create_default_experiment_controller_meta_data(
             a_id='2', exp_id='2', video_id='2', goal_id='2',
-            state=neon_controller.ControllerExperimentState.INPROGRESS)
+            state=neondata.ControllerExperimentState.INPROGRESS)
         super(TestControllerResultsRetriever, self).setUp()
-    
+
     def tearDown(self):
         self.redis.stop()
         super(TestControllerResultsRetriever, self).tearDown()
@@ -2110,13 +2109,13 @@ class TestControllerResultsRetriever(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_results_retriever_experiment_controller_in_progress(self):
-        yield neon_controller.Controller.create(
+        yield neondata.Controller.create(
             self.controller_type, '1', self.i_id, 'x')
-        yield neon_controller.Controller.create(
+        yield neondata.Controller.create(
             self.controller_type, '2', self.i_id, 'x')
 
         experiment_results_mocker = patch(
-            'controllers.neon_controller.OptimizelyController.retrieve_experiment_results')
+            'cmsdb.neondata.OptimizelyController.retrieve_experiment_results')
         experiment_results_mock = self._future_wrap_mock(
             experiment_results_mocker.start())
         experiment_results_mock.return_value = []
@@ -2128,13 +2127,13 @@ class TestControllerResultsRetriever(test_utils.neontest.AsyncTestCase):
     @patch('mastermind.server.VideoIdCache.find_video_id')
     @tornado.testing.gen_test
     def test_results_retriever_experiment_results(self, mock_find_video_id):
-        yield neon_controller.Controller.create(
+        yield neondata.Controller.create(
             self.controller_type, '1', self.i_id, 'x')
-        yield neon_controller.Controller.create(
+        yield neondata.Controller.create(
             self.controller_type, '2', self.i_id, 'x')
 
         experiment_results_mocker = patch(
-            'controllers.neon_controller.OptimizelyController.retrieve_experiment_results')
+            'cmsdb.neondata.OptimizelyController.retrieve_experiment_results')
         experiment_results_mock = self._future_wrap_mock(
             experiment_results_mocker.start())
         experiment_results_mock.return_value = [{

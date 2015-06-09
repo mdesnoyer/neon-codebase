@@ -19,13 +19,10 @@ import socket
 import tornado.gen
 import tornado.testing
 import concurrent.futures
-from controllers import neon_controller
 from utils.options import options
 from mock import MagicMock, patch, call, ANY
 from cmsdb import neondata
-from contextlib import closing
 from datetime import datetime, timedelta
-from controllers.neon_controller import ControllerType, ControllerExperimentState
 from StringIO import StringIO
 _log = logging.getLogger(__name__)
 
@@ -72,15 +69,15 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
         self.directive_watcher = controllers.server.S3DirectiveWatcher()
 
         self.i_id = "0"
-        self.controller_type = ControllerType.OPTIMIZELY
+        self.controller_type = neondata.ControllerType.OPTIMIZELY
         self.ecmd1 = self.create_default_experiment_controller_meta_data(
             a_id='1', exp_id='1', video_id='1', goal_id='1')
         self.ecmd2 = self.create_default_experiment_controller_meta_data(
             a_id='2', exp_id='2', video_id='2', goal_id='2',
-            state=ControllerExperimentState.INPROGRESS)
+            state=neondata.ControllerExperimentState.INPROGRESS)
         self.ecmd3 = self.create_default_experiment_controller_meta_data(
             a_id='3', exp_id='3', video_id='3', goal_id='3',
-            state=ControllerExperimentState.INPROGRESS)
+            state=neondata.ControllerExperimentState.INPROGRESS)
 
         self.item_now = {
             'name': '%s.%s' % (
@@ -299,18 +296,18 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
         mock_get.assert_called_with('1', '1', callback=ANY)
         self.assertEqual(mock_get.call_count, 1)
 
-    @patch('controllers.neon_controller.Controller.get')
+    @patch('cmsdb.neondata.Controller.get')
     @tornado.testing.gen_test
     def test_read_directives_check_metadata_state(self, mock_get):
         self.ecmd1.controllers[0]['state'] = \
-            ControllerExperimentState.COMPLETE
+            neondata.ControllerExperimentState.COMPLETE
         self.ecmd1.save()
 
         yield self.directive_watcher.read_directives(
             self.s3conn, self.s3conn.get_key(self.item_now['name']))
         self.assertEqual(mock_get.call_count, 0)
 
-    @patch('controllers.neon_controller.Controller.get')
+    @patch('cmsdb.neondata.Controller.get')
     @tornado.testing.gen_test
     def test_read_directives_check_metadata_last_process_date(self, mock_get):
         last_modified_epoch = (
@@ -326,19 +323,20 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_read_directives_call_update_experiment(self):
         verify_account_mocker = patch(
-            'controllers.neon_controller.OptimizelyController.verify_account')
+            'cmsdb.neondata.OptimizelyController.verify_account')
         verify_account_mock = self._future_wrap_mock(
             verify_account_mocker.start())
         verify_account_mock.return_value = None
 
-        yield neon_controller.Controller.create(
-                ControllerType.OPTIMIZELY, '1', '0', 'x')
+        yield neondata.Controller.create(
+                neondata.ControllerType.OPTIMIZELY, '1', '0', 'x')
 
         upd_directive_mocker = patch(
-            'controllers.neon_controller.OptimizelyController.update_experiment_with_directives')
+            'cmsdb.neondata.OptimizelyController.update_experiment_with_directives')
         upd_directive_mock = self._future_wrap_mock(
             upd_directive_mocker.start())
-        upd_directive_mock.return_value = ControllerExperimentState.INPROGRESS
+        upd_directive_mock.return_value = \
+            neondata.ControllerExperimentState.INPROGRESS
 
         last_modified_epoch = (
             datetime.utcnow() -
@@ -358,7 +356,7 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
             self.unzip_file(self.item_now['data'])['1_1'])
         self.assertGreater(last_modified_epoch, ecmd_ctr['last_process_date'])
         self.assertEqual(
-            ControllerExperimentState.INPROGRESS, ecmd_ctr['state'])
+            neondata.ControllerExperimentState.INPROGRESS, ecmd_ctr['state'])
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

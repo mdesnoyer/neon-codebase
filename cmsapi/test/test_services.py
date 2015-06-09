@@ -35,7 +35,6 @@ import unittest
 import urllib
 from utils.imageutils import PILImageUtils
 from utils.options import define, options
-import controllers.neon_controller as neon_controller
 import test_utils.neon_controller_aux as neon_controller_aux
 import utils.neon
 import logging
@@ -2132,7 +2131,7 @@ class TestOptimizelyIntegration(tornado.testing.AsyncHTTPTestCase):
         self.a_id = "77trcufrh25ztyru4gx7eq95"
         self.i_id = "0"
         self.access_token = "5851ee8c6358f0d46850dd60fe3d17e5:aff12cb2"
-        self.controller_type = neon_controller.ControllerType.OPTIMIZELY
+        self.controller_type = neondata.ControllerType.OPTIMIZELY
 
         self.experiment_id = "2889571145"
         self.video_id = self.a_id + "_99987212"
@@ -2314,7 +2313,7 @@ class TestOptimizelyIntegration(tornado.testing.AsyncHTTPTestCase):
         resp = self.create_optimizely_integration()
 
         nuser = neondata.NeonUserAccount.get(self.api_key)
-        controller = neon_controller.Controller.get(
+        controller = neondata.Controller.get(
             self.controller_type, self.api_key, self.i_id)
 
         self.assertEquals(resp.body, '{"status": "integration created"}')

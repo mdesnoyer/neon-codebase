@@ -22,7 +22,6 @@ from cmsdb import neondata
 from StringIO import StringIO
 from utils.options import define, options
 from boto.s3.connection import S3Connection
-from controllers import neon_controller
 _log = logging.getLogger(__name__)
 
 define("poll_period", default=300, help="Period(s) to poll",
@@ -130,7 +129,7 @@ class S3DirectiveWatcher(object):
                 # for each experiment - update directives
                 for i in ecmd.controllers:
                     state = \
-                        neon_controller.ControllerExperimentState.COMPLETE
+                        neondata.ControllerExperimentState.COMPLETE
                     if i['state'] == state:
                         continue
                     last_modified_epoch = (
@@ -140,7 +139,7 @@ class S3DirectiveWatcher(object):
                     if last_modified_epoch <= i['last_process_date']:
                         continue
 
-                    ctr = neon_controller.Controller.get(
+                    ctr = neondata.Controller.get(
                         i['controller_type'], api_key, i['platform_id'])
 
                     try:

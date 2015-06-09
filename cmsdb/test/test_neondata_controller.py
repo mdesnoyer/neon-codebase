@@ -18,11 +18,10 @@ import test_utils.redis
 import tornado.gen
 import tornado.testing
 import datetime
-import controllers.neon_controller as neon_controller
 import test_utils.neon_controller_aux as neon_controller_aux
 import concurrent.futures
 from cmsdb import neondata
-from mock import patch
+from mock import patch, MagicMock
 from tornado.httpclient import HTTPRequest, HTTPResponse
 from StringIO import StringIO
 _log = logging.getLogger(__name__)
@@ -37,7 +36,7 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         self.redis.start()
 
         self.verify_account_mocker = patch(
-            'controllers.neon_controller.OptimizelyController.verify_account')
+            'cmsdb.neondata.OptimizelyController.verify_account')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.return_value = None
@@ -46,7 +45,7 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         self.i_id = "0"
         self.access_token = "5851ee8c6358f0d46850dd60fe3d17e5:aff12cb2"
 
-        self.controller_type = neon_controller.ControllerType.OPTIMIZELY
+        self.controller_type = neondata.ControllerType.OPTIMIZELY
         self.project_name = "neon-lab"
         self.project_id = 101010
         self.experiment_id = 2889571145
@@ -101,7 +100,7 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         ecmd = neondata.ExperimentControllerMetaData(
             self.a_id,
             self.i_id,
-            neon_controller.ControllerType.OPTIMIZELY,
+            neondata.ControllerType.OPTIMIZELY,
             self.experiment_id,
             self.video_id,
             {
@@ -153,7 +152,7 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
     ###########################################################################
     # GET and CREATE
     ###########################################################################
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_create_controller_with_invalid_access_token(self, mock_http):
         mock_http.return_value = HTTPResponse(
@@ -162,26 +161,26 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         self.verify_account_mock.return_value = {'status_code': 401}
 
         with self.assertRaises(ValueError) as e:
-            yield neon_controller.Controller.create(
+            yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
         self.assertTrue("code: 401" in str(e.exception))
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_create_controller_already_exist(self, mock_http):
-        yield neon_controller.Controller.create(
+        yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # call again
         with self.assertRaises(ValueError) as e:
-            yield neon_controller.Controller.create(
+            yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
         self.assertEquals("Controller already exists", str(e.exception))
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_create_controller_success(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         self.assertEquals("OptimizelyController", type(controller).__name__)
@@ -191,13 +190,13 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         self.assertEquals(controller.key, "optimizely_%s_%s" % (
             self.a_id, self.i_id))
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_get_controller_success(self, mock_http):
-        yield neon_controller.Controller.create(
+        yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
-        controller = neon_controller.Controller.get(
+        controller = neondata.Controller.get(
                 self.controller_type, self.a_id, self.i_id)
         self.assertEquals("OptimizelyController", type(controller).__name__)
         self.assertEquals(controller.platform_id, self.i_id)
@@ -230,10 +229,10 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 HTTPRequest(OPTMIZELY_ENDPOINT, method='GET'), 200,
                 buffer=StringIO(self.html_aux.get_html()))
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_verify_experiment_with_experiment_not_found(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         mock_http.return_value = HTTPResponse(
@@ -245,10 +244,10 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 self.i_id, self.experiment_id, self.video_id)
         self.assertTrue("code: 400" in str(e.exception))
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_verify_experiment_with_goal_not_found(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         def _side_effect(request, callback=None, *args, **kwargs):
@@ -270,10 +269,10 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 self.i_id, self.experiment_id, self.video_id, extras)
         self.assertTrue("code: 400" in str(e.exception))
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_verify_experiment_with_goal_type_wrong(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         def _side_effect(request, callback=None, *args, **kwargs):
@@ -297,10 +296,10 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 self.i_id, self.experiment_id, self.video_id, extras)
         self.assertTrue("Invalid goal_id" in str(e.exception))
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_verify_experiment_with_success(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         experiment_id = self.experiment_id + 1
@@ -335,22 +334,22 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         self.assertEquals(len(ecmd.controllers), 1)
         self.assertEquals(
             ecmd_ctr['controller_type'],
-            neon_controller.ControllerType.OPTIMIZELY)
+            neondata.ControllerType.OPTIMIZELY)
         self.assertEquals(ecmd_ctr['platform_id'], self.i_id)
         self.assertEquals(ecmd_ctr['video_id'], self.video_id)
         self.assertEquals(ecmd_ctr['last_process_date'], 0)
         self.assertEquals(
             ecmd_ctr['state'],
-            neon_controller.ControllerExperimentState.PENDING)
+            neondata.ControllerExperimentState.PENDING)
         self.assertEquals(ecmd_ctr['experiment_id'], experiment_id)
         self.assertEquals(ecmd_ctr_extras['goal_id'], extras['goal_id'])
         self.assertEquals(ecmd_ctr_extras['element_id'], extras['element_id'])
         self.assertIsNotNone(ecmd_ctr_extras['js_component'])
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_verify_experiment_already_exist(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         mock_http.side_effect = self._side_effect_to_verity_experiment
@@ -364,17 +363,17 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 self.i_id, self.experiment_id, self.video_id, extras)
         self.assertTrue("Experiment already exists" in str(e.exception))
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_verify_experiment_with_append_same_video(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         extras = \
             {'goal_id': self.goal_id, 'element_id': '#11', 'js_component': ''}
         self.create_default_experiment_controller_meta_data()
         ecmd = neondata.ExperimentControllerMetaData(
-            self.a_id, self.i_id, neon_controller.ControllerType.OPTIMIZELY,
+            self.a_id, self.i_id, neondata.ControllerType.OPTIMIZELY,
             '123456', self.video_id, extras, 0)
         ecmd.save()
 
@@ -387,10 +386,10 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
             self.a_id, self.video_id)
         self.assertEquals(len(ecmd.controllers), 2)
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_check_element_id_on_page_with_success(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         mock_http.side_effect = self._side_effect_to_verity_experiment
@@ -430,10 +429,10 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         response = yield controller.check_element_id_on_page(url, element_id)
         self.assertEquals(response, _js_component)
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_check_element_id_on_page_with_errors(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         mock_http.side_effect = self._side_effect_to_verity_experiment
@@ -471,10 +470,10 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
             yield controller.check_element_id_on_page(url, element_id)
         self.assertTrue("tag not supported by element" in str(e.exception))
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_check_element_id_on_page_with_bad_url(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         mock_http.return_value = HTTPResponse(
@@ -493,11 +492,11 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
     ###########################################################################
     # Update Experiment With Directives
     ###########################################################################
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_update_experiment_with_get_variations_bad_request(self,
                                                                mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         mock_http.return_value = HTTPResponse(
@@ -511,10 +510,10 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
                 self.generate_fractions_s3_file)
         self.assertTrue("code: 400" in str(e.exception))
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_update_experiment_with_variations_to_disable(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # 1-With Update, 2-With Update, 3-NoChange - 4-With 404
@@ -576,10 +575,10 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
             self.assertEquals(x['weight'], 0)
             self.assertEquals(x['is_paused'], True)
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_update_experiment_with_update_create_and_delete(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # 1-With Update, 2-NotChange, 3-Remove,
@@ -691,17 +690,17 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
         self.assertEquals(after_variations, 4)  # 2 deletes and 2 inserts
         self.assertEquals(self.n_var_update_success_calls, 1)  # one update
         self.assertEquals(
-            response, neon_controller.ControllerExperimentState.INPROGRESS)
+            response, neondata.ControllerExperimentState.INPROGRESS)
 
         experiment_read = self.optimizely_api_aux.experiment_read(
             experiment_id=self.experiment_id)
         self.assertEquals(experiment_read['percentage_included'], 10000)
         self.assertEquals(experiment_read['status'], 'Running')
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_update_experiment_with_change_state(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         ecmd = self.create_default_experiment_controller_meta_data()
@@ -754,16 +753,16 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
             ecmd.controllers[0], fractions_s3_file)
 
         self.assertEquals(
-            response, neon_controller.ControllerExperimentState.COMPLETE)
+            response, neondata.ControllerExperimentState.COMPLETE)
 
     ###########################################################################
     # Retrieve Experiment Results
     ###########################################################################
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_retrieve_experiment_results_with_experiment_not_found(self,
                                                                    mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         mock_http.return_value = HTTPResponse(
@@ -775,10 +774,10 @@ class TestControllerOptimizely(test_utils.neontest.AsyncTestCase):
             yield controller.retrieve_experiment_results(ecmd.controllers[0])
         self.assertTrue("code: 400" in str(e.exception))
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_retrieve_experiment_results_okay(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         ecmd = self.create_default_experiment_controller_meta_data()
@@ -822,7 +821,7 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         self.redis.start()
 
         self.verify_account_mocker = patch(
-            'controllers.neon_controller.OptimizelyController.verify_account')
+            'cmsdb.neondata.OptimizelyController.verify_account')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.return_value = None
@@ -831,7 +830,7 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         self.i_id = "0"
         self.access_token = "5851ee8c6358f0d46850dd60fe3d17e5:aff12cb2"
 
-        self.controller_type = neon_controller.ControllerType.OPTIMIZELY
+        self.controller_type = neondata.ControllerType.OPTIMIZELY
         self.project_name = "neon-lab"
         self.project_id = 101010
         self.experiment_id = 2889571145
@@ -863,10 +862,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         return self.optimizely_api_aux.project_create(
             project_id=self.project_id, project_name=self.project_name)
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_create_project(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # create project
@@ -884,10 +883,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
             response_data["project_name"], project_create['project_name'])
         self.assertEqual(response_data["project_status"], "Active")
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_read_project(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # read project
@@ -905,10 +904,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(
             response_data["project_name"], project_create['project_name'])
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_update_project(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # update project
@@ -934,10 +933,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(
             response_data["ip_filter"], project_update["ip_filter"])
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_get_projects(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # get list projects
@@ -963,10 +962,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
             description="video_id_video_title",
             edit_url="https://www.neon-lab.com/videos/")
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_create_experiment(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         project_id = self.project_id
@@ -1000,10 +999,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(response_data["activation_mode"], "immediate")
         self.assertEqual(response_data["experiment_type"], "ab")
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_read_experiment(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # read experiment
@@ -1020,10 +1019,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(response["status_string"], "OK")
         self.assertEqual(response_data["id"], experiment_create["id"])
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_update_experiment(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # update experiment
@@ -1045,10 +1044,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(response["status_string"], "OK")
         self.assertEqual(response_data["status"], experiment_update["status"])
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_delete_experiment(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # delete experiment
@@ -1061,10 +1060,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
             experiment_id=experiment_create["id"])
         self.assertEqual(response["status_code"], 204)
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_get_experiments(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         project_id = self.project_id
@@ -1083,10 +1082,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(response["status_string"], "OK")
         assert len(response_data) == 3
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_get_experiment_status(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         pj = self.optimizely_api_aux.project_create(
@@ -1130,10 +1129,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
             js_component="$(\".headline\").text(\"New headline\");",
             weight=3333)
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_create_variation(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         experiment_id = self.experiment_id
@@ -1160,10 +1159,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(response_data["weight"], variation_create["weight"])
         self.assertEqual(response_data["is_paused"], False)
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_read_variation(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # read variation
@@ -1180,10 +1179,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(response["status_string"], "OK")
         self.assertEqual(response_data["id"], variation_create["id"])
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_update_variation(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # update variation
@@ -1214,10 +1213,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(
             response_data["is_paused"], variation_update["is_paused"])
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_delete_variation(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # delete variation
@@ -1230,10 +1229,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
             variation_id=variation_create["id"])
         self.assertEqual(response["status_code"], 204)
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_get_variations(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         experiment_id = self.experiment_id
@@ -1264,10 +1263,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
             target_to_experiments=True,
             experiment_ids=[11231])
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_create_goal(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         project_id = self.project_id
@@ -1299,10 +1298,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
             response_data["experiment_ids"][0],
             goal_create["experiment_ids"][0])
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_read_goal(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # read goal
@@ -1318,10 +1317,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(response["status_string"], "OK")
         self.assertEqual(response_data["id"], goal_create["id"])
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_update_goal(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # update goal
@@ -1354,10 +1353,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(
             response_data["experiment_ids"], goal_update["experiment_ids"])
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_delete_goal(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         # delete goal
@@ -1369,10 +1368,10 @@ class TestControllerOptimizelyApi(test_utils.neontest.AsyncTestCase):
             goal_id=goal_create["id"])
         self.assertEqual(response["status_code"], 204)
 
-    @patch('controllers.neon_controller.utils.http.send_request')
+    @patch('cmsdb.neondata.utils.http.send_request')
     @tornado.testing.gen_test
     def test_get_goals(self, mock_http):
-        controller = yield neon_controller.Controller.create(
+        controller = yield neondata.Controller.create(
                 self.controller_type, self.a_id, self.i_id, self.access_token)
 
         project_id = self.project_id

@@ -48,7 +48,6 @@ import utils.ps
 import utils.sqsmanager
 from utils import statemon
 import zlib
-from controllers import neon_controller
 
 # Stats database options. It is an Impala database
 define('stats_cluster_type', default='video_click_stats',
@@ -1402,11 +1401,11 @@ class ControllerResultsRetriever(threading.Thread):
             api_key = ecmd.get_api_key()
 
             for c in ecmd.controllers:
-                state = neon_controller.ControllerExperimentState.INPROGRESS
+                state = neondata.ControllerExperimentState.INPROGRESS
                 if c['state'] != state:
                     continue
 
-                ctr = neon_controller.Controller.get(
+                ctr = neondata.Controller.get(
                     c['controller_type'], api_key, c['platform_id'])
 
                 exp_results = yield ctr.retrieve_experiment_results(c)
