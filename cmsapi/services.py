@@ -65,11 +65,14 @@ def CachePrimer():
 ################################################################################
 # Monitoring variables
 ################################################################################
-statemon.define('total_requests', int) #all requests 
+statemon.define('total_requests', int) #all requests
+_total_requests_ref = statemon.state.get_ref('total_requests')
 
 # HHTP 500s totals and fine-grained issues counters
 statemon.define('bad_gateway', int) # all HTTP 502s
+_bad_gateway_ref = statemon.state.get_ref('bad_gateway')
 statemon.define('internal_err', int) # all HTTP 500s
+_internal_err_ref = statemon.state.get_ref('internal_err')
 statemon.define('unexpected_exception', int)
 statemon.define('custom_thumbnail_not_added', int)
 statemon.define('brightcove_api_failure', int)
@@ -85,6 +88,7 @@ statemon.define('abtest_state_update', int)
 
 # HTTP 400s total and fine-grained issues counters
 statemon.define('bad_request', int) #all HTTP 400s
+_bad_request_ref = statemon.state.get_ref('bad_request')
 statemon.define('invalid_api_key', int)
 statemon.define('invalid_method', int)
 statemon.define('invalid_state_request', int)
@@ -95,6 +99,7 @@ statemon.define('account_id_missing', int)
 statemon.define('account_not_found', int)
 statemon.define('job_not_found', int)
 statemon.define('video_not_found', int)
+_video_not_found_ref = statemon.state.get_ref('video_not_found')
 statemon.define('api_params_missing', int)
 statemon.define('invalid_video_link', int)
 statemon.define('deprecated', int)
@@ -156,8 +161,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     
     def prepare(self):
         ''' Called before every request is processed '''
-        
-        _log.info("Request %r" % self.request)
        
         # If POST or PUT, then decode the json arguments
         if not self.request.method == "GET":
@@ -237,13 +240,16 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     def send_json_response(self, data, status=200):
         '''Send response to service client '''
        
-        statemon.state.increment('total_requests')
+        statemon.state.increment(ref=_total_requests_ref, safe=False)
         if status == 400 or status == 409:
-            statemon.state.increment('bad_request')
+            statemon.state.increment(ref=_bad_request_ref, safe=False)
+            _log.warn("Bad Request %r" % self.request)
         elif status == 502:
-            statemon.state.increment('bad_gateway')
+            statemon.state.increment(ref=_bad_gateway_ref, safe=False)
+            _log.warn("Gateway Error. Request %r" % self.request)
         elif status >= 500:
-            statemon.state.increment('internal_err')
+            statemon.state.increment(ref=_internal_err_ref, safe=False)
+            _log.warn("Internal Error. Request %r" % self.request)
 
         self.set_header("Content-Type", "application/json")
         self.set_status(status)
@@ -900,8 +906,21 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             neondata.RequestState.REQUEUED, neondata.RequestState.REPROCESS]
         
         failed_states = [neondata.RequestState.INT_ERROR, 
-                    neondata.RequestState.FAILED]
+                         neondata.RequestState.FAILED]
         
+        # single video state, if video not found return an error
+        # GET /api/v1/accounts/{account_id}/
+        # {integration_type}/{integration_id}/videos/{video_id}
+        if vids is not None and len(vids) == 1:
+            i_vid = neondata.InternalVideoID.generate(self.api_key, vids[0])
+            v = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
+            if not v:
+                # Video is not in the system yet.
+                statemon.state.increment(ref=_video_not_found_ref, safe=False)
+                self.send_json_response('{"total_count": 1, "items":[{}],\
+                        "error":"video not found"}', 400)
+                return
+
         #1 Get job ids for the videos from account, get the request status
         platform_account = yield tornado.gen.Task(self.get_platform_account, 
                             i_type, i_id)
@@ -911,42 +930,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             statemon.state.increment('account_not_found')
             self.send_json_response('{"error":"%s account not found"}' % i_type, 400)
             return
-
-        
-        # single video state, if video not found return an error
-        # GET /api/v1/accounts/{account_id}/
-        # {integration_type}/{integration_id}/videos/{video_id}
-        if vids is not None and len(vids) == 1:
-            vid = vids[0]
-            all_vids = platform_account.get_videos()
-            i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
-            if vid not in all_vids:
-                statemon.state.increment('video_not_found')
-                self.send_json_response('{"total_count": 1, "items":[{}],\
-                        "error":"video not found"}', 400)
-                return
-            else:
-                v = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)   
-                if not v:
-                    # Video is in submit or processing state, 
-                    # so send dummy VResponse
-                    job_id = platform_account.videos[vid]
-                    vr = neondata.VideoResponse(vid,
-                                        job_id,
-                                        neondata.RequestState.PROCESSING,
-                                        i_type,
-                                        "0",
-                                        "title",
-                                        None, #duration
-                                        time.time() * 1000,
-                                        0, 
-                                        None)
-                    vstatus_response = GetVideoStatusResponse(
-                                        [vr.to_dict()], 0, page_no, page_size,
-                                        c_processing, c_recommended, c_published, c_serving)
-                    data = vstatus_response.to_json() 
-                    self.send_json_response(data, 200)
-                    return
 
         #return all videos in the account
         if vids is None:
@@ -1670,7 +1653,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
         if not vmdata:
             _log.error("Could not find video: %s" % i_vid)
-            statemon.state.increment('video_not_found')
+            statemon.state.increment(ref=_video_not_found_ref, safe=False)
             self.send_json_response("Video not found: %s" % p_vid, 400)
 
         # Figure out the rank of the custom thumbs we know about so far
@@ -1758,7 +1741,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
         if not vmdata:
-            statemon.state.increment('video_not_found')
+            statemon.state.increment(ref=_video_not_found_ref, safe=False)
             self.send_json_response('{"error": "vid not found"}', 400)
             return
         
@@ -1804,7 +1787,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
         video_status = yield tornado.gen.Task(neondata.VideoStatus.get, i_vid)
         if not video_status:
-            statemon.state.increment('video_not_found')
+            statemon.state.increment(ref=_video_not_found_ref, safe=False)
             self.send_json_response('{"error": "vid not found"}', 400)
             return
 
@@ -1840,7 +1823,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 video_meta = yield tornado.gen.Task(neondata.VideoMetadata.get,
                                                     i_vid)
                 if not video_meta:
-                    statemon.state.increment('video_not_found')
+                    statemon.state.increment(ref=_video_not_found_ref,
+                                             safe=False)
                     self.send_json_response('{"error": "vid not found"}', 400)
                     return
                 

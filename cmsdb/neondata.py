@@ -3708,6 +3708,7 @@ class VideoMetadata(StoredObject):
                                        _update_serving_url)
 
         raise tornado.gen.Return(serving_url)
+        
 
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.
