@@ -1319,16 +1319,25 @@ class DirectivePublisher(threading.Thread):
     def _update_video_serving_state(self, video_ids, new_state):
         '''Updates a list of video ids with a new serving state.'''
         try:
-            request_keys = [(video.job_id, video.get_account_id()) for 
-                            video in neondata.VideoMetadata.get_many(video_ids)
-                            if video is not None]
+            customer_error_jobs= []
+            request_keys = [(video.job_id, video.get_account_id()) for
+                                video in neondata.VideoMetadata.get_many(video_ids)
+                                if video is not None]
             def _set_state(request_dict):
                 for obj in request_dict.itervalues():
                     # Handle customer_error videos. Don't change their states
                     if obj is not None and obj.state not in \
                         [neondata.RequestState.CUSTOMER_ERROR]:
                         obj.state = new_state
+                    else:
+                        customer_error_jobs.append(obj.job_id)
             neondata.NeonApiRequest.modify_many(request_keys, _set_state)
+            def _set_serving_url(videos_dict):
+                for vidobj in videos_dict.itervalues():
+                    if vidobj.job_id not in customer_error_jobs:
+                        vidobj.serving_url = vidobj.get_serving_url(save=False)
+
+            neondata.VideoMetadata.modify_many(video_ids, _set_serving_url)
         except Exception as e:
             statemon.state.increment('unexpected_db_update_error')
             _log.exception('Unexpected error when updating serving state in '
