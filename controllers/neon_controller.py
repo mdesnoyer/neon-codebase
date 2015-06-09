@@ -89,19 +89,20 @@ class OptimizelyController(ControllerBase):
     # Abstract Methods
     ###########################################################################
 
+    @tornado.gen.coroutine
     def verify_account(self):
         # check token
-        token_response = self.get_projects()
+        token_response = yield self.get_projects()
         if token_response["status_code"] != 200:
-            return token_response
-        return None
+            raise tornado.gen.Return(token_response)
+        raise tornado.gen.Return(None)
 
     @tornado.gen.coroutine
     def verify_experiment(self, platform_id, experiment_id, video_id,
                           extras={}):
 
         # Check if experiment exist in Optimizely
-        exp_response = self.read_experiment(experiment_id=experiment_id)
+        exp_response = yield self.read_experiment(experiment_id=experiment_id)
 
         if exp_response["status_code"] != 200:
             raise ValueError("could not verify %s experiment. code: %s" % (
@@ -112,7 +113,7 @@ class OptimizelyController(ControllerBase):
             extras['goal_id'] = exp_response['data']['primary_goal_id']
 
         # Check if goal exist in Optimizely
-        goal_response = self.read_goal(goal_id=extras['goal_id'])
+        goal_response = yield self.read_goal(goal_id=extras['goal_id'])
         if goal_response["status_code"] != 200:
             raise ValueError("could not verify %s goal. code: %s" % (
                 self.get_name(), goal_response["status_code"]))
@@ -125,7 +126,7 @@ class OptimizelyController(ControllerBase):
 
         # Parse the HTML
         if extras['js_component'] is None:
-            extras['js_component'] = self.check_element_id_on_page(
+            extras['js_component'] = yield self.check_element_id_on_page(
                 exp_response['data']['edit_url'],
                 extras['element_id'])
 
@@ -141,7 +142,7 @@ class OptimizelyController(ControllerBase):
             ]
             if len(e_list) > 0:
                 raise ValueError("Experiment already exists")
-                return
+                # return
             else:
                 ecmd.append_controller(self.get_name(), platform_id,
                                        experiment_id, video_id, extras, 0)
@@ -168,7 +169,7 @@ class OptimizelyController(ControllerBase):
         experiment_id = ecmd['experiment_id']
 
         # retrieve list of variations in experiment optimizely
-        v_list_resp = self.get_variations(experiment_id=experiment_id)
+        v_list_resp = yield self.get_variations(experiment_id=experiment_id)
         if v_list_resp["status_code"] != 200:
             raise ValueError("could not verify %s variation. code: %s" % (
                 self.get_name(), v_list_resp["status_code"]))
@@ -184,8 +185,8 @@ class OptimizelyController(ControllerBase):
                 continue
 
             # Update the variation to set weight = 0
-            response = self.update_variation(variation_id=var['id'], weight=0,
-                                             is_paused=True)
+            response = yield self.update_variation(
+                variation_id=var['id'], weight=0, is_paused=True)
             if response["status_code"] == 404:
                 continue
             elif response["status_code"] != 202:
@@ -216,7 +217,7 @@ class OptimizelyController(ControllerBase):
                     if var['weight'] == frac_calc:
                         continue
 
-                    response = self.update_variation(
+                    response = yield self.update_variation(
                         variation_id=var['id'], weight=frac_calc,
                         is_paused=False)
 
@@ -238,7 +239,7 @@ class OptimizelyController(ControllerBase):
                 ecmd['extras']['js_component'] = js_component.replace(
                     "THUMB_URL", thumb['imgs'][0]['url'])
 
-                response = self.create_variation(
+                response = yield self.create_variation(
                     experiment_id=experiment_id, weight=frac_calc,
                     js_component=ecmd['extras']['js_component'],
                     is_paused=False, description=thumb['tid'])
@@ -252,9 +253,9 @@ class OptimizelyController(ControllerBase):
                 ecmd['extras']['ovid_to_tid'][variation_id] = thumb['tid']
 
         # Update experiment - Start
-        exp_resp = self.update_experiment(experiment_id=experiment_id,
-                                          percentage_included=10000,
-                                          status="Running")
+        exp_resp = yield self.update_experiment(
+            experiment_id=experiment_id, percentage_included=10000,
+            status="Running")
         if exp_resp["status_code"] != 202:
             raise ValueError(
                 "could not update %s experiment. code: %s" % (
@@ -267,9 +268,11 @@ class OptimizelyController(ControllerBase):
 
         raise tornado.gen.Return(state)
 
+    @tornado.gen.coroutine
     def retrieve_experiment_results(self, ecmd):
         experiment_id = ecmd['experiment_id']
-        exp_status = self.get_experiments_status(experiment_id=experiment_id)
+        exp_status = yield self.get_experiments_status(
+            experiment_id=experiment_id)
         if exp_status["status_code"] != 200:
             raise ValueError(
                 "could not verify %s experiment status. code: %s" % (
@@ -294,12 +297,13 @@ class OptimizelyController(ControllerBase):
                 'conversion_rate': exp['conversion_rate']
             }
             data.append(item)
-        return data
+        raise tornado.gen.Return(data)
 
     ###########################################################################
     # Helper Methods
     ###########################################################################
 
+    @tornado.gen.coroutine
     def do_http_request(self, url, method, headers, body):
         request = tornado.httpclient.HTTPRequest(
             url=url,
@@ -308,8 +312,11 @@ class OptimizelyController(ControllerBase):
             body=body,
             request_timeout=60.0,
             connect_timeout=5.0)
-        return self.http_request_pool.send_request(request)
+        response = yield tornado.gen.Task(
+            OptimizelyController.http_request_pool.send_request, request)
+        raise tornado.gen.Return(response)
 
+    @tornado.gen.coroutine
     def check_element_id_on_page(self, exp_url, element_id):
         SUPPORTED_TAGS = ['img', 'video', 'div']
         is_id = element_id.startswith('#')
@@ -320,7 +327,7 @@ class OptimizelyController(ControllerBase):
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
             Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
 
-        response = self.do_http_request(exp_url, 'GET', headers, None)
+        response = yield self.do_http_request(exp_url, 'GET', headers, None)
         if response.error:
             _log.error("Failed to access Experiment URL: %s" % response.error)
             statemon.state.increment('experiment_url_response_failed')
@@ -376,7 +383,8 @@ class OptimizelyController(ControllerBase):
                 "$.each($(\"divSELECTOR\"), function(element) {" \
                 "    $(this).css({\"background-image\": \"url(THUMB_URL)\"});"\
                 "}); "
-        return _js_component.replace('SELECTOR', element_id)
+        _js_component = _js_component.replace('SELECTOR', element_id)
+        raise tornado.gen.Return(_js_component)
 
     def remove_none_values(self, _dict):
         return dict((k, v) for k, v in _dict.iteritems() if v is not None)
@@ -402,6 +410,7 @@ class OptimizelyController(ControllerBase):
         }
         return response_data
 
+    @tornado.gen.coroutine
     def send_request(self, relative_path, method='GET', body=None):
         '''
         Make request to Optimizely RESP API
@@ -415,7 +424,7 @@ class OptimizelyController(ControllerBase):
         if (method == 'GET') or (method == 'DELETE'):
             req_body = None
 
-        response = self.do_http_request(client_url, method, headers, req_body)
+        response = yield self.do_http_request(client_url, method, headers, req_body)
         response_data = self.create_response(code=response.code)
 
         if response.error:
@@ -430,14 +439,17 @@ class OptimizelyController(ControllerBase):
                 pass
             response_data["status_string"] = "OK"
 
-        return response_data
+        raise tornado.gen.Return(response_data)
 
+    @tornado.gen.coroutine
     def get_projects(self):
         '''
         Get a list of all the projects in your acct, with associated metadata.
         '''
-        return self.send_request("projects")
-
+        response = yield self.send_request("projects")
+        raise tornado.gen.Return(response)
+    
+    @tornado.gen.coroutine
     def create_project(self, project_name=None,
                        project_status=None, include_jquery=None,
                        project_javascript=None, enable_force_variation=None,
@@ -459,8 +471,10 @@ class OptimizelyController(ControllerBase):
             "ip_filter": ip_filter
         }
         request_body = self.remove_none_values(request_body)
-        return self.send_request("projects", "POST", request_body)
-
+        response = yield self.send_request("projects", "POST", request_body)
+        raise tornado.gen.Return(response)
+    
+    @tornado.gen.coroutine
     def update_project(self, project_id=None, project_name=None,
                        project_status=None, include_jquery=None,
                        project_javascript=None, enable_force_variation=None,
@@ -482,25 +496,32 @@ class OptimizelyController(ControllerBase):
         }
         request_body = self.remove_none_values(request_body)
         relative_path = "projects/%s" % project_id
-        return self.send_request(relative_path, "PUT", request_body)
-
+        response = yield self.send_request(relative_path, "PUT", request_body)
+        raise tornado.gen.Return(response)
+    
+    @tornado.gen.coroutine
     def read_project(self, project_id):
         '''
         Get metadata for a single project.
         '''
         relative_path = "projects/%s" % project_id
-        return self.send_request(relative_path)
-
+        response = yield self.send_request(relative_path)
+        raise tornado.gen.Return(response)
+    
+    @tornado.gen.coroutine
     def delete_project(self, project_id):
         raise NotImplementedError("Deleting projects is not supported.")
-
+    
+    @tornado.gen.coroutine
     def get_experiments(self, project_id):
         '''
         Get a list of all the experiments in a project.
         '''
         relative_path = "projects/%s/experiments" % project_id
-        return self.send_request(relative_path)
-
+        response = yield self.send_request(relative_path)
+        raise tornado.gen.Return(response)
+    
+    @tornado.gen.coroutine
     def create_experiment(self, project_id=None, audience_ids=None,
                           activation_mode=None, conditional_code=None,
                           description=None, edit_url=None, status=None,
@@ -525,8 +546,10 @@ class OptimizelyController(ControllerBase):
         }
         request_body = self.remove_none_values(request_body)
         relative_path = "projects/%s/experiments" % project_id
-        return self.send_request(relative_path, "POST", request_body)
+        response = yield self.send_request(relative_path, "POST", request_body)
+        raise tornado.gen.Return(response)
 
+    @tornado.gen.coroutine
     def update_experiment(self, experiment_id=None, audience_ids=None,
                           activation_mode=None, conditional_code=None,
                           description=None, edit_url=None, status=None,
@@ -549,22 +572,28 @@ class OptimizelyController(ControllerBase):
         }
         request_body = self.remove_none_values(request_body)
         relative_path = "experiments/%s" % experiment_id
-        return self.send_request(relative_path, "PUT", request_body)
+        response = yield self.send_request(relative_path, "PUT", request_body)
+        raise tornado.gen.Return(response)
 
+    @tornado.gen.coroutine
     def read_experiment(self, experiment_id):
         '''
         Get metadata for a single experiment.
         '''
         relative_path = "experiments/%s" % experiment_id
-        return self.send_request(relative_path)
-
+        response = yield self.send_request(relative_path)
+        raise tornado.gen.Return(response)
+    
+    @tornado.gen.coroutine
     def delete_experiment(self, experiment_id):
         '''
         Delete an experiment.
         '''
         relative_path = "experiments/%s" % experiment_id
-        return self.send_request(relative_path, "DELETE")
+        response = yield self.send_request(relative_path, "DELETE")
+        raise tornado.gen.Return(response)
 
+    @tornado.gen.coroutine
     def get_experiments_status(self, experiment_id):
         '''
         Use the results endpoint to get the top-level results of an experiment,
@@ -572,15 +601,19 @@ class OptimizelyController(ControllerBase):
         and chance to beat baseline for each variation
         '''
         relative_path = "experiments/%s/stats" % experiment_id
-        return self.send_request(relative_path)
-
+        response = yield self.send_request(relative_path)
+        raise tornado.gen.Return(response)
+    
+    @tornado.gen.coroutine
     def get_variations(self, experiment_id):
         '''
         List all variations associated with the experiment.
         '''
         relative_path = "experiments/%s/variations" % experiment_id
-        return self.send_request(relative_path)
-
+        response = yield self.send_request(relative_path)
+        raise tornado.gen.Return(response)
+    
+    @tornado.gen.coroutine
     def create_variation(self, experiment_id=None, description=None,
                          is_paused=None, js_component=None,
                          weight=None):
@@ -599,8 +632,10 @@ class OptimizelyController(ControllerBase):
         }
         request_body = self.remove_none_values(request_body)
         relative_path = "experiments/%s/variations" % experiment_id
-        return self.send_request(relative_path, "POST", request_body)
+        response = yield self.send_request(relative_path, "POST", request_body)
+        raise tornado.gen.Return(response)
 
+    @tornado.gen.coroutine
     def update_variation(self, variation_id=None, description=None,
                          is_paused=None, js_component=None,
                          weight=None):
@@ -615,29 +650,37 @@ class OptimizelyController(ControllerBase):
         }
         request_body = self.remove_none_values(request_body)
         relative_path = "variations/%s" % variation_id
-        return self.send_request(relative_path, "PUT", request_body)
-
+        response = yield self.send_request(relative_path, "PUT", request_body)
+        raise tornado.gen.Return(response)
+    
+    @tornado.gen.coroutine
     def read_variation(self, variation_id):
         '''
         Get metadata for a single variation.
         '''
         relative_path = "variations/%s" % variation_id
-        return self.send_request(relative_path)
-
+        response = yield self.send_request(relative_path)
+        raise tornado.gen.Return(response)
+    
+    @tornado.gen.coroutine
     def delete_variation(self, variation_id):
         '''
         Delete a variation.
         '''
         relative_path = "variations/%s" % variation_id
-        return self.send_request(relative_path, "DELETE")
+        response = yield self.send_request(relative_path, "DELETE")
+        raise tornado.gen.Return(response)
 
+    @tornado.gen.coroutine
     def get_goals(self, project_id):
         '''
         Get a list of all the goals in a project.
         '''
         relative_path = "projects/%s/goals" % project_id
-        return self.send_request(relative_path)
-
+        response = yield self.send_request(relative_path)
+        raise tornado.gen.Return(response)
+    
+    @tornado.gen.coroutine
     def create_goal(self, project_id=None, title=None, goal_type=None,
                     archived=None, description=None, experiment_ids=None,
                     selector=None, target_to_experiments=None,
@@ -668,8 +711,10 @@ class OptimizelyController(ControllerBase):
         }
         request_body = self.remove_none_values(request_body)
         relative_path = "projects/%s/goals" % project_id
-        return self.send_request(relative_path, "POST", request_body)
+        response = yield self.send_request(relative_path, "POST", request_body)
+        raise tornado.gen.Return(response)
 
+    @tornado.gen.coroutine
     def update_goal(self, goal_id=None, title=None, goal_type=None,
                     archived=None, description=None, experiment_ids=None,
                     selector=None, target_to_experiments=None,
@@ -694,21 +739,26 @@ class OptimizelyController(ControllerBase):
         }
         request_body = self.remove_none_values(request_body)
         relative_path = "goals/%s" % goal_id
-        return self.send_request(relative_path, "PUT", request_body)
+        response = yield self.send_request(relative_path, "PUT", request_body)
+        raise tornado.gen.Return(response)
 
+    @tornado.gen.coroutine
     def read_goal(self, goal_id):
         '''
         Get metadata for a single goal.
         '''
         relative_path = "goals/%s" % goal_id
-        return self.send_request(relative_path)
+        response = yield self.send_request(relative_path)
+        raise tornado.gen.Return(response)
 
+    @tornado.gen.coroutine
     def delete_goal(self, goal_id):
         '''
         Delete a goal.
         '''
         relative_path = "goals/%s" % goal_id
-        return self.send_request(relative_path, "DELETE")
+        response = yield self.send_request(relative_path, "DELETE")
+        raise tornado.gen.Return(response)
 
 
 class Controller(object):
@@ -727,7 +777,7 @@ class Controller(object):
             raise ValueError("Controller already exists")
 
         controller = Controller(c_type, api_key, platform_id, access_key)
-        token_response = controller.verify_account()
+        token_response = yield controller.verify_account()
         if token_response is not None:
             raise ValueError("could not verify %s access. code: %s" % (
                 c_type, token_response["status_code"]))

@@ -712,17 +712,18 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             data = '{"error":"request already processed","video_id":"%s","job_id":"%s"}'\
                     % (video_id, job_id)
             self.send_json_response(data, 409)
-            return
+            raise tornado.gen.Return(True)
         if result.error:
             _log.error("key=create_neon_thumbnail_api_request "
                     "msg=thumbnail api error %s" %result.error)
             data = '{"error":"neon thumbnail api error"}'
             self.send_json_response(data, 502)
-            return
+            raise tornado.gen.Return(False)
 
         #Success
         if response_success:
             self.send_json_response(result.body, 201)
+        raise tornado.gen.Return(True)
     
     @tornado.gen.coroutine
     def create_neon_thumbnail_api_request(self):
@@ -1497,8 +1498,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             return
 
         try:
-            cr = yield tornado.gen.Task(
-                neon_controller.Controller.create,
+            cr = yield neon_controller.Controller.create(
                 c_type, self.api_key, i_id, access_token)
 
             # Associate controller with neon user account
@@ -1591,28 +1591,29 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 'ovid_to_tid': {}
             }
 
+        # verify video exist to submit
+        i_vid = neondata.InternalVideoID.generate(self.api_key, video_id)
+        vmd = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
+        if vmd is None:
+            video_submit = yield self.submit_neon_video_request(
+                self.api_key,
+                video_id,
+                video_url,
+                video_url.split('//')[-1],
+                self.get_argument('topn', 1),
+                self.get_argument('callback_url', None),
+                self.get_argument('default_thumbnail', None),
+                False
+            )
+
+            if video_submit is False:
+                return
+
         try:
             # create or append a experiment
-            data = yield tornado.gen.Task(
-                cr.verify_experiment,
+            data = yield cr.verify_experiment(
                 i_id, experiment_id, video_id, extras)
 
-            # verify video exist
-            i_vid = neondata.InternalVideoID.generate(self.api_key, video_id)
-            vmd = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
-
-            # submit video
-            if vmd is None:
-                yield self.submit_neon_video_request(
-                    self.api_key,
-                    video_id,
-                    video_url,
-                    video_url.split('//')[-1],
-                    self.get_argument('topn', 1),
-                    self.get_argument('callback_url', None),
-                    self.get_argument('default_thumbnail', None),
-                    False
-                )
             self.send_json_response(data, 201)
         except ValueError as e:
             _log.error("key=create_controller_experiment"

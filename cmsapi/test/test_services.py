@@ -2142,6 +2142,7 @@ class TestOptimizelyIntegration(tornado.testing.AsyncHTTPTestCase):
         self.goal_id = "12345"
 
         self.job_ids = []
+        self.with_invalid_access_token = False
 
     def tearDown(self):
         self.cp_sync_patcher.stop()
@@ -2177,10 +2178,19 @@ class TestOptimizelyIntegration(tornado.testing.AsyncHTTPTestCase):
 
         # print "----> ", http_req.url, callback
         if "projects" in http_req.url:
-            data = json.dumps({'status_code': 200})
+            code = 200
+            data = json.dumps({'status_code': code})
             request = tornado.httpclient.HTTPRequest(http_req.url)
+
+            if self.with_invalid_access_token:
+                code = 401
+                data = json.dumps({
+                    'status_code': code,
+                    'status_string': 'Authentication failed',
+                    'data': {}
+                })
             response = tornado.httpclient.HTTPResponse(
-                request, 200, buffer=StringIO(data))
+                request, code, buffer=StringIO(data))
             if callback:
                 return tornado.ioloop.IOLoop.current().add_callback(callback,
                                                                     response)
@@ -2332,13 +2342,8 @@ class TestOptimizelyIntegration(tornado.testing.AsyncHTTPTestCase):
         self.assertEquals(resp.body, '{"error": "Controller already exists"}')
         self.assertEqual(resp.code, 502)
 
-    @patch('controllers.neon_controller.OptimizelyController.verify_account')
-    def test_optimizely_integration_with_invalid_token(self, mock_v_account):
-        mock_v_account.return_value = {
-            'status_code': 401,
-            'status_string': 'Authentication failed',
-            'data': {}
-        }
+    def test_optimizely_integration_with_invalid_token(self):
+        self.with_invalid_access_token = True
 
         resp = self.create_optimizely_integration()
         self.assertEquals(
