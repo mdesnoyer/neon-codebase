@@ -23,7 +23,6 @@ from StringIO import StringIO
 from utils.options import define, options
 from boto.s3.connection import S3Connection
 from controllers import neon_controller
-
 _log = logging.getLogger(__name__)
 
 define("poll_period", default=300, help="Period(s) to poll",
@@ -37,6 +36,7 @@ define('directive_filename', default='mastermind',
 statemon.define('cycles_complete', int)
 statemon.define('unexpected_exception', int)
 statemon.define('s3_connection_error', int)
+statemon.define('update_experiment_error', int)
 statemon.define('cycle_runtime', float)
 
 
@@ -158,20 +158,27 @@ class S3DirectiveWatcher(object):
                         _log.error("key=read_directives"
                                    " msg=controller api call failed")
                         _log.error(e.message)
+                        statemon.state.increment('update_experiment_error')
         return
 
     @tornado.gen.coroutine
     def run_one_cycle(self):
         bucket = self.get_bucket(options.s3_bucket)
+        if bucket is None:
+            return
+
         bucket_files = self.filter_and_get_files_from_s3(
             bucket, self.last_update_time)
 
-        yield [self.read_directives(bucket, x) for x in bucket_files if x is not None]
+        yield [
+            self.read_directives(bucket, x) for x in bucket_files
+            if x is not None
+        ]
         self.last_update_time = datetime.datetime.utcnow()
 
+
 @tornado.gen.coroutine
-def main(run_flag):
-    directive_watcher = S3DirectiveWatcher()
+def main(run_flag, directive_watcher):
     while run_flag.is_set():
         start_time = datetime.datetime.now()
         try:
@@ -189,10 +196,14 @@ def main(run_flag):
 
 if __name__ == "__main__":
     utils.neon.InitNeon()
+
+    directive_watcher = S3DirectiveWatcher()
     run_flag = multiprocessing.Event()
     run_flag.set()
+
     atexit.register(utils.ps.shutdown_children)
     atexit.register(run_flag.clear)
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
 
-    tornado.ioloop.IOLoop.current().run_sync(lambda: main(run_flag))
+    tornado.ioloop.IOLoop.current().run_sync(
+        lambda: main(run_flag, directive_watcher))

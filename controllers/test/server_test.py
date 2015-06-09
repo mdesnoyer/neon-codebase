@@ -8,10 +8,8 @@ if sys.path[0] != __base_path__:
 
 import logging
 import controllers.server
-import test_utils.mock_boto_s3
 import test_utils.neontest
 import test_utils.redis
-import tornado.testing
 import unittest
 import utils.neon
 import boto.exception
@@ -19,9 +17,9 @@ import json
 import gzip
 import socket
 import tornado.gen
-import controllers.neon_controller as neon_controller
+import tornado.testing
 import concurrent.futures
-import copy
+from controllers import neon_controller
 from utils.options import options
 from mock import MagicMock, patch, call, ANY
 from cmsdb import neondata
@@ -50,8 +48,6 @@ class MockS3Connection(object):
                     k['name'], k['last_modified'], k['data'])
 
     def get_bucket(self, name):
-        if name is None:
-            raise boto.exception.BotoServerError("Missing bucket", "")
         return self
 
     def list(self, prefix=None):
@@ -108,6 +104,8 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
                 self.ecmd2, [0.1, 0.7, 0.2])
         }
 
+        # Mock for S3
+        self.bucket_name = 'neon-image-serving-directives-test'
         self.s3conn = MockS3Connection([
             self.item_now, self.item_one_hour_ago, self.item_two_hours_ago])
         self.directive_watcher.S3Connection = \
@@ -197,28 +195,35 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
 
         return directives
 
+    def test_s3_bucket_missing(self):
+        bucket_mock = MagicMock()
+        self.s3conn.get_bucket = bucket_mock
+        bucket_mock.side_effect = boto.exception.BotoServerError(
+            'Missing bucket', '')
+        self.assertEqual(
+            self.directive_watcher.get_bucket(self.bucket_name), None)
+
     def test_s3_bucket_permission_error(self):
         bucket_mock = MagicMock()
         self.s3conn.get_bucket = bucket_mock
         bucket_mock.side_effect = boto.exception.S3PermissionsError('Ooops')
         self.assertEqual(
-            self.directive_watcher.get_bucket('no_permission'), None)
+            self.directive_watcher.get_bucket(self.bucket_name), None)
 
     def test_s3_connection_error(self):
         bucket_mock = MagicMock()
         self.s3conn.get_bucket = bucket_mock
         bucket_mock.side_effect = socket.gaierror('Unknown name')
         self.assertEqual(
-            self.directive_watcher.get_bucket('unknown_name'), None)
+            self.directive_watcher.get_bucket(self.bucket_name), None)
 
     @patch('controllers.server.S3DirectiveWatcher.compare_dates')
     def test_filter_and_get_files_from_s3_with_last_updated_now(
                                             self, mock_compare_dates):
-        last_update_time = self.directive_watcher.last_update_time \
-            + timedelta(hours=0)
+        last_update_time = \
+            self.directive_watcher.last_update_time + timedelta(hours=0)
         self.directive_watcher.filter_and_get_files_from_s3(
-            self.s3conn.get_bucket("neon-image-serving-directives-test"),
-            last_update_time)
+            self.s3conn.get_bucket(self.bucket_name), last_update_time)
 
         mock_compare_dates.assert_called_with(
             self.item_now['last_modified'], last_update_time)
@@ -228,11 +233,10 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
     def test_filter_and_get_files_from_s3_with_one_hour_ago(
                                             self, mock_compare_dates):
         self.directive_watcher.last_update_time = \
-            self.directive_watcher.last_update_time \
-            - timedelta(hours=1)
+            self.directive_watcher.last_update_time - timedelta(hours=1)
 
         self.directive_watcher.filter_and_get_files_from_s3(
-            self.s3conn.get_bucket("neon-image-serving-directives-test"),
+            self.s3conn.get_bucket(self.bucket_name),
             self.directive_watcher.last_update_time)
 
         calls = [
@@ -242,6 +246,7 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
             call(
                 self.item_now['last_modified'],
                 self.directive_watcher.last_update_time)]
+
         mock_compare_dates.assert_has_calls(calls, any_order=True)
         self.assertEqual(mock_compare_dates.call_count, 2)
 
@@ -267,8 +272,7 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
         read_directives_mock.return_value = None
 
         self.directive_watcher.last_update_time = \
-            self.directive_watcher.last_update_time \
-            - timedelta(hours=1)
+            self.directive_watcher.last_update_time - timedelta(hours=1)
 
         yield self.directive_watcher.run_one_cycle()
         calls = [
@@ -283,16 +287,15 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_read_directives_with_parse_directive_file(self, mock_parse):
         yield self.directive_watcher.read_directives(
-            self.s3conn,
-            self.s3conn.get_key(self.item_now['name']))
+            self.s3conn, self.s3conn.get_key(self.item_now['name']))
         mock_parse.assert_called_with(self.item_now['data'])
         self.assertEqual(mock_parse.call_count, 1)
 
     @patch('cmsdb.neondata.ExperimentControllerMetaData.get')
+    @tornado.testing.gen_test
     def test_read_directives_check_get_metadata(self, mock_get):
         self.directive_watcher.read_directives(
-            self.s3conn,
-            self.s3conn.get_key(self.item_now['name']))
+            self.s3conn, self.s3conn.get_key(self.item_now['name']))
         mock_get.assert_called_with('1', '1', callback=ANY)
         self.assertEqual(mock_get.call_count, 1)
 
@@ -313,15 +316,13 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
         last_modified_epoch = (
             (datetime.utcnow() + timedelta(hours=1)) -
             datetime(1970, 1, 1)).total_seconds()
-        self.ecmd1.controllers[0]['last_process_date'] = \
-            last_modified_epoch
+        self.ecmd1.controllers[0]['last_process_date'] = last_modified_epoch
         self.ecmd1.save()
 
         yield self.directive_watcher.read_directives(
             self.s3conn, self.s3conn.get_key(self.item_now['name']))
         self.assertEqual(mock_get.call_count, 0)
-    
-    '''
+
     @tornado.testing.gen_test
     def test_read_directives_call_update_experiment(self):
         verify_account_mocker = patch(
@@ -330,25 +331,35 @@ class TestS3DirectiveWatcher(test_utils.neontest.AsyncTestCase):
             verify_account_mocker.start())
         verify_account_mock.return_value = None
 
+        yield neon_controller.Controller.create(
+                ControllerType.OPTIMIZELY, '1', '0', 'x')
+
         upd_directive_mocker = patch(
             'controllers.neon_controller.OptimizelyController.update_experiment_with_directives')
         upd_directive_mock = self._future_wrap_mock(
             upd_directive_mocker.start())
         upd_directive_mock.return_value = ControllerExperimentState.INPROGRESS
 
-        yield neon_controller.Controller.create(
-                ControllerType.OPTIMIZELY, '1', '0', 'x')
-
-        before = copy.deepcopy(self.ecmd1.controllers[0])
+        last_modified_epoch = (
+            datetime.utcnow() -
+            datetime(1970, 1, 1)).total_seconds()
 
         yield self.directive_watcher.read_directives(
             self.s3conn,
             self.s3conn.get_key(self.item_now['name']))
 
+        ecmd = yield tornado.gen.Task(
+            neondata.ExperimentControllerMetaData.get, '1', '1')
+
+        ecmd_ctr = ecmd.controllers[0]
+        self.assertEqual(upd_directive_mock.call_count, 1)
         upd_directive_mock.assert_called_with(
-            before,
+            ecmd_ctr,
             self.unzip_file(self.item_now['data'])['1_1'])
-    '''
+        self.assertGreater(last_modified_epoch, ecmd_ctr['last_process_date'])
+        self.assertEqual(
+            ControllerExperimentState.INPROGRESS, ecmd_ctr['state'])
+
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()

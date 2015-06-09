@@ -1391,10 +1391,13 @@ class ControllerResultsRetriever(threading.Thread):
             # Now we wait so that we don't hit the database too much.
             self._stopped.wait(options.controller_results_retriever_delay)
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def _results_retriever(self):
         data = []
+        ecmds = yield tornado.gen.Task(
+            neondata.ExperimentControllerMetaData.get_all)
 
-        ecmds = neondata.ExperimentControllerMetaData.get_all()
         for ecmd in ecmds:
             api_key = ecmd.get_api_key()
 
@@ -1404,10 +1407,10 @@ class ControllerResultsRetriever(threading.Thread):
                     continue
 
                 ctr = neon_controller.Controller.get(
-                    c['controller_type'],
-                    api_key, c['platform_id'])
+                    c['controller_type'], api_key, c['platform_id'])
 
-                for s in ctr.retrieve_experiment_results(c):
+                exp_results = yield ctr.retrieve_experiment_results(c)
+                for s in exp_results:
                     data.append((
                         self.video_id_cache.find_video_id(s['thumb_id']),
                         s['thumb_id'],

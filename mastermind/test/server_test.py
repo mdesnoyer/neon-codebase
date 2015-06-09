@@ -44,6 +44,7 @@ import utils.neon
 from utils.options import options
 import utils.ps
 import controllers.neon_controller as neon_controller
+import concurrent.futures
 
 STAGING = neondata.TrackerAccountIDMapper.STAGING
 PROD = neondata.TrackerAccountIDMapper.PRODUCTION
@@ -2051,42 +2052,54 @@ class SmokeTesting(test_utils.neontest.TestCase):
 class TestControllerResultsRetriever(test_utils.neontest.AsyncTestCase):
     ''' Controller Results Retriever Test '''
     def setUp(self):
-        super(TestControllerResultsRetriever, self).setUp()
-
+        # Mock for redis
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
 
+        # Mock for mastermind
         self.mastermind = MagicMock()
         self.retriever = mastermind.server.ControllerResultsRetriever(
             self.mastermind)
 
+        # Mock for create controller
+        self.verify_account_mocker = patch(
+            'controllers.neon_controller.OptimizelyController.verify_account')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.return_value = None
+
         self.i_id = "0"
         self.controller_type = neon_controller.ControllerType.OPTIMIZELY
-        self.create_default_experiment_controller_meta_data(
+        self.ecmd1 = self.create_default_experiment_controller_meta_data(
             a_id='1', exp_id='1', video_id='1', goal_id='1')
-        self.create_default_experiment_controller_meta_data(
+        self.ecmd2 = self.create_default_experiment_controller_meta_data(
             a_id='2', exp_id='2', video_id='2', goal_id='2',
             state=neon_controller.ControllerExperimentState.INPROGRESS)
-
+        super(TestControllerResultsRetriever, self).setUp()
+    
     def tearDown(self):
         self.redis.stop()
         super(TestControllerResultsRetriever, self).tearDown()
+
+    def _future_wrap_mock(self, outer_mock):
+        inner_mock = MagicMock()
+        def _build_future(*args, **kwargs):
+            future = concurrent.futures.Future()
+            try:
+                future.set_result(inner_mock(*args, **kwargs))
+            except Exception as e:
+                future.set_exception(e)
+            return future
+        outer_mock.side_effect = _build_future
+        return inner_mock
 
     def create_default_experiment_controller_meta_data(self, a_id, exp_id,
                                                        video_id, goal_id,
                                                        state=None):
         ecmd = neondata.ExperimentControllerMetaData(
-            a_id,
-            self.i_id,
-            self.controller_type,
-            exp_id,
-            video_id,
-            {
-                'goal_id': str(goal_id),
-                'element_id': '#1',
-                'js_component': "$(\"img#1\").attr(\"src\", \"THUMB_URL\")",
-                'ovid_to_tid': {}
-            },
+            a_id, self.i_id, self.controller_type,
+            exp_id, video_id,
+            {'goal_id': str(goal_id), 'ovid_to_tid': {}},
             0)
 
         if state is not None:
@@ -2095,59 +2108,50 @@ class TestControllerResultsRetriever(test_utils.neontest.AsyncTestCase):
         ecmd.save()
         return ecmd
 
-    @patch('controllers.neon_controller.Controller.get')
-    def test_results_retriever_experiment_controller_in_progress(self,
-                                                                 mock_ctr_get):
-        self.retriever._results_retriever()
+    @tornado.testing.gen_test
+    def test_results_retriever_experiment_controller_in_progress(self):
+        yield neon_controller.Controller.create(
+            self.controller_type, '1', self.i_id, 'x')
+        yield neon_controller.Controller.create(
+            self.controller_type, '2', self.i_id, 'x')
 
-        mock_ctr_get.assert_called_with(
-            neon_controller.ControllerType.OPTIMIZELY, "2", self.i_id)
-        self.assertEqual(mock_ctr_get.call_count, 1)
+        experiment_results_mocker = patch(
+            'controllers.neon_controller.OptimizelyController.retrieve_experiment_results')
+        experiment_results_mock = self._future_wrap_mock(
+            experiment_results_mocker.start())
+        experiment_results_mock.return_value = []
+
+        yield tornado.gen.Task(self.retriever._results_retriever)
+        experiment_results_mock.assert_called_with(self.ecmd2.controllers[0])
+        self.assertEqual(experiment_results_mock.call_count, 1)
 
     @patch('mastermind.server.VideoIdCache.find_video_id')
-    @patch('controllers.neon_controller.OptimizelyController.retrieve_experiment_results')
-    @patch('controllers.neon_controller.OptimizelyController.verify_account')
     @tornado.testing.gen_test
-    def test_results_retriever_experiment_results(self, mock_verify_account,
-                                                  mock_exp_results,
-                                                  mock_find_video_id):
-        mock_verify_account.return_value = None
+    def test_results_retriever_experiment_results(self, mock_find_video_id):
         yield neon_controller.Controller.create(
-                self.controller_type, '2', self.i_id, 'x')
+            self.controller_type, '1', self.i_id, 'x')
+        yield neon_controller.Controller.create(
+            self.controller_type, '2', self.i_id, 'x')
 
-        self.mastermind.update_stats_info = MagicMock()
-        mock_find_video_id.return_value = 'video_id0'
-        mock_exp_results.return_value = [{
-            'thumb_id': 'thumb_id0',
+        experiment_results_mocker = patch(
+            'controllers.neon_controller.OptimizelyController.retrieve_experiment_results')
+        experiment_results_mock = self._future_wrap_mock(
+            experiment_results_mocker.start())
+        experiment_results_mock.return_value = [{
+            'thumb_id': 'thumb_id2',
             'visitors': 1300,
             'conversions': 600,
             'conversion_rate': round((float(600) / 1300), 2)
         }]
 
-        self.retriever._results_retriever()
+        self.mastermind.update_stats_info = MagicMock()
+        mock_find_video_id.return_value = 'video_id2'
 
-        mock_exp_results.assert_called_with({
-            'controller_type': 'optimizely',
-            'platform_id': '0',
-            'video_id': '2',
-            'last_process_date': 0,
-            'state': 'inprogress',
-            'extras': {
-                'js_component': '$("img#1").attr("src", "THUMB_URL")',
-                'element_id': '#1',
-                'goal_id': '2',
-                'ovid_to_tid': {}
-            },
-            'experiment_id': '2'}
-        )
-
+        yield tornado.gen.Task(self.retriever._results_retriever)
+        experiment_results_mock.assert_called_with(self.ecmd2.controllers[0])
+        self.assertEqual(experiment_results_mock.call_count, 1)
         self.mastermind.update_stats_info.assert_called_with([(
-            'video_id0',
-            'thumb_id0',
-            1300,
-            None,
-            600,
-            None)])
+            'video_id2', 'thumb_id2', 1300, None, 600, None)])
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
