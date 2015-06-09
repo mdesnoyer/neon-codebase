@@ -4,181 +4,46 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-import logging
 import datetime
-import utils.neon
-import utils.ps
-import signal
-import atexit
-import threading
-import multiprocessing
-import tornado.gen
-import tornado.ioloop
+import logging
 import boto
 import socket
 import gzip
 import json
-from boto.s3.connection import S3Connection
-from cmsdb import neondata
-from controllers import neon_controller
+import signal
+import atexit
+import multiprocessing
+import tornado.gen
+import tornado.ioloop
+import utils.neon
+import utils.ps
 from utils import statemon
-from utils.options import define, options
+from cmsdb import neondata
 from StringIO import StringIO
+from utils.options import define, options
+from boto.s3.connection import S3Connection
+from controllers import neon_controller
+
 _log = logging.getLogger(__name__)
 
+define("poll_period", default=300, help="Period(s) to poll",
+       type=int)
 define('s3_bucket', default='neon-image-serving-directives-test',
        help='Bucket to publish the serving directives to')
 define('directive_filename', default='mastermind',
        help='Filename in the S3 bucket that will hold the directive.')
-define("interval", default=60, type=int,
-       help=("Standby time (in seconds) to execute loop again."
-             "Must be between 60 and 1200."))
 
 # Monitoring variables
-statemon.define('reading_error', int)  # error reading directive to s3
-statemon.define('last_directive_watcher_update_time', float)  #
-statemon.define('time_since_last_read', float)  # Time since last read
+statemon.define('cycles_complete', int)
+statemon.define('unexpected_exception', int)
+statemon.define('s3_connection_error', int)
+statemon.define('cycle_runtime', float)
 
 
-class S3DirectiveWatcher(threading.Thread):
-    def __init__(self, activity_watcher=utils.ps.ActivityWatcher()):
-        super(S3DirectiveWatcher, self).__init__(name='S3DirectiveWatcher')
-
-        self.activity_watcher = activity_watcher
+class S3DirectiveWatcher(object):
+    def __init__(self):
         self.last_update_time = datetime.datetime.utcnow()
-        self._update_timer = None
-        self._update_time_last_reading()
-
-        self.lock = threading.RLock()
-        self._stopped = threading.Event()
-
         self.S3Connection = S3Connection
-        self._lock = multiprocessing.RLock()
-
-    def __del__(self):
-        if self._update_timer and self._update_timer.is_alive():
-            self._update_timer.cancel()
-        super(S3DirectiveWatcher, self).__del__()
-
-    def run(self):
-        self._stopped.clear()
-        while not self._stopped.is_set():
-            try:
-                with self.activity_watcher.activate():
-                    self.read_directives()
-            except Exception as e:
-                _log.exception('Uncaught exception when reading %s' % e)
-                statemon.state.increment('reading_error')
-
-            self._stopped.wait(options.interval)
-
-    def stop(self):
-        '''Stop this thread safely and allow it to finish what is is doing.'''
-        self._stopped.set()
-
-    def stop_handler(self, signum, frame):
-        self.stop()
-        sys.exit(-signum)
-
-    def _update_time_last_reading(self):
-        statemon.state.time_since_last_read = (
-            datetime.datetime.utcnow() -
-            self.last_update_time).total_seconds()
-
-        self._update_timer = threading.Timer(
-            10.0, self._update_time_last_reading)
-        self._update_timer.daemon = True
-        self._update_timer.start()
-
-    @tornado.gen.coroutine
-    def read_directives(self):
-        # Create the connection to S3
-        s3conn = self.S3Connection()
-
-        try:
-            bucket = s3conn.get_bucket(options.s3_bucket)
-        except boto.exception.BotoServerError as e:
-            _log.error('Could not get bucket %s: %s' %
-                       (options.s3_bucket, e))
-            statemon.state.increment('reading_error')
-            return
-        except boto.exception.BotoClientError as e:
-            _log.error('Could not get bucket %s: %s' %
-                       (options.s3_bucket, e))
-            statemon.state.increment('reading_error')
-            return
-        except socket.error as e:
-            _log.error('Error connecting to S3: %s' % e)
-            statemon.state.increment('reading_error')
-            return
-
-        # getting within hour of last updated
-        now = datetime.datetime.utcnow()
-        bucket_listing = bucket.list(
-            prefix=self.last_update_time.strftime('%Y%m%d%H'))
-
-        # getting the current hour
-        if (self.last_update_time.hour < now.hour):
-            bucket_listing_now = bucket.list(prefix=now.strftime('%Y%m%d%H'))
-            for key in bucket_listing_now:
-                bucket_listing.append(key)
-
-        # filter file by last modified
-        filename_list = [
-            i for i in bucket_listing
-            if self.compare_dates(i.last_modified, self.last_update_time)
-        ]
-
-        # for each file get in S3
-        for rs in filename_list:
-            # parse the file to json
-            file_content = bucket.get_key(rs.name).get_contents_as_string()
-            parsed = self.parse_directive_file(file_content)
-
-            for key, value in parsed.iteritems():
-                #  get video metada
-                ecmd = yield tornado.gen.Task(
-                    neondata.ExperimentControllerMetaData.get,
-                    value['aid'], value['vid'].split('_', 1)[1])
-                if ecmd:
-                    api_key = ecmd.get_api_key()
-                    # for each experiment - update directives
-
-                    for i in ecmd.controllers:
-                        state = \
-                            neon_controller.ControllerExperimentState.COMPLETE
-                        if i['state'] == state:
-                            continue
-                        last_modified_epoch = (
-                            self.datetime_from_modified(rs.last_modified) -
-                            datetime.datetime(1970, 1, 1)).total_seconds()
-
-                        if last_modified_epoch <= i['last_process_date']:
-                            continue
-
-                        ctr = neon_controller.Controller.get(
-                            i['controller_type'], api_key, i['platform_id'])
-
-                        try:
-                            state = yield tornado.gen.Task(
-                                ctr.update_experiment_with_directives,
-                                i, value)
-
-                            # update controller - last process date
-                            ecmd.update_controller(
-                                i['controller_type'], i['platform_id'],
-                                i['experiment_id'], i['video_id'],
-                                state, last_modified_epoch, i['extras'])
-                            yield tornado.gen.Task(ecmd.save)
-
-                        except ValueError as e:
-                            _log.error("key=read_directives"
-                                       " msg=controller api call failed")
-                            _log.error(e.message)
-
-        # update time
-        self.last_update_time = datetime.datetime.utcnow()
-        return
 
     def parse_directive_file(self, file_data):
         '''{(account_id, video_id) -> json_directive}'''
@@ -207,30 +72,127 @@ class S3DirectiveWatcher(threading.Thread):
         date_format = "%Y-%m-%dT%H:%M:%S.%fZ"
         return datetime.datetime.strptime(date_str, date_format)
 
+    def get_bucket(self, bucket_name):
+        # Create the connection to S3
+        s3conn = self.S3Connection()
 
-def main(activity_watcher=utils.ps.ActivityWatcher()):
-    # validate min and max values to interval option
-    if (options.interval < 60) or (options.interval > 1200):  # 1 min or 20 min
-        raise Exception("Invalid interval argument")
+        try:
+            bucket = s3conn.get_bucket(bucket_name)
+        except boto.exception.BotoServerError as e:
+            _log.error('Could not get bucket %s: %s' %
+                       (bucket_name, e))
+            statemon.state.increment('s3_connection_error')
+            return None
+        except boto.exception.BotoClientError as e:
+            _log.error('Could not get bucket %s: %s' %
+                       (bucket_name, e))
+            statemon.state.increment('s3_connection_error')
+            return None
+        except socket.error as e:
+            _log.error('Error connecting to S3: %s' % e)
+            statemon.state.increment('s3_connection_error')
+            return None
+        return bucket
+
+    def filter_and_get_files_from_s3(self, bucket, last_update_time):
+        # getting within hour of last updated
+        now = datetime.datetime.utcnow()
+        bucket_listing = bucket.list(
+            prefix=last_update_time.strftime('%Y%m%d%H'))
+
+        # getting the current hour
+        if (last_update_time.hour < now.hour):
+            bucket_listing_now = bucket.list(prefix=now.strftime('%Y%m%d%H'))
+            for key in bucket_listing_now:
+                bucket_listing.append(key)
+
+        # filter file by last modified
+        filename_list = [
+            i for i in bucket_listing
+            if self.compare_dates(i.last_modified, last_update_time)
+        ]
+
+        return filename_list
+
+    @tornado.gen.coroutine
+    def read_directives(self, bucket, result_set):
+        # parse the file to json
+        file_content = bucket.get_key(result_set.name).get_contents_as_string()
+        parsed = self.parse_directive_file(file_content)
+
+        for key, value in parsed.iteritems():
+            #  get video metada
+            ecmd = yield tornado.gen.Task(
+                neondata.ExperimentControllerMetaData.get,
+                value['aid'], value['vid'].split('_', 1)[1])
+            if ecmd:
+                api_key = ecmd.get_api_key()
+                # for each experiment - update directives
+                for i in ecmd.controllers:
+                    state = \
+                        neon_controller.ControllerExperimentState.COMPLETE
+                    if i['state'] == state:
+                        continue
+                    last_modified_epoch = (
+                        self.datetime_from_modified(result_set.last_modified) -
+                        datetime.datetime(1970, 1, 1)).total_seconds()
+
+                    if last_modified_epoch <= i['last_process_date']:
+                        continue
+
+                    ctr = neon_controller.Controller.get(
+                        i['controller_type'], api_key, i['platform_id'])
+
+                    try:
+                        state = yield ctr.update_experiment_with_directives(
+                            i, value)
+
+                        # update controller - last process date
+                        ecmd.update_controller(
+                            i['controller_type'], i['platform_id'],
+                            i['experiment_id'], i['video_id'],
+                            state, last_modified_epoch, i['extras'])
+                        yield tornado.gen.Task(ecmd.save)
+
+                    except ValueError as e:
+                        _log.error("key=read_directives"
+                                   " msg=controller api call failed")
+                        _log.error(e.message)
         return
 
-    with activity_watcher.activate():
-        dir_watcher = S3DirectiveWatcher(
-            activity_watcher=activity_watcher)
-        dir_watcher.start()
+    @tornado.gen.coroutine
+    def run_one_cycle(self):
+        bucket = self.get_bucket(options.s3_bucket)
+        bucket_files = self.filter_and_get_files_from_s3(
+            bucket, self.last_update_time)
 
-    atexit.register(tornado.ioloop.IOLoop.current().stop)
-    signal.signal(signal.SIGTERM, dir_watcher.stop_handler)
-    signal.signal(signal.SIGINT, dir_watcher.stop_handler)
+        yield [self.read_directives(bucket, x) for x in bucket_files if x is not None]
+        self.last_update_time = datetime.datetime.utcnow()
 
-    def update_directive_watcher_time():
-        statemon.state.last_directive_watcher_update_time = (
-            datetime.datetime.utcnow() -
-            dir_watcher.last_update_time).total_seconds()
-    tornado.ioloop.PeriodicCallback(update_directive_watcher_time, 10000)
-    tornado.ioloop.IOLoop.current().start()
-    dir_watcher.join(300)
+@tornado.gen.coroutine
+def main(run_flag):
+    directive_watcher = S3DirectiveWatcher()
+    while run_flag.is_set():
+        start_time = datetime.datetime.now()
+        try:
+            yield directive_watcher.run_one_cycle()
+            statemon.state.increment('cycles_complete')
+        except Exception:
+            _log.exception('Uncaught exception when reading from Controller')
+            statemon.state.increment('unexpected_exception')
+        cycle_runtime = (datetime.datetime.now() - start_time).total_seconds()
+        statemon.state.cycle_runtime = cycle_runtime
+
+        if cycle_runtime < options.poll_period:
+            yield tornado.gen.sleep(options.poll_period - cycle_runtime)
+    _log.info('Finished program')
 
 if __name__ == "__main__":
     utils.neon.InitNeon()
-    main()
+    run_flag = multiprocessing.Event()
+    run_flag.set()
+    atexit.register(utils.ps.shutdown_children)
+    atexit.register(run_flag.clear)
+    signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
+
+    tornado.ioloop.IOLoop.current().run_sync(lambda: main(run_flag))
