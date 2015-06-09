@@ -906,8 +906,21 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             neondata.RequestState.REQUEUED, neondata.RequestState.REPROCESS]
         
         failed_states = [neondata.RequestState.INT_ERROR, 
-                    neondata.RequestState.FAILED]
+                         neondata.RequestState.FAILED]
         
+        # single video state, if video not found return an error
+        # GET /api/v1/accounts/{account_id}/
+        # {integration_type}/{integration_id}/videos/{video_id}
+        if vids is not None and len(vids) == 1:
+            i_vid = neondata.InternalVideoID.generate(self.api_key, vids[0])
+            v = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
+            if not v:
+                # Video is not in the system yet.
+                statemon.state.increment(ref=_video_not_found_ref, safe=False)
+                self.send_json_response('{"total_count": 1, "items":[{}],\
+                        "error":"video not found"}', 400)
+                return
+
         #1 Get job ids for the videos from account, get the request status
         platform_account = yield tornado.gen.Task(self.get_platform_account, 
                             i_type, i_id)
@@ -917,42 +930,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             statemon.state.increment('account_not_found')
             self.send_json_response('{"error":"%s account not found"}' % i_type, 400)
             return
-
-        
-        # single video state, if video not found return an error
-        # GET /api/v1/accounts/{account_id}/
-        # {integration_type}/{integration_id}/videos/{video_id}
-        if vids is not None and len(vids) == 1:
-            vid = vids[0]
-            all_vids = platform_account.get_videos()
-            i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
-            if vid not in all_vids:
-                statemon.state.increment(ref=_video_not_found_ref, safe=False)
-                self.send_json_response('{"total_count": 1, "items":[{}],\
-                        "error":"video not found"}', 400)
-                return
-            else:
-                v = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
-                if not v:
-                    # Video is in submit or processing state, 
-                    # so send dummy VResponse
-                    job_id = platform_account.videos[vid]
-                    vr = neondata.VideoResponse(vid,
-                                        job_id,
-                                        neondata.RequestState.PROCESSING,
-                                        i_type,
-                                        "0",
-                                        "title",
-                                        None, #duration
-                                        time.time() * 1000,
-                                        0, 
-                                        None)
-                    vstatus_response = GetVideoStatusResponse(
-                                        [vr.to_dict()], 0, page_no, page_size,
-                                        c_processing, c_recommended, c_published, c_serving)
-                    data = vstatus_response.to_json() 
-                    self.send_json_response(data, 200)
-                    return
 
         #return all videos in the account
         if vids is None:
