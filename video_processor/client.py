@@ -117,6 +117,9 @@ class VideoError(Exception):
         self.vid = job_params['video_id'] 
         self.job_id = job_params['job_id']
         self.callback_url = job_params['callback_url']
+
+        #TODO(Sunil): Don't do this here. make a new function that is called
+        # when an error happens during video processing. Call this in the catch: block
         self.send_callback()
         
     def send_callback(self):
@@ -559,9 +562,6 @@ class VideoProcessor(object):
                                               cdn_metadata=cdn_metadata,
                                               save_objects=False)
 
-        # Generate the serving url
-        self.video_metadata.get_serving_url(save=False)
-
         # Save the thumbnail and video data into the database
         # TODO(mdesnoyer): do this as a single transaction
         def _merge_thumbnails(t_objs):
@@ -615,7 +615,6 @@ class VideoProcessor(object):
             video_obj.integration_id = self.video_metadata.integration_id
             video_obj.frame_size = self.video_metadata.frame_size
             video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
-            video_obj.serving_url = self.video_metadata.get_serving_url()
         try:
             new_video_metadata = neondata.VideoMetadata.modify(
                 self.video_metadata.key,
@@ -709,10 +708,10 @@ class VideoProcessor(object):
                 neondata.InternalVideoID.to_external(self.video_metadata.key),
                 fnos,
                 thumbs,
-                self.video_metadata.get_serving_url(),
+                self.video_metadata.get_serving_url(save=False),
                 err=err_msg)
         response_body = cresp.to_dict()
-
+        
         #CREATE POST REQUEST
         body = tornado.escape.json_encode(response_body)
         h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
