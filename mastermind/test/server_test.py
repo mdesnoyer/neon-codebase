@@ -1724,6 +1724,25 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         self._wait_for_db_updates()
         self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
                           neondata.RequestState.FINISHED)
+    
+    def test_update_request_state_with_customer_error(self):
+        req = neondata.NeonApiRequest.get('job1', 'acct1')
+        req.state = neondata.RequestState.CUSTOMER_ERROR
+        req.save()
+        self.assertEquals(req.state,
+                          neondata.RequestState.CUSTOMER_ERROR)
+        
+        self.assertEquals(neondata.VideoMetadata.get('acct1_vid1').serving_url,
+                          None)
+        self.publisher._publish_directives()
+        self._wait_for_db_updates()
+
+        # Make sure that vid1 was changed in the database to serving
+        # because it was just added.
+        self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
+                          neondata.RequestState.CUSTOMER_ERROR)
+        self.assertEquals(neondata.VideoMetadata.get('acct1_vid1').serving_url,
+                          None)
 
     def test_request_state_when_no_serving_urls(self):
         self.publisher.update_serving_urls({})
