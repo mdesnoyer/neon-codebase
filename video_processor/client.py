@@ -119,7 +119,7 @@ class VideoError(Exception):
         self.callback_url = job_params['callback_url']
 
         #TODO(Sunil): Don't do this here. make a new function that is called
-        # when an error happens during video processing
+        # when an error happens during video processing. Call this in the catch: block
         self.send_callback()
         
     def send_callback(self):
