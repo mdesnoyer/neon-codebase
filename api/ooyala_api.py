@@ -401,17 +401,18 @@ class OoyalaAPI(object):
         '''
         #http://ak.c.ooyala.com/l2djJvazrgOdtAiOtaWrZejpYgsdH8zc/DOcJ-FxaFrRg4gtDEwOmY1OjBrO_V8SW
 
-        video_data = self.get('assets/%s/streams'%video_id)
+        params = {}
+        params['where'] = "muxing_format%3D%27MP4%27"
+        video_data = self.get('assets/%s/streams' % video_id, params)
         profiles = {} 
         #some videos may not have streams (default videos)
         if isinstance(video_data, list):
             for p in video_data:
-                prof = p['profile']
-                profiles[prof] = p['url']
-                if prof == "high":
-                    return p['url']
-                #if p['muxing_format'] != "NA":
-                #    return p['url']
+                if p['muxing_format'] in ['MP4', 'mp4', 'MOV']:
+                    prof = p['profile']
+                    profiles[prof] = p['url']
+                    if prof == "high":
+                        return p['url']
         else:
             _log.error("error downloading video data from ooyala")
 
@@ -420,6 +421,7 @@ class OoyalaAPI(object):
         if len(profiles.keys()) >0:
             prof, url = profiles.popitem()
             _log.info("using the profile %s for video_id %s" %(prof, video_id))
+            return url
 
     @tornado.gen.engine
     def _create_video_requests_on_signup(self, oo_account, limit=10, callback=None):
@@ -643,3 +645,14 @@ class OoyalaAPI(object):
         #something went wrong ?
         raise tornado.gen.Return(False)
     
+if __name__ == '__main__':
+
+    # David test account
+    api_secret =  "yEYRPJ2ptEJp7T_w8DO7jRPb7f-vaI_nvg4RJeo5"
+    ooyala_api_key = "FjZzYyOox2u-2NVotHUuNrktBlYN.7mlgZ" 
+    oo = OoyalaAPI(ooyala_api_key, api_secret)
+    print oo.get_video_url('5iY3ZqczpgrIhxaNm7oVGUuqkpR5fr61')
+
+    # ooyala sales engineering account with f4m streams
+    #oo = OoyalaAPI('w5YXkxOoscIo8LfVGlQiBS7b8PCF.xrlVY',
+    #        'xB6mgNuYICYlEZpF9kxLZrqDIeASbscHtOyyb0-q')
