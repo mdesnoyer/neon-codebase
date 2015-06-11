@@ -98,9 +98,9 @@ class TestVideoClient(test_utils.neontest.TestCase):
         random.seed(984695198)
         
     def tearDown(self):
+        self.utils_patch.stop()
         self.redis.stop()
         super(TestVideoClient, self).tearDown()
-        self.utils_patch.stop()
         
     def setup_video_processor(self, request_type, url='http://url.com'):
         '''
@@ -184,7 +184,14 @@ class TestVideoClient(test_utils.neontest.TestCase):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 vprocessor.download_video_file()
         
+        #TODO(Sunil): check callback response for other error responses as well
         self.assertEqual(self.uc.call_count, 1)
+        cargs, kwargs = self.uc.call_args
+        error_response_obj = cargs[0]
+        error_response = json.loads(error_response_obj.body)
+        self.assertEqual(error_response["serving_url"], None)
+        self.assertEqual(error_response["video_id"], "video1")
+        self.assertEqual(error_response["job_id"], "j123")
 
         with self.assertLogExists(logging.ERROR, "Error downloading video"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
@@ -535,8 +542,9 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertEquals(video_data.integration_id, '0')
         self.assertEquals(video_data.model_version, 'test_version')
         self.assertTrue(video_data.serving_enabled)
-        self.assertIsNotNone(video_data.serving_url)
-
+        self.assertIsNone(video_data.serving_url) # serving_url not saved here
+        
+        
         # Check the thumbnail information in the database
         thumbs = neondata.ThumbnailMetadata.get_many(
             video_data.thumbnail_ids)
@@ -584,7 +592,6 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             self.assertIsNotNone(
                 self.s3conn.get_bucket('n3.neon-images.com').get_key(
                     serving_key))
-                                
 
         # Check the response, both that it was added to the callback
         # and that it was recorded in the api request object.
@@ -593,11 +600,16 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             'video_id' : 'vid1',
             'framenos' : [6],
             'thumbnails' : [n_thumbs[0].urls[0]],
-            'serving_url' : video_data.serving_url,
             'error' : None
             }
         self.assertDictContainsSubset(expected_response,
                                       api_request.response)
+        
+        # Compare serving URL here. Ignore the i* part of serving_url; because subdomains
+        # can be different from multiple get_serving_url calls
+        self.assertEquals(api_request.response['serving_url'].split('neon-images')[1],
+                video_data.get_serving_url(save=False).split('neon-images')[1])
+        
         self.assertEquals(self.mock_sqs_manager().
                           add_callback_response.call_count, 1)
         cargs, kwargs = self.mock_sqs_manager().add_callback_response.call_args
@@ -620,7 +632,11 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertEquals(video_dict['video_id'], 'vid1')
         self.assertEquals(video_dict['title'], 'some fun video')
         self.assertEquals(len(video_dict['thumbnails']), 3)
-    
+   
+
+        # check video object again to ensure serving_url is not set
+        video_data = neondata.VideoMetadata.get(self.video_id)
+        self.assertIsNone(video_data.serving_url)
     
     def test_broken_default_thumb(self):
         '''
@@ -796,7 +812,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             self.assertEquals(video_data.url, 'http://video.mp4')
             self.assertEquals(video_data.integration_id, '0')
             self.assertTrue(video_data.serving_enabled)
-            self.assertIsNotNone(video_data.serving_url)
+            self.assertIsNone(video_data.serving_url)
             self.mock_sqs_manager().add_callback_response.reset_mock() 
             
             state_vars = video_processor.client.statemon.state.get_all_variables()
@@ -829,7 +845,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         video_data = neondata.VideoMetadata.get(self.video_id)
         self.assertEquals(len(video_data.thumbnail_ids), 4)
         self.assertTrue(video_data.serving_enabled)
-        self.assertIsNotNone(video_data.serving_url)
+        self.assertIsNone(video_data.serving_url)
 
         # Check the thumbnails, we should only have one brightcove thumbnail
         thumbs = neondata.ThumbnailMetadata.get_many(

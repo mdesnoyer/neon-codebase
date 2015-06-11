@@ -27,6 +27,7 @@ import logging
 import mastermind.core
 from mock import MagicMock, patch
 import mock
+import re
 import redis
 import sqlite3
 import stats.db
@@ -1639,12 +1640,17 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
 
+        # setup neonuser account with apikey = 'acct1'
+        self.acc = neondata.NeonUserAccount('myacctid', 'acct1')
+        self.acc.save()
+
         # Initialize the data in the database that we actually need
         neondata.VideoMetadata(
             'acct1_vid1',
             tids=['acct1_vid1_tid11', 'acct1_vid1_tid12'],
             request_id='job1',
             i_id='int1').save()
+
         request = neondata.BrightcoveApiRequest('job1', 'acct1', 'vid1')
         request.state = neondata.RequestState.FINISHED
         request.save()
@@ -1695,6 +1701,8 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
                           neondata.RequestState.FINISHED)
         
+        self.assertEquals(neondata.VideoMetadata.get('acct1_vid1').serving_url,
+                          None)
         self.publisher._publish_directives()
         self._wait_for_db_updates()
 
@@ -1702,6 +1710,13 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         # because it was just added.
         self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
                           neondata.RequestState.SERVING)
+
+        # Make sure that the serving URL was added  to the video
+        serving_url = neondata.VideoMetadata.get('acct1_vid1').serving_url
+        s3httpRe = re.compile(
+                'http://i[0-9].neon-images.com/v1/client/%s/neonvid_([a-zA-Z0-9\-\._/]+)'\
+                 % self.acc.tracker_account_id)
+        self.assertRegexpMatches(serving_url, s3httpRe)
 
         # Now remove the video and make sure it goes back to state finished
         self.mastermind.remove_video_info('acct1_vid1')

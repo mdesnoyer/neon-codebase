@@ -700,6 +700,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     % (video_id, job_id)
             self.send_json_response(data, 409)
             return
+
+        if result.code == 400:
+            data = '{"error":"bad request. check api specs","video_id":"%s","job_id":"%s"}'\
+                         % (video_id, job_id)
+            self.send_json_response(data, 400)
+            return
+
         if result.error:
             _log.error("key=create_neon_thumbnail_api_request "
                     "msg=thumbnail api error %s" %result.error)
@@ -1072,8 +1079,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     result[vid].abtest = vresult.testing_enabled
 
                     # Add a Serving URL 
-                    result[vid].serving_url = yield tornado.gen.Task(
-                                                vresult.get_serving_url) 
+                    result[vid].serving_url = vresult.serving_url
 
                     # Populate the state of the video
                     if vstatus is not None:
