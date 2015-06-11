@@ -367,12 +367,27 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         ''' generic sucess http side effects for all patched http calls 
             for this test ''' 
 
-        def _neon_submit_job_response():
+        def _neon_submit_job_response(http_request):
             ''' video server response on job submit '''
+            params = tornado.escape.json_decode(http_request.body)
             job_id = str(random.random())
             self.job_ids.append(job_id)
-            request = tornado.httpclient.HTTPRequest('http://thumbnails.neon-lab.com')
-            response = tornado.httpclient.HTTPResponse(request, 200,
+            vidmeta = neondata.VideoMetadata(
+                neondata.InternalVideoID.generate(params['api_key'],
+                                                  params['video_id']),
+                request_id = job_id,
+                video_url=params['video_url'],
+                i_id='0',
+                serving_enabled=False)
+            vidmeta.save()
+
+            neondata.NeonApiRequest(job_id,
+                                    params['api_key'],
+                                    params['video_id'],
+                                    params['video_title'],
+                                    params['video_url']).save()
+            
+            response = tornado.httpclient.HTTPResponse(http_request, 200,
                 buffer=StringIO('{"job_id":"%s"}'%job_id))
             return response
 
@@ -453,7 +468,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
 
         #neon api request
         elif "api/v1/submitvideo" in http_request.url:
-            response = _neon_submit_job_response()            
+            response = _neon_submit_job_response(http_request)            
             
 
         elif ".mp4" in http_request.url:
@@ -1125,8 +1140,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         items = json.loads(resp.body)['items']
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]['video_id'], vid)
-
-
 
     def test_create_neon_video_request_invalid_url(self):
         ''' invalid url test '''
