@@ -1313,6 +1313,8 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         tids = [thumb.key for thumb in thumbs]
         v = neondata.VideoMetadata(i_vid, tids, job_id, 'v0.mp4', 0, 0,
                 None, 0, (120, 90), True)
+        # NOTE: In the lifecycle of a video, this will be called by mastermind 
+        v.get_serving_url()
         v.save()
 
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'

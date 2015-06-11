@@ -3513,7 +3513,8 @@ class VideoMetadata(StoredObject):
         self.serving_enabled = serving_enabled 
         
         # Serving URL (ISP redirect URL) 
-        # NOTE: always use the get_serving_url() method to get the serving_url 
+        # NOTE: This is set by mastermind by calling get_serving_url() method
+        # after the request state has been changed to SERVING
         self.serving_url = None
 
     @classmethod
