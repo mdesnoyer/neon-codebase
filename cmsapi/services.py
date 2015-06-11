@@ -702,8 +702,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             return
 
         if result.code == 400:
-            data = '{"error":"bad request. check api specs","video_id":"%s","job_id":"%s"}'\
-                         % (video_id, job_id)
+            data = '{"error":"bad request. check api specs","video_id":"%s"}' %\
+                        video_id
             self.send_json_response(data, 400)
             return
 
