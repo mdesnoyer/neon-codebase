@@ -3513,7 +3513,8 @@ class VideoMetadata(StoredObject):
         self.serving_enabled = serving_enabled 
         
         # Serving URL (ISP redirect URL) 
-        # NOTE: always use the get_serving_url() method to get the serving_url 
+        # NOTE: This is set by mastermind by calling get_serving_url() method
+        # after the request state has been changed to SERVING
         self.serving_url = None
 
     @classmethod
@@ -3679,8 +3680,11 @@ class VideoMetadata(StoredObject):
         Get the serving URL of the video. If self.serving_url is not
         set, fetch the neon publisher id (TAI) and save the video object 
         with the serving_url set
+        
+        NOTE: any call to this function will return a valid serving url. 
+        multiple calls to this function may or may not return the same URL 
 
-        save_url - If true, the url is saved to the database
+        @save : If true, the url is saved to the database
         '''
         subdomain_index = random.randrange(1, 4)
         platform_vid = InternalVideoID.to_external(self.get_id())
@@ -3698,15 +3702,14 @@ class VideoMetadata(StoredObject):
                                                 platform_vid)
 
         if not staging:
-            # Keep information about the serving url around
-            self.serving_url = serving_url
-            
+
             def _update_serving_url(vobj):
                 vobj.serving_url = self.serving_url
             if save:
+                # Keep information about the serving url around
+                self.serving_url = serving_url
                 yield tornado.gen.Task(VideoMetadata.modify, self.key,
                                        _update_serving_url)
-
         raise tornado.gen.Return(serving_url)
         
 
