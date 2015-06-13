@@ -135,8 +135,8 @@ def make_yt_api_request(url, videos):
             else:
                 videos.append(real_id)
                 video_fn = '%s/%s.mp4' % (TMP_DIR, real_id)
-                subprocess.call('youtube-dl --id %s -o %s' %
-                                (yt_url, video_fn), shell=True)
+                subprocess.check_call('youtube-dl --id %s -o %s' %
+                                      (yt_url, video_fn), shell=True)
                 bucket = conn.get_bucket("neon-test")
                 fname = "/dlea/eurogamer/%s.mp4" % real_id
                 key = bucket.new_key(fname)
