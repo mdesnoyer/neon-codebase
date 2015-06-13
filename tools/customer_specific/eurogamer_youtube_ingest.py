@@ -30,7 +30,7 @@ conn = boto.connect_s3(
        aws_secret_access_key = secret_key)
 
 if not os.path.exists(TMP_DIR):
-    os.mkdirs(TMP_DIR)
+    os.makedirs(TMP_DIR)
 
 logging.basicConfig(filename='%s/yt_for_eurogamer.log' % TMP_DIR,level=logging.DEBUG, format='%(asctime)s %(message)s')
 _log = logging.getLogger(__name__)
