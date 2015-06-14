@@ -631,10 +631,10 @@ class Mastermind(object):
             conv = self._get_prior_conversions(non_exp_thumb) + \
               non_exp_thumb.get_conversions()
             mc_series.append(
-                spstats.beta.rvs(conv,
-                                 Mastermind.PRIOR_IMPRESSION_SIZE * 
-                                 (1 - Mastermind.PRIOR_CTR) + 
-                                 non_exp_thumb.get_impressions() - conv,
+                spstats.beta.rvs(max(1, conv),
+                                 max(1, Mastermind.PRIOR_IMPRESSION_SIZE * 
+                                        (1 - Mastermind.PRIOR_CTR) + 
+                                        non_exp_thumb.get_impressions()-conv),
                                  size=MC_SAMPLES))
 
         win_frac = np.array(np.bincount(np.argmax(mc_series, axis=0)),
