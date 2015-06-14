@@ -184,6 +184,7 @@ def merge_all_subdirectories(root_dir, backup_dir, temp_dir):
     _log.info('Entering %s' % root_dir.name())
 
     # Only fork to schedule 64 jobs max
+    global _sub_procs
     while len(_sub_procs) >= 64:
         _sub_procs = [x for x in _sub_procs if x.is_alive()]
         time.sleep(5.0)
