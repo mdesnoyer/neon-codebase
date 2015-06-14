@@ -128,6 +128,7 @@ def make_yt_api_request(url, videos):
             yt_url = media_group.find('{http://search.yahoo.com/mrss/}content').attrib['url']
             stripped_url = yt_url.replace("https://www.youtube.com/v/", "")
             real_id = stripped_url.replace("?version=3", "")
+            real_id = real_id.replace("_", "USCORE")
             print real_id
 
             if str(real_id) in videos:
