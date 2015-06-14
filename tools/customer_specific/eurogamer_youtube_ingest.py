@@ -135,17 +135,23 @@ def make_yt_api_request(url, videos):
             else:
                 videos.append(real_id)
                 video_fn = '%s/%s.mp4' % (TMP_DIR, real_id)
-                subprocess.check_call('youtube-dl -o %s %s' %
-                                      (video_fn, yt_url), shell=True)
-                bucket = conn.get_bucket("neon-test")
-                fname = "/dlea/eurogamer/%s.mp4" % real_id
-                key = bucket.new_key(fname)
-                key.set_contents_from_filename(video_fn)
-                os.remove(video_fn)
+                try:
+                    subprocess.check_call('youtube-dl -o %s %s' %
+                                          (video_fn, yt_url), shell=True)
+                    bucket = conn.get_bucket("neon-test")
+                    fname = "/dlea/eurogamer/%s.mp4" % real_id
+                    key = bucket.new_key(fname)
+                    key.set_contents_from_filename(video_fn)
                 
-                fullpath = "https://s3.amazonaws.com/neon-test/dlea/eurogamer/%s.mp4" % real_id
-                job_id = create_neon_api_request(account_id, API_KEY, real_id, title, fullpath) 
-                _log.info('Item added to Neon with Job ID: %s \n' % job_id)
+                    fullpath = "https://s3.amazonaws.com/neon-test/dlea/eurogamer/%s.mp4" % real_id
+                    job_id = create_neon_api_request(account_id, API_KEY, real_id, title, fullpath) 
+                    _log.info('Item added to Neon with Job ID: %s \n' % job_id)
+                except Exception as e:
+                    _log.exception('Error processing video %s' % real_id)
+
+                finally:
+                    if os.path.exists(video_fn):
+                        os.remove(video_fn)
 
     finally:
         xmlStream.close()
