@@ -23,8 +23,10 @@ import copy
 import cStringIO as StringIO
 from contextlib import closing
 import multiprocessing
+import psutil
 import re
 import tempfile
+import time
 import utils.neon
 
 import logging
@@ -180,6 +182,10 @@ _sub_procs = []
 
 def merge_all_subdirectories(root_dir, backup_dir, temp_dir):
     _log.info('Entering %s' % root_dir.name())
+
+    # Wait until there is enough memory (500mb)
+    while psutil.phymem_usage().free < 500000000L:
+        time.sleep(60.0)
     
     # First merge any files in this directory
     #merge_files_in_directory(root_dir, backup_dir, temp_dir)
