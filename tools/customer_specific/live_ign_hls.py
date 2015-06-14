@@ -186,7 +186,7 @@ if __name__ == '__main__':
         _log.exception('Error running video')
         statemon.state.increment('live_errors')
         utils.monitor.send_statemon_data()
-        return 1
+        exit(1)
 
     finally:
         utils.monitor.send_statemon_data()
