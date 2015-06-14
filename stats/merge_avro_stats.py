@@ -183,9 +183,10 @@ _sub_procs = []
 def merge_all_subdirectories(root_dir, backup_dir, temp_dir):
     _log.info('Entering %s' % root_dir.name())
 
-    # Wait until there is enough memory (500mb)
-    while psutil.phymem_usage().free < 500000000L:
-        time.sleep(60.0)
+    # Only fork to schedule 64 jobs max
+    while len(_sub_procs) >= 64:
+        _sub_procs = [x for x in _sub_procs if x.is_alive()]
+        time.sleep(5.0)
     
     # First merge any files in this directory
     #merge_files_in_directory(root_dir, backup_dir, temp_dir)
