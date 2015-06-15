@@ -573,6 +573,7 @@ class PubSubConnection(threading.Thread):
 
     def _handle_timedout_futures(self, future_dict):
         '''Handle any futures that have timed out.'''
+        timed_out = []
         for channel in future_dict:
             future, deadline = future_dict.get(channel)
             if time.time() > deadline :
@@ -581,7 +582,10 @@ class PubSubConnection(threading.Thread):
                     'Timeout when changing connection state to channel '
                     '%s' % channel))
                     statemon.state.increment('subscription_errors')
-                del future_dict[channel]
+                timed_out.append(channel)
+
+        for channel in timed_out:
+            del future_dict[channel]
 
     def get_parsed_message(self):
         '''Return a parsed message from the channel(s).'''
