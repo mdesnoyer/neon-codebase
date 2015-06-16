@@ -748,7 +748,7 @@ neon_service_client_api(ngx_http_request_t *request,
 
     if(error_url != NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK) {
         neon_stats[NEON_CLIENT_API_URL_NOT_FOUND] ++;
-        if (video_id_not_found_n++ % 25 == 0){
+        if (video_id_not_found_n++ % 5 == 0){
         ngx_log_error(NGX_LOG_ERR, request->connection->log, 0,
                     "video id %s for account %s not found", 
                     video_id, account_id);
