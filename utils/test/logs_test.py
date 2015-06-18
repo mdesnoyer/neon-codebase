@@ -10,6 +10,8 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import __builtin__
+import copy
 from cStringIO import StringIO
 import fake_filesystem
 import json
@@ -23,6 +25,7 @@ from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
 import unittest
 import urllib2
 import utils.logs
+from utils.options import define, options
 import utils.neon
 
 _log = logging.getLogger(__name__)
@@ -81,6 +84,46 @@ class TestSampledLogging(test_utils.neontest.TestCase):
                     raise Exception
                 except:
                     _log.exception_n('I got an exception log. count %i' % i, 5)
+
+class TestAccessLogger(test_utils.neontest.TestCase):
+    def setUp(self):
+        self.access_logger = logging.getLogger('tornado.access')
+        self.orig_handlers = copy.copy(self.access_logger.handlers)
+
+        self.filesystem = fake_filesystem.FakeFilesystem()
+        self.fake_os = fake_filesystem.FakeOsModule(self.filesystem)
+        self.fake_open = fake_filesystem.FakeFileOpen(self.filesystem)
+        logging.handlers.os = self.fake_os
+        logging.open = self.fake_open
+
+    def tearDown(self):
+        # Delete any handlers in the tornado access logger
+        handlers_to_delete = [x for x in self.access_logger.handlers if
+                              x not in self.orig_handlers]
+        for handler in handlers_to_delete:
+            self.access_logger.removeHandler(handler)
+
+        logging.handlers.os = os
+        logging.open = __builtin__.open
+
+    def test_access_log_no_propagate(self):
+        utils.logs.AddConfiguredLogger()
+        with self.assertLogNotExists(logging.INFO, 'This is an access log'):
+            logger = logging.getLogger('tornado.access')
+            logger.info('This is an access log')
+
+    def test_access_log_to_file(self):
+        with options._set_bounded('utils.logs.access_log_file',
+                                  '/access.log'):
+            utils.logs.AddConfiguredLogger()
+
+        with self.assertLogNotExists(logging.INFO, 'This is an access log'):
+            logger = logging.getLogger('tornado.access')
+            logger.info('This is an access log')
+
+        # Check the file contents
+        self.assertRegexpMatches(self.fake_open('/access.log').read(),
+                                 '.*This is an access log.*')
 
 class TestLogglyHandler(test_utils.neontest.TestCase):
     def setUp(self):
