@@ -55,6 +55,10 @@ define('flume_url', default=None, type=str,
              'e.g. http://localhost:6366'))
 define('loggly_tag', default=None, type=str,
        help=('If set, sends the logs to loggly with the given tag.'))
+define('max_log_file_size', default=104857600L, #100MB
+       help='Maximum log file size')
+define('access_log_file', default=None, type=str,
+       help='File to write the access logs to')
 
 
 ### Typical configuration options that will be applied to multiple loggers ###
@@ -105,6 +109,14 @@ def AddConfiguredLogger():
         handler.setLevel(logging.ERROR)
         logger.addHandler(handler)
 
+    # Add a logger for tornado access logs
+    if options.access_log_file is not None:
+        access_logger = CreateLogger('tornado.access',
+                                     logfile=options.access_log_file,
+                                     fmt=options.format,
+                                     level=logging.INFO)
+    logging.getLogger('tornado.access').propagate = False
+
     logging.captureWarnings(True)
 
 def CreateLogger(name=None,
@@ -146,9 +158,10 @@ def CreateLogger(name=None,
     # For a file output
     if logfile is not None:
         # Rotating file handler
-        max_size = 10 *1024 *1024 #10 MB
-        handler = logging.handlers.RotatingFileHandler(logfile,
-                    maxBytes=max_size, backupCount=3)
+        handler = logging.handlers.RotatingFileHandler(
+            logfile,
+            maxBytes=options.max_log_file_size,
+            backupCount=3)
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 

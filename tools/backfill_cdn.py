@@ -3,16 +3,17 @@
 '''
 Script to backfill images in to the CDN
 
-Use this script when a new image rendition is added for a customer
+Use this script when a new image rendition is added for a customer or
+the cdn parameters change.
 
 '''
 
 import os
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0, base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 from cmsdb import cdnhosting 
 from cmsdb import neondata
@@ -25,8 +26,8 @@ import utils.neon
 import utils.http
 
 from utils.options import define, options
-define('account', default=None, help='api key to backfill')
-define('integration_id', default=0, help='integration id')
+define('api_key', default=None, help='api key to backfill')
+define('integration_id', default='0', help='integration id')
 
 import logging
 _log = logging.getLogger(__name__)
@@ -44,16 +45,21 @@ def backfill(api_key, i_id):
     # Get cdn metadatalist
     cdn_key = neondata.CDNHostingMetadataList.create_key(api_key, i_id)
     clist = neondata.CDNHostingMetadataList.get(cdn_key)
-    if clist:
-        cdn_metadata = clist.cdns[0]
-    hoster = cdnhosting.CDNHosting.create(cdn_metadata)
+    for cdn_metadata in clist.cdns:
+        hoster = cdnhosting.CDNHosting.create(cdn_metadata)
 
-    expected_sizes = cdn_metadata.rendition_sizes
-    for vid in vids:
-        i_vid = neondata.InternalVideoID.generate(api_key, vid)
-        vm = neondata.VideoMetadata.get(i_vid)
-        if vm:
-            for tid in vm.thumbnail_ids:
+        expected_sizes = cdn_metadata.rendition_sizes
+        n_processed = 0
+        for vid in vids:
+            if n_processed % 50 == 0:
+                _log.info('Processing %i of %i videos' % (n_processed,
+                                                          len(vids)))
+            n_processed += 1
+            
+            i_vid = neondata.InternalVideoID.generate(api_key, vid)
+            vm = neondata.VideoMetadata.get(i_vid)
+            if vm:
+                for tid in vm.thumbnail_ids:
                     # Get thumbnail serving urls
                     s_urls = neondata.ThumbnailServingURLs.get(tid)
                     missing_sizes = []
@@ -77,13 +83,15 @@ def backfill(api_key, i_id):
                     # Missing the URL, hence create image of that size 
                     for sz in missing_sizes:
                         cv_im = pycvutils.from_pil(image)
-                        cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
+                        cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1],
+                                                            sz[0])
                         im = pycvutils.to_pil(cv_im_r)
                         cdn_url = hoster._upload_impl(im, tid)
                         if cdn_url:
                             new_serving_thumbs.append((cdn_url, sz[0], sz[1]))
 
-                    if hoster.update_serving_urls and len(new_serving_thumbs)>0:
+                    if (hoster.update_serving_urls and 
+                        len(new_serving_thumbs)>0):
                         def add_serving_urls(obj):
                             for params in new_serving_thumbs:
                                 obj.add_serving_url(*params)
@@ -95,5 +103,5 @@ def backfill(api_key, i_id):
 if __name__ == "__main__":
     utils.neon.InitNeon()
 
-    if options.account:
-        backfill(options.account, options.integration_id)
+    if options.api_key:
+        backfill(options.api_key, options.integration_id)
