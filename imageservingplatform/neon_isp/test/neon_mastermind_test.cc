@@ -65,7 +65,8 @@ verify_neon_mastermind_tid_lookup(char * vid, char * expectedTid){
     const char * tid= 0;
     int size;
 
-    NEON_MASTERMIND_TID_LOOKUP_ERROR err = neon_mastermind_tid_lookup(aid, vid, &bucketId, &tid, &size);
+    NEON_MASTERMIND_TID_LOOKUP_ERROR err = neon_mastermind_tid_lookup(
+      aid, vid, &bucketId, &tid, &size);
     EXPECT_EQ(err, NEON_MASTERMIND_TID_LOOKUP_OK);
     EXPECT_STRCASEEQ(expectedTid, tid);
 }
@@ -226,4 +227,67 @@ TEST_F(NeonMastermindTest, test_loading_expired_mastermind){
     EXPECT_EQ(ret, NEON_LOAD_FAIL);
     
 }
+
+// Test a mastermind file with utf8 in it
+// TODO: This test fails right now. Look into why and fix.
+TEST_F(NeonMastermindTest, test_loading_utf8_urls) {
+  string mastermind;
+  set_absolute_path("/mastermind.utf8", &mastermind);
+  NEON_LOAD_ERROR load_ret = neon_mastermind_load(mastermind.c_str());
+  EXPECT_EQ(load_ret, NEON_LOAD_OK);
+  
+  const char* url = NULL;
+  int size;
+  ngx_str_t bucketId = ngx_string("12");
+  
+  NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR lookup_ret = 
+    neon_mastermind_image_url_lookup("acct", "vid1", &bucketId, 500, 600,
+                                       &url, &size);
+  EXPECT_EQ(lookup_ret, NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK);
+  
+  EXPECT_STREQ(url, "http://neon/thumb1_500_600_mot%C3%B6r.jpg");
+    
+}
+
+// Test a case where there is an invalid directive, but there are
+// other entries in the mastermind file that should be visible.
+// TODO: This test fails
+TEST_F(NeonMastermindTest, test_loading_single_invalid_directive) {
+  const char* url = NULL;
+  int size;
+  ngx_str_t bucketId = ngx_string("12");
+  NEON_LOAD_ERROR load_ret;
+  NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR lookup_ret;
+  string mastermind;
+
+  // Check that thumb 1 is shown for vid1
+  lookup_ret = neon_mastermind_image_url_lookup("acc1", "vid1",
+                                                &bucketId, 500, 600,
+                                                &url, &size);
+  EXPECT_EQ(lookup_ret, NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK);
+  EXPECT_STREQ(url, "http://neon/thumb1_500_600.jpg");
+
+  // Now load a new file with an invalid entry, a new entry and a
+  // change to vid 1. It should fail the load, but serve the updates
+  // that are valid.
+  set_absolute_path("/mastermind.one_invalid", &mastermind);
+  load_ret = neon_mastermind_load(mastermind.c_str());
+  EXPECT_EQ(load_ret, NEON_LOAD_FAIL);
+
+  lookup_ret = neon_mastermind_image_url_lookup("acc1", "vid3",
+                                                &bucketId, 500, 600,
+                                                &url, &size);
+  EXPECT_EQ(lookup_ret, NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK);
+  EXPECT_STREQ(url, "http://neonv3/thumb1_500_600.jpg");
+
+  
+  lookup_ret = neon_mastermind_image_url_lookup("acc1", "vid2",
+                                                &bucketId, 500, 600,
+                                                &url, &size);
+  EXPECT_EQ(lookup_ret, NEON_MASTERMIND_IMAGE_URL_LOOKUP_NOT_FOUND);
+}
+  
+
+  
+  
 
