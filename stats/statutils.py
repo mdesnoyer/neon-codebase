@@ -14,6 +14,9 @@ if sys.path[0] != __base_path__:
 
 from datetime import datetime
 import dateutil.parser
+import logging
+
+_log = logging.getLogger(__name__)
 
 def get_time_clause(start_time=None, end_time=None):
     '''Returns the where clause to make sure the results are between the
@@ -32,7 +35,7 @@ def get_time_clause(start_time=None, end_time=None):
         end_time = dateutil.parser.parse(end_time)
         clauses.extend([
             '(yr < {year} or (yr = {year} and mnth <= {month}))'.format(
-                year=start_time.year, month=start_time.month),
+                year=end_time.year, month=end_time.month),
             "cast(serverTime as timestamp) <= '%s'" % 
             end_time.strftime('%Y-%m-%d %H:%M:%S')])
 
@@ -40,3 +43,11 @@ def get_time_clause(start_time=None, end_time=None):
         return ''
 
     return ' and ' + ' and '.join(clauses)
+
+def get_mobile_clause(do_mobile):
+    if do_mobile:
+        _log.info('Only collecting mobile data')
+        return (" and agentinfo_os_name in "
+                "('iPhone', 'Android', 'IPad', 'BlackBerry') ")
+
+    return ''

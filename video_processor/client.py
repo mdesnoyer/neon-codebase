@@ -74,6 +74,7 @@ statemon.define('no_thumbs', int)
 statemon.define('model_load_error', int)
 statemon.define('unknown_exception', int)
 statemon.define('video_download_error', int)
+statemon.define('default_thumb_error', int)
 statemon.define('ffvideo_metadata_error', int)
 statemon.define('video_duration_30m', int)
 statemon.define('video_duration_60m', int)
@@ -82,6 +83,9 @@ statemon.define('extract_frame_error', int)
 statemon.define('running_workers', int)
 statemon.define('workers_cv_processing', int)
 statemon.define('other_worker_completed', int)
+statemon.define('s3url_download_error', int)
+statemon.define('centerframe_extraction_error', int)
+statemon.define('randomframe_extraction_error', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -103,9 +107,42 @@ define('extra_workers', default=0,
 define('video_temp_dir', default=None,
        help='Temporary directory to download videos to')
 
+class VideoError(Exception):
+    '''
+    Exception class which ensures that the callback is
+    send to the client in case of video download or processing errors
+    '''
+    def __init__(self, msg, job_params):
+        self.msg = msg
+        self.vid = job_params['video_id'] 
+        self.job_id = job_params['job_id']
+        self.callback_url = job_params['callback_url']
 
-class VideoError(Exception): pass
+        #TODO(Sunil): Don't do this here. make a new function that is called
+        # when an error happens during video processing
+        self.send_callback()
+        
+    def send_callback(self):
+        cresp = neondata.VideoCallbackResponse(self.job_id, self.vid,
+                err=self.msg)
+        response_body = cresp.to_dict()
+
+        #CREATE POST REQUEST
+        body = tornado.escape.json_encode(response_body)
+        h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
+        
+        if self.callback_url is not None:
+            cb_response_request = tornado.httpclient.HTTPRequest(
+                                    url=self.callback_url,
+                                    method="POST",
+                                    headers=h, 
+                                    body=body, 
+                                    request_timeout=60.0, 
+                                    connect_timeout=10.0)
+            utils.http.send_request(cb_response_request) 
+
 class BadVideoError(VideoError): pass
+class DefaultThumbError(VideoError): pass  
 class VideoDownloadError(VideoError, IOError): pass  
 class DBError(IOError): pass
 class CallbackError(IOError): pass
@@ -252,6 +289,7 @@ class VideoProcessor(object):
                 except boto.exception.S3ResponseError as e:
                     _log.warn('Error getting video url %s via boto. '
                               'Falling back on http: %s' % (self.video_url, e))
+                    statemon.state.increment('s3url_download_error')
             
             # Use urllib2
             req = urllib2.Request(self.video_url, headers=self.headers)
@@ -269,30 +307,30 @@ class VideoProcessor(object):
             _log.error("Error downloading video from %s: %s" % 
                        (self.video_url, e))
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e))
+            raise VideoDownloadError(str(e), self.job_params)
 
         except boto.exception.BotoClientError as e:
             _log.error("Client error downloading video %s from S3: %s" %
                        (self.video_url, e))
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e))
+            raise VideoDownloadError(str(e), self.job_params)
 
         except boto.exception.BotoServerError as e:
             _log.error("Server error downloading video %s from S3: %s" %
                        (self.video_url, e))
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e))
+            raise VideoDownloadError(str(e), self.job_params)
 
         except socket.error as e:
             _log.error("Error downloading video from %s: %s" % 
                        (self.video_url, e))
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e))
+            raise VideoDownloadError(str(e), self.job_params)
 
         except IOError as e:
             _log.error("Error saving video to disk: %s" % e)
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e))
+            raise VideoDownloadError(str(e), self.job_params)
 
     def process_video(self, video_file, n_thumbs=1):
         ''' process all the frames from the partial video downloaded '''
@@ -337,7 +375,7 @@ class VideoProcessor(object):
         if duration <= 1e-3:
             _log.error("Video %s has no length" % (self.video_url))
             statemon.state.increment('video_read_error')
-            raise BadVideoError("Video has no length")
+            raise BadVideoError("Video has no length", self.job_params)
 
         #Log long videos
         if duration > 1800:
@@ -405,6 +443,7 @@ class VideoProcessor(object):
         except Exception, e:
             _log.error("Unexpected error extracting center frame from %s:"
                        " %s" % (self.video_url, e))
+            statemon.state.increment('centerframe_extraction_error')
             raise
 
     def _get_random_frame(self, video_file, nframes=None):
@@ -429,6 +468,7 @@ class VideoProcessor(object):
         except Exception, e:
             _log.error("Unexpected error extracting random frame from %s:"
                            " %s" % (self.video_url, e))
+            statemon.state.increment('randomframe_extraction_error')
             raise
 
     def _get_specific_frame(self, mov, frameno):
@@ -472,6 +512,7 @@ class VideoProcessor(object):
         # get api request object
         somebody_else_finished = [False]
         def _flag_for_finalize(req):
+            
             if req.state in [neondata.RequestState.PROCESSING,
                              neondata.RequestState.SUBMIT,
                              neondata.RequestState.REQUEUED,
@@ -479,6 +520,9 @@ class VideoProcessor(object):
                              neondata.RequestState.FAILED,
                              neondata.RequestState.INT_ERROR]:
                 req.state = neondata.RequestState.FINALIZING
+            elif req.state == neondata.RequestState.CUSTOMER_ERROR:
+                # Don't change the state
+                return
             else:
                 somebody_else_finished[0] = True
         try:
@@ -517,9 +561,6 @@ class VideoProcessor(object):
             self.video_metadata.add_thumbnail(thumb_meta, image,
                                               cdn_metadata=cdn_metadata,
                                               save_objects=False)
-
-        # Generate the serving url
-        self.video_metadata.get_serving_url(save=False)
 
         # Save the thumbnail and video data into the database
         # TODO(mdesnoyer): do this as a single transaction
@@ -574,7 +615,6 @@ class VideoProcessor(object):
             video_obj.integration_id = self.video_metadata.integration_id
             video_obj.frame_size = self.video_metadata.frame_size
             video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
-            video_obj.serving_url = self.video_metadata.get_serving_url()
         try:
             new_video_metadata = neondata.VideoMetadata.modify(
                 self.video_metadata.key,
@@ -587,66 +627,91 @@ class VideoProcessor(object):
             statemon.state.increment('save_vmdata_error')
             raise DBError("Error writing video data to database")
         self.video_metadata = new_video_metadata
-
-        # Save the default thumbnail
-        # TODO(sunil): Remove this function once this functionality is
-        # in the video api server.
-        api_request.save_default_thumbnail(cdn_metadata)
-        def _set_serving_enabled(video_obj):
-            video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
-        new_video_metadata = neondata.VideoMetadata.modify(
-            self.video_metadata.key,
-            _set_serving_enabled)
-
-        # Build the callback request
-        cb_request = self.build_callback_request()
-
-        # Tell the database that the request is done
-        def _flag_request_done_in_db(request):
-            request.state = neondata.RequestState.FINISHED
-            request.publish_date = time.time() *1000.0
-            request.response = tornado.escape.json_decode(cb_request.body)
         try:
-            sucess = neondata.NeonApiRequest.modify(api_request.job_id,
-                                                    api_request.api_key,
-                                                    _flag_request_done_in_db)
-            if not sucess:
-                raise DBError('Api Request finished failed. It was not there')
-        except Exception, e:
-            _log.error("Error writing request state to database: %s" % e)
-            statemon.state.increment('modify_request_error')
-            raise DBError("Error finishing api request")
-
-        # Send callbacks and notifications
-        self.send_client_callback_response(video_id, cb_request)
-        self.send_notifiction_response(api_request)
-
-        _log.info('Sucessfully finalized video %s. Is has video id %s' % 
-                  (self.video_url, self.video_metadata.key))
+            # A second attempt to save the default thumb
+            api_request.save_default_thumbnail(cdn_metadata)
+            
+            # Enable the video to be served if we have any thumbnails available
+            def _set_serving_enabled(video_obj):
+                video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
+            new_video_metadata = neondata.VideoMetadata.modify(
+                self.video_metadata.key,
+                _set_serving_enabled)
         
 
-    def build_callback_request(self):
+            # Everything is fine at this point, so lets mark it finished
+            api_request.state = neondata.RequestState.FINISHED
+
+        except neondata.ThumbDownloadError, e:
+            _log.warn("Default thumbnail download failed for vid %s" % video_id)
+            statemon.state.increment('default_thumb_error')
+            err_msg = "Failed to download default thumbnail error=%s" % e
+            api_request.state = neondata.RequestState.CUSTOMER_ERROR
+            api_request.set_message(err_msg)
+            
+            # build the callback response with error message here
+            # Its probably ok that its sent through SQS. Evaluate if this needs
+            # to be immediate to the customer
+            #cb_request = self.build_callback_request(error=err_msg)
+            
+            # TODO: write test to validate the states
+
+        finally:
+
+            # Build the callback request
+            err_msg = None
+            if api_request.state == neondata.RequestState.CUSTOMER_ERROR:
+                err_msg = api_request.msg
+            cb_request = self.build_callback_request(err_msg)
+
+            # Update the database that the request is done with the processing 
+            # Cleanly or with some acceptable errors (CUSTOMER_ERROR)
+            def _flag_request_done_in_db(request):
+                request.state = api_request.state
+                request.publish_date = time.time() *1000.0
+                request.response = tornado.escape.json_decode(cb_request.body)
+            try:
+                sucess = neondata.NeonApiRequest.modify(api_request.job_id,
+                                                        api_request.api_key,
+                                                        _flag_request_done_in_db)
+                if not sucess:
+                    raise DBError('Api Request finished failed. It was not there')
+            except Exception, e:
+                _log.error("Error writing request state to database: %s" % e)
+                statemon.state.increment('modify_request_error')
+                raise DBError("Error finishing api request")
+
+            # Send callbacks and notifications
+            
+            self.send_client_callback_response(new_video_metadata.key, cb_request)
+            self.send_notifiction_response(api_request)
+
+            _log.info('Sucessfully finalized video %s. Is has video id %s' % 
+                      (self.video_url, self.video_metadata.key))
+        
+
+    def build_callback_request(self, err_msg=None):
         '''
         build callback request that will be sent to the callback url
         which was specified when the request was created
 
         '''
 
-        response_body = {}
-        response_body["job_id"] = self.video_metadata.job_id 
-        response_body["video_id"] = self.video_metadata.key 
-        response_body["framenos"] = [
-            x[0].frameno for x in self.thumbnails 
+        frames = [x[0].frameno for x in self.thumbnails 
             if x[0].type == neondata.ThumbnailType.NEON]
-        response_body["framenos"] = response_body["framenos"][:self.n_thumbs]
-        response_body["thumbnails"] = [
-            x[0].urls[0] for x in self.thumbnails 
+        fnos = frames[:self.n_thumbs]
+        thumbs = [x[0].urls[0] for x in self.thumbnails 
             if x[0].type == neondata.ThumbnailType.NEON]
-        response_body["thumbnails"] = \
-          response_body["thumbnails"][:self.n_thumbs]
-        response_body["timestamp"] = str(time.time())
-        response_body["serving_url"] = self.video_metadata.get_serving_url()
+        thumbs = thumbs[:self.n_thumbs]
 
+        cresp = neondata.VideoCallbackResponse(self.video_metadata.job_id,
+                neondata.InternalVideoID.to_external(self.video_metadata.key),
+                fnos,
+                thumbs,
+                self.video_metadata.get_serving_url(save=False),
+                err=err_msg)
+        response_body = cresp.to_dict()
+        
         #CREATE POST REQUEST
         body = tornado.escape.json_encode(response_body)
         h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
@@ -658,7 +723,6 @@ class VideoProcessor(object):
                                 request_timeout=60.0, 
                                 connect_timeout=10.0)
         return cb_response_request 
-    
  
     def send_client_callback_response(self, video_id, request):
         '''
@@ -697,7 +761,7 @@ class VideoProcessor(object):
         title = self.job_params['video_title']
         i_id = self.video_metadata.integration_id
         job_id  = self.job_params['job_id']
-        account = neondata.NeonUserAccount.get_account(api_key)
+        account = neondata.NeonUserAccount.get(api_key)
         if account is None:
             _log.error('Could not get the account for api key %s' %
                        api_key)

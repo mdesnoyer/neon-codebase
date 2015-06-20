@@ -109,8 +109,10 @@ class OptionParser(object):
 
     def __del__(self):
         timer = self.__dict__['_config_poll_timer']
-        if timer is not None and time.is_alive():
+        if timer is not None and timer.is_alive():
             timer.cancel()
+        self.__dict__['_config_poll_timer'] = None
+        
 
     def __getattr__(self, name):
         with self.__dict__['lock']:
@@ -221,6 +223,11 @@ class OptionParser(object):
         This is mostly a helper for debugging since pdb breaks the
         local to global name conversion. In your code, you're better
         off just doing options.local_name
+
+        The only other time you would want to call this is if you are
+        in a tight loop and want to avoid the introspection, which is
+        slow.
+        
          ''' 
         with self.__dict__['lock']:
             return self._options[global_name].value()

@@ -23,9 +23,9 @@ import test_utils.neontest
 import test_utils.redis
 import tornado.testing
 import unittest
+from tools import backfill_cdn
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 from utils.imageutils import PILImageUtils
-from utils import backfill_cdn
 
 _log = logging.getLogger(__name__)
 
@@ -45,8 +45,6 @@ class TestBackfillCDN(test_utils.neontest.AsyncTestCase):
         self.http_call_patcher = \
           patch('utils.http.send_request')
         self.http_mock = self.http_call_patcher.start()
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start() 
         
         metadata = neondata.AkamaiCDNHostingMetadata(key=None,
                 host='http://akamai',

@@ -42,7 +42,7 @@ def main():
     else:
         excluded_jobs = set([x.trim() for x in open(options.excluded_jobs)])
     
-    acct = neondata.NeonUserAccount.get_account(options.api_key)
+    acct = neondata.NeonUserAccount.get(options.api_key)
     for platform in acct.get_platforms():
         for job_id in platform.videos.values():
             if job_id in excluded_jobs:

@@ -389,6 +389,33 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         ts = int(time.time()) / 100
         self.assertTrue(str(ts) in cookie_value)
 
+    #
+    # directive is invalid and rejected but the rest of mastermind is loaded. 
+    # the  default account thumbnail is returned
+
+    def test_client_api_directive_rejected(self):
+        '''
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("pubmissingpct", prefix + "vidmissingpct", 800, 700, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://neon/default_url_defaccmissingpct.jpg")
 
     def test_client_api_default_thumbnail(self):
         '''

@@ -12,6 +12,7 @@ import logging
 import os
 import rpdb2
 import signal
+import socket
 import threading
 
 from . import logs
@@ -26,6 +27,8 @@ def InitNeon(usage='%prog [options]'):
     garb, args = options.parse_options(usage=usage)
     logs.AddConfiguredLogger()
     EnableRunningDebugging()
+
+    socket.setdefaulttimeout(30)
 
     magent = monitor.MonitoringAgent()
     magent.start()

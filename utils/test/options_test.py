@@ -45,7 +45,7 @@ class TestAsyncOptions(test_utils.neontest.AsyncTestCase):
         self.parser = utils.options.OptionParser()
 
     def tearDown(self):
-        del self.parser
+        self.parser.__del__()
         super(TestAsyncOptions, self).tearDown()
 
     @tornado.gen.engine
@@ -109,7 +109,7 @@ class TestMultiProcesses(test_utils.neontest.TestCase):
         super(TestMultiProcesses, self).setUp()
 
     def tearDown(self):
-        del self.parser
+        self.parser.__del__()
         sys.modules['__builtin__'].open = self.open_func
         if self.subproc is not None:
             self.subproc.stop()
@@ -227,7 +227,7 @@ class TestCommandLineParsing(unittest.TestCase):
         open('/dev/null', 'a').close()
 
     def tearDown(self):
-        del self.parser
+        self.parser.__del__()
         sys.modules['__builtin__'].open = self.open_func
 
     def test_define_twice(self):
@@ -420,8 +420,8 @@ class TestS3ConfigFiles(unittest.TestCase):
         boto.connect_s3 = mock.MagicMock(return_value = self.mock_connection)
 
     def tearDown(self):
+        self.parser.__del__()
         boto.connect_s3 = self.connect_func
-        del self.parser
 
     def test_good_connection(self):
         self.parser.define('an_int', default=6, type=int)

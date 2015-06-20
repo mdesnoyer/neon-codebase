@@ -250,7 +250,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
             'clickTracker.trackserver.utils.http.send_request')
         self.bn_map = {}
         self.isp_mock = self.isp_patcher.start()
-        self.isp_mock.side_effect = self.mock_isp_response
+        self.isp_mock.side_effect = self.mock_http_response
 
         self.thrift_transport_patcher = patch('clickTracker.trackserver.TTornado.TTornadoStreamTransport')
         self.thrift_transport_mock = self.thrift_transport_patcher.start()
@@ -285,8 +285,10 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
     def get_httpserver_options(self):
         return {'xheaders': True}
     
-    def mock_isp_response(self, request, retries=1, callback=None):
+    def mock_http_response(self, request, retries=1, callback=None):
         if request.url.endswith('.avsc'):
+            retval = HTTPResponse(request, 200)
+        elif "logs-01.loggly.com" in request.url:
             retval = HTTPResponse(request, 200)
         else:
             bns = urlparse.parse_qs(urlparse.urlparse(request.url).query
@@ -1490,6 +1492,11 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(response.code, 200)
 
 
+    def test_error_message_handler(self):
+        # basic test to check the error endpoint 
+        url = '/v2/error?error=my+error+message'
+        response = self.fetch(url)
+        self.assertEqual(response.code, 200)
 
     # TODO(mdesnoyer) add tests for when the schema isn't on S3 and
     # for when arguments are missing

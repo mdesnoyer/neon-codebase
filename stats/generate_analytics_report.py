@@ -64,7 +64,6 @@ def get_thumbnail_ids():
     _log.info('Querying for thumbnail ids')
     conn = connect()
     cursor = conn.cursor()
-    print statutils.get_time_clause(options.start_time, options.end_time)
     cursor.execute(
     """select distinct thumbnail_id from imageloads where 
     tai='%s' %s""" % (options.pub_id, 

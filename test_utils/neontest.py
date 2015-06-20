@@ -6,9 +6,12 @@ Allows some more complicated assert options.
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright 2013 Neon Labs
 '''
+import concurrent.futures
 from contextlib import contextmanager
 import logging
+from mock import MagicMock
 import re
+import time
 import tornado.testing
 import unittest
 
@@ -88,6 +91,21 @@ class TestCase(unittest.TestCase):
                 '\n'.join(['%s: %s' % (x.levelname, x.getMessage())
                             for x in handler.logs])))
 
+    def assertWaitForEquals(self, func, expected, timeout=5.0):
+        '''Waits for the result of a function to equal val.'''
+        start_time = time.time()
+        found = None
+        while (time.time() - start_time) < timeout:
+            try:
+                found = func()
+                if found == expected:
+                    return
+            except Exception as e:
+                found = '%s: %s' % (e.__class__.__name__, e)
+            time.sleep(0.05)
+        self.fail('Timed out waiting for %s to equal %s. '
+                  'Its value was %s' % (func, expected, found))
+
 class LogCaptureHandler(logging.Handler):
     '''A class that just collects all the logs.'''
     def __init__(self):
@@ -109,6 +127,24 @@ class AsyncTestCase(tornado.testing.AsyncTestCase, TestCase):
 
     def tearDown(self):
         tornado.testing.AsyncTestCase.tearDown(self)
+
+    def _future_wrap_mock(self, outer_mock):
+        '''Sets up a mock that mocks out a call that returns a future.
+
+        Input: outer_mock - Mock of the function that needs a future
+        Returns: 
+        mock that can be used to set the actual function return value/exception
+        '''
+        inner_mock = MagicMock()
+        def _build_future(*args, **kwargs):
+            future = concurrent.futures.Future()
+            try:
+                future.set_result(inner_mock(*args, **kwargs))
+            except Exception as e:
+                future.set_exception(e)
+            return future
+        outer_mock.side_effect = _build_future
+        return inner_mock
 
 class AsyncHTTPTestCase(tornado.testing.AsyncHTTPTestCase, TestCase):
     '''A test case that has access to Neon functions and can 

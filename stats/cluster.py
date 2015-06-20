@@ -55,11 +55,13 @@ define("s3_jar_bucket", default="neon-emr-packages",
 
 from utils import statemon
 statemon.define("master_connection_error", int)
+statemon.define("cluster_creation_error", int)
 
 s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
 
 class ClusterException(Exception): pass
 class ClusterInfoError(ClusterException): pass
+class MasterMissingError(ClusterInfoError): pass
 class ClusterConnectionError(ClusterException): pass
 class ClusterCreationError(ClusterException): pass
 class ExecutionError(ClusterException):pass
@@ -252,7 +254,9 @@ class Cluster():
         extra_ops = {
             'mapreduce.output.fileoutputformat.compress' : 'true',
             'avro.output.codec' : 'snappy',
-            'mapreduce.job.reduce.slowstart.completedmaps' : '1.0'
+            'mapreduce.job.reduce.slowstart.completedmaps' : '1.0',
+            'mapreduce.task.timeout' : 1800000,
+            'mapreduce.reduce.speculative': 'false'
         }
 
         # If the requested map memory is different, set it
@@ -667,7 +671,11 @@ class Cluster():
         conn = EmrConnection()
         most_recent = None
         cluster_found = None
-        for cluster in emr_iterator(conn, 'clusters'):
+        for cluster in emr_iterator(conn, 'clusters',
+                                    cluster_states=['STARTING',
+                                                    'BOOTSTRAPPING',
+                                                    'RUNNING',
+                                                    'WAITING']):
             if cluster.name != options.cluster_name:
                 # The cluster has to have the right name to be a possible match
                 continue
@@ -726,7 +734,7 @@ class Cluster():
                     self.master_ip = instance.privateipaddress
 
         if self.master_ip is None:
-            raise ClusterInfoError("Could not find the master ip")
+            raise MasterMissingError("Could not find the master ip")
         _log.info("Found master ip address %s" % self.master_ip)
 
     def _set_requested_core_instances(self):
@@ -793,35 +801,46 @@ class Cluster():
                  '--yarn-key-value',
                  'yarn.resourcemanager.container.liveness-monitor.interval-ms=120000',
                  '--yarn-key-value',
-                 'yarn.log-aggregation-enable=true'])]
+                 'yarn.log-aggregation-enable=true',
+                 '--yarn-key-value',
+                 'yarn.scheduler.maximum-allocation-mb=12000'])]
             
         steps = [
             boto.emr.step.InstallHiveStep('0.11.0.2')]
 
             
         instance_groups = [
-            InstanceGroup(1, 'MASTER', 'r3.xlarge', 'SPOT',
-                          'Master Instance Group', 1.4),
+            InstanceGroup(1, 'MASTER', 'r3.xlarge', 'ON_DEMAND',
+                          'Master Instance Group'),
             self._get_core_instance_group()
             ]
         
         conn = EmrConnection()
         _log.info('Creating cluster %s' % options.cluster_name)
-        self.cluster_id = conn.run_jobflow(
-            options.cluster_name,
-            log_uri='s3://neon-cluster-logs/',
-            ec2_keyname='emr-runner',
-            ami_version='3.1.4',
-            job_flow_role='EMR_EC2_DefaultRole',
-            service_role='EMR_DefaultRole',
-            keep_alive=True,
-            enable_debugging=True,
-            steps=steps,
-            bootstrap_actions=bootstrap_actions,
-            instance_groups=instance_groups,
-            visible_to_all_users=True,
-            api_params = {'Instances.Ec2SubnetId' : 
-                          'subnet-74c10003'})
+        try:
+            self.cluster_id = conn.run_jobflow(
+                options.cluster_name,
+                log_uri='s3://neon-cluster-logs/',
+                ec2_keyname=os.path.basename(options.ssh_key).split('.')[0],
+                ami_version='3.1.4',
+                job_flow_role='EMR_EC2_DefaultRole',
+                service_role='EMR_DefaultRole',
+                keep_alive=True,
+                enable_debugging=True,
+                steps=steps,
+                bootstrap_actions=bootstrap_actions,
+                instance_groups=instance_groups,
+                visible_to_all_users=True,
+                api_params = {'Instances.Ec2SubnetId' : 
+                              'subnet-74c10003'})
+        except boto.exception.EmrResponseError as e:
+            _log.error('Error creating the cluster: %s' % e)
+            statemon.state.increment('cluster_creation_error')
+            # We sleep because this most likely is caused by a bug in
+            # the config and we don't want to piss AWS off by trying
+            # over and over and over and over again
+            time.sleep(30.0)
+            raise
 
         conn.add_tags(self.cluster_id,
                       {'cluster-type' : self.cluster_type,

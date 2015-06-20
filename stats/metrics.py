@@ -16,7 +16,150 @@ if sys.path[0] != __base_path__:
 
 import math
 import numpy as np
+import pandas
 import scipy.stats
+
+def calc_lift_at_first_significant_hour(impressions, conversions):
+    '''Calculates the lift for each thumbnail relative to the others 
+    when statistical significant is reached.
+    Inputs:
+    Impressions - A pandas DataFrame of impression counts where rows are hours
+                  and columns are thumbnails
+    Conversions - A pandas DataFrame of conversion counts where rows are hours
+                  and columns are thumbnails
+    
+    If there is no statistically significant point, then the aggregate
+    is used for calculating the stats.
+    Returns:
+    
+    A pandas Panel with three frames: 'lift', 'p_value' and
+    'revlift'. Each frame is a symmetric matrix where the
+    cols and rows represent the thumbnail and the entries are row
+    vs. col (baseline)
+    '''
+
+    # Calculate the cumulative, per thumbnail stats we need.
+    cum_imp = impressions.cumsum().fillna(method='ffill')
+    cum_conv = conversions.cumsum().fillna(method='ffill')
+    cum_ctr = cum_conv / cum_imp
+    cum_stderr = np.sqrt(cum_ctr * (1-cum_ctr) / cum_imp)
+
+    # Now put together the pairwise comparisons
+    thumb_list = impressions.columns
+    stats = pandas.Panel(items=['lift', 'p_value', 'revlift'],
+                         major_axis=thumb_list,
+                         minor_axis=thumb_list)
+    for base in thumb_list:
+        for top in [x for x in thumb_list if x != base]:
+            if cum_imp[base].iloc[-1] == 0 or cum_imp[top].iloc[-1] == 0:
+                continue
+            
+            zscore = (cum_ctr[base] - cum_ctr[top]) / \
+                np.sqrt(cum_stderr[base]*cum_stderr[base] +
+                        cum_stderr[top]*cum_stderr[top])
+
+            p_value = pandas.Series(
+                scipy.stats.norm(0, 1).cdf(zscore),
+                index=zscore.index)
+            p_value = p_value.where(p_value > 0.5, 1 - p_value)
+
+            # Find where the first hour of statististical significance is
+            sig = p_value[(p_value > 0.95) & (cum_imp[base] > 500) & 
+                          (cum_imp[top] > 500) & (cum_conv[base] > 5) &
+                          (cum_conv[top] > 5)]
+            #sig = p_value[(p_value > 0.95) & (cum_imp[base] > 500) & 
+            #              (cum_imp[top] > 500)]
+            if len(sig) == 0:
+                # There isn't statistical significance anywhere so use
+                # the aggregate stats.
+                idx = p_value.index[-1]
+
+                # TODO(mdesnoyer): Playing. only keep data that's significant
+                #continue
+            else:
+                idx = sig.index[0]
+                
+            stats['p_value'][base][top] = p_value[idx]
+            stats['lift'][base][top] = ((
+                cum_ctr[top][idx] - cum_ctr[base][idx]) /
+                cum_ctr[base][idx])
+
+            stats['revlift'][base][top] = ((
+                cum_ctr[top][idx] - cum_ctr[base][idx]))
+
+    return stats
+
+def calc_extra_conversions(impressions, revlift):
+    '''Calculate the extra conversions for each thumb relative to the others.
+    Inputs:
+    impressions - A pandas DataFrame of impression counts where rows are hours
+                  and columns are thumbnails
+    revlift - A DataFrame of lift where row and cols are thumbs. cols are baseline
+    Returns:
+    A DataFrame of extra conversions in the same shape as revlift
+    '''
+    impr_totals = impressions.sum()
+            
+    retval = revlift.multiply(impr_totals, axis='index')
+    retval = retval.replace(np.inf, 0).replace(-np.inf, 0)
+    return retval
+
+def calc_aggregate_click_based_stats_from_dataframe(data):
+    '''Calculate click based stats using a dataframe.
+    Inputs:
+    data - Data frame with columns of extra_conversions, impr, conv and is_base
+    Returns:
+    pandas series of stats we generate
+    '''
+    data = data.fillna(0)
+    all_data = data[(data['extra_conversions'] != 0) | data['is_base']]
+
+    # Get the data from videos where there was a statistically
+    # significant lift
+    sig_data = all_data.copy()
+    sig_data = sig_data.groupby(level=1).filter(
+        lambda x: np.any(x['p_value']>0.95)
+        and np.any(x['is_base']) 
+        and np.any(x['is_base'] ==False))
+
+    # Only grab videos that have a baseline and one non-baseline
+    all_data = all_data.groupby(level=1).filter(
+        lambda x: np.any(x['is_base']) 
+        and np.any(x['is_base'] == False))
+
+    neon_winners = sig_data[(sig_data['extra_conversions'] > 0) & 
+                            (sig_data['p_value'] > 0.95)]
+
+    lots_of_clicks = all_data.groupby(level=1).filter(
+        lambda x: np.sum(x['conv']) > 100)
+
+    no_runaways = all_data.groupby(level=1).filter(
+        lambda x: np.sum(x['extra_conversions']) > -50 or
+        np.sum(x['conv']) < 50)
+    
+
+    return pandas.Series(
+        {'significant_video_count' : sig_data.groupby(level=1).ngroups,
+         'total_video_count' : all_data.groupby(level=1).ngroups,
+         'total_neon_winners' : neon_winners.groupby(level=1).ngroups,
+         'significant lift': calc_lift_from_dataframe(sig_data),
+         'all_lift' : calc_lift_from_dataframe(all_data),
+         'lots_clicks_lift' : calc_lift_from_dataframe(lots_of_clicks),
+         'no_runaways' : calc_lift_from_dataframe(no_runaways)})
+
+def calc_lift_from_dataframe(data):
+    if len(data) == 0:
+        return float('nan')
+    base_sums = data.groupby(['is_base']).sum()
+    neon_sums = data.groupby(level=['type']).sum()
+
+    #lift = base_sums['impr'][True] * base_sums['extra_conversions'][False] / \
+    #  (base_sums['conv'][True] * base_sums['impr'][False])
+
+    lift = base_sums['impr'][True] * neon_sums['extra_conversions']['neon'] / \
+      (base_sums['conv'][True] * neon_sums['impr']['neon'])
+
+    return lift
 
 def calc_thumb_stats(baseCounts, thumbCounts):
     '''Calculates statistics for a thumbnail relative to a baseline.
@@ -132,12 +275,14 @@ def calc_aggregate_click_based_metrics(data):
      (Mean lift (Positive value is good), p_value, lower 95% confidence bound,
      upper 95% confidence bound)
     '''
-    raw_counts = np.sum(data, axis=0)
-
     np_data = np.array(data)
     extra_clicks = np_data[:,3] - np.multiply(np_data[:,2],
                                               np.divide(np_data[:,1],
                                                         np_data[:,0]))
+    np_data = np_data[np.isfinite(extra_clicks),:]
+    extra_clicks = extra_clicks[np.isfinite(extra_clicks)]
+    
+    raw_counts = np.sum(np_data, axis=0)
 
     lift = raw_counts[0] / (raw_counts[2] * raw_counts[1]) * \
       np.sum(extra_clicks)
