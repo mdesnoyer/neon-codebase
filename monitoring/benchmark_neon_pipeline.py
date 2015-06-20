@@ -146,7 +146,8 @@ def monitor_neon_pipeline():
             attempts += 1
             request = neondata.NeonApiRequest.get(job_id, options.api_key)
             if request:
-                _log.info("current request state is %s" % request.state)
+                _log.info_n("current request state is %s" % request.state,
+                            10)
                 if request.state == "serving":
                     job_serving = True
                     continue
