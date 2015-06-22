@@ -56,7 +56,8 @@ def create_neon_api_request(account_id, api_key, video_id, video_title, video_ur
         "video_id": video_id,
         "video_url": video_url, 
         "video_title": video_title,
-        "callback_url": None 
+        "callback_url": None,
+        "topn" : 2
     }
 
     req = urllib2.Request(request_url, headers=headers)
