@@ -13,10 +13,13 @@ if sys.path[0] != __base_path__:
 from api import brightcove_api
 from cmsdb import neondata
 import integrations.ovp
+import logging
 import tornado.gen
 from utils import statemon
 
 statemon.define('bc_api_errors', int)
+
+_log = logging.getLogger(__name__)
 
 class BrightcoveIntegration(integrations.ovp.OVPIntegration):
     def __init__(self, account_id, platform):
