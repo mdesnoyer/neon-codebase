@@ -4,6 +4,10 @@ Script that submits old brightcove videos to be processed
 
 Takes an input file with one brightcove video id per line
 
+One way to get a list of most common failed ids is to parse a log file like
+
+cat access.log | sed -n 's/.*400 GET .*video_ids.\([0-9]*\) .*/\1/p' | sort | uniq -c | sort -n | awk -F " " '{print $2}' | tail -n 500
+
 Authors: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright 2015 Neon Labs
 '''
