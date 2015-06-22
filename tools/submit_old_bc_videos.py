@@ -54,8 +54,8 @@ def main(input_file):
               % (len(bcove_vids), options.api_key, options.integration_id))
 
     while len(bcove_vids) > 0:
-        cur_vids = bcove_vids[0:10]
-        bcove_vids = bcove_vids[10:]
+        cur_vids = bcove_vids[0:options.max_submit_rate]
+        bcove_vids = bcove_vids[options.max_submit_rate:]
 
         yield bc_integration.lookup_and_submit_videos(cur_vids)
         _log.info('%i videos left' % len(bcove_vids))
