@@ -72,3 +72,6 @@ CTestResults.xml
 
 #### git stuff ###
 *.orig
+
+#### PyCharm ####
+.idea

@@ -52,6 +52,12 @@ define("mapreduce_status_port", default=9046,
        help="Port to query the mapreduce status on")
 define("s3_jar_bucket", default="neon-emr-packages",
        help='S3 bucket where jobs will be stored')
+define("cluster_subnet_id", default="subnet-74c10003",
+       help='The VPC Subnet Id where the cluster should run. Default: vpc-90ad09f5 subnet Stats Cluster (10.0.128.0/17) .')
+define("cluster_log_uri",default="s3://neon-cluster-logs/",
+       help='Where to store EMR Job flow cluster logs.')
+define("master_instance_type", default="r3.xlarge",
+       help='The instance type/size of the EMR MASTER node.')
 
 from utils import statemon
 statemon.define("master_connection_error", int)
@@ -813,7 +819,7 @@ class Cluster():
 
             
         instance_groups = [
-            InstanceGroup(1, 'MASTER', 'r3.xlarge', 'ON_DEMAND',
+            InstanceGroup(1, 'MASTER', options.master_instance_type, 'ON_DEMAND',
                           'Master Instance Group'),
             self._get_core_instance_group()
             ]
@@ -823,7 +829,7 @@ class Cluster():
         try:
             self.cluster_id = conn.run_jobflow(
                 options.cluster_name,
-                log_uri='s3://neon-cluster-logs/',
+                log_uri=options.cluster_log_uri,
                 ec2_keyname=os.path.basename(options.ssh_key).split('.')[0],
                 ami_version='3.1.4',
                 job_flow_role='EMR_EC2_DefaultRole',
@@ -835,7 +841,7 @@ class Cluster():
                 instance_groups=instance_groups,
                 visible_to_all_users=True,
                 api_params = {'Instances.Ec2SubnetId' : 
-                              'subnet-74c10003'})
+                              options.cluster_subnet_id})
         except boto.exception.EmrResponseError as e:
             _log.error('Error creating the cluster: %s' % e)
             statemon.state.increment('cluster_creation_error')
