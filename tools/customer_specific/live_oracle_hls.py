@@ -134,9 +134,9 @@ if __name__ == '__main__':
                 bandwidth = playlist.stream_info.bandwidth
                 hdurl = playlist.uri
 
-        hdurl = '%s/%s' % (os.path.dirname(options.input), hdurl)
-        #m3u8_obj = m3u8.load(hdurl)
-        m3u8_obj = m3u8.load(options.input)
+        #hdurl = '%s/%s' % (os.path.dirname(options.input), hdurl)
+        m3u8_obj = m3u8.load(hdurl)
+        #m3u8_obj = m3u8.load(options.input)
         cipher=None
         if m3u8_obj.key is not None:
             encr_key = urllib2.urlopen(m3u8_obj.key.uri)
@@ -159,14 +159,21 @@ if __name__ == '__main__':
                         f_stream.write(segment)
 
             if idx < options.lookback_count:
-                local_fn = download_and_save_segment(os.path.dirname(hdurl),
-                                                     segment, cipher)
-                segment_files.append(local_fn)
+                try:
+                    local_fn = download_and_save_segment(
+                        os.path.dirname(hdurl),
+                        segment, cipher)
+                    segment_files.append(local_fn)
+                except urllib2.HTTPError as e:
+                    _log.warning("Error downloading segment %s: %s" % 
+                                 (segment,e))
             elif os.path.exists(local_fn):
                 # Delete older segments
                 os.remove(local_fn)
             idx += 1
 
+        if len(segment_files) == 0:
+            raise Exception("Could not download any video")
         cat_and_ffmpeg(segment_files)
 
         bucket = conn.get_bucket("neon-test")
