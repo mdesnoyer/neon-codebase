@@ -781,6 +781,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 # NOTE: Only if this is a Neon request, save it to the
                 # DB. Other platform requests get added on request
                 # creation cron
+                # TODO: Change this so that any source will have the video
+                # added here.
                 if request_type == 'neon':
                     nplatform = yield tornado.gen.Task(
                         neondata.NeonPlatform.get, api_key, '0')
