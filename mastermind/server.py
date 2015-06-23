@@ -1269,7 +1269,14 @@ class DirectivePublisher(threading.Thread):
                 'fractions': fractions
             }
             stream.write('\n' + json.dumps(data))
-            written_video_ids.add(video_id)
+            if len(fractions) > 1:
+                # If the default thumb is there, we want to serve it,
+                # but not flag that it is serving yet. So, we need
+                # more than one thumb associated with the video.  THIS
+                # IS A HACK
+                # TODO(mdesnoyer): Keep the video state
+                # around and do this properly.
+                written_video_ids.add(video_id)
 
         statemon.state.serving_urls_missing = serving_urls_missing
         return written_video_ids
@@ -1337,8 +1344,11 @@ class DirectivePublisher(threading.Thread):
                 for vidobj in videos_dict.itervalues():
                     if (vidobj is not None and 
                         vidobj.job_id not in customer_error_jobs):
-                        vidobj.serving_url = vidobj.get_serving_url(save=False)
-
+                        if new_state == neondata.RequestState.SERVING:
+                            vidobj.serving_url = vidobj.get_serving_url(
+                                save=False)
+                        else:
+                            vidobj.serving_url = None
             neondata.VideoMetadata.modify_many(video_ids, _set_serving_url)
         except Exception as e:
             statemon.state.increment('unexpected_db_update_error')
