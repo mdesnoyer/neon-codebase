@@ -155,7 +155,7 @@ class TestLogglyHandler(test_utils.neontest.TestCase):
         raw_data = re.compile('PLAINTEXT=(.*)').match(request.body).group(1)
         record = json.loads(urllib2.unquote(raw_data))
 
-        self.assertEqual(record['msg'], 'I got an INFO log')
+        self.assertEqual(record['message'], 'I got an INFO log')
         self.assertEqual(record['levelno'], logging.INFO)
 
     @patch('sys.stderr', new_callable=StringIO)
