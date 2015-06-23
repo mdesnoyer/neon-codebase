@@ -85,4 +85,19 @@ def load_model(filename):
 
     '''
     with open(filename, 'rb') as f:
-        return pickle.load(f)
+        model = pickle.load(f)
+    # this is a somewhat inelegant way to accomplish this, 
+    # but i suspect that as we add more computer vision 
+    # stuff, there will be a greater need for filters that 
+    # load data that is not easily pickled.
+    #
+    # see the closed eye filter for an example of why this 
+    # is necessary and how it works; it is based on the 
+    # presumption that additional filter data will be 
+    # kept in the model_data directory along with the pickled
+    # models themselves. This is useful if the data used by
+    # the filters are static, but large enough to make repeated
+    # pickling / unpickling prohibitively expensive.  
+    _ = [f.restore_additional_data(filename) for f in model.filt.filters]
+    return model 
+
