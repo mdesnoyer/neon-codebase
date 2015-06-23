@@ -72,6 +72,14 @@ class Filter(object):
             state['max_height'] = None
         self.__dict__ = state
 
+    def restore_additional_data(self, filename):
+        '''
+        This function is to be defined in individual classes, and restores 
+        additional data that is required by a given filter but is static and
+        not easily filtered.  
+        '''
+        pass 
+
 class VideoFilter(Filter):
     '''Abstract video filter'''
     def __init__(self, max_height=None):
