@@ -79,6 +79,9 @@ define('expiry_buffer', type=int, default=30,
 define('serving_update_delay', type=int, default=240,
        help='delay in seconds to update new videos to serving state')
 
+# Script running options
+define('tmp_dir', default='/tmp', help='Temp directory to work in')
+
 
 # Monitoring variables
 statemon.define('time_since_stats_update', float) # Time since the last update
@@ -1089,7 +1092,11 @@ class DirectivePublisher(threading.Thread):
         '''Publishes the directives to S3'''
         # Create the directives file
         _log.info("Building directives file")
-        with closing(tempfile.NamedTemporaryFile('w+b')) as directive_file:
+        if not os.path.exists(options.tmp_dir):
+            os.makedirs(options.tmp_dir)
+            
+        with closing(tempfile.NamedTemporaryFile(
+                'w+b', dir=options.tmp_dir)) as directive_file:
             # Create the space for the expiry
             self._write_expiry(directive_file)
 
@@ -1104,7 +1111,8 @@ class DirectivePublisher(threading.Thread):
             directive_file.seek(0)
             curtime = datetime.datetime.utcnow()
 
-            with closing(tempfile.NamedTemporaryFile('w+b')) as gzip_file:
+            with closing(tempfile.NamedTemporaryFile(
+                    'w+b', dir=options.tmp_dir)) as gzip_file:
                 gzip_stream = gzip.GzipFile(mode='wb',
                                             compresslevel=7,
                                             fileobj=gzip_file)
