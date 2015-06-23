@@ -1193,6 +1193,8 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.real_tempfile = mastermind.server.tempfile
         mastermind.server.tempfile = fake_tempfile.FakeTempfileModule(
             self.filesystem)
+        self.real_os = mastermind.server.os
+        mastermind.server.os = fake_filesystem.FakeOsModule(self.filesystem)
 
         # Mock out neondata
         self.neondata_patcher = patch('mastermind.server.neondata')
@@ -1212,6 +1214,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.neondata_patcher.stop()
         self.callback_patcher.stop()
         mastermind.server.tempfile = self.real_tempfile
+        mastermind.server.os = self.real_os
         self.s3_patcher.stop()
         options._set('mastermind.server.serving_update_delay',
                      self.old_serving_update_delay)
@@ -1635,6 +1638,8 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         self.real_tempfile = mastermind.server.tempfile
         mastermind.server.tempfile = fake_tempfile.FakeTempfileModule(
             self.filesystem)
+        self.real_os = mastermind.server.os
+        mastermind.server.os = fake_filesystem.FakeOsModule(self.filesystem)
 
         # Start a database
         self.redis = test_utils.redis.RedisServer()
@@ -1684,6 +1689,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
     def tearDown(self):
         self.callback_patcher.stop()
         mastermind.server.tempfile = self.real_tempfile
+        mastermind.server.os = self.real_os
         self.s3_patcher.stop()
         options._set('mastermind.server.serving_update_delay',
                      self.old_serving_update_delay)
@@ -1816,6 +1822,8 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.real_tempfile = mastermind.server.tempfile
         mastermind.server.tempfile = fake_tempfile.FakeTempfileModule(
             self.filesystem)
+        self.real_os = mastermind.server.os
+        mastermind.server.os = fake_filesystem.FakeOsModule(self.filesystem)
 
         # Use an in-memory sqlite for the impala server
         def connect2db(*args, **kwargs):
@@ -1885,6 +1893,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
     def tearDown(self):
         neondata.DBConnection.clear_singleton_instance()
         mastermind.server.tempfile = self.real_tempfile
+        mastermind.server.os = self.real_os
         self.hbase_patcher.stop()
         self.cluster_patcher.stop()
         self.callback_patcher.stop()
