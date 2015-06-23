@@ -575,7 +575,7 @@ class ClosedEyesFilter(Filter):
             except:
                 pass 
                 # the svm file could not be located, instead
-                # the get_svm_from_filename method will have to be 
+                # the restore_additional_data method will have to be 
                 # used. 
         #############################################
         state['hog'] = cv2.HOGDescriptor(*state['HOGparams'])
@@ -591,7 +591,7 @@ class ClosedEyesFilter(Filter):
         state['face_cascade'] = face_cascade
         self.__dict__ = state
 
-    def get_svm_from_filename(self, filename):
+    def restore_additional_data(self, filename):
         # this is based on the presumption that the model_data
         # folder will store both the model pickles as well as
         # the required SVM files. Filename is the filename of 
@@ -599,5 +599,6 @@ class ClosedEyesFilter(Filter):
         #   
         fn = os.path.join('/'.join(filename.split('/')[:-1]), 'svms', self.svmPkl)
         self.svm = joblib.load(fn)
+
     def short_description(self):
         return 'closed eyes'
