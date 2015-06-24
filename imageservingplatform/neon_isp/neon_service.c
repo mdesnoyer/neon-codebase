@@ -25,7 +25,7 @@ static ngx_str_t cookie_expiry_str = ngx_string("; expires=");
 static ngx_str_t cookie_client_api = ngx_string("/v1/client/");
 static ngx_str_t cookie_semi_colon = ngx_string(";");
 static ngx_str_t cookie_fwd_slash = ngx_string("/");
-
+static int video_id_not_found_n = 0;
 /* 
  * Get a particular URI token relative to the base url 
  *
@@ -748,6 +748,11 @@ neon_service_client_api(ngx_http_request_t *request,
 
     if(error_url != NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK) {
         neon_stats[NEON_CLIENT_API_URL_NOT_FOUND] ++;
+        if (video_id_not_found_n++ % 5 == 0){
+        ngx_log_error(NGX_LOG_ERR, request->connection->log, 0,
+                    "video id %s for account %s not found", 
+                    video_id, account_id);
+        }
         neon_service_no_content(request);
         return NEON_CLIENT_API_FAIL;
     }

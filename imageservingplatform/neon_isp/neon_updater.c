@@ -127,7 +127,7 @@ neon_runloop(void * arg){
     ///////////////////////////////////////////
     
     while(neon_shutdown != NEON_TRUE){
-        neon_log_error("Neon updater run loop");
+        //neon_log_error("Neon updater run loop");
         
         // check if the current mastermind's expiry is approaching
         if(neon_mastermind_expired() == NEON_TRUE){
@@ -247,10 +247,10 @@ neon_terminate_updater(){
     
     neon_shutdown = 1;
     
-    int ret = pthread_join(neon_updater_thread, 0);
+    pthread_join(neon_updater_thread, 0);
     
-    if(ret != 0)
-        neon_log_error("cannot stop updater thread");
+    //if(ret != 0)
+    //    neon_log_error("cannot stop updater thread");
 
     return 0;
 }
