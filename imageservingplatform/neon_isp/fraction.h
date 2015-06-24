@@ -22,12 +22,14 @@ public:
     double GetThreshold() const;
     const char * GetDefaultURL() const;
     const char * GetThumbnailID() const;
+    std::string GetBaseUrl() const; 
 
     ScaledImage* GetScaledImage(int height, int width) const;
     
 protected:
     
     int InitSafe(double floor, const rapidjson::Value& fa);
+    int ProcessImages(const rapidjson::Value &, bool);
     void Dealloc();
     
     bool initialized;
@@ -35,8 +37,12 @@ protected:
     double pct;
     const char * defaultURL;
     const char * tid;
+    std::string  baseUrl; 
     
     std::vector<ScaledImage*> images;
+
+private: 
+    std::string GenerateDefaultUrl(const rapidjson::Value&); 
 };
 
 

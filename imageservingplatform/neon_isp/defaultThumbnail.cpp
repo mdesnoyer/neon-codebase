@@ -80,14 +80,39 @@ DefaultThumbnail::InitSafe(const rapidjson::Document & document)
     /*
      *  Scaled Images
      */
-    // the array must exist
-    if(document.HasMember("imgs") == false) {
+    if(document.HasMember("imgs")) {
+        const rapidjson::Value& imgs = document["imgs"];
+        return ProcessImages(imgs, false); 
+    }
+    else if(document.HasMember("img_sizes"))  {
+        const rapidjson::Value& img_sizes = document["img_sizes"];  
+        return ProcessImages(img_sizes, true); 
+    }
+    else { 
         neon_stats[NEON_DEFAULT_THUMBNAIL_PARSE_ERROR]++;
         return -1;
-    }
-    
-    const rapidjson::Value& imgs = document["imgs"];
+    }     
 
+    return 0;
+}
+
+
+/**************************************************************
+Function   : ProcessImages
+Purpose    : handles both the imgs and img_sizes Values from 
+             mastermind json file 
+Parameters : imgs - an array of images from the mastermind file 
+             on a directive. should have h/w/and possible 
+             url  
+             needsUrlGenerated - if we have an img that does not 
+             have a url, send this in as true and one will be 
+             generated 
+RV         : 0 if successful -1 if not 
+***************************************************************/ 
+
+int 
+DefaultThumbnail::ProcessImages(const rapidjson::Value & imgs, bool needsUrlGenerated) 
+{ 
     if(imgs.IsArray() == false) {
         neon_stats[NEON_DEFAULT_THUMBNAIL_PARSE_ERROR]++;
         return -1;
@@ -105,7 +130,7 @@ DefaultThumbnail::InitSafe(const rapidjson::Document & document)
     for(rapidjson::SizeType i=0; i < numOfImages; i++) {
 
         ScaledImage * img = new ScaledImage();
-
+        img->needsUrlGenerated = needsUrlGenerated; 
         // store in vector first, if any error it is deletable from Shutdown()
         images.push_back(img);
 
@@ -120,9 +145,9 @@ DefaultThumbnail::InitSafe(const rapidjson::Document & document)
             return -1;
         }
     }
-
-    return 0;
+    return 0; 
 }
+
 
 
 void

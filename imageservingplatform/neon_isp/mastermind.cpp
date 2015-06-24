@@ -508,7 +508,6 @@ Mastermind::GetImageUrl(const char * account_id,
 
     const Directive * directive = 0;
     directive = directiveTable->Find(accountId, videoId);
-    
     // if no directive are found for this vid then try to return 
     // the default thumb for this account
     if(directive == 0){
@@ -559,7 +558,13 @@ Mastermind::GetImageUrl(const char * account_id,
 
     }
 
-    return image->GetUrl(size);
+    if (image->needsUrlGenerated) { 
+        const char * url = image->GenerateUrl(fraction->GetBaseUrl(), (std::string)fraction->GetThumbnailID(), image->GetHeight(), image->GetWidth()); 
+        size = strlen(url); 
+        return url;
+    } 
+
+    return image->GetUrl(size); 
 }
 
 /*
