@@ -838,7 +838,7 @@ class Cluster():
                 instance_groups=instance_groups,
                 visible_to_all_users=True,
                 api_params = {'Instances.Ec2SubnetId' : 
-                              options.vpc_subnet_id})
+                              options.cluster_subnet_id})
         except boto.exception.EmrResponseError as e:
             _log.error('Error creating the cluster: %s' % e)
             statemon.state.increment('cluster_creation_error')
