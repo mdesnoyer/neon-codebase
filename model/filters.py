@@ -408,11 +408,10 @@ class ClosedEyesFilter(Filter):
         '''
         Create the filter with parameters.
         PARAMETERS:
-        haarRoot        directory containing viola-jones files
-        haarCascade     the Viola-Jones xml file to use
+        haarFile        the haarFile to use
+        svmPkl          path to the pickled SVM 
         haarParams      a dictionary of parameters for the haar filter
         hogWin          the hog window size
-        svmPkl          path to the pickled SVM
         alpha           the minimum score needed to pass
         maxFaces        the maximum number of face to consider (None = all)
         scoreType       scoring method, either 1 or 2
@@ -492,7 +491,6 @@ class ClosedEyesFilter(Filter):
         return image[y:(y+h), x:(x+w)]
 
     def score(self, image):
-        print 'Scoring image'
         image = self.get_gray(image)
         # detect faces
         faces = self.face_cascade.detectMultiScale(image, **self.haarParams)
@@ -581,15 +579,15 @@ class ClosedEyesFilter(Filter):
                 for pklfn in files_to_remove:
                     if os.path.exists(pklfn):
                         os.unlink(pklfn)
-        else:
-            try:
-                print 'In test mode: not attempting to load the pkl from filename'
-                #state['svm'] = joblib.load(state['svmPkl'])
-            except:
-                pass 
-                # the svm file could not be located, instead
-                # the restore_additional_data method will have to be 
-                # used. 
+        # else:
+        #     try:
+        #         print 'In test mode: not attempting to load the pkl from filename'
+        #         #state['svm'] = joblib.load(state['svmPkl'])
+        #     except:
+        #         pass 
+        #         # the svm file could not be located, instead
+        #         # the restore_additional_data method will have to be 
+        #         # used. 
         #############################################
         state['hog'] = cv2.HOGDescriptor(*state['HOGparams'])
         tfile,tfilename = tempfile.mkstemp()
