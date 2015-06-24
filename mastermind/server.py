@@ -1103,6 +1103,7 @@ class DirectivePublisher(threading.Thread):
             # Write the data
             with self.lock:
                 written_video_ids = self._write_directives(directive_file)
+
             directive_file.write('\nend')
 
             # Overwrite the expiry because write_directives can take a while
