@@ -24,12 +24,17 @@ if __name__ == '__main__':
 
     mod = model.load_model(options.input)
 
-    mod.filt.filters.append(filters.DeltaStdDevFilter())
+    #mod.filt.filters.append(filters.DeltaStdDevFilter())
 
     #mod.filt = filters.CascadeFilter([filters.BlurryFilter(),
     #                              filters.UniformColorFilter(),
     #                              filters.TextFilter(),
     #                              filters.DeltaStdDevFilter()],
     #    max_height=480)
-
+    
+    haarF = '/data/model_data/haar_cascades/haarcascade_frontalface_alt2.xml'
+    svmF = '/data/model_data/svms/SVMw40.pkl'
+    CEC = filters.ClosedEyesFilter(haarFile=haarF, svmPkl=svmF, maxFaces=15) 
+    mod.filt.filters.append(CEC)
+    
     model.save_model(mod, options.output)
