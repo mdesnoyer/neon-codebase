@@ -156,7 +156,7 @@ class TestLogglyHandler(test_utils.neontest.TestCase):
         record = json.loads(urllib2.unquote(raw_data))
 
         self.assertEqual(record['message'], 'I got an INFO log')
-        self.assertEqual(record['levelno'], logging.INFO)
+        self.assertEqual(record['levelname'], 'INFO')
 
     @patch('sys.stderr', new_callable=StringIO)
     def test_bad_connection(self, mock_stderr):

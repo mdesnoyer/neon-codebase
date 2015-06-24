@@ -87,8 +87,10 @@ define('tmp_dir', default='/tmp', help='Temp directory to work in')
 statemon.define('time_since_stats_update', float) # Time since the last update
 statemon.define('time_since_last_batch_event', float) # Time since the most recent event in the stats db
 statemon.define('time_since_publish', float) # Time since the last publish
-statemon.define('statsdb_error', int) # error connecting to the stats database
-statemon.define('incr_statsdb_error', int) # error connecting to the hbase 
+statemon.define('unexpected_statsdb_error', int) # 1 if there was an error last cycle
+statemon.define('has_newest_statsdata', int) # 1 if we have the newest data
+statemon.define('good_connection_to_impala', int)
+statemon.define('good_connection_to_hbase', int)
 statemon.define('videodb_batch_update', int) # Count of the nubmer of batch updates from the video db
 statemon.define('videodb_error', int) # error connecting to the video DB
 statemon.define('publish_error', int) # error publishing directive to s3
@@ -557,10 +559,11 @@ class StatsDBWatcher(threading.Thread):
             try:
                 with self.activity_watcher.activate():
                     self._process_db_data()
+                statemon.state.unexpected_statsdb_error = 0
 
             except Exception as e:
                 _log.exception('Uncaught stats DB Error: %s' % e)
-                statemon.state.increment('statsdb_error')
+                statemon.state.unexpected_statsdb_error = 1
 
             finally:
                 if self.impala_conn is not None:
@@ -581,7 +584,7 @@ class StatsDBWatcher(threading.Thread):
             return self.impala_conn
         except Exception as e:
             _log.exception('Error connecting to stats db: %s' % e)
-            statemon.state.increment('statsdb_error')
+            statemon.state.good_connection_to_impala = 0
             raise
 
     def _process_db_data(self):
@@ -660,6 +663,7 @@ class StatsDBWatcher(threading.Thread):
 
                     self.mastermind.update_stats_info(data)
                 _log.info('Finished processing batch stats update')
+                statemon.state.has_newest_statsdata = 1
             finally:
                 cursor.close()
         else:
@@ -710,7 +714,7 @@ class StatsDBWatcher(threading.Thread):
                     table_build_result[0][0] is None):
                     _log.error('Cannot determine when the database was last '
                                'updated')
-                    statemon.state.increment('statsdb_error')
+                    statemon.state.good_connection_to_impala = 0
                     self.is_loaded.set()
                     return False
 
@@ -724,12 +728,13 @@ class StatsDBWatcher(threading.Thread):
 
                 is_newer = (self.last_table_build is None or 
                             cur_table_build > self.last_table_build)
+                statemon.state.good_connection_to_impala = 1
                 if not is_newer:
                     return False
             except impala.error.RPCError as e:
                 _log.error('SQL Error. Probably a table is not available yet. '
                            '%s' % e)
-                statemon.state.increment('statsdb_error')
+                statemon.state.good_connection_to_impala = 0
                 self.is_loaded.set()
                 return False
 
@@ -745,13 +750,13 @@ class StatsDBWatcher(threading.Thread):
                 play_result = cursor.fetchall()
                 if len(play_result) == 0 or play_result[0][0] is None:
                     _log.error('Cannot find any videoplay events')
-                    statemon.state.increment('statsdb_error')
+                    statemon.state.good_connection_to_impala = 0
                     self.is_loaded.set()
                     return False
             except impala.error.RPCError as e:
                 _log.error('SQL Error. Probably a table is not available yet. '
                            '%s' % e)
-                statemon.state.increment('statsdb_error')
+                statemon.state.good_connection_to_impala = 0
                 self.is_loaded.set()
                 return False
         finally:
@@ -849,12 +854,13 @@ class StatsDBWatcher(threading.Thread):
                         continue
 
                     retval[tid] = counts
+                statemon.state.good_connection_to_hbase = 1
             finally:
                 conn.close()
         except thrift.Thrift.TException as e:
             _log.error('Error connecting to incremental stats database: %s'
                        % e)
-            statemon.state.increment('incr_statsdb_error')
+            statemon.state.good_connection_to_hbase = 0
 
         return retval            
             
@@ -868,7 +874,6 @@ class StatsDBWatcher(threading.Thread):
             cluster.find_cluster()
         except stats.cluster.ClusterInfoError as e:
             _log.error('Could not find the cluster.')
-            statemon.state.increment('statsdb_error')
             raise
         return cluster.master_ip
 
@@ -1103,6 +1108,7 @@ class DirectivePublisher(threading.Thread):
             # Write the data
             with self.lock:
                 written_video_ids = self._write_directives(directive_file)
+
             directive_file.write('\nend')
 
             # Overwrite the expiry because write_directives can take a while
@@ -1277,7 +1283,14 @@ class DirectivePublisher(threading.Thread):
                 'fractions': fractions
             }
             stream.write('\n' + json.dumps(data))
-            written_video_ids.add(video_id)
+            if len(fractions) > 1:
+                # If the default thumb is there, we want to serve it,
+                # but not flag that it is serving yet. So, we need
+                # more than one thumb associated with the video.  THIS
+                # IS A HACK
+                # TODO(mdesnoyer): Keep the video state
+                # around and do this properly.
+                written_video_ids.add(video_id)
 
         statemon.state.serving_urls_missing = serving_urls_missing
         return written_video_ids
@@ -1345,8 +1358,11 @@ class DirectivePublisher(threading.Thread):
                 for vidobj in videos_dict.itervalues():
                     if (vidobj is not None and 
                         vidobj.job_id not in customer_error_jobs):
-                        vidobj.serving_url = vidobj.get_serving_url(save=False)
-
+                        if new_state == neondata.RequestState.SERVING:
+                            vidobj.serving_url = vidobj.get_serving_url(
+                                save=False)
+                        else:
+                            vidobj.serving_url = None
             neondata.VideoMetadata.modify_many(video_ids, _set_serving_url)
         except Exception as e:
             statemon.state.increment('unexpected_db_update_error')
