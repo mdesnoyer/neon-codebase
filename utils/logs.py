@@ -222,7 +222,7 @@ class TornadoHTTPHandler(logging.Handler):
     def get_verbose_dict(self, record):
         '''Returns a verbose dictionary of the record.'''
         retval = copy.copy(record.__dict__)
-        retval['msg'] = record.getMessage()
+        retval['message'] = record.getMessage()
         del retval['args']
         return retval
 
@@ -273,9 +273,18 @@ class LogglyHandler(TornadoHTTPHandler):
             '%s/tag/%s' % (options.loggly_base_url, tag))
 
     def generate_request(self, record):
-        data = self.get_verbose_dict(record)
-        data['timestamp'] = datetime.datetime.utcnow().isoformat()
-        data['host'] = platform.node()
+        vdict = self.get_verbose_dict(record)
+
+        data = {
+            'timestamp': datetime.datetime.utcnow().isoformat(),
+            'host': platform.node(),
+            'message': vdict['message'],
+            'levelname': vdict['levelname'],
+            'name': vdict['name'],
+            'filename': vdict['filename'],
+            'lineno': vdict['lineno']
+            }
+            
         log_data = ("PLAINTEXT=" + 
                     urllib2.quote(json.dumps(data)))
         return tornado.httpclient.HTTPRequest(

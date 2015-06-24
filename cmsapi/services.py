@@ -920,7 +920,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         # {integration_type}/{integration_id}/videos/{video_id}
         if vids is not None and len(vids) == 1:
             i_vid = neondata.InternalVideoID.generate(self.api_key, vids[0])
-            v = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
+            v = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid,
+                                       log_missing=False)
             if not v:
                 # Video is not in the system yet.
                 statemon.state.increment(ref=_video_not_found_ref, safe=False)
@@ -966,7 +967,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         completed_videos = [] 
         # Get all requests and populate video response object in advance
         requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_many,
-                    job_request_keys) 
+                                          job_request_keys,
+                                          log_missing=False) 
         ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for request, vid in zip(requests, vids):
             if not request:
@@ -1066,8 +1068,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         if len(keys) > 0:
             video_results = yield [
-                tornado.gen.Task(neondata.VideoMetadata.get_many, keys),
-                tornado.gen.Task(neondata.VideoStatus.get_many, keys)]
+                tornado.gen.Task(neondata.VideoMetadata.get_many, keys,
+                                 log_missing=False),
+                tornado.gen.Task(neondata.VideoStatus.get_many, keys,
+                                 log_missing=False)]
             tids = []
             for vresult, vstatus in zip(*video_results):
                 if vresult:
