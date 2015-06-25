@@ -1401,6 +1401,9 @@ class NeonApiKey(NamespacedStoredObject):
 class InternalVideoID(object):
     ''' Internal Video ID Generator '''
     NOVIDEO = 'NOVIDEO' # External video id to specify that there is no video
+
+    VALID_EXTERNAL_REGEX = '[0-9a-zA-Z\-\.]+'
+    VALID_INTERNAL_REGEX = '[0-9a-zA-Z]+_%s' % VALID_EXTERNAL_VID_REGEX
     
     @staticmethod
     def generate(api_key, vid=None):
@@ -3098,6 +3101,7 @@ class ThumbnailID(AbstractHashGenerator):
 
     Thumbnail ID is: <internal_video_id>_<md5 MD5 hash of image data>
     '''
+    VALID_REGEX = '%s_[0-9a-f]+' % InternalVideoID.VALID_INTERNAL_VID_REGEX
 
     @staticmethod
     def generate(_input, internal_video_id):
@@ -3146,10 +3150,15 @@ class ThumbnailServingURLs(NamespacedStoredObject):
 
     thumbnail_id -> { (width, height) -> url }
     '''
+    FNAME_FORMAT = "neontn%s_w%s_h%s.jpg"
+    FNAME_REGEX = ('neontn%s_w([0-9]+)_h([0-9]+)\.jpg' % 
+                   neondata.ThumbnailID.VALID_REGEX)
 
-    def __init__(self, thumbnail_id, size_map=None):
+    def __init__(self, thumbnail_id, size_map=None, base_url=None):
         super(ThumbnailServingURLs, self).__init__(thumbnail_id)
         self.size_map = size_map or {}
+        self.base_url = base_url
+        self.sizes
 
     @classmethod
     def _baseclass_name(cls):
@@ -3174,6 +3183,11 @@ class ThumbnailServingURLs(NamespacedStoredObject):
         Raises a KeyError if there isn't one.
         '''
         return self.size_map[(width, height)]
+
+    @staticmethod
+    def create_filename(tid, width, height):
+        '''Creates a filename for a given thumbnail id at a specific size.'''
+        return ThumbnailServingURLs.FNAME_FORMAT % (tid, width, height)
 
     def to_dict(self):
         new_dict = {

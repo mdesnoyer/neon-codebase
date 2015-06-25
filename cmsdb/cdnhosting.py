@@ -10,13 +10,13 @@ if sys.path[0] != __base_path__:
 
 import api.akamai_api
 import base64
+from cmsdb import neondata
 import json
 import hashlib
 import random
 import re
 import socket
 import string
-import cmsdb.neondata
 import time
 import tornado.gen
 import urllib
@@ -154,7 +154,6 @@ def create_s3_redirect(dest_key, src_key, dest_bucket=None,
 
 class CDNHosting(object):
     '''Abstract class for hosting images on a CDN.'''
-
     def __init__(self, cdn_metadata):
         '''Abstract CDN hosting class.
 
@@ -209,7 +208,7 @@ class CDNHosting(object):
                     obj.add_serving_url(*params)
 
             yield tornado.gen.Task(
-                cmsdb.neondata.ThumbnailServingURLs.modify,
+                neondata.ThumbnailServingURLs.modify,
                 tid,
                 add_serving_urls,
                 create_missing=True)
@@ -243,13 +242,13 @@ class CDNHosting(object):
         Creates the appropriate connection based on a database entry.
         '''
         if isinstance(cdn_metadata,
-                      cmsdb.neondata.S3CDNHostingMetadata):
+                      neondata.S3CDNHostingMetadata):
             return AWSHosting(cdn_metadata)
         elif isinstance(cdn_metadata,
-                        cmsdb.neondata.CloudinaryCDNHostingMetadata):
+                        neondata.CloudinaryCDNHostingMetadata):
             return CloudinaryHosting(cdn_metadata)
         elif isinstance(cdn_metadata,
-                        cmsdb.neondata.AkamaiCDNHostingMetadata):
+                        neondata.AkamaiCDNHostingMetadata):
             return AkamaiHosting(cdn_metadata)
 
         else:
@@ -257,16 +256,14 @@ class CDNHosting(object):
                              " implement" % cdn_metadata.__class__.__name__)
 
 class AWSHosting(CDNHosting):
-
-    neon_fname_fmt = "neontn%s_w%s_h%s.jpg" 
     
     def __init__(self, cdn_metadata):
         super(AWSHosting, self).__init__(cdn_metadata)
         self.neon_bucket = (isinstance(
-            cdn_metadata, cmsdb.neondata.NeonCDNHostingMetadata)
+            cdn_metadata, neondata.NeonCDNHostingMetadata)
             or isinstance(
                 cdn_metadata,
-                cmsdb.neondata.PrimaryNeonHostingMetadata))
+                neondata.PrimaryNeonHostingMetadata))
         self.s3conn = S3Connection(cdn_metadata.access_key,
                                    cdn_metadata.secret_key)
         self.s3bucket_name = cdn_metadata.bucket_name
@@ -304,8 +301,8 @@ class AWSHosting(CDNHosting):
         if self.make_tid_folders:
             name_pieces.append("%s.jpg" % re.sub('_', '/', tid))
         else:
-            name_pieces.append(AWSHosting.neon_fname_fmt % 
-                               (tid, image.size[0], image.size[1]))
+            name_pieces.append(neondata.ThumbnailServingURLs.create_filename(
+                (tid, image.size[0], image.size[1])))
         key_name = '/'.join(name_pieces)
 
         cdn_url = "http://%s/%s" % (cdn_prefix, key_name)
@@ -416,8 +413,6 @@ class CloudinaryHosting(CDNHosting):
 
 class AkamaiHosting(CDNHosting):
 
-    neon_fname_fmt = "neontn%s_w%s_h%s.jpg" 
-
     def __init__(self, cdn_metadata):
         super(AkamaiHosting, self).__init__(cdn_metadata)
         self.cdn_prefixes = cdn_metadata.cdn_prefixes 
@@ -432,8 +427,8 @@ class AkamaiHosting(CDNHosting):
     def _upload_impl(self, image, tid, url=None):
         
         name_pieces = []
-        name_pieces.append(AkamaiHosting.neon_fname_fmt % 
-                           (tid, image.size[0], image.size[1]))
+        name_pieces.append(neondata.ThumbnailServingURLs.create_filename( 
+            (tid, image.size[0], image.size[1]))
         key_name = '/'.join(name_pieces)
 
         if self.cdn_prefixes and len(self.cdn_prefixes) > 0:
