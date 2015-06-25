@@ -3,8 +3,14 @@
  */
 
 
+#include <boost/scoped_ptr.hpp>
 #include <gtest/gtest.h>
 #include <stdio.h>
+#include <libgen.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <fstream> 
 #include <time.h>
 
 #include "neon_error_codes.h"
@@ -13,6 +19,7 @@
 #include "neon_utils.h"
 #include "directive.h"
 #include "fraction.h"
+#include "test_utils.hpp"
 
 using namespace std; 
 
@@ -125,3 +132,18 @@ TEST_F(FractionsTest, test_fractions_less_than_one){
 
 }
 
+TEST_F(FractionsTest, test_generate_default_url_base) 
+{
+    string testString = TestUtils::readTestFile("noUrlsGoodDirective.json"); 
+    cout << testString; 
+    rapidjson::Document doc; 
+    doc.Parse<0>(testString.c_str());  
+    rapidjson::Value& frac = doc["fractions"][0u];
+    cout << frac["base_url"].GetString();
+
+    Fraction f; 
+    f.Init(0,frac); 
+    string defaultUrl = f.GenerateDefaultUrl(frac);
+
+    ASSERT_EQ("http://kevin_test/thumb1_700_800.jpg", defaultUrl); 
+}

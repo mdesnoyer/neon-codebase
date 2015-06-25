@@ -48,6 +48,7 @@ add_cc_test(NeonISPTest
   test/neon_directivehashtable_test.cc
   test/neon_service_helper_test.cc
   test/fractions_test.cc
+  test/test_utils.cc
 )
 
 target_link_libraries( NeonISPTest 

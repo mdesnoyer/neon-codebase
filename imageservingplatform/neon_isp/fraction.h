@@ -26,6 +26,8 @@ public:
 
     ScaledImage* GetScaledImage(int height, int width) const;
     
+    std::string GenerateDefaultUrl(const rapidjson::Value&); 
+    
 protected:
     
     int InitSafe(double floor, const rapidjson::Value& fa);
@@ -40,9 +42,6 @@ protected:
     std::string  baseUrl; 
     
     std::vector<ScaledImage*> images;
-
-private: 
-    std::string GenerateDefaultUrl(const rapidjson::Value&); 
 };
 
 
