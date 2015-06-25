@@ -12,6 +12,7 @@
 #include "mastermind.h"
 #include "neon_mastermind.h"
 #include "neon_stats.h"
+#include "include/utility.hpp"
 
 const std::string Mastermind::typeKey            = "type";
 const std::string Mastermind::typeDirective      = "dir";
@@ -559,7 +560,7 @@ Mastermind::GetImageUrl(const char * account_id,
     }
 
     if (image->needsUrlGenerated) { 
-        const char * url = image->GenerateUrl(fraction->GetBaseUrl(), (std::string)fraction->GetThumbnailID(), image->GetHeight(), image->GetWidth()); 
+        const char * url = utility::generateUrl(fraction->GetBaseUrl(), (std::string)fraction->GetThumbnailID(), image->GetHeight(), image->GetWidth()).c_str(); 
         size = strlen(url); 
         return url;
     } 

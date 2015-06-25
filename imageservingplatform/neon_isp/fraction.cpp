@@ -80,6 +80,20 @@ Fraction::InitSafe(double floor, const rapidjson::Value& frac)
         pct = 0.0;
 
     threshold = floor + pct;
+    
+    // Thumbnail ID
+    if (frac.HasMember("tid") == false) {
+        neon_stats[NEON_FRACTION_PARSE_ERROR]++;
+        return -1; 
+    }
+
+    tid = 0;
+    tid = strdup(frac["tid"].GetString());
+
+    if(tid == 0) {
+       neon_stats[NGINX_OUT_OF_MEMORY]++;
+       return -1;
+    }
 
     // Default URL
     if (frac.HasMember("default_url"))  {
@@ -97,28 +111,26 @@ Fraction::InitSafe(double floor, const rapidjson::Value& frac)
            neon_stats[NGINX_OUT_OF_MEMORY]++;
            return -1;
         }
-        //we don't core dump let's generate a default url 
-        defaultURL = strdup(this->GenerateDefaultUrl(frac).c_str());  
+
+        // TODO Kevin when we delete the old code above, move the default url logic outta here
+        if (frac.HasMember("default_size") == false) { 
+            neon_stats[NEON_FRACTION_PARSE_ERROR]++;
+            return -1; 
+        } 
+        const rapidjson::Value& defaultSize = frac["default_size"]; 
+        if (defaultSize["h"].IsInt() && defaultSize["w"].IsInt()) {  
+            defaultURL = strdup(utility::generateUrl(baseUrl, tid, frac["default_size"]["h"].GetInt(), frac["default_size"]["w"].GetInt()).c_str());  
+        }
+        else { 
+            neon_stats[NEON_FRACTION_PARSE_ERROR]++;
+            return -1; 
+        }
     } 
     else { 
         neon_stats[NEON_FRACTION_PARSE_ERROR]++;
         return -1;
     }
 
-    // Thumbnail ID
-    if (frac.HasMember("tid") == false) {
-        neon_stats[NEON_FRACTION_PARSE_ERROR]++;
-        return -1; 
-    }
-
-    tid = 0;
-    tid = strdup(frac["tid"].GetString());
-
-    if(tid == 0) {
-       neon_stats[NGINX_OUT_OF_MEMORY]++;
-       return -1;
-    }
-    
     /*
      *  Images array
      */
@@ -135,8 +147,6 @@ Fraction::InitSafe(double floor, const rapidjson::Value& frac)
     return 0;
 }
 
-
-// TODO Kevin refactor this/ with the identically named defaultThumbnail function, these things do the same thing
 int 
 Fraction::ProcessImages(const rapidjson::Value & imgs, bool needsUrlGenerated) 
 { 
@@ -276,18 +286,3 @@ std::string
 Fraction::GetBaseUrl() const{ 
     return baseUrl; 
 }
-
-// TODO Kevin exceptions, also this should be combined with the scaledImage::GenerateUrl function 
-std::string
-Fraction::GenerateDefaultUrl(const rapidjson::Value& frac) {
-    std::ostringstream ss(""); 
-    int height = frac["default_size"]["h"].GetInt();  
-    int width = frac["default_size"]["w"].GetInt(); 
-    std::string baseUrl = frac["base_url"].GetString(); 
-    std::string tid = frac["tid"].GetString(); 
-    
-    ss << baseUrl << "/" << tid << "_" << height << "_" << width << ".jpg"; 
-       
-    return ss.str();
-} 
-

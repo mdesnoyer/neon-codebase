@@ -135,15 +135,13 @@ TEST_F(FractionsTest, test_fractions_less_than_one){
 TEST_F(FractionsTest, test_generate_default_url_base) 
 {
     string testString = TestUtils::readTestFile("noUrlsGoodDirective.json"); 
-    cout << testString; 
     rapidjson::Document doc; 
     doc.Parse<0>(testString.c_str());  
     rapidjson::Value& frac = doc["fractions"][0u];
-    cout << frac["base_url"].GetString();
 
     Fraction f; 
-    f.Init(0,frac); 
-    string defaultUrl = f.GenerateDefaultUrl(frac);
+    f.Init(0,frac);
+    string defaultUrl = utility::generateUrl(f.GetBaseUrl(), (std::string)f.GetThumbnailID(),800,700); 
 
-    ASSERT_EQ("http://kevin_test/thumb1_700_800.jpg", defaultUrl); 
+    ASSERT_EQ("http://kevin_test/neontnthumb1_w700_h800.jpg", defaultUrl); 
 }

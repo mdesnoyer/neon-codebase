@@ -35,7 +35,7 @@ add_library(NeonISP STATIC
  neon_error_codes.c
  neon_stats.c
  neon_service_helper.c
-
+ utility.cpp
 )
 
 ######## All tests after this point #########

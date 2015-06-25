@@ -25,7 +25,6 @@ public:
     const char * GetUrl(int & size) const;
     const std::string & GetUrlString() const;
     static bool ApproxEqual(int a, int b, int window);
-    const char * GenerateUrl(std::string, std::string, int, int) const; 
     
     bool needsUrlGenerated; 
 

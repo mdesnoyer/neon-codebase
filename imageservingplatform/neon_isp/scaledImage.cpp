@@ -123,11 +123,3 @@ ScaledImage::GetUrlString() const
 {
     return url;
 }
-
-const char *
-ScaledImage::GenerateUrl(std::string baseUrl, std::string tid, int h, int w) const
-{
-    std::ostringstream ss(""); 
-    ss << baseUrl << "/" << tid << "_" << h << "_" << w << ".jpg"; 
-    return ss.str().c_str(); 
-}

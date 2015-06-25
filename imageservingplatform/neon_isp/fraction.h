@@ -5,6 +5,7 @@
 #include <vector>
 #include "rapidjson/document.h"
 #include "scaledImage.h"
+#include "include/utility.hpp" 
 
 class Fraction  {
     
@@ -25,8 +26,6 @@ public:
     std::string GetBaseUrl() const; 
 
     ScaledImage* GetScaledImage(int height, int width) const;
-    
-    std::string GenerateDefaultUrl(const rapidjson::Value&); 
     
 protected:
     
