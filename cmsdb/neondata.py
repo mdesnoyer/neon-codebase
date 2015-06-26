@@ -3155,7 +3155,7 @@ class ThumbnailServingURLs(NamespacedStoredObject):
     <base_url>/FNAME_FORMAT % (thumbnail_id, width, height)
     '''
     FNAME_FORMAT = "neontn%s_w%s_h%s.jpg"
-    FNAME_REGEX = ('neontn%s_w([0-9]+)_h([0-9]+)\.jpg' % 
+    FNAME_REGEX = ('neontn(%s)_w([0-9]+)_h([0-9]+)\.jpg' % 
                    ThumbnailID.VALID_REGEX)
 
     def __init__(self, thumbnail_id, size_map=None, base_url=None, sizes=None):
@@ -3182,11 +3182,15 @@ class ThumbnailServingURLs(NamespacedStoredObject):
         '''
         if self.base_url is not None:
             urlRe = re.compile(
-                ('%s/%s' % (self.base_url, ThumbnailServingURLs.FNAME_REGEX))
-                % self.get_thumbnail_id())
+                '%s/%s' % (self.base_url, ThumbnailServingURLs.FNAME_REGEX))
             if urlRe.match(url):
                 self.sizes.add((width, height))
                 return
+            else:
+                # TODO(mdesnoyer): once the db is cleaned, make this
+                # raise a ValueError
+                _log.warn_n('url %s does not conform to base %s' %
+                            (url, self.base_url))
         self.size_map[(width, height)] = str(url)
 
     def get_serving_url(self, width, height):
@@ -3220,6 +3224,10 @@ class ThumbnailServingURLs(NamespacedStoredObject):
             # Load in the url entries into the object
             size_map = obj.size_map
             obj.size_map = {}
+            # Find the basename
+            bases = set((os.path.dirname(x[1]) for x in size_map))
+            if len(bases) == 1 and obj.base_url is None:
+                obj.base_url = bases.pop()
             for k, v in size_map:
                 width, height = k
                 obj.add_serving_url(v, width, height)

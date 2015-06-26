@@ -364,7 +364,8 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
     def test_ThumbnailServingURLs(self):
         input1 = ThumbnailServingURLs('acct1_vid1_tid1')
-        input1.add_serving_url('http://that_800_600.jpg', 800, 600) 
+        input1.add_serving_url('http://that_800_600.jpg', 800, 600)
+        input1.add_serving_url('http://this_100_50.jpg', 100, 50)
         
         input1.save()
         output1 = ThumbnailServingURLs.get('acct1_vid1_tid1')
@@ -390,6 +391,26 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                          'http://that_800_600.jpg')
         self.assertEqual(output2.get_serving_url(640, 480),
                          'http://this.jpg')
+
+    def test_thumbnail_servingurl_base_url(self):
+        input1 = ThumbnailServingURLs('acct1_vid1_tid1',
+                                      base_url='http://somedomain.com/y6w')
+        url800 = \
+          'http://somedomain.com/y6w/neontnacct1_vid1_tid1_w800_h600.jpg'
+        input1.add_serving_url(url800, 800, 600)
+        url160 = 'http://somedomain.com/ppw/neontnacct1_vid1_tid1_w160_h90.jpg'
+        with self.assertLogExists(logging.WARNING, 'url.*does not conform'):
+            input1.add_serving_url(url160, 160, 90)
+        self.asesrtEqual(input1.get_serving_url(800, 600), url800)
+        self.assertEqual(input1.get_serving_url(160, 90), url160)
+        input1.save()
+
+        output1 = ThumbnailMetadata.get('acct1_vid1_tid1')
+        self.asesrtEqual(input1.get_serving_url(800, 600),
+                         output1.get_serving_url(800, 600))
+        self.assertEqual(input1.get_serving_url(160, 90),
+                         output1.get_serving_url(160, 90))
+        
 
     def test_backwards_compatible_thumb_serving_urls_diff_base(self):
         json_str = "{\"_type\": \"ThumbnailServingURLs\", \"_data\": {\"size_map\": [[[210, 118], \"http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w210_h118.jpg\"], [[160, 90], \"http://n3.neon-images.com/EaE/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w160_h90.jpg\"], [[1280, 720], \"http://n3.neon-images.com/ZZc/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w1280_h720.jpg\"]], \"key\": \"thumbnailservingurls_b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8\"}}"
