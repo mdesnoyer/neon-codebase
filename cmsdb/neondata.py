@@ -3101,7 +3101,7 @@ class ThumbnailID(AbstractHashGenerator):
 
     Thumbnail ID is: <internal_video_id>_<md5 MD5 hash of image data>
     '''
-    VALID_REGEX = '%s_[0-9a-f]+' % InternalVideoID.VALID_INTERNAL_REGEX
+    VALID_REGEX = '%s_[0-9A-Za-z]+' % InternalVideoID.VALID_INTERNAL_REGEX
 
     @staticmethod
     def generate(_input, internal_video_id):
@@ -3182,7 +3182,8 @@ class ThumbnailServingURLs(NamespacedStoredObject):
         '''
         if self.base_url is not None:
             urlRe = re.compile(
-                '%s/%s' % (self.base_url, ThumbnailServingURLs.FNAME_REGEX))
+                '%s/%s' % (re.escape(self.base_url),
+                           ThumbnailServingURLs.FNAME_REGEX))
             if urlRe.match(url):
                 self.sizes.add((width, height))
                 return
@@ -3200,7 +3201,7 @@ class ThumbnailServingURLs(NamespacedStoredObject):
         '''
         if (width, height) in self.sizes:
             return (self.base_url + '/' + ThumbnailServingURLs.FNAME_FORMAT %
-                    (width, height))
+                    (self.get_thumbnail_id(), width, height))
         return self.size_map[(width, height)]
 
     @staticmethod
@@ -3221,6 +3222,9 @@ class ThumbnailServingURLs(NamespacedStoredObject):
     def _create(cls, key, obj_dict):
         obj = super(ThumbnailServingURLs, cls)._create(key, obj_dict)
         if obj:
+            # Convert the sizes into tuples and a set
+            obj.sizes = set((tuple(x) for x in obj.sizes))
+            
             # Load in the url entries into the object
             size_map = obj.size_map
             obj.size_map = {}

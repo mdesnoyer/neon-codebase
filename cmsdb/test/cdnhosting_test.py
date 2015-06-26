@@ -48,7 +48,9 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
           neondata.CloudinaryCDNHostingMetadata
         self.datamock.NeonCDNHostingMetadata = neondata.NeonCDNHostingMetadata
         self.datamock.PrimaryNeonHostingMetadata = \
-                            neondata.PrimaryNeonHostingMetadata
+          neondata.PrimaryNeonHostingMetadata
+        self.datamock.ThumbnailServingURLs.create_filename = \
+          neondata.ThumbnailServingURLs.create_filename
 
         random.seed(1654984)
 

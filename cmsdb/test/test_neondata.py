@@ -11,7 +11,6 @@ import copy
 from concurrent.futures import Future
 import contextlib
 import logging
-_log = logging.getLogger(__name__)
 import json
 import multiprocessing
 from mock import patch, MagicMock
@@ -45,6 +44,8 @@ from cmsdb.neondata import NeonPlatform, BrightcovePlatform, \
         S3CDNHostingMetadata, CloudinaryCDNHostingMetadata, \
         NeonCDNHostingMetadata, CDNHostingMetadataList, ThumbnailType
 
+_log = logging.getLogger(__name__)
+
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
     Neondata class tester
@@ -54,6 +55,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
         self.maxDiff = 5000
+        logging.getLogger('cmsdb.neondata').reset_sample_counters()
 
     def tearDown(self):
         neondata.PubSubConnection.clear_singleton_instance()
@@ -394,19 +396,19 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
     def test_thumbnail_servingurl_base_url(self):
         input1 = ThumbnailServingURLs('acct1_vid1_tid1',
-                                      base_url='http://somedomain.com/y6w')
+                                      base_url='http://neon-images.com/y6w')
         url800 = \
-          'http://somedomain.com/y6w/neontnacct1_vid1_tid1_w800_h600.jpg'
+          'http://neon-images.com/y6w/neontnacct1_vid1_tid1_w800_h600.jpg'
         input1.add_serving_url(url800, 800, 600)
-        url160 = 'http://somedomain.com/ppw/neontnacct1_vid1_tid1_w160_h90.jpg'
+        url160 = 'http://neon-images.com/ppw/neontnacct1_vid1_tid1_w160_h90.jpg'
         with self.assertLogExists(logging.WARNING, 'url.*does not conform'):
             input1.add_serving_url(url160, 160, 90)
-        self.asesrtEqual(input1.get_serving_url(800, 600), url800)
+        self.assertEqual(input1.get_serving_url(800, 600), url800)
         self.assertEqual(input1.get_serving_url(160, 90), url160)
         input1.save()
 
-        output1 = ThumbnailMetadata.get('acct1_vid1_tid1')
-        self.asesrtEqual(input1.get_serving_url(800, 600),
+        output1 = ThumbnailServingURLs.get('acct1_vid1_tid1')
+        self.assertEqual(input1.get_serving_url(800, 600),
                          output1.get_serving_url(800, 600))
         self.assertEqual(input1.get_serving_url(160, 90),
                          output1.get_serving_url(160, 90))
