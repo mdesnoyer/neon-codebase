@@ -8,10 +8,6 @@
             "pct": 0.7,
             "tid": "thumb1",
             "base_url": "http://kevin_test/",
-            "default_size": {
-                "h": 700,
-                "w": 800
-            },
             "img_sizes": [
                 {
                     "h": 500,
@@ -26,25 +22,6 @@
         {
             "pct": 0.2,
             "tid": "thumb2",
-            "base_url": "http://kevin_test/",
-            "default_size": {
-                "h": 700,
-                "w": 800
-            },
-            "img_sizes": [
-                {
-                    "h": 500,
-                    "w": 600
-                },
-                {
-                    "h": 300,
-                    "w": 400
-                }
-            ]
-        },
-        {
-            "pct": 0.1,
-            "tid": "thumb3",
             "base_url": "http://kevin_test/",
             "default_size": {
                 "h": 700,

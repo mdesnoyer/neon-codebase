@@ -132,6 +132,7 @@ TEST_F(FractionsTest, test_fractions_less_than_one){
 
 }
 
+// This test likely belongs in a utility test
 TEST_F(FractionsTest, test_generate_default_url_base) 
 {
     string testString = TestUtils::readTestFile("noUrlsGoodDirective.json"); 
@@ -141,7 +142,52 @@ TEST_F(FractionsTest, test_generate_default_url_base)
 
     Fraction f; 
     f.Init(0,frac);
-    string defaultUrl = utility::generateUrl(f.GetBaseUrl(), (std::string)f.GetThumbnailID(),800,700); 
+    string defaultUrl = utility::generateUrl(f.GetBaseUrl(), (std::string)f.GetThumbnailID(),700,800); 
 
-    ASSERT_EQ("http://kevin_test/neontnthumb1_w700_h800.jpg", defaultUrl); 
+    ASSERT_EQ("http://kevin_test/neontnthumb1_w800_h700.jpg", defaultUrl); 
+}
+
+TEST_F(FractionsTest, test_frac_init_no_height) 
+{
+    string testString = TestUtils::readTestFile("lackingHeightDirective.json"); 
+    rapidjson::Document doc; 
+    doc.Parse<0>(testString.c_str());  
+    rapidjson::Value& frac = doc["fractions"][0u];
+    Fraction f; 
+    int rv = f.Init(0, frac); 
+    ASSERT_EQ(rv, -1); 
+}
+
+TEST_F(FractionsTest, test_frac_init_no_width) 
+{
+    string testString = TestUtils::readTestFile("lackingWidthDirective.json"); 
+    rapidjson::Document doc; 
+    doc.Parse<0>(testString.c_str());  
+    rapidjson::Value& frac = doc["fractions"][0u];
+    Fraction f; 
+    int rv = f.Init(0, frac); 
+    ASSERT_EQ(rv, -1); 
+}
+
+TEST_F(FractionsTest, test_frac_init_no_default_size) 
+{
+    string testString = TestUtils::readTestFile("lackingDefaultSizeDirective.json"); 
+    rapidjson::Document doc; 
+    doc.Parse<0>(testString.c_str());  
+    rapidjson::Value& frac = doc["fractions"][0u];
+    Fraction f; 
+    int rv = f.Init(0, frac); 
+    ASSERT_EQ(rv, -1); 
+}
+
+TEST_F(FractionsTest, test_generate_default_url_full) 
+{ 
+    string testString = TestUtils::readTestFile("noUrlsGoodDirective.json"); 
+    rapidjson::Document doc; 
+    doc.Parse<0>(testString.c_str());  
+    rapidjson::Value& frac = doc["fractions"][0u];
+
+    Fraction f; 
+    f.Init(0,frac);
+    ASSERT_EQ("http://kevin_test/neontnthumb1_w800_h700.jpg", string(f.GetDefaultURL())); 
 }
