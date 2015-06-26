@@ -391,6 +391,33 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEqual(output2.get_serving_url(640, 480),
                          'http://this.jpg')
 
+    def test_backwards_compatible_thumb_serving_urls_diff_base(self):
+        json_str = "{\"_type\": \"ThumbnailServingURLs\", \"_data\": {\"size_map\": [[[210, 118], \"http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w210_h118.jpg\"], [[160, 90], \"http://n3.neon-images.com/EaE/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w160_h90.jpg\"], [[1280, 720], \"http://n3.neon-images.com/ZZc/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w1280_h720.jpg\"]], \"key\": \"thumbnailservingurls_b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8\"}}"
+
+        obj = ThumbnailServingURLs._create('thumbnailservingurls_b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8', json.loads(json_str))
+
+        # It's different base urls so we keep the object in the old format
+        self.assertEquals(len(obj.size_map), 3)
+        self.assertIsNone(obj.base_url)
+        self.assertEquals(len(obj.sizes), 0)
+        self.assertEquals(obj.get_serving_url(160, 90),
+                          'http://n3.neon-images.com/EaE/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w160_h90.jpg')
+
+    def test_backwards_compatible_thumb_serving_urls_same_base(self):
+        json_str = "{\"_type\": \"ThumbnailServingURLs\", \"_data\": {\"size_map\": [[[210, 118], \"http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w210_h118.jpg\"], [[160, 90], \"http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w160_h90.jpg\"], [[1280, 720], \"http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w1280_h720.jpg\"]], \"key\": \"thumbnailservingurls_b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8\"}}"
+
+        obj = ThumbnailServingURLs._create('thumbnailservingurls_b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8', json.loads(json_str))
+
+        # It's the same base url so store in the new format
+        self.assertEquals(len(obj.size_map), 0)
+        self.assertEquals(obj.base_url, 'http://n3.neon-images.com/fF7')
+        self.assertEquals(obj.sizes, set([(210,118), (160,90), (1280,720)]))
+        self.assertEquals(obj.get_serving_url(160, 90),
+                          'http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w160_h90.jpg')
+        self.assertEquals(obj.get_thumbnail_id(),
+                          'b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8')
+        
+
     def test_too_many_open_connections_sync(self):
         self.maxDiff = 10000
 
