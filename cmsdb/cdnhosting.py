@@ -193,12 +193,14 @@ class CDNHosting(object):
                 cv_im = pycvutils.from_pil(image)
                 cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
                 im = pycvutils.to_pil(cv_im_r)
-                cdn_url = yield self._upload_impl(im, tid, url, async=True)
+                cdn_url = yield self._upload_impl(im, tid, url,
+                                                  async=True)
                 if cdn_url:
                     new_serving_thumbs.append((cdn_url, sz[0], sz[1]))
 
         else:
-            cdn_url = yield self._upload_impl(image, tid, url, async=True)
+            cdn_url = yield self._upload_impl(image, tid, url,
+                                              async=True)
             # Append only if the image was uploaded successfully   
             if cdn_url:
                 new_serving_thumbs.append((cdn_url, image.size[0], image.size[1]))
@@ -216,7 +218,7 @@ class CDNHosting(object):
         
         # return the CDN URL 
         raise tornado.gen.Return(cdn_url)
-
+        
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def _upload_impl(self, image, tid, url=None):
@@ -224,6 +226,12 @@ class CDNHosting(object):
 
         Note that this could be called multiple times for the same
         image, but they could be different sizes.
+
+        Your implementation must create urls with the same base (all
+        the way up to the last '/') for each thumbnail id. If you use
+        a random number, then, the easiest thing to do is to use
+        rng = random.Random(tid)
+        # Figure out the cdn url using rng
 
         To be implemented by a subclass.
 
@@ -281,6 +289,8 @@ class AWSHosting(CDNHosting):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def _upload_impl(self, image, tid, url=None):
+        rng = random.Random(tid)
+        
         # Connect to the bucket if not done already
         if self.s3bucket is None:
             self.s3bucket = yield utils.botoutils.run_async(
@@ -288,7 +298,7 @@ class AWSHosting(CDNHosting):
                 self.s3bucket_name)
         
         if self.cdn_prefixes and len(self.cdn_prefixes) > 0:
-            cdn_prefix = random.choice(self.cdn_prefixes)
+            cdn_prefix = rng.choice(self.cdn_prefixes)
         else:
             cdn_prefix = "s3.amazonaws.com/%s" % self.s3bucket_name
 
@@ -299,7 +309,7 @@ class AWSHosting(CDNHosting):
             name_pieces.append(self.folder_prefix)
         if self.do_salt:
             name_pieces.append(''.join(
-                random.choice(string.letters + string.digits) 
+                rng.choice(string.letters + string.digits) 
                 for _ in range(3)))
         if self.make_tid_folders:
             name_pieces.append("%s.jpg" % re.sub('_', '/', tid))
@@ -430,20 +440,9 @@ class AkamaiHosting(CDNHosting):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def _upload_impl(self, image, tid, url=None):
-        
-        name_pieces = []
-        name_pieces.append(AkamaiHosting.neon_fname_fmt % 
-                           (tid, image.size[0], image.size[1]))
-        key_name = '/'.join(name_pieces)
+        rng = random.Random(tid)
 
-        if self.cdn_prefixes and len(self.cdn_prefixes) > 0:
-            cdn_prefix = random.choice(self.cdn_prefixes)
-        
-        fmt = 'jpeg'
-        filestream = StringIO()
-        image.save(filestream, fmt, quality=90) 
-        filestream.seek(0)
-        imgdata = filestream.read()
+        cdn_prefix = rng.choice(self.cdn_prefixes)
        
         # Akamai storage does not recommend a single folder for all
         # files under our neon account for performance reasons (limit 2000). 
@@ -460,20 +459,28 @@ class AkamaiHosting(CDNHosting):
         # break in the future if the tid scheme changes. Another option would 
         # be to add a root folder to the class that would be set using the 
         # account id. For now, this is fine so go with it.
-        root_folder_name = tid[:24]
-        
-        random.seed()
+        name_pieces = ['',tid[:24]]
+        for _ in range(3):
+            name_pieces.append(rng.choice(string.ascii_letters))
 
-        # directory structure
-        image_url = "/%s/%s/%s/%s/%s" % (root_folder_name,
-                                         random.choice(string.ascii_letters),
-                                         random.choice(string.ascii_letters),
-                                         random.choice(string.ascii_letters),
-                                         key_name)
+        # Add the filename
+        name_pieces.append(AkamaiHosting.neon_fname_fmt % 
+                           (tid, image.size[0], image.size[1]))
+
+        image_url = '/'.join(name_pieces)
+        
         # the full cdn url
         cdn_url = "http://%s%s" % (cdn_prefix, image_url)
 
-        response = yield tornado.gen.Task(self.ak_conn.upload, image_url, imgdata)
+        # Get the image data
+        fmt = 'jpeg'
+        filestream = StringIO()
+        image.save(filestream, fmt, quality=90) 
+        filestream.seek(0)
+        imgdata = filestream.read()
+
+        response = yield tornado.gen.Task(self.ak_conn.upload, image_url,
+                                          imgdata)
         if response.error:
             _log.warn_n("Error uploading image to akamai for tid %s" % tid)
             cdn_url = None
