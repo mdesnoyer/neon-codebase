@@ -280,8 +280,6 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
         self.s3conn.create_bucket('hosting-bucket')
         self.bucket = self.s3conn.get_bucket('hosting-bucket')
 
-        random.seed(1654984)
-
         self.image = PILImageUtils.create_random_image(480, 640)
         super(TestAWSHostingWithServingUrls, self).setUp()
 
@@ -397,7 +395,6 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
 
         self.hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
         
-        random.seed(1654985)
         self.image = PILImageUtils.create_random_image(480, 640)
         super(TestAkamaiHosting, self).setUp()
 
@@ -459,6 +456,12 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
         # Make sure all the base urls are the same for a given thumb
         self.assertGreater(len(base_urls), 1)
         self.assertEquals(len(set(base_urls)), 1)
+
+        # Make sure that the url is exactly what we expect. If this
+        # check fails, then the python random module had changed
+        self.assertEquals(
+            base_urls[0],
+            'http://cdn1.akamai.com/customeraccountnamelabel/G/l/l')
     
     @tornado.testing.gen_test
     def test_upload_image_error(self):
