@@ -82,7 +82,7 @@ def main():
                                serving_urls.get_id())
                     continue
                 cdn_metadata = cdn_list[0]
-                hoster = cdnhosting.CDNHosting.create(cdn_metadata)
+                hoster = cmsdb.cdnhosting.CDNHosting.create(cdn_metadata)
 
             # Grab the original image
             image = None
