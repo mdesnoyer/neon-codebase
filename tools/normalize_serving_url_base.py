@@ -37,7 +37,7 @@ def download_image(url):
         return Image.open(StringIO(response.body))
     return None
 
-urlRe = re.compile('(http[s]?://(.+)/(.+))/.+')
+urlRe = re.compile('(http[s]?://.+)/.+')
 
 def main():
     cdn_list = None
@@ -55,11 +55,10 @@ def main():
         try:
         
             # parse the existing urls
-            url_parsing = [urlRe.match(x).groups()
+            bases = [urlRe.match(x).group1(1)
                            for x in serving_urls.size_map.itervalues()]
 
             # If the base is the same for all, we're done
-            bases, hosts, folders = zip(*url_parsing)
             if len(set(bases)) <= 1:
                 continue
 

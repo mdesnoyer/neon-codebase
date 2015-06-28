@@ -332,7 +332,7 @@ class AkamaiNetstorage(object):
             request_timeout=10.0,
             connect_timeout=5.0)
         response = yield tornado.gen.Task(
-            utils.http.send_request, req) 
+            utils.http.send_request, req, ntries=2) 
                         
         raise tornado.gen.Return(response)
 
