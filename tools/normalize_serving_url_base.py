@@ -74,7 +74,8 @@ def main():
             api_key = thumb_meta.get_account_id()
             if cdn_metadata is None or cdn_metadata.get_id() != api_key:
                 cdn_list = neondata.CDNHostingMetadataList.get(
-                    api_key, vid_meta.integration_id)
+                     neondata.CDNHostingMetadataList.create_key(
+                         api_key, vid_meta.integration_id))
                 cdn_list = [x for x in cdn_list.cdns if x.update_serving_urls]
                 if len(cdn_list) != 1:
                     _log.error('Cannot find cdnmetadata for thumb %s' %
