@@ -10,6 +10,7 @@ if sys.path[0] != __base_path__:
 
 import api.akamai_api
 import base64
+import boto.exception
 import json
 import hashlib
 import random
