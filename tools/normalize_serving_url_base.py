@@ -71,7 +71,7 @@ def main():
             thumb_meta = neondata.ThumbnailMetadata.get(thumb_id)
             if vid_meta is None or vid_meta.key != thumb_meta.video_id:
                 vid_meta = neondata.VideoMetadata.get(thumb_meta.video_id)
-            api_key = thumb_meta.get_account()
+            api_key = thumb_meta.get_account_id()
             if cdn_metadata is None or cdn_metadata.get_id() != api_key:
                 cdn_list = neondata.CDNHostingMetadataList.get(
                     api_key, vid_meta.integration_id)
