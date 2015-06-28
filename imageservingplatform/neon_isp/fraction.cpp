@@ -97,17 +97,11 @@ Fraction::InitSafe(double floor, const rapidjson::Value& frac)
 
     // Default URL
     if (frac.HasMember("default_url"))  {
-        defaultURL = 0;
-        defaultURL = strdup(frac["default_url"].GetString());
-    
-        if(defaultURL == 0) {
-           neon_stats[NGINX_OUT_OF_MEMORY]++;
-           return -1;
-        }
+        default_url_.reset(new std::string(frac["default_url"].GetString())); 
     }
     else if (frac.HasMember("base_url") && frac["base_url"].IsString()) { 
-        baseUrl = frac["base_url"].GetString();
-        if (baseUrl.empty()) { 
+        base_url_ = frac["base_url"].GetString();
+        if (base_url_.empty()) { 
            neon_stats[NGINX_OUT_OF_MEMORY]++;
            return -1;
         }
@@ -119,7 +113,7 @@ Fraction::InitSafe(double floor, const rapidjson::Value& frac)
         } 
         const rapidjson::Value& defaultSize = frac["default_size"]; 
         if (defaultSize["h"].IsInt() && defaultSize["w"].IsInt()) {  
-            defaultURL = strdup(utility::generateUrl(baseUrl, tid, frac["default_size"]["h"].GetInt(), frac["default_size"]["w"].GetInt()).c_str());  
+            default_url_.reset(new std::string(utility::generateUrl(base_url_, tid, frac["default_size"]["h"].GetInt(), frac["default_size"]["w"].GetInt()))); 
         }
         else { 
             neon_stats[NEON_FRACTION_PARSE_ERROR]++;
@@ -130,25 +124,22 @@ Fraction::InitSafe(double floor, const rapidjson::Value& frac)
         neon_stats[NEON_FRACTION_PARSE_ERROR]++;
         return -1;
     }
-
-    /*
-     *  Images array
-     */
+    
     if (frac.HasMember("imgs")) { 
         const rapidjson::Value& imgs = frac["imgs"];  
-        return ProcessImages(imgs, false); 
+        return ProcessImages(imgs); 
     } 
     else if (frac.HasMember("img_sizes")) { 
         const rapidjson::Value& img_sizes = frac["img_sizes"];  
-        return ProcessImages(img_sizes, true); 
+        return ProcessImages(img_sizes); 
     } 
-    
+
     initialized = true;
     return 0;
 }
 
 int 
-Fraction::ProcessImages(const rapidjson::Value & imgs, bool needsUrlGenerated) 
+Fraction::ProcessImages(const rapidjson::Value & imgs) 
 { 
     if(imgs.IsArray() == false) {
         neon_stats[NEON_DEFAULT_THUMBNAIL_PARSE_ERROR]++;
@@ -165,7 +156,6 @@ Fraction::ProcessImages(const rapidjson::Value & imgs, bool needsUrlGenerated)
     for(rapidjson::SizeType i=0; i < numOfImages; i++) {
         
         ScaledImage * img = new ScaledImage();
-        img->needsUrlGenerated = needsUrlGenerated;    
         // store immediately so that Shutdown can delete it in case of error
         images.push_back(img);
         
@@ -222,6 +212,7 @@ Fraction::Dealloc()  {
 
 // Iterate throgugh the images to find the appropriate image for a given
 // height & width
+// TODO Kevin this needs to be combined with DefaultThumbnail::GetScaledImage
 ScaledImage*
 Fraction::GetScaledImage(int height, int width) const{
 
@@ -270,10 +261,10 @@ Fraction::GetPct() const
     return pct;
 }
 
-const char *
-Fraction::GetDefaultURL() const
+std::string * 
+Fraction::default_url() const
 {
-    return defaultURL;
+    return default_url_.get();
 }
 
 const char *
@@ -282,7 +273,8 @@ Fraction::GetThumbnailID() const
     return tid;
 }
 
-std::string 
-Fraction::GetBaseUrl() const{ 
-    return baseUrl; 
+const std::string& 
+Fraction::base_url() const 
+{ 
+    return base_url_; 
 }

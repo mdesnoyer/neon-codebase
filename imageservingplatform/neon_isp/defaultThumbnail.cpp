@@ -80,13 +80,14 @@ DefaultThumbnail::InitSafe(const rapidjson::Document & document)
     /*
      *  Scaled Images
      */
+    // the array must exist
     if(document.HasMember("imgs")) {
         const rapidjson::Value& imgs = document["imgs"];
-        return ProcessImages(imgs, false); 
+        return ProcessImages(imgs); 
     }
     else if(document.HasMember("img_sizes"))  {
         const rapidjson::Value& img_sizes = document["img_sizes"];  
-        return ProcessImages(img_sizes, true); 
+        return ProcessImages(img_sizes); 
     }
     else { 
         neon_stats[NEON_DEFAULT_THUMBNAIL_PARSE_ERROR]++;
@@ -111,7 +112,7 @@ RV         : 0 if successful -1 if not
 ***************************************************************/ 
 
 int 
-DefaultThumbnail::ProcessImages(const rapidjson::Value & imgs, bool needsUrlGenerated) 
+DefaultThumbnail::ProcessImages(const rapidjson::Value & imgs) 
 { 
     if(imgs.IsArray() == false) {
         neon_stats[NEON_DEFAULT_THUMBNAIL_PARSE_ERROR]++;
@@ -130,7 +131,6 @@ DefaultThumbnail::ProcessImages(const rapidjson::Value & imgs, bool needsUrlGene
     for(rapidjson::SizeType i=0; i < numOfImages; i++) {
 
         ScaledImage * img = new ScaledImage();
-        img->needsUrlGenerated = needsUrlGenerated; 
         // store in vector first, if any error it is deletable from Shutdown()
         images.push_back(img);
 
@@ -193,6 +193,8 @@ DefaultThumbnail::GetAccountIdRef() const
 }
 
 
+// TODO Kevin this needs to be combined with Fraction::GetScaledImage
+// TODO get rid of images->GetUrl, replace it with the call to scoped_url  
 const char *
 DefaultThumbnail::GetScaledImage(int height, int width, int & url_size) const{
     

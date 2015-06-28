@@ -35,7 +35,7 @@ public:
 protected:
     
     int InitSafe(const rapidjson::Document & document);
-    int ProcessImages(const rapidjson::Value &, bool);
+    int ProcessImages(const rapidjson::Value &);
     void Dealloc();
     
     std::string accountId;

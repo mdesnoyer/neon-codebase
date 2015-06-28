@@ -9,7 +9,6 @@ ScaledImage::ScaledImage()
     height = 0;
     width = 0;
     initialized = false;
-    needsUrlGenerated = false; 
 }
 
 ScaledImage::~ScaledImage()
@@ -71,19 +70,10 @@ ScaledImage::Init(const rapidjson::Value& img)
     /*
      *  Image url
      */
-    if (this->needsUrlGenerated == false) { 
-        if(img.HasMember("url") == false) {
-	    neon_stats[NEON_SCALED_IMAGE_PARSE_ERROR]++;
-	    return -1;
-	}
-
-	if(img["url"].IsString() == false) {
-	    neon_stats[NEON_SCALED_IMAGE_PARSE_ERROR]++;
-	    return -1;
-	}
-	url = strdup(img["url"].GetString());
+    if (img.HasMember("url") && img["url"].IsString()) { 
+	url = img["url"].GetString();
+        scoped_url_.reset(new std::string(img["url"].GetString())); 
     } 
-    
     initialized = true;
     return 0;
 }
@@ -122,4 +112,10 @@ const std::string &
 ScaledImage::GetUrlString() const
 {
     return url;
+}
+
+std::string * 
+ScaledImage::scoped_url() const
+{
+    return scoped_url_.get();
 }

@@ -166,15 +166,16 @@ neon_mastermind_image_url_lookup(const char * accountId,
     if(mastermind_current == 0)
         return NEON_MASTERMIND_IMAGE_URL_LOOKUP_FAIL;
 
+    std::string image_url("");  
+    mastermind->GetImageUrl(accountId, videoId, 
+                            bucketId->data, bucketId->len,
+                            height, width, *size, image_url);
     
-    (*url) = mastermind->GetImageUrl(accountId, videoId, 
-                                      bucketId->data, bucketId->len,
-                                      height, width, *size);
-    
+    (*url) = image_url.c_str();
+  
     if(*url == 0)
         return NEON_MASTERMIND_IMAGE_URL_LOOKUP_NOT_FOUND;
     
-
     return NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK;
 }
 

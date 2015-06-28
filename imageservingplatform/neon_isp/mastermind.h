@@ -58,13 +58,14 @@ public:
     // searches the publisher hashtable
     const char * GetAccountId(const char * publisherId, int & size);
     
-    const char * GetImageUrl(const char * accountId, 
-                                const char * videoId, 
-                                unsigned char * bucketId,
-                                int bucketIdLen,
-                                int height, 
-                                int width, 
-                                int & size);
+    void GetImageUrl(const char * accountId, 
+                     const char * videoId, 
+                     unsigned char * bucketId,
+                     int bucketIdLen,
+                     int height, 
+                     int width, 
+                     int & size,
+                     std::string& image_url);
     
     const char * GetThumbnailID(const char * c_accountId, 
                                 const char * c_videoId, 

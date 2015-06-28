@@ -8,6 +8,7 @@
 #define _NEON_SCALE_IMAGE__
 
 #include <string>
+#include <boost/scoped_ptr.hpp>
 #include "rapidjson/document.h"
 
 
@@ -25,14 +26,16 @@ public:
     const char * GetUrl(int & size) const;
     const std::string & GetUrlString() const;
     static bool ApproxEqual(int a, int b, int window);
-    
-    bool needsUrlGenerated; 
+    std::string * scoped_url() const;
 
 protected:
     bool initialized;
     int height;
     int width;
     std::string url;
+
+private: 
+    boost::scoped_ptr<std::string> scoped_url_; 
 };
 
 
