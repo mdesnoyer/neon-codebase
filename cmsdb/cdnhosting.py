@@ -457,11 +457,13 @@ class AkamaiHosting(CDNHosting):
     def __init__(self, cdn_metadata):
         super(AkamaiHosting, self).__init__(cdn_metadata)
         self.cdn_prefixes = cdn_metadata.cdn_prefixes 
+        base_split = cdn_metadata.baseurl.strip('/').split('/')
+        self.extra_dirs = base_split[1:]
         self.ak_conn = api.akamai_api.AkamaiNetstorage(
             cdn_metadata.host,
             cdn_metadata.akamai_key,
             cdn_metadata.akamai_name,
-            cdn_metadata.baseurl)
+            '/' + base_split[0])
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -485,7 +487,11 @@ class AkamaiHosting(CDNHosting):
         # break in the future if the tid scheme changes. Another option would 
         # be to add a root folder to the class that would be set using the 
         # account id. For now, this is fine so go with it.
-        name_pieces = ['',tid[:24]]
+        name_pieces = ['']
+        if len(self.extra_dirs) > 0:
+            name_pieces.extend(self.extra_dirs)
+                
+        name_pieces.append(tid[:24])
         for _ in range(3):
             name_pieces.append(rng.choice(string.ascii_letters))
 

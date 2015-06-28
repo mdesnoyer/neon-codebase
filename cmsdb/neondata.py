@@ -1977,7 +1977,8 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
         self.host = host
         self.akamai_key = akamai_key
         self.akamai_name = akamai_name
-        self.baseurl = baseurl
+        # Base upload url. Should be something like '/17645/neon/prod'
+        self.baseurl = baseurl 
 
 class AbstractPlatform(NamespacedStoredObject):
     ''' Abstract Platform/ Integration class '''
