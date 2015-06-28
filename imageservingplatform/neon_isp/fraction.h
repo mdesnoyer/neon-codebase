@@ -6,7 +6,7 @@
 #include <vector>
 #include "rapidjson/document.h"
 #include "scaledImage.h"
-#include "include/utility.hpp" 
+#include "include/url_utils.hpp" 
 
 class Fraction  {
     

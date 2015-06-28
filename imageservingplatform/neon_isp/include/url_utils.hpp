@@ -4,9 +4,9 @@
 #include <iostream>
 #include <sstream> 
 
-namespace utility 
+namespace url_utils 
 { 
-    std::string generateUrl(std::string, std::string, int, int); 
+    std::string GenerateUrl(std::string, std::string, int, int); 
 }
 
 #endif 
