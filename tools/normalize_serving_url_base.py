@@ -88,6 +88,8 @@ def main():
             image = None
             for im_url in thumb_meta.urls:
                 image = download_image(im_url)
+                if image is not None:
+                    break
             if image is None:
                 # Grab the image of the same size as the original
                 image = download_image(serving_urls.get_serving_url(
