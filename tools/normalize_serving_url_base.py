@@ -59,7 +59,7 @@ def main():
                            for x in serving_urls.size_map.itervalues()]
 
             # If the base is the same for all, we're done
-            bases, hosts, folders = zip(url_parsing)
+            bases, hosts, folders = zip(*url_parsing)
             if len(set(bases)) <= 1:
                 continue
 
