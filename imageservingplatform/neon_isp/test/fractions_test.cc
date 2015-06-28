@@ -132,7 +132,7 @@ TEST_F(FractionsTest, test_fractions_less_than_one){
 
 }
 
-// This test likely belongs in a utility test
+// This test likely belongs in a url_utils test
 TEST_F(FractionsTest, test_generate_default_url_base) 
 {
     string testString = TestUtils::readTestFile("noUrlsGoodDirective.json"); 
@@ -142,7 +142,7 @@ TEST_F(FractionsTest, test_generate_default_url_base)
 
     Fraction f; 
     f.Init(0,frac);
-    string defaultUrl = utility::generateUrl(f.base_url(), (std::string)f.GetThumbnailID(),700,800); 
+    string defaultUrl = url_utils::GenerateUrl(f.base_url(), (std::string)f.GetThumbnailID(),700,800); 
 
     ASSERT_EQ("http://kevin_test/neontnthumb1_w800_h700.jpg", defaultUrl); 
 }
