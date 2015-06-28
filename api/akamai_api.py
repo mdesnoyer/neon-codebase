@@ -226,14 +226,15 @@ class AkamaiNetstorage(object):
 
         headers['Content-Length'] = length
         request_url = self.host + self.baseurl + encoded_url
-        req = tornado.httpclient.HTTPRequest(url=request_url,
-                    method="POST",
-                    body=body,
-                    headers=headers,
-                    request_timeout=10.0,
-                    connect_timeout=5.0)
+        req = tornado.httpclient.HTTPRequest(
+            url=request_url,
+            method="POST",
+            body=body,
+            headers=headers,
+            request_timeout=10.0,
+            connect_timeout=5.0)
         response = yield tornado.gen.Task(
-                        utils.http.send_request, req) 
+            utils.http.send_request, req) 
                         
         raise tornado.gen.Return(response)
 

@@ -25,6 +25,7 @@ import tornado.testing
 import unittest
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 from utils.imageutils import PILImageUtils
+import utils.neon
 
 _log = logging.getLogger(__name__)
 
@@ -374,6 +375,25 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
         self.assertEquals(len(base_urls), len(sizes))
         self.assertEquals(len(set(base_urls)), 1)
 
+    @tornado.testing.gen_test
+    def test_delete_salted_image(self):
+        sizes = [(640, 480)]
+        metadata = neondata.NeonCDNHostingMetadata(None,
+            'hosting-bucket', ['cdn1.cdn.com'],
+            'folder1', True, True, True, False, sizes)
+
+        hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+        yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+
+        self.assertEquals(len(list(self.bucket.list())), 1)
+
+        serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
+        self.assertIsNotNone(serving_urls)
+
+        yield hoster.delete(serving_urls.get_serving_url(640,480), async=True)
+
+        self.assertEquals(len(list(self.bucket.list())), 0)
+
 class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
     '''
     Test uploading images to Akamai
@@ -478,4 +498,5 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
         self.assertEqual(len(ts.size_map), 0)
 
 if __name__ == '__main__':
+    utils.neon.InitNeon()
     unittest.main()

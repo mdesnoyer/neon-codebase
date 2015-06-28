@@ -21,6 +21,7 @@ import time
 import tornado.gen
 import urllib
 import urllib2
+import urlparse
 import utils.s3
 
 from boto.exception import S3ResponseError, BotoServerError, BotoClientError
@@ -44,59 +45,6 @@ define('cloudinary_api_key', default='433154993476843',
        help='Cloudinary api key')
 define('cloudinary_api_secret', default='n0E7427lrS1Fe_9HLbtykf9CdtA',
        help='Cloudinary secret api key')
-
-@utils.sync.optional_sync
-@tornado.gen.coroutine
-def upload_image_to_s3(
-        keyname,
-        data,
-        bucket=None,
-        bucket_name=options.hosting_bucket,
-        access_key=None,
-        secret_key=None,
-        *args, **kwargs):
-    '''
-    Upload image to s3 bucket 'host-thumbnails' 
-
-    This is the bucket where the primary copy of thumbnails are stored.
-    ThumbnailMetadata structure stores these thumbnails
-    CMS API returns these urls to be populated in the Neon UI
-
-    @keyname: the basename of the file or name relative to bucket 
-    @data: string data (of image) to be uploaded to S3 
-    @bucket: Optional bucket object to upload to.
-             Allows reuse of the bucket object.
-    @bucket_name: bucket to upload to
-    @access_key: s3 key
-    @secret_key: s3 secret key
-    *args, **kwargs: Arguments passed to set_contents_from_string 
-    '''
-    try:
-        if bucket is None:
-            s3conn = S3Connection(access_key, secret_key)
-            bucket = yield utils.botoutils.run_async(s3conn.get_bucket,
-                                                     bucket_name)
-        else:
-            bucket_name = bucket.name
-
-        key = bucket.new_key(keyname)
-
-        yield utils.botoutils.run_async(
-            key.set_contents_from_string,
-            data,
-            {"Content-Type":"image/jpeg"},
-            *args, **kwargs)
-    except BotoServerError as e:
-        _log.error(
-            'AWS Server error when uploading image to s3://%s/%s: %s' % 
-                    (bucket_name, keyname, e))
-        raise IOError(str(e))
-
-    except BotoClientError as e:
-        _log.error(
-            'AWS client error when uploading image to s3://%s/%s : %s' % 
-                    (bucket_name, keyname, e))
-        raise IOError(str(e))
 
 def get_s3_hosting_bucket():
     '''Returns the bucket that hosts the images.'''
@@ -168,7 +116,7 @@ class CDNHosting(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def upload(self, image, tid, url=None):
+    def upload(self, image, tid, url=None, overwrite=True):
         '''
         Host images on the CDN
 
@@ -182,6 +130,7 @@ class CDNHosting(object):
         tid - Thumbnail id of the image
         url - URL of the image that's already live. This is optional but some
               CDNHosting objects might use this instead of the image.
+        overwrite - Should existing files be overwritten?
         '''
         new_serving_thumbs = [] # (url, width, height)
         
@@ -193,13 +142,13 @@ class CDNHosting(object):
                 cv_im = pycvutils.from_pil(image)
                 cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
                 im = pycvutils.to_pil(cv_im_r)
-                cdn_url = yield self._upload_impl(im, tid, url,
+                cdn_url = yield self._upload_impl(im, tid, url, overwrite,
                                                   async=True)
                 if cdn_url:
                     new_serving_thumbs.append((cdn_url, sz[0], sz[1]))
 
         else:
-            cdn_url = yield self._upload_impl(image, tid, url,
+            cdn_url = yield self._upload_impl(image, tid, url, overwrite,
                                               async=True)
             # Append only if the image was uploaded successfully   
             if cdn_url:
@@ -221,7 +170,7 @@ class CDNHosting(object):
         
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, image, tid, url=None):
+    def _upload_impl(self, image, tid, url=None, overwrite=True):
         '''Upload the specific image to the CDN service.
 
         Note that this could be called multiple times for the same
@@ -240,8 +189,19 @@ class CDNHosting(object):
         @tid: tid of the image being uploaded
         @url: URL of the image that's already live. This is optional but some
               CDNHosting objects might use this instead of the image.
+        @overwrite: If True, an existing file on the CDN will be overwritten
 
         @returns: The serving url for the image or None if it shouldn't be served
+        '''
+        raise NotImplementedError()
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete(self, url):
+        '''Delete the object at a given url.
+
+        Inputs:
+        @url: The url to delete from the CDN
         '''
         raise NotImplementedError()
 
@@ -286,16 +246,21 @@ class AWSHosting(CDNHosting):
         self.do_salt = cdn_metadata.do_salt
         self.make_tid_folders = cdn_metadata.make_tid_folders
 
-    @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, image, tid, url=None):
-        rng = random.Random(tid)
-        
-        # Connect to the bucket if not done already
+    def _get_bucket(self):
+        '''Connects to the bucket if it's not already done'''
         if self.s3bucket is None:
             self.s3bucket = yield utils.botoutils.run_async(
                 self.s3conn.get_bucket,
                 self.s3bucket_name)
+        raise tornado.gen.Return(self.s3bucket)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _upload_impl(self, image, tid, url=None, overwrite=True):
+        rng = random.Random(tid)
+
+        s3bucket = yield self._get_bucket()
         
         if self.cdn_prefixes and len(self.cdn_prefixes) > 0:
             cdn_prefix = rng.choice(self.cdn_prefixes)
@@ -331,10 +296,46 @@ class AWSHosting(CDNHosting):
         if self.neon_bucket:
             policy = 'public-read'
 
-        yield upload_image_to_s3(key_name, imgdata, bucket=self.s3bucket,
-                                 policy=policy, async=True)
+        try:
+            key = s3bucket.new_key(key_name)
+
+            yield utils.botoutils.run_async(
+                key.set_contents_from_string,
+                imgdata,
+                {'Content-Type':'image/jpeg'},
+                policy=policy,
+                replace=overwrite)
+        except BotoServerError as e:
+            _log.error(
+            'AWS Server error when uploading image to s3://%s/%s: %s' % 
+                    (self.s3bucket_name, key_name, e))
+            raise IOError(str(e))
+
+        except BotoClientError as e:
+            _log.error(
+                'AWS client error when uploading image to s3://%s/%s : %s' % 
+                    (self.s3bucket_name, key_name, e))
+            raise IOError(str(e))
 
         raise tornado.gen.Return(cdn_url)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete(self, url):
+        '''Delete the object at a given url.
+
+        Inputs:
+        @url: The url to delete from the CDN
+        '''
+        s3bucket = yield self._get_bucket()
+
+        key_name = urlparse.urlparse(url).path.strip('/')
+        try:
+            yield utils.botoutils.run_async(s3bucket.delete_key,
+                                            key_name)
+        except boto.exception.StorageResponseError as e:
+            # key wasn't there, so that's ok
+            pass
 
 class CloudinaryHosting(CDNHosting):
     
@@ -354,7 +355,7 @@ class CloudinaryHosting(CDNHosting):
     
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, image, tid, url=None):
+    def _upload_impl(self, image, tid, url=None, overwrite=True):
         '''
         Upload the image to cloudinary.
         
@@ -439,7 +440,7 @@ class AkamaiHosting(CDNHosting):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, image, tid, url=None):
+    def _upload_impl(self, image, tid, url=None, overwrite=True):
         rng = random.Random(tid)
 
         cdn_prefix = rng.choice(self.cdn_prefixes)
