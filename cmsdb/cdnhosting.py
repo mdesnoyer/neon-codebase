@@ -456,9 +456,11 @@ class AkamaiHosting(CDNHosting):
 
     def __init__(self, cdn_metadata):
         super(AkamaiHosting, self).__init__(cdn_metadata)
-        self.cdn_prefixes = cdn_metadata.cdn_prefixes 
         base_split = cdn_metadata.baseurl.strip('/').split('/')
         self.extra_dirs = base_split[1:]
+        self.cdn_prefixes = [
+            re.sub('/'+'/'.join(self.extra_dirs), '', x).strip('/')
+            for x in cdn_metadata.cdn_prefixes]
         self.ak_conn = api.akamai_api.AkamaiNetstorage(
             cdn_metadata.host,
             cdn_metadata.akamai_key,
