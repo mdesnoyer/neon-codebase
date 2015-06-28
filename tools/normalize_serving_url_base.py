@@ -40,7 +40,7 @@ def download_image(url):
 urlRe = re.compile('(http[s]?://(.+)/(.+))/.+')
 
 def main():
-    cdn_metadata = None
+    cdn_list = None
     vid_meta = None
     hoster = None
     have_write_permissions = False
@@ -72,16 +72,16 @@ def main():
             if vid_meta is None or vid_meta.key != thumb_meta.video_id:
                 vid_meta = neondata.VideoMetadata.get(thumb_meta.video_id)
             api_key = thumb_meta.get_account_id()
-            if cdn_metadata is None or cdn_metadata.get_id() != api_key:
+            if cdn_list is None or cdn_list.key != api_key:
                 cdn_list = neondata.CDNHostingMetadataList.get(
                      neondata.CDNHostingMetadataList.create_key(
                          api_key, vid_meta.integration_id))
-                cdn_list = [x for x in cdn_list.cdns if x.update_serving_urls]
-                if len(cdn_list) != 1:
+                cdns = [x for x in cdn_list.cdns if x.update_serving_urls]
+                if len(cdns) != 1:
                     _log.error('Cannot find cdnmetadata for thumb %s' %
                                serving_urls.get_id())
                     continue
-                cdn_metadata = cdn_list[0]
+                cdn_metadata = cdns[0]
                 hoster = cmsdb.cdnhosting.CDNHosting.create(cdn_metadata)
 
             # Grab the original image
