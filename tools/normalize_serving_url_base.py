@@ -20,6 +20,7 @@ import cmsdb.cdnhosting
 from cmsdb import neondata
 import logging
 from PIL import Image
+import random
 import re
 from StringIO import StringIO
 import tornado.httpclient
@@ -64,6 +65,23 @@ def main():
 
             _log.info('Making changes to serving urls for thumb %s' %
                       thumb_id)
+
+            # Check for IGN because in this case, we just need to
+            # change the host name to be consistent for every size.
+            if thumb_id.startswith('9xmw08l4ln1rk8uhv3txwbg1'):
+                prefixes = ['assets.ign.com', 'assets2.ignimgs.com']
+                rng = random.Random(thumb_id)
+                new_host = rng.choice(prefixes)
+                def _change_host(x):
+                    for size, url in x.size_map.items():
+                        new_url = re.sub(
+                            '(assets.ign.com)|(assets2.ignimgs.com)',
+                            new_host,
+                            url)
+                        x.add_serving_url(new_url, size[0], size[1])
+                neondata.ThumbnailServingURLs.modify(thumb_id, _change_host)
+                continue
+                
 
             # Grab the video, thumbnail and hosting metadata objects for
             # this thumb
