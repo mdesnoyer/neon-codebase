@@ -32,6 +32,7 @@ from StringIO import StringIO
 import utils.botoutils
 from utils.imageutils import PILImageUtils
 from utils import pycvutils
+from utils import statemon 
 import utils.sync
 
 import logging
@@ -46,6 +47,11 @@ define('cloudinary_api_key', default='433154993476843',
        help='Cloudinary api key')
 define('cloudinary_api_secret', default='n0E7427lrS1Fe_9HLbtykf9CdtA',
        help='Cloudinary secret api key')
+
+# Monitoring
+statemon.define('upload_error', int)
+statemon.define('s3_upload_error', int)
+statemon.define('akamai_upload_error', int)
 
 def get_s3_hosting_bucket():
     '''Returns the bucket that hosts the images.'''
@@ -134,6 +140,7 @@ class CDNHosting(object):
         overwrite - Should existing files be overwritten?
         '''
         new_serving_thumbs = [] # (url, width, height)
+        cdn_url = None
         
         # NOTE: if _upload_impl returns None, the image is not added to the 
         # list of serving URLs
@@ -143,19 +150,27 @@ class CDNHosting(object):
                 cv_im = pycvutils.from_pil(image)
                 cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
                 im = pycvutils.to_pil(cv_im_r)
-                cdn_url = yield self._upload_impl(im, tid, url, overwrite,
-                                                  async=True)
-                if cdn_url:
-                    new_serving_thumbs.append((cdn_url, sz[0], sz[1]))
+                try:
+                    cdn_url = yield self._upload_impl(im, tid, url, overwrite,
+                                                      async=True)
+                    if cdn_url is not None:
+                        new_serving_thumbs.append((cdn_url, sz[0], sz[1]))
+                except IOError:
+                    statemon.state.increment('upload_error')
+                    raise
 
         else:
-            cdn_url = yield self._upload_impl(image, tid, url, overwrite,
-                                              async=True)
-            # Append only if the image was uploaded successfully   
-            if cdn_url:
-                new_serving_thumbs.append((cdn_url, image.size[0], image.size[1]))
+            try:
+                cdn_url = yield self._upload_impl(image, tid, url, overwrite,
+                                                  async=True)
+                if cdn_url is not None:
+                    new_serving_thumbs.append((cdn_url, image.size[0],
+                                               image.size[1]))
+            except IOError:
+                statemon.state.increment('upload_error')
+                raise
 
-        if self.update_serving_urls:
+        if self.update_serving_urls and len(new_serving_thumbs) > 0:
             def add_serving_urls(obj):
                 for params in new_serving_thumbs:
                     obj.add_serving_url(*params)
@@ -192,7 +207,8 @@ class CDNHosting(object):
               CDNHosting objects might use this instead of the image.
         @overwrite: If True, an existing file on the CDN will be overwritten
 
-        @returns: The serving url for the image or None if it shouldn't be served
+        @returns: The serving url for the image
+        @raises: IOError if the image couldn't be uploaded
         '''
         raise NotImplementedError()
 
@@ -307,15 +323,17 @@ class AWSHosting(CDNHosting):
                 policy=policy,
                 replace=overwrite)
         except BotoServerError as e:
-            _log.error(
+            _log.error_n(
             'AWS Server error when uploading image to s3://%s/%s: %s' % 
                     (self.s3bucket_name, key_name, e))
+            statemon.state.increment('s3_upload_error')
             raise IOError(str(e))
 
         except BotoClientError as e:
-            _log.error(
+            _log.error_n(
                 'AWS client error when uploading image to s3://%s/%s : %s' % 
                     (self.s3bucket_name, key_name, e))
+            statemon.state.increment('s3_upload_error')
             raise IOError(str(e))
 
         raise tornado.gen.Return(cdn_url)
@@ -382,8 +400,14 @@ class CloudinaryHosting(CDNHosting):
         params['file'] = url
         response = yield self.make_request(params, None, headers, async=True)
         if response.error:
-            _log.error("Failed to upload image to cloudinary for tid %s: %s" %
-                       (tid, response.error))
+            msg = ("Failed to upload image to cloudinary for tid %s: %s" %
+                   (tid, response.error))
+            _log.error_n(msg)
+            raise IOError(msg)
+
+        # TODO: This upload function doesn't conform, fix if we want
+        # to use cloudinary again.
+        raise tornado.gen.Return(None)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -481,10 +505,29 @@ class AkamaiHosting(CDNHosting):
         filestream.seek(0)
         imgdata = filestream.read()
 
-        response = yield tornado.gen.Task(self.ak_conn.upload, image_url,
-                                          imgdata)
+        response = yield self.ak_conn.upload(image_url, imgdata, async=True)
         if response.error:
-            _log.warn_n("Error uploading image to akamai for tid %s" % tid)
-            cdn_url = None
+            msg = ("Error uploading image to akamai for tid %s: %s" 
+                   % (tid, response.error))
+            _log.error_n(msg)
+            statemon.state.increment('akamai_upload_error')
+            raise IOError(str(msg))
 
         raise tornado.gen.Return(cdn_url) 
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete(self, url):
+        '''Delete the object at a given url.
+
+        Inputs:
+        @url: The url to delete from the CDN
+        '''
+
+        rel_path = urlparse.urlparse(url).path.strip('/')
+        response = yield self.ak_conn.delete(rel_path, async=True)
+        if response.error and response.error.code != 404:
+            msg = ("Error delete image %s from akamai: %s" 
+                   % (url, response.error))
+            _log.error_n(msg)
+            raise IOError(str(msg))

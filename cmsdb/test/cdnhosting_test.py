@@ -263,7 +263,8 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
                                     buffer=StringIO("gateway error")))
         with self.assertLogExists(logging.ERROR,
                 'Failed to upload image to cloudinary for tid %s' % tid):
-            url = cd.upload(None, tid, url)
+            with self.assertRaises(IOError):
+                url = cd.upload(None, tid, url)
         self.assertEquals(mock_http.call_count, 1)
 
 
@@ -488,14 +489,15 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
         self._set_http_response(code=500)
         tid = 'akamai_vid1_tid2'
         
-        with self.assertLogExists(logging.WARNING, 
+        with self.assertLogExists(logging.ERROR, 
                 'Error uploading image to akamai for tid %s' % tid):
-            yield self.hoster.upload(self.image, tid, async=True)
+            with self.assertRaises(IOError):
+                yield self.hoster.upload(self.image, tid, async=True)
         
         self.assertGreater(self.http_mock._mock_call_count, 0)
         
         ts = neondata.ThumbnailServingURLs.get(tid)
-        self.assertEqual(len(ts.size_map), 0)
+        self.assertIsNone(ts)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

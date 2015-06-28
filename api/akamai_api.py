@@ -317,8 +317,7 @@ class AkamaiNetstorage(object):
         headers = {
             'X-Akamai-ACS-Action': action_string,
             'X-Akamai-ACS-Auth-Data': g2o_auth_data,
-            'X-Akamai-ACS-Auth-Sign': g2o_auth_sign,
-            'Accept-Encoding': 'identity'
+            'X-Akamai-ACS-Auth-Sign': g2o_auth_sign
         }
 
         length = 0
