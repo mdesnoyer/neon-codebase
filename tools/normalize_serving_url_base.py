@@ -55,7 +55,7 @@ def main():
         try:
         
             # parse the existing urls
-            bases = [urlRe.match(x).group1(1)
+            bases = [urlRe.match(x).group(1)
                            for x in serving_urls.size_map.itervalues()]
 
             # If the base is the same for all, we're done
