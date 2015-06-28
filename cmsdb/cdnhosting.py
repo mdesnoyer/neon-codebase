@@ -533,7 +533,7 @@ class AkamaiHosting(CDNHosting):
         '''
 
         rel_path = urlparse.urlparse(url).path.strip('/')
-        response = yield self.ak_conn.delete(rel_path, async=True)
+        response = yield self.ak_conn.delete('/'+rel_path, async=True)
         if response.error and response.error.code != 404:
             msg = ("Error delete image %s from akamai: %s" 
                    % (url, response.error))
