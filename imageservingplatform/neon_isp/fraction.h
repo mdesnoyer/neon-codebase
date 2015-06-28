@@ -36,7 +36,6 @@ protected:
     bool initialized;
     double threshold;
     double pct;
-    const char * defaultURL;
     const char * tid;
     std::vector<ScaledImage*> images;
 

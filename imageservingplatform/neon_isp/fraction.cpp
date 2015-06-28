@@ -15,7 +15,6 @@
 
 Fraction::Fraction()
 {
-   defaultURL = 0;
    tid = 0;  
    initialized = false;
 }
@@ -23,7 +22,6 @@ Fraction::Fraction()
 
 Fraction::~Fraction()
 {
-     defaultURL = 0;
      tid = 0;
      initialized = false;
 }
@@ -204,8 +202,6 @@ Fraction::Dealloc()  {
         img = 0;
     }   
 
-    if(defaultURL != 0)
-        free((void *)defaultURL);
     if(tid != 0)
         free((void *)tid);
 }
