@@ -173,7 +173,7 @@ neon_mastermind_image_url_lookup(const char * accountId,
     
     (*url) = image_url.c_str();
   
-    if(*url == 0)
+    if(strlen(*url) == 0)
         return NEON_MASTERMIND_IMAGE_URL_LOOKUP_NOT_FOUND;
     
     return NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK;

@@ -531,7 +531,6 @@ Mastermind::GetImageUrl(const char * account_id,
    
     // If either or both height or width are empty, then serve the default image URL
     if (height == -1 || width == -1){
-        //image_url = string(*fraction->default_url());
         image_url = *fraction->default_url();
         size = image_url.size();
     }
