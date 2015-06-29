@@ -131,7 +131,14 @@ def main():
                 if list(size) not in cdn_metadata.rendition_sizes:
                     # This rendition isn't valid anymore
                     try:
-                        hoster.delete(old_url)
+                        if (old_url.startswith('http://n3.neon-images.com')
+                            and ('n3.neon-images.com' not in
+                                 cdn_metadata.cdn_prefixes)):
+                            tmp_hoster = cmsdb.cdnhosting.CDNHosting.create(
+                                neondata.NeonCDNHostingMetadata())
+                            tmp_hoster.delete(old_url):
+                        else:
+                            hoster.delete(old_url)
                         remove_serving_urls.append(size)
                     except NotImplementedError as e:
                         pass
