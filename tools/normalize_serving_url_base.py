@@ -144,7 +144,10 @@ def main():
                 if (urlparse.urlparse(old_url).path !=
                     urlparse.urlparse(new_url).path):
                     try:
-                        hoster.delete(old_url)
+                        if (cdn_metadata.host != 
+                            'http://usatoday-nsu.akamaihd.net'):
+                            # We don't have permission to delete on usatoday
+                            hoster.delete(old_url)
                     except NotImplementedError as e:
                         pass
                     except Exception as e:
