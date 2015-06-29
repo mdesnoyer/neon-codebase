@@ -144,9 +144,17 @@ def main():
                 if (urlparse.urlparse(old_url).path !=
                     urlparse.urlparse(new_url).path):
                     try:
-                        if (cdn_metadata.host != 
-                            'http://usatoday-nsu.akamaihd.net'):
+                        if (old_url.startswith('http://n3.neon-images.com')
+                            and ('n3.neon-images.com' not in
+                                 cdn_metadata.cdn_prefixes)):
+                            tmp_hoster = cmsdb.cdnhosting.CDNHosting.create(
+                                neondata.NeonCDNHostingMetadata())
+                            tmp_hoster.delete(old_url)
+                        elif cdn_metadata.cdn_prefixes[0].startswith(
+                                'www.gannett-cdn.com'):
                             # We don't have permission to delete on usatoday
+                            continue
+                        else:
                             hoster.delete(old_url)
                     except NotImplementedError as e:
                         pass
