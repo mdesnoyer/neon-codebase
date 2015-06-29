@@ -136,7 +136,7 @@ def main():
                                  cdn_metadata.cdn_prefixes)):
                             tmp_hoster = cmsdb.cdnhosting.CDNHosting.create(
                                 neondata.NeonCDNHostingMetadata())
-                            tmp_hoster.delete(old_url):
+                            tmp_hoster.delete(old_url)
                         else:
                             hoster.delete(old_url)
                         remove_serving_urls.append(size)
