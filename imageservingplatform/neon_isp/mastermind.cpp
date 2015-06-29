@@ -502,7 +502,6 @@ Mastermind::GetImageUrl(const char * account_id,
                         int bucketIdLen,
                         int height, 
                         int width, 
-                        int & size,
                         std::string & image_url){
     
     string accountId = account_id;
@@ -519,7 +518,13 @@ Mastermind::GetImageUrl(const char * account_id,
             neon_stats[NEON_INVALID_VIDEO_ID] ++;
             return;
         }
-        image_url = def->GetScaledImage(height, width, size);
+        const ScaledImage * si = def->GetScaledImage(height, width);
+        
+        if (si)  
+            image_url = *si->scoped_url();
+        else 
+            image_url = def->default_url();
+ 
         return;  
     }
 
@@ -530,16 +535,14 @@ Mastermind::GetImageUrl(const char * account_id,
     }
    
     // If either or both height or width are empty, then serve the default image URL
-    if (height == -1 || width == -1){
+    if (height == -1 || width == -1) {
         image_url = *fraction->default_url();
-        size = image_url.size();
     }
     else { 
         const ScaledImage * image = fraction->GetScaledImage(height, width);
         // Didn't get a "pre-sized" image so send default URL 
         if (image == 0){
             image_url = *fraction->default_url();
-            size = image_url.size();
             // NOTE: IGN Doesn't want to use cloudinary, hence we'll return a
             // default URL for non-standard sizes
             // re-enable when needed
@@ -553,11 +556,9 @@ Mastermind::GetImageUrl(const char * account_id,
         }
         if (image->scoped_url() != 0) {
             image_url = *image->scoped_url(); 
-            size = image_url.size(); 
         } 
         else { 
             image_url = url_utils::GenerateUrl(fraction->base_url(), (std::string)fraction->GetThumbnailID(), image->GetHeight(), image->GetWidth()); 
-            size = image_url.size(); 
         }
     }  
 }

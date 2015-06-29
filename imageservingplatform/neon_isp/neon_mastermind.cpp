@@ -169,9 +169,10 @@ neon_mastermind_image_url_lookup(const char * accountId,
     std::string image_url("");  
     mastermind->GetImageUrl(accountId, videoId, 
                             bucketId->data, bucketId->len,
-                            height, width, *size, image_url);
+                            height, width, image_url);
     
     (*url) = image_url.c_str();
+    (*size) = image_url.size();
   
     if(strlen(*url) == 0)
         return NEON_MASTERMIND_IMAGE_URL_LOOKUP_NOT_FOUND;

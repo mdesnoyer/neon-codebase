@@ -23,8 +23,6 @@ public:
  
     int GetHeight() const;
     int GetWidth () const;
-    const char * GetUrl(int & size) const;
-    const std::string & GetUrlString() const;
     static bool ApproxEqual(int a, int b, int window);
     std::string * scoped_url() const;
 
@@ -32,7 +30,6 @@ protected:
     bool initialized;
     int height;
     int width;
-    std::string url;
 
 private: 
     boost::scoped_ptr<std::string> scoped_url_; 

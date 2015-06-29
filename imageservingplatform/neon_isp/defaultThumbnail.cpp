@@ -74,7 +74,7 @@ DefaultThumbnail::InitSafe(const rapidjson::Document & document)
         return -1;
     }
 
-    default_url = document["default_url"].GetString();
+    default_url_ = document["default_url"].GetString();
 
 
     /*
@@ -154,7 +154,7 @@ void
 DefaultThumbnail::Shutdown()
 {
     accountId = "";
-    default_url = "";
+    default_url_ = "";
     Dealloc();
 }
 
@@ -185,55 +185,44 @@ DefaultThumbnail::GetAccountId() const
     return accountId.c_str();
 }
 
-
 const std::string &
 DefaultThumbnail::GetAccountIdRef() const
 {
     return accountId;
 }
 
+const std::string &
+DefaultThumbnail::default_url() const
+{
+    return default_url_;
+}
 
 // TODO Kevin this needs to be combined with Fraction::GetScaledImage
-// TODO get rid of images->GetUrl, replace it with the call to scoped_url  
-const char *
-DefaultThumbnail::GetScaledImage(int height, int width, int & url_size) const{
-    
+ScaledImage*
+DefaultThumbnail::GetScaledImage(int height, int width) const
+{
     static const int pixelRange = 6;
-
     // iterate through our scaled images to find a size match
     unsigned numOfImgs = images.size();
 
     // try to find a perfect size match
-    for(unsigned i=0; i < numOfImgs; i++){
-
-        if( images[i]->GetHeight() ==  height &&
-            images[i]->GetWidth() == width ) {
-
-            // a match, url_size is set here
-            const char * url = images[i]->GetUrl(url_size);
-            neon_stats[NEON_DEFAULT_IMAGE_PERFECT_FIT]++;
-            return url;
+    for(unsigned i=0; i < numOfImgs; i++) {
+        if( images[i]->GetHeight() ==  height && images[i]->GetWidth() == width ) {
+              return images[i]; 
         }
     }
 
     // try to find an approximate size
-    for(unsigned i=0; i < numOfImgs; i++){
+    for(unsigned i=0; i < numOfImgs; i++) {
         
         if( ScaledImage::ApproxEqual(images[i]->GetHeight(), height, pixelRange) &&
             ScaledImage::ApproxEqual(images[i]->GetWidth(), width, pixelRange)) {
-
-            // a match, url_size is set here
-            const char * url = images[i]->GetUrl(url_size);
-            neon_stats[NEON_DEFAULT_IMAGE_APPROX_FIT]++;
-            return url;
+              return images[i]; 
         }
     }
-    
-    // otherwise return default url
-    url_size = default_url.size();
-    return default_url.c_str();
+    // otherwise return NULL, and leave it up to the caller to do what they want with it
+    return NULL; 
 }
-
 
 bool
 DefaultThumbnail::operator==(const DefaultThumbnail &other) const {

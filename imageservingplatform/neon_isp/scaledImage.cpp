@@ -71,7 +71,6 @@ ScaledImage::Init(const rapidjson::Value& img)
      *  Image url
      */
     if (img.HasMember("url") && img["url"].IsString()) { 
-	url = img["url"].GetString();
         scoped_url_.reset(new std::string(img["url"].GetString())); 
     } 
     initialized = true;
@@ -99,19 +98,6 @@ int
 ScaledImage::GetWidth () const
 {
     return width;
-}
-
-const char *
-ScaledImage::GetUrl(int & size) const
-{
-    size = url.size();
-    return url.c_str();
-}
-
-const std::string &
-ScaledImage::GetUrlString() const
-{
-    return url;
 }
 
 std::string * 

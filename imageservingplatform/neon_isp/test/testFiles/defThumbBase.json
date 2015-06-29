@@ -1,0 +1,17 @@
+{
+    "type": "default_thumb",
+    "aid": "defa1",
+    "default_url": "http://neon/default_url_defaccount1.jpg",
+    "imgs": [
+        {
+            "h": 480,
+            "w": 640,
+            "url": "http://neon/thumb_480_640_default_url_defaccount1.jpg"
+        },
+        {
+            "h": 600,
+            "w": 800,
+            "url": "http://neon/thumb_600_800_default_url_defaccount1.jpg"
+        }
+    ]
+}
