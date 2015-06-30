@@ -817,13 +817,13 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         # Add some stats where n2 starts to bubble up but doesn't win
         video_info.thumbnails[0].base_imp = 1000
-        video_info.thumbnails[0].base_conv = 40
+        video_info.thumbnails[0].base_conv = 43
         video_info.thumbnails[1].base_imp = 1000
         video_info.thumbnails[1].base_conv = 50
         video_info.thumbnails[2].base_imp = 1000
-        video_info.thumbnails[2].base_conv = 30
+        video_info.thumbnails[2].base_conv = 35
         video_info.thumbnails[3].base_imp = 1000
-        video_info.thumbnails[3].base_conv = 35
+        video_info.thumbnails[3].base_conv = 38
 
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
