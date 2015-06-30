@@ -34,6 +34,7 @@ import copy
 import datetime
 import errno
 import hashlib
+import itertools
 import simplejson as json
 import logging
 import multiprocessing
@@ -1261,6 +1262,34 @@ class NamespacedStoredObject(StoredObject):
                      if x is not None]
 
     @classmethod
+    def iterate_all(cls, max_request_size=100):
+        '''A synchronous function that returns an iterator across all the
+        objects in the database.
+
+        The set of keys to grab happens once so if the db changes while
+        the iteration is going, so neither new or deleted objects will
+        be returned.
+
+        #TODO(mdesnoyer): Figure out a way to make this
+        asynchronous. It ain't going to be easy.
+
+        Inputs:
+        max_request_size - Maximum number of objects to request from
+        the database at a time.
+        '''
+        db_connection = DBConnection.get(cls)
+        keys = db_connection.blocking_conn.keys(
+            cls._baseclass_name().lower() + '_*')
+        cur_idx = 0
+        while cur_idx < len(keys):
+            cur_keys = keys[cur_idx:(cur_idx+max_request_size)]
+            for obj in super(NamespacedStoredObject, cls).get_many(cur_keys):
+                if obj is not None:
+                    yield obj
+
+            cur_idx += max_request_size
+
+    @classmethod
     def modify(cls, key, func, create_missing=False, callback=None):
         return super(NamespacedStoredObject, cls).modify(
             cls.format_key(key),
@@ -1952,7 +1981,8 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
         self.host = host
         self.akamai_key = akamai_key
         self.akamai_name = akamai_name
-        self.baseurl = baseurl
+        # Base upload url. Should be something like '/17645/neon/prod'
+        self.baseurl = baseurl 
 
 class AbstractPlatform(NamespacedStoredObject):
     ''' Abstract Platform/ Integration class '''
@@ -3204,6 +3234,16 @@ class ThumbnailServingURLs(NamespacedStoredObject):
                     (self.get_thumbnail_id(), width, height))
         return self.size_map[(width, height)]
 
+    def get_serving_url_count(self):
+        '''Return the number of serving urls in this object.'''
+        return len(self.size_map) + len(self.sizes)
+
+    def __iter__(self):
+        '''Iterator of size, url pairs.'''
+        return itertools.chain(
+            self.size_map.iteritems(),
+            ((k, self.get_serving_url(*k)) for k in self.sizes))
+
     @staticmethod
     def create_filename(tid, width, height):
         '''Creates a filename for a given thumbnail id at a specific size.'''
@@ -3228,7 +3268,7 @@ class ThumbnailServingURLs(NamespacedStoredObject):
             # Load in the url entries into the object
             size_map = obj.size_map
             obj.size_map = {}
-            # Find the basename
+            # Find the base url to save that way
             bases = set((os.path.dirname(x[1]) for x in size_map))
             if len(bases) == 1 and obj.base_url is None:
                 obj.base_url = bases.pop()

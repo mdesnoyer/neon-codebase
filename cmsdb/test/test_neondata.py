@@ -366,33 +366,42 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
     def test_ThumbnailServingURLs(self):
         input1 = ThumbnailServingURLs('acct1_vid1_tid1')
-        input1.add_serving_url('http://that_800_600.jpg', 800, 600)
-        input1.add_serving_url('http://this_100_50.jpg', 100, 50)
+        input1.add_serving_url(
+            'http://neon.com/neontnacct1_vid1_tid1_w800_h600.jpg', 800, 600)
+        input1.add_serving_url(
+            'http://neon.com/neontnacct1_vid1_tid1_w100_h50.jpg', 100, 50)
         
         input1.save()
         output1 = ThumbnailServingURLs.get('acct1_vid1_tid1')
         self.assertEqual(output1.get_thumbnail_id(), input1.get_thumbnail_id())
         self.assertEqual(output1.get_serving_url(800, 600),
-                         'http://that_800_600.jpg')
+                         'http://neon.com/neontnacct1_vid1_tid1_w800_h600.jpg')
         with self.assertRaises(KeyError):
-            _log.info('Output1 %s' % output1)
             output1.get_serving_url(640, 480)
+        self.assertItemsEqual(
+            list(input1),
+            [((800, 600), 'http://neon.com/neontnacct1_vid1_tid1_w800_h600.jpg'),
+             ((100, 50), 'http://neon.com/neontnacct1_vid1_tid1_w100_h50.jpg')])
+        self.assertItemsEqual(list(input1), list(output1))
 
-        input1.add_serving_url('http://that_640_480.jpg', 640, 480) 
-        input2 = ThumbnailServingURLs('tid2', {(640, 480) : 'http://this.jpg'})
+        input1.add_serving_url('http://neon.com/neontnacct1_vid1_tid1_w640_h480.jpg',
+                               640, 480) 
+        input2 = ThumbnailServingURLs(
+            'acct1_vid1_tid2',
+            {(640, 480) : 'http://neon.com/neontnacct1_vid1_tid2_w640_h480.jpg'})
         ThumbnailServingURLs.save_all([input1, input2])
         output1, output2 = ThumbnailServingURLs.get_many(['acct1_vid1_tid1',
-                                                          'tid2'])
+                                                          'acct1_vid1_tid2'])
         self.assertEqual(output1.get_thumbnail_id(),
                          input1.get_thumbnail_id())
         self.assertEqual(output2.get_thumbnail_id(),
                          input2.get_thumbnail_id())
         self.assertEqual(output1.get_serving_url(640, 480),
-                         'http://that_640_480.jpg')
+                         'http://neon.com/neontnacct1_vid1_tid1_w640_h480.jpg')
         self.assertEqual(output1.get_serving_url(800, 600),
-                         'http://that_800_600.jpg')
+                         'http://neon.com/neontnacct1_vid1_tid1_w800_h600.jpg')
         self.assertEqual(output2.get_serving_url(640, 480),
-                         'http://this.jpg')
+                         'http://neon.com/neontnacct1_vid1_tid2_w640_h480.jpg')
 
     def test_thumbnail_servingurl_base_url(self):
         input1 = ThumbnailServingURLs('acct1_vid1_tid1',
@@ -421,6 +430,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         # It's different base urls so we keep the object in the old format
         self.assertEquals(len(obj.size_map), 3)
+        self.assertEquals(obj.get_serving_url_count(), 3)
         self.assertIsNone(obj.base_url)
         self.assertEquals(len(obj.sizes), 0)
         self.assertEquals(obj.get_serving_url(160, 90),
@@ -433,6 +443,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         # It's the same base url so store in the new format
         self.assertEquals(len(obj.size_map), 0)
+        self.assertEquals(obj.get_serving_url_count(), 3)
         self.assertEquals(obj.base_url, 'http://n3.neon-images.com/fF7')
         self.assertEquals(obj.sizes, set([(210,118), (160,90), (1280,720)]))
         self.assertEquals(obj.get_serving_url(160, 90),

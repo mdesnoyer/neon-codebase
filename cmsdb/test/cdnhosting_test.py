@@ -25,6 +25,7 @@ import tornado.testing
 import unittest
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 from utils.imageutils import PILImageUtils
+import utils.neon
 
 _log = logging.getLogger(__name__)
 
@@ -264,7 +265,8 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
                                     buffer=StringIO("gateway error")))
         with self.assertLogExists(logging.ERROR,
                 'Failed to upload image to cloudinary for tid %s' % tid):
-            url = cd.upload(None, tid, url)
+            with self.assertRaises(IOError):
+                url = cd.upload(None, tid, url)
         self.assertEquals(mock_http.call_count, 1)
 
 
@@ -281,8 +283,6 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
         self.mock_conn.return_value = self.s3conn
         self.s3conn.create_bucket('hosting-bucket')
         self.bucket = self.s3conn.get_bucket('hosting-bucket')
-
-        random.seed(1654984)
 
         self.image = PILImageUtils.create_random_image(480, 640)
         super(TestAWSHostingWithServingUrls, self).setUp()
@@ -337,22 +337,26 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
         serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
         self.assertIsNotNone(serving_urls)
 
-        keyRe = re.compile('folder1/[0-9a-zA-Z]{3}/neontnacct1_vid1_tid1_'
+        keyRe = re.compile('(folder1/[0-9a-zA-Z]{3})/neontnacct1_vid1_tid1_'
                            'w([0-9]+)_h([0-9]+).jpg')
         sizes_found = []
+        folders_found = []
+        base_urls = []
         for s3key in self.bucket.list():
             # Make sure that the key is the expected format with salt
             match = keyRe.match(s3key.name)
             self.assertIsNotNone(match)
 
-            width = int(match.group(1))
-            height = int(match.group(2))
+            width = int(match.group(2))
+            height = int(match.group(3))
             sizes_found.append((width, height))
+            folders_found.append(match.group(1))
 
             # Check that the serving url is included
             url = serving_urls.get_serving_url(width, height)
             self.assertRegexpMatches(
                 url, 'http://cdn[1-2].cdn.com/%s' % s3key.name)
+            base_urls.append(url.rpartition('/')[0])
 
             # Check that the image is as expected
             buf = StringIO()
@@ -365,6 +369,33 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
 
         # Make sure that all the expected files were found
         self.assertItemsEqual(sizes_found, sizes)
+
+        # Make sure that the folders were the same
+        self.assertEquals(len(folders_found), len(sizes))
+        self.assertEquals(len(set(folders_found)), 1)
+
+        # Make sure the base urls were the same
+        self.assertEquals(len(base_urls), len(sizes))
+        self.assertEquals(len(set(base_urls)), 1)
+
+    @tornado.testing.gen_test
+    def test_delete_salted_image(self):
+        sizes = [(640, 480)]
+        metadata = neondata.NeonCDNHostingMetadata(None,
+            'hosting-bucket', ['cdn1.cdn.com'],
+            'folder1', True, True, True, False, sizes)
+
+        hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+        yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+
+        self.assertEquals(len(list(self.bucket.list())), 1)
+
+        serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
+        self.assertIsNotNone(serving_urls)
+
+        yield hoster.delete(serving_urls.get_serving_url(640,480), async=True)
+
+        self.assertEquals(len(list(self.bucket.list())), 0)
 
 class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
     '''
@@ -382,12 +413,11 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
                 akamai_key='akey',
                 akamai_name='aname',
                 baseurl='base',
-                cdn_prefixes=['cdn.akamai.com']
+                cdn_prefixes=['cdn1.akamai.com', 'cdn2.akamai.com']
                 )
 
         self.hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
         
-        random.seed(1654985)
         self.image = PILImageUtils.create_random_image(480, 640)
         super(TestAkamaiHosting, self).setUp()
 
@@ -428,30 +458,48 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
 
         # Check serving URLs
         ts = neondata.ThumbnailServingURLs.get(tid)
-        self.assertGreater(len(ts.size_map), 0)
+        self.assertGreater(ts.get_serving_url_count(), 0)
+
+        base_urls = []
 
         # Verify the final image URLs. This should be the account id 
         # followed by 3 sub folders whose name should be a single letter
         # (lower or uppercase) choosen randomly, then the thumbnail file
-        for (w, h), url in ts.size_map.iteritems():
-            url = ts.get_serving_url(w, h)
-            self.assertRegexpMatches(url, 
-              'http://cdn.akamai.com/%s/[a-zA-Z]/[a-zA-Z]/[a-zA-Z]/neontn%s_w%s_h%s.jpg' 
-              % (url_root_folder,tid, w, h))
+        for (w, h), url in ts:
+            url_re = ('(http://cdn[12].akamai.com/%s/[a-zA-Z]/[a-zA-Z]/'
+                      '[a-zA-Z])/neontn%s_w%s_h%s.jpg' % 
+                      (url_root_folder, tid, w, h))
+                
+            self.assertRegexpMatches(url, url_re)
+
+            # Grab the base url
+            base_urls.append(re.compile(url_re).match(url).group(1))
+
+        # Make sure all the base urls are the same for a given thumb
+        self.assertGreater(len(base_urls), 1)
+        self.assertEquals(len(set(base_urls)), 1)
+
+        # Make sure that the url is exactly what we expect. If this
+        # check fails, then the python random module had changed
+        self.assertEquals(
+            base_urls[0],
+            'http://cdn1.akamai.com/customeraccountnamelabel/G/l/l')
     
     @tornado.testing.gen_test
     def test_upload_image_error(self):
         self._set_http_response(code=500)
         tid = 'akamai_vid1_tid2'
         
-        with self.assertLogExists(logging.WARNING, 
+        with self.assertLogExists(logging.ERROR, 
                 'Error uploading image to akamai for tid %s' % tid):
-            yield self.hoster.upload(self.image, tid, async=True)
+            with self.assertRaises(IOError):
+                yield self.hoster.upload(self.image, tid, async=True)
         
         self.assertGreater(self.http_mock._mock_call_count, 0)
         
         ts = neondata.ThumbnailServingURLs.get(tid)
-        self.assertEqual(len(ts.size_map), 0)
+        self.assertIsNone(ts)
 
 if __name__ == '__main__':
+    utils.neon.InitNeon()
     unittest.main()
