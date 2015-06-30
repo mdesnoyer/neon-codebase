@@ -115,8 +115,14 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                                ttype='brightcove'))]))[1]
 
-        self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
-                         ['n2', 'ctr', 'bc', 'n1'])
+        # TODO (mdesnoyer): Change this test to have the initial model
+        # score significantly change the prior serving
+        # percentages. That is disabled now because have a highly
+        # weighted prior that is wrong (10% vs. 1% say) causes the
+        # experiment to run much longer that would be ideal.
+        #self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
+        self.assertItemsEqual(directive.keys(),
+                              ['n2', 'ctr', 'bc', 'n1'])
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
             self.assertGreater(val, 0.0)
@@ -635,7 +641,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             directive = self.mastermind._calculate_current_serving_directive(
                 video_info)[1]
 
-        self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
+        self.assertItemsEqual(sorted(directive.keys(),
+                                     key=lambda x: directive[x]),
                          ['n2', 'ctr', 'n1', 'bc'])
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
@@ -806,18 +813,17 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                ttype='brightcove'))])
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
-        self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
-                         ['n2', 'ctr', 'bc', 'n1'])
+        self.assertItemsEqual(directive.keys(), ['n2', 'ctr', 'bc', 'n1'])
 
         # Add some stats where n2 starts to bubble up but doesn't win
         video_info.thumbnails[0].base_imp = 1000
-        video_info.thumbnails[0].base_conv = 10
+        video_info.thumbnails[0].base_conv = 40
         video_info.thumbnails[1].base_imp = 1000
-        video_info.thumbnails[1].base_conv = 20
+        video_info.thumbnails[1].base_conv = 50
         video_info.thumbnails[2].base_imp = 1000
-        video_info.thumbnails[2].base_conv = 10
+        video_info.thumbnails[2].base_conv = 30
         video_info.thumbnails[3].base_imp = 1000
-        video_info.thumbnails[3].base_conv = 10
+        video_info.thumbnails[3].base_conv = 35
 
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
@@ -901,7 +907,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                ttype='random')),
                  build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                                ttype='brightcove'))]))[1]
-        self.assertEqual(
+        self.assertItemsEqual(
             sorted(directive.keys(), key=lambda x: directive[x])[2:],
             ['n3', 'ctr', 'bc', 'n1'])
         self.assertAlmostEqual(sum(directive.values()), 1.0)
@@ -930,7 +936,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                          base_impressions=10, base_conversions=4),
              build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                            ttype='brightcove'),
-                         base_impressions=600, base_conversions=150)])
+                         base_impressions=1200, base_conversions=150)])
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         
@@ -959,14 +965,14 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                          base_impressions=350, base_conversions=1),
              build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                            ttype='brightcove'),
-                         base_impressions=600, base_conversions=2)])
+                         base_impressions=1200, base_conversions=2)])
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         self.assertAlmostEqual(max(directive.values()), directive['n2'])
-        self.assertGreater(0.001, directive['n1'])
-        self.assertGreater(0.001, directive['bc'])
+        self.assertGreater(0.01, directive['n1'])
+        self.assertGreater(0.01, directive['bc'])
         self.assertGreater(directive['ctr'], 0.05) # Not enough imp
 
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
@@ -1171,8 +1177,8 @@ class TestStatUpdating(test_utils.neontest.TestCase):
             ('acct1_vid1', 'acct1_vid1_v1t1', 1000, 0, 5, 0),
             ('acct1_vid1', 'acct1_vid1_v1t2', 1000, 0, 100, 0),
             ('acct1_vid2', 'acct1_vid2_v2t1', 10, 0, 5, 0),
-            ('acct1_vid2', 'acct1_vid2_v2t2', 1000, 0, 100, 0),
-            ('acct1_vid2', 'acct1_vid2_v2t3', 1000, 0, 100, 0)])
+            ('acct1_vid2', 'acct1_vid2_v2t2', 400, 0, 100, 0),
+            ('acct1_vid2', 'acct1_vid2_v2t3', 400, 0, 100, 0)])
 
         directives = dict([x for x in self.mastermind.get_directives()])
         self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
@@ -1216,9 +1222,9 @@ class TestStatUpdating(test_utils.neontest.TestCase):
              None, decimal.Decimal(100), None),
             ('acct1_vid2', 'acct1_vid2_v2t1', decimal.Decimal(10),
              None, decimal.Decimal(5), None),
-            ('acct1_vid2', 'acct1_vid2_v2t2', decimal.Decimal(1000),
+            ('acct1_vid2', 'acct1_vid2_v2t2', decimal.Decimal(400),
              None, decimal.Decimal(100), None),
-            ('acct1_vid2', 'acct1_vid2_v2t3', decimal.Decimal(1000),
+            ('acct1_vid2', 'acct1_vid2_v2t3', decimal.Decimal(400),
              None, decimal.Decimal(99), decimal.Decimal(1))])
 
         directives = dict([x for x in self.mastermind.get_directives()])
@@ -1288,7 +1294,7 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
         video = VideoMetadata.get('acct1_vid1')
         thumbs = neondata.ThumbnailStatus.get_many(video.thumbnail_ids)
         directive = dict([(x.get_id(), x.serving_frac) for x in thumbs])
-        self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
+        self.assertItemsEqual(directive.keys(),
                          ['acct1_vid1_n2', 'acct1_vid1_ctr', 'acct1_vid1_bc',
                           'acct1_vid1_n1'])
         self.assertAlmostEqual(sum(directive.values()), 1.0)
