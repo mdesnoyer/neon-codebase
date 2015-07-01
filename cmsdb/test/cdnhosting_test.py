@@ -25,6 +25,7 @@ import tornado.testing
 import unittest
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 from utils.imageutils import PILImageUtils
+import utils.neon
 
 _log = logging.getLogger(__name__)
 
@@ -262,7 +263,8 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
                                     buffer=StringIO("gateway error")))
         with self.assertLogExists(logging.ERROR,
                 'Failed to upload image to cloudinary for tid %s' % tid):
-            url = cd.upload(None, tid, url)
+            with self.assertRaises(IOError):
+                url = cd.upload(None, tid, url)
         self.assertEquals(mock_http.call_count, 1)
 
 
@@ -374,6 +376,25 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
         self.assertEquals(len(base_urls), len(sizes))
         self.assertEquals(len(set(base_urls)), 1)
 
+    @tornado.testing.gen_test
+    def test_delete_salted_image(self):
+        sizes = [(640, 480)]
+        metadata = neondata.NeonCDNHostingMetadata(None,
+            'hosting-bucket', ['cdn1.cdn.com'],
+            'folder1', True, True, True, False, sizes)
+
+        hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+        yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+
+        self.assertEquals(len(list(self.bucket.list())), 1)
+
+        serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
+        self.assertIsNotNone(serving_urls)
+
+        yield hoster.delete(serving_urls.get_serving_url(640,480), async=True)
+
+        self.assertEquals(len(list(self.bucket.list())), 0)
+
 class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
     '''
     Test uploading images to Akamai
@@ -468,14 +489,16 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
         self._set_http_response(code=500)
         tid = 'akamai_vid1_tid2'
         
-        with self.assertLogExists(logging.WARNING, 
+        with self.assertLogExists(logging.ERROR, 
                 'Error uploading image to akamai for tid %s' % tid):
-            yield self.hoster.upload(self.image, tid, async=True)
+            with self.assertRaises(IOError):
+                yield self.hoster.upload(self.image, tid, async=True)
         
         self.assertGreater(self.http_mock._mock_call_count, 0)
         
         ts = neondata.ThumbnailServingURLs.get(tid)
-        self.assertEqual(len(ts.size_map), 0)
+        self.assertIsNone(ts)
 
 if __name__ == '__main__':
+    utils.neon.InitNeon()
     unittest.main()

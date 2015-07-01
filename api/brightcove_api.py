@@ -716,12 +716,13 @@ class BrightcoveApi(object):
                     item['job_id'] = job_id 
                     bc.videos[vid] = job_id 
                     result.append(item)
-            #Update the videos in customer inbox
-            res = bc.save()
-            if not res:
-                _log.error("key=verify_token_and_create_requests" 
-                        " msg=customer inbox not updated %s" %i_id)
-                raise tornado.gen.Return(result)
+                    yield tornado.gen.Task(
+                        cmsdb.neondata.BrightcovePlatform.modify,
+                        self.neon_api_key,
+                        i_id,
+                        lambda x: x.add_video(vid, job_id))
+
+            raise tornado.gen.Return(result)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine

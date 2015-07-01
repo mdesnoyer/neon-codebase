@@ -10,6 +10,7 @@ if sys.path[0] != __base_path__:
 
 import api.akamai_api
 import base64
+import boto.exception
 import json
 import hashlib
 import random
@@ -21,6 +22,7 @@ import time
 import tornado.gen
 import urllib
 import urllib2
+import urlparse
 import utils.s3
 
 from boto.exception import S3ResponseError, BotoServerError, BotoClientError
@@ -30,6 +32,7 @@ from StringIO import StringIO
 import utils.botoutils
 from utils.imageutils import PILImageUtils
 from utils import pycvutils
+from utils import statemon 
 import utils.sync
 
 import logging
@@ -45,58 +48,10 @@ define('cloudinary_api_key', default='433154993476843',
 define('cloudinary_api_secret', default='n0E7427lrS1Fe_9HLbtykf9CdtA',
        help='Cloudinary secret api key')
 
-@utils.sync.optional_sync
-@tornado.gen.coroutine
-def upload_image_to_s3(
-        keyname,
-        data,
-        bucket=None,
-        bucket_name=options.hosting_bucket,
-        access_key=None,
-        secret_key=None,
-        *args, **kwargs):
-    '''
-    Upload image to s3 bucket 'host-thumbnails' 
-
-    This is the bucket where the primary copy of thumbnails are stored.
-    ThumbnailMetadata structure stores these thumbnails
-    CMS API returns these urls to be populated in the Neon UI
-
-    @keyname: the basename of the file or name relative to bucket 
-    @data: string data (of image) to be uploaded to S3 
-    @bucket: Optional bucket object to upload to.
-             Allows reuse of the bucket object.
-    @bucket_name: bucket to upload to
-    @access_key: s3 key
-    @secret_key: s3 secret key
-    *args, **kwargs: Arguments passed to set_contents_from_string 
-    '''
-    try:
-        if bucket is None:
-            s3conn = S3Connection(access_key, secret_key)
-            bucket = yield utils.botoutils.run_async(s3conn.get_bucket,
-                                                     bucket_name)
-        else:
-            bucket_name = bucket.name
-
-        key = bucket.new_key(keyname)
-
-        yield utils.botoutils.run_async(
-            key.set_contents_from_string,
-            data,
-            {"Content-Type":"image/jpeg"},
-            *args, **kwargs)
-    except BotoServerError as e:
-        _log.error(
-            'AWS Server error when uploading image to s3://%s/%s: %s' % 
-                    (bucket_name, keyname, e))
-        raise IOError(str(e))
-
-    except BotoClientError as e:
-        _log.error(
-            'AWS client error when uploading image to s3://%s/%s : %s' % 
-                    (bucket_name, keyname, e))
-        raise IOError(str(e))
+# Monitoring
+statemon.define('upload_error', int)
+statemon.define('s3_upload_error', int)
+statemon.define('akamai_upload_error', int)
 
 def get_s3_hosting_bucket():
     '''Returns the bucket that hosts the images.'''
@@ -168,7 +123,7 @@ class CDNHosting(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def upload(self, image, tid, url=None):
+    def upload(self, image, tid, url=None, overwrite=True):
         '''
         Host images on the CDN
 
@@ -182,8 +137,10 @@ class CDNHosting(object):
         tid - Thumbnail id of the image
         url - URL of the image that's already live. This is optional but some
               CDNHosting objects might use this instead of the image.
+        overwrite - Should existing files be overwritten?
         '''
         new_serving_thumbs = [] # (url, width, height)
+        cdn_url = None
         
         # NOTE: if _upload_impl returns None, the image is not added to the 
         # list of serving URLs
@@ -193,19 +150,27 @@ class CDNHosting(object):
                 cv_im = pycvutils.from_pil(image)
                 cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
                 im = pycvutils.to_pil(cv_im_r)
-                cdn_url = yield self._upload_impl(im, tid, url,
-                                                  async=True)
-                if cdn_url:
-                    new_serving_thumbs.append((cdn_url, sz[0], sz[1]))
+                try:
+                    cdn_url = yield self._upload_impl(im, tid, url, overwrite,
+                                                      async=True)
+                    if cdn_url is not None:
+                        new_serving_thumbs.append((cdn_url, sz[0], sz[1]))
+                except IOError:
+                    statemon.state.increment('upload_error')
+                    raise
 
         else:
-            cdn_url = yield self._upload_impl(image, tid, url,
-                                              async=True)
-            # Append only if the image was uploaded successfully   
-            if cdn_url:
-                new_serving_thumbs.append((cdn_url, image.size[0], image.size[1]))
+            try:
+                cdn_url = yield self._upload_impl(image, tid, url, overwrite,
+                                                  async=True)
+                if cdn_url is not None:
+                    new_serving_thumbs.append((cdn_url, image.size[0],
+                                               image.size[1]))
+            except IOError:
+                statemon.state.increment('upload_error')
+                raise
 
-        if self.update_serving_urls:
+        if self.update_serving_urls and len(new_serving_thumbs) > 0:
             def add_serving_urls(obj):
                 for params in new_serving_thumbs:
                     obj.add_serving_url(*params)
@@ -221,7 +186,7 @@ class CDNHosting(object):
         
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, image, tid, url=None):
+    def _upload_impl(self, image, tid, url=None, overwrite=True):
         '''Upload the specific image to the CDN service.
 
         Note that this could be called multiple times for the same
@@ -240,8 +205,20 @@ class CDNHosting(object):
         @tid: tid of the image being uploaded
         @url: URL of the image that's already live. This is optional but some
               CDNHosting objects might use this instead of the image.
+        @overwrite: If True, an existing file on the CDN will be overwritten
 
-        @returns: The serving url for the image or None if it shouldn't be served
+        @returns: The serving url for the image
+        @raises: IOError if the image couldn't be uploaded
+        '''
+        raise NotImplementedError()
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete(self, url):
+        '''Delete the object at a given url.
+
+        Inputs:
+        @url: The url to delete from the CDN
         '''
         raise NotImplementedError()
 
@@ -286,16 +263,21 @@ class AWSHosting(CDNHosting):
         self.do_salt = cdn_metadata.do_salt
         self.make_tid_folders = cdn_metadata.make_tid_folders
 
-    @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, image, tid, url=None):
-        rng = random.Random(tid)
-        
-        # Connect to the bucket if not done already
+    def _get_bucket(self):
+        '''Connects to the bucket if it's not already done'''
         if self.s3bucket is None:
             self.s3bucket = yield utils.botoutils.run_async(
                 self.s3conn.get_bucket,
                 self.s3bucket_name)
+        raise tornado.gen.Return(self.s3bucket)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _upload_impl(self, image, tid, url=None, overwrite=True):
+        rng = random.Random(tid)
+
+        s3bucket = yield self._get_bucket()
         
         if self.cdn_prefixes and len(self.cdn_prefixes) > 0:
             cdn_prefix = rng.choice(self.cdn_prefixes)
@@ -331,10 +313,48 @@ class AWSHosting(CDNHosting):
         if self.neon_bucket:
             policy = 'public-read'
 
-        yield upload_image_to_s3(key_name, imgdata, bucket=self.s3bucket,
-                                 policy=policy, async=True)
+        try:
+            key = s3bucket.new_key(key_name)
+
+            yield utils.botoutils.run_async(
+                key.set_contents_from_string,
+                imgdata,
+                {'Content-Type':'image/jpeg'},
+                policy=policy,
+                replace=overwrite)
+        except BotoServerError as e:
+            _log.error_n(
+            'AWS Server error when uploading image to s3://%s/%s: %s' % 
+                    (self.s3bucket_name, key_name, e))
+            statemon.state.increment('s3_upload_error')
+            raise IOError(str(e))
+
+        except BotoClientError as e:
+            _log.error_n(
+                'AWS client error when uploading image to s3://%s/%s : %s' % 
+                    (self.s3bucket_name, key_name, e))
+            statemon.state.increment('s3_upload_error')
+            raise IOError(str(e))
 
         raise tornado.gen.Return(cdn_url)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete(self, url):
+        '''Delete the object at a given url.
+
+        Inputs:
+        @url: The url to delete from the CDN
+        '''
+        s3bucket = yield self._get_bucket()
+
+        key_name = urlparse.urlparse(url).path.strip('/')
+        try:
+            yield utils.botoutils.run_async(s3bucket.delete_key,
+                                            key_name)
+        except boto.exception.StorageResponseError as e:
+            # key wasn't there, so that's ok
+            pass
 
 class CloudinaryHosting(CDNHosting):
     
@@ -354,7 +374,7 @@ class CloudinaryHosting(CDNHosting):
     
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, image, tid, url=None):
+    def _upload_impl(self, image, tid, url=None, overwrite=True):
         '''
         Upload the image to cloudinary.
         
@@ -380,8 +400,14 @@ class CloudinaryHosting(CDNHosting):
         params['file'] = url
         response = yield self.make_request(params, None, headers, async=True)
         if response.error:
-            _log.error("Failed to upload image to cloudinary for tid %s: %s" %
-                       (tid, response.error))
+            msg = ("Failed to upload image to cloudinary for tid %s: %s" %
+                   (tid, response.error))
+            _log.error_n(msg)
+            raise IOError(msg)
+
+        # TODO: This upload function doesn't conform, fix if we want
+        # to use cloudinary again.
+        raise tornado.gen.Return(None)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -430,16 +456,20 @@ class AkamaiHosting(CDNHosting):
 
     def __init__(self, cdn_metadata):
         super(AkamaiHosting, self).__init__(cdn_metadata)
-        self.cdn_prefixes = cdn_metadata.cdn_prefixes 
+        base_split = cdn_metadata.baseurl.strip('/').split('/')
+        self.extra_dirs = base_split[1:]
+        self.cdn_prefixes = [
+            re.sub('/'+'/'.join(self.extra_dirs), '', x).strip('/')
+            for x in cdn_metadata.cdn_prefixes]
         self.ak_conn = api.akamai_api.AkamaiNetstorage(
             cdn_metadata.host,
             cdn_metadata.akamai_key,
             cdn_metadata.akamai_name,
-            cdn_metadata.baseurl)
+            '/' + base_split[0])
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, image, tid, url=None):
+    def _upload_impl(self, image, tid, url=None, overwrite=True):
         rng = random.Random(tid)
 
         cdn_prefix = rng.choice(self.cdn_prefixes)
@@ -459,7 +489,11 @@ class AkamaiHosting(CDNHosting):
         # break in the future if the tid scheme changes. Another option would 
         # be to add a root folder to the class that would be set using the 
         # account id. For now, this is fine so go with it.
-        name_pieces = ['',tid[:24]]
+        name_pieces = ['']
+        if len(self.extra_dirs) > 0:
+            name_pieces.extend(self.extra_dirs)
+                
+        name_pieces.append(tid[:24])
         for _ in range(3):
             name_pieces.append(rng.choice(string.ascii_letters))
 
@@ -479,10 +513,29 @@ class AkamaiHosting(CDNHosting):
         filestream.seek(0)
         imgdata = filestream.read()
 
-        response = yield tornado.gen.Task(self.ak_conn.upload, image_url,
-                                          imgdata)
+        response = yield self.ak_conn.upload(image_url, imgdata, async=True)
         if response.error:
-            _log.warn_n("Error uploading image to akamai for tid %s" % tid)
-            cdn_url = None
+            msg = ("Error uploading image to akamai for tid %s: %s" 
+                   % (tid, response.error))
+            _log.error_n(msg)
+            statemon.state.increment('akamai_upload_error')
+            raise IOError(str(msg))
 
         raise tornado.gen.Return(cdn_url) 
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete(self, url):
+        '''Delete the object at a given url.
+
+        Inputs:
+        @url: The url to delete from the CDN
+        '''
+
+        rel_path = urlparse.urlparse(url).path.strip('/')
+        response = yield self.ak_conn.delete('/'+rel_path, async=True)
+        if response.error and response.error.code != 404:
+            msg = ("Error delete image %s from akamai: %s" 
+                   % (url, response.error))
+            _log.error_n(msg)
+            raise IOError(str(msg))
