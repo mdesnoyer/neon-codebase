@@ -29,7 +29,7 @@ public:
     const std::string & GetAccountIdRef() const;
     const std::string & default_url() const;
 
-    ScaledImage * GetScaledImage(int height, int width) const;
+    const ScaledImage * GetScaledImage(int height, int width) const;
 
     bool operator == (const DefaultThumbnail &other) const;
 

@@ -5,7 +5,7 @@ using namespace std;
 namespace url_utils
 { 
      string 
-     GenerateUrl(string baseUrl, string tid, int height, int width) 
+     GenerateUrl(const string baseUrl, const string tid, int height, int width) 
      { 
          ostringstream oss(""); 
          oss << baseUrl << "neontn" << tid << "_w" << width << "_h" << height << ".jpg"; 

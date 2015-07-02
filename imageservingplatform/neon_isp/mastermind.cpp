@@ -554,7 +554,7 @@ Mastermind::GetImageUrl(const char * account_id,
             //size = strlen(url);
             //return url;
         }
-        if (image->scoped_url() != 0) {
+        else if (image->scoped_url() != NULL) {
             image_url = *image->scoped_url(); 
         } 
         else { 

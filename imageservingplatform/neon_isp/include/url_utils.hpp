@@ -6,7 +6,7 @@
 
 namespace url_utils 
 { 
-    std::string GenerateUrl(std::string, std::string, int, int); 
+    std::string GenerateUrl(const std::string, const std::string, int, int); 
 }
 
 #endif 

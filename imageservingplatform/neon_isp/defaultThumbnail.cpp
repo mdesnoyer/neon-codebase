@@ -198,7 +198,7 @@ DefaultThumbnail::default_url() const
 }
 
 // TODO Kevin this needs to be combined with Fraction::GetScaledImage
-ScaledImage*
+const ScaledImage*
 DefaultThumbnail::GetScaledImage(int height, int width) const
 {
     static const int pixelRange = 6;
