@@ -1572,7 +1572,8 @@ class NeonUserAccount(NamespacedStoredObject):
 
         ovp_map = {}
         #TODO: Add Ooyala when necessary
-        for plat in [NeonPlatform, BrightcovePlatform, YoutubePlatform]:
+        for plat in [NeonPlatform, BrightcovePlatform, OoyalaPlatform,
+                     YoutubePlatform]:
             ovp_map[plat.get_ovp()] = plat
 
         calls = []
@@ -1690,14 +1691,7 @@ class NeonUserAccount(NamespacedStoredObject):
     @classmethod 
     def get_all_accounts(cls):
         ''' Get all NeonUserAccount instances '''
-        nuser_accounts = []
-        db_connection = DBConnection.get(cls)
-        accounts = db_connection.blocking_conn.keys(cls.__name__.lower() + "*")
-        for accnt in accounts:
-            api_key = accnt.split('_')[-1]
-            nu = NeonUserAccount.get(api_key)
-            nuser_accounts.append(nu)
-        return nuser_accounts
+        return cls.get_all()
     
     @classmethod
     def get_neon_publisher_id(cls, api_key):
@@ -1707,6 +1701,33 @@ class NeonUserAccount(NamespacedStoredObject):
         na = cls.get(api_key)
         if nc:
             return na.tracker_account_id
+
+    def iterate_all_videos(self, max_request_size=100):
+        '''A synchronous function that returns an iterator across all the
+        videos for this account in the database.
+
+        The set of keys to grab happens once so if the db changes while
+        the iteration is going, so neither new or deleted objects will
+        be returned.
+
+        #TODO(mdesnoyer): Figure out a way to make this
+        asynchronous. It ain't going to be easy.
+
+        Inputs:
+        max_request_size - Maximum number of objects to request from
+        the database at a time.
+        '''
+        db_connection = DBConnection.get(VideoMetadata)
+        keys = db_connection.blocking_conn.keys(self.neon_api_key + '_*')
+        keys = [x for x in keys if len(x.split('_')) == 2]
+        cur_idx = 0
+        while cur_idx < len(keys):
+            cur_keys = keys[cur_idx:(cur_idx+max_request_size)]
+            for obj in VideoMetadata.get_many(cur_keys):
+                if obj is not None and isinstance(obj, VideoMetadata):
+                    yield obj
+
+            cur_idx += max_request_size
 
 
 class ExperimentStrategy(DefaultedStoredObject):
