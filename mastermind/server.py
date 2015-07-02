@@ -1053,14 +1053,6 @@ class DirectivePublisher(threading.Thread):
     def add_to_tracker_id_map(self, tracker_id, account_id):
         self.tracker_id_map[tracker_id] = account_id
 
-    def update_serving_urls(self, new_map):
-        with self.lock:
-            del self.serving_urls
-            self.serving_urls = {}
-            for k, v in new_map.iteritems():
-                self.serving_urls[k] = pack_obj(v)
-        statemon.state.thumbnails_serving = len(self.serving_urls)
-
     def add_serving_url(self, thumbnail_id, urls):
         with self.lock:
             self.serving_urls[thumbnail_id] = pack_obj(urls)
@@ -1248,6 +1240,7 @@ class DirectivePublisher(threading.Thread):
             missing_urls = False
             for thumb_id, frac in directive:
                 try:
+                    serving_urls = unpack_obj(self.serving_urls[thumb_id])
                     fractions.append({
                         'pct': frac,
                         'tid': thumb_id,
