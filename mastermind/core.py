@@ -400,6 +400,11 @@ class Mastermind(object):
             
         except KeyError:
             pass
+        # fabs causes an error if a string type happens to be in the old directive 
+        # temporary fix to see if this clears up the directive issue on isp
+        # we should probably manually go through the for loop above and check for matching types 
+        except AttributeError: 
+            pass 
 
         self._modify_video_state(video_id, experiment_state, value_left,
                                  winner_tid, new_directive, video_info)
