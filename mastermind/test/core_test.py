@@ -167,7 +167,142 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
             self.assertGreater(val, 0.0)
+    
+    def test_ign_breaker_one(self):  
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', exp_frac=0.2, baseline_type='brightcove'))
+        self.mastermind.serving_directive = {
+            'acct1_vid1': (('acct1', 'vid1'),
+                           [
+                            ('tid11', ''),
+                            ('tid12', 3037000499.9760499),
+                            ('tid13', 1.0), 
+                            ('tid14', 0.324234234234),
+                            ('tid15', -0.23423111123),
+                            ('tid16', 0), 
+                            ('tid17', 0),
+                            ('tid18', 0),
+                            ('tid19', 0)                          
+                            ]) }
+        self.mastermind.video_info['acct1_vid1'] = VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0, height=720, width=1280,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash='4576300592785859712', 
+                                               urls=['http://blah.invalid.com'], 
+                                               ttype='neon', model_score=5.406484635388814)),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0, height=720, width=1280,
+                                               model_version=None, 
+                                               phash='4576300592785859713', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='random', model_score=None)),
+                 build_thumb(ThumbnailMetadata('n3', 'vid1', rank=0, height=360, width=640,
+                                               model_version=None, 
+                                               phash='4576300592785859713', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='brightcove', model_score=None)),
+                 build_thumb(ThumbnailMetadata('n4', 'vid1', rank=4, height=720, width=1280,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash='4576300592785859715', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='neon', model_score=5.292761188458726)),
+                 build_thumb(ThumbnailMetadata('n5', 'vid1', rank=3, height=720, width=1280,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash='4576300592785859716', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='neon', model_score=5.330244313549762)),
+                 build_thumb(ThumbnailMetadata('n6', 'vid1', rank=1, height=720, width=1280,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash='4576300592785859717', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='neon', model_score=5.390517351344677)),
+                 build_thumb(ThumbnailMetadata('n7', 'vid1', rank=0, height=360, width=640,
+                                               model_version=None, 
+                                               phash='4576300592785859718', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='centerframe', model_score=None)),
+                 build_thumb(ThumbnailMetadata('n8', 'vid1', rank=2, height=720, width=1280,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash='4576300592785859719', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='neon', model_score=5.3649998500954)),
+                 build_thumb(ThumbnailMetadata('n9', 'vid1', rank=0, height=720, width=1280,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash='4576300592785859720', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='neon', model_score=None))])
 
+        self.mastermind._calculate_new_serving_directive('acct1_vid1')
+        self.assertEquals(len(self.mastermind.serving_directive['acct1_vid1'][1]), 9)
+           
+    def test_ign_breaker_two(self): 
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', exp_frac=0.2, baseline_type='brightcove'))
+        self.serving_directive = {
+            'acct1_vid1': (('acct1', 'vid1'),
+                           [
+                            ('tid11', ''),
+                            ('tid12', 3037000499.9760499),
+                            ('tid13', 1.0), 
+                            ('tid14', 0.324234234234),
+                            ('tid15', -0.23423111123),
+                            ('tid16', 0), 
+                            ('tid17', 0),
+                            ('tid18', 0),
+                            ('tid19', 0)                          
+                            ]) }
+        directive = self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0, height=720, width=1280,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash='4576300592785859712', 
+                                               urls=['http://blah.invalid.com'], 
+                                               ttype='neon', model_score=5.406484635388814)),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0, height=720, width=1280,
+                                               model_version=None, 
+                                               phash='4576300592785859713', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='random', model_score=None)),
+                 build_thumb(ThumbnailMetadata('n3', 'vid1', rank=0, height=360, width=640,
+                                               model_version=None, 
+                                               phash='4576300592785859713', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='brightcove', model_score=None)),
+                 build_thumb(ThumbnailMetadata('n4', 'vid1', rank=4, height=720, width=1280,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash='4576300592785859715', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='neon', model_score=5.292761188458726)),
+                 build_thumb(ThumbnailMetadata('n5', 'vid1', rank=3, height=720, width=1280,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash='4576300592785859716', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='neon', model_score=5.330244313549762)),
+                 build_thumb(ThumbnailMetadata('n6', 'vid1', rank=1, height=720, width=1280,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash='4576300592785859717', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='neon', model_score=5.390517351344677)),
+                 build_thumb(ThumbnailMetadata('n7', 'vid1', rank=0, height=360, width=640,
+                                               model_version=None, 
+                                               phash='4576300592785859718', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='centerframe', model_score=None)),
+                 build_thumb(ThumbnailMetadata('n8', 'vid1', rank=2, height=720, width=1280,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash='4576300592785859719', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='neon', model_score=5.3649998500954)),
+                 build_thumb(ThumbnailMetadata('n9', 'vid1', rank=0, height=720, width=1280,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash='4576300592785859720', 
+                                               urls=['http://blah.invalid2.jpg'], 
+                                               ttype='neon', model_score=None))]))[1]
+ 
+        self.assertEquals(len(directive), 9)
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+        
     def test_exp_frac_1(self):
         # Testing all the cases when the experiment fraction is 1.0
         # because in that case, we add the editor's selection and/or
