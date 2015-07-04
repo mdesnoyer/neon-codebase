@@ -168,27 +168,92 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         for val in directive.values():
             self.assertGreater(val, 0.0)
     
+    def test_ign_breaker_three(self):  
+        self.mastermind.update_experiment_strategy(
+            'testacct123', ExperimentStrategy('gvs3vytvg20ozp78rolqmdfa', exp_frac=1.2, baseline_type='brightcove'))
+        self.mastermind.serving_directive = {
+            'testacct123_4324552316001': (('gvs3vytvg20ozp78rolqmdfa', '4324552316001'),
+                           [
+                            ('tid1', 0),
+                            ('tid2', 0),
+                            ('tid3', 0), 
+                            ('tid4', 0),
+                            ('tid5', 0),
+                            ('tid6', 0), 
+                            ('tid7', 0)                          
+                            ]) }
+        self.mastermind.video_info['testacct123_4324552316001'] = VideoInfo(
+                'testacct123', True,
+                [build_thumb(ThumbnailMetadata('d6dfa36d8431e795b573263bed0a71e8', '4324552316001', ctr=None,rank=1,height=720,width=1280,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash=4437922592898527388, 
+                                               ttype='neon', model_score=5.654004413457463), 
+                                               phash=14285162934004088064L, 
+                                               incremental_impressions=0,
+                                               base_impressions=234234234,
+                                               incremental_conversions=234234234,
+                                               base_conversions=-1),
+                 build_thumb(ThumbnailMetadata('1e10632ba402134d74bef2eb47ae51af', '4324552316001', rank=3, height=720, width=1280,
+                                               ctr=None,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash=11159919755030691327L,
+                                               ttype='neon', 
+                                               model_score=5.009933999821487)),
+                 build_thumb(ThumbnailMetadata('bb0dbd191853aa5ce998121e1b6d54d6', '4324552316001', rank=0, height=720, width=1280,
+                                               ctr=None,
+                                               phash=4438202951250849932,
+                                               ttype='random', 
+                                               model_score=None)),
+                 build_thumb(ThumbnailMetadata('050c67f1b38449ea254f1eb3024b999e', '4324552316001', rank=2, height=720, width=1280,
+                                               ctr=None,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash=1949432825026632815,
+                                               ttype='neon', 
+                                               model_score=5.037118012144308)),
+                 build_thumb(ThumbnailMetadata('ec480d6634dadbae513e9a4fc28e84eb', '4324552316001', rank=0, height=360, width=740,
+                                               ctr=None,
+                                               model_version=None, 
+                                               phash=10216194004065988127L,
+                                               ttype='brightcove', 
+                                               model_score=None)),
+                 build_thumb(ThumbnailMetadata('4dd194c4c4a082bba85a4f3bd57dc854', '4324552316001', rank=0, height=720, width=1280,
+                                               ctr=None,
+                                               model_version='20130924_crossfade_withalg', 
+                                               phash=4438202951275983004,
+                                               ttype='neon', 
+                                               model_score=5.666209793655988)),
+                 build_thumb(ThumbnailMetadata('7833f53877497433fed22ee030a534a8', '4324552316001', rank=0, height=720, width=1280,
+                                               ctr=None,
+                                               model_version=None, 
+                                               phash=4437921476290916540,
+                                               filtered=None, 
+                                               ttype='centerframe', 
+                                               model_score=None))])
+
+        self.mastermind._calculate_new_serving_directive('testacct123_4324552316001')
+        self.assertEquals(len(self.mastermind.serving_directive['testacct123_4324552316001'][1]), 7)
+    
     def test_ign_breaker_one(self):  
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', exp_frac=0.2, baseline_type='brightcove'))
         self.mastermind.serving_directive = {
             'acct1_vid1': (('acct1', 'vid1'),
                            [
-                            ('tid11', ''),
+                            ('tid11', -3242343242342232423423423423442341299999999999999999999999999999999999999999999999999999999999999999999999999.124102984023984230952390582040982309482334534534534521),
                             ('tid12', 3037000499.9760499),
                             ('tid13', 1.0), 
                             ('tid14', 0.324234234234),
                             ('tid15', -0.23423111123),
                             ('tid16', 0), 
-                            ('tid17', 0),
-                            ('tid18', 0),
+                            ('tid17', 0.0e4000000),
+                            ('tid18', 15314e999999990000000000000),
                             ('tid19', 0)                          
                             ]) }
         self.mastermind.video_info['acct1_vid1'] = VideoInfo(
                 'acct1', True,
                 [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0, height=720, width=1280,
                                                model_version='20130924_crossfade_withalg', 
-                                               phash='4576300592785859712', 
+                                               phash=14285162934004088064L, 
                                                urls=['http://blah.invalid.com'], 
                                                ttype='neon', model_score=5.406484635388814)),
                  build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0, height=720, width=1280,
