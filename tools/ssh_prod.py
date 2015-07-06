@@ -49,7 +49,6 @@ def find_host_private_address(hostname):
     ip = None
     for instance in conn.describe_instances(stack_id=stack_id)['Instances']:
         try:
-            print instance['Hostname']
             if instance['Hostname'] == hostname:
                 ip = instance['PrivateIp']
                 break
