@@ -18,6 +18,7 @@
 
 /// String Constants used by Neon Service 
 static ngx_str_t neon_cookie_name = ngx_string("neonglobaluserid");
+static ngx_str_t neon_custom_header_name = ngx_string("X-Neon-guid");
 static ngx_str_t cookie_root_domain = ngx_string("; Domain=.neon-images.com; Path=/;"); 
 static ngx_str_t cookie_neon_domain_prefix = ngx_string("; Domain=.neon-images.com; Path=");
 static ngx_str_t cookie_max_expiry = ngx_string( "; expires=Thu, 31-Dec-37 23:59:59 GMT"); //expires 2038
@@ -164,6 +165,11 @@ neon_service_isset_neon_cookie(ngx_http_request_t *request){
     return ret;
 }
 
+static NEON_BOOLEAN 
+neon_service_isset_custom_header(ngx_http_request_t *req, ngx_str_t *key, ngx_str_t *value) { 
+    return NEON_FALSE; 
+}
+
 /*
  * Set the Neon Cookie with Neon UUID 
  *
@@ -265,8 +271,7 @@ neon_service_userid_abtest_ready(ngx_http_request_t *request, ngx_str_t *uuid){
     unsigned int cur_timestamp = (unsigned int) time(NULL);
     
     // check for the neonglobaluserid cookie
-    if (neon_service_isset_cookie(request, &neon_cookie_name, uuid) == NEON_TRUE){
-       
+    if (neon_service_isset_cookie(request, &neon_cookie_name, uuid) == NEON_TRUE) {
         char ts[NEON_UUID_TS_LEN];
         // TODO: Protect against fake cookie timestamp, or invalid atoi
         // conversion
@@ -275,6 +280,11 @@ neon_service_userid_abtest_ready(ngx_http_request_t *request, ngx_str_t *uuid){
         if (cur_timestamp >= cookie_ts + 120)
             return NEON_TRUE;
     }
+    // since we can't always rely on a cookie actually making it, let's check 
+    // our custom header to see if it's set there
+    else if (neon_service_isset_custom_header(request, &neon_custom_header_name, uuid) == NEON_TRUE) { 
+        
+    } 
     
     return NEON_FALSE;
 }
