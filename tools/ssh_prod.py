@@ -35,6 +35,8 @@ define("stack_name", default="Neon Serving Stack V2",
 
 def find_host_private_address(hostname):
     conn = boto.opsworks.connect_to_region(options.aws_region)
+
+    _log.info('Finding the ip address for %s' % hostname)
     
     # Find the stack
     stack_id = None
