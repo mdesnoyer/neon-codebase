@@ -166,7 +166,13 @@ neon_service_isset_neon_cookie(ngx_http_request_t *request){
 }
 
 static NEON_BOOLEAN 
-neon_service_isset_custom_header(ngx_http_request_t *req, ngx_str_t *key, ngx_str_t *value) { 
+neon_service_isset_custom_header(ngx_http_request_t *request, ngx_str_t *key, ngx_str_t *value) { 
+    ngx_table_elt_t * header;
+    header = search_headers_in(request, key->data, key->len); 
+    if (header){
+        *value = header->value;
+        return NEON_TRUE; 
+    }
     return NEON_FALSE; 
 }
 
@@ -271,7 +277,8 @@ neon_service_userid_abtest_ready(ngx_http_request_t *request, ngx_str_t *uuid){
     unsigned int cur_timestamp = (unsigned int) time(NULL);
     
     // check for the neonglobaluserid cookie
-    if (neon_service_isset_cookie(request, &neon_cookie_name, uuid) == NEON_TRUE) {
+    if ((neon_service_isset_cookie(request, &neon_cookie_name, uuid) == NEON_TRUE) || 
+        (neon_service_isset_custom_header(request, &neon_custom_header_name, uuid) == NEON_TRUE)) {
         char ts[NEON_UUID_TS_LEN];
         // TODO: Protect against fake cookie timestamp, or invalid atoi
         // conversion
@@ -280,12 +287,7 @@ neon_service_userid_abtest_ready(ngx_http_request_t *request, ngx_str_t *uuid){
         if (cur_timestamp >= cookie_ts + 120)
             return NEON_TRUE;
     }
-    // since we can't always rely on a cookie actually making it, let's check 
-    // our custom header to see if it's set there
-    else if (neon_service_isset_custom_header(request, &neon_custom_header_name, uuid) == NEON_TRUE) { 
-        
-    } 
-    
+
     return NEON_FALSE;
 }
 
