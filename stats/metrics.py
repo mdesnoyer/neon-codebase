@@ -81,8 +81,6 @@ def calc_lift_at_first_significant_hour(impressions, conversions):
                 idx = sig.index[0]
                 
             stats['p_value'][base][top] = p_value[idx]
-            #if cum_ctr[base][idx] < 1e-8:
-            #    import pdb; pdb.set_trace()
             stats['lift'][base][top] = ((
                 cum_ctr[top][idx] - cum_ctr[base][idx]) /
                 cum_ctr[base][idx])

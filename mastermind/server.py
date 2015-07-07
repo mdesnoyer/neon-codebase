@@ -537,6 +537,7 @@ class StatsDBWatcher(threading.Thread):
         self.video_id_cache = video_id_cache
         self.last_update = None # Time of the most recent data
         self.last_table_build = None # Time when the tables were last built
+        self._update_stats_timer = None
         self.impala_conn = None
         self.daemon = True
         self.activity_watcher = activity_watcher
@@ -544,6 +545,28 @@ class StatsDBWatcher(threading.Thread):
         # Is the initial data loaded
         self.is_loaded = threading.Event()
         self._stopped = threading.Event()
+
+        self._update_time_since_stats_update()
+
+    def __del__(self):
+        if self._update_stats_timer and self._update_stats_timer.is_alive():
+            self._update_stats_timer.cancel()
+        super(DirectivePublisher, self).__del__()
+
+    def _update_time_since_stats_update(self):
+        if self.last_update is not None:
+            statemon.state.time_since_last_batch_event = (
+                datetime.datetime.now() - self.last_update).total_seconds()
+
+        if self.last_table_build is not None:
+            statemon.state.time_since_stats_update = (
+                datetime.datetime.now() -
+                self.last_table_build).total_seconds()
+
+        self._update_stats_timer = threading.Timer(
+            10.0, self._update_time_since_stats_update)
+        self._update_stats_timer.daemon = True
+        self._update_stats_timer.start()
 
     def wait_until_loaded(self, timeout=None):
         '''Blocks until the data is loaded.'''
@@ -679,13 +702,6 @@ class StatsDBWatcher(threading.Thread):
                  for thumb_id, counts in 
                  self._get_incremental_stat_data(strategy_cache)
                  .iteritems()])
-
-        if self.last_update is not None and self.last_table_build is not None:
-            statemon.state.time_since_last_batch_event = (
-                datetime.datetime.now() - self.last_update).total_seconds()
-            statemon.state.time_since_stats_update = (
-                datetime.datetime.now() -
-                self.last_table_build).total_seconds()
                     
         self.is_loaded.set()
 
@@ -783,7 +799,8 @@ class StatsDBWatcher(threading.Thread):
         if thumb_id is not None:
             retval[thumb_id] = [0, 0]
         try:
-            conn = happybase.Connection(options.incr_stats_host)
+            conn = happybase.Connection(options.incr_stats_host,
+                                        timeout=300000)
             try:
                 col_family = options.incr_stats_col_family
                 col_map = {

@@ -189,12 +189,14 @@ def collect_stats(thumb_info, video_info,
         # Find the baseline thumb
         baseline_types = options.baseline_types.split(',')
         base_thumb = None
+        base_rank = None
         for baseline_type in baseline_types:
             for thumb_id in video.thumbnail_ids:
                 cur_thumb = thumb_info[thumb_id]
                 if cur_thumb.type == baseline_type:
-                    base_thumb = cur_thumb
-                    break
+                    if base_rank is None or cur_thumb.rank < base_rank:
+                        base_thumb = cur_thumb
+                        base_rank = cur_thumb.rank
             if base_thumb is not None:
                 break
 
