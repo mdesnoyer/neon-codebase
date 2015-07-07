@@ -46,7 +46,8 @@ def calc_lift_at_first_significant_hour(impressions, conversions):
 
     # Now put together the pairwise comparisons
     thumb_list = impressions.columns
-    stats = pandas.Panel(items=['lift', 'p_value', 'revlift'],
+    stats = pandas.Panel(items=['lift', 'p_value', 'revlift',
+                                'xtra_conv_at_sig'],
                          major_axis=thumb_list,
                          minor_axis=thumb_list)
     for base in thumb_list:
@@ -80,12 +81,17 @@ def calc_lift_at_first_significant_hour(impressions, conversions):
                 idx = sig.index[0]
                 
             stats['p_value'][base][top] = p_value[idx]
+            #if cum_ctr[base][idx] < 1e-8:
+            #    import pdb; pdb.set_trace()
             stats['lift'][base][top] = ((
                 cum_ctr[top][idx] - cum_ctr[base][idx]) /
                 cum_ctr[base][idx])
 
-            stats['revlift'][base][top] = ((
-                cum_ctr[top][idx] - cum_ctr[base][idx]))
+            stats['revlift'][base][top] = (
+                cum_ctr[top][idx] - cum_ctr[base][idx])
+
+            stats['xtra_conv_at_sig'][base][top] = (
+                cum_conv[top][idx] - cum_imp[top][idx] * cum_ctr[base][idx])
 
     return stats
 
@@ -112,7 +118,10 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     pandas series of stats we generate
     '''
     data = data.fillna(0)
+    data['xtra_conv_with_clamp'] = np.maximum(data['extra_conversions'],
+                                              data['xtra_conv_at_sig'])
     all_data = data[(data['extra_conversions'] != 0) | data['is_base']]
+
 
     # Get the data from videos where there was a statistically
     # significant lift
@@ -133,9 +142,11 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     lots_of_clicks = all_data.groupby(level=1).filter(
         lambda x: np.sum(x['conv']) > 100)
 
-    no_runaways = all_data.groupby(level=1).filter(
-        lambda x: np.sum(x['extra_conversions']) > -50 or
-        np.sum(x['conv']) < 50)
+    cap_runaways = all_data.copy()
+    cap_runaways['extra_conversions'] = cap_runaways['extra_conversions'].clip(-50)
+    #no_runaways = cap_runaways.groupby(level=1).filter(
+    #    lambda x: np.sum(x['extra_conversions']) > -50 or
+    #    np.sum(x['conv']) < 50)
     
 
     return pandas.Series(
@@ -145,18 +156,20 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
          'significant lift': calc_lift_from_dataframe(sig_data),
          'all_lift' : calc_lift_from_dataframe(all_data),
          'lots_clicks_lift' : calc_lift_from_dataframe(lots_of_clicks),
-         'no_runaways' : calc_lift_from_dataframe(no_runaways)})
+         'shutdown_bad_thumbs' : calc_lift_from_dataframe(
+             all_data, 'xtra_conv_with_clamp'),
+         'cap_runaways' : calc_lift_from_dataframe(cap_runaways)})
 
-def calc_lift_from_dataframe(data):
+def calc_lift_from_dataframe(data, xtra_conv_col='extra_conversions'):
     if len(data) == 0:
         return float('nan')
     base_sums = data.groupby(['is_base']).sum()
     neon_sums = data.groupby(level=['type']).sum()
 
-    #lift = base_sums['impr'][True] * base_sums['extra_conversions'][False] / \
+    #lift = base_sums['impr'][True] * base_sums[xtra_conv_col][False] / \
     #  (base_sums['conv'][True] * base_sums['impr'][False])
 
-    lift = base_sums['impr'][True] * neon_sums['extra_conversions']['neon'] / \
+    lift = base_sums['impr'][True] * neon_sums[xtra_conv_col]['neon'] / \
       (base_sums['conv'][True] * neon_sums['impr']['neon'])
 
     return lift

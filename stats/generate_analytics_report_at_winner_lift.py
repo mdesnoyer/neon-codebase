@@ -59,7 +59,7 @@ class MetricTypes:
 def connect():
     return impala.dbapi.connect(host=options.stats_host,
                                 port=options.stats_port,
-                                timeout=600)
+                                timeout=10000)
 
 def get_video_ids():
     _log.info('Querying for video ids')
