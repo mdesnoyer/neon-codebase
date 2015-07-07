@@ -39,7 +39,7 @@ def download_image(url):
         return Image.open(StringIO(response.body))
 
 def backfill(api_key, i_id):
-    ba = neondata.NeonPlatform.get(api_key, i_id)
+    ba = neondata.BrightcovePlatform.get(api_key, i_id)
     vids = ba.get_videos()
     
     # Get cdn metadatalist
