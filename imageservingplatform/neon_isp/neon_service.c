@@ -943,7 +943,25 @@ neon_service_unique_id(ngx_http_request_t *request, ngx_chain_t  **  chain)
     ngx_str_t current_id_key = ngx_string("current_id");
     ngx_str_t current_id = ngx_string(""); 
     ngx_http_arg(request, current_id_key.data, current_id_key.len, &current_id);
+    
+    if (current_id.len == 0) { 
+       ngx_str_t new_one = ngx_string("thisisanewid124124"); 
+       current_id = new_one;  
+    }
+    else { 
+        int len = 12, i=0; 
+        char s[13];  
+        static const char alphanum[] =
+             "0123456789"
+             "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+             "abcdefghijklmnopqrstuvwxyz";
 
+        for (i = 0; i < len; ++i) {
+            s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
+        } 
+        ngx_str_t new_one = ngx_string((u_char*)s);
+        current_id = new_one;  
+    }  
     u_char * response_body = 0, *p = 0;
     int response_body_len = 0;
     response_body_len = response_body_start.len + response_body_end.len + current_id.len;
