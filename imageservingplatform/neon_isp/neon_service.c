@@ -782,10 +782,9 @@ neon_service_client_api(ngx_http_request_t *request,
 
 /* Get Thumbnail ID service handler */
 NEON_GETTHUMB_API_ERROR 
-neon_service_getthumbnailid(ngx_http_request_t *request,
-                            ngx_chain_t  **  chain){
-
-    int clen = 0; 
+neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
+{
+    int wants_html = 0, clen = 0; 
 
     ngx_str_t base_url = ngx_string("/v1/getthumbnailid/");
     ngx_str_t params_key = ngx_string("params");
@@ -812,15 +811,18 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
 
     // get publisher id
     unsigned char * publisher_id = neon_service_get_uri_token(request, &base_url, 0);
-   
-    
+    unsigned char * token = (unsigned char*)strtok((char*)publisher_id, "."); 
+    if (token) {
+        publisher_id = token; 
+        unsigned char * extension = (unsigned char*)strtok(NULL, "."); 
+        if (strcmp((char*)extension, (char*)"html") == 0) 
+            wants_html = 1; 
+    }  
     if(publisher_id == NULL) {
         neon_stats[NEON_GETTHUMBNAIL_API_PUBLISHER_NOT_FOUND] ++;
         neon_service_no_content(request);
         return NEON_GETTHUMB_API_FAIL;
     }
-
-
     // Account ID
     const char * account_id = 0;
     int account_id_size = 0;
@@ -859,7 +861,18 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
     vids[video_ids.len] = 0;
     strncpy((char*) vids, (char *)video_ids.data, video_ids.len);
     char *vtoken = strtok_r((char*)vids, s, &context);
-    
+    if (wants_html) { 
+        static ngx_str_t response_body_start = ngx_string("<!DOCTYPE html><html><head><script type='text/javascript'>window.parent.postMessage('");
+        buf = ngx_calloc_buf(request->pool);
+        buf->memory = 1;   
+        *chain = ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
+        buf->start = buf->pos  = response_body_start.data;
+        buf->end = buf->last = buf->pos + response_body_start.len;
+        clen += response_body_start.len;
+        (*chain)->buf = buf;
+        (*chain)->next = NULL;
+        chain = &(*chain)->next;
+    }  
     // for each video id  passd to us as params
     while(vtoken != NULL) {
 
@@ -925,6 +938,18 @@ neon_service_getthumbnailid(ngx_http_request_t *request,
              chain = &(*chain)->next;
         }
     }
+    if (wants_html) { 
+        static ngx_str_t response_body_end = ngx_string("', '*')</script></head><body></body></html>");
+        buf = ngx_calloc_buf(request->pool);
+        buf->memory = 1;   
+        *chain = ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
+        buf->start = buf->pos  = response_body_end.data;
+        buf->end = buf->last = buf->pos + response_body_end.len;
+        clen += response_body_end.len;
+        (*chain)->buf = buf;
+        (*chain)->next = NULL;
+        chain = &(*chain)->next;
+    }  
 
     request->headers_out.status = NGX_HTTP_OK;
     request->headers_out.content_type.len = strlen("text/plain");
