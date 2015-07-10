@@ -952,8 +952,14 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
     }  
 
     request->headers_out.status = NGX_HTTP_OK;
-    request->headers_out.content_type.len = strlen("text/plain");
-    request->headers_out.content_type.data = (u_char *) "text/plain";
+    if (wants_html) { 
+        request->headers_out.content_type.len = strlen("text/html");
+        request->headers_out.content_type.data = (u_char *) "text/html";
+    }
+    else { 
+        request->headers_out.content_type.len = strlen("text/plain");
+        request->headers_out.content_type.data = (u_char *) "text/plain";
+    }  
     request->headers_out.content_length_n = clen;
     buf->last_buf = 1; //Mark the last buffer   
         
