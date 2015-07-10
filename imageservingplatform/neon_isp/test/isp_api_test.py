@@ -309,7 +309,8 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
             headers = {"X-Client-IP" : ip}
         return self.make_api_request(url, headers)
 
-    def client_api_request(self, pub_id, vid, width, height, ip, **kwargs):
+    def client_api_request(self, pub_id, vid, width, height, ip=None,
+                           **kwargs):
         '''
         Client request api requester 
         '''
@@ -321,11 +322,12 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         url = self.base_url % ("client", pub_id, vid)
         url += self.get_params % (width, height)
         headers = kwargs.get('headers', {})
-        if len(headers) == 0: 
-            headers = {"X-Forwarded-For" : ip}
-        else:
-            headers["X-Forwarded-For"] = ip
-
+        if ip is not None:
+            if len(headers) == 0: 
+                headers = {"X-Forwarded-For" : ip}
+            else:
+                headers["X-Forwarded-For"] = ip
+                
         req = urllib2.Request(url, headers=headers)
         
         try:
@@ -980,9 +982,6 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         pass
 
     def test_client_api_request_with_invalid_video(self):
-
-        '''
-        '''
         ts = int(time.time())
         response = self.client_api_request(self.pub_id, self.vid, 600, 500,
                                             "12.2.2.4", headers={})
@@ -998,6 +997,51 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         response, code = self.make_api_request(url, headers)
         self.assertEqual(response, '')
         self.assertEqual(code, 204)
+
+    def test_client_api_request_empty_ip(self):
+        response = self.client_api_request(self.pub_id,
+                                           "neonvid_" + self.vid,
+                                           600, 500, '')
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        # Get the location and cookies
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+            if "Set-Cookie" in header:
+                cookie = header.split("Set-Cookie: ")[-1]
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, self.expected_img_url)
+        self.assertIsNotNone(cookie)
+
+    def test_client_api_request_no_ip(self):
+        response = self.client_api_request(self.pub_id,
+                                           "neonvid_" + self.vid,
+                                           600, 500)
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        # Get the location and cookies
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+            if "Set-Cookie" in header:
+                cookie = header.split("Set-Cookie: ")[-1]
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, self.expected_img_url)
+        self.assertIsNotNone(cookie)
+        
 
 
     ################### Server API tests #####################
@@ -1184,6 +1228,13 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         headers = {"X-Forwarded-For" : ip}
         response, code = self.make_api_request(url, headers)
         self.assertEqual(code, 204)
+
+    def test_thumbnailids_missing_ip(self):
+        url = "http://localhost:" + self.port + "/v1/%s/%s/?params=%s" %\
+                ("getthumbnailid", self.pub_id, self.vid)
+        response, code = self.make_api_request(url, {})
+        self.assertIsNotNone(response)
+        self.assertRegexpMatches(response, "thumb[0-1]")
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
