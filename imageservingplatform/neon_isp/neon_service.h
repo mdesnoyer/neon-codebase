@@ -41,10 +41,6 @@ NEON_SERVER_API_ERROR neon_service_server_api(ngx_http_request_t *req,
 NEON_GETTHUMB_API_ERROR neon_service_getthumbnailid(ngx_http_request_t *req,
                                                  ngx_chain_t  ** chain);
 
-NEON_GETTHUMB_API_ERROR neon_service_unique_id(ngx_http_request_t *req,
-                                                 ngx_chain_t  ** chain);
-
-
 #ifdef __cplusplus
 } // extern "C"
 #endif

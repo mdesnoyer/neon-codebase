@@ -811,11 +811,11 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
 
     // get publisher id
     unsigned char * publisher_id = neon_service_get_uri_token(request, &base_url, 0);
-    unsigned char * token = (unsigned char*)strtok((char*)publisher_id, "."); 
+    char * token = strtok((char*)publisher_id, "."); 
     if (token) {
-        publisher_id = token; 
-        unsigned char * extension = (unsigned char*)strtok(NULL, "."); 
-        if (strcmp((char*)extension, (char*)"html") == 0) 
+        publisher_id = (unsigned char *)token; 
+        char * extension = strtok(NULL, "."); 
+        if (extension && strcmp(extension, (char*)"html") == 0) 
             wants_html = 1; 
     }  
     if(publisher_id == NULL) {
@@ -963,61 +963,6 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
     request->headers_out.content_length_n = clen;
     buf->last_buf = 1; //Mark the last buffer   
         
-    return NEON_GETTHUMB_API_OK;
-}
-
-NEON_GETTHUMB_API_ERROR 
-neon_service_unique_id(ngx_http_request_t *request, ngx_chain_t  **  chain)
-{
-    static ngx_str_t response_body_start = ngx_string("{\"unique_id\":\"");
-    static ngx_str_t response_body_end = ngx_string("\"}");
-    ngx_str_t current_id_key = ngx_string("current_id");
-    ngx_str_t current_id = ngx_string(""); 
-    ngx_http_arg(request, current_id_key.data, current_id_key.len, &current_id);
-    
-    if (current_id.len == 0) { 
-       ngx_str_t new_one = ngx_string("thisisanewid124124"); 
-       current_id = new_one;  
-    }
-    else { 
-        int len = 12, i=0; 
-        char s[13];  
-        static const char alphanum[] =
-             "0123456789"
-             "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-             "abcdefghijklmnopqrstuvwxyz";
-
-        for (i = 0; i < len; ++i) {
-            s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
-        } 
-        ngx_str_t new_one = ngx_string((u_char*)s);
-        current_id = new_one;  
-    }  
-    u_char * response_body = 0, *p = 0;
-    int response_body_len = 0;
-    response_body_len = response_body_start.len + response_body_end.len + current_id.len;
-    response_body = ngx_pnalloc(request->pool, response_body_len);
-    p = ngx_copy(response_body, 
-            response_body_start.data, 
-            response_body_start.len);
-    p = ngx_copy(p, current_id.data, current_id.len);
-    p = ngx_copy(p, response_body_end.data, response_body_end.len);
- 
-    *chain = ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
-    ngx_buf_t * b;
-    b = (ngx_buf_t *) ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
-    (*chain)->buf = b;
-    (*chain)->next = NULL;
-    
-    request->headers_out.status = NGX_HTTP_OK;
-    request->headers_out.content_type.len = sizeof("application/json") - 1;
-    request->headers_out.content_type.data = (u_char *) "application/json";
-    request->headers_out.content_length_n = p - response_body;
-    b->pos = response_body;
-    b->last = p; 
-    b->memory = 1;
-    b->last_buf = 1;
-    
     return NEON_GETTHUMB_API_OK;
 }
 // Getting geoip stuff in nginx

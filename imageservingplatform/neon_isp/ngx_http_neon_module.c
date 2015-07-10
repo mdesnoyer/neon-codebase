@@ -27,7 +27,6 @@ static char *ngx_http_neon_client_hook(ngx_conf_t *cf, ngx_command_t *cmd, void 
 static char *ngx_http_neon_server_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_neon_getthumbnailid_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_neon_healthcheck_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-static char *ngx_http_neon_unique_id_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static ngx_int_t ngx_http_neon_handler_healthcheck(ngx_http_request_t *r);
 
 static char *ngx_http_neon_stats_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
@@ -110,13 +109,6 @@ static ngx_command_t  ngx_http_neon_commands[] = {
     { ngx_string("mastermind_healthcheck"),
         NGX_HTTP_LOC_CONF|NGX_CONF_NOARGS,
         ngx_http_neon_healthcheck_hook,
-        0,
-        0,
-        NULL },
-    
-    { ngx_string("v1_unique_id"),
-        NGX_HTTP_LOC_CONF|NGX_CONF_NOARGS,
-        ngx_http_neon_unique_id_hook,
         0,
         0,
         NULL },
@@ -642,25 +634,6 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
     return ngx_http_output_filter(r, &out);
 }
 
-static ngx_int_t ngx_http_neon_handler_unique_id(ngx_http_request_t *request)
-{
-    neon_stats[NEON_GETTHUMBNAIL_API_REQUESTS] ++;
-
-    // this will be allocated if a response body is created
-    ngx_chain_t *  chain = 0; 
-    
-    neon_service_unique_id(request, &chain);
-    
-    ngx_http_send_header(request);
-   
-    // if a response body 
-    if(chain)
-        return ngx_http_output_filter(request, chain);
-    else
-        return ngx_http_output_filter(request, 0);
-}
-
-
 static void create_stats_formatter(int num_of_counters, char * format_string, int format_string_size) {
  
     char * ptr = format_string;
@@ -738,14 +711,3 @@ static char *ngx_http_neon_stats_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *
     
     return NGX_CONF_OK;
 }
-
-static char *ngx_http_neon_unique_id_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
-{
-    ngx_http_core_loc_conf_t  *clcf;
-    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
-    clcf->handler = ngx_http_neon_handler_unique_id;
-    
-    return NGX_CONF_OK;
-}
-
-
