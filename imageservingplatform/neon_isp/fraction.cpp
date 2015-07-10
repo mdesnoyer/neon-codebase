@@ -111,7 +111,7 @@ Fraction::InitSafe(double floor, const rapidjson::Value& frac)
         } 
         const rapidjson::Value& defaultSize = frac["default_size"]; 
         if (defaultSize["h"].IsInt() && defaultSize["w"].IsInt()) {  
-            default_url_.reset(new std::string(url_utils::GenerateUrl(base_url_, tid, frac["default_size"]["h"].GetInt(), frac["default_size"]["w"].GetInt()))); 
+            default_url_.reset(url_utils::GenerateUrl(base_url_, tid, frac["default_size"]["h"].GetInt(), frac["default_size"]["w"].GetInt())); 
         }
         else { 
             neon_stats[NEON_FRACTION_PARSE_ERROR]++;

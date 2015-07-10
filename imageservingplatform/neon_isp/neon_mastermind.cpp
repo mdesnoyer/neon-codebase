@@ -159,8 +159,7 @@ neon_mastermind_image_url_lookup(const char * accountId,
                                     ngx_str_t * bucketId,
                                     int height,
                                     int width,
-                                    char ** url, 
-                                    ngx_buf_t * buf)
+                                    char ** url)
 {
     Mastermind * mastermind = neon_get_mastermind();
     
@@ -175,17 +174,8 @@ neon_mastermind_image_url_lookup(const char * accountId,
     if(image_url.size() == 0) { 
         return NEON_MASTERMIND_IMAGE_URL_LOOKUP_NOT_FOUND; 
     } 
-/*
-    u_char* content = (u_char*)malloc(image_url.size()), *p=0; 
-    if (content == NULL){
-        neon_stats[NGINX_OUT_OF_MEMORY]++;
-        return NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK;
-    }
-    p = ngx_copy(content, (u_char*)image_url.c_str(), image_url.size());
-    buf->pos = content; 
-    buf->last = p;    */ 
-
-    *url = (char*)malloc(image_url.size()+1);
+    
+    *url = (char *)malloc(image_url.size()+1);
     snprintf((*url), image_url.size()+1, "%s", image_url.c_str()); 
  
     return NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK;

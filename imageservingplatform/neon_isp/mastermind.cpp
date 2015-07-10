@@ -558,7 +558,9 @@ Mastermind::GetImageUrl(const char * account_id,
             image_url = *image->scoped_url(); 
         } 
         else { 
-            image_url = url_utils::GenerateUrl(fraction->base_url(), (std::string)fraction->GetThumbnailID(), image->GetHeight(), image->GetWidth()); 
+            boost::scoped_ptr<std::string> new_url; 
+            new_url.reset(url_utils::GenerateUrl(fraction->base_url(), (std::string)fraction->GetThumbnailID(), image->GetHeight(), image->GetWidth())); 
+            image_url = *new_url; 
         }
     }  
 }

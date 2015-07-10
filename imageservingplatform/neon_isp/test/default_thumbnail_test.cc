@@ -37,7 +37,7 @@ TEST_F(DefaultThumbnailTest, test_default_thumbnail_default_url)
     doc.Parse<0>(testString.c_str());  
     DefaultThumbnail dt; 
     dt.Init(doc); 
-    ScaledImage *si = dt.GetScaledImage(-1, -1); 
+    const ScaledImage *si = dt.GetScaledImage(-1, -1); 
     ASSERT_EQ(NULL, si);  
 }
 
@@ -48,7 +48,7 @@ TEST_F(DefaultThumbnailTest, test_get_exact_match_url)
     doc.Parse<0>(testString.c_str());  
     DefaultThumbnail dt; 
     dt.Init(doc); 
-    ScaledImage *si = dt.GetScaledImage(600, 800); 
+    const ScaledImage *si = dt.GetScaledImage(600, 800); 
     ASSERT_EQ(*si->scoped_url(), "http://neon/thumb_600_800_default_url_defaccount1.jpg"); 
 }
 
@@ -59,6 +59,6 @@ TEST_F(DefaultThumbnailTest, test_get_approx_match_url)
     doc.Parse<0>(testString.c_str());  
     DefaultThumbnail dt; 
     dt.Init(doc); 
-    ScaledImage *si = dt.GetScaledImage(595, 803); 
+    const ScaledImage *si = dt.GetScaledImage(595, 803); 
     ASSERT_EQ(*si->scoped_url(), "http://neon/thumb_600_800_default_url_defaccount1.jpg"); 
 }
