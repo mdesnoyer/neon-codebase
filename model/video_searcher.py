@@ -198,7 +198,7 @@ class BisectSearcher(VideoSearcher):
         def score_frame(video, f):
             if not f in scores.keys():
                 frame = get_frame(video, f)
-                if not frame == None:
+                if frame is not None:
                     score, attr = self.score_single_frame(frame, f, video)
 
                     # If the frame was filtered, then the score is
