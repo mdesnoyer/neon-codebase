@@ -140,24 +140,30 @@ class MockKey(object):
             self.close()
         return data
 
-    def set_contents_from_file(self, fp, headers=None, replace=NOT_IMPL,
+    def set_contents_from_file(self, fp, headers=None, replace=False,
                                cb=NOT_IMPL, num_cb=NOT_IMPL,
                                policy='bucket-owner-full-control',
                                md5=NOT_IMPL,
                                res_upload_handler=NOT_IMPL,
                                encrypt_key=NOT_IMPL):
+        if not replace and self.name in self.bucket.keys:
+            return 0
         self.data = fp.read()
         self.set_etag()
         self.size = len(self.data)
         self.policy = policy
         self._handle_headers(headers)
+        self.bucket.keys[self.name] = self
+        self.bucket.acls[self.name] = MockAcl()
         return self.size
 
-    def set_contents_from_stream(self, fp, headers=None, replace=NOT_IMPL,
+    def set_contents_from_stream(self, fp, headers=None, replace=False,
                                cb=NOT_IMPL, num_cb=NOT_IMPL,
                                policy='bucket-owner-full-control',
                                reduced_redundancy=NOT_IMPL, query_args=NOT_IMPL,
                                size=NOT_IMPL, encrypt_key=NOT_IMPL):
+        if not replace and self.name in self.bucket.keys:
+            return
         self.data = ''
         chunk = fp.read(self.BufferSize)
         while chunk:
@@ -167,21 +173,27 @@ class MockKey(object):
         self.size = len(self.data)
         self.policy = policy
         self._handle_headers(headers)
+        self.bucket.keys[self.name] = self
+        self.bucket.acls[self.name] = MockAcl()
 
-    def set_contents_from_string(self, s, headers=NOT_IMPL, replace=NOT_IMPL,
+    def set_contents_from_string(self, s, headers=NOT_IMPL, replace=False,
                                  cb=NOT_IMPL, num_cb=NOT_IMPL,
                                  policy='bucket-owner-full-control',
                                  md5=NOT_IMPL, reduced_redundancy=NOT_IMPL,
                                  encrypt_key=NOT_IMPL):
+        if not replace and self.name in self.bucket.keys:
+            return 0
         self.data = copy.copy(s)
         self.set_etag()
         self.size = len(s)
         self.policy = policy
         self._handle_headers(headers)
+        self.bucket.keys[self.name] = self
+        self.bucket.acls[self.name] = MockAcl()
         return self.size
 
     def set_contents_from_filename(self, filename, headers=None,
-                                   replace=NOT_IMPL, cb=NOT_IMPL,
+                                   replace=False, cb=NOT_IMPL,
                                    num_cb=NOT_IMPL,
                                    policy='bucket-owner-full-control',
                                    md5=NOT_IMPL, res_upload_handler=NOT_IMPL,
@@ -305,8 +317,6 @@ class MockBucket(object):
 
     def new_key(self, key_name=None):
         mock_key = MockKey(self, key_name)
-        self.keys[key_name] = mock_key
-        self.acls[key_name] = MockAcl()
         return mock_key
 
     def delete_key(self, key_name, headers=NOT_IMPL,
@@ -607,24 +617,24 @@ class MockBucketStorageUri(object):
                                    src_bucket_name=src_bucket_name,
                                    src_key_name=src_key_name)
 
-    def set_contents_from_string(self, s, headers=NOT_IMPL, replace=NOT_IMPL,
+    def set_contents_from_string(self, s, headers=NOT_IMPL, replace=False,
                                  cb=NOT_IMPL, num_cb=NOT_IMPL, policy=NOT_IMPL,
                                  md5=NOT_IMPL, reduced_redundancy=NOT_IMPL):
         key = self.new_key()
-        key.set_contents_from_string(s)
+        key.set_contents_from_string(s, replace=replace)
 
-    def set_contents_from_file(self, fp, headers=None, replace=NOT_IMPL,
+    def set_contents_from_file(self, fp, headers=None, replace=False,
                                cb=NOT_IMPL, num_cb=NOT_IMPL, policy=NOT_IMPL,
                                md5=NOT_IMPL, size=NOT_IMPL, rewind=NOT_IMPL,
                                res_upload_handler=NOT_IMPL):
         key = self.new_key()
-        return key.set_contents_from_file(fp, headers=headers)
+        return key.set_contents_from_file(fp, headers=headers, replace=replace)
 
-    def set_contents_from_stream(self, fp, headers=NOT_IMPL, replace=NOT_IMPL,
+    def set_contents_from_stream(self, fp, headers=NOT_IMPL, replace=False,
                                  cb=NOT_IMPL, num_cb=NOT_IMPL, policy=NOT_IMPL,
                                  reduced_redundancy=NOT_IMPL,
                                  query_args=NOT_IMPL, size=NOT_IMPL):
-        dst_key.set_contents_from_stream(fp)
+        dst_key.set_contents_from_stream(fp, replace=replace)
 
     def get_contents_to_file(self, fp, headers=NOT_IMPL, cb=NOT_IMPL,
                              num_cb=NOT_IMPL, torrent=NOT_IMPL,

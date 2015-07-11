@@ -62,6 +62,7 @@ import utils.sync
 import utils.s3
 import utils.http 
 import urllib
+import urlparse
 import warnings
 
 
@@ -1828,8 +1829,13 @@ class CDNHostingMetadata(NamespacedStoredObject):
                  update_serving_urls=False,
                  rendition_sizes=None):
         self.key = key
-        
-        self.cdn_prefixes = cdn_prefixes # List of url prefixes
+
+        # List of url prefixes to put in front of the path. If there
+        # is no transport scheme, http:// will be added. Also, there
+        # is no trailing slash
+        cdn_prefixes = cdn_prefixes or []
+        self.cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
+                                cdn_prefixes)
         
         # If true, the images should be resized into all the desired
         # renditions.
@@ -1866,17 +1872,44 @@ class CDNHostingMetadata(NamespacedStoredObject):
         raise NotImplementedError()
 
     @classmethod
-    def save_all(self, *args, **kwargs):
+    def save_all(cls, *args, **kwargs):
         raise NotImplementedError()
 
     @classmethod
-    def modify(self, *args, **kwargs):
+    def modify(cls, *args, **kwargs):
         raise NotImplementedError()
 
     @classmethod
-    def modify_many(self, *args, **kwargs):
+    def modify_many(cls, *args, **kwargs):
         raise NotImplementedError()
 
+    @classmethod
+    def _create(cls, key, obj_dict):
+        obj = super(CDNHostingMetadata, cls)._create(key, obj_dict)
+
+        # Normalize the CDN prefixes
+        new_cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
+                               obj.cdn_prefixes)
+        
+        return obj
+
+    @staticmethod
+    def _normalize_cdn_prefix(prefix):
+      '''Normalizes a cdn prefix so that it starts with a scheme and does
+      not end with a slash.
+
+      e.g. http://neon.com
+           https://neon.com
+      '''
+      prefix_split = urlparse.urlparse(prefix, 'http')
+      if prefix_split.netloc == '':
+        path_split = prefix_split.path.partition('/')
+        prefix_split = [x for x in prefix_split]
+        prefix_split[1] = path_split[0]
+        prefix_split[2] = path_split[1]
+      scheme_added = urlparse.urlunparse(prefix_split)
+      return scheme_added.strip('/')
+      
 class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
     If the images are to be uploaded to S3 bucket use this formatter  
@@ -1913,7 +1946,7 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     def __init__(self, key=None,
                  bucket_name='n3.neon-images.com',
                  cdn_prefixes=None,
-                 folder_prefix='',
+                 folder_prefix=None,
                  resize=True,
                  update_serving_urls=True,
                  do_salt=True,
@@ -1939,7 +1972,7 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     '''
     def __init__(self, key=None,
                  bucket_name='host-thumbnails',
-                 folder_prefix=''):
+                 folder_prefix=None):
         super(PrimaryNeonHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
@@ -1966,19 +1999,49 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
     '''
 
     def __init__(self, key=None, host=None, akamai_key=None, akamai_name=None,
-            baseurl=None, cdn_prefixes=None, rendition_sizes=None):
+                 folder_prefix=None, cdn_prefixes=None, rendition_sizes=None,
+                 cpcode=None):
         super(AkamaiCDNHostingMetadata, self).__init__(
             key,
             cdn_prefixes=cdn_prefixes,
             resize=True,
             update_serving_urls=True,
             rendition_sizes=rendition_sizes)
-        
+
+        # Host for uploading to akamai. Can have http:// or not
         self.host = host
+
+        # Parameters to talk to akamai
         self.akamai_key = akamai_key
         self.akamai_name = akamai_name
-        # Base upload url. Should be something like '/17645/neon/prod'
-        self.baseurl = baseurl 
+
+        # The folder prefix to prepend to where the file will be
+        # stored and served from. Slashes at the beginning and end are
+        # optional
+        self.folder_prefix=folder_prefix
+
+        # CPCode string for uploading to Akamai. Should be something
+        # like 17645
+        self.cpcode = cpcode
+
+    @classmethod
+    def _create(cls, key, obj_dict):
+        obj = super(AkamaiCDNHostingMetadata, cls)._create(key, obj_dict)
+
+        # An old object could have had a baseurl, which was smashed
+        # together the folder prefix and cpcode. That was confusing,
+        # but in case there's an old object around, fix it. Also, in
+        # that case, the cdn_prefixes could have had the folder prefix
+        # in them, so remove them.
+        if hasattr(obj, 'baseurl'):
+            split = obj.baseurl.strip('/').partition('/')
+            obj.cpcode = split[0].strip('/')
+            obj.folder_prefix = split[2].strip('/')
+            obj.cdn_prefixes = [re.sub(obj.folder_prefix, '', x).strip('/')
+                                for x in obj.cdn_prefixes]
+            del obj.baseurl
+        
+        return obj
 
 class AbstractPlatform(NamespacedStoredObject):
     ''' Abstract Platform/ Integration class '''

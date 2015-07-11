@@ -146,6 +146,29 @@ class AsyncTestCase(tornado.testing.AsyncTestCase, TestCase):
         outer_mock.side_effect = _build_future
         return inner_mock
 
+    def _callback_wrap_mock(self, outer_mock):
+        '''Sets up a mock that mocks out a call that acts on a callback.
+
+        Input: outer_mock - Mock of the function that does a callback
+        Returns: 
+        mock that can be used to set the actual function return value/exception
+        '''
+        inner_mock = MagicMock()
+        def _do_callback(*args, **kwargs):
+            callback = kwargs.get('callback', None)
+            if 'callback' in kwargs:
+                del kwargs['callback']
+                
+            response = inner_mock(*args, **kwargs)
+            if callback:
+                tornado.ioloop.IOLoop.current().add_callback(callback,
+                                                             response)
+            else:
+                return response
+
+        outer_mock.side_effect = _do_callback
+        return inner_mock
+
 class AsyncHTTPTestCase(tornado.testing.AsyncHTTPTestCase, TestCase):
     '''A test case that has access to Neon functions and can 
     test a tornado async http server calls.

@@ -20,6 +20,7 @@ import time
 import tornado.gen
 import tornado.httpclient
 import urllib
+import urlparse
 import utils.http
 import utils.logs
 import utils.neon
@@ -127,8 +128,7 @@ class AkamaiNetstorage(object):
     ak.upload(req, body)
     '''
 
-    def __init__(self, host, netstorage_key, netstorage_name, baseurl):
-        self.host = host
+    def __init__(self, host, netstorage_key, netstorage_name, cpcode):
         self.g2o = None
         self.md5 = None
         self.sha1 = None
@@ -136,7 +136,18 @@ class AkamaiNetstorage(object):
         self.version = 1 # API Version
         self.key = netstorage_key
         self.name = netstorage_name
-        self.baseurl = baseurl # The base directory to work in. i.e. '/764573'
+        self.cpcode = cpcode.strip('/') # String cpcode (e.g. 764573)
+
+        # Normalize the host so that it includes the transport scheme
+        # (e.g. http)
+        host_split = urlparse.urlparse(host, 'http')
+        if host_split.netloc == '':
+            path_split = host_split.path.partition('/')
+            host_split = [x for x in host_split]
+            host_split[1] = path_split[0]
+            host_split[2] = path_split[1]
+        scheme_added = urlparse.urlunparse(host_split)
+        self.host = scheme_added.strip('/')
 
     def _get_hashes(self, body):
         '''
@@ -171,24 +182,50 @@ class AkamaiNetstorage(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def delete(self, url):
-        '''Delete a relative url from akamai'
+    def stat(self, url, ntries=5):
+        '''fetch file attributes for a file in XML format.
 
         Inputs:
-        @url : baseURL or the filename relative to the host
+        @url : filename relative to the host when serving
 
         Return: HTTPResponse object
         '''
-        response = yield self._update_action(url, 'delete')
+        response = yield self._read_only_action(url, 'stat', ntries=ntries)
+        raise tornado.gen.Return(response)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def dir(self, url, ntries=5):
+        '''ffetch directory listing for an object in XML format.
+
+        Inputs:
+        @url : filename relative to the host when serving
+
+        Return: HTTPResponse object
+        '''
+        response = yield self._read_only_action(url, 'dir', ntries=ntries)
+        raise tornado.gen.Return(response)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete(self, url, ntries=5):
+        '''Delete a relative url from akamai'
+
+        Inputs:
+        @url : filename relative to the host when serving
+
+        Return: HTTPResponse object
+        '''
+        response = yield self._update_action(url, 'delete', ntries=ntries)
         raise tornado.gen.Return(response)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def upload(self, url, body, index_zip=None, mtime=None, size=None,
-               md5=None, sha1=None, sha256=None):
+               md5=None, sha1=None, sha256=None, ntries=5):
         '''
         Upload data to Akamai
-        @url : baseURL or the filename relative to host
+        @url : filename relative to host when serving
         @body : string of file contents to upload if applicable
         @index_zip: Boolean which sets whether to enable az2z processing to index
                    uploaded .zip archive files for the "serve-from-zip" feature
@@ -207,11 +244,11 @@ class AkamaiNetstorage(object):
 
         response = yield self._update_action(
             url, 'upload', body, index_zip, mtime, size,
-            md5, sha1, sha256)
+            md5, sha1, sha256, ntries=ntries)
         raise tornado.gen.Return(response)
 
     @tornado.gen.coroutine
-    def _read_only_action(self, url, action):
+    def _read_only_action(self, url, action, ntries=5):
         # This internal function implements all of the read-only actions.  They
         # are all essentially identical, aside from the action name itself, and
         # of course the output.  But the output is returned via the same type of
@@ -219,7 +256,7 @@ class AkamaiNetstorage(object):
         # method, and all such actions require the "format=xml" key-value pair.
         self.prepare_g2o()
 
-        url = self.baseurl + url
+        url = '/%s/%s' % (self.cpcode, url.strip('/'))
         
         fmt = "version=%s"
         if action:
@@ -244,43 +281,25 @@ class AkamaiNetstorage(object):
             headers=headers,
             request_timeout=10.0,
             connect_timeout=5.0)
-        response = yield tornado.gen.Task(utils.http.send_request, req)
+        response = yield tornado.gen.Task(utils.http.send_request, req,
+                                          ntries=ntries)
 
         raise tornado.gen.Return(response)
 
     @tornado.gen.coroutine
-    def _update_action(self, url, action, body='', index_zip=None, mtime=None,                       size=None, md5=None, sha1=None, sha256=None, 
+    def _update_action(self, url, action, body='', index_zip=None, mtime=None,
+                       size=None, md5=None, sha1=None, sha256=None, 
                        destination=None, target=None, qd_confirm=None,
-                       field=None):
-        # This internal function implements all of the update actions.  Each has
-        # optional or required arguments; whether or not they are present when
-        # required is enforced by the wrapper method interface.  Update-actions
-        # require the "POST" or "PUT" method, which we treat equivalently.
-        # Unlike read-only actions, "format=xml" is not required or used.
+                       field=None, ntries=5):
+        # This internal function implements all of the update actions.
+        # Each has optional or required arguments; whether or not they
+        # are present when required is enforced by the wrapper method
+        # interface.  Update-actions require the "POST" or "PUT"
+        # method, which we treat equivalently.  Unlike read-only
+        # actions, "format=xml" is not required or used.
 
         self.prepare_g2o()
-        url = self.baseurl + url
-
-        # Assemble log message
-        msg = ""
-        if index_zip:
-            msg += 'index_zip="%s"' % index_zip
-        if mtime:
-            msg += 'mtime="%s"' % mtime
-        if size:
-            msg += 'size="%s"' % size
-        if md5:
-            msg += 'md5="%s"' % md5
-        if sha1:
-            msg += 'sha1="%s"' % sha1
-        if sha256:
-            msg += 'sha256="%s"' % sha256
-        if destination:
-            msg += 'destination="%s"' % urllib.quote_plus(destination)
-        if target:
-            msg += 'target="%s"' % urllib.quote_plus(target)
-        if qd_confirm:
-            msg += 'qd_confirm="%s"' % qd_confirm
+        url = '/%s/%s' % (self.cpcode, url.strip('/'))
 
         # assemble action string
         fmt = "version=%s"
@@ -332,7 +351,7 @@ class AkamaiNetstorage(object):
             request_timeout=10.0,
             connect_timeout=5.0)
         response = yield tornado.gen.Task(
-            utils.http.send_request, req, ntries=2) 
+            utils.http.send_request, req, ntries=ntries) 
                         
         raise tornado.gen.Return(response)
 
@@ -342,8 +361,9 @@ if __name__ == "__main__" :
     host = "http://fbnneon-nsu.akamaihd.net"
     key = "kx6L370D6gcHP17emUs8f1203io6DhvjDGu88H1KEa9230uwPn"
     name = "fbneon"
-    baseURL = "/344611"
+    baseURL = "344611"
     ak = AkamaiNetstorage(host, key, name, baseURL)
-    r = ak.upload("/test3", "foo bar tornado2")
-    print r
-    print ak.delete("/test3")
+    print ak.stat('/test2', ntries=1).code
+    #print ak.upload("/test2", "foo bar tornado4")
+    #print r
+    #print ak.delete("/test3")
