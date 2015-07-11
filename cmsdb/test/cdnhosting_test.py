@@ -24,6 +24,7 @@ import test_utils.redis
 import tornado.testing
 import unittest
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
+import urlparse
 from utils.imageutils import PILImageUtils
 import utils.neon
 
@@ -51,6 +52,12 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.datamock.PrimaryNeonHostingMetadata = \
                             neondata.PrimaryNeonHostingMetadata
 
+        # Mock out the cdn url check
+        self.cdn_check_patcher = patch('cmsdb.cdnhosting.utils.http')
+        self.mock_cdn_url = self._callback_wrap_mock(
+            self.cdn_check_patcher.start().send_request)
+        self.mock_cdn_url.side_effect = lambda x: HTTPResponse(x, 200)
+
         random.seed(1654984)
 
         self.image = PILImageUtils.create_random_image(480, 640)
@@ -59,6 +66,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     def tearDown(self):
         self.neondata_patcher.stop()
         self.s3_patcher.stop()
+        self.cdn_check_patcher.stop()
         super(TestAWSHosting, self).tearDown()
 
     @tornado.testing.gen_test
@@ -93,17 +101,15 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         Test hosting the Primary copy for a image in Neon's primary 
         hosting bucket
         '''
-       
-        # use the default bucket in the class to test with
-        self.s3conn.create_bucket('host-thumbnails')
-        metadata = neondata.PrimaryNeonHostingMetadata('acct1')
+        metadata = neondata.PrimaryNeonHostingMetadata(
+            'acct1', 'hosting-bucket')
 
         hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
         url = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
         self.assertEqual(
             url,
-            "http://s3.amazonaws.com/host-thumbnails/acct1/vid1/tid1.jpg")
-        self.bucket = self.s3conn.get_bucket('host-thumbnails')
+            "http://s3.amazonaws.com/hosting-bucket/acct1/vid1/tid1.jpg")
+        self.bucket = self.s3conn.get_bucket('hosting-bucket')
         s3_key = self.bucket.get_key('acct1/vid1/tid1.jpg')
         self.assertIsNotNone(s3_key)
         self.assertEqual(s3_key.content_type, 'image/jpeg')
@@ -115,27 +121,55 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         Test hosting the Primary copy for a image in Neon's primary 
         hosting bucket
         '''
-       
-        # use the default bucket in the class to test with
-        self.s3conn.create_bucket('host-thumbnails')
         metadata = neondata.PrimaryNeonHostingMetadata(
             'acct1',
+            'hosting-bucket',
             folder_prefix='my/folder/path')
 
         hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
         url = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
         self.assertEqual(
             url,
-            "http://s3.amazonaws.com/host-thumbnails/my/folder/path/acct1/vid1/tid1.jpg")
-        self.bucket = self.s3conn.get_bucket('host-thumbnails')
+            "http://s3.amazonaws.com/hosting-bucket/my/folder/path/acct1/vid1/tid1.jpg")
+        self.bucket = self.s3conn.get_bucket('hosting-bucket')
         s3_key = self.bucket.get_key('my/folder/path/acct1/vid1/tid1.jpg')
         self.assertIsNotNone(s3_key)
         self.assertEqual(s3_key.content_type, 'image/jpeg')
         self.assertEqual(s3_key.policy, 'public-read')
 
     @tornado.testing.gen_test
+    def test_overwrite_image(self):
+        metadata = neondata.PrimaryNeonHostingMetadata(
+            'acct1', 'hosting-bucket')
+        hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+
+        # Do initial upload
+        url = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+        s3key = self.bucket.get_key('acct1/vid1/tid1.jpg')
+        orig_etag = s3key.etag
+
+        # Now upload, but don't overwrite
+        new_image = PILImageUtils.create_random_image(480, 640)
+        yield hoster.upload(new_image, 'acct1_vid1_tid1', overwrite=False,
+                            async=True)
+
+        # Check the file contents
+        s3key = self.bucket.get_key('acct1/vid1/tid1.jpg')
+        self.assertIsNotNone(s3key)
+        self.assertEquals(s3key.etag, orig_etag)
+
+        # Now overwrite
+        yield hoster.upload(new_image, 'acct1_vid1_tid1', async=True)
+            
+        buf = StringIO()
+        s3key = self.bucket.get_key('acct1/vid1/tid1.jpg')
+        self.assertNotEquals(s3key.etag, orig_etag)
+            
+
+    @tornado.testing.gen_test
     def test_permissions_error_uploading_image(self):
         self.s3conn.get_bucket = MagicMock()
+        self.s3conn.get_bucket().get_key.side_effect = [None]
         self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3PermissionsError('Permission error')]
         
         metadata = neondata.S3CDNHostingMetadata(None,
@@ -151,6 +185,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_create_error_uploading_image(self):
         self.s3conn.get_bucket = MagicMock()
+        self.s3conn.get_bucket().get_key.side_effect = [None]
         self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3CreateError('oops', 'seriously, oops')]
         
         metadata = neondata.S3CDNHostingMetadata(None,
@@ -282,28 +317,37 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
         self.s3conn.create_bucket('hosting-bucket')
         self.bucket = self.s3conn.get_bucket('hosting-bucket')
 
+        # Mock out the cdn url check
+        self.cdn_check_patcher = patch('cmsdb.cdnhosting.utils.http')
+        self.mock_cdn_url = self._callback_wrap_mock(
+            self.cdn_check_patcher.start().send_request)
+        self.mock_cdn_url.side_effect = lambda x: HTTPResponse(x, 200)
+
+        random.seed(1654984)
+
+        sizes = [(640, 480), (160, 90)]
+        self.metadata = neondata.NeonCDNHostingMetadata(None,
+            'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
+            'folder1', True, True, False, False, sizes)
+
         self.image = PILImageUtils.create_random_image(480, 640)
         super(TestAWSHostingWithServingUrls, self).setUp()
 
     def tearDown(self):
         self.s3_patcher.stop()
+        self.cdn_check_patcher.stop()
         self.redis.stop()
         super(TestAWSHostingWithServingUrls, self).tearDown()
 
     @tornado.testing.gen_test
     def test_host_resized_images(self):
-        sizes = [(640, 480), (160, 90)]
-        metadata = neondata.NeonCDNHostingMetadata(None,
-            'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
-            'folder1', True, True, False, False, sizes)
-
-        hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+        hoster = cmsdb.cdnhosting.CDNHosting.create(self.metadata)
         yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
 
         serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
         self.assertIsNotNone(serving_urls)
 
-        for w, h in sizes:
+        for w, h in self.metadata.rendition_sizes:
 
             # check that the image is in s3
             key_name = 'folder1/neontnacct1_vid1_tid1_w%i_h%i.jpg' % (w, h)
@@ -323,13 +367,31 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
                 url, 'http://cdn[1-2].cdn.com/%s' % key_name)
 
     @tornado.testing.gen_test
-    def test_salted_path(self):
-        sizes = [(640, 480), (160, 90), (1960, 1080)]
-        metadata = neondata.NeonCDNHostingMetadata(None,
-            'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
-            'folder1', True, True, True, False, sizes)
+    def test_https_cdn_prefix(self):
+        self.metadata.cdn_prefixes = ['https://cdn1.cdn.com/neon',
+                                      'https://cdn2.cdn.com/neon']
 
-        hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+        hoster = cmsdb.cdnhosting.CDNHosting.create(self.metadata)
+        yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+
+        serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
+        self.assertIsNotNone(serving_urls)
+
+        for w, h in self.metadata.rendition_sizes:
+            key_name = 'folder1/neontnacct1_vid1_tid1_w%i_h%i.jpg' % (w, h)
+            s3key = self.bucket.get_key(key_name)
+            self.assertIsNotNone(s3key)
+
+            url = serving_urls.get_serving_url(w, h)
+            self.assertRegexpMatches(
+                url, 'https://cdn[1-2].cdn.com/neon/%s' % key_name)
+                                                   
+
+    @tornado.testing.gen_test
+    def test_salted_path(self):
+        self.metadata.do_salt = True
+
+        hoster = cmsdb.cdnhosting.CDNHosting.create(self.metadata)
         yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
 
         serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
@@ -366,79 +428,142 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
             self.assertEqual(s3key.policy, 'public-read')
 
         # Make sure that all the expected files were found
-        self.assertItemsEqual(sizes_found, sizes)
+        self.assertItemsEqual(sizes_found, self.metadata.rendition_sizes)
 
         # Make sure that the folders were the same
-        self.assertEquals(len(folders_found), len(sizes))
+        self.assertEquals(len(folders_found),
+                          len(self.metadata.rendition_sizes))
         self.assertEquals(len(set(folders_found)), 1)
 
         # Make sure the base urls were the same
-        self.assertEquals(len(base_urls), len(sizes))
+        self.assertEquals(len(base_urls), len(self.metadata.rendition_sizes))
         self.assertEquals(len(set(base_urls)), 1)
 
     @tornado.testing.gen_test
     def test_delete_salted_image(self):
-        sizes = [(640, 480)]
-        metadata = neondata.NeonCDNHostingMetadata(None,
-            'hosting-bucket', ['cdn1.cdn.com'],
-            'folder1', True, True, True, False, sizes)
+        self.metadata.do_salt = True
 
-        hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+        hoster = cmsdb.cdnhosting.CDNHosting.create(self.metadata)
         yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
 
-        self.assertEquals(len(list(self.bucket.list())), 1)
+        self.assertEquals(len(list(self.bucket.list())), 2)
 
         serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
         self.assertIsNotNone(serving_urls)
 
         yield hoster.delete(serving_urls.get_serving_url(640,480), async=True)
 
-        self.assertEquals(len(list(self.bucket.list())), 0)
+        self.assertEquals(len(list(self.bucket.list())), 1)
+
+    @tornado.testing.gen_test
+    def test_change_rendition_sizes(self):
+        # Upload 640x480 & 160x90
+        hoster = cmsdb.cdnhosting.CDNHosting.create(self.metadata)
+        yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+        
+        serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
+        self.assertIsNotNone(serving_urls)
+
+        for w, h in self.metadata.rendition_sizes:
+            key_name = 'folder1/neontnacct1_vid1_tid1_w%i_h%i.jpg' % (w, h)
+            s3key = self.bucket.get_key(key_name)
+            self.assertIsNotNone(s3key)
+
+        # Change the rendition sizes to be 320x240 & 160x90 but keep
+        # the old rendition around
+        self.metadata.rendition_sizes = [(320, 240), (160, 90)]
+        hoster = cmsdb.cdnhosting.CDNHosting.create(self.metadata)
+        yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+
+        # Check that the serving urls include the intersection
+        serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
+        for w, h in [(320, 240), (160, 90), (640, 480)]:
+            self.assertRegexpMatches(serving_urls.get_serving_url(w, h),
+                                     'http://cdn[1-2].cdn.com/.*\.jpg')
+
+        # Now overwrite the serving urls and check that the 640x480 isn't there
+        yield hoster.upload(self.image, 'acct1_vid1_tid1',
+                            servingurl_overwrite=True, async=True)
+        serving_urls = neondata.ThumbnailServingURLs.get('acct1_vid1_tid1')
+        for w, h in [(320, 240), (160, 90)]:
+            self.assertRegexpMatches(serving_urls.get_serving_url(w, h),
+                                     'http://cdn[1-2].cdn.com/.*\.jpg')
+        with self.assertRaises(KeyError):
+            serving_urls.get_serving_url(640, 480)
+
+        # Make sure the keys are consistent in S3
+        for w, h in self.metadata.rendition_sizes:
+            key_name = 'folder1/neontnacct1_vid1_tid1_w%i_h%i.jpg' % (w, h)
+            s3key = self.bucket.get_key(key_name)
+            self.assertIsNotNone(s3key)
+
+        # Don't delete the 640x480 image because it will take a while
+        # until we stop serving it.
+        s3key = self.bucket.get_key(
+            'folder1/neontnacct1_vid1_tid1_w640_h480.jpg')
+        self.assertIsNotNone(s3key)
+
+    @tornado.testing.gen_test
+    def test_bad_url_generated(self):
+        self.mock_cdn_url.side_effect = lambda x: HTTPResponse(
+            x, 404, error=HTTPError(404))
+        hoster = cmsdb.cdnhosting.CDNHosting.create(self.metadata)
+
+        with self.assertRaisesRegexp(IOError, 'CDN url .* is invalid'):
+            yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+            
+        # Make sure there are no serving urls
+        self.assertIsNone(neondata.ThumbnailServingURLs.get('acct1_vid1_tid1'))
+        
 
 class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
     '''
     Test uploading images to Akamai
     '''
     def setUp(self):
-        self.http_call_patcher = \
-          patch('api.akamai_api.utils.http.send_request')
-        self.http_mock = self.http_call_patcher.start()
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start() 
-        
-        metadata = neondata.AkamaiCDNHostingMetadata(key=None,
-                host='http://akamai',
-                akamai_key='akey',
-                akamai_name='aname',
-                baseurl='base',
-                cdn_prefixes=['cdn1.akamai.com', 'cdn2.akamai.com']
-                )
-
-        self.hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
-        
-        self.image = PILImageUtils.create_random_image(480, 640)
         super(TestAkamaiHosting, self).setUp()
 
+        # Mock out the http requests, one mock for each type
+        self.akamai_mock = MagicMock()
+        self.akamai_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
+        self.cdn_mock = MagicMock()
+        self.cdn_mock.side_effect = lambda x: HTTPResponse(x, 200)
+        self.http_patcher = patch('cmsdb.cdnhosting.utils.http')
+        self.http_mock = self._callback_wrap_mock(
+            self.http_patcher.start().send_request)
+        def _handle_http_request(request, *args, **kwargs):
+            if 'cdn' in request.url:
+                return self.cdn_mock(request, *args, **kwargs)
+            else:
+                return self.akamai_mock(request, *args, **kwargs)
+        self.http_mock.side_effect = _handle_http_request
+        
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+
+        random.seed(1654984)
+        
+        self.image = PILImageUtils.create_random_image(480, 640)
+
     def tearDown(self):
-        self.http_call_patcher.stop()
+        self.http_patcher.stop()
         self.redis.stop()
         super(TestAkamaiHosting, self).tearDown()
 
-    def _set_http_response(self, code=200, body='', error=None):
-        def do_response(request, callback=None, *args, **kwargs):
-            response = HTTPResponse(request, code,
-                                    buffer=StringIO(body),
-                                    error=error)
-            if callback:
-                tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                             response)
-            else:
-                return response
-        self.http_mock.side_effect = do_response
-
     @tornado.testing.gen_test
     def test_upload_image(self):
-        self._set_http_response()
+        metadata = neondata.AkamaiCDNHostingMetadata(
+            key=None,
+            host='akamai',
+            akamai_key='akey',
+            akamai_name='aname',
+            cpcode='168974',
+            folder_prefix=None,
+            cdn_prefixes=['cdn1.akamai.com', 'cdn2.akamai.com']
+            )
+
+        self.hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+        
         tid = 'customeraccountnamelabel_vid1_tid1'
 
         # the expected root of the url is the first 24 characters of the tid
@@ -448,11 +573,29 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
        
         # Check http mock and Akamai request
         # make sure the http mock was called
-        self.assertGreater(self.http_mock._mock_call_count, 0)
-        headers = self.http_mock._mock_call_args_list[0][0][0].headers 
-        self.assertListEqual(headers.keys(), ['Content-Length',
-            'X-Akamai-ACS-Auth-Data', 'X-Akamai-ACS-Auth-Sign',
-            'X-Akamai-ACS-Action'])
+        self.assertGreater(self.akamai_mock._mock_call_count, 0)
+        upload_requests = [x[0][0] for x in
+                           self.akamai_mock._mock_call_args_list]
+        for request in upload_requests:
+            self.assertItemsEqual(request.headers.keys(),
+                                  ['Content-Length',
+                                   'X-Akamai-ACS-Auth-Data',
+                                   'X-Akamai-ACS-Auth-Sign',
+                                   'X-Akamai-ACS-Action'])
+            actions = urlparse.parse_qs(request.headers['X-Akamai-ACS-Action'])
+            self.assertDictContainsSubset(
+                { 'version': ['1'],
+                  'action' : ['upload'],
+                  'format' : ['xml']
+                  },
+                  actions)
+            self.assertIn('md5', actions)
+                  
+            self.assertRegexpMatches(
+                request.url, 
+                ('http://akamai/168974/%s/[a-zA-Z]/[a-zA-Z]/[a-zA-Z]/'
+                 'neontn%s_w[0-9]+_h[0-9]+.jpg' % (url_root_folder, tid)))
+            self.assertEquals(request.method, "POST")
 
         # Check serving URLs
         ts = neondata.ThumbnailServingURLs.get(tid)
@@ -483,10 +626,108 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
         self.assertEquals(
             base_urls[0],
             'http://cdn1.akamai.com/customeraccountnamelabel/G/l/l')
+
+    @tornado.testing.gen_test
+    def test_with_folder_prefix(self):
+        metadata = neondata.AkamaiCDNHostingMetadata(
+            key=None,
+            host='http://akamai.com/',
+            akamai_key='akey',
+            akamai_name='aname',
+            cpcode='168974',
+            folder_prefix='neon/prod',
+            cdn_prefixes=['https://cdn1.akamai.com', 'https://cdn2.akamai.com']
+            )
+
+        self.hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+        
+        tid = 'customeraccountnamelabel_vid1_tid1'
+
+        # the expected root of the url is the first 24 characters of the tid
+        url_root_folder = tid[:24]
+
+        yield self.hoster.upload(self.image, tid, async=True)
+
+        # Check http mock and Akamai request
+        # make sure the http mock was called
+        self.assertGreater(self.akamai_mock._mock_call_count, 0)
+        upload_requests = [x[0][0] for x in
+                           self.akamai_mock._mock_call_args_list]
+        for request in upload_requests:
+            self.assertItemsEqual(request.headers.keys(),
+                                  ['Content-Length',
+                                   'X-Akamai-ACS-Auth-Data',
+                                   'X-Akamai-ACS-Auth-Sign',
+                                   'X-Akamai-ACS-Action'])
+            actions = urlparse.parse_qs(request.headers['X-Akamai-ACS-Action'])
+            self.assertDictContainsSubset(
+                { 'version': ['1'],
+                  'action' : ['upload'],
+                  'format' : ['xml']
+                  },
+                  actions)
+            self.assertIn('md5', actions)
+                  
+            self.assertRegexpMatches(
+                request.url, 
+                ('http://akamai.com/168974/neon/prod/%s/[a-zA-Z]/[a-zA-Z]/'
+                 '[a-zA-Z]/neontn%s_w[0-9]+_h[0-9]+.jpg' % 
+                 (url_root_folder, tid)))
+            self.assertEquals(request.method, "POST")
+
+        # Check serving URLs
+        ts = neondata.ThumbnailServingURLs.get(tid)
+        self.assertGreater(len(ts.size_map), 0)
+
+        # Verify the final image URLs. This should be the account id 
+        # followed by 3 sub folders whose name should be a single letter
+        # (lower or uppercase) choosen randomly, then the thumbnail file
+        for (w, h), url in ts.size_map.iteritems():
+            url = ts.get_serving_url(w, h)
+            url_re = ('(https://cdn[12].akamai.com/neon/prod/%s/[a-zA-Z]/'
+                      '[a-zA-Z]/[a-zA-Z])/neontn%s_w%s_h%s.jpg' % 
+                      (url_root_folder,tid, w, h))
+                
+            self.assertRegexpMatches(url, url_re)
+
+    @tornado.testing.gen_test
+    def test_no_overwrite(self):
+        metadata = neondata.AkamaiCDNHostingMetadata(
+            key=None,
+            host='akamai',
+            akamai_key='akey',
+            akamai_name='aname',
+            cpcode='168974',
+            folder_prefix=None,
+            cdn_prefixes=['cdn1.akamai.com', 'cdn2.akamai.com'],
+            rendition_sizes=[(640, 480)]
+            )
+
+        self.hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+
+        yield self.hoster.upload(self.image, 'some_vid_tid', overwrite=False,
+                                 async=True)
+
+        # Only one call should have been sent to akamai and it should be a stat
+        self.assertEquals(self.akamai_mock.call_count, 1)
+        cargs, kwargs = self.akamai_mock.call_args
+        request = cargs[0]
+        self.assertIn('action=stat', request.headers['X-Akamai-ACS-Action'])
+        
     
     @tornado.testing.gen_test
     def test_upload_image_error(self):
-        self._set_http_response(code=500)
+        self.akamai_mock.side_effect = lambda x, **kw: HTTPResponse(x, 500)
+        metadata = neondata.AkamaiCDNHostingMetadata(
+            key=None,
+            host='http://akamai',
+            akamai_key='akey',
+            akamai_name='aname',
+            cpcode='168974',
+            cdn_prefixes=['cdn1.akamai.com', 'cdn2.akamai.com']
+            )
+
+        self.hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
         tid = 'akamai_vid1_tid2'
         
         with self.assertLogExists(logging.ERROR, 
@@ -494,11 +735,36 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(IOError):
                 yield self.hoster.upload(self.image, tid, async=True)
         
-        self.assertGreater(self.http_mock._mock_call_count, 0)
+        self.assertGreater(self.akamai_mock._mock_call_count, 0)
         
         ts = neondata.ThumbnailServingURLs.get(tid)
         self.assertIsNone(ts)
 
+    @tornado.testing.gen_test
+    def test_bad_url_generated(self):
+        self.cdn_mock.side_effect = lambda x: HTTPResponse(
+            x, 404, error=HTTPError(404))
+        
+        metadata = neondata.AkamaiCDNHostingMetadata(
+            key=None,
+            host='akamai',
+            akamai_key='akey',
+            akamai_name='aname',
+            cpcode='168974',
+            folder_prefix=None,
+            cdn_prefixes=['cdn1.akamai.com', 'cdn2.akamai.com']
+            )
+
+        self.hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+        
+        tid = 'customeraccountnamelabel_vid1_tid1'
+
+        with self.assertRaisesRegexp(IOError, 'CDN url .* is invalid'):
+            yield self.hoster.upload(self.image, tid, async=True)
+            
+        # Make sure there are no serving urls
+        self.assertIsNone(neondata.ThumbnailServingURLs.get(tid))
+        
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()

@@ -1170,11 +1170,12 @@ class DirectivePublisher(threading.Thread):
                 # Write the file that is timestamped
                 key = bucket.new_key(filename)
                 gzip_file.seek(0)
-                key.set_contents_from_file(
+                data_size = key.set_contents_from_file(
                     gzip_file,
                     encrypt_key=True,
-                    headers={'Content-Type': 'application/x-gzip'})
-                statemon.state.directive_file_size = key.size
+                    headers={'Content-Type': 'application/x-gzip'},
+                    replace=True)
+                statemon.state.directive_file_size = data_size
 
                 # Copy the file to the REST endpoint
                 key.copy(bucket.name, options.directive_filename,

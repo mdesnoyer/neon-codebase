@@ -52,6 +52,7 @@ define('cloudinary_api_secret', default='n0E7427lrS1Fe_9HLbtykf9CdtA',
 statemon.define('upload_error', int)
 statemon.define('s3_upload_error', int)
 statemon.define('akamai_upload_error', int)
+statemon.define('invalid_cdn_url', int)
 
 def get_s3_hosting_bucket():
     '''Returns the bucket that hosts the images.'''
@@ -120,10 +121,12 @@ class CDNHosting(object):
         self.resize = cdn_metadata.resize
         self.update_serving_urls = cdn_metadata.update_serving_urls
         self.rendition_sizes = cdn_metadata.rendition_sizes or []
+        self.cdn_prefixes = cdn_metadata.cdn_prefixes
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def upload(self, image, tid, url=None, overwrite=True):
+    def upload(self, image, tid, url=None, overwrite=True,
+               servingurl_overwrite=False):
         '''
         Host images on the CDN
 
@@ -138,6 +141,7 @@ class CDNHosting(object):
         url - URL of the image that's already live. This is optional but some
               CDNHosting objects might use this instead of the image.
         overwrite - Should existing files be overwritten?
+        servingurl_overwrite - Should the serving urls be overwritten?
         '''
         new_serving_thumbs = [] # (url, width, height)
         cdn_url = None
@@ -153,7 +157,13 @@ class CDNHosting(object):
                 try:
                     cdn_url = yield self._upload_impl(im, tid, url, overwrite,
                                                       async=True)
-                    if cdn_url is not None:
+                    is_cdn_url_valid = yield self._check_cdn_url(cdn_url)
+                    if not is_cdn_url_valid:
+                        msg = 'CDN url %s is invalid' % cdn_url
+                        _log.error_n(msg, 100);
+                        statemon.state.increment('invalid_cdn_url')
+                        raise IOError(msg)
+                    elif cdn_url is not None:
                         new_serving_thumbs.append((cdn_url, sz[0], sz[1]))
                 except IOError:
                     statemon.state.increment('upload_error')
@@ -175,14 +185,31 @@ class CDNHosting(object):
                 for params in new_serving_thumbs:
                     obj.add_serving_url(*params)
 
-            yield tornado.gen.Task(
-                cmsdb.neondata.ThumbnailServingURLs.modify,
-                tid,
-                add_serving_urls,
-                create_missing=True)
+            if servingurl_overwrite:
+                url_obj = cmsdb.neondata.ThumbnailServingURLs(tid)
+                add_serving_urls(url_obj)
+                url_obj.save()
+            else:
+                yield tornado.gen.Task(
+                    cmsdb.neondata.ThumbnailServingURLs.modify,
+                    tid,
+                    add_serving_urls,
+                    create_missing=True)
         
         # return the CDN URL 
         raise tornado.gen.Return(cdn_url)
+
+    @tornado.gen.coroutine
+    def _check_cdn_url(self, url):
+        '''Returns True if we have a valid response from the CDN URL.'''
+        request = tornado.httpclient.HTTPRequest(
+            url, 'GET',
+            headers={'Accept': 'image/*'})
+        response = yield tornado.gen.Task(utils.http.send_request,
+                                          request)
+        if response.error:
+            raise tornado.gen.Return(False)
+        raise tornado.gen.Return(True)
         
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -257,9 +284,10 @@ class AWSHosting(CDNHosting):
         self.s3bucket_name = cdn_metadata.bucket_name
         self.s3bucket = None
         self.cdn_prefixes = cdn_metadata.cdn_prefixes
-        self.folder_prefix = cdn_metadata.folder_prefix or ''
-        if self.folder_prefix.endswith('/'):
-            self.folder_prefix = self.folder_prefix[:-1]
+        if cdn_metadata.folder_prefix:
+            self.folder_prefix = cdn_metadata.folder_prefix.strip('/')
+        else:
+            self.folder_prefix = None
         self.do_salt = cdn_metadata.do_salt
         self.make_tid_folders = cdn_metadata.make_tid_folders
 
@@ -282,7 +310,7 @@ class AWSHosting(CDNHosting):
         if self.cdn_prefixes and len(self.cdn_prefixes) > 0:
             cdn_prefix = rng.choice(self.cdn_prefixes)
         else:
-            cdn_prefix = "s3.amazonaws.com/%s" % self.s3bucket_name
+            cdn_prefix = "http://s3.amazonaws.com/%s" % self.s3bucket_name
 
 
         # Build the key name
@@ -300,7 +328,7 @@ class AWSHosting(CDNHosting):
                                (tid, image.size[0], image.size[1]))
         key_name = '/'.join(name_pieces)
 
-        cdn_url = "http://%s/%s" % (cdn_prefix, key_name)
+        cdn_url = "%s/%s" % (cdn_prefix, key_name)
         fmt = 'jpeg'
         filestream = StringIO()
         image.save(filestream, fmt, quality=90) 
@@ -314,8 +342,21 @@ class AWSHosting(CDNHosting):
             policy = 'public-read'
 
         try:
-            key = s3bucket.new_key(key_name)
-
+            key = s3bucket.get_key(key_name)
+            if key is None:
+                key = s3bucket.new_key(key_name)
+            elif not overwrite:
+                # We're done because the object is already there
+                raise tornado.gen.Return(cdn_url)
+            else:
+                # We are overwriting, but check the size to see if it
+                # matches. If it does, don't bother uploading because
+                # it's probably the same image. Thank you lossy jpeg
+                # compression. I'd love to do an md5, but we don't get
+                # that from S3
+                if key.size and filestream.len == key.size:
+                    raise tornado.gen.Return(cdn_url)
+                
             yield utils.botoutils.run_async(
                 key.set_contents_from_string,
                 imgdata,
@@ -456,16 +497,15 @@ class AkamaiHosting(CDNHosting):
 
     def __init__(self, cdn_metadata):
         super(AkamaiHosting, self).__init__(cdn_metadata)
-        base_split = cdn_metadata.baseurl.strip('/').split('/')
-        self.extra_dirs = base_split[1:]
-        self.cdn_prefixes = [
-            re.sub('/'+'/'.join(self.extra_dirs), '', x).strip('/')
-            for x in cdn_metadata.cdn_prefixes]
+        if cdn_metadata.folder_prefix:
+            self.folder_prefix = cdn_metadata.folder_prefix.strip('/')
+        else:
+            self.folder_prefix = None
         self.ak_conn = api.akamai_api.AkamaiNetstorage(
             cdn_metadata.host,
             cdn_metadata.akamai_key,
             cdn_metadata.akamai_name,
-            '/' + base_split[0])
+            cdn_metadata.cpcode)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -489,9 +529,9 @@ class AkamaiHosting(CDNHosting):
         # break in the future if the tid scheme changes. Another option would 
         # be to add a root folder to the class that would be set using the 
         # account id. For now, this is fine so go with it.
-        name_pieces = ['']
-        if len(self.extra_dirs) > 0:
-            name_pieces.extend(self.extra_dirs)
+        name_pieces = []
+        if self.folder_prefix:
+            name_pieces.extend(self.folder_prefix.split('/'))
                 
         name_pieces.append(tid[:24])
         for _ in range(3):
@@ -504,7 +544,14 @@ class AkamaiHosting(CDNHosting):
         image_url = '/'.join(name_pieces)
         
         # the full cdn url
-        cdn_url = "http://%s%s" % (cdn_prefix, image_url)
+        cdn_url = "%s/%s" % (cdn_prefix, image_url)
+
+        # If we do not overwrite and it's already there, stop
+        if not overwrite:
+            stat_response = yield self.ak_conn.stat(image_url, ntries=1,
+                                                    async=True)
+            if stat_response.code == 200:
+                raise tornado.gen.Return(cdn_url) 
 
         # Get the image data
         fmt = 'jpeg'
@@ -533,7 +580,7 @@ class AkamaiHosting(CDNHosting):
         '''
 
         rel_path = urlparse.urlparse(url).path.strip('/')
-        response = yield self.ak_conn.delete('/'+rel_path, async=True)
+        response = yield self.ak_conn.delete(rel_path, async=True)
         if response.error and response.error.code != 404:
             msg = ("Error delete image %s from akamai: %s" 
                    % (url, response.error))
