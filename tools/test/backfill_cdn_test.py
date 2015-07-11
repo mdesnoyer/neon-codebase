@@ -50,7 +50,7 @@ class TestBackfillCDN(test_utils.neontest.AsyncTestCase):
                 host='http://akamai',
                 akamai_key='akey',
                 akamai_name='aname',
-                baseurl='base',
+                cpcode='34563',
                 cdn_prefixes=['cdn.akamai.com']
                 )
         
