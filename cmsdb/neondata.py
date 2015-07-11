@@ -851,8 +851,11 @@ class StoredObject(object):
             obj = classtype(key)
 
             #populate the object dictionary
-            for k, value in data_dict.iteritems():
-                obj.__dict__[str(k)] = cls._deserialize_field(k, value)
+            try:
+                for k, value in data_dict.iteritems():
+                    obj.__dict__[str(k)] = cls._deserialize_field(k, value)
+            except ValueError:
+                return None
         
             return obj
 
@@ -863,7 +866,12 @@ class StoredObject(object):
         if isinstance(value, dict):
             if '_type' in value and '_data' in value:
                 # It is a stored object, so unpack it
-                return cls._create(key, value)
+                try:
+                    classtype = globals()[value['_type']]
+                    return classtype._create(key, value)
+                except KeyError:
+                    _log.error('Unknown class of type %s' % value['_type'])
+                    raise ValueError('Bad class type %s' % value['_type'])
             else:
                 # It is a dictionary do deserialize each of the fields
                 for k, v in value.iteritems():
@@ -1888,7 +1896,7 @@ class CDNHostingMetadata(NamespacedStoredObject):
         obj = super(CDNHostingMetadata, cls)._create(key, obj_dict)
 
         # Normalize the CDN prefixes
-        new_cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
+        obj.cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
                                obj.cdn_prefixes)
         
         return obj
