@@ -281,6 +281,8 @@ class MockBucket(object):
         new_key.content_type = src_key.content_type
         new_key.last_modified = src_key.last_modified
         new_key.redirect_destination = src_key.redirect_destination
+        self.keys[new_key.name] = new_key
+        self.acls[new_key.name] = MockAcl()
         return new_key
 
     def disable_logging(self):
