@@ -508,7 +508,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             cdn_list = CDNHostingMetadataList._create(
                 'api-key_integration0',
                 json.loads(bad_json))
-            self.assertItemsEqual(cdn_list, [])
+            self.assertIsNone(cdn_list)
 
     def test_hosting_metadata_list_bad_key(self):
         with self.assertRaises(ValueError):
@@ -532,7 +532,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEquals(folder_in_cdn_prefixes.cpcode, '17200')
         self.assertEquals(folder_in_cdn_prefixes.folder_prefix, 'neon/prod')
         self.assertEquals(folder_in_cdn_prefixes.cdn_prefixes,
-                          ['www.gannett-cdn.com'])
+                          ['http://www.gannett-cdn.com'])
 
         folder_not_in_cdn_prefixes = neondata.AkamaiCDNHostingMetadata._create(
             None,
@@ -550,7 +550,23 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEquals(folder_not_in_cdn_prefixes.folder_prefix,
                           'neon/prod')
         self.assertEquals(folder_not_in_cdn_prefixes.cdn_prefixes,
-                          ['static.neon.groupetva.ca'])
+                          ['http://static.neon.groupetva.ca'])
+
+    def test_old_s3_hosting_list(self):
+        old_str = "{\"_type\": \"CDNHostingMetadataList\", \"_data\": {\"_id\": \"9xmw08l4ln1rk8uhv3txwbg1_0\", \"cdns\": [{\"_type\": \"S3CDNHostingMetadata\", \"_data\": {\"access_key\": \"AKIAJZOPH5BBEXRQFCKA\", \"folder_prefix\": \"thumbs/neon/\", \"update_serving_urls\": true, \"bucket_name\": \"o.assets.ign.com\", \"key\": null, \"cdn_prefixes\": [\"assets.ign.com\", \"assets2.ignimgs.com\"], \"secret_key\": \"sdErEhAMR1XARhQ8qjKH4P4ZTjCf1WiU6+lKV4aL\", \"do_salt\": false, \"resize\": true}}], \"key\": \"cdnhostingmetadatalist_9xmw08l4ln1rk8uhv3txwbg1_0\"}}"
+
+        obj_dict = json.loads(old_str)
+        cdn_list = neondata.CDNHostingMetadataList._create(
+            obj_dict['_data']['key'],
+            obj_dict)
+        self.assertEquals(cdn_list.cdns[0].cdn_prefixes,
+                          ["http://assets.ign.com",
+                           "http://assets2.ignimgs.com"])
+        self.assertEquals(cdn_list.cdns[0].bucket_name,
+                          'o.assets.ign.com')
+        self.assertEquals(cdn_list.cdns[0].folder_prefix,
+                          'thumbs/neon/')
+        
 
     def test_internal_video_id(self):
         '''
