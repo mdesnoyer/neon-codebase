@@ -142,43 +142,44 @@ class CDNHosting(object):
               CDNHosting objects might use this instead of the image.
         overwrite - Should existing files be overwritten?
         servingurl_overwrite - Should the serving urls be overwritten?
+
+        Returns: list [(cdn_url, width, height)]
         '''
         new_serving_thumbs = [] # (url, width, height)
-        cdn_url = None
+        upload_futures = []
         
         # NOTE: if _upload_impl returns None, the image is not added to the 
         # list of serving URLs
+        try:
+            if self.resize:
+                for sz in self.rendition_sizes:
+                    cv_im = pycvutils.from_pil(image)
+                    cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
+                    im = pycvutils.to_pil(cv_im_r)
+                    upload_futures.append(self._upload_and_check_image(
+                        im, tid, url, overwrite))
+            else:
+                upload_futures.append(self._upload_and_check_image(
+                        image, tid, url, overwrite))
 
-        if self.resize:
-            for sz in self.rendition_sizes:
-                cv_im = pycvutils.from_pil(image)
-                cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
-                im = pycvutils.to_pil(cv_im_r)
+            # TODO: Once we use Tornado 4.2+, just use
+            # tornado.gen.multi_future with quiet exceptions. The
+            # problem here is that if there are multiple errors, our
+            # logging system gets overloaded.
+            exception_found = None
+            for future in upload_futures:
                 try:
-                    cdn_url = yield self._upload_impl(im, tid, url, overwrite,
-                                                      async=True)
-                    is_cdn_url_valid = yield self._check_cdn_url(cdn_url)
-                    if not is_cdn_url_valid:
-                        msg = 'CDN url %s is invalid' % cdn_url
-                        _log.error_n(msg, 100);
-                        statemon.state.increment('invalid_cdn_url')
-                        raise IOError(msg)
-                    elif cdn_url is not None:
-                        new_serving_thumbs.append((cdn_url, sz[0], sz[1]))
-                except IOError:
-                    statemon.state.increment('upload_error')
-                    raise
+                    cdn_val = yield future
+                    if cdn_val:
+                        new_serving_thumbs.append(cdn_val)
+                except IOError as e:
+                    exception_found = e
 
-        else:
-            try:
-                cdn_url = yield self._upload_impl(image, tid, url, overwrite,
-                                                  async=True)
-                if cdn_url is not None:
-                    new_serving_thumbs.append((cdn_url, image.size[0],
-                                               image.size[1]))
-            except IOError:
-                statemon.state.increment('upload_error')
-                raise
+            if exception_found is not None:
+                raise exception_found
+        except IOError:
+            statemon.state.increment('upload_error')
+            raise
 
         if self.update_serving_urls and len(new_serving_thumbs) > 0:
             def add_serving_urls(obj):
@@ -197,7 +198,22 @@ class CDNHosting(object):
                     create_missing=True)
         
         # return the CDN URL 
-        raise tornado.gen.Return(cdn_url)
+        raise tornado.gen.Return(new_serving_thumbs)
+
+    @tornado.gen.coroutine
+    def _upload_and_check_image(self, image, tid, url, overwrite):
+        '''Returns a tuple of (cdn_url, width, height).'''
+        cdn_url = yield self._upload_impl(image, tid, url, overwrite,
+                                          async=True)
+        is_cdn_url_valid = yield self._check_cdn_url(cdn_url)
+        if not is_cdn_url_valid:
+            msg = 'CDN url %s is invalid' % cdn_url
+            _log.error_n(msg, 30);
+            statemon.state.increment('invalid_cdn_url')
+            raise IOError(msg)
+        elif cdn_url is not None:
+            raise tornado.gen.Return((cdn_url, image.size[0], image.size[1]))
+        raise tornado.gen.Return(None)
 
     @tornado.gen.coroutine
     def _check_cdn_url(self, url):
@@ -205,8 +221,10 @@ class CDNHosting(object):
         request = tornado.httpclient.HTTPRequest(
             url, 'GET',
             headers={'Accept': 'image/*'})
-        response = yield tornado.gen.Task(utils.http.send_request,
-                                          request)
+        response = yield tornado.gen.Task(
+            utils.http.send_request,
+            request,
+            base_delay=1.0)
         if response.error:
             raise tornado.gen.Return(False)
         raise tornado.gen.Return(True)

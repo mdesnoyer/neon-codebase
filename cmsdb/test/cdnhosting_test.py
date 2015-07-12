@@ -56,7 +56,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.cdn_check_patcher = patch('cmsdb.cdnhosting.utils.http')
         self.mock_cdn_url = self._callback_wrap_mock(
             self.cdn_check_patcher.start().send_request)
-        self.mock_cdn_url.side_effect = lambda x: HTTPResponse(x, 200)
+        self.mock_cdn_url.side_effect = lambda x, **kw: HTTPResponse(x, 200)
 
         random.seed(1654984)
 
@@ -105,9 +105,9 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
             'acct1', 'hosting-bucket')
 
         hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
-        url = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+        urls = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
         self.assertEqual(
-            url,
+            urls[0][0],
             "http://s3.amazonaws.com/hosting-bucket/acct1/vid1/tid1.jpg")
         self.bucket = self.s3conn.get_bucket('hosting-bucket')
         s3_key = self.bucket.get_key('acct1/vid1/tid1.jpg')
@@ -127,9 +127,9 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
             folder_prefix='my/folder/path')
 
         hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
-        url = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+        urls = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
         self.assertEqual(
-            url,
+            urls[0][0],
             "http://s3.amazonaws.com/hosting-bucket/my/folder/path/acct1/vid1/tid1.jpg")
         self.bucket = self.s3conn.get_bucket('hosting-bucket')
         s3_key = self.bucket.get_key('my/folder/path/acct1/vid1/tid1.jpg')
@@ -274,11 +274,11 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         mresponse = tornado.httpclient.HTTPResponse(
             tornado.httpclient.HTTPRequest('http://cloudinary.com'), 
             200, buffer=StringIO(mock_response))
-        mock_http.side_effect = lambda x, callback: callback(
+        mock_http.side_effect = lambda x, callback=None, **kw: callback(
             tornado.httpclient.HTTPResponse(x, 200,
                                             buffer=StringIO(mock_response)))
         url = cd.upload(None, tid, url)
-        self.assertEquals(mock_http.call_count, 1)
+        self.assertEquals(mock_http.call_count, 2)
         self.assertIsNotNone(mock_http._mock_call_args_list[0][0][0]._body)
         self.assertEqual(mock_http._mock_call_args_list[0][0][0].url,
                 "https://api.cloudinary.com/v1_1/neon-labs/image/upload")
@@ -321,7 +321,7 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
         self.cdn_check_patcher = patch('cmsdb.cdnhosting.utils.http')
         self.mock_cdn_url = self._callback_wrap_mock(
             self.cdn_check_patcher.start().send_request)
-        self.mock_cdn_url.side_effect = lambda x: HTTPResponse(x, 200)
+        self.mock_cdn_url.side_effect = lambda x, **kw: HTTPResponse(x, 200)
 
         random.seed(1654984)
 
@@ -505,7 +505,7 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_bad_url_generated(self):
-        self.mock_cdn_url.side_effect = lambda x: HTTPResponse(
+        self.mock_cdn_url.side_effect = lambda x, **kw: HTTPResponse(
             x, 404, error=HTTPError(404))
         hoster = cmsdb.cdnhosting.CDNHosting.create(self.metadata)
 
@@ -527,7 +527,7 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
         self.akamai_mock = MagicMock()
         self.akamai_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
         self.cdn_mock = MagicMock()
-        self.cdn_mock.side_effect = lambda x: HTTPResponse(x, 200)
+        self.cdn_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
         self.http_patcher = patch('cmsdb.cdnhosting.utils.http')
         self.http_mock = self._callback_wrap_mock(
             self.http_patcher.start().send_request)
@@ -742,7 +742,7 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_bad_url_generated(self):
-        self.cdn_mock.side_effect = lambda x: HTTPResponse(
+        self.cdn_mock.side_effect = lambda x, **kw: HTTPResponse(
             x, 404, error=HTTPError(404))
         
         metadata = neondata.AkamaiCDNHostingMetadata(
