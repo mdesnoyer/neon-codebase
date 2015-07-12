@@ -478,7 +478,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         # Mock out http requests
         self.http_mocker = patch('video_processor.client.utils.http.send_request')
         self.http_mock = self._callback_wrap_mock(self.http_mocker.start())
-        self.http_mock.side_effect = lambda x: HTTPResponse(x, 200)
+        self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
 
         # Mock out cloudinary
         self.cloudinary_patcher = patch('cmsdb.cdnhosting.CloudinaryHosting')
@@ -1119,7 +1119,7 @@ class SmokeTest(test_utils.neontest.TestCase):
         self.http_mocker = patch('video_processor.client.utils.http.send_request')
         self.http_mock = self._callback_wrap_mock(self.http_mocker.start())
         self.job_queue = multiprocessing.Queue() # Queue of job param dics
-        def _http_response(request):
+        def _http_response(request, **kw):
             if request.url.endswith('dequeue'):
                 if not self.job_queue.empty():
                     body = json.dumps(self.job_queue.get())

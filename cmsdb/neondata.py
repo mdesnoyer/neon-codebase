@@ -3456,11 +3456,14 @@ class ThumbnailMetadata(StoredObject):
         # Host the primary copy of the image 
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
-        s3_url = yield primary_hoster.upload(image, self.key, async=True)
+        s3_url_list = yield primary_hoster.upload(image, self.key, async=True)
         # TODO (Sunil):  Add redirect for the image
 
         # Add the primary image to Thumbmetadata
-        self.urls.insert(0, s3_url)
+        s3_url = None
+        if len(s3_url_list) == 1:
+            s3_url = s3_url_list[0][0]
+            self.urls.insert(0, s3_url)
 
         # Host the image on the CDN
         if cdn_metadata is None:

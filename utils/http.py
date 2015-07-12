@@ -10,6 +10,7 @@ sys.path.insert(0,os.path.abspath(
 
 import logging
 import Queue
+import random
 import socket
 import threading
 import time
@@ -25,7 +26,7 @@ _log = logging.getLogger(__name__)
 # being called.
 
 def send_request(request, ntries=5, callback=None, cur_try=0,
-                 do_logging=True):
+                 do_logging=True, base_delay=0.2):
     '''Sends an HTTP request with retries
 
     If there was an error, either in the connection, or if the
@@ -40,6 +41,7 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
                returns with its response as the parameter. If it is None,
                this call blocks and returns the HTTPResponse.
     do_logging - True if logging should be turned on
+    base_delay - Time in seconds for the first delay on the retry
 
     '''
 
@@ -96,7 +98,7 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
             return finish_request(response)
 
 
-        delay = (1 << cur_try) * 0.1 # in seconds
+        delay = (1 << cur_try) * base_delay * random.random() # in seconds
         if callback is None:
             time.sleep(delay)
             return send_request(request, ntries, cur_try=cur_try,
@@ -191,7 +193,8 @@ class RequestThread(threading.Thread):
                         callback(response)
                         self.q.task_done()
                     else:
-                        delay = (1 << ntries) * 0.1 # in seconds
+                        # in seconds
+                        delay = (1 << ntries) * 0.2 * random.random()
                         ntries += 1
                         self._delayed_requeue(request, callback, ntries, 
                                               do_logging, delay)

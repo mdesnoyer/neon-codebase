@@ -1631,7 +1631,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.cdn_check_patcher = patch('cmsdb.cdnhosting.utils.http')
         self.mock_cdn_url = self._callback_wrap_mock(
             self.cdn_check_patcher.start().send_request)
-        self.mock_cdn_url.side_effect = lambda x: HTTPResponse(x, 200)
+        self.mock_cdn_url.side_effect = lambda x, **kw: HTTPResponse(x, 200)
 
         random.seed(1654984)
 
