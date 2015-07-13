@@ -62,6 +62,7 @@ import utils.sync
 import utils.s3
 import utils.http 
 import urllib
+import urlparse
 import warnings
 
 
@@ -850,8 +851,11 @@ class StoredObject(object):
             obj = classtype(key)
 
             #populate the object dictionary
-            for k, value in data_dict.iteritems():
-                obj.__dict__[str(k)] = cls._deserialize_field(k, value)
+            try:
+                for k, value in data_dict.iteritems():
+                    obj.__dict__[str(k)] = cls._deserialize_field(k, value)
+            except ValueError:
+                return None
         
             return obj
 
@@ -862,7 +866,12 @@ class StoredObject(object):
         if isinstance(value, dict):
             if '_type' in value and '_data' in value:
                 # It is a stored object, so unpack it
-                return cls._create(key, value)
+                try:
+                    classtype = globals()[value['_type']]
+                    return classtype._create(key, value)
+                except KeyError:
+                    _log.error('Unknown class of type %s' % value['_type'])
+                    raise ValueError('Bad class type %s' % value['_type'])
             else:
                 # It is a dictionary do deserialize each of the fields
                 for k, v in value.iteritems():
@@ -1259,6 +1268,34 @@ class NamespacedStoredObject(StoredObject):
             return  [x for x in 
                      super(NamespacedStoredObject, cls).get_many(keys)
                      if x is not None]
+
+    @classmethod
+    def iterate_all(cls, max_request_size=100):
+        '''A synchronous function that returns an iterator across all the
+        objects in the database.
+
+        The set of keys to grab happens once so if the db changes while
+        the iteration is going, so neither new or deleted objects will
+        be returned.
+
+        #TODO(mdesnoyer): Figure out a way to make this
+        asynchronous. It ain't going to be easy.
+
+        Inputs:
+        max_request_size - Maximum number of objects to request from
+        the database at a time.
+        '''
+        db_connection = DBConnection.get(cls)
+        keys = db_connection.blocking_conn.keys(
+            cls._baseclass_name().lower() + '_*')
+        cur_idx = 0
+        while cur_idx < len(keys):
+            cur_keys = keys[cur_idx:(cur_idx+max_request_size)]
+            for obj in super(NamespacedStoredObject, cls).get_many(cur_keys):
+                if obj is not None:
+                    yield obj
+
+            cur_idx += max_request_size
 
     @classmethod
     def modify(cls, key, func, create_missing=False, callback=None):
@@ -1800,8 +1837,13 @@ class CDNHostingMetadata(NamespacedStoredObject):
                  update_serving_urls=False,
                  rendition_sizes=None):
         self.key = key
-        
-        self.cdn_prefixes = cdn_prefixes # List of url prefixes
+
+        # List of url prefixes to put in front of the path. If there
+        # is no transport scheme, http:// will be added. Also, there
+        # is no trailing slash
+        cdn_prefixes = cdn_prefixes or []
+        self.cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
+                                cdn_prefixes)
         
         # If true, the images should be resized into all the desired
         # renditions.
@@ -1838,17 +1880,44 @@ class CDNHostingMetadata(NamespacedStoredObject):
         raise NotImplementedError()
 
     @classmethod
-    def save_all(self, *args, **kwargs):
+    def save_all(cls, *args, **kwargs):
         raise NotImplementedError()
 
     @classmethod
-    def modify(self, *args, **kwargs):
+    def modify(cls, *args, **kwargs):
         raise NotImplementedError()
 
     @classmethod
-    def modify_many(self, *args, **kwargs):
+    def modify_many(cls, *args, **kwargs):
         raise NotImplementedError()
 
+    @classmethod
+    def _create(cls, key, obj_dict):
+        obj = super(CDNHostingMetadata, cls)._create(key, obj_dict)
+
+        # Normalize the CDN prefixes
+        obj.cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
+                               obj.cdn_prefixes)
+        
+        return obj
+
+    @staticmethod
+    def _normalize_cdn_prefix(prefix):
+      '''Normalizes a cdn prefix so that it starts with a scheme and does
+      not end with a slash.
+
+      e.g. http://neon.com
+           https://neon.com
+      '''
+      prefix_split = urlparse.urlparse(prefix, 'http')
+      if prefix_split.netloc == '':
+        path_split = prefix_split.path.partition('/')
+        prefix_split = [x for x in prefix_split]
+        prefix_split[1] = path_split[0]
+        prefix_split[2] = path_split[1]
+      scheme_added = urlparse.urlunparse(prefix_split)
+      return scheme_added.strip('/')
+      
 class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
     If the images are to be uploaded to S3 bucket use this formatter  
@@ -1885,7 +1954,7 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     def __init__(self, key=None,
                  bucket_name='n3.neon-images.com',
                  cdn_prefixes=None,
-                 folder_prefix='',
+                 folder_prefix=None,
                  resize=True,
                  update_serving_urls=True,
                  do_salt=True,
@@ -1911,7 +1980,7 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     '''
     def __init__(self, key=None,
                  bucket_name='host-thumbnails',
-                 folder_prefix=''):
+                 folder_prefix=None):
         super(PrimaryNeonHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
@@ -1938,18 +2007,49 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
     '''
 
     def __init__(self, key=None, host=None, akamai_key=None, akamai_name=None,
-            baseurl=None, cdn_prefixes=None, rendition_sizes=None):
+                 folder_prefix=None, cdn_prefixes=None, rendition_sizes=None,
+                 cpcode=None):
         super(AkamaiCDNHostingMetadata, self).__init__(
             key,
             cdn_prefixes=cdn_prefixes,
             resize=True,
             update_serving_urls=True,
             rendition_sizes=rendition_sizes)
-        
+
+        # Host for uploading to akamai. Can have http:// or not
         self.host = host
+
+        # Parameters to talk to akamai
         self.akamai_key = akamai_key
         self.akamai_name = akamai_name
-        self.baseurl = baseurl
+
+        # The folder prefix to prepend to where the file will be
+        # stored and served from. Slashes at the beginning and end are
+        # optional
+        self.folder_prefix=folder_prefix
+
+        # CPCode string for uploading to Akamai. Should be something
+        # like 17645
+        self.cpcode = cpcode
+
+    @classmethod
+    def _create(cls, key, obj_dict):
+        obj = super(AkamaiCDNHostingMetadata, cls)._create(key, obj_dict)
+
+        # An old object could have had a baseurl, which was smashed
+        # together the folder prefix and cpcode. That was confusing,
+        # but in case there's an old object around, fix it. Also, in
+        # that case, the cdn_prefixes could have had the folder prefix
+        # in them, so remove them.
+        if hasattr(obj, 'baseurl'):
+            split = obj.baseurl.strip('/').partition('/')
+            obj.cpcode = split[0].strip('/')
+            obj.folder_prefix = split[2].strip('/')
+            obj.cdn_prefixes = [re.sub(obj.folder_prefix, '', x).strip('/')
+                                for x in obj.cdn_prefixes]
+            del obj.baseurl
+        
+        return obj
 
 class AbstractPlatform(NamespacedStoredObject):
     ''' Abstract Platform/ Integration class '''
@@ -3356,11 +3456,14 @@ class ThumbnailMetadata(StoredObject):
         # Host the primary copy of the image 
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
-        s3_url = yield primary_hoster.upload(image, self.key, async=True)
+        s3_url_list = yield primary_hoster.upload(image, self.key, async=True)
         # TODO (Sunil):  Add redirect for the image
 
         # Add the primary image to Thumbmetadata
-        self.urls.insert(0, s3_url)
+        s3_url = None
+        if len(s3_url_list) == 1:
+            s3_url = s3_url_list[0][0]
+            self.urls.insert(0, s3_url)
 
         # Host the image on the CDN
         if cdn_metadata is None:

@@ -250,7 +250,7 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         response = tornado.httpclient.HTTPResponse(request, 200,
                 buffer=StringIO(''), headers={'Content-Length': vsize})
         self.mock_http.send_request.side_effect = \
-                lambda x, callback: callback(response)
+                lambda x, callback, **kw: callback(response)
 
         # Mock out the image download
         self.im_download_mocker = patch(

@@ -20,6 +20,7 @@ import time
 import tornado.gen
 import tornado.httpclient
 import urllib
+import urlparse
 import utils.http
 import utils.logs
 import utils.neon
@@ -127,8 +128,7 @@ class AkamaiNetstorage(object):
     ak.upload(req, body)
     '''
 
-    def __init__(self, host, netstorage_key, netstorage_name, baseurl):
-        self.host = host
+    def __init__(self, host, netstorage_key, netstorage_name, cpcode):
         self.g2o = None
         self.md5 = None
         self.sha1 = None
@@ -136,7 +136,18 @@ class AkamaiNetstorage(object):
         self.version = 1 # API Version
         self.key = netstorage_key
         self.name = netstorage_name
-        self.baseurl = baseurl
+        self.cpcode = cpcode.strip('/') # String cpcode (e.g. 764573)
+
+        # Normalize the host so that it includes the transport scheme
+        # (e.g. http)
+        host_split = urlparse.urlparse(host, 'http')
+        if host_split.netloc == '':
+            path_split = host_split.path.partition('/')
+            host_split = [x for x in host_split]
+            host_split[1] = path_split[0]
+            host_split[2] = path_split[1]
+        scheme_added = urlparse.urlunparse(host_split)
+        self.host = scheme_added.strip('/')
 
     def _get_hashes(self, body):
         '''
@@ -144,12 +155,12 @@ class AkamaiNetstorage(object):
         # its cryptographic hashes, as a tuple.
         '''
 
-        m = hashlib.md5()
-        md5 = m.hexdigest(body)
-        s = hashlib.sha1()
-        sha1 = s.hexdigest(body)
-        sh = hashlib.sha256
-        sha256 = sh.hexdigest(body)
+        m = hashlib.md5(body)
+        md5 = m.hexdigest()
+        s = hashlib.sha1(body)
+        sha1 = s.hexdigest()
+        sh = hashlib.sha256(body)
+        sha256 = sh.hexdigest()
         return (len(body), md5, sha1, sha256)
 
     # set the Akamai ACS authentication header values
@@ -168,52 +179,160 @@ class AkamaiNetstorage(object):
           5: sha256
         '''
         self.g2o = G2OAuth(self.key, self.name, version)
-        
-        if not self.g2o:
-            raise NoG2OAuth
-
-    #def send_request(self, action, url, body=None):
-    #    ''' Send request to akamai
-    #        @action : action to be perfomed (upload, download..)
-    #        @url : baseURL or the filename relative to host
-    #        @body : file contents if applicable
-    #    '''        
-    #
-    #    if action == "upload":
-    #        return self.upload(url, body)
-    #    else:
-    #        raise NotImplementedError()
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def upload(self, url, body):
+    def stat(self, url, ntries=5):
+        '''fetch file attributes for a file in XML format.
+
+        Inputs:
+        @url : filename relative to the host when serving
+
+        Return: HTTPResponse object
+        '''
+        response = yield self._read_only_action(url, 'stat', ntries=ntries)
+        raise tornado.gen.Return(response)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def dir(self, url, ntries=5):
+        '''ffetch directory listing for an object in XML format.
+
+        Inputs:
+        @url : filename relative to the host when serving
+
+        Return: HTTPResponse object
+        '''
+        response = yield self._read_only_action(url, 'dir', ntries=ntries)
+        raise tornado.gen.Return(response)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete(self, url, ntries=5):
+        '''Delete a relative url from akamai'
+
+        Inputs:
+        @url : filename relative to the host when serving
+
+        Return: HTTPResponse object
+        '''
+        response = yield self._update_action(url, 'delete', ntries=ntries)
+        raise tornado.gen.Return(response)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def upload(self, url, body, index_zip=None, mtime=None, size=None,
+               md5=None, sha1=None, sha256=None, ntries=5):
         '''
         Upload data to Akamai
-        @url : baseURL or the filename relative to host
-        @body : file contents if applicable
+        @url : filename relative to host when serving
+        @body : string of file contents to upload if applicable
+        @index_zip: Boolean which sets whether to enable az2z processing to index
+                   uploaded .zip archive files for the "serve-from-zip" feature
+        @mtime: String of decimal digits representing the Unix Epoch time to
+               which the modification time of the file should be set.
+        @size: Enforce that the uploaded file has the specified size
+        @md5: Endforce that the uploaded file has the specified MD5 sum.
+        @sha1: Enforce that the uploaded file has the specified SHA1 hash.
+        @sha256: Enforce that the uploaded file has the specified SHA256 hash.
         
         Return: HTTPResponse object
         '''
-        # Prepare g20 Auth
+        if md5 is None:
+            m = hashlib.md5(body)
+            md5 = m.hexdigest()
+
+        response = yield self._update_action(
+            url, 'upload', body, index_zip, mtime, size,
+            md5, sha1, sha256, ntries=ntries)
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def _read_only_action(self, url, action, ntries=5):
+        # This internal function implements all of the read-only actions.  They
+        # are all essentially identical, aside from the action name itself, and
+        # of course the output.  But the output is returned via the same type of
+        # object, regardless of its form.  Read-only actions must use the "GET"
+        # method, and all such actions require the "format=xml" key-value pair.
         self.prepare_g2o()
+
+        url = '/%s/%s' % (self.cpcode, url.strip('/'))
         
-        m = hashlib.md5()
-        m.update(body)
-        md5 = m.hexdigest()
+        fmt = "version=%s"
+        if action:
+            fmt += "&action=%s"
+            if action != 'download':
+                fmt += "&format=xml"
+            action_string = fmt % (self.version, action)
+        else:
+           action_string = fmt % (self.version)
+
+        encoded_url = urllib.quote(url)
+        g2o_auth_data = self.g2o.get_auth_data()
+        g2o_auth_sign = self.g2o.get_auth_sign(encoded_url, action_string)
+        headers = {
+            'X-Akamai-ACS-Action': action_string,
+            'X-Akamai-ACS-Auth-Data': g2o_auth_data,
+            'X-Akamai-ACS-Auth-Sign': g2o_auth_sign
+        }
+        req = tornado.httpclient.HTTPRequest(
+            url=self.host + encoded_url,
+            method='GET',
+            headers=headers,
+            request_timeout=10.0,
+            connect_timeout=5.0)
+        response = yield tornado.gen.Task(utils.http.send_request, req,
+                                          ntries=ntries)
+
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def _update_action(self, url, action, body='', index_zip=None, mtime=None,
+                       size=None, md5=None, sha1=None, sha256=None, 
+                       destination=None, target=None, qd_confirm=None,
+                       field=None, ntries=5):
+        # This internal function implements all of the update actions.
+        # Each has optional or required arguments; whether or not they
+        # are present when required is enforced by the wrapper method
+        # interface.  Update-actions require the "POST" or "PUT"
+        # method, which we treat equivalently.  Unlike read-only
+        # actions, "format=xml" is not required or used.
+
+        self.prepare_g2o()
+        url = '/%s/%s' % (self.cpcode, url.strip('/'))
 
         # assemble action string
-        action = "upload"
-        fmt = "version=%s&action=%s&format=xml"
-        action_string = fmt % (self.version, action)
-
-        # If md5
+        fmt = "version=%s"
+        if action:
+            fmt += "&action=%s"
+            if action != 'download':
+                fmt += "&format=xml"
+                action_string = fmt % (self.version, action)
+        else:
+            action_string = fmt % (self.version)
+        if index_zip:
+            action_string += "&index-zip=%s" % index_zip
+        if mtime != None:
+            action_string += "&mtime=%s" % mtime
+        if size:
+            action_string += "&size=%s" % size
         if md5:
             action_string += "&md5=%s" % md5
+        if sha1:
+            action_string += "&sha1=%s" % sha1
+        if sha256:
+            action_string += "&sha256=%s" % md5
+        if destination:
+            action_string += "&destination=%s" % urllib.quote_plus(destination)
+        if target:
+            action_string += "&target=%s" % urllib.quote_plus(target)
+        if qd_confirm:
+            action_string += "&quick-delete=%s" % qd_confirm
 
         # Do g2o and send the request
         encoded_url = urllib.quote(url)
         g2o_auth_data = self.g2o.get_auth_data()
-        g2o_auth_sign = self.g2o.get_auth_sign(self.baseurl + encoded_url, action_string)
+        g2o_auth_sign = self.g2o.get_auth_sign(encoded_url, action_string)
         headers = {
             'X-Akamai-ACS-Action': action_string,
             'X-Akamai-ACS-Auth-Data': g2o_auth_data,
@@ -223,17 +342,16 @@ class AkamaiNetstorage(object):
         length = 0
         if (body):
             length = len(body)
-
         headers['Content-Length'] = length
-        request_url = self.host + self.baseurl + encoded_url
-        req = tornado.httpclient.HTTPRequest(url=request_url,
-                    method="POST",
-                    body=body,
-                    headers=headers,
-                    request_timeout=10.0,
-                    connect_timeout=5.0)
+        req = tornado.httpclient.HTTPRequest(
+            url=self.host + encoded_url,
+            method="POST",
+            body=body,
+            headers=headers,
+            request_timeout=10.0,
+            connect_timeout=5.0)
         response = yield tornado.gen.Task(
-                        utils.http.send_request, req) 
+            utils.http.send_request, req, ntries=ntries) 
                         
         raise tornado.gen.Return(response)
 
@@ -243,7 +361,9 @@ if __name__ == "__main__" :
     host = "http://fbnneon-nsu.akamaihd.net"
     key = "kx6L370D6gcHP17emUs8f1203io6DhvjDGu88H1KEa9230uwPn"
     name = "fbneon"
-    baseURL = "/344611"
+    baseURL = "344611"
     ak = AkamaiNetstorage(host, key, name, baseURL)
-    r = ak.upload("/test3", "foo bar tornado2")
-    print r
+    print ak.stat('/test2', ntries=1).code
+    #print ak.upload("/test2", "foo bar tornado4")
+    #print r
+    #print ak.delete("/test3")
