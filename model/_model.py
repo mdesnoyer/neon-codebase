@@ -34,17 +34,21 @@ class Model(object):
         else:
             self.video_searcher = vid_searcher
 
+
     def __setstate__(self, state):
         if 'video_searcher' not in state:
             state['video_searcher'] = video_searcher.BisectSearcher(
                 state['predictor'], state['filt'])
         self.__dict__ = state
 
+
     def __str__(self):
         return utils.obj.full_object_str(self)
 
+
     def reset(self):
         self.predictor.reset()
+
 
     def score(self, image, do_filtering=True):
         '''Scores a single image. 
@@ -72,6 +76,22 @@ class Model(object):
         '''
         return self.video_searcher.choose_thumbnails(video, n, video_name)
 
+
+    def restore_additional_data(self, filename):
+        '''
+        Given filename (which points to the pkl of the restored model), 
+        restores additional data, specifically for filters. New filters
+        (i.e., the closed-eye filter) require access to pickled numpy
+        arrays and scipy objects which are too expensive to pickle
+        using the vanilla implementation. The closed-eye filter has
+        an implementation of restore_additional_data that can find what
+        it requires so long as it knows where model_data is, which it
+        can determine based on where the model pickle is.
+        '''
+        for f in self.filt.filters:
+            f.restore_additional_data(filename)
+
+
 def save_model(model, filename):
     '''Save the model to a file.'''
     with open(filename, 'wb') as f:
@@ -86,18 +106,7 @@ def load_model(filename):
     '''
     with open(filename, 'rb') as f:
         model = pickle.load(f)
-    # this is a somewhat inelegant way to accomplish this, 
-    # but i suspect that as we add more computer vision 
-    # stuff, there will be a greater need for filters that 
-    # load data that is not easily pickled.
-    #
-    # see the closed eye filter for an example of why this 
-    # is necessary and how it works; it is based on the 
-    # presumption that additional filter data will be 
-    # kept in the model_data directory along with the pickled
-    # models themselves. This is useful if the data used by
-    # the filters are static, but large enough to make repeated
-    # pickling / unpickling prohibitively expensive.  
-    _ = [f.restore_additional_data(filename) for f in model.filt.filters]
+    model.restore_additional_data()
+    
     return model 
 
