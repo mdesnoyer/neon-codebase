@@ -102,12 +102,14 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
         if callback is None:
             time.sleep(delay)
             return send_request(request, ntries, cur_try=cur_try,
-                                do_logging=do_logging)
+                                do_logging=do_logging,
+                                base_delay=base_delay)
         else:
             ioloop = tornado.ioloop.IOLoop.current()
             ioloop.add_callback(ioloop.add_timeout, time.time()+delay,
                                 lambda: send_request(request, ntries, callback,
-                                                     cur_try, do_logging))
+                                                     cur_try, do_logging,
+                                                     base_delay))
 
         # TODO(mdesnoyer): Return a future
         return None
