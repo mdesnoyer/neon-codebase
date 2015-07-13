@@ -224,7 +224,7 @@ class CDNHosting(object):
         response = yield tornado.gen.Task(
             utils.http.send_request,
             request,
-            base_delay=1.0)
+            base_delay=4.0)
         if response.error:
             raise tornado.gen.Return(False)
         raise tornado.gen.Return(True)
