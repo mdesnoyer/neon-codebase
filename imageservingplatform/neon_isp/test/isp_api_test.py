@@ -1112,7 +1112,7 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
             return im_url
 
         urls = {}
-        N = 300
+        N = 50
         for i in range(N):
             url = client_api_call()
             try:
@@ -1144,6 +1144,22 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         response, code = self.make_api_request(url, headers)
         self.assertIsNotNone(response)
         self.assertEqual(response, "thumb2")
+    
+    def test_get_thumbnailid_with_html_extension(self):
+        '''
+        Test get thumbnailid API
+        
+        Since no cookie is sent, hash is based on ip address
+        '''
+
+        url = "http://localhost:" + self.port + "/v1/%s/%s.html/?params=%s" %\
+                ("getthumbnailid", self.pub_id, self.vid)
+        ip = "203.2.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response, code = self.make_api_request(url, headers)
+        self.assertIsNotNone(response)
+        self.assertEqual(response, "<!DOCTYPE html><html><head><script type='text/javascript'>window.parent.postMessage('thumb2', '*')" 
+                                   "</script></head><body></body></html>")
 
     def test_multiple_thumbnailids(self):
         '''
@@ -1158,6 +1174,22 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         response, code = self.make_api_request(url, headers)
         self.assertIsNotNone(response)
         self.assertEqual(response, "thumb2,thumb2")
+    
+    def test_multiple_thumbnails_with_html_extension(self):
+        '''
+        Test get thumbnailid API
+        
+        Since no cookie is sent, hash is based on ip address
+        '''
+        
+        url = "http://localhost:" + self.port + "/v1/%s/%s.html/?params=%s,%s" %\
+                ("getthumbnailid", self.pub_id, self.vid, self.vid)
+        ip = "203.2.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response, code = self.make_api_request(url, headers)
+        self.assertIsNotNone(response)
+        self.assertEqual(response, "<!DOCTYPE html><html><head><script type='text/javascript'>window.parent.postMessage('thumb2,thumb2', '*')" 
+                                   "</script></head><body></body></html>")
     
     def test_multiple_thumbnailids_with_invalid_vid(self):
         '''
