@@ -150,6 +150,19 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         bp2 = BrightcovePlatform.get(bp.neon_api_key, 'iid')
         self.assertEqual(bp.__dict__, bp2.__dict__)
 
+    def test_bcplatform_with_callback(self):
+
+        na = NeonUserAccount('acct1')
+        na.save()
+        bp = BrightcovePlatform('aid', 'iid', na.neon_api_key, callback_url='http://www.callback.com')
+
+        self.assertFalse(bp.abtest)
+        self.assertFalse(bp.auto_update)
+        self.assertTrue(bp.serving_enabled)
+        self.assertNotEqual(bp.neon_api_key, '')
+        self.assertEqual(bp.key, 'brightcoveplatform_%s_iid' % bp.neon_api_key)
+        self.assertEqual(bp.callback_url, 'http://www.callback.com')
+
     def test_neon_user_account(self):
         ''' nuser account '''
 
