@@ -2381,7 +2381,8 @@ class BrightcovePlatform(AbstractPlatform):
         self.rendition_frame_width = None #Resolution of video to process
         self.video_still_width = 480 #default brightcove still width
         # the ids of playlist to create video requests from
-        self.playlist_feed_ids = [] 
+        self.playlist_feed_ids = []
+        # the url that will be called when a video is finished processing 
         self.callback_url = callback_url
 
     @classmethod
