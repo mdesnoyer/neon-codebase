@@ -180,6 +180,29 @@ class AkamaiNetstorage(object):
         '''
         self.g2o = G2OAuth(self.key, self.name, version)
 
+    def _generate_akamai_headers(self, action_string, url):
+        '''Gets the akamai headers for a call.
+
+        This resets the authorization because the auth tokens only
+        last one minute.
+
+        Inputs:
+        action_string - The akamai action string
+        url - The url in the bucket that's being called
+
+        Outputs:
+        dictionary of Akamai headers
+        '''
+        self.g2o = G2OAuth(self.key, self.name, version)
+        encoded_url = urllib.quote(url)
+        g2o_auth_data = self.g2o.get_auth_data()
+        g2o_auth_sign = self.g2o.get_auth_sign(encoded_url, action_string)
+        return {
+            'X-Akamai-ACS-Action': action_string,
+            'X-Akamai-ACS-Auth-Data': g2o_auth_data,
+            'X-Akamai-ACS-Auth-Sign': g2o_auth_sign
+        }
+
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def stat(self, url, ntries=5, do_logging=True):
@@ -249,13 +272,13 @@ class AkamaiNetstorage(object):
         raise tornado.gen.Return(response)
 
     @tornado.gen.coroutine
-    def _read_only_action(self, url, action, ntries=5, do_logging=True):
+    def _read_only_action(self, url, action, ntries=5, base_delay=0.2,
+                          do_logging=True):
         # This internal function implements all of the read-only actions.  They
         # are all essentially identical, aside from the action name itself, and
         # of course the output.  But the output is returned via the same type of
         # object, regardless of its form.  Read-only actions must use the "GET"
         # method, and all such actions require the "format=xml" key-value pair.
-        self.prepare_g2o()
 
         url = '/%s/%s' % (self.cpcode, url.strip('/'))
         
@@ -269,22 +292,23 @@ class AkamaiNetstorage(object):
            action_string = fmt % (self.version)
 
         encoded_url = urllib.quote(url)
-        g2o_auth_data = self.g2o.get_auth_data()
-        g2o_auth_sign = self.g2o.get_auth_sign(encoded_url, action_string)
-        headers = {
-            'X-Akamai-ACS-Action': action_string,
-            'X-Akamai-ACS-Auth-Data': g2o_auth_data,
-            'X-Akamai-ACS-Auth-Sign': g2o_auth_sign
-        }
-        req = tornado.httpclient.HTTPRequest(
-            url=self.host + encoded_url,
-            method='GET',
-            headers=headers,
-            request_timeout=10.0,
-            connect_timeout=5.0)
-        response = yield tornado.gen.Task(utils.http.send_request, req,
-                                          ntries=ntries,
-                                          do_logging=do_logging)
+
+        # We control the retries here because the auth header is time
+        # based and we need to regenerate it.
+        for cur_try in range(ntries):
+            req = tornado.httpclient.HTTPRequest(
+                url=self.host + encoded_url,
+                method='GET',
+                headers=self._generate_akamai_headers(action_string, url),
+                request_timeout=10.0,
+                connect_timeout=5.0)
+            response = yield tornado.gen.Task(utils.http.send_request, req,
+                                              ntries=1,
+                                              do_logging=do_logging)
+            if response.error is None:
+                raise tornado.gen.Return(response)
+            delay = (1 << cur_try) * base_delay * random.random()
+            yield tornado.gen.sleep(delay)
 
         raise tornado.gen.Return(response)
 
@@ -300,7 +324,6 @@ class AkamaiNetstorage(object):
         # method, which we treat equivalently.  Unlike read-only
         # actions, "format=xml" is not required or used.
 
-        self.prepare_g2o()
         url = '/%s/%s' % (self.cpcode, url.strip('/'))
 
         # assemble action string
@@ -331,30 +354,32 @@ class AkamaiNetstorage(object):
         if qd_confirm:
             action_string += "&quick-delete=%s" % qd_confirm
 
-        # Do g2o and send the request
         encoded_url = urllib.quote(url)
-        g2o_auth_data = self.g2o.get_auth_data()
-        g2o_auth_sign = self.g2o.get_auth_sign(encoded_url, action_string)
-        headers = {
-            'X-Akamai-ACS-Action': action_string,
-            'X-Akamai-ACS-Auth-Data': g2o_auth_data,
-            'X-Akamai-ACS-Auth-Sign': g2o_auth_sign
-        }
-
+        
         length = 0
         if (body):
             length = len(body)
-        headers['Content-Length'] = length
-        req = tornado.httpclient.HTTPRequest(
-            url=self.host + encoded_url,
-            method="POST",
-            body=body,
-            headers=headers,
-            request_timeout=10.0,
-            connect_timeout=5.0)
-        response = yield tornado.gen.Task(
-            utils.http.send_request, req, ntries=ntries) 
-                        
+        headers = {'Content-Length': length}
+
+        # We control the retries here because the auth header is time
+        # based and we need to regenerate it.
+        for cur_try in range(ntries):
+            headers.update(self._generate_akamai_headers(action_string, url))
+            req = tornado.httpclient.HTTPRequest(
+                url=self.host + encoded_url,
+                method='POST',
+                body=body,
+                headers=headers,
+                request_timeout=30.0,
+                connect_timeout=15.0)
+            response = yield tornado.gen.Task(utils.http.send_request, req,
+                                              ntries=1,
+                                              do_logging=do_logging)
+            if response.error is None:
+                raise tornado.gen.Return(response)
+            delay = (1 << cur_try) * base_delay * random.random()
+            yield tornado.gen.sleep(delay)
+
         raise tornado.gen.Return(response)
 
 
