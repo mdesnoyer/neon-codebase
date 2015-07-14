@@ -350,8 +350,8 @@ class AkamaiNetstorage(object):
             method="POST",
             body=body,
             headers=headers,
-            request_timeout=10.0,
-            connect_timeout=5.0)
+            request_timeout=30.0,
+            connect_timeout=15.0)
         response = yield tornado.gen.Task(
             utils.http.send_request, req, ntries=ntries) 
                         
