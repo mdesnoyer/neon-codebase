@@ -524,6 +524,7 @@ class AkamaiHosting(CDNHosting):
             cdn_metadata.akamai_key,
             cdn_metadata.akamai_name,
             cdn_metadata.cpcode)
+        self.ntries = 5
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -579,7 +580,9 @@ class AkamaiHosting(CDNHosting):
         filestream.seek(0)
         imgdata = filestream.read()
 
-        response = yield self.ak_conn.upload(image_url, imgdata, async=True)
+        response = yield self.ak_conn.upload(image_url, imgdata,
+                                             ntries=self.ntries,
+                                             async=True)
         if response.error:
             msg = ("Error uploading image to akamai for tid %s: %s" 
                    % (tid, response.error))

@@ -163,24 +163,7 @@ class AkamaiNetstorage(object):
         sha256 = sh.hexdigest()
         return (len(body), md5, sha1, sha256)
 
-    # set the Akamai ACS authentication header values
-    def prepare_g2o(self, version=5):
-        '''
-        prepare_g2o(): set the Akamai ACS authentication header values.
-        fields:
-        key: a string containing the G2O key (password)
-        name: the "nonce" (key name or username associated with the key).
-        version: version of G2O auth to use; selects the hashing algorithm.
-        
-        The version field must be one of (3, 4, 5) and selects the hashing
-        algorithm as follows:
-          3: md5
-          4: sha1
-          5: sha256
-        '''
-        self.g2o = G2OAuth(self.key, self.name, version)
-
-    def _generate_akamai_headers(self, action_string, url):
+    def _generate_akamai_headers(self, action_string, url, version=5):
         '''Gets the akamai headers for a call.
 
         This resets the authorization because the auth tokens only
@@ -189,6 +172,11 @@ class AkamaiNetstorage(object):
         Inputs:
         action_string - The akamai action string
         url - The url in the bucket that's being called
+        version - must be one of (3, 4, 5) and selects the hashing
+          algorithm as follows:
+            3: md5
+            4: sha1
+            5: sha256
 
         Outputs:
         dictionary of Akamai headers
@@ -272,7 +260,7 @@ class AkamaiNetstorage(object):
         raise tornado.gen.Return(response)
 
     @tornado.gen.coroutine
-    def _read_only_action(self, url, action, ntries=5, base_delay=0.2,
+    def _read_only_action(self, url, action, ntries=5, base_delay=0.4,
                           do_logging=True):
         # This internal function implements all of the read-only actions.  They
         # are all essentially identical, aside from the action name itself, and
@@ -316,7 +304,7 @@ class AkamaiNetstorage(object):
     def _update_action(self, url, action, body='', index_zip=None, mtime=None,
                        size=None, md5=None, sha1=None, sha256=None, 
                        destination=None, target=None, qd_confirm=None,
-                       field=None, ntries=5):
+                       field=None, ntries=5, base_delay=0.4, do_logging=True):
         # This internal function implements all of the update actions.
         # Each has optional or required arguments; whether or not they
         # are present when required is enforced by the wrapper method
@@ -390,7 +378,7 @@ if __name__ == "__main__" :
     name = "fbneon"
     baseURL = "344611"
     ak = AkamaiNetstorage(host, key, name, baseURL)
-    print ak.stat('/test2', ntries=1).code
-    #print ak.upload("/test2", "foo bar tornado4")
+    print ak.stat('/test267', ntries=4)
+    print ak.upload("/test2", "foo bar tornado4")
     #print r
     #print ak.delete("/test3")
