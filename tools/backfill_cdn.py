@@ -33,6 +33,9 @@ import utils.sync
 from utils.options import define, options
 define('api_key', default=None, help='api key to backfill')
 define('integration_id', default='0', help='integration id to processes.')
+define('worker_multiplier', default=1.0, 
+       help=('Multiplier by the number of cores to figure out how many '
+             'workers to use'))
 
 import logging
 _log = logging.getLogger(__name__)
@@ -137,8 +140,8 @@ def main():
     if not neondata.ThumbnailServingURLs('some_test_thumb').save():
         raise Exeception('Do not have write permission')
 
-    proc_slots = max(multiprocessing.cpu_count() * 2, 1)
-    #proc_slots = 1
+    proc_slots = max(multiprocessing.cpu_count() * options.worker_multiplier,
+                     1)
     pool = multiprocessing.Pool(proc_slots, init_worker,
                                 maxtasksperchild=50)
 
