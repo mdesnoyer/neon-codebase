@@ -672,7 +672,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             try:
                 api_key = params[API_KEY]
                 vid = params[VIDEO_ID]
-                if not re.match('^[a-zA-Z0-9-]+$', vid):
+                if re.match('%s$' % 
+                            neondata.InternalVideoID.VALID_EXTERNAL_REGEX,
+                            vid) is None:
                     self.send_json_response(
                         '{"error":"video id contains invalid characters"}', 400)
                     return
