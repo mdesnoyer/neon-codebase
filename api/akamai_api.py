@@ -182,7 +182,7 @@ class AkamaiNetstorage(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def stat(self, url, ntries=5):
+    def stat(self, url, ntries=5, do_logging=True):
         '''fetch file attributes for a file in XML format.
 
         Inputs:
@@ -190,7 +190,8 @@ class AkamaiNetstorage(object):
 
         Return: HTTPResponse object
         '''
-        response = yield self._read_only_action(url, 'stat', ntries=ntries)
+        response = yield self._read_only_action(url, 'stat', ntries=ntries,
+                                                do_logging=do_logging)
         raise tornado.gen.Return(response)
 
     @utils.sync.optional_sync
@@ -248,7 +249,7 @@ class AkamaiNetstorage(object):
         raise tornado.gen.Return(response)
 
     @tornado.gen.coroutine
-    def _read_only_action(self, url, action, ntries=5):
+    def _read_only_action(self, url, action, ntries=5, do_logging=True):
         # This internal function implements all of the read-only actions.  They
         # are all essentially identical, aside from the action name itself, and
         # of course the output.  But the output is returned via the same type of
@@ -282,7 +283,8 @@ class AkamaiNetstorage(object):
             request_timeout=10.0,
             connect_timeout=5.0)
         response = yield tornado.gen.Task(utils.http.send_request, req,
-                                          ntries=ntries)
+                                          ntries=ntries,
+                                          do_logging=do_logging)
 
         raise tornado.gen.Return(response)
 

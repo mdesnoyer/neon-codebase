@@ -567,6 +567,7 @@ class AkamaiHosting(CDNHosting):
         # If we do not overwrite and it's already there, stop
         if not overwrite:
             stat_response = yield self.ak_conn.stat(image_url, ntries=1,
+                                                    do_logging=False,
                                                     async=True)
             if stat_response.code == 200:
                 raise tornado.gen.Return(cdn_url) 
