@@ -67,7 +67,8 @@ neon_fetch(const char * const mastermind_url,
          current_size += read;     
          if (current_size >= output_size) { 
              char *temp = realloc(*script_output, output_size*2); 
-             if (!temp) { 
+             if (!temp) {
+                 free(line);  
                  strcat(*script_output, "ERROR : realloc error in fetching");  
                  return NEON_FETCH_FAIL; 
              }

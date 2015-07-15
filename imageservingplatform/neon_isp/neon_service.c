@@ -599,8 +599,7 @@ neon_service_server_api(ngx_http_request_t *request, ngx_chain_t  * chain)
     unsigned char * pub_id = 0;
     int account_id_size;
     ngx_str_t ipAddress = ngx_string("");
-    int width;
-    int height;
+    int width, height, content_length = 0; 
 
     int ret = neon_service_parse_api_args(request, &base_url, &account_id, 
                                            &account_id_size, &video_id, &pub_id, 
@@ -620,7 +619,8 @@ neon_service_server_api(ngx_http_request_t *request, ngx_chain_t  * chain)
     buf = ngx_calloc_buf(request->pool);
     ngx_str_t start = ngx_string("{\"data\":\"");
     buf->pos = start.data; 
-    buf->last = buf->pos + start.len;  
+    buf->last = buf->pos + start.len; 
+    content_length += start.len;  
     neon_service_add_to_chain(request, chain, buf); 
     
     // look up thumbnail image url
@@ -633,8 +633,17 @@ neon_service_server_api(ngx_http_request_t *request, ngx_chain_t  * chain)
                 height,
                 width,
                 &url);
+    
+    if(error_url != NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK) {
+        ngx_log_error(NGX_LOG_ERR, request->connection->log, 0, "IM URL Not Found");
+        neon_stats[NEON_SERVER_API_URL_NOT_FOUND] ++;
+        neon_service_server_api_not_found(request, chain);
+        return NEON_SERVER_API_FAIL;
+    }
+
     buf->pos = (u_char*)url; 
     buf->last = buf->pos + strlen(url); 
+    content_length += strlen(url);  
 
     neon_service_add_to_chain(request, chain, buf);
 
@@ -649,18 +658,11 @@ neon_service_server_api(ngx_http_request_t *request, ngx_chain_t  * chain)
     buf = ngx_calloc_buf(request->pool);
     buf->pos = end.data; 
     buf->last = buf->pos + end.len;  
+    content_length += end.len;  
     neon_service_add_to_chain(request, chain, buf);
     
-    if(error_url != NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK) {
-        ngx_log_error(NGX_LOG_ERR, request->connection->log, 0, "IM URL Not Found");
-        neon_stats[NEON_SERVER_API_URL_NOT_FOUND] ++;
-        neon_service_server_api_not_found(request, chain);
-        return NEON_SERVER_API_FAIL;
-    }
-
-    // TODO get length 
     // set the headers and the request is done! 
-    neon_service_set_json_headers(request, NGX_HTTP_OK, 300); 
+    neon_service_set_json_headers(request, NGX_HTTP_OK, content_length); 
 
     return NEON_SERVER_API_OK;
 }
