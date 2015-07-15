@@ -135,15 +135,20 @@ neon_runloop(void * arg){
             /*
              *  fetch new mastermind file from S3
              */
-            if(neon_fetch(mastermind_url, mastermind_filepath, s3downloader, s3port, fetch_timeout) == NEON_FETCH_FAIL) {
+            char *error_msg = NULL; 
+            if(neon_fetch(mastermind_url, mastermind_filepath, s3downloader, s3port, fetch_timeout, &error_msg) == NEON_FETCH_FAIL) {
                 
                 // log
                 ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, 
-                        "updater: failed to fetch mastermind file: %s", neon_fetch_error);
+                        "updater: failed to fetch mastermind file: %s", error_msg);
                 neon_stats[NEON_UPDATER_HTTP_FETCH_FAIL]++; 
                 neon_sleep(sleep_time);
                 continue;
             }
+            if (error_msg) {
+                free(error_msg); 
+            } 
+
             
             neon_stats[MASTERMIND_FILE_FETCH_SUCCESS]++; 
             
