@@ -3,8 +3,6 @@
  *
  * Fraction data present in the mastermind json file
  * */
-
-
 #include <iostream>
 #include <sstream>
 #include "neonException.h"
@@ -13,37 +11,23 @@
 
 #define SMALLEST_FRACTION 0.001
 
-Fraction::Fraction()
-{
-    initialized = false;
-}
+Fraction::Fraction() { }
 
-
-Fraction::~Fraction()
-{
-    initialized = false;
-}
+Fraction::~Fraction() { }
 
 int
 Fraction::Init(double floor, const rapidjson::Value& frac)
 {
     try {
         int ret = InitSafe(floor, frac);
-
         // success
         if (ret == 0)
             return 0;
     }
 
-    // on any error, clean up 
-    catch (NeonException * e) {
-    }
-    catch (std::bad_alloc e) {
-    }
     catch (...) {
     }
-    
-    Dealloc();
+
     return -1;
 }
 
@@ -51,11 +35,6 @@ Fraction::Init(double floor, const rapidjson::Value& frac)
 int
 Fraction::InitSafe(double floor, const rapidjson::Value& frac)
 {
-    if(initialized == true) {
-        neon_stats[NEON_FRACTION_INVALID_INIT]++;
-        return -1;
-    }
-
     /*
      *  Percentage of being selected at random
      */
@@ -130,7 +109,6 @@ Fraction::InitSafe(double floor, const rapidjson::Value& frac)
         return ProcessImages(img_sizes); 
     } 
 
-    initialized = true;
     return 0;
 }
 
@@ -152,8 +130,8 @@ Fraction::ProcessImages(const rapidjson::Value & imgs)
     for(rapidjson::SizeType i=0; i < numOfImages; i++) {
         
         ScaledImage * img = new ScaledImage();
-        // store immediately so that Shutdown can delete it in case of error
-        images.push_back(img);
+
+        images_.push_back(img); 
         
         // get image from the json array
         const rapidjson::Value& elem = imgs[i];
@@ -169,64 +147,32 @@ Fraction::ProcessImages(const rapidjson::Value & imgs)
     return 0; 
 }
 
-void
-Fraction::Shutdown()
-{
-    if(initialized == false) {
-        neon_stats[NEON_FRACTION_INVALID_SHUTDOWN]++;
-        return;
-    }
-    
-    Dealloc();
-    initialized = false;
-}
-
-
-void
-Fraction::Dealloc()  {
-
-    for(std::vector<ScaledImage*>::iterator it = images.begin(); it != images.end(); it ++)
-    {
-        ScaledImage * img = (*it);
-        (*it) = 0;
-
-        if(img == NULL) {
-            neon_stats[NEON_SCALED_IMAGE_SHUTDOWN_NULL_POINTER]++;
-            continue;
-        }
-
-        img->Shutdown();
-        delete img;
-        img = 0;
-    }   
-}
-
 // Iterate throgugh the images to find the appropriate image for a given
 // height & width
 // TODO Kevin this needs to be combined with DefaultThumbnail::GetScaledImage
-ScaledImage*
+const ScaledImage*
 Fraction::GetScaledImage(int height, int width) const{
 
     static const int pixelRange = 6; 
 
     // go through all images again and pick the first approximate fit
-    unsigned numOfImages = images.size();
+    unsigned numOfImages = images_.size();
 
     if(numOfImages == 0)
         return 0; 
 
     // try to find an exact fit
     for(unsigned i=0; i < numOfImages; i++){
-        if(images[i]->GetHeight() == height &&
-           images[i]->GetWidth() == width)
-             return images[i];
+        if(images_[i].GetHeight() == height &&
+           images_[i].GetWidth() == width)
+             return &images_[i];
     }
 
     // otherwise try to find pick an approximate fit
     for(unsigned i=0; i < numOfImages; i++){
-        if(ScaledImage::ApproxEqual(images[i]->GetHeight(), height, pixelRange) &&
-           ScaledImage::ApproxEqual(images[i]->GetWidth(), width, pixelRange)) { 
-            return images[i];
+        if(ScaledImage::ApproxEqual(images_[i].GetHeight(), height, pixelRange) &&
+           ScaledImage::ApproxEqual(images_[i].GetWidth(), width, pixelRange)) { 
+            return &images_[i];
         } 
     }
     

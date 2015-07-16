@@ -2,6 +2,7 @@
 #define _NEON_FRACTION__
 
 #include <boost/scoped_ptr.hpp>
+#include <boost/ptr_container/ptr_vector.hpp>
 #include <string>
 #include <vector>
 #include "rapidjson/document.h"
@@ -17,31 +18,26 @@ public:
     ~Fraction();
     
     int Init(double floor, const rapidjson::Value& fa);
-    void Shutdown();
-    
     void   SetPct(double);
     double GetPct() const;
     double GetThreshold() const;
     std::string * default_url() const;
     std::string * tid() const;
     const std::string & base_url() const; 
-    ScaledImage* GetScaledImage(int height, int width) const;
+    const ScaledImage* GetScaledImage(int height, int width) const;
     
 protected:
     
     int InitSafe(double floor, const rapidjson::Value& fa);
     int ProcessImages(const rapidjson::Value &);
-    void Dealloc();
-    
-    bool initialized;
     double threshold;
     double pct;
-    std::vector<ScaledImage*> images;
 
 private: 
     std::string base_url_; 
     boost::scoped_ptr<std::string> default_url_; 
     boost::scoped_ptr<std::string> tid_; 
+    boost::ptr_vector<ScaledImage> images_; 
 };
 
 

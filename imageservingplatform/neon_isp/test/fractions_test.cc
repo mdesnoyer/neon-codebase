@@ -142,9 +142,9 @@ TEST_F(FractionsTest, test_generate_default_url_base)
 
     Fraction f; 
     f.Init(0,frac);
-//    string defaultUrl = url_utils::GenerateUrl(f.base_url(), (std::string)f.GetThumbnailID(),700,800); 
-
- //   ASSERT_EQ("http://kevin_test/neontnthumb1_w800_h700.jpg", defaultUrl); 
+    boost::scoped_ptr<std::string> default_url; 
+    default_url.reset(url_utils::GenerateUrl(f.base_url(), *f.tid(),700,800)); 
+    ASSERT_EQ("http://kevin_test/neontnthumb1_w800_h700.jpg", *default_url.get()); 
 }
 
 TEST_F(FractionsTest, test_frac_init_no_height) 
@@ -248,7 +248,7 @@ TEST_F(FractionsTest, test_exact_size_image_returned){
                 " ] ";
     testDoc.Parse<0>(json);
     testFraction.Init(0,testDoc[0u]);
-    ScaledImage *si = testFraction.GetScaledImage(140,70); 
+    const ScaledImage *si = testFraction.GetScaledImage(140,70); 
     ASSERT_EQ(si->GetHeight(), 140);  
     ASSERT_EQ(si->GetWidth(), 70);  
 }
