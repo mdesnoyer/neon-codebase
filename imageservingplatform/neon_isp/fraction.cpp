@@ -15,15 +15,13 @@
 
 Fraction::Fraction()
 {
-   tid = 0;  
-   initialized = false;
+    initialized = false;
 }
 
 
 Fraction::~Fraction()
 {
-     tid = 0;
-     initialized = false;
+    initialized = false;
 }
 
 int
@@ -80,15 +78,15 @@ Fraction::InitSafe(double floor, const rapidjson::Value& frac)
     threshold = floor + pct;
     
     // Thumbnail ID
-    if (frac.HasMember("tid") == false) {
+    if (frac.HasMember("tid") && frac["tid"].IsString()) {
+        tid_.reset(new std::string(frac["tid"].GetString())); 
+    }
+    else { 
         neon_stats[NEON_FRACTION_PARSE_ERROR]++;
         return -1; 
-    }
+    } 
 
-    tid = 0;
-    tid = strdup(frac["tid"].GetString());
-
-    if(tid == 0) {
+    if(tid()->empty()) {
        neon_stats[NGINX_OUT_OF_MEMORY]++;
        return -1;
     }
@@ -111,7 +109,7 @@ Fraction::InitSafe(double floor, const rapidjson::Value& frac)
         } 
         const rapidjson::Value& defaultSize = frac["default_size"]; 
         if (defaultSize["h"].IsInt() && defaultSize["w"].IsInt()) {  
-            default_url_.reset(url_utils::GenerateUrl(base_url_, tid, frac["default_size"]["h"].GetInt(), frac["default_size"]["w"].GetInt())); 
+            default_url_.reset(url_utils::GenerateUrl(base_url_, *tid(), frac["default_size"]["h"].GetInt(), frac["default_size"]["w"].GetInt())); 
         }
         else { 
             neon_stats[NEON_FRACTION_PARSE_ERROR]++;
@@ -201,9 +199,6 @@ Fraction::Dealloc()  {
         delete img;
         img = 0;
     }   
-
-    if(tid != 0)
-        free((void *)tid);
 }
 
 // Iterate throgugh the images to find the appropriate image for a given
@@ -263,10 +258,10 @@ Fraction::default_url() const
     return default_url_.get();
 }
 
-const char *
-Fraction::GetThumbnailID() const
+std::string * 
+Fraction::tid() const
 {
-    return tid;
+    return tid_.get();
 }
 
 const std::string& 

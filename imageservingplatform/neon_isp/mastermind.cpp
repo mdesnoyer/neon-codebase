@@ -559,7 +559,7 @@ Mastermind::GetImageUrl(const char * account_id,
         } 
         else { 
             boost::scoped_ptr<std::string> new_url; 
-            new_url.reset(url_utils::GenerateUrl(fraction->base_url(), (std::string)fraction->GetThumbnailID(), image->GetHeight(), image->GetWidth())); 
+            new_url.reset(url_utils::GenerateUrl(fraction->base_url(), *fraction->tid(), image->GetHeight(), image->GetWidth())); 
             image_url = *new_url; 
         }
     }  
@@ -568,12 +568,12 @@ Mastermind::GetImageUrl(const char * account_id,
 /*
  * Get Thumbnail ID for a given video id
  * */
-const char *
+void
 Mastermind::GetThumbnailID(const char * c_accountId, 
                             const char * c_videoId,
                             unsigned char * bucketId,
                             int bucketIdLen,
-                            int &size){
+                            std::string& tid){
     
     string accountId = c_accountId;
     string videoId = c_videoId;
@@ -583,19 +583,18 @@ Mastermind::GetThumbnailID(const char * c_accountId,
     
     if(directive == 0){
         neon_stats[NEON_INVALID_VIDEO_ID] ++;
-        return 0;
+        return;
     }
     
     const Fraction * fraction = directive->GetFraction(bucketId, bucketIdLen);
 
     if (fraction == 0){
         //neon_log_error("Fraction for the directive is NULL");
-        return 0;
+        return;
     }
 
-    const char * tid = fraction->GetThumbnailID();
-    size = strlen(tid);    
-    return tid;
+    tid = *fraction->tid();
+    //size = strlen(tid);    
 } 
 
 /*

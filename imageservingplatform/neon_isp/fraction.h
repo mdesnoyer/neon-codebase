@@ -23,7 +23,7 @@ public:
     double GetPct() const;
     double GetThreshold() const;
     std::string * default_url() const;
-    const char * GetThumbnailID() const;
+    std::string * tid() const;
     const std::string & base_url() const; 
     ScaledImage* GetScaledImage(int height, int width) const;
     
@@ -36,12 +36,12 @@ protected:
     bool initialized;
     double threshold;
     double pct;
-    const char * tid;
     std::vector<ScaledImage*> images;
 
 private: 
     std::string base_url_; 
     boost::scoped_ptr<std::string> default_url_; 
+    boost::scoped_ptr<std::string> tid_; 
 };
 
 

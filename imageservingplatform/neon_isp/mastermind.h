@@ -66,11 +66,11 @@ public:
                      int width, 
                      std::string& image_url);
     
-    const char * GetThumbnailID(const char * c_accountId, 
-                                const char * c_videoId, 
-                                unsigned char * bucketId,
-                                int bucketIdLen,
-                                int &size);
+    void GetThumbnailID(const char * c_accountId, 
+                        const char * c_videoId, 
+                        unsigned char * bucketId,
+                        int bucketIdLen,
+                        std::string& tid);
    
 
 protected:

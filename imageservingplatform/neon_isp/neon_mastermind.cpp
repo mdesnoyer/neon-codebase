@@ -190,24 +190,24 @@ NEON_MASTERMIND_TID_LOOKUP_ERROR
 neon_mastermind_tid_lookup(const char * accountId,
                             const char * videoId,
                             ngx_str_t * bucketId,
-                            const char ** tid,
-                            int * size){
-
+                            char ** tid)
+{
     Mastermind * mastermind = neon_get_mastermind();
     
     if(mastermind_current == 0)
         return NEON_MASTERMIND_TID_LOOKUP_FAIL;
 
-    
-    (*tid) = mastermind->GetThumbnailID(accountId, videoId, 
+    std::string thumbnailId("");  
+    mastermind->GetThumbnailID(accountId, videoId, 
                                         bucketId->data, 
                                         bucketId->len, 
-                                        *size); 
-
-    
-    if(*tid == 0)
+                                        thumbnailId); 
+    if (thumbnailId.size() == 0) { 
         return NEON_MASTERMIND_TID_LOOKUP_NOT_FOUND;
-    
+    }
+ 
+    *tid = (char *)malloc(thumbnailId.size()+1);
+    snprintf((*tid), thumbnailId.size()+1, "%s", thumbnailId.c_str()); 
 
     return NEON_MASTERMIND_TID_LOOKUP_OK;
 }
