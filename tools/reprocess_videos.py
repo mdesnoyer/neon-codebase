@@ -42,8 +42,8 @@ define('max_submit_rate', default=60.0,
 _log = logging.getLogger(__name__)
 
 def send_reprocess_request(job):
-    _log.info('Reprocessing job %s for account %s' % (job.job_id,
-                                                      job.api_key))
+    _log.info('Reprocessing job %s, video %s for account %s' % (
+        job.job_id, job.video_id, job.api_key))
     
     request = tornado.httpclient.HTTPRequest(
         'http://%s/reprocess' % options.video_server_ip,
