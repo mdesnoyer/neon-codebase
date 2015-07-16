@@ -36,7 +36,7 @@ define('test_video_func', default=None,
              'reprocessed. If the function returns true, the video will be '
              'reprocessed. It will be of the form lambda vid, job: '
              '<some expression>. This option replaces <some expression>'))
-define('max_submite_rate', default=60.0,
+define('max_submit_rate', default=60.0,
        help='Maximum number of jobs to submit per hour')
 
 _log = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ def send_reprocess_request(job):
         _log.error('Error submitting job %s: %s' % (job.key, response.error))
         return False
 
-    time.sleep(3600.0/options.max_submite_rate)
+    time.sleep(3600.0/options.max_submit_rate)
         
     return True
 
