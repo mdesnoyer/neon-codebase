@@ -201,5 +201,54 @@ TEST_F(FractionsTest, test_generate_url_without_slashes_in_base_url)
 
     Fraction f; 
     f.Init(0,frac);
-    ASSERT_EQ("http://kevin_test/neontnthumb1_w800_h700.jpg", *f.default_url()); 
+    ASSERT_EQ("http://kevin_test/neontnthumb1_w800_h700.jpg", *f.default_url());
+}  
+// JIRA NEON-240
+TEST_F(FractionsTest, test_exact_size_image_returned){
+    rapidjson::Document testDoc;
+    Fraction testFraction;
+    char json[] =
+                "[  "
+                " { "
+                " \"pct\": 0.9, "
+                " \"default_url\":\"http://vid1\",  "
+                " \"tid\":\"tid1\", "
+                " \"imgs\": "
+                " [ "
+                "  {"
+                "   \"h\":146,  "
+                "   \"w\":74,  "
+                "   \"url\":\"http://neon/thumb1_500_600.jpg\"  "
+                "  },   "
+                "  {"
+                "   \"h\":140,  "
+                "   \"w\":70,  "
+                "   \"url\":\"http://neon/thumb2_700_800.jpg\"  "
+                "  }"
+                " ] "
+                " },"
+                " { "
+                " \"pct\": 0.1, "
+                " \"default_url\":\"http://vid1\",  "
+                " \"tid\":\"tid2\", "
+                " \"imgs\": "
+                " [ "
+                "  {"
+                "   \"h\":146,  "
+                "   \"w\":74,  "
+                "   \"url\":\"http://neon/thumb1_100_200.jpg\"  "
+                "  },   "
+                "  {"
+                "   \"h\":140,  "
+                "   \"w\":70,  "
+                "   \"url\":\"http://neon/thumb2_300_400.jpg\"  "
+                "  }"
+                " ] "
+                " } "
+                " ] ";
+    testDoc.Parse<0>(json);
+    testFraction.Init(0,testDoc[0u]);
+    ScaledImage *si = testFraction.GetScaledImage(140,70); 
+    ASSERT_EQ(si->GetHeight(), 140);  
+    ASSERT_EQ(si->GetWidth(), 70);  
 }

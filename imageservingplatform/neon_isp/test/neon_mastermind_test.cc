@@ -62,10 +62,9 @@ verify_neon_mastermind_tid_lookup(char * vid, char * expectedTid){
     //char *pid = "pub1";
     char *aid = "acc1";
     ngx_str_t bucketId = ngx_string("12");
-    const char * tid= 0;
-    int size;
+    char * tid= 0;
 
-    NEON_MASTERMIND_TID_LOOKUP_ERROR err = neon_mastermind_tid_lookup(aid, vid, &bucketId, &tid, &size);
+    NEON_MASTERMIND_TID_LOOKUP_ERROR err = neon_mastermind_tid_lookup(aid, vid, &bucketId, &tid);
     EXPECT_EQ(err, NEON_MASTERMIND_TID_LOOKUP_OK);
     EXPECT_STRCASEEQ(expectedTid, tid);
 }
@@ -102,8 +101,7 @@ TEST_F(NeonMastermindTest, test_neon_mastermind_image_url_lookup){
     ngx_str_t bucketId = ngx_string("12");
     int h = 500;
     int w = 600;
-    char * url = 0;
-    int size;
+    char * url = NULL;
 
     NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR err = neon_mastermind_image_url_lookup(
                                                     aid, vid, &bucketId, h, w, &url);
@@ -148,8 +146,7 @@ TEST_F(NeonMastermindTest, test_neon_mastermind_image_url_lookup_invalids){
     ngx_str_t bucketId = ngx_string("12");
     int h = 500;
     int w = 600;
-    char * url = 0;
-    int size;
+    char * url = NULL;
 
     // invalid account id
     aid[0] = 'i';

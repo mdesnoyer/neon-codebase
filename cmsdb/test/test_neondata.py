@@ -150,6 +150,19 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         bp2 = BrightcovePlatform.get(bp.neon_api_key, 'iid')
         self.assertEqual(bp.__dict__, bp2.__dict__)
 
+    def test_bcplatform_with_callback(self):
+
+        na = NeonUserAccount('acct1')
+        na.save()
+        bp = BrightcovePlatform('aid', 'iid', na.neon_api_key, callback_url='http://www.callback.com')
+
+        self.assertFalse(bp.abtest)
+        self.assertFalse(bp.auto_update)
+        self.assertTrue(bp.serving_enabled)
+        self.assertNotEqual(bp.neon_api_key, '')
+        self.assertEqual(bp.key, 'brightcoveplatform_%s_iid' % bp.neon_api_key)
+        self.assertEqual(bp.callback_url, 'http://www.callback.com')
+
     def test_neon_user_account(self):
         ''' nuser account '''
 
@@ -474,7 +487,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                                           rendition_sizes=[[360, 240]])
         self.assertTrue(neon_cdn.resize)
         self.assertTrue(neon_cdn.update_serving_urls)
-        self.assertEqual(neon_cdn.folder_prefix, '')
+        self.assertEqual(neon_cdn.folder_prefix, None)
         s3_cdn = S3CDNHostingMetadata(None,
                                       'access-key',
                                       'secret-key',
@@ -508,7 +521,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             cdn_list = CDNHostingMetadataList._create(
                 'api-key_integration0',
                 json.loads(bad_json))
-            self.assertItemsEqual(cdn_list, [])
+            self.assertIsNone(cdn_list)
 
     def test_hosting_metadata_list_bad_key(self):
         with self.assertRaises(ValueError):
@@ -516,6 +529,57 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         with self.assertRaises(ValueError):
             CDNHostingMetadataList('acct_1_integration0')
+
+    def test_old_akamai_hosting_objects(self):
+        folder_in_cdn_prefixes = neondata.AkamaiCDNHostingMetadata._create(
+            None,
+            {'akamai_key':'Bt9lrfGL9hGBs7APtg10AfCUti5FeDrJ65dZIFVTxuvd33H74C',
+             'akamai_name': 'neonuser',
+             'update_serving_urls': True,
+             'baseurl': '/17200/neon/prod',
+             'rendition_sizes': [[120, 67]],
+             'host': 'http://usatoday-nsu.akamaihd.net',
+             'key': None,
+             'cdn_prefixes': ['www.gannett-cdn.com/neon/prod'],
+             'resize': True})
+        self.assertEquals(folder_in_cdn_prefixes.cpcode, '17200')
+        self.assertEquals(folder_in_cdn_prefixes.folder_prefix, 'neon/prod')
+        self.assertEquals(folder_in_cdn_prefixes.cdn_prefixes,
+                          ['http://www.gannett-cdn.com'])
+
+        folder_not_in_cdn_prefixes = neondata.AkamaiCDNHostingMetadata._create(
+            None,
+            {'akamai_key': 'Igi93b3mTZ1Cq30N0dY0G39NjZq92nIGtUclw23hm2Iy7RF2Nj',
+             'akamai_name': 'neon',
+             'update_serving_urls': True,
+             'baseurl': '/386270/neon/prod',
+             'rendition_sizes': [[50, 50]],
+             'host': 'http://tvaiharmony-nsu.akamaihd.net',
+             'key': None,
+             'cdn_prefixes': ['static.neon.groupetva.ca'],
+             'resize': True})
+
+        self.assertEquals(folder_not_in_cdn_prefixes.cpcode, '386270')
+        self.assertEquals(folder_not_in_cdn_prefixes.folder_prefix,
+                          'neon/prod')
+        self.assertEquals(folder_not_in_cdn_prefixes.cdn_prefixes,
+                          ['http://static.neon.groupetva.ca'])
+
+    def test_old_s3_hosting_list(self):
+        old_str = "{\"_type\": \"CDNHostingMetadataList\", \"_data\": {\"_id\": \"9xmw08l4ln1rk8uhv3txwbg1_0\", \"cdns\": [{\"_type\": \"S3CDNHostingMetadata\", \"_data\": {\"access_key\": \"AKIAJZOPH5BBEXRQFCKA\", \"folder_prefix\": \"thumbs/neon/\", \"update_serving_urls\": true, \"bucket_name\": \"o.assets.ign.com\", \"key\": null, \"cdn_prefixes\": [\"assets.ign.com\", \"assets2.ignimgs.com\"], \"secret_key\": \"sdErEhAMR1XARhQ8qjKH4P4ZTjCf1WiU6+lKV4aL\", \"do_salt\": false, \"resize\": true}}], \"key\": \"cdnhostingmetadatalist_9xmw08l4ln1rk8uhv3txwbg1_0\"}}"
+
+        obj_dict = json.loads(old_str)
+        cdn_list = neondata.CDNHostingMetadataList._create(
+            obj_dict['_data']['key'],
+            obj_dict)
+        self.assertEquals(cdn_list.cdns[0].cdn_prefixes,
+                          ["http://assets.ign.com",
+                           "http://assets2.ignimgs.com"])
+        self.assertEquals(cdn_list.cdns[0].bucket_name,
+                          'o.assets.ign.com')
+        self.assertEquals(cdn_list.cdns[0].folder_prefix,
+                          'thumbs/neon/')
+        
 
     def test_internal_video_id(self):
         '''
@@ -1576,6 +1640,12 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.cloudinary_mock().hoster_type = "cloudinary"
         self.cloudinary_mock().upload.side_effect = [future]
 
+        # Mock out the cdn url check
+        self.cdn_check_patcher = patch('cmsdb.cdnhosting.utils.http')
+        self.mock_cdn_url = self._callback_wrap_mock(
+            self.cdn_check_patcher.start().send_request)
+        self.mock_cdn_url.side_effect = lambda x, **kw: HTTPResponse(x, 200)
+
         random.seed(1654984)
 
         self.image = PILImageUtils.create_random_image(360, 480)
@@ -1584,6 +1654,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
     def tearDown(self):
         self.s3_patcher.stop()
         self.cloudinary_patcher.stop()
+        self.cdn_check_patcher.stop()
         self.redis.stop()
         super(TestAddingImageData, self).tearDown()
 

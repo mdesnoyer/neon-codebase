@@ -79,13 +79,18 @@ define('expiry_buffer', type=int, default=30,
 define('serving_update_delay', type=int, default=240,
        help='delay in seconds to update new videos to serving state')
 
+# Script running options
+define('tmp_dir', default='/tmp', help='Temp directory to work in')
+
 
 # Monitoring variables
 statemon.define('time_since_stats_update', float) # Time since the last update
 statemon.define('time_since_last_batch_event', float) # Time since the most recent event in the stats db
 statemon.define('time_since_publish', float) # Time since the last publish
-statemon.define('statsdb_error', int) # error connecting to the stats database
-statemon.define('incr_statsdb_error', int) # error connecting to the hbase 
+statemon.define('unexpected_statsdb_error', int) # 1 if there was an error last cycle
+statemon.define('has_newest_statsdata', int) # 1 if we have the newest data
+statemon.define('good_connection_to_impala', int)
+statemon.define('good_connection_to_hbase', int)
 statemon.define('videodb_batch_update', int) # Count of the nubmer of batch updates from the video db
 statemon.define('videodb_error', int) # error connecting to the video DB
 statemon.define('publish_error', int) # error publishing directive to s3
@@ -532,6 +537,7 @@ class StatsDBWatcher(threading.Thread):
         self.video_id_cache = video_id_cache
         self.last_update = None # Time of the most recent data
         self.last_table_build = None # Time when the tables were last built
+        self._update_stats_timer = None
         self.impala_conn = None
         self.daemon = True
         self.activity_watcher = activity_watcher
@@ -539,6 +545,28 @@ class StatsDBWatcher(threading.Thread):
         # Is the initial data loaded
         self.is_loaded = threading.Event()
         self._stopped = threading.Event()
+
+        self._update_time_since_stats_update()
+
+    def __del__(self):
+        if self._update_stats_timer and self._update_stats_timer.is_alive():
+            self._update_stats_timer.cancel()
+        super(DirectivePublisher, self).__del__()
+
+    def _update_time_since_stats_update(self):
+        if self.last_update is not None:
+            statemon.state.time_since_last_batch_event = (
+                datetime.datetime.now() - self.last_update).total_seconds()
+
+        if self.last_table_build is not None:
+            statemon.state.time_since_stats_update = (
+                datetime.datetime.now() -
+                self.last_table_build).total_seconds()
+
+        self._update_stats_timer = threading.Timer(
+            10.0, self._update_time_since_stats_update)
+        self._update_stats_timer.daemon = True
+        self._update_stats_timer.start()
 
     def wait_until_loaded(self, timeout=None):
         '''Blocks until the data is loaded.'''
@@ -554,10 +582,11 @@ class StatsDBWatcher(threading.Thread):
             try:
                 with self.activity_watcher.activate():
                     self._process_db_data()
+                statemon.state.unexpected_statsdb_error = 0
 
             except Exception as e:
                 _log.exception('Uncaught stats DB Error: %s' % e)
-                statemon.state.increment('statsdb_error')
+                statemon.state.unexpected_statsdb_error = 1
 
             finally:
                 if self.impala_conn is not None:
@@ -578,7 +607,7 @@ class StatsDBWatcher(threading.Thread):
             return self.impala_conn
         except Exception as e:
             _log.exception('Error connecting to stats db: %s' % e)
-            statemon.state.increment('statsdb_error')
+            statemon.state.good_connection_to_impala = 0
             raise
 
     def _process_db_data(self):
@@ -657,6 +686,7 @@ class StatsDBWatcher(threading.Thread):
 
                     self.mastermind.update_stats_info(data)
                 _log.info('Finished processing batch stats update')
+                statemon.state.has_newest_statsdata = 1
             finally:
                 cursor.close()
         else:
@@ -672,13 +702,6 @@ class StatsDBWatcher(threading.Thread):
                  for thumb_id, counts in 
                  self._get_incremental_stat_data(strategy_cache)
                  .iteritems()])
-
-        if self.last_update is not None and self.last_table_build is not None:
-            statemon.state.time_since_last_batch_event = (
-                datetime.datetime.now() - self.last_update).total_seconds()
-            statemon.state.time_since_stats_update = (
-                datetime.datetime.now() -
-                self.last_table_build).total_seconds()
                     
         self.is_loaded.set()
 
@@ -707,7 +730,7 @@ class StatsDBWatcher(threading.Thread):
                     table_build_result[0][0] is None):
                     _log.error('Cannot determine when the database was last '
                                'updated')
-                    statemon.state.increment('statsdb_error')
+                    statemon.state.good_connection_to_impala = 0
                     self.is_loaded.set()
                     return False
 
@@ -721,12 +744,13 @@ class StatsDBWatcher(threading.Thread):
 
                 is_newer = (self.last_table_build is None or 
                             cur_table_build > self.last_table_build)
+                statemon.state.good_connection_to_impala = 1
                 if not is_newer:
                     return False
             except impala.error.RPCError as e:
                 _log.error('SQL Error. Probably a table is not available yet. '
                            '%s' % e)
-                statemon.state.increment('statsdb_error')
+                statemon.state.good_connection_to_impala = 0
                 self.is_loaded.set()
                 return False
 
@@ -742,13 +766,13 @@ class StatsDBWatcher(threading.Thread):
                 play_result = cursor.fetchall()
                 if len(play_result) == 0 or play_result[0][0] is None:
                     _log.error('Cannot find any videoplay events')
-                    statemon.state.increment('statsdb_error')
+                    statemon.state.good_connection_to_impala = 0
                     self.is_loaded.set()
                     return False
             except impala.error.RPCError as e:
                 _log.error('SQL Error. Probably a table is not available yet. '
                            '%s' % e)
-                statemon.state.increment('statsdb_error')
+                statemon.state.good_connection_to_impala = 0
                 self.is_loaded.set()
                 return False
         finally:
@@ -775,7 +799,8 @@ class StatsDBWatcher(threading.Thread):
         if thumb_id is not None:
             retval[thumb_id] = [0, 0]
         try:
-            conn = happybase.Connection(options.incr_stats_host)
+            conn = happybase.Connection(options.incr_stats_host,
+                                        timeout=300000)
             try:
                 col_family = options.incr_stats_col_family
                 col_map = {
@@ -846,12 +871,13 @@ class StatsDBWatcher(threading.Thread):
                         continue
 
                     retval[tid] = counts
+                statemon.state.good_connection_to_hbase = 1
             finally:
                 conn.close()
         except thrift.Thrift.TException as e:
             _log.error('Error connecting to incremental stats database: %s'
                        % e)
-            statemon.state.increment('incr_statsdb_error')
+            statemon.state.good_connection_to_hbase = 0
 
         return retval            
             
@@ -865,7 +891,6 @@ class StatsDBWatcher(threading.Thread):
             cluster.find_cluster()
         except stats.cluster.ClusterInfoError as e:
             _log.error('Could not find the cluster.')
-            statemon.state.increment('statsdb_error')
             raise
         return cluster.master_ip
 
@@ -1089,13 +1114,18 @@ class DirectivePublisher(threading.Thread):
         '''Publishes the directives to S3'''
         # Create the directives file
         _log.info("Building directives file")
-        with closing(tempfile.NamedTemporaryFile('w+b')) as directive_file:
+        if not os.path.exists(options.tmp_dir):
+            os.makedirs(options.tmp_dir)
+            
+        with closing(tempfile.NamedTemporaryFile(
+                'w+b', dir=options.tmp_dir)) as directive_file:
             # Create the space for the expiry
             self._write_expiry(directive_file)
 
             # Write the data
             with self.lock:
                 written_video_ids = self._write_directives(directive_file)
+
             directive_file.write('\nend')
 
             # Overwrite the expiry because write_directives can take a while
@@ -1104,7 +1134,8 @@ class DirectivePublisher(threading.Thread):
             directive_file.seek(0)
             curtime = datetime.datetime.utcnow()
 
-            with closing(tempfile.NamedTemporaryFile('w+b')) as gzip_file:
+            with closing(tempfile.NamedTemporaryFile(
+                    'w+b', dir=options.tmp_dir)) as gzip_file:
                 gzip_stream = gzip.GzipFile(mode='wb',
                                             compresslevel=7,
                                             fileobj=gzip_file)
@@ -1139,11 +1170,12 @@ class DirectivePublisher(threading.Thread):
                 # Write the file that is timestamped
                 key = bucket.new_key(filename)
                 gzip_file.seek(0)
-                key.set_contents_from_file(
+                data_size = key.set_contents_from_file(
                     gzip_file,
                     encrypt_key=True,
-                    headers={'Content-Type': 'application/x-gzip'})
-                statemon.state.directive_file_size = key.size
+                    headers={'Content-Type': 'application/x-gzip'},
+                    replace=True)
+                statemon.state.directive_file_size = data_size
 
                 # Copy the file to the REST endpoint
                 key.copy(bucket.name, options.directive_filename,
@@ -1269,7 +1301,14 @@ class DirectivePublisher(threading.Thread):
                 'fractions': fractions
             }
             stream.write('\n' + json.dumps(data))
-            written_video_ids.add(video_id)
+            if len(fractions) > 1:
+                # If the default thumb is there, we want to serve it,
+                # but not flag that it is serving yet. So, we need
+                # more than one thumb associated with the video.  THIS
+                # IS A HACK
+                # TODO(mdesnoyer): Keep the video state
+                # around and do this properly.
+                written_video_ids.add(video_id)
 
         statemon.state.serving_urls_missing = serving_urls_missing
         return written_video_ids
@@ -1337,8 +1376,11 @@ class DirectivePublisher(threading.Thread):
                 for vidobj in videos_dict.itervalues():
                     if (vidobj is not None and 
                         vidobj.job_id not in customer_error_jobs):
-                        vidobj.serving_url = vidobj.get_serving_url(save=False)
-
+                        if new_state == neondata.RequestState.SERVING:
+                            vidobj.serving_url = vidobj.get_serving_url(
+                                save=False)
+                        else:
+                            vidobj.serving_url = None
             neondata.VideoMetadata.modify_many(video_ids, _set_serving_url)
         except Exception as e:
             statemon.state.increment('unexpected_db_update_error')

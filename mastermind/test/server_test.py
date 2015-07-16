@@ -1193,6 +1193,8 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.real_tempfile = mastermind.server.tempfile
         mastermind.server.tempfile = fake_tempfile.FakeTempfileModule(
             self.filesystem)
+        self.real_os = mastermind.server.os
+        mastermind.server.os = fake_filesystem.FakeOsModule(self.filesystem)
 
         # Mock out neondata
         self.neondata_patcher = patch('mastermind.server.neondata')
@@ -1212,6 +1214,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.neondata_patcher.stop()
         self.callback_patcher.stop()
         mastermind.server.tempfile = self.real_tempfile
+        mastermind.server.os = self.real_os
         self.s3_patcher.stop()
         options._set('mastermind.server.serving_update_delay',
                      self.old_serving_update_delay)
@@ -1635,6 +1638,8 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         self.real_tempfile = mastermind.server.tempfile
         mastermind.server.tempfile = fake_tempfile.FakeTempfileModule(
             self.filesystem)
+        self.real_os = mastermind.server.os
+        mastermind.server.os = fake_filesystem.FakeOsModule(self.filesystem)
 
         # Start a database
         self.redis = test_utils.redis.RedisServer()
@@ -1684,6 +1689,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
     def tearDown(self):
         self.callback_patcher.stop()
         mastermind.server.tempfile = self.real_tempfile
+        mastermind.server.os = self.real_os
         self.s3_patcher.stop()
         options._set('mastermind.server.serving_update_delay',
                      self.old_serving_update_delay)
@@ -1735,61 +1741,30 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
                           neondata.RequestState.FINISHED)
 
-    #TODO(Sunil): re-enable this test and add error cases
-    @unittest.skip('tests the non-async mechanism of updating the serving state')
-    def test_update_request_state_to_serving(self):
-        '''
-        Test the update_request_state logic
-        '''
-        api_key = "apikey"
-        i_vids = [];
-        requests = {}
-        def add_video(i, state=neondata.RequestState.SUBMIT):    
-            jid = 'job%s' % i
-            vid = 'vid%s' % i 
-            i_vid = "%s_%s" % (api_key, vid)
-            nar = neondata.NeonApiRequest(jid, api_key, vid)
-            nar.state = state
-            nar.save = MagicMock()
-            requests[i_vid] = nar
-            i_vids.append(i_vid)
-            self.publisher._add_video_id_to_serving_map(i_vid)
+        self.assertIsNone(neondata.VideoMetadata.get('acct1_vid1').serving_url)
 
-        # Add videos
-        for i in range(5):
-            add_video(i)
-        add_video(11, state=neondata.RequestState.ACTIVE)
-        self.datamock.VideoMetadata.get_video_requests.side_effect = \
-          lambda vids: [requests.get(vid, None) for vid in vids]
+    def test_no_update_when_only_default_thumb(self):
+        # TODO: Add ThumbnailMetadata change to this test when we
+        # check for the thumb state instead of just the number of
+        # thumbs
 
-        # Check initial state in the map
-        for i_vid in i_vids:
-            self.assertFalse(self.publisher.video_id_serving_map[i_vid])
+        # Only make one thumb valid
+        self.mastermind.serving_directive = {
+            'acct1_vid1': (('acct1', 'acct1_vid1'), 
+                           [('tid11', 1.0)])}
+        self.mastermind.video_info = self.mastermind.serving_directive
 
-        self.publisher._update_request_state_to_serving()
-        
-        def validate():
-            for i_vid in i_vids:
-                self.assertTrue(self.publisher.video_id_serving_map[i_vid])
+        self.publisher._publish_directives()
+        self._wait_for_db_updates()
 
-            for req in requests.values():
-                self.assertEqual(req.save.call_count, 1)
-                if req.job_id == 'job11':
-                    self.assertEqual(req.state,
-                                     neondata.RequestState.SERVING_AND_ACTIVE)
-                else:
-                    self.assertEqual(req.state, neondata.RequestState.SERVING)
-        
-        validate()
+        # The video shouldn't be in a serving state because there is only
+        # the default thumb
+        self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
+                          neondata.RequestState.FINISHED)
 
-        # Second iteration of directive publisher with no video change
-        self.publisher._update_request_state_to_serving()
-        validate()
+        self.assertIsNone(neondata.VideoMetadata.get('acct1_vid1').serving_url)
 
-        # Add a video
-        add_video('6')
-        self.publisher._update_request_state_to_serving()
-        validate()
+
 
 class SmokeTesting(test_utils.neontest.TestCase):
 
@@ -1816,6 +1791,8 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.real_tempfile = mastermind.server.tempfile
         mastermind.server.tempfile = fake_tempfile.FakeTempfileModule(
             self.filesystem)
+        self.real_os = mastermind.server.os
+        mastermind.server.os = fake_filesystem.FakeOsModule(self.filesystem)
 
         # Use an in-memory sqlite for the impala server
         def connect2db(*args, **kwargs):
@@ -1885,6 +1862,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
     def tearDown(self):
         neondata.DBConnection.clear_singleton_instance()
         mastermind.server.tempfile = self.real_tempfile
+        mastermind.server.os = self.real_os
         self.hbase_patcher.stop()
         self.cluster_patcher.stop()
         self.callback_patcher.stop()
@@ -2018,7 +1996,8 @@ class SmokeTesting(test_utils.neontest.TestCase):
             req = neondata.VideoMetadata.get_video_request('key1_vid1')
             self.assertEqual(req.state, neondata.RequestState.SERVING)
 
-            # Trigger new videos with different states via a push (finished, customer_error)
+            # Trigger new videos with different states via a push
+            # (finished, customer_error)
             for i in [2, 3]:
                 job = neondata.NeonApiRequest('job%d'%i, 'key1', 'vid%d'%i)
                 if i == 2:
@@ -2030,18 +2009,23 @@ class SmokeTesting(test_utils.neontest.TestCase):
                 # Create a video with a couple of thumbs in the database
                 vid = neondata.VideoMetadata('key1_vid%d'%i,
                                         request_id='job%d'%i,
-                                        tids=['key1_vid%d_t1'%i],
+                                        tids=['key1_vid%d_t%d' % (i, j)
+                                              for j in range(2)],
                                         i_id='i1')
                 vid.save()
                 platform.add_video('vid%d'%i, vid.job_id)
                 platform.save()
-                thumbs =  [neondata.ThumbnailMetadata('key1_vid%d_t1'%i,
-                            'key1_vid%d'%i,
-                             ttype='neon')]
+                thumbs =  [neondata.ThumbnailMetadata(
+                    'key1_vid%d_t%d'% (i,j),
+                    'key1_vid%d' % i,
+                    ttype='neon',
+                    rank=j) for j in range(2)]
                 neondata.ThumbnailMetadata.save_all(thumbs)
                 neondata.ThumbnailServingURLs.save_all([
-                    neondata.ThumbnailServingURLs('key1_vid%d_t1'%i,
-                                                  {(160, 90) : 't21.jpg'})])
+                    neondata.ThumbnailServingURLs(
+                        'key1_vid%d_t%d' % (i,j),
+                        {(160, 90) : 't21.jpg'})
+                        for j in range(2)])
 
             self.assertWaitForEquals(
                 lambda: 'key1_vid2' in \

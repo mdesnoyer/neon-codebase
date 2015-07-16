@@ -36,7 +36,7 @@ define("batch_period", default=86400, type=float,
        help='Minimum period in seconds between runs of the batch process.')
 define("cluster_ip", default=None, type=str,
        help='Elastic ip to assign to the primary cluster')
-define("max_task_instances", default=10, type=int,
+define("max_task_instances", default=18, type=int,
        help='Maximum number of task instances to spin up')
 
 from utils import statemon
@@ -60,7 +60,7 @@ class BatchProcessManager(threading.Thread):
         self._stopped = threading.Event()
 
         # Number of extra task instances to spin up for the batch process.
-        self.n_task_instances = 4
+        self.n_task_instances = 10
         self.daemon = True
 
     def run(self):
@@ -191,7 +191,7 @@ class BatchProcessManager(threading.Thread):
 def main():
     _log.info('Looking up cluster %s' % options.cluster_type)
     try:
-        cluster = stats.cluster.Cluster(options.cluster_type, 12,
+        cluster = stats.cluster.Cluster(options.cluster_type, 15,
                                         options.cluster_ip)
         cluster.connect()
 

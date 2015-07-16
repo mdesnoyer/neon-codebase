@@ -42,7 +42,7 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
         self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
         self.cdn_mock = self._future_wrap_mock(
             self.cdn_mocker.start().create().upload)
-        self.cdn_mock.return_value = 'some_cdn_url.jpg'
+        self.cdn_mock.return_value = [('some_cdn_url.jpg', 640, 480)]
 
         # Mock out the brightcove api and build the platform
         mock_bc_api = MagicMock()

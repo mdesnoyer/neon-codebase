@@ -265,8 +265,8 @@ neon_service_userid_abtest_ready(ngx_http_request_t *request, ngx_str_t *uuid){
     unsigned int cur_timestamp = (unsigned int) time(NULL);
     
     // check for the neonglobaluserid cookie
-    if (neon_service_isset_cookie(request, &neon_cookie_name, uuid) == NEON_TRUE){
-       
+    if (neon_service_isset_cookie(request, &neon_cookie_name, uuid) == NEON_TRUE)
+    {  
         char ts[NEON_UUID_TS_LEN];
         // TODO: Protect against fake cookie timestamp, or invalid atoi
         // conversion
@@ -275,7 +275,7 @@ neon_service_userid_abtest_ready(ngx_http_request_t *request, ngx_str_t *uuid){
         if (cur_timestamp >= cookie_ts + 120)
             return NEON_TRUE;
     }
-    
+
     return NEON_FALSE;
 }
 
@@ -775,7 +775,7 @@ neon_service_client_api(ngx_http_request_t *request,
 NEON_GETTHUMB_API_ERROR 
 neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
 {
-    int clen = 0; 
+    int wants_html = 0, clen = 0; 
 
     ngx_str_t base_url = ngx_string("/v1/getthumbnailid/");
     ngx_str_t params_key = ngx_string("params");
@@ -802,14 +802,18 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
 
     // get publisher id
     unsigned char * publisher_id = neon_service_get_uri_token(request, &base_url, 0);
-    
+    char * token = strtok((char*)publisher_id, "."); 
+    if (token) {
+        publisher_id = (unsigned char *)token; 
+        char * extension = strtok(NULL, "."); 
+        if (extension && strcmp(extension, (char*)"html") == 0) 
+            wants_html = 1; 
+    }  
     if(publisher_id == NULL) {
         neon_stats[NEON_GETTHUMBNAIL_API_PUBLISHER_NOT_FOUND] ++;
         neon_service_set_no_content_headers(request);
         return NEON_GETTHUMB_API_FAIL;
     }
-
-
     // Account ID
     const char * account_id = 0;
     int account_id_size = 0;
@@ -847,6 +851,19 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
 
     (*chain) = (ngx_chain_t*)ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
     
+    if (wants_html) { 
+        static ngx_str_t response_body_start = ngx_string("<!DOCTYPE html><html><head><script type='text/javascript'>window.parent.postMessage('");
+        buf = ngx_calloc_buf(request->pool);
+     //   buf->memory = 1;   
+    //    *chain = ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
+        buf->start = buf->pos  = response_body_start.data;
+        buf->end = buf->last = buf->pos + response_body_start.len;
+        clen += response_body_start.len;
+        neon_service_add_to_chain(request, (*chain), buf); 
+      //  (*chain)->buf = buf;
+     //   (*chain)->next = NULL;
+     //   chain = &(*chain)->next;
+    }  
     // for each video id  passd to us as params
     while(vtoken != NULL) {
 
@@ -901,15 +918,33 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
              clen += 1;
         }
     }
+    if (wants_html) { 
+        static ngx_str_t response_body_end = ngx_string("', '*')</script></head><body></body></html>");
+        buf = ngx_calloc_buf(request->pool);
+        //buf->memory = 1;   
+        //*chain = ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
+        buf->start = buf->pos  = response_body_end.data;
+        buf->end = buf->last = buf->pos + response_body_end.len;
+        clen += response_body_end.len;
+        neon_service_add_to_chain(request, (*chain), buf); 
+        //(*chain)->buf = buf;
+        //(*chain)->next = NULL;
+        //chain = &(*chain)->next;
+    }  
 
     request->headers_out.status = NGX_HTTP_OK;
-    request->headers_out.content_type.len = strlen("text/plain");
-    request->headers_out.content_type.data = (u_char *) "text/plain";
+    if (wants_html) { 
+        request->headers_out.content_type.len = strlen("text/html");
+        request->headers_out.content_type.data = (u_char *) "text/html";
+    }
+    else { 
+        request->headers_out.content_type.len = strlen("text/plain");
+        request->headers_out.content_type.data = (u_char *) "text/plain";
+    }  
     request->headers_out.content_length_n = clen;
         
     return NEON_GETTHUMB_API_OK;
 }
-
 // Getting geoip stuff in nginx
 //ngx_str_t variable_name = ngx_string("geoip_country_code");
 //    ngx_http_variable_value_t * geoip_country_code_var =

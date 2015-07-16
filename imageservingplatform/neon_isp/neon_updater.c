@@ -47,8 +47,8 @@ static const int test_config = 1;
 void neon_updater_config_init(unsigned char *m_url, 
                                 unsigned char *m_valid_path, 
                                 unsigned char *m_download_path, 
-                                unsigned char * s3downloader_fpath, 
                                 unsigned char * s3_port, 
+                                unsigned char * s3downloader_fpath, 
                                 time_t s_time){
     
     // Mastermind REST URI
@@ -136,8 +136,7 @@ neon_runloop(void * arg){
              *  fetch new mastermind file from S3
              */
             char *error_msg = NULL; 
-            if(neon_fetch(mastermind_url, mastermind_filepath, s3downloader, s3port, fetch_timeout, &error_msg) == NEON_FETCH_FAIL) {
-                
+            if(neon_fetch(mastermind_url, mastermind_filepath, s3port, s3downloader, fetch_timeout, &error_msg) == NEON_FETCH_FAIL) {
                 // log
                 ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, 
                         "updater: failed to fetch mastermind file: %s", error_msg);
