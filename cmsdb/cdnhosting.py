@@ -224,7 +224,7 @@ class CDNHosting(object):
         response = yield tornado.gen.Task(
             utils.http.send_request,
             request,
-            base_delay=1.0)
+            base_delay=4.0)
         if response.error:
             raise tornado.gen.Return(False)
         raise tornado.gen.Return(True)
@@ -524,6 +524,7 @@ class AkamaiHosting(CDNHosting):
             cdn_metadata.akamai_key,
             cdn_metadata.akamai_name,
             cdn_metadata.cpcode)
+        self.ntries = 5
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -567,6 +568,7 @@ class AkamaiHosting(CDNHosting):
         # If we do not overwrite and it's already there, stop
         if not overwrite:
             stat_response = yield self.ak_conn.stat(image_url, ntries=1,
+                                                    do_logging=False,
                                                     async=True)
             if stat_response.code == 200:
                 raise tornado.gen.Return(cdn_url) 
@@ -578,7 +580,9 @@ class AkamaiHosting(CDNHosting):
         filestream.seek(0)
         imgdata = filestream.read()
 
-        response = yield self.ak_conn.upload(image_url, imgdata, async=True)
+        response = yield self.ak_conn.upload(image_url, imgdata,
+                                             ntries=self.ntries,
+                                             async=True)
         if response.error:
             msg = ("Error uploading image to akamai for tid %s: %s" 
                    % (tid, response.error))

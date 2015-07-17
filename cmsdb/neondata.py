@@ -1438,6 +1438,9 @@ class NeonApiKey(NamespacedStoredObject):
 class InternalVideoID(object):
     ''' Internal Video ID Generator '''
     NOVIDEO = 'NOVIDEO' # External video id to specify that there is no video
+
+    VALID_EXTERNAL_REGEX = '[0-9a-zA-Z\-\.]+'
+    VALID_INTERNAL_REGEX = ('[0-9a-zA-Z]+_%s' % VALID_EXTERNAL_REGEX)
     
     @staticmethod
     def generate(api_key, vid=None):
@@ -2365,7 +2368,7 @@ class BrightcovePlatform(AbstractPlatform):
     
     def __init__(self, a_id, i_id='', api_key='', p_id=None, 
                 rtoken=None, wtoken=None, auto_update=False,
-                last_process_date=None, abtest=False):
+                last_process_date=None, abtest=False, callback_url=None):
 
         ''' On every request, the job id is saved '''
         super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)
@@ -2381,7 +2384,9 @@ class BrightcovePlatform(AbstractPlatform):
         self.rendition_frame_width = None #Resolution of video to process
         self.video_still_width = 480 #default brightcove still width
         # the ids of playlist to create video requests from
-        self.playlist_feed_ids = [] 
+        self.playlist_feed_ids = []
+        # the url that will be called when a video is finished processing 
+        self.callback_url = callback_url
 
     @classmethod
     def get_ovp(cls):
@@ -2406,7 +2411,7 @@ class BrightcovePlatform(AbstractPlatform):
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update,
             self.last_process_date, neon_video_server=video_server_uri,
-            account_created=self.account_created)
+            account_created=self.account_created, callback_url=self.callback_url)
 
     @tornado.gen.engine
     def update_thumbnail(self, i_vid, new_tid, nosave=False, callback=None):

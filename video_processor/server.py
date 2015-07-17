@@ -205,17 +205,15 @@ class FairWeightedRequestQueue(object):
     FairWeighted requeust Q
 
     '''
-    def __init__(self, nqueues=2, weights='pow2'):
+    def __init__(self, nqueues=3, weights='pow2'):
         # Queues that hold objects of type RequestData
         self.pqs = [SimpleThreadSafeDictQ(RequestData) for x in range(nqueues)]
-        self.max_priority = 1.0
+        self.max_priority = 0.0
         self.cumulative_priorities = []
         if weights == 'pow2':
-            self.cumulative_priorities.append(1)
             for i in range(nqueues):
-                if i >0:
-                    self.max_priority += 1.0/2**(i) 
-                    self.cumulative_priorities.append(self.max_priority)
+                self.max_priority += 1.0/2**(i) 
+                self.cumulative_priorities.append(self.max_priority)
         else:
             raise Exception("unsupported weight scheme")
     
@@ -415,7 +413,8 @@ class JobManager(object):
                 # The job finished sucessfully
                 continue
             elif request.state in [neondata.RequestState.FAILED,
-                                   neondata.RequestState.INT_ERROR]:
+                                   neondata.RequestState.INT_ERROR,
+                                   neondata.RequestState.CUSTOMER_ERROR]:
                 # Requeue the job with a large exponential backoff
                 delay = self.base_time * (1 << (request.fail_count + 2))
                 _log.warn('Job %s for account %s failed and will be retried'
@@ -542,7 +541,8 @@ class JobManager(object):
                                   neondata.RequestState.REQUEUED,
                                   neondata.RequestState.REPROCESS,
                                   neondata.RequestState.FAILED,
-                                  neondata.RequestState.INT_ERROR]):
+                                  neondata.RequestState.INT_ERROR,
+                                  neondata.RequestState.CUSTOMER_ERROR]):
                 yield self.requeue_job(request.job_id, request.api_key)
 
 class StatsHandler(tornado.web.RequestHandler):
@@ -672,7 +672,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             try:
                 api_key = params[API_KEY]
                 vid = params[VIDEO_ID]
-                if not re.match('^[a-zA-Z0-9-]+$', vid):
+                if re.match('%s$' % 
+                            neondata.InternalVideoID.VALID_EXTERNAL_REGEX,
+                            vid) is None:
                     self.send_json_response(
                         '{"error":"video id contains invalid characters"}', 400)
                     return

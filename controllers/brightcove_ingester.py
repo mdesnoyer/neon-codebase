@@ -209,7 +209,8 @@ def process_one_account(platform):
 def run_one_cycle():
     platforms = yield tornado.gen.Task(
         neondata.BrightcovePlatform.get_all)
-    yield [process_one_account(x) for x in platforms if x is not None]
+    yield [process_one_account(x) for x in platforms if 
+           x is not None and x.enabled]
 
 @tornado.gen.coroutine
 def main(run_flag):
