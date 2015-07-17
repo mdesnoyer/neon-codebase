@@ -106,7 +106,7 @@ def load_model(filename):
     '''
     with open(filename, 'rb') as f:
         model = pickle.load(f)
-    model.restore_additional_data()
+    model.restore_additional_data(filename)
     
     return model 
 
