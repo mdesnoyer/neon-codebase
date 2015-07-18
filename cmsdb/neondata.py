@@ -996,6 +996,7 @@ class StoredObject(object):
         StoredObject.modify('thumb_a', lambda thumb: thumb.update_phash())
         '''
         def _process_one(d):
+            
             val = d[key]
             if val is not None:
                 func(val)
@@ -1623,18 +1624,6 @@ class NeonUserAccount(NamespacedStoredObject):
     def to_json(self):
         ''' to json '''
         return json.dumps(self, default=lambda o: o.__dict__)
-    
-    def save_platform(self, new_integration, callback=None):
-        '''
-        Save Neon User account and corresponding platform object
-        '''
-        
-        #temp: changing this to a blocking pipeline call   
-        db_connection = DBConnection.get(self)
-        pipe = db_connection.blocking_conn.pipeline()
-        pipe.set(self.key, self.to_json())
-        pipe.set(new_integration.key, new_integration.to_json()) 
-        callback(pipe.execute())
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -2057,7 +2046,7 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
 class AbstractPlatform(NamespacedStoredObject):
     ''' Abstract Platform/ Integration class '''
 
-    def __init__(self, api_key, i_id='0', abtest=False, enabled=True, 
+    def __init__(self, api_key, i_id=None, abtest=False, enabled=True, 
                 serving_enabled=True, serving_controller="imageplatform"):
         
         super(AbstractPlatform, self).__init__(
@@ -2076,6 +2065,9 @@ class AbstractPlatform(NamespacedStoredObject):
     
     @classmethod
     def _generate_subkey(cls, api_key, i_id):
+        if i_id is None or api_key.endswith('_%s' % i_id):
+            # It's already the correct key
+            return api_key
         return '_'.join([api_key, i_id])
 
     @classmethod
@@ -2108,9 +2100,11 @@ class AbstractPlatform(NamespacedStoredObject):
                     '_type': __get_type(obj_dict['key']),
                     '_data': copy.deepcopy(obj_dict)
                 }
+            
             return super(AbstractPlatform, cls)._create(key, obj_dict)
 
     def save(self, callback=None):
+        raise NotImplementedError("To save this object use modify()")
         # since we need a default constructor with empty strings for the 
         # eval magic to work, check here to ensure apikey and i_id aren't empty
         # since the key is generated based on them
@@ -2127,14 +2121,21 @@ class AbstractPlatform(NamespacedStoredObject):
             cls._generate_subkey(api_key, i_id), callback=callback)
     
     @classmethod
-    def modify(cls, api_key, i_id, func, callback=None):
+    def modify(cls, api_key, i_id, func, create_missing=False, callback=None):
+        def _set_parameters(x):
+            api_key, i_id = x.get_id().split('_')
+            x.neon_api_key = api_key
+            x.integration_id = i_id
+            func(x)
+            
         return super(AbstractPlatform, cls).modify(
             cls._generate_subkey(api_key, i_id),
-            func,
+            _set_parameters,
+            create_missing=create_missing,
             callback=callback)
 
     @classmethod
-    def modify_many(cls, keys, func, callback=None):
+    def modify_many(cls, keys, func, create_missing=False, callback=None):
         '''Modify many keys.
 
         Each key must be a tuple of (api_key, i_id)
@@ -2143,6 +2144,7 @@ class AbstractPlatform(NamespacedStoredObject):
             [cls._generate_subkey(api_key, i_id) for 
              api_key, i_id in keys],
             func,
+            create_missing=create_missing,
             callback=callback)
 
     def to_json(self):
@@ -2333,11 +2335,11 @@ class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
     '''
-    def __init__(self, a_id, i_id='0', api_key='', abtest=False):
+    def __init__(self, api_key, i_id='0', a_id='', abtest=False):
         # By default integration ID 0 represents 
         # Neon Platform Integration (access via neon api)
         
-        super(NeonPlatform, self).__init__(api_key, '0', abtest)
+        super(NeonPlatform, self).__init__(api_key, i_id, abtest)
         self.account_id = a_id
         self.neon_api_key = api_key 
    
@@ -2366,7 +2368,7 @@ class NeonPlatform(AbstractPlatform):
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
     
-    def __init__(self, a_id, i_id='', api_key='', p_id=None, 
+    def __init__(self, api_key, i_id=None, a_id='', p_id=None, 
                 rtoken=None, wtoken=None, auto_update=False,
                 last_process_date=None, abtest=False, callback_url=None):
 
@@ -2595,7 +2597,7 @@ class YoutubePlatform(AbstractPlatform):
 
     # TODO(Sunil): Fix this class when Youtube is implemented 
 
-    def __init__(self, a_id, i_id='', api_key='', access_token=None, refresh_token=None,
+    def __init__(self, api_key, i_id=None, a_id='', access_token=None, refresh_token=None,
                 expires=None, auto_update=False, abtest=False):
         super(YoutubePlatform, self).__init__(api_key, i_id)
         
@@ -2720,7 +2722,7 @@ class OoyalaPlatform(AbstractPlatform):
     '''
     OOYALA Platform
     '''
-    def __init__(self, a_id, i_id='', api_key='', p_code=None, 
+    def __init__(self, api_key, i_id=None, a_id='', p_code=None, 
                  o_api_key=None, api_secret=None, auto_update=False): 
         '''
         Init ooyala platform 

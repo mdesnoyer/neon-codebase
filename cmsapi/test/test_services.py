@@ -1128,9 +1128,9 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertIsNotNone(job_id)
         
         # add video to account
-        np = neondata.NeonPlatform.get(api_key, '0')
-        np.add_video(vid, job_id)
-        np.save()
+        np = neondata.NeonPlatform.modify(
+            api_key, '0',
+            lambda x: x.add_video(vid, job_id))
         
         # Query a video that was just submitted 
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
@@ -1174,9 +1174,9 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         '''
 
         self.api_key = self.create_neon_account()
-        nplatform = neondata.NeonPlatform.get(self.api_key, '0')
         nvids = 10 
         api_requests = [] 
+        vids_added = []
         for i in range(nvids):
             vid = "neonvideo%s"%i 
             title = "title%s"%i 
@@ -1190,9 +1190,14 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             api_request.state = neondata.RequestState.SUBMIT
             self.assertTrue(api_request.save())
             api_requests.append(api_request)
-            nplatform.add_video(vid, job_id)
+            vids_added.append((vid, job_id))
 
-        nplatform.save()
+        def _add_videos(x):
+            for vid, job_id in vids_added:
+                x.add_video(vid, job_id)
+        nplatform = neondata.NeonPlatform.modify(
+            self.api_key, '0',
+            _add_videos)
         random.seed(1123)
 
         self._process_brightcove_neon_api_requests(api_requests[:-1])
@@ -1357,7 +1362,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         '''
 
         self.api_key = self.create_neon_account()
-        nplatform = neondata.NeonPlatform.get(self.api_key, '0')
         vid = "testvideo1"
         title = "title"
         video_download_url = "http://video.mp4" 
@@ -1369,9 +1373,10 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         api_request.submit_time = str(time.time())
         api_request.state = neondata.RequestState.SUBMIT
         self.assertTrue(api_request.save())
-        nplatform.add_video(vid, job_id)
-
-        nplatform.save()
+        nplatform = neondata.NeonPlatform.modify(
+            self.api_key, '0',
+            lambda x: x.add_video(vid, job_id),
+            create_missing=True)
         self._process_brightcove_neon_api_requests([api_request])
         
         i_vid = neondata.InternalVideoID.generate(self.api_key, vid) 
