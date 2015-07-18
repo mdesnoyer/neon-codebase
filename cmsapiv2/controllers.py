@@ -36,7 +36,6 @@ from utils import statemon
 import utils.sync
 from utils.options import define, options
 from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Invalid
-#import voluptuous
 
 import logging
 _log = logging.getLogger(__name__)
@@ -55,6 +54,17 @@ def parse_args(request):
 def api_key(request): 
     return self.request.headers.get('X-Neon-API-Key') 
 
+def generate_standard_error(error_msg):
+    error_json = {} 
+    error_json['error'] = error_msg
+    return json.dumps(error_json) 
+
+def send_json_response(request, data, status=200):
+    request.set_header("Content-Type", "application/json")
+    request.set_status(status)
+    request.write(data)
+    request.finish()
+
 '''*************************************************************
 AccountHandler : class responsible for handling put and get 
                  requests for Accounts 
@@ -66,28 +76,34 @@ class AccountHandler(tornado.web.RequestHandler):
         schema = Schema({ 
           Required('account_id') : All(int, Range(min=0)) 
         }) 
-        try: 
-            schema({'account_id': int(account_id)}) 
+        try:
+            args = {} 
+            args['account_id'] = int(account_id)  
+            schema(args) 
+            output = json.dumps(args)
         except MultipleInvalid as e:  
-            print e
+            output = generate_standard_error('%s %s' % (e.path[0], e.msg))
+ 
+        send_json_response(self, output, 200) 
 
     @tornado.gen.coroutine
-    def put(self, account_id, *args, **kwargs):
+    def put(self, account_id):
+        # validate me 
         schema = Schema({ 
           Required('account_id') : All(int, Range(min=0)),
           'default_width': All(int, Range(min=1, max=8192)), 
           'default_height': All(int, Range(min=1, max=8192)),
           'default_thumbnail': All(str, Length(min=1, max=2048)) 
         })
-        # validate me 
         try: 
             args = parse_args(self.request)
             args['account_id'] = int(account_id)  
             schema(args) 
-        except MultipleInvalid as e:  
-            print e
+            output = json.dumps(args)
+        except MultipleInvalid as e: 
+            output = generate_standard_error('%s %s' % (e.path[0], e.msg))
 
-        print args
+        send_json_response(self, output, 200) 
 
 class LiveStreamHandler(tornado.web.RequestHandler): 
     @tornado.gen.coroutine 
