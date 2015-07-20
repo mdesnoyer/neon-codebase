@@ -74,13 +74,25 @@ class AccountHandler(tornado.web.RequestHandler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({ 
-          Required('account_id') : All(int, Range(min=0)) 
+          Required('account_id') : All(str, Length(min=1, max=256)),
         }) 
         try:
             args = {} 
-            args['account_id'] = int(account_id)  
+            args['account_id'] = str(account_id)  
             schema(args) 
-            output = json.dumps(args)
+            user_account = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
+            # we don't want to send back everything, build up object of what we want to send back 
+            rv_account = {} 
+            rv_account['tracker_account_id'] = user_account.tracker_account_id
+            rv_account['account_id'] = user_account.account_id 
+            rv_account['staging_tracker_account_id'] = user_account.staging_tracker_account_id 
+            rv_account['default_thumbnail_id'] = user_account.default_thumbnail_id 
+            rv_account['integrations'] = user_account.integrations
+            rv_account['default_size'] = user_account.default_size
+            #TODO we need created/updated on neonuseraccount
+            rv_account['created'] = str(datetime.datetime.utcnow()) 
+            rv_account['updated'] = str(datetime.datetime.utcnow()) 
+            output = json.dumps(rv_account) 
         except MultipleInvalid as e:  
             output = generate_standard_error('%s %s' % (e.path[0], e.msg))
  
@@ -88,18 +100,26 @@ class AccountHandler(tornado.web.RequestHandler):
 
     @tornado.gen.coroutine
     def put(self, account_id):
-        # validate me 
         schema = Schema({ 
-          Required('account_id') : All(int, Range(min=0)),
+          Required('account_id') : All(str, Length(min=1, max=256)),
           'default_width': All(int, Range(min=1, max=8192)), 
           'default_height': All(int, Range(min=1, max=8192)),
-          'default_thumbnail': All(str, Length(min=1, max=2048)) 
+          'default_thumbnail_id': All(str, Length(min=1, max=2048)) 
         })
-        try: 
+        try:
             args = parse_args(self.request)
-            args['account_id'] = int(account_id)  
-            schema(args) 
-            output = json.dumps(args)
+            args['account_id'] = str(account_id)
+            schema(args)
+            acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
+            def _update_account(a):
+                try: 
+                    a.default_size[0] = args['default_width'] 
+                    a.default_size[1] = args['default_height']
+                    a.default_thumbnail_id = args['default_thumbnail_id']
+                except KeyError as e: 
+                    pass 
+            result = yield tornado.gen.Task(neondata.NeonUserAccount.modify, acct.key, _update_account)
+            output = result.to_json() 
         except MultipleInvalid as e: 
             output = generate_standard_error('%s %s' % (e.path[0], e.msg))
 
@@ -111,8 +131,8 @@ class LiveStreamHandler(tornado.web.RequestHandler):
         print 'posting a video job' 
 
 application = tornado.web.Application([
-    (r'/(\d+)$', AccountHandler), 
-    (r'/(\d+)/$', AccountHandler),
+    (r'/([a-zA-Z0-9]+)$', AccountHandler), 
+    (r'/([a-zA-Z0-9]+)/$', AccountHandler),
     (r'/(\d+)/jobs/live_stream', LiveStreamHandler)
 ], gzip=True)
 
