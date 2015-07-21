@@ -149,32 +149,35 @@ neon_mastermind_account_id_lookup(const char * publisher_id,
 }
 
 
-/*
- * Lookup logic
- */
+/*********************************************************
+ * Name       : neon_mastermind_image_url_lookup 
+ * Parameters :  
+ *********************************************************/
 NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR
 neon_mastermind_image_url_lookup(const char * accountId,
                                     const char * videoId,
                                     ngx_str_t * bucketId,
                                     int height,
                                     int width,
-                                    const char ** url,
-                                    int * size){
-    
+                                    char ** url)
+{
     Mastermind * mastermind = neon_get_mastermind();
     
     if(mastermind_current == 0)
         return NEON_MASTERMIND_IMAGE_URL_LOOKUP_FAIL;
 
+    std::string image_url("");  
+    mastermind->GetImageUrl(accountId, videoId, 
+                            bucketId->data, bucketId->len,
+                            height, width, image_url);
     
-    (*url) = mastermind->GetImageUrl(accountId, videoId, 
-                                      bucketId->data, bucketId->len,
-                                      height, width, *size);
+    if(image_url.size() == 0) { 
+        return NEON_MASTERMIND_IMAGE_URL_LOOKUP_NOT_FOUND; 
+    } 
     
-    if(*url == 0)
-        return NEON_MASTERMIND_IMAGE_URL_LOOKUP_NOT_FOUND;
-    
-
+    *url = (char *)malloc(image_url.size()+1);
+    snprintf((*url), image_url.size()+1, "%s", image_url.c_str()); 
+ 
     return NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK;
 }
 
@@ -187,24 +190,24 @@ NEON_MASTERMIND_TID_LOOKUP_ERROR
 neon_mastermind_tid_lookup(const char * accountId,
                             const char * videoId,
                             ngx_str_t * bucketId,
-                            const char ** tid,
-                            int * size){
-
+                            char ** tid)
+{
     Mastermind * mastermind = neon_get_mastermind();
     
     if(mastermind_current == 0)
         return NEON_MASTERMIND_TID_LOOKUP_FAIL;
 
-    
-    (*tid) = mastermind->GetThumbnailID(accountId, videoId, 
+    std::string thumbnailId("");  
+    mastermind->GetThumbnailID(accountId, videoId, 
                                         bucketId->data, 
                                         bucketId->len, 
-                                        *size); 
-
-    
-    if(*tid == 0)
+                                        thumbnailId); 
+    if (thumbnailId.size() == 0) { 
         return NEON_MASTERMIND_TID_LOOKUP_NOT_FOUND;
-    
+    }
+ 
+    *tid = (char *)malloc(thumbnailId.size()+1);
+    snprintf((*tid), thumbnailId.size()+1, "%s", thumbnailId.c_str()); 
 
     return NEON_MASTERMIND_TID_LOOKUP_OK;
 }
