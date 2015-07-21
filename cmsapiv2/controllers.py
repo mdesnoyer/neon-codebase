@@ -48,8 +48,12 @@ def parse_args(request):
     if request.query_arguments is not None: 
         for key, value in request.query_arguments.iteritems():
             args[key] = int(value[0]) if value[0].isdigit() else value[0]
-        return args
     # otherwise let's use what we find in the body
+    elif request.body_arguments is not None: 
+        for key, value in request.body_arguments.iteritems():
+            args[key] = int(value[0]) if value[0].isdigit() else value[0]
+
+    return args
 
 def api_key(request): 
     return self.request.headers.get('X-Neon-API-Key') 
