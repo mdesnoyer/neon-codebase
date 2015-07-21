@@ -58,6 +58,11 @@ def parse_args(request):
 def api_key(request): 
     return self.request.headers.get('X-Neon-API-Key') 
 
+def send_not_implemented_msg(self, verb): 
+    send_json_response(self, 
+                       generate_standard_error('%s %s' % (verb, 'is not implemented for this endpoint')), 
+                       501)
+
 def generate_standard_error(error_msg):
     error_json = {} 
     error_json['error'] = error_msg
@@ -69,10 +74,31 @@ def send_json_response(request, data, status=200):
     request.write(data)
     request.finish()
 
-'''*************************************************************
-AccountHandler : class responsible for handling put and get 
-                 requests for Accounts 
-*************************************************************'''
+'''****************************************************************
+NewAccountHandler : class responsible for creating a new account
+   HTTP Verbs     : post 
+****************************************************************'''
+class NewAccountHandler(tornado.web.RequestHandler):
+    @tornado.gen.coroutine 
+    def get(self):
+        send_not_implemented_msg(self, 'get') 
+
+    @tornado.gen.coroutine 
+    def post(self):
+        print 'posting a new account' 
+
+    @tornado.gen.coroutine 
+    def put(self): 
+        send_not_implemented_msg(self, 'put') 
+ 
+    @tornado.gen.coroutine 
+    def delete(self): 
+        send_not_implemented_msg(self, 'delete') 
+
+'''*****************************************************************
+AccountHandler : class responsible for updating and getting accounts 
+   HTTP Verbs  : get, put 
+*****************************************************************'''
 
 class AccountHandler(tornado.web.RequestHandler):
     @tornado.gen.coroutine
@@ -97,6 +123,10 @@ class AccountHandler(tornado.web.RequestHandler):
             rv_account['created'] = str(datetime.datetime.utcnow()) 
             rv_account['updated'] = str(datetime.datetime.utcnow()) 
             output = json.dumps(rv_account) 
+        except AttributeError as e:  
+            output = generate_standard_error('%s %s' % 
+                        ('Could not retrieve the account with id:',
+                         account_id))
         except MultipleInvalid as e:  
             output = generate_standard_error('%s %s' % (e.path[0], e.msg))
  
@@ -123,18 +153,40 @@ class AccountHandler(tornado.web.RequestHandler):
                 except KeyError as e: 
                     pass 
             result = yield tornado.gen.Task(neondata.NeonUserAccount.modify, acct.key, _update_account)
-            output = result.to_json() 
+            output = result.to_json()
+        except AttributeError as e:  
+            output = generate_standard_error('%s %s %s' % 
+                        ('Unable to fetch the account with id:',
+                         account_id,
+                         'can not perform an update.'))
         except MultipleInvalid as e: 
             output = generate_standard_error('%s %s' % (e.path[0], e.msg))
 
-        send_json_response(self, output, 200) 
+        send_json_response(self, output, 200)
 
+    @tornado.gen.coroutine 
+    def post(self):
+        send_not_implemented_msg(self, 'post') 
+ 
+    @tornado.gen.coroutine 
+    def delete(self): 
+        send_not_implemented_msg(self, 'delete')
+ 
+'''*********************************************************************
+LiveStreamHandler : class responsible for creating a new video job 
+   HTTP Verbs     : post
+        Notes     : outside of scope of phase 1, future implementation
+*********************************************************************'''
 class LiveStreamHandler(tornado.web.RequestHandler): 
     @tornado.gen.coroutine 
     def post(self, *args, **kwargs):
         print 'posting a video job' 
 
 application = tornado.web.Application([
+    (r'/accounts/$', NewAccountHandler),
+    (r'/accounts$', NewAccountHandler),
+    (r'/accounts/([a-zA-Z0-9]+)$', AccountHandler), 
+    (r'/accounts/([a-zA-Z0-9]+)/$', AccountHandler),
     (r'/([a-zA-Z0-9]+)$', AccountHandler), 
     (r'/([a-zA-Z0-9]+)/$', AccountHandler),
     (r'/(\d+)/jobs/live_stream', LiveStreamHandler)
