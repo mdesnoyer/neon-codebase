@@ -12,6 +12,7 @@
 #include "mastermind.h"
 #include "neon_mastermind.h"
 #include "neon_stats.h"
+#include "include/url_utils.hpp"
 
 const std::string Mastermind::typeKey            = "type";
 const std::string Mastermind::typeDirective      = "dir";
@@ -494,83 +495,85 @@ Mastermind::GetAccountId(const char * publisherId, int & size){
  * @return : URL of the image (const char *)
  * */
 
-const char *
+void
 Mastermind::GetImageUrl(const char * account_id, 
                         const char * video_id, 
                         unsigned char * bucketId,
                         int bucketIdLen,
                         int height, 
                         int width, 
-                        int & size){
+                        std::string & image_url){
     
     string accountId = account_id;
     string videoId = video_id;
 
     const Directive * directive = 0;
     directive = directiveTable->Find(accountId, videoId);
-    
     // if no directive are found for this vid then try to return 
     // the default thumb for this account
-    if(directive == 0){
-        
+    if(directive == 0) {
         const DefaultThumbnail * def = defaultThumbnailTable->Find(accountId); 
-
         // if nothing more can be done
         if(def == 0) {
             neon_stats[NEON_INVALID_VIDEO_ID] ++;
-            return 0;
+            return;
         }
-
-       return def->GetScaledImage(height, width, size); 
+        const ScaledImage * si = def->GetScaledImage(height, width);
+        
+        if (si)  
+            image_url = *si->scoped_url();
+        else 
+            image_url = def->default_url();
+ 
+        return;  
     }
 
     const Fraction * fraction = directive->GetFraction(bucketId, bucketIdLen);
     
-    if (fraction == 0){
-        return 0;
+    if (fraction == 0) {
+        return;
     }
    
     // If either or both height or width are empty, then serve the default image URL
-    if (height == -1 || width == -1){
-        const char * url = fraction->GetDefaultURL();
-        size = strlen(url);
-        return url;
+    if (height == -1 || width == -1) {
+        image_url = *fraction->default_url();
     }
+    else { 
+        const ScaledImage * image = fraction->GetScaledImage(height, width);
+        // Didn't get a "pre-sized" image so send default URL 
+        if (image == 0){
+            image_url = *fraction->default_url();
+            // NOTE: IGN Doesn't want to use cloudinary, hence we'll return a
+            // default URL for non-standard sizes
+            // re-enable when needed
 
-    const ScaledImage * image = fraction->GetScaledImage(height, width);
-
-    // Didn't get a "pre-sized" image so send default URL 
-    if (image == 0){
-
-        const char * url = fraction->GetDefaultURL();
-        size = strlen(url);
-        return url;
-
-        // NOTE: IGN Doesn't want to use cloudinary, hence we'll return a
-        // default URL for non-standard sizes
-        // re-enable when needed
-
-        //char buffer[1024]; // sufficiently large buffer for the URL
-        //const char * tid = fraction->GetThumbnailID();
-        //sprintf(buffer, cloudinary_image_format, width, height, tid);
-        //const char * url = strdup(buffer);
-        //size = strlen(url);
-        //return url;
-
-    }
-
-    return image->GetUrl(size);
+            //char buffer[1024]; // sufficiently large buffer for the URL
+            //const char * tid = fraction->GetThumbnailID();
+            //sprintf(buffer, cloudinary_image_format, width, height, tid);
+            //const char * url = strdup(buffer);
+            //size = strlen(url);
+            //return url;
+        }
+        else if (image->scoped_url() != NULL) {
+            image_url = *image->scoped_url(); 
+        } 
+        else { 
+            boost::scoped_ptr<std::string> new_url; 
+            new_url.reset(url_utils::GenerateUrl(fraction->base_url(), *fraction->tid(), image->GetHeight(), image->GetWidth())); 
+            image_url = *new_url; 
+        }
+    }  
 }
 
 /*
  * Get Thumbnail ID for a given video id
  * */
-const char *
+void
 Mastermind::GetThumbnailID(const char * c_accountId, 
                             const char * c_videoId,
                             unsigned char * bucketId,
                             int bucketIdLen,
-                            int &size){
+                            std::string& tid){
     
     string accountId = c_accountId;
     string videoId = c_videoId;
@@ -580,19 +583,18 @@ Mastermind::GetThumbnailID(const char * c_accountId,
     
     if(directive == 0){
         neon_stats[NEON_INVALID_VIDEO_ID] ++;
-        return 0;
+        return;
     }
     
     const Fraction * fraction = directive->GetFraction(bucketId, bucketIdLen);
 
     if (fraction == 0){
         //neon_log_error("Fraction for the directive is NULL");
-        return 0;
+        return;
     }
 
-    const char * tid = fraction->GetThumbnailID();
-    size = strlen(tid);    
-    return tid;
+    tid = *fraction->tid();
+    //size = strlen(tid);    
 } 
 
 /*
