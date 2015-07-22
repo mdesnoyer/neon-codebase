@@ -1,9 +1,8 @@
 #include <iostream>
+#include <sstream>
 #include "neonException.h"
 #include "scaledImage.h"
 #include "neon_stats.h"
-
-
 
 ScaledImage::ScaledImage()
 {
@@ -12,14 +11,12 @@ ScaledImage::ScaledImage()
     initialized = false;
 }
 
-
 ScaledImage::~ScaledImage()
 {
     height = 0;
     width = 0;
     initialized = false;
 }
-
 
 // check if a & b approx equal i.e in the range of the window size specified 
 bool
@@ -29,7 +26,6 @@ ScaledImage::ApproxEqual(int a, int b, int window){
     else
         return false;
 }
-
 
 int
 ScaledImage::Init(const rapidjson::Value& img)
@@ -74,21 +70,12 @@ ScaledImage::Init(const rapidjson::Value& img)
     /*
      *  Image url
      */
-    if(img.HasMember("url") == false) {
-        neon_stats[NEON_SCALED_IMAGE_PARSE_ERROR]++;
-        return -1;
-    }
-
-    if(img["url"].IsString() == false) {
-        neon_stats[NEON_SCALED_IMAGE_PARSE_ERROR]++;
-        return -1;
-    }
-
-    url = img["url"].GetString();
+    if (img.HasMember("url") && img["url"].IsString()) { 
+        scoped_url_.reset(new std::string(img["url"].GetString())); 
+    } 
     initialized = true;
     return 0;
 }
-
 
 void
 ScaledImage::Shutdown()
@@ -101,13 +88,11 @@ ScaledImage::Shutdown()
     initialized = false;
 }
 
-
 int
 ScaledImage::GetHeight() const
 {
     return height;
 }
-
 
 int
 ScaledImage::GetWidth () const
@@ -115,23 +100,8 @@ ScaledImage::GetWidth () const
     return width;
 }
 
-
-const char *
-ScaledImage::GetUrl(int & size) const
+std::string * 
+ScaledImage::scoped_url() const
 {
-    size = url.size();
-    return url.c_str();
+    return scoped_url_.get();
 }
-
-
-const std::string &
-ScaledImage::GetUrlString() const
-{
-    return url;
-}
-
-
-
-
-
-

@@ -728,6 +728,7 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
             )
 
         self.hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+        self.hoster.ntries = 2
         tid = 'akamai_vid1_tid2'
         
         with self.assertLogExists(logging.ERROR, 

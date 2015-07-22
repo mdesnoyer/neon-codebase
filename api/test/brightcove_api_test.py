@@ -308,6 +308,20 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         imdata = json.loads(j_imdata)
         self.assertTrue(imdata["params"]["image"]["remoteUrl"], r_url)
 
+    @patch('api.brightcove_api.utils.http')
+    def test_create_video_request(self, http_mock): 
+        send_request_mock = self._callback_wrap_mock(http_mock.send_request)
+        send_request_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+                                          
+        bc = api.brightcove_api.BrightcoveApi(
+            "neon_api_key", "publisher_id",
+            "read_token", "write_token", callback_url="http://callback.invalid")
+ 
+        response = bc.format_neon_api_request('vid1', 'http://fake_dl_url', callback=None)
+        cargs, kwargs = send_request_mock.call_args
+        call_json = json.loads(cargs[0].body)
+        self.assertEquals(call_json['callback_url'], "http://callback.invalid") 
+
     def test_select_rendition(self):
         '''
         Test the selection of the right rendition
