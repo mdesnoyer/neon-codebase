@@ -436,10 +436,10 @@ class ClosedEyesFilter(Filter):
             self.haarParams = {'minNeighbors': 8, 'minSize': (50, 50), 'scaleFactor': 1.1}
         else:
             self.haarParams = haarParams
-        self.svmPkl = svmPkl
-        self.svm = joblib.load(self.svmPkl)
-        self.pcaPkl = pcaPkl
-        self.pca = joblib.load(self.pcaPkl)
+        self.svm = joblib.load(svmPkl)
+        self.svmPkl = os.path.sep.join(svmPkl.split(os.path.sep)[-2:])
+        self.pca = joblib.load(pcaPkl)
+        self.pcaPkl = os.path.sep.join(pcaPkl.split(os.path.sep)[-2:])
         self.alpha, self.maxFaces, self.scoreType, self.accCrit, \
         self.f, self.areaW, self.areaWs, self.distWs, self.hogWin \
         = alpha, maxFaces, scoreType, accCrit, f, areaW, areaWs, \
@@ -617,9 +617,10 @@ class ClosedEyesFilter(Filter):
         # the required SVM files. Filename is the filename of 
         # the model that you are trying to load. If the 
         #   
-        fn = os.path.join('/'.join(filename.split('/')[:-1]), 'svms_pca', self.svmPkl)
+        ops = os.path.sep
+        fn = os.path.join(ops.join(filename.split(ops)[:-1]), self.svmPkl)
         self.svm = joblib.load(fn)
-        fn = os.path.join('/'.join(filename.split('/')[:-1]), 'pca', self.pcaPkl)
+        fn = os.path.join(ops.join(filename.split(ops)[:-1]), self.pcaPkl)
         self.pca = joblib.load(fn)
 
     def short_description(self):
