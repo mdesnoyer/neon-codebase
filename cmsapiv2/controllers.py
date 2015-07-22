@@ -42,6 +42,10 @@ _log = logging.getLogger(__name__)
 
 define("port", default=8084, help="run on the given port", type=int)
 
+HTTP_OK = 200 
+HTTP_BAD_REQUEST = 400 
+HTTP_NOT_IMPLEMENTED = 501
+
 def parse_args(request):
     args = {} 
     # if we have query_arguments only use them 
@@ -61,7 +65,7 @@ def api_key(request):
 def send_not_implemented_msg(self, verb): 
     send_json_response(self, 
                        generate_standard_error('%s %s' % (verb, 'is not implemented for this endpoint')), 
-                       501)
+                       HTTP_NOT_IMPLEMENTED)
 
 def generate_standard_error(error_msg):
     error_json = {} 
@@ -85,7 +89,30 @@ class NewAccountHandler(tornado.web.RequestHandler):
 
     @tornado.gen.coroutine 
     def post(self):
-        print 'posting a new account' 
+        schema = Schema({ 
+          Required('customer_name') : All(str, Length(min=1, max=1024)),
+          'default_width': All(int, Range(min=1, max=8192)), 
+          'default_height': All(int, Range(min=1, max=8192)),
+          'default_thumbnail_id': All(str, Length(min=1, max=2048)) 
+        })
+        try:  
+            args = parse_args(self.request)
+            schema(args) 
+            user = neondata.NeonUserAccount(customer_name=args['customer_name'])
+            try:
+                user.default_size[0] = args['default_width'] 
+                user.default_size[1] = args['default_height']
+                user.default_thumbnail_id = args['default_thumbnail_id']
+            except KeyError as e: 
+                pass 
+            user.save()
+            output = user.to_json()
+            code = HTTP_OK
+        except MultipleInvalid as e: 
+            output = generate_standard_error('%s %s' % (e.path[0], e.msg))
+            code = HTTP_BAD_REQUEST
+        
+        send_json_response(self, output, code) 
 
     @tornado.gen.coroutine 
     def put(self): 
@@ -122,15 +149,17 @@ class AccountHandler(tornado.web.RequestHandler):
             #TODO we need created/updated on neonuseraccount
             rv_account['created'] = str(datetime.datetime.utcnow()) 
             rv_account['updated'] = str(datetime.datetime.utcnow()) 
-            output = json.dumps(rv_account) 
+            output = json.dumps(rv_account)
+            code = HTTP_OK  
         except AttributeError as e:  
             output = generate_standard_error('%s %s' % 
                         ('Could not retrieve the account with id:',
                          account_id))
+            code = HTTP_BAD_REQUEST 
         except MultipleInvalid as e:  
             output = generate_standard_error('%s %s' % (e.path[0], e.msg))
  
-        send_json_response(self, output, 200) 
+        send_json_response(self, output, code) 
 
     @tornado.gen.coroutine
     def put(self, account_id):
@@ -154,15 +183,18 @@ class AccountHandler(tornado.web.RequestHandler):
                     pass 
             result = yield tornado.gen.Task(neondata.NeonUserAccount.modify, acct.key, _update_account)
             output = result.to_json()
+            code = HTTP_OK 
         except AttributeError as e:  
             output = generate_standard_error('%s %s %s' % 
                         ('Unable to fetch the account with id:',
                          account_id,
                          'can not perform an update.'))
+            code = HTTP_BAD_REQUEST
         except MultipleInvalid as e: 
             output = generate_standard_error('%s %s' % (e.path[0], e.msg))
+            code = HTTP_BAD_REQUEST
 
-        send_json_response(self, output, 200)
+        send_json_response(self, output, code)
 
     @tornado.gen.coroutine 
     def post(self):
@@ -177,6 +209,7 @@ LiveStreamHandler : class responsible for creating a new video job
    HTTP Verbs     : post
         Notes     : outside of scope of phase 1, future implementation
 *********************************************************************'''
+
 class LiveStreamHandler(tornado.web.RequestHandler): 
     @tornado.gen.coroutine 
     def post(self, *args, **kwargs):

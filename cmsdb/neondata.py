@@ -64,6 +64,7 @@ import utils.http
 import urllib
 import urlparse
 import warnings
+import uuid
 
 
 _log = logging.getLogger(__name__)
@@ -1526,8 +1527,13 @@ class NeonUserAccount(NamespacedStoredObject):
     @integrations: all the integrations associated with this acccount
 
     '''
-    def __init__(self, a_id, api_key=None, default_size=(160,90)):
-        self.account_id = a_id # Account id chosen when account is created
+    def __init__(self, a_id=None, api_key=None, default_size=(160,90), customer_name=None):
+        if a_id is None: 
+            # this will become the default TODO fix the tests surrounding this 
+            # generate a unique account_id instead of letting it be chosen via the api
+            self.account_id = uuid.uuid1().hex
+        else: 
+            self.account_id = a_id # Account id chosen when account is created
         self.neon_api_key = self.get_api_key() if api_key is None else api_key
         self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
         self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
@@ -1536,6 +1542,8 @@ class NeonUserAccount(NamespacedStoredObject):
         self.videos = {} #phase out,should be stored in neon integration
         # a mapping from integration id -> get_ovp() string
         self.integrations = {}
+        # name of the customer
+        self.customer_name = customer_name
 
         # The default thumbnail (w, h) to serve for this account
         self.default_size = default_size
@@ -1546,6 +1554,9 @@ class NeonUserAccount(NamespacedStoredObject):
         # Default thumbnail to show if we don't have one for a video
         # under this account.
         self.default_thumbnail_id = None
+         
+        # the created/updated date in utc of this object 
+        self.created = self.updated = str(datetime.datetime.utcnow())
     
     @classmethod
     def _baseclass_name(cls):
