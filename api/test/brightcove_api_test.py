@@ -237,10 +237,15 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         nvideos = 6
         na = neondata.NeonUserAccount('acct1')
         na.save()
-        bp = neondata.BrightcovePlatform(a_id, i_id, na.neon_api_key, 'p1', 'rt', 'wt', 
-                last_process_date=21492000000)
-        bp.account_created = 21492000
-        bp.save()
+        def _setup_plat(x):
+            x.publisher_id = 'p1'
+            x.read_token = 'rt'
+            x.write_token = 'wt'
+            x.last_process_date = 21492000000
+            x.account_created = 21492000
+        bp = neondata.BrightcovePlatform.modify(na.neon_api_key, i_id,
+                                                _setup_plat,
+                                                create_missing=True)
         bp.check_feed_and_create_api_requests()
         u_bp = neondata.BrightcovePlatform.get(na.neon_api_key, i_id)
         self.assertEqual(len(u_bp.get_videos()), nvideos)
@@ -363,12 +368,17 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         nvideos = 2 
         na = neondata.NeonUserAccount('acct1')
         na.save()
-        bp = neondata.BrightcovePlatform(a_id, i_id, na.neon_api_key, 'p1', 'rt', 'wt', 
-                last_process_date=21492000000)
-        bp.account_created = 21492000
-        bp.videos['v1'] = 'j1'
-        bp.playlist_feed_ids.append('1234')
-        bp.save()
+        def _setup_plat(x):
+            x.publisher_id = 'p1'
+            x.read_token = 'rt'
+            x.write_token = 'wt'
+            x.last_process_date = 21492000000
+            x.account_created = 21492000
+            x.add_video('v1', 'j1')
+            x.playlist_feed_ids.append('1234')
+        bp = neondata.BrightcovePlatform.modify(na.neon_api_key, i_id,
+                                                _setup_plat,
+                                                create_missing=True)
         bp.check_playlist_feed_and_create_requests()
         u_bp = neondata.BrightcovePlatform.get(na.neon_api_key, i_id)
         self.assertEqual(len(u_bp.get_videos()), nvideos)

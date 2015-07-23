@@ -1329,13 +1329,12 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             else:
                 def _initialize_bc_plat(x):
                     x.account_id = a_id
-                    x.publisher_id = p_id,
+                    x.publisher_id = p_id
                     x.read_token = rtoken
                     x.write_token = wtoken
                     x.auto_update = autosync
                     x.last_process_date = time.time()
                     
-                curtime = time.time() #account creation time
                 bc = yield tornado.gen.Task(
                     neondata.BrightcovePlatform.modify,
                     self.api_key, i_id,
@@ -1349,16 +1348,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 
                 #Saved platform
                 if na:
-                    # Set the default experimental strategy for
-                    # Brightcove Customers.
-                    strategy = neondata.ExperimentStrategy(
-                        self.api_key, only_exp_if_chosen=True)
-                    res = yield tornado.gen.Task(strategy.save)
-                    if not res:
-                        _log.error('Bad database response when adding '
-                                   'the default strategy for BC account %s'
-                                   % self.api_key)
-                    
                     response = yield tornado.gen.Task(
                         bc.verify_token_and_create_requests_for_video,
                         10)
@@ -1487,25 +1476,25 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 data = '{"error": "integration already exists"}'
                 self.send_json_response(data, 409)
             else:
-                curtime = time.time() #account creation time
-                oo_account = neondata.OoyalaPlatform(a_id, i_id, self.api_key, 
-                                    partner_code, oo_api_key, oo_secret_key,
-                                    autosync)  
-                na.add_platform(oo_account)
+                def _initialize_oo_plat(x):
+                    x.account_id = a_id
+                    x.partner_code = partner_code
+                    x.ooyala_api_key = oo_api_key
+                    x.api_secret = oo_secret_key
+                    x.auto_update = autosync
 
-                #save & update acnt
-                res = yield tornado.gen.Task(na.save_platform, oo_account)
+                oo_account = yield tornado.gen.Task(
+                    neondata.OoyalaPlatform.modify,
+                    self.api_key, i_id,
+                    _initialize_oo_plat,
+                    create_missing=True)
+
+                na = yield tornado.gen.Task(
+                    neondata.NeonUserAccount.modify,
+                    self.api_key,
+                    lambda x: x.add_platform(oo_account))
                 
-                if res:
-                    # Set the default experimental strategy for
-                    # Ooyala Customers.
-                    strategy = neondata.ExperimentStrategy(
-                        self.api_key, only_exp_if_chosen=True)
-                    res = yield tornado.gen.Task(strategy.save)
-                    if not res:
-                        _log.error('Bad database response when adding '
-                                   'the default strategy for Ooyala account %s'
-                                   % self.api_key)
+                if na:
                     
                     response = yield tornado.gen.Task(
                         oo_account.create_video_requests_on_signup, 10)
@@ -1576,21 +1565,17 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         uri_parts = self.request.uri.split('/')
 
-        oo = yield tornado.gen.Task(neondata.OoyalaPlatform.get,
-                                    self.api_key, i_id)
+        def _update_fields(x):
+            x.partner_code = partner_code
+            x.ooyala_api_key = oo_api_key
+            x.api_secret = oo_secret_key 
+            x.autosync = autosync
+
+        oo = yield tornado.gen.Task(neondata.OoyalaPlatform.modify,
+                                    self.api_key, i_id, _update_fields)
         if oo:
-            oo.partner_code = partner_code
-            oo.ooyala_api_key = oo_api_key
-            oo.api_secret = oo_secret_key 
-            oo.autosync = autosync
-            res = yield tornado.gen.Task(oo.save)
-            if res:
-                data = ''
-                self.send_json_response(data, 200)
-            else:
-                data = '{"error": "account not updated"}'
-                statemon.state.increment('account_not_updated')
-                self.send_json_response(data, 500)
+            data = ''
+            self.send_json_response(data, 200)
         else:
             _log.error("key=update_ooyala_integration msg=no such account ") 
             data = '{"error": "Account doesnt exists"}'

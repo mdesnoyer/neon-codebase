@@ -511,11 +511,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         #verify account id added to Neon user account
         nuser = neondata.NeonUserAccount.get(self.api_key)
         self.assertTrue(self.b_id in nuser.integrations.keys())
-
-        #Verifty that there is an experiment strategy for the account
-        strategy = neondata.ExperimentStrategy.get(self.api_key)
-        self.assertIsNotNone(strategy)
-        self.assertTrue(strategy.only_exp_if_chosen)
         
         reqs = self._create_neon_api_requests()
         self._process_brightcove_neon_api_requests(reqs)
@@ -1077,9 +1072,8 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertIsNotNone(job_id)
         
         # add video to account
-        np = neondata.NeonPlatform.get(api_key, '0')
-        np.add_video(vid, job_id)
-        np.save()
+        neondata.NeonPlatform.modify(api_key, '0',
+                                     lambda x: x.add_video(vid, job_id))
 
         # Test duplicate request
         request = tornado.httpclient.HTTPRequest('http://thumbnails.neon-lab.com')
@@ -1275,7 +1269,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
     def _setup_neon_account_and_request_object(self, vid="testvideo1",
                                             job_id = "j1"):
         self.api_key = self.create_neon_account()
-        nplatform = neondata.NeonPlatform.get(self.api_key, '0')
         title = "title"
         video_download_url = "http://video.mp4" 
         api_request = neondata.NeonApiRequest(job_id, self.api_key, vid,
@@ -1285,9 +1278,10 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         api_request.submit_time = str(time.time())
         api_request.state = neondata.RequestState.SUBMIT
         self.assertTrue(api_request.save())
-        nplatform.add_video(vid, job_id)
-
-        nplatform.save()
+        neondata.NeonPlatform.modify(
+            self.api_key, '0',
+            lambda x: x.add_video(vid, job_id),
+            create_missing=True)
         self._process_brightcove_neon_api_requests([api_request])
         
         # set the state to serving
@@ -1820,7 +1814,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         self.oo_api_secret = 'oo_secret'
        
         self.a_id = "oo_test"
-        self.i_id = "oo_iid_1"
+        self.i_id = "ooiid1"
         self.job_ids = [] 
         
     def tearDown(self):
@@ -2005,7 +1999,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
 
         #Get ooyala account 
         oo_account = neondata.OoyalaPlatform.get(self.api_key,
-                                                         self.i_id)
+                                                 self.i_id)
         
         #create feed request
         oo_account.check_feed_and_create_requests()
@@ -2036,11 +2030,6 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
     def test_create_ooyala_requests(self):
 
         self._create_request_from_feed()
-
-        #Verify that there is an experiment strategy for the account
-        strategy = neondata.ExperimentStrategy.get(self.api_key)
-        self.assertIsNotNone(strategy)
-        self.assertTrue(strategy.only_exp_if_chosen)
 
         #Assert the job ids in the ooyala account
         oo_account = neondata.OoyalaPlatform.get(self.api_key, self.i_id)
