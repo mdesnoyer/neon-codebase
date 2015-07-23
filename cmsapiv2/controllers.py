@@ -206,19 +206,19 @@ OoyalaIntegrationHandler : class responsible for creating/updating/
 *********************************************************************'''
 class OoyalaIntegrationHandler(tornado.web.RequestHandler): 
     @tornado.gen.coroutine
-    def post(self, *args)  
+    def post(self, *args): 
         print 'posting' 
     
     @tornado.gen.coroutine
-    def get(self, *args)  
+    def get(self, *args):
         print 'getting'
  
     @tornado.gen.coroutine
-    def update(self, *args)  
+    def update(self, *args):
         print 'updating' 
     
     @tornado.gen.coroutine
-    def delete(self, *args)  
+    def delete(self, *args): 
         send_not_implemented_msg(self, 'delete')
 
 '''*********************************************************************
@@ -228,19 +228,19 @@ BrightcoveIntegrationHandler : class responsible for creating/updating/
 *********************************************************************'''
 class BrightcoveIntegrationHandler(tornado.web.RequestHandler): 
     @tornado.gen.coroutine
-    def post(self, *args)  
+    def post(self, *args):
         print 'posting' 
     
     @tornado.gen.coroutine
-    def get(self, *args)  
+    def get(self, *args):  
         print 'getting'
  
     @tornado.gen.coroutine
-    def update(self, *args)  
+    def update(self, *args):  
         print 'updating' 
     
     @tornado.gen.coroutine
-    def delete(self, *args)  
+    def delete(self, *args): 
         send_not_implemented_msg(self, 'delete')
 
 '''*********************************************************************
@@ -250,19 +250,19 @@ OptimizelyIntegrationHandler : class responsible for creating/updating/
 *********************************************************************'''
 class OptimizelyIntegrationHandler(tornado.web.RequestHandler): 
     @tornado.gen.coroutine
-    def post(self, *args)  
+    def post(self, *args):
         print 'posting' 
     
     @tornado.gen.coroutine
-    def get(self, *args)  
+    def get(self, *args):  
         print 'getting'
  
     @tornado.gen.coroutine
-    def update(self, *args)  
+    def update(self, *args):
         print 'updating' 
     
     @tornado.gen.coroutine
-    def delete(self, *args)  
+    def delete(self, *args): 
         send_not_implemented_msg(self, 'delete')
 
  
