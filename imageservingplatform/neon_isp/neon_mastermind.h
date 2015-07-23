@@ -81,8 +81,7 @@ neon_mastermind_image_url_lookup(const char * accountId,
                                  ngx_str_t * ipAddress,
                                  int height,
                                  int width,
-                                 const char ** url,
-                                 int * size);
+                                 char ** url);
     
 typedef enum  {
     NEON_MASTERMIND_TID_LOOKUP_OK = 0,
@@ -95,8 +94,7 @@ NEON_MASTERMIND_TID_LOOKUP_ERROR
 neon_mastermind_tid_lookup(const char * accountId,
                             const char * videoId,
                             ngx_str_t * bucketId,
-                            const char ** tid,
-                            int * size);
+                            char ** tid);
      
 /*
  * Check if current mastermind has expired

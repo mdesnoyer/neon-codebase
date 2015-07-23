@@ -634,7 +634,6 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
     return ngx_http_output_filter(r, &out);
 }
 
-
 static void create_stats_formatter(int num_of_counters, char * format_string, int format_string_size) {
  
     char * ptr = format_string;
@@ -712,5 +711,3 @@ static char *ngx_http_neon_stats_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *
     
     return NGX_CONF_OK;
 }
-
-

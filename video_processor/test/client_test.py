@@ -110,8 +110,9 @@ class TestVideoClient(test_utils.neontest.TestCase):
         self.na = neondata.NeonUserAccount('acc1')
         self.na.save()
         
-        self.np = neondata.NeonPlatform('acc1', '0', self.na.neon_api_key)
-        self.np.save()
+        self.np = neondata.NeonPlatform.modify(
+            self.na.neon_api_key, '0',
+            lambda x: x, create_missing=True)
 
         j_id = "j123"
         api_key = self.na.neon_api_key 
@@ -429,7 +430,13 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         na = neondata.NeonUserAccount('acct1')
         self.api_key = na.neon_api_key
         na.save()
-        neondata.NeonPlatform('acct1', '0', self.api_key).save()
+        neondata.NeonPlatform.modify(self.api_key, '0', 
+                                     lambda x: x, create_missing=True)
+
+        cdn = neondata.CDNHostingMetadataList(
+            neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
+            [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)])])
+        cdn.save()
 
         self.video_id = '%s_vid1' % self.api_key
         self.api_request = neondata.BrightcoveApiRequest(
@@ -472,8 +479,8 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
 
         # Mock out http requests
         self.http_mocker = patch('video_processor.client.utils.http.send_request')
-        self.http_mock = self.http_mocker.start()
-        self.http_mock.side_effect = lambda x: HTTPResponse(x, 200)
+        self.http_mock = self._callback_wrap_mock(self.http_mocker.start())
+        self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
 
         # Mock out cloudinary
         self.cloudinary_patcher = patch('cmsdb.cdnhosting.CloudinaryHosting')
@@ -586,7 +593,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             self.assertIsNotNone(s_url)
             s3httpRe = re.compile(
                 'http://n[0-9].neon-images.com/([a-zA-Z0-9\-\._/]+)')
-            serving_url = s_url.get_serving_url(160, 120)
+            serving_url = s_url.get_serving_url(160, 90)
             self.assertRegexpMatches(serving_url, s3httpRe)
             serving_key = s3httpRe.search(serving_url).group(1)
             self.assertIsNotNone(
@@ -1062,7 +1069,13 @@ class SmokeTest(test_utils.neontest.TestCase):
         na = neondata.NeonUserAccount('acct1')
         self.api_key = na.neon_api_key
         na.save()
-        neondata.NeonPlatform('acct1', '0', self.api_key).save()
+        neondata.NeonPlatform.modify(self.api_key, '0', 
+                                     lambda x: x, create_missing=True)
+
+        cdn = neondata.CDNHostingMetadataList(
+            neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
+            [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)])])
+        cdn.save()
 
         self.video_id = '%s_vid1' % self.api_key
         self.api_request = neondata.OoyalaApiRequest(
@@ -1107,9 +1120,9 @@ class SmokeTest(test_utils.neontest.TestCase):
 
         # Mock out http requests.
         self.http_mocker = patch('video_processor.client.utils.http.send_request')
-        self.http_mock = self.http_mocker.start()
+        self.http_mock = self._callback_wrap_mock(self.http_mocker.start())
         self.job_queue = multiprocessing.Queue() # Queue of job param dics
-        def _http_response(request):
+        def _http_response(request, **kw):
             if request.url.endswith('dequeue'):
                 if not self.job_queue.empty():
                     body = json.dumps(self.job_queue.get())

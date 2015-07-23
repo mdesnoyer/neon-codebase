@@ -59,7 +59,7 @@ class BrightcoveApi(object):
     
     def __init__(self, neon_api_key, publisher_id=0, read_token=None,
                  write_token=None, autosync=False, publish_date=None,
-                 neon_video_server=None, account_created=None):
+                 neon_video_server=None, account_created=None, callback_url=None):
         self.publisher_id = publisher_id
         self.neon_api_key = neon_api_key
         self.read_token = read_token
@@ -69,6 +69,7 @@ class BrightcoveApi(object):
         self.autosync = autosync
         self.last_publish_date = publish_date if publish_date else time.time()
         self.neon_uri = "http://localhost:8081/api/v1/submitvideo/"  
+        self.callback_url = callback_url
         if neon_video_server is not None:
             self.neon_uri = "http://%s:8081/api/v1/submitvideo/" % neon_video_server
 
@@ -486,7 +487,7 @@ class BrightcoveApi(object):
     def format_neon_api_request(self, id, video_download_url, 
                                 prev_thumbnail=None, request_type='topn',
                                 i_id=None, title=None, callback=None):
-        ''' Format and submit reuqest to neon thumbnail api '''
+        ''' Format and submit request to neon thumbnail api '''
 
         request_body = {}
         #brightcove tokens
@@ -496,7 +497,8 @@ class BrightcoveApi(object):
         request_body["video_id"] = str(id)
         request_body["video_title"] = str(id) if title is None else title 
         request_body["video_url"] = video_download_url
-        request_body["callback_url"] = None #no callback required 
+        # adding callback url, this is passed in via the BrightcovePlatform object
+        request_body["callback_url"] = self.callback_url 
         request_body["autosync"] = self.autosync
         request_body["topn"] = 1
         request_body["integration_id"] = i_id 
@@ -716,12 +718,13 @@ class BrightcoveApi(object):
                     item['job_id'] = job_id 
                     bc.videos[vid] = job_id 
                     result.append(item)
-            #Update the videos in customer inbox
-            res = bc.save()
-            if not res:
-                _log.error("key=verify_token_and_create_requests" 
-                        " msg=customer inbox not updated %s" %i_id)
-                raise tornado.gen.Return(result)
+                    yield tornado.gen.Task(
+                        cmsdb.neondata.BrightcovePlatform.modify,
+                        self.neon_api_key,
+                        i_id,
+                        lambda x: x.add_video(vid, job_id))
+
+            raise tornado.gen.Return(result)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine

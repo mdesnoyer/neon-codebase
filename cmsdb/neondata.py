@@ -63,6 +63,7 @@ import utils.sync
 import utils.s3
 import utils.http 
 import urllib
+import urlparse
 import warnings
 
 
@@ -851,8 +852,11 @@ class StoredObject(object):
             obj = classtype(key)
 
             #populate the object dictionary
-            for k, value in data_dict.iteritems():
-                obj.__dict__[str(k)] = cls._deserialize_field(k, value)
+            try:
+                for k, value in data_dict.iteritems():
+                    obj.__dict__[str(k)] = cls._deserialize_field(k, value)
+            except ValueError:
+                return None
         
             return obj
 
@@ -863,7 +867,12 @@ class StoredObject(object):
         if isinstance(value, dict):
             if '_type' in value and '_data' in value:
                 # It is a stored object, so unpack it
-                return cls._create(key, value)
+                try:
+                    classtype = globals()[value['_type']]
+                    return classtype._create(key, value)
+                except KeyError:
+                    _log.error('Unknown class of type %s' % value['_type'])
+                    raise ValueError('Bad class type %s' % value['_type'])
             else:
                 # It is a dictionary do deserialize each of the fields
                 for k, v in value.iteritems():
@@ -988,6 +997,7 @@ class StoredObject(object):
         StoredObject.modify('thumb_a', lambda thumb: thumb.update_phash())
         '''
         def _process_one(d):
+            
             val = d[key]
             if val is not None:
                 func(val)
@@ -1064,7 +1074,7 @@ class StoredObject(object):
                     pipe.mset(to_set)
             return mappings
 
-        db_connection = DBConnection.get(cls)
+        db_connection = DBConnection.get(create_class)
         if callback:
             return db_connection.conn.transaction(_getandset, *keys,
                                                   callback=callback,
@@ -1615,18 +1625,6 @@ class NeonUserAccount(NamespacedStoredObject):
     def to_json(self):
         ''' to json '''
         return json.dumps(self, default=lambda o: o.__dict__)
-    
-    def save_platform(self, new_integration, callback=None):
-        '''
-        Save Neon User account and corresponding platform object
-        '''
-        
-        #temp: changing this to a blocking pipeline call   
-        db_connection = DBConnection.get(self)
-        pipe = db_connection.blocking_conn.pipeline()
-        pipe.set(self.key, self.to_json())
-        pipe.set(new_integration.key, new_integration.to_json()) 
-        callback(pipe.execute())
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -1832,8 +1830,13 @@ class CDNHostingMetadata(NamespacedStoredObject):
                  update_serving_urls=False,
                  rendition_sizes=None):
         self.key = key
-        
-        self.cdn_prefixes = cdn_prefixes # List of url prefixes
+
+        # List of url prefixes to put in front of the path. If there
+        # is no transport scheme, http:// will be added. Also, there
+        # is no trailing slash
+        cdn_prefixes = cdn_prefixes or []
+        self.cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
+                                cdn_prefixes)
         
         # If true, the images should be resized into all the desired
         # renditions.
@@ -1870,17 +1873,44 @@ class CDNHostingMetadata(NamespacedStoredObject):
         raise NotImplementedError()
 
     @classmethod
-    def save_all(self, *args, **kwargs):
+    def save_all(cls, *args, **kwargs):
         raise NotImplementedError()
 
     @classmethod
-    def modify(self, *args, **kwargs):
+    def modify(cls, *args, **kwargs):
         raise NotImplementedError()
 
     @classmethod
-    def modify_many(self, *args, **kwargs):
+    def modify_many(cls, *args, **kwargs):
         raise NotImplementedError()
 
+    @classmethod
+    def _create(cls, key, obj_dict):
+        obj = super(CDNHostingMetadata, cls)._create(key, obj_dict)
+
+        # Normalize the CDN prefixes
+        obj.cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
+                               obj.cdn_prefixes)
+        
+        return obj
+
+    @staticmethod
+    def _normalize_cdn_prefix(prefix):
+      '''Normalizes a cdn prefix so that it starts with a scheme and does
+      not end with a slash.
+
+      e.g. http://neon.com
+           https://neon.com
+      '''
+      prefix_split = urlparse.urlparse(prefix, 'http')
+      if prefix_split.netloc == '':
+        path_split = prefix_split.path.partition('/')
+        prefix_split = [x for x in prefix_split]
+        prefix_split[1] = path_split[0]
+        prefix_split[2] = path_split[1]
+      scheme_added = urlparse.urlunparse(prefix_split)
+      return scheme_added.strip('/')
+      
 class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
     If the images are to be uploaded to S3 bucket use this formatter  
@@ -1917,7 +1947,7 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     def __init__(self, key=None,
                  bucket_name='n3.neon-images.com',
                  cdn_prefixes=None,
-                 folder_prefix='',
+                 folder_prefix=None,
                  resize=True,
                  update_serving_urls=True,
                  do_salt=True,
@@ -1943,7 +1973,7 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     '''
     def __init__(self, key=None,
                  bucket_name='host-thumbnails',
-                 folder_prefix=''):
+                 folder_prefix=None):
         super(PrimaryNeonHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
@@ -1970,24 +2000,54 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
     '''
 
     def __init__(self, key=None, host=None, akamai_key=None, akamai_name=None,
-            baseurl=None, cdn_prefixes=None, rendition_sizes=None):
+                 folder_prefix=None, cdn_prefixes=None, rendition_sizes=None,
+                 cpcode=None):
         super(AkamaiCDNHostingMetadata, self).__init__(
             key,
             cdn_prefixes=cdn_prefixes,
             resize=True,
             update_serving_urls=True,
             rendition_sizes=rendition_sizes)
-        
+
+        # Host for uploading to akamai. Can have http:// or not
         self.host = host
+
+        # Parameters to talk to akamai
         self.akamai_key = akamai_key
         self.akamai_name = akamai_name
-        # Base upload url. Should be something like '/17645/neon/prod'
-        self.baseurl = baseurl 
+
+        # The folder prefix to prepend to where the file will be
+        # stored and served from. Slashes at the beginning and end are
+        # optional
+        self.folder_prefix=folder_prefix
+
+        # CPCode string for uploading to Akamai. Should be something
+        # like 17645
+        self.cpcode = cpcode
+
+    @classmethod
+    def _create(cls, key, obj_dict):
+        obj = super(AkamaiCDNHostingMetadata, cls)._create(key, obj_dict)
+
+        # An old object could have had a baseurl, which was smashed
+        # together the folder prefix and cpcode. That was confusing,
+        # but in case there's an old object around, fix it. Also, in
+        # that case, the cdn_prefixes could have had the folder prefix
+        # in them, so remove them.
+        if hasattr(obj, 'baseurl'):
+            split = obj.baseurl.strip('/').partition('/')
+            obj.cpcode = split[0].strip('/')
+            obj.folder_prefix = split[2].strip('/')
+            obj.cdn_prefixes = [re.sub(obj.folder_prefix, '', x).strip('/')
+                                for x in obj.cdn_prefixes]
+            del obj.baseurl
+        
+        return obj
 
 class AbstractPlatform(NamespacedStoredObject):
     ''' Abstract Platform/ Integration class '''
 
-    def __init__(self, api_key, i_id='0', abtest=False, enabled=True, 
+    def __init__(self, api_key, i_id=None, abtest=False, enabled=True, 
                 serving_enabled=True, serving_controller="imageplatform"):
         
         super(AbstractPlatform, self).__init__(
@@ -2006,6 +2066,9 @@ class AbstractPlatform(NamespacedStoredObject):
     
     @classmethod
     def _generate_subkey(cls, api_key, i_id):
+        if i_id is None or api_key.endswith('_%s' % i_id):
+            # It's already the correct key
+            return api_key
         return '_'.join([api_key, i_id])
 
     @classmethod
@@ -2038,9 +2101,11 @@ class AbstractPlatform(NamespacedStoredObject):
                     '_type': __get_type(obj_dict['key']),
                     '_data': copy.deepcopy(obj_dict)
                 }
+            
             return super(AbstractPlatform, cls)._create(key, obj_dict)
 
     def save(self, callback=None):
+        raise NotImplementedError("To save this object use modify()")
         # since we need a default constructor with empty strings for the 
         # eval magic to work, check here to ensure apikey and i_id aren't empty
         # since the key is generated based on them
@@ -2057,14 +2122,22 @@ class AbstractPlatform(NamespacedStoredObject):
             cls._generate_subkey(api_key, i_id), callback=callback)
     
     @classmethod
-    def modify(cls, api_key, i_id, func, callback=None):
+    def modify(cls, api_key, i_id, func, create_missing=False, callback=None):
+        def _set_parameters(x):
+            _log.warn(x)
+            api_key, i_id = x.get_id().split('_')
+            x.neon_api_key = api_key
+            x.integration_id = i_id
+            func(x)
+            
         return super(AbstractPlatform, cls).modify(
             cls._generate_subkey(api_key, i_id),
-            func,
+            _set_parameters,
+            create_missing=create_missing,
             callback=callback)
 
     @classmethod
-    def modify_many(cls, keys, func, callback=None):
+    def modify_many(cls, keys, func, create_missing=False, callback=None):
         '''Modify many keys.
 
         Each key must be a tuple of (api_key, i_id)
@@ -2073,6 +2146,7 @@ class AbstractPlatform(NamespacedStoredObject):
             [cls._generate_subkey(api_key, i_id) for 
              api_key, i_id in keys],
             func,
+            create_missing=create_missing,
             callback=callback)
 
     def to_json(self):
@@ -2092,25 +2166,6 @@ class AbstractPlatform(NamespacedStoredObject):
         i_vids = [] 
         for vid in self.videos.keys(): 
             i_vids.append(InternalVideoID.generate(self.neon_api_key, vid))
-        return i_vids
-    
-    def get_processed_internal_video_ids(self):
-        ''' return list of i_vids for an account which have been processed '''
-
-        i_vids = []
-        processed_state = [RequestState.FINISHED, 
-                            RequestState.ACTIVE,
-                            RequestState.REPROCESS, 
-                            RequestState.SERVING, 
-                            RequestState.CUSTOMER_ERROR,
-                            RequestState.SERVING_AND_ACTIVE]
-        request_keys = [(v, self.neon_api_key) for v in
-                        self.videos.values()]
-        api_requests = NeonApiRequest.get_many(request_keys)
-        for api_request in api_requests:
-            if api_request and api_request.state in processed_state:
-                i_vids.append(InternalVideoID.generate(self.neon_api_key, 
-                                                        api_request.video_id)) 
         return i_vids
 
     @classmethod
@@ -2226,7 +2281,8 @@ class AbstractPlatform(NamespacedStoredObject):
 
         request, vmdata, thumbs, thumb serving urls
         
-        #NOTE: Don't you dare call this method unless you really want to delete 
+        #NOTE: Don't you dare call this method unless you really want to 
+        delete 
         '''
         
         do_you_want_to_delete = kwargs.get('really_delete_keys', False)
@@ -2263,7 +2319,7 @@ class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
     '''
-    def __init__(self, a_id, i_id='0', api_key='', abtest=False):
+    def __init__(self, api_key, a_id=None, abtest=False):
         # By default integration ID 0 represents 
         # Neon Platform Integration (access via neon api)
         
@@ -2296,9 +2352,9 @@ class NeonPlatform(AbstractPlatform):
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
     
-    def __init__(self, a_id, i_id='', api_key='', p_id=None, 
+    def __init__(self, api_key, i_id=None, a_id='', p_id=None, 
                 rtoken=None, wtoken=None, auto_update=False,
-                last_process_date=None, abtest=False):
+                last_process_date=None, abtest=False, callback_url=None):
 
         ''' On every request, the job id is saved '''
         super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)
@@ -2314,7 +2370,9 @@ class BrightcovePlatform(AbstractPlatform):
         self.rendition_frame_width = None #Resolution of video to process
         self.video_still_width = 480 #default brightcove still width
         # the ids of playlist to create video requests from
-        self.playlist_feed_ids = [] 
+        self.playlist_feed_ids = []
+        # the url that will be called when a video is finished processing 
+        self.callback_url = callback_url
 
     @classmethod
     def get_ovp(cls):
@@ -2339,7 +2397,7 @@ class BrightcovePlatform(AbstractPlatform):
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update,
             self.last_process_date, neon_video_server=video_server_uri,
-            account_created=self.account_created)
+            account_created=self.account_created, callback_url=self.callback_url)
 
     @tornado.gen.engine
     def update_thumbnail(self, i_vid, new_tid, nosave=False, callback=None):
@@ -2523,12 +2581,10 @@ class YoutubePlatform(AbstractPlatform):
 
     # TODO(Sunil): Fix this class when Youtube is implemented 
 
-    def __init__(self, a_id, i_id='', api_key='', access_token=None, refresh_token=None,
+    def __init__(self, api_key, i_id=None, a_id='', access_token=None,
+                 refresh_token=None,
                 expires=None, auto_update=False, abtest=False):
-        super(YoutubePlatform, self).__init__(api_key, i_id)
-        
-        self.key = self.__class__.__name__.lower()  + '_%s_%s' \
-                %(api_key, i_id) #TODO: fix
+        super(YoutubePlatform, self).__init__(api_key, i_id, abtest)
         self.account_id = a_id
         self.access_token = access_token
         self.refresh_token = refresh_token
@@ -2648,7 +2704,7 @@ class OoyalaPlatform(AbstractPlatform):
     '''
     OOYALA Platform
     '''
-    def __init__(self, a_id, i_id='', api_key='', p_code=None, 
+    def __init__(self, api_key, i_id=None, a_id='', p_code=None, 
                  o_api_key=None, api_secret=None, auto_update=False): 
         '''
         Init ooyala platform 
@@ -2658,9 +2714,7 @@ class OoyalaPlatform(AbstractPlatform):
 
         '''
         super(OoyalaPlatform, self).__init__(api_key, i_id)
-        self.neon_api_key = api_key
         self.account_id = a_id
-        self.integration_id = i_id
         self.partner_code = p_code
         self.ooyala_api_key = o_api_key
         self.api_secret = api_secret 
@@ -3446,11 +3500,14 @@ class ThumbnailMetadata(StoredObject):
         # Host the primary copy of the image 
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
-        s3_url = yield primary_hoster.upload(image, self.key, async=True)
+        s3_url_list = yield primary_hoster.upload(image, self.key, async=True)
         # TODO (Sunil):  Add redirect for the image
 
         # Add the primary image to Thumbmetadata
-        self.urls.insert(0, s3_url)
+        s3_url = None
+        if len(s3_url_list) == 1:
+            s3_url = s3_url_list[0][0]
+            self.urls.insert(0, s3_url)
 
         # Host the image on the CDN
         if cdn_metadata is None:

@@ -167,7 +167,7 @@ class Mastermind(object):
     This object is thread safe, so only one thread is allow in at a time
     as long as you keep to the public interface.
     '''
-    PRIOR_IMPRESSION_SIZE = 100
+    PRIOR_IMPRESSION_SIZE = 10
     PRIOR_CTR = 0.1
     
     def __init__(self):
@@ -400,6 +400,10 @@ class Mastermind(object):
             
         except KeyError:
             pass
+         
+        except Exception as e:
+            _log.error('Unhandled exception calculating new serving directive %s old_directive = %s new_directive = %s' % (e, old_directive, new_directive.values()))
+            raise
 
         self._modify_video_state(video_id, experiment_state, value_left,
                                  winner_tid, new_directive, video_info)
@@ -656,18 +660,17 @@ class Mastermind(object):
                       mc_series[:][winner_idx])
         value_remaining = np.sort(lost_value)[0.95*MC_SAMPLES]
 
-        # For all those thumbs that haven't been seen for 5x the
-        # prior, make sure that they will get some traffic
+        # For all those thumbs that haven't been seen for 1000 imp,
+        # make sure that they will get some traffic
         for i in range(len(valid_bandits)):
-            if impressions[i] < 5 * Mastermind.PRIOR_IMPRESSION_SIZE:
+            if impressions[i] < 500:
                 win_frac[i] = max(0.1, win_frac[i])
         win_frac = win_frac / np.sum(win_frac)
 
         if win_frac[winner_idx] >= 0.95:
             # There is a winner. See if there were enough imp to call it
             if (win_frac.shape[0] == 1 or 
-                impressions[winner_idx] >= 
-                5 * Mastermind.PRIOR_IMPRESSION_SIZE):
+                impressions[winner_idx] >= 500):
                 # The experiment is done
                 experiment_state = neondata.ExperimentState.COMPLETE
                 try:

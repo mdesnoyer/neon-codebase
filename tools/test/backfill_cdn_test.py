@@ -15,7 +15,6 @@ import json
 import logging
 from mock import MagicMock, patch
 from cmsdb import neondata
-import PIL
 import random
 import re
 import test_utils.mock_boto_s3 as boto_mock
@@ -41,16 +40,23 @@ class TestBackfillCDN(test_utils.neontest.AsyncTestCase):
         bname = 'n3.neon-images.com'
         self.s3conn.create_bucket(bname)
         self.bucket = self.s3conn.get_bucket(bname)
+
+        self.imdownload_patcher = patch(
+            'tools.backfill_cdn.PILImageUtils.download_image')
+        self.image = PILImageUtils.create_random_image(480, 640)
+        self.imdownload_patcher.start().side_effect = [self.image]
         
         self.http_call_patcher = \
           patch('utils.http.send_request')
-        self.http_mock = self.http_call_patcher.start()
+        self.http_mock = self._callback_wrap_mock(
+            self.http_call_patcher.start())
+        self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
         
         metadata = neondata.AkamaiCDNHostingMetadata(key=None,
                 host='http://akamai',
                 akamai_key='akey',
                 akamai_name='aname',
-                baseurl='base',
+                cpcode='34563',
                 cdn_prefixes=['cdn.akamai.com']
                 )
         
@@ -65,41 +71,23 @@ class TestBackfillCDN(test_utils.neontest.AsyncTestCase):
     def tearDown(self):
         self.s3_patcher.stop()
         self.http_call_patcher.stop()
+        self.imdownload_patcher.stop()
         self.redis.stop()
         super(TestBackfillCDN, self).tearDown()
 
-    def _set_http_response(self, code=200, body='', error=None):
-        def do_response(request, callback=None, *args, **kwargs):
-            response = HTTPResponse(request, code,
-                                    buffer=StringIO(body),
-                                    error=error)
-            if callback:
-                tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                             response)
-            else:
-                return response
-        self.http_mock.side_effect = do_response
-
-    # NOTE: Adding a very basic test for this script, add more tests as
-    # necessary in the future
+    # TODO: Add error tests
 
     def test_new_size(self):
-        
-        # create image response
-        image = PILImageUtils.create_random_image(480, 640)
-        imdata = StringIO()
-        image.save(imdata, "JPEG")
-        imdata.seek(0)
-        self._set_http_response(body=imdata.read())
        
         api_key = "test"
         vid = 'v1'
         tid = '%s_%s_t1' % (api_key, vid)
 
         # create brightcove account
-        ba = neondata.BrightcovePlatform('aid', 'iid', api_key)
-        ba.add_video(vid, 'j1')
-        ba.save()
+        ba = neondata.BrightcovePlatform.modify(
+            api_key, 'aid',
+            lambda x: x.add_video(vid, 'j1'),
+            create_missing=False)
         v1 = neondata.VideoMetadata(
             neondata.InternalVideoID.generate(api_key, vid),
             [tid],
@@ -111,19 +99,24 @@ class TestBackfillCDN(test_utils.neontest.AsyncTestCase):
         t1.save()
 
         input1 = neondata.ThumbnailServingURLs(tid)
-        input1.add_serving_url('http://that_800_600.jpg', 800, 600) 
+        input1.add_serving_url('http://that_12_8.jpg', 12, 8) 
+        self.assertIsNotNone(input1.get_serving_url(12, 8))
         input1.save()
 
-        backfill_cdn.backfill(api_key, 'iid')
+        backfill_cdn.process_one_video(v1.key)
 
     
         cdn_key = neondata.CDNHostingMetadataList.create_key(api_key, 'iid')
         clist = neondata.CDNHostingMetadataList.get(cdn_key)
-        # Check then newly added images
+        # Check the newly added images
         s_urls = neondata.ThumbnailServingURLs.get(tid)
         for sz in clist.cdns[0].rendition_sizes:
             c_url = s_urls.get_serving_url(sz[0], sz[1])
             self.assertIsNotNone(c_url)
+
+        # Make sure the old size is gone
+        with self.assertRaises(KeyError):
+            s_urls.get_serving_url(12, 8)
 
 if __name__ == '__main__':
     unittest.main()

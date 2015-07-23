@@ -42,11 +42,11 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
         self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
         self.cdn_mock = self._future_wrap_mock(
             self.cdn_mocker.start().create().upload)
-        self.cdn_mock.return_value = 'some_cdn_url.jpg'
+        self.cdn_mock.return_value = [('some_cdn_url.jpg', 640, 480)]
 
         # Mock out the brightcove api and build the platform
         mock_bc_api = MagicMock()
-        self.platform = neondata.BrightcovePlatform('a1', 'i1', 'acct1')
+        self.platform = neondata.BrightcovePlatform('acct1', 'i1')
         self.platform.get_api = lambda: mock_bc_api
         self.mock_bc_response = self._future_wrap_mock(
             mock_bc_api.find_videos_by_ids)
@@ -370,8 +370,9 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
                             ['acct1_v1_n1', 'acct1_v1_bc1'],
                             i_id='i1')
         vid.save()
-        platform.add_video(vid.key, None)
-        platform.save()
+        neondata.BrightcovePlatform.modify(
+            'acct1', 'i1',
+            lambda x: x.add_video(vid.key, None), create_missing=True)
         ThumbnailMetadata('acct1_v1_n1', 'acct1_v1',
                           ttype=ThumbnailType.NEON, rank=1).save()
 

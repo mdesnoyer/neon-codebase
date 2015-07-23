@@ -593,17 +593,13 @@ class VideoProcessor(object):
             raise DBError("Error writing thumbnail data to database")
         
         def _merge_video_data(video_obj):
-            # If we are reprocessing, then we don't keep the random,
-            # centerframe or neon thumbnails
-            if self.reprocess:
-                thumbs = neondata.ThumbnailMetadata.get_many(
-                    video_obj.thumbnail_ids)
-                keep_thumbs = [x.key for x in thumbs if x.type not in [
-                    neondata.ThumbnailType.NEON,
-                    neondata.ThumbnailType.CENTERFRAME,
-                    neondata.ThumbnailType.RANDOM]]
-            else:
-                keep_thumbs = video_obj.thumbnail_ids
+            # Don't keep the random centerframe or neon thumbnails
+            thumbs = neondata.ThumbnailMetadata.get_many(
+                video_obj.thumbnail_ids)
+            keep_thumbs = [x.key for x in thumbs if x.type not in [
+                neondata.ThumbnailType.NEON,
+                neondata.ThumbnailType.CENTERFRAME,
+                neondata.ThumbnailType.RANDOM]]
             tidset = set(keep_thumbs +
                          self.video_metadata.thumbnail_ids)
             video_obj.thumbnail_ids = [x for x in tidset]
