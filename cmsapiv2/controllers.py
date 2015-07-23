@@ -198,6 +198,73 @@ class AccountHandler(tornado.web.RequestHandler):
  
     def delete(self, *args): 
         send_not_implemented_msg(self, 'delete')
+
+'''*********************************************************************
+OoyalaIntegrationHandler : class responsible for creating/updating/
+                           getting an ooyala integration
+   HTTP Verbs            : get, post, update
+*********************************************************************'''
+class OoyalaIntegrationHandler(tornado.web.RequestHandler): 
+    @tornado.gen.coroutine
+    def post(self, *args)  
+        print 'posting' 
+    
+    @tornado.gen.coroutine
+    def get(self, *args)  
+        print 'getting'
+ 
+    @tornado.gen.coroutine
+    def update(self, *args)  
+        print 'updating' 
+    
+    @tornado.gen.coroutine
+    def delete(self, *args)  
+        send_not_implemented_msg(self, 'delete')
+
+'''*********************************************************************
+BrightcoveIntegrationHandler : class responsible for creating/updating/
+                               getting a brightcove integration
+   HTTP Verbs                : get, post, update
+*********************************************************************'''
+class BrightcoveIntegrationHandler(tornado.web.RequestHandler): 
+    @tornado.gen.coroutine
+    def post(self, *args)  
+        print 'posting' 
+    
+    @tornado.gen.coroutine
+    def get(self, *args)  
+        print 'getting'
+ 
+    @tornado.gen.coroutine
+    def update(self, *args)  
+        print 'updating' 
+    
+    @tornado.gen.coroutine
+    def delete(self, *args)  
+        send_not_implemented_msg(self, 'delete')
+
+'''*********************************************************************
+OptimizelyIntegrationHandler : class responsible for creating/updating/
+                               getting an optimizely integration 
+   HTTP Verbs                : get, post, update
+*********************************************************************'''
+class OptimizelyIntegrationHandler(tornado.web.RequestHandler): 
+    @tornado.gen.coroutine
+    def post(self, *args)  
+        print 'posting' 
+    
+    @tornado.gen.coroutine
+    def get(self, *args)  
+        print 'getting'
+ 
+    @tornado.gen.coroutine
+    def update(self, *args)  
+        print 'updating' 
+    
+    @tornado.gen.coroutine
+    def delete(self, *args)  
+        send_not_implemented_msg(self, 'delete')
+
  
 '''*********************************************************************
 LiveStreamHandler : class responsible for creating a new video job 
@@ -215,6 +282,12 @@ application = tornado.web.Application([
     (r'/api/v2/accounts$', NewAccountHandler),
     (r'/api/v2/accounts/([a-zA-Z0-9]+)$', AccountHandler), 
     (r'/api/v2/accounts/([a-zA-Z0-9]+)/$', AccountHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala$', OoyalaIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/$', OoyalaIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove$', BrightcoveIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/$', BrightcoveIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely$', OptimizelyIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/$', OptimizelyIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)$', AccountHandler), 
     (r'/api/v2/([a-zA-Z0-9]+)/$', AccountHandler),
     (r'/api/v2/(\d+)/jobs/live_stream', LiveStreamHandler)
