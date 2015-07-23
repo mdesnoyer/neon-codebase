@@ -144,9 +144,8 @@ class AccountHandler(tornado.web.RequestHandler):
             rv_account['default_thumbnail_id'] = user_account.default_thumbnail_id 
             rv_account['integrations'] = user_account.integrations
             rv_account['default_size'] = user_account.default_size
-            #TODO we need created/updated on neonuseraccount
-            rv_account['created'] = str(datetime.datetime.utcnow()) 
-            rv_account['updated'] = str(datetime.datetime.utcnow()) 
+            rv_account['created'] = user_account.created 
+            rv_account['updated'] = user_account.updated
             output = json.dumps(rv_account)
             code = HTTP_OK  
         except AttributeError as e:  
