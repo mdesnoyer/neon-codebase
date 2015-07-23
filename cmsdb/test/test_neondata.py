@@ -111,10 +111,14 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                 ('account_3', TrackerAccountIDMapper.PRODUCTION))
 
     def test_get_all_platforms_sync(self):
-        NeonPlatform('acct1', api_key='acct1').save()
-        BrightcovePlatform('acct2', 'i_bc', 'acct2').save()
-        OoyalaPlatform('acct3', 'i_oo', 'acct3').save()
-        YoutubePlatform('acct4', 'i_yt', 'acct4').save()
+        NeonPlatform.modify('acct1', '0', lambda x: x,
+                            create_missing=True)
+        BrightcovePlatform.modify('acct2', 'ibc', lambda x: x,
+                                  create_missing=True)
+        OoyalaPlatform.modify('acct3', 'ioo', lambda x: x,
+                              create_missing=True)
+        YoutubePlatform.modify('acct4', 'iyt', lambda x: x,
+                               create_missing=True)
 
         objs = AbstractPlatform.get_all()
 
@@ -122,10 +126,14 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_get_all_platforms_async(self):
-        NeonPlatform('acct1', api_key='acct1').save()
-        BrightcovePlatform('acct2', 'i_bc', 'acct2').save()
-        OoyalaPlatform('acct3', 'i_oo', 'acct3').save()
-        YoutubePlatform('acct4', 'i_yt', 'acct4').save()
+        NeonPlatform.modify('acct1', '0', lambda x: x,
+                            create_missing=True)
+        BrightcovePlatform.modify('acct2', 'ibc', lambda x: x,
+                            create_missing=True)
+        OoyalaPlatform.modify('acct3', 'ioo', lambda x: x,
+                            create_missing=True)
+        YoutubePlatform.modify('acct4', 'iyt', lambda x: x,
+                            create_missing=True)
 
         objs = yield tornado.gen.Task(AbstractPlatform.get_all)
 
@@ -135,8 +143,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         ''' brightcove defaults ''' 
 
         na = NeonUserAccount('acct1')
-        na.save()
-        bp = BrightcovePlatform('aid', 'iid', na.neon_api_key)
+        bp = BrightcovePlatform(na.neon_api_key, 'iid', 'aid')
 
         self.assertFalse(bp.abtest)
         self.assertFalse(bp.auto_update)
@@ -145,16 +152,19 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEqual(bp.key, 'brightcoveplatform_%s_iid' % bp.neon_api_key)
 
         # Make sure that save and regenerating creates the same object
-        bp.save()
+        def _set_acct(x):
+            x.account_id = 'aid'
+        bp = BrightcovePlatform.modify(na.neon_api_key, 'iid', _set_acct,
+                                       create_missing=True)
 
-        bp2 = BrightcovePlatform.get(bp.neon_api_key, 'iid')
+        bp2 = BrightcovePlatform.get(na.neon_api_key, 'iid')
         self.assertEqual(bp.__dict__, bp2.__dict__)
 
     def test_bcplatform_with_callback(self):
 
         na = NeonUserAccount('acct1')
-        na.save()
-        bp = BrightcovePlatform('aid', 'iid', na.neon_api_key, callback_url='http://www.callback.com')
+        bp = BrightcovePlatform('aid', 'iid', na.neon_api_key,
+                                callback_url='http://www.callback.com')
 
         self.assertFalse(bp.abtest)
         self.assertFalse(bp.auto_update)
@@ -167,17 +177,19 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         ''' nuser account '''
 
         na = NeonUserAccount('acct1')
-        bp = BrightcovePlatform('acct1', 'bp1', na.neon_api_key)
-        bp.save()
-        np = NeonPlatform('acct1', '0', na.neon_api_key)
-        np.save()
+        def _set_acct(x):
+            x.account_id = 'acct1'
+        bp = BrightcovePlatform.modify(na.neon_api_key, 'bp1',
+                                       _set_acct, create_missing=True)
+        np = NeonPlatform.modify(na.neon_api_key, '0',
+                                 _set_acct, create_missing=True)
         na.add_platform(bp)
         na.add_platform(np)
         na.save()
 
         # Retrieve the account
         NeonUserAccount.get(na.neon_api_key,
-                                    callback=self.stop)
+                            callback=self.stop)
         account = self.wait()
         self.assertIsNotNone(account)
         self.assertEqual(account.account_id, 'acct1')
@@ -286,10 +298,10 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         # create all video related objects
         
         na = NeonUserAccount('ta1')
-        bp = BrightcovePlatform('ta1', 'bp1', na.neon_api_key)
-        bp.save()
-        np = NeonPlatform('ta1', '0', na.neon_api_key)
-        np.save()
+        bp = BrightcovePlatform.modify(na.neon_api_key, 'bp1', lambda x: x,
+                                       create_missing=True)
+        np = NeonPlatform.modify(na.neon_api_key, '0', lambda x: x,
+                                 create_missing=True)
         na.add_platform(bp)
         na.add_platform(np)
         na.save()
@@ -306,7 +318,10 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         VideoMetadata.save_all([vid])
         np.add_video('dummyv', 'dummyjob')
         np.add_video('vid1', 'job1')
-        np.save()
+        NeonPlatform.modify(na.neon_api_key, '0',
+                            lambda x: x.add_video('dummyv', 'dummyjob'))
+        NeonPlatform.modify(na.neon_api_key, '0',
+                            lambda x: x.add_video('vid1', 'job1'))
         NeonPlatform.delete_all_video_related_data(np, 'vid1',
                 really_delete_keys=True)
         
@@ -327,9 +342,10 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         # Build up a database structure
         na = NeonUserAccount('acct1')
-        bp = BrightcovePlatform('acct1', 'bp1', na.neon_api_key)
-        op = OoyalaPlatform('acct1', 'op1', na.neon_api_key, 'p_code', 'o_key',
-                            'o_secret')
+        bp = BrightcovePlatform.modify(na.neon_api_key, 'bp1', lambda x: x,
+                                       create_missing=True)
+        op = OoyalaPlatform.modify(na.neon_api_key, 'op1',
+                                   lambda x: x, create_missing=True)
         na.add_platform(bp)
         na.add_platform(op)
         na.save()
@@ -364,12 +380,13 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         v2.save()
 
 
-        bp.add_video('v0', 'r0')
-        bp.add_video('v1', 'r1')
-        bp.save()
-        op.add_video('v2', 'r2')
-        op.save()
-
+        BrightcovePlatform.modify(na.neon_api_key, 'bp1', 
+                                  lambda x: x.add_video('v0', 'r0'))
+        BrightcovePlatform.modify(na.neon_api_key, 'bp1', 
+                                  lambda x: x.add_video('v1', 'r1'))
+        OoyalaPlatform.modify(na.neon_api_key, 'op1', 
+                              lambda x: x.add_video('v2', 'r2'))
+        
         # Now make sure that the iteration goes through all the thumbnails
         found_thumb_ids = [x.key for x in  
                            ThumbnailMetadata.iterate_all_thumbnails()]
@@ -430,16 +447,20 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             (ExperimentStrategy('key'), get_func),
             (NeonUserAccount('key', 'api'),
              lambda x: x.get('key')),
-            (NeonPlatform('key', '0', 'api'),
+            (NeonPlatform('api', '0', 'a'),
              lambda x: x.get('api', '0')),
-            (BrightcovePlatform('a', 'i', 'api'),
-             lambda x: x.get('api', 'i')),
-            (OoyalaPlatform('a', 'i', 'api', 'b', 'c', 'd', 'e'),
-             lambda x: x.get('api', 'i'))]
+            (BrightcovePlatform('api', 'i1', 'a'),
+             lambda x: x.get('api', 'i1')),
+            (OoyalaPlatform('api', 'i2', 'a', 'b', 'c', 'd', 'e'),
+             lambda x: x.get('api', 'i2'))]
 
         for obj, read_func in obj_types:
             # Start by saving the object
-            obj.save()
+            if isinstance(obj, AbstractPlatform):
+                obj.modify('api', obj.integration_id, lambda x: x,
+                           create_missing=True)
+            else:
+                obj.save()
 
             # Now find the number of open file descriptors
             start_fd_list = _get_open_connection_list()
@@ -455,24 +476,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             if len(start_fd_list) != len(end_fd_list):
                 # This will give us more information if it fails
                 self.assertEqual(start_fd_list, end_fd_list)
-    
-    def test_processed_internal_video_ids(self):
-        na = NeonUserAccount('accttest')
-        na.save()
-        bp = BrightcovePlatform('aid', 'iid', na.neon_api_key)
-        
-        vids = bp.get_processed_internal_video_ids()
-        self.assertEqual(len(vids), 0)
-
-        for i in range(10):
-            bp.add_video('vid%s' % i, 'job%s' % i)
-            r = NeonApiRequest('job%s' % i, na.neon_api_key, 'vid%s' % i, 't', 't', 'r', 'h')
-            r.state = "active"
-            r.save()
-        bp.save()
-
-        vids = bp.get_processed_internal_video_ids()
-        self.assertEqual(len(vids), 10)
 
     def test_hosting_metadata(self):
         '''
@@ -651,8 +654,8 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         
         na = NeonUserAccount('acct1')
         na.save()
-        np = NeonPlatform('acct1', '0', na.neon_api_key)
-        np.save()
+        np = NeonPlatform.modify(na.neon_api_key, '0', lambda x: x,
+                                 create_missing=True)
        
         vid = InternalVideoID.generate(na.neon_api_key, 'vid1')
         vm = VideoMetadata(vid, [], 'reqid0', 'v0.mp4', 0, 0, None, 0, None, True)
@@ -806,9 +809,13 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEqual(obj.account_id, '161')
         self.assertEqual(obj.neon_api_key, 'hzxts57y7ywcl9onl811b0p4')
         
-        # save the object and ensure that its "savable", then verify contents again
-        obj.abtest = True
-        obj.save() 
+        # save the object and ensure that its "savable", then verify
+        # contents again
+        def _set_params(x):
+            x.account_id = obj.account_id
+            x.abtest = True
+        NeonPlatform.modify(obj.neon_api_key, obj.integration_id,
+                            _set_params, create_missing=True)
         
         obj = NeonPlatform.get(obj.neon_api_key, '0')
         self.assertEqual(obj.account_id, '161')
@@ -821,12 +828,19 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         obj = BrightcovePlatform._create('brightcoveplatform_wsoruplnzkbilzj3apr05kvz_39', json.loads(json_str)) 
         self.assertEqual(obj.account_id, '145')
         self.assertEqual(obj.neon_api_key, 'wsoruplnzkbilzj3apr05kvz')
-        obj.abtest = True
-        obj.save() 
+        self.assertEqual(obj.publisher_id, '1948681880001')
+        
+        def _set_params(x):
+            x.account_id = obj.account_id
+            x.publisher_id = obj.publisher_id
+            x.abtest = True
+        BrightcovePlatform.modify(obj.neon_api_key, obj.integration_id,
+                                  _set_params, create_missing=True)
         
         obj = BrightcovePlatform.get('wsoruplnzkbilzj3apr05kvz', '39')
         self.assertEqual(obj.account_id, '145')
         self.assertEqual(obj.neon_api_key, 'wsoruplnzkbilzj3apr05kvz')
+        self.assertEqual(obj.publisher_id, '1948681880001')
         self.assertTrue(obj.abtest)
 
     def test_ooyalaplatform_account_backwards_compatibility(self):
@@ -836,13 +850,23 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEqual(obj.account_id, '136')
         self.assertEqual(obj.neon_api_key, 'qo4vtvhu2cqgdi30k63bahzh')
         self.assertEqual(obj.partner_code, 's0Y3YxOp0XTCL2hFlfFS1S2MRmaY')
-        obj.abtest = True
-        obj.save() 
+        self.assertEqual(obj.api_secret,
+                         'uwTrMevYq54eani8ViRn6Ar5-rwmmmvKwq1HDtCn')
+
+        def _set_params(x):
+            x.account_id = obj.account_id
+            x.partner_code = obj.partner_code
+            x.abtest = True
+            x.api_secret = obj.api_secret
+        OoyalaPlatform.modify(obj.neon_api_key, obj.integration_id,
+                              _set_params, create_missing=True)
         
         obj = OoyalaPlatform.get('qo4vtvhu2cqgdi30k63bahzh', '1')
         self.assertEqual(obj.account_id, '136')
         self.assertEqual(obj.neon_api_key, 'qo4vtvhu2cqgdi30k63bahzh')
         self.assertEqual(obj.partner_code, 's0Y3YxOp0XTCL2hFlfFS1S2MRmaY')
+        self.assertEqual(obj.api_secret, 
+                         'uwTrMevYq54eani8ViRn6Ar5-rwmmmvKwq1HDtCn')
         self.assertTrue(obj.abtest)
 
     def test_neonplatform_get_many(self):
@@ -851,11 +875,11 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         '''
         nps = []
         for i in range(10):
-            np = NeonPlatform('acct_%s' % i, '0', "APIKEY%s" % i)
-            np.save()
+            np = NeonPlatform.modify('acct%s' % i, '0', lambda x: x,
+                                     create_missing=True)
             nps.append(np)
 
-        keys = ['neonplatform_APIKEY%s_0' % i for i in range(10)]
+        keys = ['neonplatform_acct%s_0' % i for i in range(10)]
         r_nps = NeonPlatform.get_many(keys)
         self.assertListEqual(nps, r_nps)
 
@@ -1014,22 +1038,25 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         trap = TestNeondata.ChangeTrap()
         trap.subscribe(AbstractPlatform)
 
-        neondata.BrightcovePlatform('a1', 'bc', 'acct1').save()
+        def _set_acct(x):
+            x.account_id = 'a1'
+
+        BrightcovePlatform.modify('acct1','bc', _set_acct, create_missing=True)
         events = trap.wait()
         self.assertEquals(len(events), 1)
         self.assertIsInstance(events[0][1], BrightcovePlatform)
 
-        neondata.NeonPlatform('a1', 'neon', 'acct1').save()
+        NeonPlatform.modify('acct1', '0', _set_acct, create_missing=True)
         events = trap.wait()
         self.assertEquals(len(events), 2)
         self.assertIsInstance(events[-1][1], NeonPlatform)
 
-        neondata.YoutubePlatform('a1', 'yt', 'acct1').save()
+        YoutubePlatform.modify('acct1', 'yt', _set_acct, create_missing=True)
         events = trap.wait()
         self.assertEquals(len(events), 3)
         self.assertIsInstance(events[-1][1], YoutubePlatform)
 
-        neondata.OoyalaPlatform('a1', 'oo', 'acct1').save()
+        OoyalaPlatform.modify('acct1', 'oo', _set_acct, create_missing=True)
         events = trap.wait()
         self.assertEquals(len(events), 4)
         self.assertIsInstance(events[-1][1], OoyalaPlatform)
@@ -1043,13 +1070,15 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         video_trap.subscribe(VideoMetadata, 'acct1_*')
 
         # Make sure all the subscriptions are working
-        neondata.BrightcovePlatform('a1', 'bc', 'acct1').save()
+        def _set_acct(x):
+            x.account_id = 'a1'
+        BrightcovePlatform.modify('acct1','bc', _set_acct, create_missing=True)
         plat_trap.wait()
-        neondata.NeonPlatform('a1', 'neon', 'acct1').save()
+        NeonPlatform.modify('acct1', '0', _set_acct, create_missing=True)
         plat_trap.wait()
-        neondata.YoutubePlatform('a1', 'yt', 'acct1').save()
+        YoutubePlatform.modify('acct1', 'yt', _set_acct, create_missing=True)
         plat_trap.wait()
-        neondata.OoyalaPlatform('a1', 'oo', 'acct1').save()
+        OoyalaPlatform.modify('acct1', 'oo', _set_acct, create_missing=True)
         plat_trap.wait()
         self.assertEquals(len(plat_trap.args), 4)
         plat_trap.reset()
@@ -1070,11 +1099,11 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         plat_trap.unsubscribe(AbstractPlatform)
         request_trap.unsubscribe(NeonApiRequest)
         video_trap.unsubscribe(VideoMetadata, 'acct1_*')
-
-        neondata.BrightcovePlatform('a1', 'bc', 'acct2').save()
-        neondata.NeonPlatform('a1', 'neon', 'acct2').save()
-        neondata.YoutubePlatform('a1', 'yt', 'acct2').save()
-        neondata.OoyalaPlatform('a1', 'oo', 'acct2').save()
+        
+        BrightcovePlatform.modify('acct2','bc', _set_acct, create_missing=True)
+        NeonPlatform.modify('acct2', '0', _set_acct, create_missing=True)
+        YoutubePlatform.modify('acct2', 'yt', _set_acct, create_missing=True)
+        OoyalaPlatform.modify('acct2', 'oo', _set_acct, create_missing=True)
         neondata.BrightcoveApiRequest('jobbc', 'acct2').save()
         NeonApiRequest('jobneon', 'acct2').save()
         VideoMetadata('acct1_vid2', request_id='req1').save()
@@ -1083,14 +1112,14 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         plat_trap.subscribe(AbstractPlatform)
         request_trap.subscribe(NeonApiRequest)
         video_trap.subscribe(VideoMetadata, 'acct1_*')
-
-        neondata.BrightcovePlatform('a1', 'bc', 'acct3').save()
+        
+        BrightcovePlatform.modify('acct3','bc', _set_acct, create_missing=True)
         plat_trap.wait()
-        neondata.NeonPlatform('a1', 'neon', 'acct3').save()
+        NeonPlatform.modify('acct3', '0', _set_acct, create_missing=True)
         plat_trap.wait()
-        neondata.YoutubePlatform('a1', 'yt', 'acct3').save()
+        YoutubePlatform.modify('acct3', 'yt', _set_acct, create_missing=True)
         plat_trap.wait()
-        neondata.OoyalaPlatform('a1', 'oo', 'acct3').save()
+        OoyalaPlatform.modify('acct3', 'oo', _set_acct, create_missing=True)
         plat_trap.wait()
         self.assertEquals(len(plat_trap.args), 4)
         
