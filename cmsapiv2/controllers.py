@@ -83,8 +83,7 @@ NewAccountHandler : class responsible for creating a new account
    HTTP Verbs     : post 
 ****************************************************************'''
 class NewAccountHandler(tornado.web.RequestHandler):
-    @tornado.gen.coroutine 
-    def get(self):
+    def get(self, *args):
         send_not_implemented_msg(self, 'get') 
 
     @tornado.gen.coroutine 
@@ -95,7 +94,7 @@ class NewAccountHandler(tornado.web.RequestHandler):
           'default_height': All(int, Range(min=1, max=8192)),
           'default_thumbnail_id': All(str, Length(min=1, max=2048)) 
         })
-        try:  
+        try:
             args = parse_args(self.request)
             schema(args) 
             user = neondata.NeonUserAccount(customer_name=args['customer_name'])
@@ -105,7 +104,8 @@ class NewAccountHandler(tornado.web.RequestHandler):
                 user.default_thumbnail_id = args['default_thumbnail_id']
             except KeyError as e: 
                 pass 
-            user.save()
+            output = yield tornado.gen.Task(neondata.NeonUserAccount.save, user)
+            user = yield tornado.gen.Task(neondata.NeonUserAccount.get, user.neon_api_key)
             output = user.to_json()
             code = HTTP_OK
         except MultipleInvalid as e: 
@@ -114,12 +114,10 @@ class NewAccountHandler(tornado.web.RequestHandler):
         
         send_json_response(self, output, code) 
 
-    @tornado.gen.coroutine 
-    def put(self): 
+    def put(self, *args): 
         send_not_implemented_msg(self, 'put') 
  
-    @tornado.gen.coroutine 
-    def delete(self): 
+    def delete(self, *args): 
         send_not_implemented_msg(self, 'delete') 
 
 '''*****************************************************************
@@ -196,12 +194,10 @@ class AccountHandler(tornado.web.RequestHandler):
 
         send_json_response(self, output, code)
 
-    @tornado.gen.coroutine 
-    def post(self):
+    def post(self, *args):
         send_not_implemented_msg(self, 'post') 
  
-    @tornado.gen.coroutine 
-    def delete(self): 
+    def delete(self, *args): 
         send_not_implemented_msg(self, 'delete')
  
 '''*********************************************************************
@@ -216,13 +212,13 @@ class LiveStreamHandler(tornado.web.RequestHandler):
         print 'posting a video job' 
 
 application = tornado.web.Application([
-    (r'/accounts/$', NewAccountHandler),
-    (r'/accounts$', NewAccountHandler),
-    (r'/accounts/([a-zA-Z0-9]+)$', AccountHandler), 
-    (r'/accounts/([a-zA-Z0-9]+)/$', AccountHandler),
-    (r'/([a-zA-Z0-9]+)$', AccountHandler), 
-    (r'/([a-zA-Z0-9]+)/$', AccountHandler),
-    (r'/(\d+)/jobs/live_stream', LiveStreamHandler)
+    (r'/api/v2/accounts/$', NewAccountHandler),
+    (r'/api/v2/accounts$', NewAccountHandler),
+    (r'/api/v2/accounts/([a-zA-Z0-9]+)$', AccountHandler), 
+    (r'/api/v2/accounts/([a-zA-Z0-9]+)/$', AccountHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)$', AccountHandler), 
+    (r'/api/v2/([a-zA-Z0-9]+)/$', AccountHandler),
+    (r'/api/v2/(\d+)/jobs/live_stream', LiveStreamHandler)
 ], gzip=True)
 
 def main():
