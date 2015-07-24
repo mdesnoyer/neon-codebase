@@ -238,9 +238,10 @@ class IntegrationHelper():
                 brightcove_platform = neondata.BrightcovePlatform(a_id=acct.neon_api_key, 
                                                                   i_id=None, 
                                                                   api_key=acct.neon_api_key, 
+                                                                  last_process_date=current_time,  
                                                                   p_id=args['publisher_id'], 
                                                                   rtoken=args.get('read_token', None), 
-                                                                  wtoken=args.get('write_token', None), 
+                                                                  wtoken=args.get('write_token', None),
                                                                   callback_url=args.get('callback_url', None)) 
             except KeyError as e: 
                 pass
@@ -253,7 +254,7 @@ class IntegrationHelper():
             platform = _createBrightcovePlatform(args)
 
         acct.add_platform(platform)
-        result = yield tornado.gen.Task(acct.save)
+        result = yield tornado.gen.Task(acct.save_platform, platform)
         if result: 
             raise tornado.gen.Return(platform)
         else: 
@@ -322,7 +323,7 @@ class OoyalaIntegrationHandler(tornado.web.RequestHandler):
         send_json_response(self, output, code)
            
     @tornado.gen.coroutine
-    def get(self, *args):
+    def get(self, account_id):
         try: 
             schema = Schema({
               Required('account_id') : All(str, Length(min=1, max=256)),
@@ -330,13 +331,17 @@ class OoyalaIntegrationHandler(tornado.web.RequestHandler):
             })
             args = parse_args(self.request)
             args['account_id'] = str(account_id)
-            args['integration_id'] = str(integration_id)
             schema(args)
             ooyala_platform = yield tornado.gen.Task(neondata.OoyalaPlatform.get, 
                                                      args['account_id'], 
                                                      args['integration_id'])
             output = ooyala_platform.to_json() 
-            code = HTTP_OK  
+            code = HTTP_OK 
+        except AttributeError as e:  
+            output = generate_standard_error('%s %s' % 
+                        ('Unable to get integration with id :',
+                         integration_id))
+            code = HTTP_BAD_REQUEST
         except MultipleInvalid as e: 
             output = generate_standard_error('%s %s' % (e.path[0], e.msg))
             code = HTTP_BAD_REQUEST
@@ -344,7 +349,7 @@ class OoyalaIntegrationHandler(tornado.web.RequestHandler):
         send_json_response(self, output, code)
  
     @tornado.gen.coroutine
-    def update(self, account_id, integration_id):
+    def update(self, account_id):
         try: 
             schema = Schema({
               Required('account_id') : All(str, Length(min=1, max=256)),
@@ -355,7 +360,7 @@ class OoyalaIntegrationHandler(tornado.web.RequestHandler):
             })
             args = parse_args(self.request)
             args['account_id'] = str(account_id)
-            args['integration_id'] = str(integration_id)
+            #args['integration_id'] = str(integration_id)
             schema(args)
             ooyala_platform = yield tornado.gen.Task(neondata.OoyalaPlatform.get, 
                                                      args['account_id'], 
@@ -374,7 +379,7 @@ class OoyalaIntegrationHandler(tornado.web.RequestHandler):
                                          _update_platform)
              
         except AttributeError as e:  
-            output = generate_standard_error('%s %s %s %s' % 
+            output = generate_standard_error('%s %s' % 
                         ('Unable to update integration with id :',
                          integration_id))
             code = HTTP_BAD_REQUEST
@@ -460,8 +465,8 @@ application = tornado.web.Application([
     (r'/api/v2/accounts/([a-zA-Z0-9]+)/$', AccountHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala$', OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/$', OoyalaIntegrationHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/([a-zA-Z0-9]+)$', OoyalaIntegrationHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/([a-zA-Z0-9]+)/$', OoyalaIntegrationHandler),
+    #(r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/([a-zA-Z0-9]+)$', OoyalaIntegrationHandler),
+    #(r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/([a-zA-Z0-9]+)/$', OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove$', BrightcoveIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/$', BrightcoveIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely$', OptimizelyIntegrationHandler),
