@@ -2740,10 +2740,16 @@ class OoyalaPlatform(AbstractPlatform):
         for api calls to ooyala 
 
         '''
+
+        if i_id is None: 
+            self.integration_id = i_id = uuid.uuid1().hex
+        else: 
+            self.integration_id = i_id
+
         super(OoyalaPlatform, self).__init__(api_key, i_id)
+ 
         self.neon_api_key = api_key
         self.account_id = a_id
-        self.integration_id = i_id
         self.partner_code = p_code
         self.ooyala_api_key = o_api_key
         self.api_secret = api_secret 
