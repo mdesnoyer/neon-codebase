@@ -110,8 +110,9 @@ class TestVideoClient(test_utils.neontest.TestCase):
         self.na = neondata.NeonUserAccount('acc1')
         self.na.save()
         
-        self.np = neondata.NeonPlatform('acc1', '0', self.na.neon_api_key)
-        self.np.save()
+        self.np = neondata.NeonPlatform.modify(
+            self.na.neon_api_key, '0',
+            lambda x: x, create_missing=True)
 
         j_id = "j123"
         api_key = self.na.neon_api_key 
@@ -429,7 +430,8 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         na = neondata.NeonUserAccount('acct1')
         self.api_key = na.neon_api_key
         na.save()
-        neondata.NeonPlatform('acct1', '0', self.api_key).save()
+        neondata.NeonPlatform.modify(self.api_key, '0', 
+                                     lambda x: x, create_missing=True)
 
         cdn = neondata.CDNHostingMetadataList(
             neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
@@ -1067,7 +1069,8 @@ class SmokeTest(test_utils.neontest.TestCase):
         na = neondata.NeonUserAccount('acct1')
         self.api_key = na.neon_api_key
         na.save()
-        neondata.NeonPlatform('acct1', '0', self.api_key).save()
+        neondata.NeonPlatform.modify(self.api_key, '0', 
+                                     lambda x: x, create_missing=True)
 
         cdn = neondata.CDNHostingMetadataList(
             neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),

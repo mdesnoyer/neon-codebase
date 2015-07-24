@@ -997,6 +997,7 @@ class StoredObject(object):
         StoredObject.modify('thumb_a', lambda thumb: thumb.update_phash())
         '''
         def _process_one(d):
+            
             val = d[key]
             if val is not None:
                 func(val)
@@ -1073,7 +1074,7 @@ class StoredObject(object):
                     pipe.mset(to_set)
             return mappings
 
-        db_connection = DBConnection.get(cls)
+        db_connection = DBConnection.get(create_class)
         if callback:
             return db_connection.conn.transaction(_getandset, *keys,
                                                   callback=callback,
@@ -1634,18 +1635,6 @@ class NeonUserAccount(NamespacedStoredObject):
     def to_json(self):
         ''' to json '''
         return json.dumps(self, default=lambda o: o.__dict__)
-    
-    def save_platform(self, new_integration, callback=None):
-        '''
-        Save Neon User account and corresponding platform object
-        '''
-        
-        #temp: changing this to a blocking pipeline call   
-        db_connection = DBConnection.get(self)
-        pipe = db_connection.blocking_conn.pipeline()
-        pipe.set(self.key, self.to_json())
-        pipe.set(new_integration.key, new_integration.to_json()) 
-        callback(pipe.execute())
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -2068,7 +2057,7 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
 class AbstractPlatform(NamespacedStoredObject):
     ''' Abstract Platform/ Integration class '''
 
-    def __init__(self, api_key, i_id='0', abtest=False, enabled=True, 
+    def __init__(self, api_key, i_id=None, abtest=False, enabled=True, 
                 serving_enabled=True, serving_controller="imageplatform"):
         
         super(AbstractPlatform, self).__init__(
@@ -2087,6 +2076,9 @@ class AbstractPlatform(NamespacedStoredObject):
     
     @classmethod
     def _generate_subkey(cls, api_key, i_id):
+        if i_id is None or api_key.endswith('_%s' % i_id):
+            # It's already the correct key
+            return api_key
         return '_'.join([api_key, i_id])
 
     @classmethod
@@ -2119,9 +2111,11 @@ class AbstractPlatform(NamespacedStoredObject):
                     '_type': __get_type(obj_dict['key']),
                     '_data': copy.deepcopy(obj_dict)
                 }
+            
             return super(AbstractPlatform, cls)._create(key, obj_dict)
 
     def save(self, callback=None):
+        raise NotImplementedError("To save this object use modify()")
         # since we need a default constructor with empty strings for the 
         # eval magic to work, check here to ensure apikey and i_id aren't empty
         # since the key is generated based on them
@@ -2138,14 +2132,22 @@ class AbstractPlatform(NamespacedStoredObject):
             cls._generate_subkey(api_key, i_id), callback=callback)
     
     @classmethod
-    def modify(cls, api_key, i_id, func, callback=None):
+    def modify(cls, api_key, i_id, func, create_missing=False, callback=None):
+        def _set_parameters(x):
+            _log.warn(x)
+            api_key, i_id = x.get_id().split('_')
+            x.neon_api_key = api_key
+            x.integration_id = i_id
+            func(x)
+            
         return super(AbstractPlatform, cls).modify(
             cls._generate_subkey(api_key, i_id),
-            func,
+            _set_parameters,
+            create_missing=create_missing,
             callback=callback)
 
     @classmethod
-    def modify_many(cls, keys, func, callback=None):
+    def modify_many(cls, keys, func, create_missing=False, callback=None):
         '''Modify many keys.
 
         Each key must be a tuple of (api_key, i_id)
@@ -2154,6 +2156,7 @@ class AbstractPlatform(NamespacedStoredObject):
             [cls._generate_subkey(api_key, i_id) for 
              api_key, i_id in keys],
             func,
+            create_missing=create_missing,
             callback=callback)
 
     def to_json(self):
@@ -2173,25 +2176,6 @@ class AbstractPlatform(NamespacedStoredObject):
         i_vids = [] 
         for vid in self.videos.keys(): 
             i_vids.append(InternalVideoID.generate(self.neon_api_key, vid))
-        return i_vids
-    
-    def get_processed_internal_video_ids(self):
-        ''' return list of i_vids for an account which have been processed '''
-
-        i_vids = []
-        processed_state = [RequestState.FINISHED, 
-                            RequestState.ACTIVE,
-                            RequestState.REPROCESS, 
-                            RequestState.SERVING, 
-                            RequestState.CUSTOMER_ERROR,
-                            RequestState.SERVING_AND_ACTIVE]
-        request_keys = [(v, self.neon_api_key) for v in
-                        self.videos.values()]
-        api_requests = NeonApiRequest.get_many(request_keys)
-        for api_request in api_requests:
-            if api_request and api_request.state in processed_state:
-                i_vids.append(InternalVideoID.generate(self.neon_api_key, 
-                                                        api_request.video_id)) 
         return i_vids
 
     @classmethod
@@ -2307,7 +2291,8 @@ class AbstractPlatform(NamespacedStoredObject):
 
         request, vmdata, thumbs, thumb serving urls
         
-        #NOTE: Don't you dare call this method unless you really want to delete 
+        #NOTE: Don't you dare call this method unless you really want to 
+        delete 
         '''
         
         do_you_want_to_delete = kwargs.get('really_delete_keys', False)
@@ -2344,7 +2329,7 @@ class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
     '''
-    def __init__(self, a_id, i_id='0', api_key='', abtest=False):
+    def __init__(self, api_key, a_id=None, abtest=False):
         # By default integration ID 0 represents 
         # Neon Platform Integration (access via neon api)
         
@@ -2377,7 +2362,7 @@ class NeonPlatform(AbstractPlatform):
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
     
-    def __init__(self, a_id, i_id='', api_key='', p_id=None, 
+    def __init__(self, api_key, i_id=None, a_id='', p_id=None, 
                 rtoken=None, wtoken=None, auto_update=False,
                 last_process_date=None, abtest=False, callback_url=None):
 
@@ -2609,12 +2594,10 @@ class YoutubePlatform(AbstractPlatform):
 
     # TODO(Sunil): Fix this class when Youtube is implemented 
 
-    def __init__(self, a_id, i_id='', api_key='', access_token=None, refresh_token=None,
+    def __init__(self, api_key, i_id=None, a_id='', access_token=None,
+                 refresh_token=None,
                 expires=None, auto_update=False, abtest=False):
-        super(YoutubePlatform, self).__init__(api_key, i_id)
-        
-        self.key = self.__class__.__name__.lower()  + '_%s_%s' \
-                %(api_key, i_id) #TODO: fix
+        super(YoutubePlatform, self).__init__(api_key, i_id, abtest)
         self.account_id = a_id
         self.access_token = access_token
         self.refresh_token = refresh_token
@@ -2734,7 +2717,7 @@ class OoyalaPlatform(AbstractPlatform):
     '''
     OOYALA Platform
     '''
-    def __init__(self, a_id, i_id='', api_key='', p_code=None, 
+    def __init__(self, api_key, i_id=None, a_id='', p_code=None, 
                  o_api_key=None, api_secret=None, auto_update=False): 
         '''
         Init ooyala platform 

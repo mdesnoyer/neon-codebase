@@ -84,9 +84,10 @@ class TestBackfillCDN(test_utils.neontest.AsyncTestCase):
         tid = '%s_%s_t1' % (api_key, vid)
 
         # create brightcove account
-        ba = neondata.BrightcovePlatform('aid', 'iid', api_key)
-        ba.add_video(vid, 'j1')
-        ba.save()
+        ba = neondata.BrightcovePlatform.modify(
+            api_key, 'aid',
+            lambda x: x.add_video(vid, 'j1'),
+            create_missing=False)
         v1 = neondata.VideoMetadata(
             neondata.InternalVideoID.generate(api_key, vid),
             [tid],

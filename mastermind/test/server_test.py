@@ -81,7 +81,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         # Define platforms in the database
         api_key = "neonapikey"
 
-        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
+        bcPlatform = neondata.BrightcovePlatform(api_key, 'i1', 
                                                  abtest=False)
         bcPlatform.add_video(0, 'job11')
         job11 = neondata.NeonApiRequest('job11', api_key, 0)
@@ -92,7 +92,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         job12 = neondata.NeonApiRequest('job12', api_key, 10)
         job12.state = neondata.RequestState.SUBMIT
 
-        testPlatform = neondata.BrightcovePlatform('a2', 'i2', api_key, 
+        testPlatform = neondata.BrightcovePlatform(api_key, 'i2',
                                                    abtest=True)
         testPlatform.add_video(1, 'job21')
         job21 = neondata.NeonApiRequest('job21', api_key, 1)
@@ -102,12 +102,12 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         job22 = neondata.NeonApiRequest('job22', api_key, 2)
         job22.state = neondata.RequestState.FINISHED
 
-        apiPlatform = neondata.NeonPlatform('a3', '0', api_key, abtest=True)
+        apiPlatform = neondata.NeonPlatform(api_key, abtest=True)
         apiPlatform.add_video(4, 'job31')
         job31 = neondata.NeonApiRequest('job31', api_key, 4)
         job31.state = neondata.RequestState.CUSTOMER_ERROR
 
-        noVidPlatform = neondata.BrightcovePlatform('a4', 'i4', api_key, 
+        noVidPlatform = neondata.BrightcovePlatform(api_key, 'i4', 
                                                     abtest=True) 
         
         datamock.AbstractPlatform.get_all.return_value = \
@@ -191,7 +191,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         datamock.InternalVideoID = neondata.InternalVideoID
         api_key = "neonapikey"
 
-        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
+        bcPlatform = neondata.BrightcovePlatform(api_key, 'i1', 
                                                  abtest=True)
         bcPlatform.add_video(0, 'job11')
         job11 = neondata.NeonApiRequest('job11', api_key, 0, 
@@ -300,8 +300,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
     def test_video_metadata_missing(self, datamock):
         datamock.InternalVideoID = neondata.InternalVideoID
         api_key = 'apikey'
-        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
-                abtest=True)
+        bcPlatform = neondata.BrightcovePlatform(api_key, 'i1', 
+                                                 abtest=True)
         bcPlatform.add_video('0', 'job11')
         bcPlatform.add_video('10', 'job12')
         job11 = neondata.NeonApiRequest('job11', api_key, 0)
@@ -324,8 +324,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
     def test_thumb_metadata_missing(self, datamock):
         datamock.InternalVideoID = neondata.InternalVideoID
         api_key = 'apikey'
-        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key,  
-                abtest=True)
+        bcPlatform = neondata.BrightcovePlatform(api_key, 'i1',  
+                                                 abtest=True)
         bcPlatform.add_video('0', 'job11')
         bcPlatform.add_video('1', 'job12')
         job11 = neondata.NeonApiRequest('job11', api_key, 0)
@@ -378,7 +378,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         datamock.InternalVideoID = neondata.InternalVideoID
         api_key = "neonapikey"
 
-        bcPlatform = neondata.BrightcovePlatform('a1', 'i1', api_key, 
+        bcPlatform = neondata.BrightcovePlatform(api_key, 'i1',
                                                  abtest=True)
         bcPlatform.add_video(0, 'job11')
         job11 = neondata.NeonApiRequest('job11', api_key, 0, 
@@ -476,10 +476,11 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
                                           tids=['key1_vid1_t1', 'key1_vid1_t2'],
                                           i_id='i1')
         self.vid.save()
-        self.platform = neondata.BrightcovePlatform('acct1', 'i1', 'key1',
-                                                    abtest=True)
-        self.platform.add_video('vid1', self.vid.job_id)
-        self.platform.save()
+        def _set_plat(x):
+            x.abtest = True
+            x.add_video('vid1', self.vid.job_id)
+        self.platform = neondata.BrightcovePlatform.modify(
+            'key1', 'i1', _set_plat, create_missing=True)
         self.acct.add_platform(self.platform)
         self.acct.save()
         self.thumbs =  [
@@ -545,8 +546,9 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
             False)
 
     def test_turn_off_serving(self):
-        self.platform.serving_enabled = False
-        self.platform.save()
+        def _disable_serving(x):
+            x.serving_enabled = False
+        neondata.BrightcovePlatform.modify('key1', 'i1', _disable_serving)
 
         self.wait_for_video_updates()
 
@@ -562,8 +564,8 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
                                      tids=['key1_vid2_t1'],
                                      i_id='i1')
         vid.save()
-        self.platform.add_video('vid2', vid.job_id)
-        self.platform.save()
+        neondata.BrightcovePlatform.modify(
+            'key1', 'i1', lambda x: x.add_video('vid2', vid.job_id))
 
         self.wait_for_video_updates()
 
@@ -1929,10 +1931,13 @@ class SmokeTesting(test_utils.neontest.TestCase):
                                      tids=['key1_vid1_t1', 'key1_vid1_t2'],
                                      i_id='i1')
         vid.save()
-        platform = neondata.BrightcovePlatform('acct1', 'i1', 'key1',
-                                               abtest=True)
-        platform.add_video('vid1', vid.job_id)
-        platform.save()
+        def _change_plat(x):
+            x.abtest = True
+            x.add_video('vid1', vid.job_id)
+        platform = neondata.BrightcovePlatform.modify(
+            'key1', 'i1',
+            _change_plat,
+            create_missing=True)
         acct.add_platform(platform)
         acct.save()
         thumbs =  [neondata.ThumbnailMetadata('key1_vid1_t1', 'key1_vid1',
@@ -2013,8 +2018,10 @@ class SmokeTesting(test_utils.neontest.TestCase):
                                               for j in range(2)],
                                         i_id='i1')
                 vid.save()
-                platform.add_video('vid%d'%i, vid.job_id)
-                platform.save()
+                neondata.BrightcovePlatform.modify(
+                    'key1', 'i1', 
+                    lambda x: x.add_video('vid%d' % i,
+                                          vid.job_id))
                 thumbs =  [neondata.ThumbnailMetadata(
                     'key1_vid%d_t%d'% (i,j),
                     'key1_vid%d' % i,

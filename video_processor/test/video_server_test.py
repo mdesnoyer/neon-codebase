@@ -239,8 +239,9 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.nuser = neondata.NeonUserAccount(a_id)
         self.nuser.save()
         self.api_key = self.nuser.neon_api_key
-        self.na = neondata.NeonPlatform(a_id, '0', self.api_key)
-        self.na.save()
+        self.na = neondata.NeonPlatform.modify(self.api_key, '0',
+                                               lambda x: x,
+                                               create_missing=True)
 
         # Patch the video length lookup
         self.http_patcher = patch('video_processor.server.utils.http')
@@ -415,9 +416,9 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
     def test_brightcove_request(self):
 
         i_id = "i125"
-        bp = neondata.BrightcovePlatform("testaccountneonapi", i_id,
-               self.api_key)
-        bp.save()
+        bp = neondata.BrightcovePlatform.modify(
+            self.api_key, i_id,
+            lambda x: x, create_missing=True)
 
         vals = {"api_key": self.api_key, 
                 "video_url": "http://testurl/video.mp4", 
@@ -453,10 +454,9 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
     def test_ooyala_request(self):
 
         i_id = "i125"
-        bp = neondata.OoyalaPlatform("testaccountneonapi", i_id,
-               self.api_key)
-        bp.save()
-
+        bp = neondata.OoyalaPlatform.modify(self.api_key, i_id,
+                                            lambda x: x,
+                                            create_missing=True)
         vals = {"api_key": self.api_key, 
                 "video_url": "http://testurl/video.mp4", 
                 "video_id": "testid123", "topn":2, 
@@ -491,13 +491,13 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
     def test_brightcove_request_invalid(self):
 
         i_id = "i125"
-        bp = neondata.BrightcovePlatform("testaccountneonapi", i_id,
-                self.api_key)
-        bp.save()
+        bp = neondata.BrightcovePlatform.modify(
+            self.api_key, i_id,
+            lambda x: x, create_missing=True)
         vals = {"api_key": self.api_key, 
-                    "video_url": "http://testurl/video.mp4", 
-                    "video_id": "testid123", "topn":2, 
-                    "callback_url": "http://callback_push_url"}
+                "video_url": "http://testurl/video.mp4", 
+                "video_id": "testid123", "topn":2, 
+                "callback_url": "http://callback_push_url"}
         url = self.get_url('/api/v1/submitvideo/brightcove')
         resp = self.make_api_request(vals, url)
         self.assertEqual(resp.code, 400)
@@ -751,8 +751,9 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
         self.nuser = neondata.NeonUserAccount(a_id)
         self.nuser.save()
         self.api_key = self.nuser.neon_api_key
-        self.na = neondata.NeonPlatform(a_id, '0', self.api_key)
-        self.na.save()
+        self.na = neondata.NeonPlatform.modify(
+            self.api_key, '0',
+            lambda x: x, create_missing=True)
 
         # Make some default jobs
         self.jobs = [

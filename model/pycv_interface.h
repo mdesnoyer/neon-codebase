@@ -13,7 +13,7 @@ initialization code for the module.
 #define __PYCV_INTERFACE_H__
 
 #include <Python.h>
-#include <numpy/ndarrayobject.h>
+#include <ndarrayobject.h>
 #include <opencv2/core/core.hpp>
 
 namespace pycv {

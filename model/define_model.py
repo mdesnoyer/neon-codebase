@@ -29,6 +29,12 @@ if __name__ == '__main__':
                                   filters.TextFilter(0.025),
                                   filters.CrossFadeFilter(max_height=480)],
                                   max_height=480)
+    haarF = '/data/model_data/haar_cascades/haarcascade_frontalface_alt2.xml'
+    svmF = '/data/model_data/svm_pca/SVMw20'
+    pcaF = '/data/model_data/pca/pca'
+    CEC = filters.ClosedEyesFilter(haarFile=haarF, svmPkl=svmF, pcaPkl=pcaF, maxFaces=15)
+    filt.append(CEC)
+
     predictor = model.predictor.KFlannPredictor(feature_generator, k=9)
 
     video_searcher = model.video_searcher.BisectSearcher(
