@@ -2367,8 +2367,8 @@ class BrightcovePlatform(AbstractPlatform):
                 last_process_date=None, abtest=False, callback_url=None):
 
         ''' On every request, the job id is saved '''
-        if i_id is None: 
-            i_id = uuid.uuid1().hex
+        #if i_id is None: 
+        #    i_id = uuid.uuid1().hex
 
         super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)
         self.account_id = a_id
@@ -2727,14 +2727,11 @@ class OoyalaPlatform(AbstractPlatform):
 
         '''
 
-        if i_id is None: 
-            self.integration_id = i_id = uuid.uuid1().hex
-        else: 
-            self.integration_id = i_id
+        #if i_id is None: 
+        #    i_id = uuid.uuid1().hex
 
         super(OoyalaPlatform, self).__init__(api_key, i_id)
  
-        self.neon_api_key = api_key
         self.account_id = a_id
         self.partner_code = p_code
         self.ooyala_api_key = o_api_key
