@@ -1070,9 +1070,15 @@ class DirectivePublisher(threading.Thread):
     def add_to_tracker_id_map(self, tracker_id, account_id):
         self.tracker_id_map[tracker_id] = account_id
 
-    def add_serving_urls(self, thumbnail_id, urls):
+    def add_serving_urls(self, thumbnail_id, urls_obj):
+        '''Add serving urls for a given thumbnail
+
+        Inputs:
+        thumbnail_id - The thumbnail id
+        urls_obj - A ThumbnailServingURLs objec
+        '''
         with self.lock:
-            self.serving_urls[thumbnail_id] = pack_obj(urls.__dict__)
+            self.serving_urls[thumbnail_id] = pack_obj(urls_obj.__dict__)
         statemon.state.thumbnails_serving = len(self.serving_urls)
 
     def del_serving_urls(self, thumbnail_id):
@@ -1085,7 +1091,7 @@ class DirectivePublisher(threading.Thread):
 
     def get_serving_urls(self, thumbnail_id):
         obj = neondata.ThumbnailServingURLs('')
-        obj.__dict__ = unpack_obj(self.serving_urls[thumb_id])
+        obj.__dict__ = unpack_obj(self.serving_urls[thumbnail_id])
         return obj
 
     def update_default_sizes(self, new_map):
