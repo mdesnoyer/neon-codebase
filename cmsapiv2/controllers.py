@@ -55,7 +55,8 @@ def parse_args(request):
     # if we have query_arguments only use them 
     if request.query_arguments is not None: 
         for key, value in request.query_arguments.iteritems():
-            #TODO let's use Coerce inside voluptuous instead of this
+            #TODO hack(and it's gonna break on a double value passed in)
+            # let's use Coerce inside voluptuous instead of using isdigit
             args[key] = int(value[0]) if value[0].isdigit() else value[0]
     # otherwise let's use what we find in the body
     elif request.body_arguments is not None: 
@@ -90,6 +91,7 @@ NewAccountHandler : class responsible for creating a new account
    HTTP Verbs     : post 
 ****************************************************************'''
 class NewAccountHandler(tornado.web.RequestHandler):
+    @tornado.gen.coroutine 
     def get(self, *args):
         send_not_implemented_msg(self, 'get') 
 
@@ -121,9 +123,11 @@ class NewAccountHandler(tornado.web.RequestHandler):
         
         send_json_response(self, output, code) 
 
+    @tornado.gen.coroutine 
     def put(self, *args): 
         send_not_implemented_msg(self, 'put') 
  
+    @tornado.gen.coroutine 
     def delete(self, *args): 
         send_not_implemented_msg(self, 'delete') 
 
@@ -133,6 +137,10 @@ AccountHandler : class responsible for updating and getting accounts
 *****************************************************************'''
 
 class AccountHandler(tornado.web.RequestHandler):
+
+    '''**********************
+    AccountHandler.get
+    **********************'''    
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({ 
@@ -166,6 +174,9 @@ class AccountHandler(tornado.web.RequestHandler):
  
         send_json_response(self, output, code) 
 
+    '''**********************
+    AccountHandler.put
+    **********************'''    
     @tornado.gen.coroutine
     def put(self, account_id):
         schema = Schema({ 
@@ -201,9 +212,17 @@ class AccountHandler(tornado.web.RequestHandler):
 
         send_json_response(self, output, code)
 
+    '''**********************
+    AccountHandler.post
+    **********************'''    
+    @tornado.gen.coroutine 
     def post(self, *args):
         send_not_implemented_msg(self, 'post') 
  
+    '''**********************
+    AccountHandler.delete
+    **********************'''    
+    @tornado.gen.coroutine 
     def delete(self, *args): 
         send_not_implemented_msg(self, 'delete')
 
@@ -319,7 +338,11 @@ OoyalaIntegrationHandler : class responsible for creating/updating/
                            getting an ooyala integration
    HTTP Verbs            : get, post, put
 *********************************************************************'''
-class OoyalaIntegrationHandler(tornado.web.RequestHandler): 
+class OoyalaIntegrationHandler(tornado.web.RequestHandler):
+ 
+    '''**********************
+    OoyalaPlatform.post
+    **********************'''    
     @tornado.gen.coroutine
     def post(self, account_id): 
         schema = Schema({
@@ -358,6 +381,9 @@ class OoyalaIntegrationHandler(tornado.web.RequestHandler):
 
         send_json_response(self, output, code)
            
+    '''**********************
+    OoyalaPlatform.get
+    **********************'''    
     @tornado.gen.coroutine
     def get(self, account_id):
         try: 
@@ -382,6 +408,9 @@ class OoyalaIntegrationHandler(tornado.web.RequestHandler):
 
         send_json_response(self, output, code)
  
+    '''**********************
+    OoyalaPlatform.put
+    **********************'''    
     @tornado.gen.coroutine
     def put(self, account_id):
         try: 
@@ -427,6 +456,9 @@ class OoyalaIntegrationHandler(tornado.web.RequestHandler):
 
         send_json_response(self, output, code)
         
+    '''**********************
+    OoyalaPlatform.delete
+    **********************'''    
     @tornado.gen.coroutine
     def delete(self, *args): 
         send_not_implemented_msg(self, 'delete')
@@ -436,7 +468,11 @@ BrightcoveIntegrationHandler : class responsible for creating/updating/
                                getting a brightcove integration
    HTTP Verbs                : get, post, put
 *********************************************************************'''
-class BrightcoveIntegrationHandler(tornado.web.RequestHandler): 
+class BrightcoveIntegrationHandler(tornado.web.RequestHandler):
+ 
+    '''*********************
+    BrightcovePlatform.post 
+    *********************'''   
     @tornado.gen.coroutine
     def post(self, account_id):
         schema = Schema({
@@ -473,7 +509,10 @@ class BrightcoveIntegrationHandler(tornado.web.RequestHandler):
             code = HTTP_BAD_REQUEST
 
         send_json_response(self, output, code)
-    
+
+    '''*********************
+    BrightcovePlatform.get 
+    *********************'''    
     @tornado.gen.coroutine
     def get(self, account_id):  
         try: 
@@ -498,6 +537,9 @@ class BrightcoveIntegrationHandler(tornado.web.RequestHandler):
 
         send_json_response(self, output, code)
  
+    '''*********************
+    BrightcovePlatform.put 
+    *********************'''    
     @tornado.gen.coroutine
     def put(self, account_id):
         try:   
@@ -541,6 +583,9 @@ class BrightcoveIntegrationHandler(tornado.web.RequestHandler):
             output = generate_standard_error('%s %s' % (e.path[0], e.msg))
             code = HTTP_BAD_REQUEST
     
+    '''**********************
+    BrightcovePlatform.delete 
+    **********************'''    
     @tornado.gen.coroutine
     def delete(self, *args): 
         send_not_implemented_msg(self, 'delete')
@@ -568,18 +613,19 @@ class OptimizelyIntegrationHandler(tornado.web.RequestHandler):
     def delete(self, *args): 
         send_not_implemented_msg(self, 'delete')
 
- 
 '''*********************************************************************
-LiveStreamHandler : class responsible for creating a new video job 
+LiveStreamHandler : class responsible for creating a new live stream job 
    HTTP Verbs     : post
         Notes     : outside of scope of phase 1, future implementation
 *********************************************************************'''
-
 class LiveStreamHandler(tornado.web.RequestHandler): 
     @tornado.gen.coroutine 
     def post(self, *args, **kwargs):
         print 'posting a video job' 
 
+'''*********************************************************************
+Controller Defined Exceptions 
+*********************************************************************'''
 class Error(Exception): 
     pass 
 
@@ -591,6 +637,9 @@ class GetError(Error):
     def __init__(self, msg): 
         self.msg = msg
 
+'''*********************************************************************
+Endpoints 
+*********************************************************************'''
 application = tornado.web.Application([
     (r'/api/v2/accounts/$', NewAccountHandler),
     (r'/api/v2/accounts$', NewAccountHandler),
