@@ -2382,6 +2382,9 @@ class BrightcovePlatform(AbstractPlatform):
                 last_process_date=None, abtest=False, callback_url=None):
 
         ''' On every request, the job id is saved '''
+        if i_id is None: 
+            i_id = uuid.uuid1().hex
+
         super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)
         self.account_id = a_id
         self.publisher_id = p_id

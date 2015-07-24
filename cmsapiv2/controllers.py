@@ -218,15 +218,23 @@ class IntegrationHelper():
     @staticmethod 
     @tornado.gen.coroutine
     def createIntegration(acct, args, integration_type):
-        def _createOoyalaPlatform(args):
-            try:  
+        def _createOoyalaPlatform(p):
+            try: 
+                p.account_id = acct.neon_api_key
+                p.partner_code = args['publisher_id'] 
+                p.ooyala_api_key = args.get('ooyala_api_key', None)
+                p.api_secret = args.get('ooyala_api_secret', None)
+                p.auto_update = args.get('autosync', False)
+                ''' 
                 ooyala_platform = neondata.OoyalaPlatform(a_id=acct.neon_api_key, 
                                                           i_id=None, 
                                                           api_key=acct.neon_api_key, 
                                                           p_code=args['publisher_id'], 
                                                           o_api_key=args.get('ooyala_api_key', None),  
                                                           api_secret=args.get('ooyala_api_secret', None), 
-                                                          auto_update=args.get('autosync', False))
+                                                          auto_update=args.get('autosync', False), 
+                                                          create_missing=True)
+                ''' 
             except KeyError as e: 
                 pass 
              
@@ -234,7 +242,7 @@ class IntegrationHelper():
 
         def _createBrightcovePlatform(args):
             try:
-                current_time = datetime.datetime.utcnow()
+                current_time = time.time()
                 brightcove_platform = neondata.BrightcovePlatform(a_id=acct.neon_api_key, 
                                                                   i_id=None, 
                                                                   api_key=acct.neon_api_key, 
@@ -249,12 +257,22 @@ class IntegrationHelper():
             return brightcove_platform 
 
         if integration_type == INTEGRATION_TYPE_OOYALA: 
-            platform = _createOoyalaPlatform(args)
+            #platform = _createOoyalaPlatform(args)
+            platform = yield tornado.gen.Task(neondata.OoyalaPlatform.modify, 
+                                              acct.neon_api_key, 
+                                              None, 
+                                              _createOoyalaPlatform, 
+                                              create_missing=True) 
         elif integration_type == INTEGRATION_TYPE_BRIGHTCOVE:
             platform = _createBrightcovePlatform(args)
-
-        acct.add_platform(platform)
-        result = yield tornado.gen.Task(acct.save_platform, platform)
+        
+        
+        #acct.add_platform(platform)
+        #result = yield tornado.gen.Task(acct.save_platform, platform)
+        result = yield tornado.gen.Task(neondata.NeonUserAccount.modify, 
+                                        acct.neon_api_key, 
+                                        lambda a: a.add_platform(platform))
+        import pdb; pdb.set_trace() 
         if result: 
             raise tornado.gen.Return(platform)
         else: 
@@ -265,7 +283,7 @@ class IntegrationHelper():
     def addStrategy(acct, integration_type): 
          if integration_type == INTEGRATION_TYPE_OOYALA: 
              strategy = neondata.ExperimentStrategy(acct.neon_api_key, only_exp_if_chosen=True) 
-         elif integration_Type == INTEGRATION_TYPE_BRIGHTCOVE: 
+         elif integration_type == INTEGRATION_TYPE_BRIGHTCOVE: 
              strategy = neondata.ExperimentStrategy(acct.neon_api_key, only_exp_if_chosen=True)
          result = yield tornado.gen.Task(strategy.save)  
          if result: 
@@ -273,6 +291,30 @@ class IntegrationHelper():
          else: 
              raise SaveError('unable to save strategy to account')
     
+    @staticmethod 
+    @tornado.gen.coroutine
+    def getIntegration(request, account_id, integration_type): 
+        schema = Schema({
+          Required('account_id') : All(str, Length(min=1, max=256)),
+          Required('integration_id') : All(str, Length(min=1, max=256))
+        })
+        args = parse_args(request)
+        args['account_id'] = str(account_id)
+        schema(args)
+        integration_id = args['integration_id'] 
+        if integration_type == INTEGRATION_TYPE_OOYALA: 
+            platform = yield tornado.gen.Task(neondata.OoyalaPlatform.get, 
+                                              args['account_id'], 
+                                              integration_id)
+        elif integration_type == INTEGRATION_TYPE_BRIGHTCOVE: 
+            platform = yield tornado.gen.Task(neondata.BrightcovePlatform.get, 
+                                              args['account_id'], 
+                                              args['integration_id'])
+        if platform: 
+            raise tornado.gen.Return(platform) 
+        else: 
+            raise GetError('%s %s' % ('unable to find the integration for id:',integration_id))
+
     @staticmethod 
     @tornado.gen.coroutine
     def addVideoResponses(account): 
@@ -298,8 +340,8 @@ class OoyalaIntegrationHandler(tornado.web.RequestHandler):
             args['account_id'] = str(account_id)
             schema(args)
             acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
-            platform = yield tornado.gen.Task(IntegrationHelper.createIntegration, acct, args, 'ooyala')
-            yield tornado.gen.Task(IntegrationHelper.addStrategy, acct, 'ooyala')
+            platform = yield tornado.gen.Task(IntegrationHelper.createIntegration, acct, args, INTEGRATION_TYPE_OOYALA)
+            yield tornado.gen.Task(IntegrationHelper.addStrategy, acct, INTEGRATION_TYPE_OOYALA)
             output = platform.to_json()
             code = HTTP_OK
         except SaveError as e: 
@@ -325,22 +367,20 @@ class OoyalaIntegrationHandler(tornado.web.RequestHandler):
     @tornado.gen.coroutine
     def get(self, account_id):
         try: 
-            schema = Schema({
-              Required('account_id') : All(str, Length(min=1, max=256)),
-              Required('integration_id') : All(str, Length(min=1, max=256))
-            })
-            args = parse_args(self.request)
-            args['account_id'] = str(account_id)
-            schema(args)
-            ooyala_platform = yield tornado.gen.Task(neondata.OoyalaPlatform.get, 
-                                                     args['account_id'], 
-                                                     args['integration_id'])
-            output = ooyala_platform.to_json() 
-            code = HTTP_OK 
+            platform = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
+                                              self.request,
+                                              account_id,  
+                                              INTEGRATION_TYPE_OOYALA) 
+            output = platform.to_json() 
+            code = HTTP_OK
+        except GetError as e: 
+            output = generate_standard_error('error getting the integration',
+                                             e.msg)
+            code = HTTP_BAD_REQUEST
         except AttributeError as e:  
             output = generate_standard_error('%s %s' % 
-                        ('Unable to get integration with id :',
-                         integration_id))
+                        ('Unable to find integration for account id :',
+                         account_id), 'unknown error')
             code = HTTP_BAD_REQUEST
         except MultipleInvalid as e: 
             output = generate_standard_error('%s %s' % (e.path[0], e.msg))
@@ -349,7 +389,7 @@ class OoyalaIntegrationHandler(tornado.web.RequestHandler):
         send_json_response(self, output, code)
  
     @tornado.gen.coroutine
-    def update(self, account_id):
+    def put(self, account_id):
         try: 
             schema = Schema({
               Required('account_id') : All(str, Length(min=1, max=256)),
@@ -360,16 +400,15 @@ class OoyalaIntegrationHandler(tornado.web.RequestHandler):
             })
             args = parse_args(self.request)
             args['account_id'] = str(account_id)
-            #args['integration_id'] = str(integration_id)
             schema(args)
             ooyala_platform = yield tornado.gen.Task(neondata.OoyalaPlatform.get, 
                                                      args['account_id'], 
                                                      args['integration_id']) 
             def _update_platform(p):
                 try:
-                    p.o_api_key = args['ooyala_api_key'] 
+                    p.ooyala_api_key = args['ooyala_api_key'] 
                     p.api_secret = args['ooyala_api_secret'] 
-                    p.p_code = args['publisher_id'] 
+                    p.partner_code = args['publisher_id'] 
                 except KeyError as e: 
                     pass
  
@@ -377,6 +416,12 @@ class OoyalaIntegrationHandler(tornado.web.RequestHandler):
                                          args['account_id'], 
                                          args['integration_id'], 
                                          _update_platform)
+
+            ooyala_platform = yield tornado.gen.Task(neondata.OoyalaPlatform.get, 
+                                                     args['account_id'], 
+                                                     args['integration_id']) 
+            output = ooyala_platform.to_json()
+            code = HTTP_OK
              
         except AttributeError as e:  
             output = generate_standard_error('%s %s' % 
@@ -390,7 +435,6 @@ class OoyalaIntegrationHandler(tornado.web.RequestHandler):
 
         send_json_response(self, output, code)
         
-    
     @tornado.gen.coroutine
     def delete(self, *args): 
         send_not_implemented_msg(self, 'delete')
@@ -402,16 +446,110 @@ BrightcoveIntegrationHandler : class responsible for creating/updating/
 *********************************************************************'''
 class BrightcoveIntegrationHandler(tornado.web.RequestHandler): 
     @tornado.gen.coroutine
-    def post(self, *args):
-        print 'posting' 
+    def post(self, account_id):
+        schema = Schema({
+          Required('account_id') : All(str, Length(min=1, max=256)),
+          Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
+          'read_token': All(str, Length(min=1, max=1024)), 
+          'write_token': All(str, Length(min=1, max=1024))
+        })
+        try: 
+            args = parse_args(self.request)
+            args['account_id'] = str(account_id)
+            schema(args)
+            acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
+            platform = yield tornado.gen.Task(IntegrationHelper.createIntegration, acct, args, INTEGRATION_TYPE_BRIGHTCOVE)
+            yield tornado.gen.Task(IntegrationHelper.addStrategy, acct, INTEGRATION_TYPE_BRIGHTCOVE)
+            output = platform.to_json()
+            code = HTTP_OK
+        except SaveError as e: 
+            output = generate_standard_error('%s %s %s %s' % 
+                        ('Unable to create an integration for account_id :',
+                         account_id,
+                         'with publisher_id :', 
+                         args['publisher_id']), e.msg)
+            code = HTTP_BAD_REQUEST
+        except AttributeError as e:  
+            output = generate_standard_error('%s %s %s %s' % 
+                        ('Unable to create an integration for account_id :',
+                         account_id,
+                         'with publisher_id :', 
+                         args['publisher_id']))
+            code = HTTP_BAD_REQUEST
+        except MultipleInvalid as e: 
+            output = generate_standard_error('%s %s' % (e.path[0], e.msg))
+            code = HTTP_BAD_REQUEST
+
+        send_json_response(self, output, code)
     
     @tornado.gen.coroutine
     def get(self, *args):  
-        print 'getting'
+        try: 
+            platform = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
+                                              self.request,
+                                              account_id,  
+                                              INTEGRATION_TYPE_BRIGHTCOVE) 
+            output = platform.to_json() 
+            code = HTTP_OK
+        except GetError as e: 
+            output = generate_standard_error('error getting the integration',
+                                             e.msg)
+            code = HTTP_BAD_REQUEST
+        except AttributeError as e:  
+            output = generate_standard_error('%s %s' % 
+                        ('Unable to find integration for account id :',
+                         account_id), 'unknown error')
+            code = HTTP_BAD_REQUEST
+        except MultipleInvalid as e: 
+            output = generate_standard_error('%s %s' % (e.path[0], e.msg))
+            code = HTTP_BAD_REQUEST
+
+        send_json_response(self, output, code)
  
     @tornado.gen.coroutine
-    def update(self, *args):  
-        print 'updating' 
+    def put(self, account_id):
+        try:   
+            schema = Schema({
+              Required('account_id') : All(str, Length(min=1, max=256)),
+              Required('integration_id') : All(str, Length(min=1, max=256)),
+              'read_token': All(str, Length(min=1, max=1024)), 
+              'write_token': All(str, Length(min=1, max=1024)), 
+              'publisher_id': All(str, Length(min=1, max=1024))
+            })
+            args = parse_args(self.request)
+            args['account_id'] = account_id = str(account_id)
+            integration_id = args['integration_id'] 
+            schema(args)
+            ooyala_platform = yield tornado.gen.Task(neondata.BrightcovePlatform.get, 
+                                                     account_id, 
+                                                     integration_id) 
+            def _update_platform(p):
+                try:
+                    p.read_token = args['read_token'] 
+                    p.write_token = args['write_token'] 
+                    p.publisher_id = args['publisher_id'] 
+                except KeyError as e: 
+                    pass
+ 
+            result = yield tornado.gen.Task(neondata.BrightcovePlatform.modify, 
+                                         account_id, 
+                                         integration_id, 
+                                         _update_platform)
+
+            platform = yield tornado.gen.Task(neondata.BrightcovePlatform.get, 
+                                              account_id, 
+                                              integration_id) 
+            output = platform.to_json()
+            code = HTTP_OK
+        except AttributeError as e:  
+            output = generate_standard_error('%s %s' % 
+                        ('Unable to update integration with id :',
+                         integration_id))
+            code = HTTP_BAD_REQUEST
+
+        except MultipleInvalid as e: 
+            output = generate_standard_error('%s %s' % (e.path[0], e.msg))
+            code = HTTP_BAD_REQUEST
     
     @tornado.gen.coroutine
     def delete(self, *args): 
@@ -420,20 +558,21 @@ class BrightcoveIntegrationHandler(tornado.web.RequestHandler):
 '''*********************************************************************
 OptimizelyIntegrationHandler : class responsible for creating/updating/
                                getting an optimizely integration 
-   HTTP Verbs                : get, post, put
+HTTP Verbs                   : get, post, put
+Notes                        : not yet implemented, likely phase 2
 *********************************************************************'''
 class OptimizelyIntegrationHandler(tornado.web.RequestHandler): 
     @tornado.gen.coroutine
     def post(self, *args):
-        print 'posting' 
+        send_not_implemented_msg(self, 'delete')
     
     @tornado.gen.coroutine
     def get(self, *args):  
-        print 'getting'
+        send_not_implemented_msg(self, 'delete')
  
     @tornado.gen.coroutine
     def update(self, *args):
-        print 'updating' 
+        send_not_implemented_msg(self, 'delete')
     
     @tornado.gen.coroutine
     def delete(self, *args): 
@@ -458,6 +597,10 @@ class SaveError(Error):
     def __init__(self, msg): 
         self.msg = msg
 
+class GetError(Error): 
+    def __init__(self, msg): 
+        self.msg = msg
+
 application = tornado.web.Application([
     (r'/api/v2/accounts/$', NewAccountHandler),
     (r'/api/v2/accounts$', NewAccountHandler),
@@ -465,8 +608,6 @@ application = tornado.web.Application([
     (r'/api/v2/accounts/([a-zA-Z0-9]+)/$', AccountHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala$', OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/$', OoyalaIntegrationHandler),
-    #(r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/([a-zA-Z0-9]+)$', OoyalaIntegrationHandler),
-    #(r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/([a-zA-Z0-9]+)/$', OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove$', BrightcoveIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/$', BrightcoveIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely$', OptimizelyIntegrationHandler),
