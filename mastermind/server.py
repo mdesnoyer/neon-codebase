@@ -1313,7 +1313,9 @@ class DirectivePublisher(threading.Thread):
 
         # We couldn't find the exact size so pick the one with the
         # minimum size difference.
-        valid_sizes = url_obj.sizes.union(url.obj.size_map.iterkeys())
+        valid_sizes = url_obj.sizes.union(url_obj.size_map.iterkeys())
+        if len(valid_sizes) == 0:
+            raise KeyError('No valid sizes to serve')
         mindiff = min([abs(x[0] - default_size[0]) +
                            abs(x[1] - default_size[1]) 
                            for x in valid_sizes])

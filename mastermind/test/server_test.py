@@ -1562,8 +1562,9 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.publisher.update_tracker_id_map({'tai1' : 'acct1',
                                               'tai2' : 'acct2'})
 
-        self.publisher.update_serving_urls({
-            'acct1_vid2_tid21' : {}})
+        self.publisher.add_serving_urls(
+            'acct1_vid2_tid21',
+            neondata.ThumbnailServingURLs('acct1_vid2_tid21'))
 
         with self.assertLogExists(logging.ERROR, 
                                   ('Could not find all serving URLs for '
