@@ -1315,6 +1315,8 @@ class DirectivePublisher(threading.Thread):
         # minimum size difference.
         valid_sizes = url_obj.sizes.union(url_obj.size_map.iterkeys())
         if len(valid_sizes) == 0:
+            _log.warn('No valid sizes to serve for thumb %s' 
+                      % url_obj.get_id())
             raise KeyError('No valid sizes to serve')
         mindiff = min([abs(x[0] - default_size[0]) +
                            abs(x[1] - default_size[1]) 

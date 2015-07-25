@@ -1569,8 +1569,8 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.ERROR, 
                                   ('Could not find all serving URLs for '
                                    'video: acct1_vid2')):
-            with self.assertLogExists(logging.ERROR,
-                                      ('No serving urls for thumb '
+            with self.assertLogExists(logging.WARNING,
+                                      ('No valid sizes to server for thumb '
                                        'acct1_vid2_tid21')):
                 self.publisher._publish_directives()
 
