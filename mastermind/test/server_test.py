@@ -218,22 +218,24 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         datamock.ThumbnailMetadata.get_many.side_effect = \
                 lambda tids: [tid_meta[tid] for tid in tids]
         
-        serving_urls = {
-            api_key+'_0_t01' : { (640, 480): 't01_640.jpg',
-                      (120, 90): 't01_120.jpg'},
-            api_key+'_0_t02' : { (800, 600): 't02_800.jpg',
-                      (120, 90): 't02_120.jpg'}}
-        datamock.ThumbnailServingURLs.get_many.return_value = [
-            neondata.ThumbnailServingURLs(k, v) for k, v in
-            serving_urls.iteritems()
-            ]
+        serving_urls = [
+            neondata.ThumbnailServingURLs(
+                api_key+'_0_t01',
+                base_url='http://one.com', 
+                sizes = [(640, 480), (120,90)]),
+            neondata.ThumbnailServingURLs(
+                api_key+'_0_t02',
+                base_url='http://two.com', 
+                sizes = [(800, 600), (120,90)])]
+        datamock.ThumbnailServingURLs.get_many.return_value = serving_urls
 
         # Process the data
         self.watcher._process_db_data()
 
         # Make sure that the serving urls were sent to the directive pusher
-        self.assertEqual(dict([(k, mastermind.server.pack_obj(v)) 
-                               for k, v in serving_urls.iteritems()]),
+        self.assertEqual(dict([(x.get_id(),
+                                mastermind.server.pack_obj(x.__dict__)) 
+                               for x in serving_urls]),
             self.directive_publisher.serving_urls)
 
     def test_tracker_id_update(self, datamock):
@@ -1325,9 +1327,11 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
                                           sizes=[(160, 90)]))
         self.publisher.add_serving_urls(
             'acct1_vid2_tid21',
-            neondata.ThumbnailServingURLs('acct1_vid2_tid21',
-                                          base_url = 'http://two_one.com',
-                                          sizes=[(1920,720), (160, 90)]))
+            neondata.ThumbnailServingURLs(
+                'acct1_vid2_tid21',
+                base_url = 'http://two_one.com',
+                sizes=[(1920,720), (160, 90)],
+                size_map = {(320,240): 't21_320.jpg'}))
         self.publisher.add_serving_urls(
             'acct1_vid2_tid22',
             neondata.ThumbnailServingURLs('acct1_vid2_tid22',
@@ -1411,9 +1415,12 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'fractions' : [
                 { 'pct' : 0.0,
                   'tid' : 'acct1_vid2_tid21',
-                  'base_url' : 'http://two_one.com',
-                  'default_size' : {'h': 90, 'w': 160},
-                  'img_sizes' : [{'h': 720, 'w': 1920}, {'h': 90, 'w': 160}]
+                  'default_url' : 'http://two_one.com/neontnacct1_vid2_tid21_w160_h90.jpg',
+                  'imgs' : [
+                      { 'h': 240, 'w': 320, 'url': 't21_320.jpg' },
+                      { 'h': 720, 'w': 1920, 'url': 'http://two_one.com/neontnacct1_vid2_tid21_w1920_h720.jpg' },
+                      { 'h': 90, 'w': 160, 'url': 'http://two_one.com/neontnacct1_vid2_tid21_w160_h90.jpg' },
+                      ]
                 },
                 { 'pct' : 1.0,
                   'tid' : 'acct1_vid2_tid22',
@@ -1570,7 +1577,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
                                   ('Could not find all serving URLs for '
                                    'video: acct1_vid2')):
             with self.assertLogExists(logging.WARNING,
-                                      ('No valid sizes to server for thumb '
+                                      ('No valid sizes to serve for thumb '
                                        'acct1_vid2_tid21')):
                 self.publisher._publish_directives()
 
@@ -1604,18 +1611,32 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.publisher.update_default_thumbs({
             'acct1' : 'acct1_vid1_tid11'}
             )
-        self.publisher.update_serving_urls(
-            {
-            'acct1_vid1_tid11' : { (640, 480): 't11_640.jpg',
-                                   (160, 90): 't11_160.jpg' },
-            'acct1_vid1_tid12' : { (800, 600): 't12_800.jpg',
-                                   (160, 90): 't12_160.jpg'},
-            'acct1_vid1_tid13' : { (160, 90): 't13_160.jpg'},
-            'acct1_vid2_tid21' : { (1920, 720): 't21_1920.jpg',
-                                   (160, 90): 't21_160.jpg'},
-            'acct1_vid2_tid22' : { (500, 500): 't22_500.jpg',
-                                   (160, 90): 't22_160.jpg'},
-                                   })
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid11',
+            neondata.ThumbnailServingURLs('acct1_vid1_tid11',
+                                          base_url = 'http://first_tids.com',
+                                          sizes=[(640, 480), (160,90)]))
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid12',
+            neondata.ThumbnailServingURLs(
+                'acct1_vid1_tid12',
+                size_map = { (800, 600): 't12_800.jpg',
+                             (160, 90): 't12_160.jpg'}))
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid13',
+            neondata.ThumbnailServingURLs('acct1_vid1_tid13',
+                                          base_url = 'http://third_tids.com',
+                                          sizes=[(160, 90)]))
+        self.publisher.add_serving_urls(
+            'acct1_vid2_tid21',
+            neondata.ThumbnailServingURLs('acct1_vid2_tid21',
+                                          base_url = 'http://two_one.com',
+                                          sizes=[(1920,720), (160, 90)]))
+        self.publisher.add_serving_urls(
+            'acct1_vid2_tid22',
+            neondata.ThumbnailServingURLs('acct1_vid2_tid22',
+                                          base_url = 'http://two_two.com',
+                                          sizes=[(500,500), (160, 90)]))
 
         with self.assertLogExists(logging.WARNING,
                                   'Unexpected error when sending a customer'):
