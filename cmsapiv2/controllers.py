@@ -591,6 +591,76 @@ class BrightcoveIntegrationHandler(tornado.web.RequestHandler):
         send_not_implemented_msg(self, 'delete')
 
 '''*********************************************************************
+ThumbnailHandler : class responsible for creating/updating/getting a
+                   thumbnail 
+HTTP Verbs       : get, post, put
+*********************************************************************'''
+class ThumbnailHandler(tornado.web.RequestHandler):
+ 
+    '''**********************
+    Thumbnail.post 
+    **********************'''    
+    @tornado.gen.coroutine
+    def post(self, *args):
+        send_not_implemented_msg(self, 'post')
+    
+    '''**********************
+    Thumbnail.get 
+    **********************'''    
+    @tornado.gen.coroutine
+    def get(self, *args):  
+        send_not_implemented_msg(self, 'get')
+ 
+    '''**********************
+    Thumbnail.put 
+    **********************'''    
+    @tornado.gen.coroutine
+    def put(self, *args):
+        send_not_implemented_msg(self, 'put')
+
+    '''**********************
+    Thumbnail.delete 
+    **********************'''    
+    @tornado.gen.coroutine
+    def delete(self, *args): 
+        send_not_implemented_msg(self, 'delete')
+
+'''*********************************************************************
+VideoHandler     : class responsible for creating/updating/getting a
+                   video
+HTTP Verbs       : get, post, put
+*********************************************************************'''
+class VideoHandler(tornado.web.RequestHandler):
+ 
+    '''**********************
+    Video.post 
+    **********************'''    
+    @tornado.gen.coroutine
+    def post(self, *args):
+        send_not_implemented_msg(self, 'post')
+    
+    '''**********************
+    Video.get 
+    **********************'''    
+    @tornado.gen.coroutine
+    def get(self, *args):  
+        send_not_implemented_msg(self, 'get')
+ 
+    '''**********************
+    Video.put 
+    **********************'''    
+    @tornado.gen.coroutine
+    def put(self, *args):
+        send_not_implemented_msg(self, 'put')
+
+    '''**********************
+    Video.delete 
+    **********************'''    
+    @tornado.gen.coroutine
+    def delete(self, *args): 
+        send_not_implemented_msg(self, 'delete')
+
+'''*********************************************************************
 OptimizelyIntegrationHandler : class responsible for creating/updating/
                                getting an optimizely integration 
 HTTP Verbs                   : get, post, put
@@ -651,6 +721,10 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/$', BrightcoveIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely$', OptimizelyIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/$', OptimizelyIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails$', ThumbnailHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/$', ThumbnailHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/videos$', VideoHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/videos/$', VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)$', AccountHandler), 
     (r'/api/v2/([a-zA-Z0-9]+)/$', AccountHandler),
     (r'/api/v2/(\d+)/jobs/live_stream', LiveStreamHandler)
