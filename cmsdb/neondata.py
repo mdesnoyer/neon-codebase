@@ -2350,6 +2350,10 @@ class AbstractPlatform(NamespacedStoredObject):
         # delete the video object
         yield tornado.gen.Task(VideoMetadata.delete, i_vid)
 
+        # delete the request object
+        yield tornado.gen.Task(NeonApiRequest.delete, vm.job_id,
+                               self.neon_api_key)
+
         # delete the thumbnails
         yield tornado.gen.Task(ThumbnailMetadata.delete_many,
                                vm.thumbnail_ids)
