@@ -1103,6 +1103,31 @@ class StoredObject(object):
         db_connection.clear_db()
 
     @classmethod
+    def delete(cls, key, callback=None):
+        '''Delete an object from the database.
+
+        Returns True if the object was successfully deleted
+        '''
+        return StoredObject.delete_many([key], callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        '''Deletes many objects simultaneously
+
+        Inputs:
+        keys - List of keys to delete
+
+        Returns:
+        The number of keys that were removed
+        '''
+        db_connection = DBConnection.get(cls)
+            
+        if callback:
+            db_connection.conn.delete(*keys, callback=callback)
+        else:
+            return db_connection.blocking_conn.delete(*keys)
+        
+    @classmethod
     def _handle_all_changes(cls, msg, func, conn, get_object):
         '''Handles any changes to objects subscribed on pubsub.
 
@@ -1313,6 +1338,18 @@ class NamespacedStoredObject(StoredObject):
             [cls.format_key(x) for x in keys],
             func,
             create_missing=create_missing,
+            callback=callback)
+
+    @classmethod
+    def delete(cls, key, callback=None):
+        return super(NamespacedStoredObject, cls).delete(
+            cls.format_key(key),
+            callback=callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        return super(NamespacedStoredObject, cls).delete_many(
+            [cls.format_key(k) for k in keys],
             callback=callback)
 
 class DefaultedStoredObject(NamespacedStoredObject):
@@ -2124,7 +2161,6 @@ class AbstractPlatform(NamespacedStoredObject):
     @classmethod
     def modify(cls, api_key, i_id, func, create_missing=False, callback=None):
         def _set_parameters(x):
-            _log.warn(x)
             api_key, i_id = x.get_id().split('_')
             x.neon_api_key = api_key
             x.integration_id = i_id
@@ -2147,6 +2183,19 @@ class AbstractPlatform(NamespacedStoredObject):
              api_key, i_id in keys],
             func,
             create_missing=create_missing,
+            callback=callback)
+
+    @classmethod
+    def delete(cls, api_key, i_id, callback=None):
+        return super(AbstractPlatform, cls).delete(
+            cls._generate_subkey(api_key, i_id),
+            callback=callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        return super(AbstractPlatform, cls).delete_many(
+            [cls._generate_subkey(api_key, i_id) for 
+             api_key, i_id in keys],
             callback=callback)
 
     def to_json(self):
@@ -2264,17 +2313,11 @@ class AbstractPlatform(NamespacedStoredObject):
         ''' erase all data ''' 
         db_connection = DBConnection.get(cls)
         db_connection.clear_db()
+ 
 
-    @classmethod
-    def _delete_many_keys(cls, keys):
-        #TODO: (Sunil/ Mark) have individual methods in each
-        # of the stored objects to delete the keys
-        db_connection = DBConnection.get(cls)
-        for key in keys:
-            db_connection.blocking_conn.delete(key) 
-
-    @classmethod
-    def delete_all_video_related_data(cls, platform_instance, platform_vid,
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete_all_video_related_data(self, platform_vid,
             *args, **kwargs):
         '''
         Delete all data related to a given video
@@ -2296,25 +2339,25 @@ class AbstractPlatform(NamespacedStoredObject):
                 _log.error('no such video to delete')
                 return
         
-        i_vid = InternalVideoID.generate(platform_instance.neon_api_key, 
-                                        platform_vid)
-        vm = VideoMetadata.get(i_vid)
-        keys_to_delete = []
-        
-        # get all the keys to delete 
-        keys_to_delete.append("request_%s_%s" % (
-                             platform_instance.neon_api_key, vm.job_id))
-        keys_to_delete.append(vm.key)
-        for tid in vm.thumbnail_ids:
-            keys_to_delete.append(tid)
-            #serving urls
-            keys_to_delete.append("thumbnailservingurls_%s" %tid)
-
-        cls._delete_many_keys(keys_to_delete)
-
+        i_vid = InternalVideoID.generate(self.neon_api_key, 
+                                         platform_vid)
+        vm = yield tornado.gen.Task(VideoMetadata.get, i_vid)
         # update platform instance
-        cls.modify(platform_instance.neon_api_key, '0', _del_video)
+        yield tornado.gen.Task(self.modify,
+                               self.neon_api_key, '0',
+                               _del_video)
 
+        # delete the video object
+        yield tornado.gen.Task(VideoMetadata.delete, i_vid)
+
+        # delete the thumbnails
+        yield tornado.gen.Task(ThumbnailMetadata.delete_many,
+                               vm.thumbnail_ids)
+
+        # delete the serving urls
+        yield tornado.gen.Task(ThumbnailServingURLs.delete_many,
+                               vm.thumbnail_ids)
+        
 class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
@@ -3028,6 +3071,19 @@ class NeonApiRequest(NamespacedStoredObject):
             [cls._generate_subkey(job_id, api_key) for 
              job_id, api_key in keys],
             func,
+            callback=callback)
+
+    @classmethod
+    def delete(cls, job_id, api_key, callback=None):
+        return super(NeonApiRequest, cls).delete(
+            cls._generate_subkey(job_id, api_key),
+            callback=callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        return super(NeonApiRequest, cls).delete_many(
+            [cls._generate_subkey(job_id, api_key) for 
+             job_id, api_key in keys],
             callback=callback)
 
     @utils.sync.optional_sync

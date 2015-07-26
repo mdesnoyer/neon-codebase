@@ -318,14 +318,11 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         req.save()
         ThumbnailMetadata.save_all([thumb])
         VideoMetadata.save_all([vid])
-        np.add_video('dummyv', 'dummyjob')
-        np.add_video('vid1', 'job1')
         NeonPlatform.modify(na.neon_api_key, '0',
                             lambda x: x.add_video('dummyv', 'dummyjob'))
-        NeonPlatform.modify(na.neon_api_key, '0',
-                            lambda x: x.add_video('vid1', 'job1'))
-        NeonPlatform.delete_all_video_related_data(np, 'vid1',
-                really_delete_keys=True)
+        np = NeonPlatform.modify(na.neon_api_key, '0',
+                                 lambda x: x.add_video('vid1', 'job1'))
+        np.delete_all_video_related_data('vid1', really_delete_keys=True)
         
         # check the keys have been deleted
         self.assertIsNone(NeonApiRequest.get('job1', na.neon_api_key))
@@ -1359,10 +1356,128 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         # Now try getting data from the original database again
         self.assertEquals(VideoMetadata.get('acct1_vid1'), video_meta)
+
+    @tornado.testing.gen_test
+    def test_delete_videos_async(self):
+      # Delete some video objects
+      vids = [VideoMetadata('acct1_v1'),
+              VideoMetadata('acct1_v2'),
+              VideoMetadata('acct1_v3')]
+      yield tornado.gen.Task(VideoMetadata.save_all, vids)
+      found_objs = yield tornado.gen.Task(VideoMetadata.get_many,
+                                          ['acct1_v1', 'acct1_v2', 'acct1_v3'])
+      self.assertEquals(found_objs, vids)
+      n_deleted = yield tornado.gen.Task(VideoMetadata.delete, 'acct1_v1')
+      self.assertEquals(n_deleted, 1)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v3'))
+      n_deleted = yield tornado.gen.Task(VideoMetadata.delete_many,
+                                         ['acct1_v2', 'acct1_v3'])
+      self.assertEquals(n_deleted, 2)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNone(VideoMetadata.get('acct1_v3'))
+
+    @tornado.testing.gen_test
+    def test_delete_videos_async(self):
+      # Delete some video objects
+      vids = [VideoMetadata('acct1_v1'),
+              VideoMetadata('acct1_v2'),
+              VideoMetadata('acct1_v3')]
+      yield tornado.gen.Task(VideoMetadata.save_all, vids)
+      found_objs = yield tornado.gen.Task(VideoMetadata.get_many,
+                                          ['acct1_v1', 'acct1_v2', 'acct1_v3'])
+      self.assertEquals(found_objs, vids)
+      n_deleted = yield tornado.gen.Task(VideoMetadata.delete, 'acct1_v1')
+      self.assertEquals(n_deleted, 1)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v3'))
+      n_deleted = yield tornado.gen.Task(VideoMetadata.delete_many,
+                                         ['acct1_v2', 'acct1_v3'])
+      self.assertEquals(n_deleted, 2)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNone(VideoMetadata.get('acct1_v3'))
+
+    @tornado.testing.gen_test
+    def test_delete_videos_sync(self):
+      # Delete some video objects
+      vids = [VideoMetadata('acct1_v1'),
+              VideoMetadata('acct1_v2'),
+              VideoMetadata('acct1_v3')]
+      VideoMetadata.save_all(vids)
+      found_objs = VideoMetadata.get_many(['acct1_v1', 'acct1_v2', 'acct1_v3'])
+      self.assertEquals(found_objs, vids)
+      n_deleted = VideoMetadata.delete('acct1_v1')
+      self.assertEquals(n_deleted, 1)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v3'))
+      n_deleted = VideoMetadata.delete_many(['acct1_v2', 'acct1_v3'])
+      self.assertEquals(n_deleted, 2)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNone(VideoMetadata.get('acct1_v3'))
+
+      
+    @tornado.testing.gen_test
+    def test_delete_platforms_async(self):
+      # Do some platform objects
+      np = NeonPlatform.modify('acct1', '0', lambda x: x,
+                               create_missing=True)
+      bp = BrightcovePlatform.modify('acct2', 'ibc', lambda x: x,
+                                     create_missing=True)
+      op = OoyalaPlatform.modify('acct3', 'ioo', lambda x: x,
+                                 create_missing=True)
+      yp = YoutubePlatform.modify('acct4', 'iyt', lambda x: x,
+                                  create_missing=True)
+      plats = yield tornado.gen.Task(AbstractPlatform.get_all)
+      self.assertEquals(len(plats), 4)
+      deleted_counts = yield [
+        tornado.gen.Task(NeonPlatform.delete, np.neon_api_key,
+                         np.integration_id),
+        tornado.gen.Task(BrightcovePlatform.delete_many,
+                         [(bp.neon_api_key, bp.integration_id)]),
+        tornado.gen.Task(OoyalaPlatform.delete, op.neon_api_key,
+                         op.integration_id),
+        tornado.gen.Task(YoutubePlatform.delete, yp.neon_api_key,
+                         yp.integration_id)]
+      self.assertEquals(deleted_counts, [1,1,1,1])
+      self.assertIsNone(NeonPlatform.get('acct1', '0'))
+      self.assertIsNone(BrightcovePlatform.get('acct2', 'ibc'))
+      self.assertIsNone(OoyalaPlatform.get('acct3', 'ioo'))
+      self.assertIsNone(YoutubePlatform.get('acct4', 'iyt'))
+
+    @tornado.testing.gen_test
+    def test_delete_requests_async(self):
+      nreq = NeonApiRequest('job1', 'acct1')
+      breq = neondata.BrightcoveApiRequest('job2', 'acct1')
+      oreq = neondata.OoyalaApiRequest('job3', 'acct1')
+      yreq = neondata.YoutubeApiRequest('job4', 'acct1')
+      NeonApiRequest.save_all([nreq, breq, oreq, yreq])
+      self.assertIsNotNone(NeonApiRequest.get('job1', 'acct1'))
+      self.assertIsNotNone(NeonApiRequest.get('job2', 'acct1'))
+      self.assertIsNotNone(NeonApiRequest.get('job3', 'acct1'))
+      self.assertIsNotNone(NeonApiRequest.get('job4', 'acct1'))
+      deleted_counts = yield [
+        tornado.gen.Task(NeonApiRequest.delete, 'job1', 'acct1'),
+        tornado.gen.Task(NeonApiRequest.delete_many,
+                         [('job2', 'acct1'), ('job3', 'acct1'),
+                          ('job4', 'acct1')])]
+      self.assertEquals(deleted_counts, [1,3])
+      self.assertIsNone(NeonApiRequest.get('job1', 'acct1'))
+      self.assertIsNone(NeonApiRequest.get('job2', 'acct1'))
+      self.assertIsNone(NeonApiRequest.get('job3', 'acct1'))
+      self.assertIsNone(NeonApiRequest.get('job4', 'acct1'))
+      
+      
             
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()
+        logging.getLogger('cmsdb.neondata').reset_sample_counters()
         self.connection_patcher = patch('cmsdb.neondata.blockingRedis.StrictRedis')
 
         # For the sake of this test, we will only mock the get() function

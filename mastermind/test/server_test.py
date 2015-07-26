@@ -524,8 +524,9 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
                                                         ttype='default',
                                                         rank=0)
         default_acct_thumb.save()
-        neondata.ThumbnailServingURLs('key1_NOVIDEO_t0',
-                                      {(160, 90) : 't_default.jpg'}).save()
+        t_urls = neondata.ThumbnailServingURLs('key1_NOVIDEO_t0',
+                                               {(160, 90) : 't_default.jpg'})
+        t_urls.save()
         self.acct.default_thumbnail_id = 'key1_NOVIDEO_t0'
         self.acct.default_size = (640, 480)
         self.acct.save()
@@ -535,9 +536,10 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
             'key1_NOVIDEO_t0')
         self.assertEquals(self.directive_publisher.default_sizes['key1'],
                           [640,480])
-        self.assertEquals(mastermind.server.unpack_obj(
-            self.directive_publisher.serving_urls['key1_NOVIDEO_t0']),
-            {(160, 90) : 't_default.jpg'})
+        self.assertEquals(
+            self.directive_publisher.get_serving_urls(
+                'key1_NOVIDEO_t0').get_serving_url(160, 90),
+            't_default.jpg')
 
         # Now remove the default thumb and make sure it disapears
         self.acct.default_thumbnail_id = None
@@ -628,11 +630,15 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
                                       {(160, 90) : 't1.jpg',
                                        (640, 480) : '640.jpg'}).save()
         self.assertWaitForEquals(
-            lambda: mastermind.server.unpack_obj(
-                self.directive_publisher.serving_urls['key1_vid1_t1']),
-            {(160, 90) : 't1.jpg', (640, 480) : '640.jpg'})
+            lambda: self.directive_publisher.get_serving_urls(
+                'key1_vid1_t1').get_serving_url(640,480),
+                '640.jpg')
 
-        # TODO: Test deleting the serving url
+        # Test deleting the serving url
+        neondata.ThumbnailServingURLs.delete('key1_vid1_t1')
+        self.assertWaitForEquals(
+            lambda: 'key1_vid1_t1' in self.directive_publisher.serving_urls,
+            False)
         
 
 class SQLWrapper(object):
