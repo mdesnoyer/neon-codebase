@@ -3309,6 +3309,22 @@ class ThumbnailServingURLs(NamespacedStoredObject):
         self.base_url = base_url
         self.sizes = sizes or set([]) # List of (width, height)
 
+    def __eq__(self, other):
+        '''Sets can't do cmp, so we need to overright so that == and != works.
+        '''
+        if other is None or self.__dict__.keys() != other.__dict__.keys():
+            return False
+        for k, v in self.__dict__.iteritems():
+            if v != other.__dict__[k]:
+                return False
+        return True
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __len__(self):
+        return len(self.size_map) + len(self.sizes)
+    
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.

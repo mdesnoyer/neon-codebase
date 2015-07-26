@@ -678,7 +678,7 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
 
         # Check serving URLs
         ts = neondata.ThumbnailServingURLs.get(tid)
-        self.assertGreater(len(ts.size_map), 0)
+        self.assertGreater(len(ts), 0)
 
         # Verify the final image URLs. This should be the account id 
         # followed by 3 sub folders whose name should be a single letter

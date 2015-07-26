@@ -125,6 +125,10 @@ class CascadeFilter(Filter):
             return ''
         return self.last_failed.short_description()
 
+    def restore_additional_data(self, filename):
+        for filt in self.filters:
+            filt.restore_additional_data(filename)
+
 class UniformColorFilter(Filter):
     '''Filters an image that is too uniform a color.'''
 
