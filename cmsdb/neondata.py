@@ -127,7 +127,7 @@ def _object_to_classname(otype=None):
     as a string.
     '''
     cname = None
-    if otype:
+    if otype is not None:
         if isinstance(otype, basestring):
             cname = otype
         else:
@@ -3312,7 +3312,9 @@ class ThumbnailServingURLs(NamespacedStoredObject):
     def __eq__(self, other):
         '''Sets can't do cmp, so we need to overright so that == and != works.
         '''
-        if other is None or self.__dict__.keys() != other.__dict__.keys():
+        if ((other is None) or 
+            (type(other) != type(self)) or 
+            (self.__dict__.keys() != other.__dict__.keys())):
             return False
         for k, v in self.__dict__.iteritems():
             if v != other.__dict__[k]:

@@ -510,7 +510,8 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             (BrightcovePlatform('api', 'i1', 'a'),
              lambda x: x.get('api', 'i1')),
             (OoyalaPlatform('api', 'i2', 'a', 'b', 'c', 'd', 'e'),
-             lambda x: x.get('api', 'i2'))]
+             lambda x: x.get('api', 'i2'))
+             ]
 
         for obj, read_func in obj_types:
             # Start by saving the object
