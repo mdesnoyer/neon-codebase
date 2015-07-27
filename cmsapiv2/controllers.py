@@ -582,6 +582,8 @@ class BrightcoveIntegrationHandler(tornado.web.RequestHandler):
         except MultipleInvalid as e: 
             output = generate_standard_error('%s %s' % (e.path[0], e.msg))
             code = HTTP_BAD_REQUEST
+
+        send_json_response(self, output, code)
     
     '''**********************
     BrightcovePlatform.delete 
@@ -626,6 +628,52 @@ class ThumbnailHandler(tornado.web.RequestHandler):
         send_not_implemented_msg(self, 'delete')
 
 '''*********************************************************************
+VideoHelper      : helper class responsible for creating new video jobs 
+                   for any and all integration types
+*********************************************************************'''
+class VideoHelper():
+    @staticmethod 
+    @tornado.gen.coroutine
+    def addVideo(request, account_id):
+        schema = Schema({
+          Required('account_id') : All(str, Length(min=1, max=256)),
+          Required('integration_id') : All(str, Length(min=1, max=256)),
+          # TODO we should probably just generate this for them, unless there is 
+          # some use case where them sending in the id makes more sense
+          Required('external_video_ref') : All(str, Length(min=1, max=512)),
+          'video_url': All(str, Length(min=1, max=512)), 
+          'callback_url': All(str, Length(min=1, max=512)), 
+          'video_title': All(str, Length(min=1, max=256)),
+          'default_thumbnail_id': All(str, Length(min=1, max=128)),
+          'external_thumbnail_ref': All(str, Length(min=1, max=512))
+        })
+        args = parse_args(request)
+        args['account_id'] = account_id = str(account_id)
+        schema(args)
+        account_id_api_key = args['account_id'] 
+        integration_id = args['integration_id']
+ 
+        user_account = yield tornado.gen.Task(neondata.NeonUserAccount.get, account_id_api_key)
+        integration_type = user_account.integrations[integration_id] 
+        # TODO investigate the data layer to see if we can get a 
+        # top-level platform object that gets rid of having these ifs 
+        if integration_type == INTEGRATION_TYPE_BRIGHTCOVE:
+            platform = yield tornado.gen.Task(neondata.BrightcovePlatform.get, 
+                                          account_id_api_key, 
+                                          integration_id)  
+        elif integration_type == INTEGRATION_TYPE_OOYALA:
+            platform = yield tornado.gen.Task(neondata.OoyalaPlatform.get, 
+                                          account_id_api_key, 
+                                          integration_id)  
+
+        result = yield tornado.gen.Task(platform.create_job)
+ 
+        if result: 
+            raise tornado.gen.Return(result) 
+        else: 
+            raise SaveError('unable to add to video, unable to process')
+
+'''*********************************************************************
 VideoHandler     : class responsible for creating/updating/getting a
                    video
 HTTP Verbs       : get, post, put
@@ -636,22 +684,90 @@ class VideoHandler(tornado.web.RequestHandler):
     Video.post 
     **********************'''    
     @tornado.gen.coroutine
-    def post(self, *args):
-        send_not_implemented_msg(self, 'post')
+    def post(self, account_id):
+        try:  
+            video = yield tornado.gen.Task(VideoHelper.addVideo(self.request, account_id)) 
+            output = video.to_json() 
+            code = HTTP_OK
+        except MultipleInvalid as e: 
+            output = generate_standard_error('%s %s' % (e.path[0], e.msg))
+            code = HTTP_BAD_REQUEST
+        except SaveError as e: 
+            output = generate_standard_error(e.msg) 
+            code = HTTP_BAD_REQUEST
+        except AttributeError as e:  
+            output = generate_standard_error('%s %s' % 
+                        ('Unable to create video request for account id: ',
+                         account_id))
+            code = HTTP_BAD_REQUEST
+
+        send_json_response(self, output, code)
     
     '''**********************
     Video.get 
     **********************'''    
     @tornado.gen.coroutine
     def get(self, *args):  
-        send_not_implemented_msg(self, 'get')
+        try: 
+            schema = Schema({
+              Required('account_id') : All(str, Length(min=1, max=256)),
+              Required('video_id') : All(str, Length(min=1, max=4096)),
+              'fields': All(str, Length(min=1, max=4096))
+            })
+            args = parse_args(request)
+            args['account_id'] = account_id_api_key = str(account_id)
+            schema(args)
+            
+            output_list = []
+            video_ids = video_id.split(',')
+            for vid in video_ids: 
+                internal_video_id = neondata.InternalVideoID.generate(self.api_key,args['video_id'])
+                result = yield tornado.gen.Task(neondata.VideoMetadata.get, 
+                                                internal_video_id)
+                #TODO explode fields and only return what was asked for 
+                output_list.append(result)
+             
+            vid_array['videos'] = output_list
+            output = json.dumps(vid_array) 
+            code = HTTP_OK
+
+        except MultipleInvalid as e: 
+            output = generate_standard_error('%s %s' % (e.path[0], e.msg))
+            code = HTTP_BAD_REQUEST
+
+        send_json_response(self, output, code)
  
     '''**********************
     Video.put 
     **********************'''    
     @tornado.gen.coroutine
-    def put(self, *args):
-        send_not_implemented_msg(self, 'put')
+    def put(self, account_id):
+        try: 
+            schema = Schema({
+              Required('account_id') : All(str, Length(min=1, max=256)),
+              Required('video_id') : All(str, Length(min=1, max=256)),
+              'testing_enabled': All(int, Length(min=0, max=1))
+            })
+            args = parse_args(request)
+            args['account_id'] = account_id_api_key = str(account_id)
+            schema(args)
+
+            abtest = bool(args['testing_enabled'])
+            internal_video_id = neondata.InternalVideoID.generate(self.api_key,args['video_id']) 
+            def _update_video(v): 
+                v.testing_enabled = abtest
+
+            result = yield tornado.gen.Task(neondata.VideoMetadata.modify, 
+                                            internal_video_id, 
+                                            _update_video)
+            output = result.to_json() 
+            code = HTTP_OK  
+
+        except MultipleInvalid as e: 
+            output = generate_standard_error('%s %s' % (e.path[0], e.msg))
+            code = HTTP_BAD_REQUEST
+
+        send_json_response(self, output, code)
 
     '''**********************
     Video.delete 
@@ -669,15 +785,15 @@ Notes                        : not yet implemented, likely phase 2
 class OptimizelyIntegrationHandler(tornado.web.RequestHandler): 
     @tornado.gen.coroutine
     def post(self, *args):
-        send_not_implemented_msg(self, 'delete')
+        send_not_implemented_msg(self, 'post')
     
     @tornado.gen.coroutine
     def get(self, *args):  
         send_not_implemented_msg(self, 'delete')
  
     @tornado.gen.coroutine
-    def update(self, *args):
-        send_not_implemented_msg(self, 'delete')
+    def put(self, *args):
+        send_not_implemented_msg(self, 'put')
     
     @tornado.gen.coroutine
     def delete(self, *args): 
@@ -691,7 +807,7 @@ LiveStreamHandler : class responsible for creating a new live stream job
 class LiveStreamHandler(tornado.web.RequestHandler): 
     @tornado.gen.coroutine 
     def post(self, *args, **kwargs):
-        print 'posting a video job' 
+        print 'posting a live stream job' 
 
 '''*********************************************************************
 Controller Defined Exceptions 
