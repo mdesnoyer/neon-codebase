@@ -1813,7 +1813,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 s_urls = yield tornado.gen.Task(
                     neondata.ThumbnailServingURLs.get,
                     winner_tid)
-                for size_tup, url in s_urls.size_map.iteritems():
+                for size_tup, url in s_urls:
                     #Add urls to data section
                     s_url = {}
                     s_url['url'] = url 
