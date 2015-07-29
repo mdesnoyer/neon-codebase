@@ -218,22 +218,24 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         datamock.ThumbnailMetadata.get_many.side_effect = \
                 lambda tids: [tid_meta[tid] for tid in tids]
         
-        serving_urls = {
-            api_key+'_0_t01' : { (640, 480): 't01_640.jpg',
-                      (120, 90): 't01_120.jpg'},
-            api_key+'_0_t02' : { (800, 600): 't02_800.jpg',
-                      (120, 90): 't02_120.jpg'}}
-        datamock.ThumbnailServingURLs.get_many.return_value = [
-            neondata.ThumbnailServingURLs(k, v) for k, v in
-            serving_urls.iteritems()
-            ]
+        serving_urls = [
+            neondata.ThumbnailServingURLs(
+                api_key+'_0_t01',
+                base_url='http://one.com', 
+                sizes = [(640, 480), (120,90)]),
+            neondata.ThumbnailServingURLs(
+                api_key+'_0_t02',
+                base_url='http://two.com', 
+                sizes = [(800, 600), (120,90)])]
+        datamock.ThumbnailServingURLs.get_many.return_value = serving_urls
 
         # Process the data
         self.watcher._process_db_data()
 
         # Make sure that the serving urls were sent to the directive pusher
-        self.assertEqual(dict([(k, mastermind.server.pack_obj(v)) 
-                               for k, v in serving_urls.iteritems()]),
+        self.assertEqual(dict([(x.get_id(),
+                                mastermind.server.pack_obj(x.__dict__)) 
+                               for x in serving_urls]),
             self.directive_publisher.serving_urls)
 
     def test_tracker_id_update(self, datamock):
@@ -522,8 +524,9 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
                                                         ttype='default',
                                                         rank=0)
         default_acct_thumb.save()
-        neondata.ThumbnailServingURLs('key1_NOVIDEO_t0',
-                                      {(160, 90) : 't_default.jpg'}).save()
+        t_urls = neondata.ThumbnailServingURLs('key1_NOVIDEO_t0',
+                                               {(160, 90) : 't_default.jpg'})
+        t_urls.save()
         self.acct.default_thumbnail_id = 'key1_NOVIDEO_t0'
         self.acct.default_size = (640, 480)
         self.acct.save()
@@ -533,9 +536,10 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
             'key1_NOVIDEO_t0')
         self.assertEquals(self.directive_publisher.default_sizes['key1'],
                           [640,480])
-        self.assertEquals(mastermind.server.unpack_obj(
-            self.directive_publisher.serving_urls['key1_NOVIDEO_t0']),
-            {(160, 90) : 't_default.jpg'})
+        self.assertEquals(
+            self.directive_publisher.get_serving_urls(
+                'key1_NOVIDEO_t0').get_serving_url(160, 90),
+            't_default.jpg')
 
         # Now remove the default thumb and make sure it disapears
         self.acct.default_thumbnail_id = None
@@ -626,11 +630,15 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
                                       {(160, 90) : 't1.jpg',
                                        (640, 480) : '640.jpg'}).save()
         self.assertWaitForEquals(
-            lambda: mastermind.server.unpack_obj(
-                self.directive_publisher.serving_urls['key1_vid1_t1']),
-            {(160, 90) : 't1.jpg', (640, 480) : '640.jpg'})
+            lambda: self.directive_publisher.get_serving_urls(
+                'key1_vid1_t1').get_serving_url(640,480),
+                '640.jpg')
 
-        # TODO: Test deleting the serving url
+        # Test deleting the serving url
+        neondata.ThumbnailServingURLs.delete('key1_vid1_t1')
+        self.assertWaitForEquals(
+            lambda: 'key1_vid1_t1' in self.directive_publisher.serving_urls,
+            False)
         
 
 class SQLWrapper(object):
@@ -1202,6 +1210,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.neondata_patcher = patch('mastermind.server.neondata')
         self.datamock = self.neondata_patcher.start()
         self.datamock.RequestState = neondata.RequestState
+        self.datamock.ThumbnailServingURLs = neondata.ThumbnailServingURLs
 
         self.old_serving_update_delay = options.get(
             'mastermind.server.serving_update_delay')
@@ -1306,18 +1315,34 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.publisher.update_default_thumbs({
             'acct1' : 'acct1_vid1_tid11'}
             )
-        self.publisher.update_serving_urls(
-            {
-            'acct1_vid1_tid11' : { (640, 480): 't11_640.jpg',
-                                   (160, 90): 't11_160.jpg' },
-            'acct1_vid1_tid12' : { (800, 600): 't12_800.jpg',
-                                   (160, 90): 't12_160.jpg'},
-            'acct1_vid1_tid13' : { (160, 90): 't13_160.jpg'},
-            'acct1_vid2_tid21' : { (1920, 720): 't21_1920.jpg',
-                                   (160, 90): 't21_160.jpg'},
-            'acct1_vid2_tid22' : { (500, 500): 't22_500.jpg',
-                                   (160, 90): 't22_160.jpg'},
-                                   })
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid11',
+            neondata.ThumbnailServingURLs('acct1_vid1_tid11',
+                                          base_url = 'http://first_tids.com',
+                                          sizes=[(640, 480), (160,90)]))
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid12',
+            neondata.ThumbnailServingURLs(
+                'acct1_vid1_tid12',
+                size_map = { (800, 600): 't12_800.jpg',
+                             (160, 90): 't12_160.jpg'}))
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid13',
+            neondata.ThumbnailServingURLs('acct1_vid1_tid13',
+                                          base_url = 'http://third_tids.com',
+                                          sizes=[(160, 90)]))
+        self.publisher.add_serving_urls(
+            'acct1_vid2_tid21',
+            neondata.ThumbnailServingURLs(
+                'acct1_vid2_tid21',
+                base_url = 'http://two_one.com',
+                sizes=[(1920,720), (160, 90)],
+                size_map = {(320,240): 't21_320.jpg'}))
+        self.publisher.add_serving_urls(
+            'acct1_vid2_tid22',
+            neondata.ThumbnailServingURLs('acct1_vid2_tid22',
+                                          base_url = 'http://two_two.com',
+                                          sizes=[(500,500), (160, 90)]))
 
         self.publisher._publish_directives()
 
@@ -1356,12 +1381,10 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'acct1' : {
                 'type' : 'default_thumb',
                 'aid' : 'acct1',
-                'default_url' : 't11_160.jpg',
-                'imgs' : [
-                    { 'h': 480, 'w': 640, 'url': 't11_640.jpg' },
-                    { 'h': 90, 'w': 160, 'url': 't11_160.jpg' }]
-                }
-            })
+                'base_url' : 'http://first_tids.com',
+                'default_size' : {'h': 90, 'w': 160},
+                'img_sizes' : [{'h': 480, 'w': 640}, {'h': 90, 'w': 160}]
+            }})
 
         # Validate the actual directives
         self.assertDictContainsSubset({
@@ -1370,10 +1393,9 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'fractions' : [
                 { 'pct' : 0.1,
                   'tid' : 'acct1_vid1_tid11',
-                  'default_url' : 't11_160.jpg',
-                  'imgs' : [
-                      { 'h': 480, 'w': 640, 'url': 't11_640.jpg' },
-                      { 'h': 90, 'w': 160, 'url': 't11_160.jpg' }]
+                  'base_url' : 'http://first_tids.com',
+                  'default_size' : {'h': 90, 'w': 160},
+                  'img_sizes' : [{'h': 480, 'w': 640}, {'h': 90, 'w': 160}]
                 },
                 { 'pct' : 0.2,
                   'tid' : 'acct1_vid1_tid12',
@@ -1384,9 +1406,9 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
                 },
                 { 'pct' : 0.8,
                   'tid' : 'acct1_vid1_tid13',
-                  'default_url' : 't13_160.jpg',
-                  'imgs' : [
-                      { 'h': 90, 'w': 160, 'url': 't13_160.jpg' }]
+                  'base_url' : 'http://third_tids.com',
+                  'default_size' : {'h': 90, 'w': 160},
+                  'img_sizes' : [{'h': 90, 'w': 160}]
                 }]
             },
             directives[('acct1', 'acct1_vid1')])
@@ -1399,18 +1421,19 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'fractions' : [
                 { 'pct' : 0.0,
                   'tid' : 'acct1_vid2_tid21',
-                  'default_url' : 't21_160.jpg',
+                  'default_url' : 'http://two_one.com/neontnacct1_vid2_tid21_w160_h90.jpg',
                   'imgs' : [
-                      { 'h': 720, 'w': 1920, 'url': 't21_1920.jpg' },
-                      { 'h': 90, 'w': 160, 'url': 't21_160.jpg' }]
+                      { 'h': 240, 'w': 320, 'url': 't21_320.jpg' },
+                      { 'h': 720, 'w': 1920, 'url': 'http://two_one.com/neontnacct1_vid2_tid21_w1920_h720.jpg' },
+                      { 'h': 90, 'w': 160, 'url': 'http://two_one.com/neontnacct1_vid2_tid21_w160_h90.jpg' },
+                      ]
                 },
                 { 'pct' : 1.0,
                   'tid' : 'acct1_vid2_tid22',
-                  'default_url' : 't22_160.jpg',
-                  'imgs' : [
-                      { 'h': 500, 'w': 500, 'url': 't22_500.jpg' },
-                      { 'h': 90, 'w': 160, 'url': 't22_160.jpg' }]
-                }]
+                  'base_url' : 'http://two_two.com',
+                  'default_size' : {'h': 90, 'w': 160},
+                  'img_sizes' : [{'h': 500, 'w': 500}, {'h': 90, 'w': 160}
+                ]}]
             },
             directives[('acct1', 'acct1_vid2')])
         self.assertLessEqual(
@@ -1441,15 +1464,22 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.publisher.update_default_thumbs({
             'acct1' : 'acct1_vid1_tid11'}
             )
-        self.publisher.update_serving_urls(
-            {
-            'acct1_vid1_tid11' : { (640, 480): 't11_640.jpg',
-                                   (160, 90): 't11_160.jpg' },
-            'acct2_vid2_tid21' : { (800, 600): 't21_800.jpg',
-                                   (160, 90): 't21_160.jpg'},
-            'acct2_vid2_tid22' : { (800, 600): 't22_800.jpg',
-                                   (240, 180): 't22_240.jpg',
-                                   (120, 68): 't22_120.jpg'}})
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid11',
+            neondata.ThumbnailServingURLs('acct1_vid1_tid11',
+                                          base_url = 'http://first_tids.com',
+                                          sizes=[(640, 480), (160,90)]))
+        self.publisher.add_serving_urls(
+            'acct2_vid2_tid21',
+            neondata.ThumbnailServingURLs('acct2_vid2_tid21',
+                                          base_url = 'http://two_one.com',
+                                          sizes=[(800,600), (160, 90)]))
+        self.publisher.add_serving_urls(
+            'acct2_vid2_tid22',
+            neondata.ThumbnailServingURLs('acct2_vid2_tid22',
+                                          base_url = 'http://two_two.com',
+                                          sizes=[(800,600), (240,180),
+                                                 (160, 90)]))
 
         self.publisher._publish_directives()
 
@@ -1463,10 +1493,9 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'acct1' : {
                 'type' : 'default_thumb',
                 'aid' : 'acct1',
-                'default_url' : 't11_640.jpg',
-                'imgs' : [
-                    { 'h': 480, 'w': 640, 'url': 't11_640.jpg' },
-                    { 'h': 90, 'w': 160, 'url': 't11_160.jpg' }]
+                'base_url' : 'http://first_tids.com',
+                'default_size' : {'h': 480, 'w': 640},
+                'img_sizes' : [{'h': 480, 'w': 640}, {'h': 90, 'w': 160}]
                 }
             })
 
@@ -1474,13 +1503,13 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         defaults = {}
         for key, directive in directives.iteritems():
             for thumb in directive['fractions']:
-                defaults[thumb['tid']] = thumb['default_url']
+                defaults[thumb['tid']] = thumb['default_size']
 
         # Validate the sizes
         self.assertEqual(defaults,
-                         {'acct1_vid1_tid11': 't11_640.jpg', 
-                          'acct2_vid2_tid21': 't21_160.jpg',
-                          'acct2_vid2_tid22': 't22_120.jpg'})
+                         {'acct1_vid1_tid11': {'h': 480, 'w': 640}, 
+                          'acct2_vid2_tid21': {'h': 90, 'w': 160},
+                          'acct2_vid2_tid22': {'h': 90, 'w': 160}})
 
     def test_serving_url_missing(self):
         self.mastermind.serving_directive = {
@@ -1496,10 +1525,11 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'acct1' : 'acct1_vid1_tid11'}
             )
 
-        self.publisher.update_serving_urls({
-            'acct1_vid2_tid21' : 
-                { (800, 600): 't21_800.jpg',
-                  (160, 90): 't21_160.jpg'}})
+        self.publisher.add_serving_urls(
+            'acct1_vid2_tid21',
+            neondata.ThumbnailServingURLs('acct1_vid2_tid21',
+                                          base_url = 'http://two_one.com',
+                                          sizes=[(800,600), (160, 90)]))
 
         with self.assertLogExists(logging.ERROR,
                                   'Could not find serving url for thumb '
@@ -1529,10 +1559,9 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             'fractions' : [
                 { 'pct' : 1.0,
                   'tid' : 'acct1_vid2_tid21',
-                  'default_url' : 't21_160.jpg',
-                  'imgs' : [
-                      { 'h': 600, 'w': 800, 'url': 't21_800.jpg' },
-                      { 'h': 90, 'w': 160, 'url': 't21_160.jpg' }]
+                  'base_url' : 'http://two_one.com',
+                  'default_size' : {'h': 90, 'w': 160},
+                  'img_sizes' : [{'h': 600, 'w': 800}, {'h': 90, 'w': 160}]
                 }]
             },
             directives[('acct1', 'acct1_vid2')])
@@ -1546,14 +1575,15 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.publisher.update_tracker_id_map({'tai1' : 'acct1',
                                               'tai2' : 'acct2'})
 
-        self.publisher.update_serving_urls({
-            'acct1_vid2_tid21' : {}})
+        self.publisher.add_serving_urls(
+            'acct1_vid2_tid21',
+            neondata.ThumbnailServingURLs('acct1_vid2_tid21'))
 
         with self.assertLogExists(logging.ERROR, 
                                   ('Could not find all serving URLs for '
                                    'video: acct1_vid2')):
-            with self.assertLogExists(logging.ERROR,
-                                      ('No serving urls for thumb '
+            with self.assertLogExists(logging.WARNING,
+                                      ('No valid sizes to serve for thumb '
                                        'acct1_vid2_tid21')):
                 self.publisher._publish_directives()
 
@@ -1587,18 +1617,32 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.publisher.update_default_thumbs({
             'acct1' : 'acct1_vid1_tid11'}
             )
-        self.publisher.update_serving_urls(
-            {
-            'acct1_vid1_tid11' : { (640, 480): 't11_640.jpg',
-                                   (160, 90): 't11_160.jpg' },
-            'acct1_vid1_tid12' : { (800, 600): 't12_800.jpg',
-                                   (160, 90): 't12_160.jpg'},
-            'acct1_vid1_tid13' : { (160, 90): 't13_160.jpg'},
-            'acct1_vid2_tid21' : { (1920, 720): 't21_1920.jpg',
-                                   (160, 90): 't21_160.jpg'},
-            'acct1_vid2_tid22' : { (500, 500): 't22_500.jpg',
-                                   (160, 90): 't22_160.jpg'},
-                                   })
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid11',
+            neondata.ThumbnailServingURLs('acct1_vid1_tid11',
+                                          base_url = 'http://first_tids.com',
+                                          sizes=[(640, 480), (160,90)]))
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid12',
+            neondata.ThumbnailServingURLs(
+                'acct1_vid1_tid12',
+                size_map = { (800, 600): 't12_800.jpg',
+                             (160, 90): 't12_160.jpg'}))
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid13',
+            neondata.ThumbnailServingURLs('acct1_vid1_tid13',
+                                          base_url = 'http://third_tids.com',
+                                          sizes=[(160, 90)]))
+        self.publisher.add_serving_urls(
+            'acct1_vid2_tid21',
+            neondata.ThumbnailServingURLs('acct1_vid2_tid21',
+                                          base_url = 'http://two_one.com',
+                                          sizes=[(1920,720), (160, 90)]))
+        self.publisher.add_serving_urls(
+            'acct1_vid2_tid22',
+            neondata.ThumbnailServingURLs('acct1_vid2_tid22',
+                                          base_url = 'http://two_two.com',
+                                          sizes=[(500,500), (160, 90)]))
 
         with self.assertLogExists(logging.WARNING,
                                   'Unexpected error when sending a customer'):
@@ -1679,12 +1723,17 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         self.mastermind.video_info = self.mastermind.serving_directive
         self.publisher.update_tracker_id_map({
             'tai1' : 'acct1'})
-        self.publisher.update_serving_urls(
-            {
-            'acct1_vid1_tid11' : { (640, 480): 't11_640.jpg',
-                                   (160, 90): 't11_160.jpg' },
-            'acct1_vid1_tid12' : { (800, 600): 't12_800.jpg',
-                                   (160, 90): 't12_160.jpg'}})
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid11',
+            neondata.ThumbnailServingURLs('acct1_vid1_tid11',
+                                          base_url = 'http://first_tids.com',
+                                          sizes=[(640, 480), (160,90)]))
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid12',
+            neondata.ThumbnailServingURLs(
+                'acct1_vid1_tid12',
+                size_map = { (800, 600): 't12_800.jpg',
+                             (160, 90): 't12_160.jpg'}))
 
         logging.getLogger('mastermind.server').reset_sample_counters()
 
@@ -1719,7 +1768,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
                           neondata.RequestState.SERVING)
 
-        # Make sure that the serving URL was added  to the video
+        # Make sure that the serving URL was added to the video
         serving_url = neondata.VideoMetadata.get('acct1_vid1').serving_url
         s3httpRe = re.compile(
                 'http://i[0-9].neon-images.com/v1/client/%s/neonvid_([a-zA-Z0-9\-\._/]+)'\
@@ -1734,7 +1783,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
                           neondata.RequestState.FINISHED)
 
     def test_request_state_when_no_serving_urls(self):
-        self.publisher.update_serving_urls({})
+        self.publisher.serving_urls = {}
 
         self.publisher._publish_directives()
         self._wait_for_db_updates()

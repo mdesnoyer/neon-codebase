@@ -11,7 +11,6 @@ import copy
 from concurrent.futures import Future
 import contextlib
 import logging
-_log = logging.getLogger(__name__)
 import json
 import multiprocessing
 from mock import patch, MagicMock
@@ -45,6 +44,8 @@ from cmsdb.neondata import NeonPlatform, BrightcovePlatform, \
         S3CDNHostingMetadata, CloudinaryCDNHostingMetadata, \
         NeonCDNHostingMetadata, CDNHostingMetadataList, ThumbnailType
 
+_log = logging.getLogger(__name__)
+
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
     Neondata class tester
@@ -54,6 +55,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
         self.maxDiff = 5000
+        logging.getLogger('cmsdb.neondata').reset_sample_counters()
 
     def tearDown(self):
         neondata.PubSubConnection.clear_singleton_instance()
@@ -316,14 +318,11 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         req.save()
         ThumbnailMetadata.save_all([thumb])
         VideoMetadata.save_all([vid])
-        np.add_video('dummyv', 'dummyjob')
-        np.add_video('vid1', 'job1')
         NeonPlatform.modify(na.neon_api_key, '0',
                             lambda x: x.add_video('dummyv', 'dummyjob'))
-        NeonPlatform.modify(na.neon_api_key, '0',
-                            lambda x: x.add_video('vid1', 'job1'))
-        NeonPlatform.delete_all_video_related_data(np, 'vid1',
-                really_delete_keys=True)
+        np = NeonPlatform.modify(na.neon_api_key, '0',
+                                 lambda x: x.add_video('vid1', 'job1'))
+        np.delete_all_video_related_data('vid1', really_delete_keys=True)
         
         # check the keys have been deleted
         self.assertIsNone(NeonApiRequest.get('job1', na.neon_api_key))
@@ -394,32 +393,91 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
     def test_ThumbnailServingURLs(self):
         input1 = ThumbnailServingURLs('acct1_vid1_tid1')
-        input1.add_serving_url('http://that_800_600.jpg', 800, 600) 
+        input1.add_serving_url(
+            'http://neon.com/neontnacct1_vid1_tid1_w800_h600.jpg', 800, 600)
+        input1.add_serving_url(
+            'http://neon.com/neontnacct1_vid1_tid1_w100_h50.jpg', 100, 50)
         
         input1.save()
         output1 = ThumbnailServingURLs.get('acct1_vid1_tid1')
         self.assertEqual(output1.get_thumbnail_id(), input1.get_thumbnail_id())
         self.assertEqual(output1.get_serving_url(800, 600),
-                         'http://that_800_600.jpg')
+                         'http://neon.com/neontnacct1_vid1_tid1_w800_h600.jpg')
         with self.assertRaises(KeyError):
-            _log.info('Output1 %s' % output1)
             output1.get_serving_url(640, 480)
+        self.assertItemsEqual(
+            list(input1),
+            [((800, 600), 'http://neon.com/neontnacct1_vid1_tid1_w800_h600.jpg'),
+             ((100, 50), 'http://neon.com/neontnacct1_vid1_tid1_w100_h50.jpg')])
+        self.assertItemsEqual(list(input1), list(output1))
 
-        input1.add_serving_url('http://that_640_480.jpg', 640, 480) 
-        input2 = ThumbnailServingURLs('tid2', {(640, 480) : 'http://this.jpg'})
+        input1.add_serving_url('http://neon.com/neontnacct1_vid1_tid1_w640_h480.jpg',
+                               640, 480) 
+        input2 = ThumbnailServingURLs(
+            'acct1_vid1_tid2',
+            {(640, 480) : 'http://neon.com/neontnacct1_vid1_tid2_w640_h480.jpg'})
         ThumbnailServingURLs.save_all([input1, input2])
         output1, output2 = ThumbnailServingURLs.get_many(['acct1_vid1_tid1',
-                                                          'tid2'])
+                                                          'acct1_vid1_tid2'])
         self.assertEqual(output1.get_thumbnail_id(),
                          input1.get_thumbnail_id())
         self.assertEqual(output2.get_thumbnail_id(),
                          input2.get_thumbnail_id())
         self.assertEqual(output1.get_serving_url(640, 480),
-                         'http://that_640_480.jpg')
+                         'http://neon.com/neontnacct1_vid1_tid1_w640_h480.jpg')
         self.assertEqual(output1.get_serving_url(800, 600),
-                         'http://that_800_600.jpg')
+                         'http://neon.com/neontnacct1_vid1_tid1_w800_h600.jpg')
         self.assertEqual(output2.get_serving_url(640, 480),
-                         'http://this.jpg')
+                         'http://neon.com/neontnacct1_vid1_tid2_w640_h480.jpg')
+
+    def test_thumbnail_servingurl_base_url(self):
+        input1 = ThumbnailServingURLs('acct1_vid1_tid1',
+                                      base_url='http://neon-images.com/y6w')
+        url800 = \
+          'http://neon-images.com/y6w/neontnacct1_vid1_tid1_w800_h600.jpg'
+        input1.add_serving_url(url800, 800, 600)
+        url160 = 'http://neon-images.com/ppw/neontnacct1_vid1_tid1_w160_h90.jpg'
+        with self.assertLogExists(logging.WARNING, 'url.*does not conform'):
+            input1.add_serving_url(url160, 160, 90)
+        self.assertEqual(input1.get_serving_url(800, 600), url800)
+        self.assertEqual(input1.get_serving_url(160, 90), url160)
+        input1.save()
+
+        output1 = ThumbnailServingURLs.get('acct1_vid1_tid1')
+        self.assertEqual(input1.get_serving_url(800, 600),
+                         output1.get_serving_url(800, 600))
+        self.assertEqual(input1.get_serving_url(160, 90),
+                         output1.get_serving_url(160, 90))
+        
+
+    def test_backwards_compatible_thumb_serving_urls_diff_base(self):
+        json_str = "{\"_type\": \"ThumbnailServingURLs\", \"_data\": {\"size_map\": [[[210, 118], \"http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w210_h118.jpg\"], [[160, 90], \"http://n3.neon-images.com/EaE/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w160_h90.jpg\"], [[1280, 720], \"http://n3.neon-images.com/ZZc/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w1280_h720.jpg\"]], \"key\": \"thumbnailservingurls_b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8\"}}"
+
+        obj = ThumbnailServingURLs._create('thumbnailservingurls_b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8', json.loads(json_str))
+
+        # It's different base urls so we keep the object in the old format
+        self.assertEquals(len(obj.size_map), 3)
+        self.assertEquals(obj.get_serving_url_count(), 3)
+        self.assertIsNone(obj.base_url)
+        self.assertEquals(len(obj.sizes), 0)
+        self.assertEquals(obj.get_serving_url(160, 90),
+                          'http://n3.neon-images.com/EaE/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w160_h90.jpg')
+
+    def test_backwards_compatible_thumb_serving_urls_same_base(self):
+        json_str = "{\"_type\": \"ThumbnailServingURLs\", \"_data\": {\"size_map\": [[[210, 118], \"http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w210_h118.jpg\"], [[160, 90], \"http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w160_h90.jpg\"], [[1280, 720], \"http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w1280_h720.jpg\"]], \"key\": \"thumbnailservingurls_b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8\"}}"
+
+        obj = ThumbnailServingURLs._create('thumbnailservingurls_b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8', json.loads(json_str))
+
+        # It's the same base url so store in the new format
+        self.assertEquals(len(obj.size_map), 0)
+        self.assertEquals(obj.get_serving_url_count(), 3)
+        self.assertEquals(obj.base_url, 'http://n3.neon-images.com/fF7')
+        self.assertEquals(obj.sizes, set([(210,118), (160,90), (1280,720)]))
+        self.assertEquals(obj.get_serving_url(160, 90),
+                          'http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w160_h90.jpg')
+        self.assertEquals(obj.get_thumbnail_id(),
+                          'b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8')
+        
 
     def test_too_many_open_connections_sync(self):
         self.maxDiff = 10000
@@ -452,7 +510,8 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             (BrightcovePlatform('api', 'i1', 'a'),
              lambda x: x.get('api', 'i1')),
             (OoyalaPlatform('api', 'i2', 'a', 'b', 'c', 'd', 'e'),
-             lambda x: x.get('api', 'i2'))]
+             lambda x: x.get('api', 'i2'))
+             ]
 
         for obj, read_func in obj_types:
             # Start by saving the object
@@ -1298,10 +1357,128 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         # Now try getting data from the original database again
         self.assertEquals(VideoMetadata.get('acct1_vid1'), video_meta)
+
+    @tornado.testing.gen_test
+    def test_delete_videos_async(self):
+      # Delete some video objects
+      vids = [VideoMetadata('acct1_v1'),
+              VideoMetadata('acct1_v2'),
+              VideoMetadata('acct1_v3')]
+      yield tornado.gen.Task(VideoMetadata.save_all, vids)
+      found_objs = yield tornado.gen.Task(VideoMetadata.get_many,
+                                          ['acct1_v1', 'acct1_v2', 'acct1_v3'])
+      self.assertEquals(found_objs, vids)
+      n_deleted = yield tornado.gen.Task(VideoMetadata.delete, 'acct1_v1')
+      self.assertEquals(n_deleted, 1)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v3'))
+      n_deleted = yield tornado.gen.Task(VideoMetadata.delete_many,
+                                         ['acct1_v2', 'acct1_v3'])
+      self.assertEquals(n_deleted, 2)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNone(VideoMetadata.get('acct1_v3'))
+
+    @tornado.testing.gen_test
+    def test_delete_videos_async(self):
+      # Delete some video objects
+      vids = [VideoMetadata('acct1_v1'),
+              VideoMetadata('acct1_v2'),
+              VideoMetadata('acct1_v3')]
+      yield tornado.gen.Task(VideoMetadata.save_all, vids)
+      found_objs = yield tornado.gen.Task(VideoMetadata.get_many,
+                                          ['acct1_v1', 'acct1_v2', 'acct1_v3'])
+      self.assertEquals(found_objs, vids)
+      n_deleted = yield tornado.gen.Task(VideoMetadata.delete, 'acct1_v1')
+      self.assertEquals(n_deleted, 1)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v3'))
+      n_deleted = yield tornado.gen.Task(VideoMetadata.delete_many,
+                                         ['acct1_v2', 'acct1_v3'])
+      self.assertEquals(n_deleted, 2)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNone(VideoMetadata.get('acct1_v3'))
+
+    @tornado.testing.gen_test
+    def test_delete_videos_sync(self):
+      # Delete some video objects
+      vids = [VideoMetadata('acct1_v1'),
+              VideoMetadata('acct1_v2'),
+              VideoMetadata('acct1_v3')]
+      VideoMetadata.save_all(vids)
+      found_objs = VideoMetadata.get_many(['acct1_v1', 'acct1_v2', 'acct1_v3'])
+      self.assertEquals(found_objs, vids)
+      n_deleted = VideoMetadata.delete('acct1_v1')
+      self.assertEquals(n_deleted, 1)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v3'))
+      n_deleted = VideoMetadata.delete_many(['acct1_v2', 'acct1_v3'])
+      self.assertEquals(n_deleted, 2)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNone(VideoMetadata.get('acct1_v3'))
+
+      
+    @tornado.testing.gen_test
+    def test_delete_platforms_async(self):
+      # Do some platform objects
+      np = NeonPlatform.modify('acct1', '0', lambda x: x,
+                               create_missing=True)
+      bp = BrightcovePlatform.modify('acct2', 'ibc', lambda x: x,
+                                     create_missing=True)
+      op = OoyalaPlatform.modify('acct3', 'ioo', lambda x: x,
+                                 create_missing=True)
+      yp = YoutubePlatform.modify('acct4', 'iyt', lambda x: x,
+                                  create_missing=True)
+      plats = yield tornado.gen.Task(AbstractPlatform.get_all)
+      self.assertEquals(len(plats), 4)
+      deleted_counts = yield [
+        tornado.gen.Task(NeonPlatform.delete, np.neon_api_key,
+                         np.integration_id),
+        tornado.gen.Task(BrightcovePlatform.delete_many,
+                         [(bp.neon_api_key, bp.integration_id)]),
+        tornado.gen.Task(OoyalaPlatform.delete, op.neon_api_key,
+                         op.integration_id),
+        tornado.gen.Task(YoutubePlatform.delete, yp.neon_api_key,
+                         yp.integration_id)]
+      self.assertEquals(deleted_counts, [1,1,1,1])
+      self.assertIsNone(NeonPlatform.get('acct1', '0'))
+      self.assertIsNone(BrightcovePlatform.get('acct2', 'ibc'))
+      self.assertIsNone(OoyalaPlatform.get('acct3', 'ioo'))
+      self.assertIsNone(YoutubePlatform.get('acct4', 'iyt'))
+
+    @tornado.testing.gen_test
+    def test_delete_requests_async(self):
+      nreq = NeonApiRequest('job1', 'acct1')
+      breq = neondata.BrightcoveApiRequest('job2', 'acct1')
+      oreq = neondata.OoyalaApiRequest('job3', 'acct1')
+      yreq = neondata.YoutubeApiRequest('job4', 'acct1')
+      NeonApiRequest.save_all([nreq, breq, oreq, yreq])
+      self.assertIsNotNone(NeonApiRequest.get('job1', 'acct1'))
+      self.assertIsNotNone(NeonApiRequest.get('job2', 'acct1'))
+      self.assertIsNotNone(NeonApiRequest.get('job3', 'acct1'))
+      self.assertIsNotNone(NeonApiRequest.get('job4', 'acct1'))
+      deleted_counts = yield [
+        tornado.gen.Task(NeonApiRequest.delete, 'job1', 'acct1'),
+        tornado.gen.Task(NeonApiRequest.delete_many,
+                         [('job2', 'acct1'), ('job3', 'acct1'),
+                          ('job4', 'acct1')])]
+      self.assertEquals(deleted_counts, [1,3])
+      self.assertIsNone(NeonApiRequest.get('job1', 'acct1'))
+      self.assertIsNone(NeonApiRequest.get('job2', 'acct1'))
+      self.assertIsNone(NeonApiRequest.get('job3', 'acct1'))
+      self.assertIsNone(NeonApiRequest.get('job4', 'acct1'))
+      
+      
             
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()
+        logging.getLogger('cmsdb.neondata').reset_sample_counters()
         self.connection_patcher = patch('cmsdb.neondata.blockingRedis.StrictRedis')
 
         # For the sake of this test, we will only mock the get() function
