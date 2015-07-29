@@ -638,8 +638,6 @@ class VideoHelper():
         schema = Schema({
           Required('account_id') : All(str, Length(min=1, max=256)),
           Required('integration_id') : All(str, Length(min=1, max=256)),
-          # TODO we should probably just generate this for them, unless there is 
-          # some use case where them sending in the id makes more sense
           Required('external_video_ref') : All(str, Length(min=1, max=512)),
           'video_url': All(str, Length(min=1, max=512)), 
           'callback_url': All(str, Length(min=1, max=512)), 
@@ -648,7 +646,7 @@ class VideoHelper():
           'external_thumbnail_ref': All(str, Length(min=1, max=512))
         })
         args = parse_args(request)
-        args['account_id'] = account_id = str(account_id)
+        args['account_id'] = str(account_id)
         schema(args)
         account_id_api_key = args['account_id'] 
         integration_id = args['integration_id']
@@ -665,8 +663,9 @@ class VideoHelper():
             platform = yield tornado.gen.Task(neondata.OoyalaPlatform.get, 
                                           account_id_api_key, 
                                           integration_id)  
-
-        result = yield tornado.gen.Task(platform.create_job)
+        #import pdb; pdb.set_trace()
+        result = yield tornado.gen.Task(platform.create_job, None)
+        import pdb; pdb.set_trace()  
  
         if result: 
             raise tornado.gen.Return(result) 
@@ -685,8 +684,10 @@ class VideoHandler(tornado.web.RequestHandler):
     **********************'''    
     @tornado.gen.coroutine
     def post(self, account_id):
-        try:  
-            video = yield tornado.gen.Task(VideoHelper.addVideo(self.request, account_id)) 
+        try:
+            video = yield tornado.gen.Task(VideoHelper.addVideo, 
+                                           self.request, 
+                                           account_id) 
             output = video.to_json() 
             code = HTTP_OK
         except MultipleInvalid as e: 
@@ -694,6 +695,11 @@ class VideoHandler(tornado.web.RequestHandler):
             code = HTTP_BAD_REQUEST
         except SaveError as e: 
             output = generate_standard_error(e.msg) 
+            code = HTTP_BAD_REQUEST
+        except KeyError as e: 
+            output = generate_standard_error('%s %s' % 
+                        ('Unable to find the integration id on the account with id: ',
+                         account_id))
             code = HTTP_BAD_REQUEST
         except AttributeError as e:  
             output = generate_standard_error('%s %s' % 
