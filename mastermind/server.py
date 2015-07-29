@@ -95,6 +95,7 @@ statemon.define('videodb_batch_update', int) # Count of the nubmer of batch upda
 statemon.define('videodb_error', int) # error connecting to the video DB
 statemon.define('publish_error', int) # error publishing directive to s3
 statemon.define('serving_urls_missing', int) # missing serving urls for videos
+statemon.define('need_full_urls', int) # Num of thumbs where full urls had to be sent in the directive file
 statemon.define('account_default_serving_url_missing', int) # mising default
 statemon.define('no_videometadata', int) # mising videometadata 
 statemon.define('no_platform', int) # mising platform information 
@@ -290,9 +291,9 @@ class VideoDBWatcher(threading.Thread):
         for url_obj in neondata.ThumbnailServingURLs.get_many(
                 default_thumb_ids):
             if url_obj is not None:
-                self.directive_pusher.add_serving_url(
+                self.directive_pusher.add_serving_urls(
                     url_obj.get_thumbnail_id(),
-                    url_obj.size_map)
+                    url_obj)
 
         # Update the platform, which updates the video data
         for platform in neondata.AbstractPlatform.get_all():
@@ -337,14 +338,13 @@ class VideoDBWatcher(threading.Thread):
             def _update_serving_url(key, obj, op):
                 if op == 'del':
                     try:
-                        self.directive_pusher.del_serving_url(key)
+                        self.directive_pusher.del_serving_urls(key)
                     except KeyError:
                         pass
                 elif op == 'set':
                     if self.mastermind.is_serving_video(
                             self.video_id_cache.find_video_id(key)):
-                        self.directive_pusher.add_serving_url(key,
-                                                              obj.size_map)
+                        self.directive_pusher.add_serving_urls(key, obj)
             self._table_subscribers.append(
                 neondata.ThumbnailServingURLs.subscribe_to_changes(
                 _update_serving_url))
@@ -477,9 +477,9 @@ class VideoDBWatcher(threading.Thread):
                 video_metadata.thumbnail_ids)
             for url_obj in serving_urls:
                 if url_obj is not None:
-                    self.directive_pusher.add_serving_url(
+                    self.directive_pusher.add_serving_urls(
                         url_obj.get_thumbnail_id(),
-                        url_obj.size_map)
+                        url_obj)
 
             self.mastermind.update_video_info(video_metadata,
                                               thumbnails,
@@ -487,7 +487,7 @@ class VideoDBWatcher(threading.Thread):
         else:
             self.mastermind.remove_video_info(video_id)
             for thumb_id in video_metadata.thumbnail_ids:
-                self.directive_pusher.del_serving_url(thumb_id)
+                self.directive_pusher.del_serving_urls(thumb_id)
 
     def process_queued_video_updates(self):
         try:
@@ -1070,26 +1070,29 @@ class DirectivePublisher(threading.Thread):
     def add_to_tracker_id_map(self, tracker_id, account_id):
         self.tracker_id_map[tracker_id] = account_id
 
-    def update_serving_urls(self, new_map):
+    def add_serving_urls(self, thumbnail_id, urls_obj):
+        '''Add serving urls for a given thumbnail
+
+        Inputs:
+        thumbnail_id - The thumbnail id
+        urls_obj - A ThumbnailServingURLs objec
+        '''
         with self.lock:
-            del self.serving_urls
-            self.serving_urls = {}
-            for k, v in new_map.iteritems():
-                self.serving_urls[k] = pack_obj(v)
+            self.serving_urls[thumbnail_id] = pack_obj(urls_obj.__dict__)
         statemon.state.thumbnails_serving = len(self.serving_urls)
 
-    def add_serving_url(self, thumbnail_id, urls):
-        with self.lock:
-            self.serving_urls[thumbnail_id] = pack_obj(urls)
-        statemon.state.thumbnails_serving = len(self.serving_urls)
-
-    def del_serving_url(self, thumbnail_id):
+    def del_serving_urls(self, thumbnail_id):
         try:
             with self.lock:
                 del self.serving_urls[thumbnail_id]
         except KeyError as e:
             pass
         statemon.state.thumbnails_serving = len(self.serving_urls)
+
+    def get_serving_urls(self, thumbnail_id):
+        obj = neondata.ThumbnailServingURLs('')
+        obj.__dict__ = unpack_obj(self.serving_urls[thumbnail_id])
+        return obj
 
     def update_default_sizes(self, new_map):
         with self.lock:
@@ -1235,24 +1238,15 @@ class DirectivePublisher(threading.Thread):
         missing_account_default_serving = 0
         for account_id, thumb_id in self.default_thumbs.iteritems():
             try:
-                stream.write('\n' + json.dumps(
-                    {'type': 'default_thumb',
-                     'aid' : account_id,
-                     'default_url' : self._get_default_url(account_id, thumb_id),
-                     'imgs' : [
-                         {
-                             'w': k[0],
-                             'h': k[1],
-                             'url': v
-                        }
-                        for k, v in 
-                        unpack_obj(self.serving_urls[thumb_id]).iteritems()
-                        ]
-                    }))
+                default_thumb_directive = self._get_url_fields(account_id,
+                                                               thumb_id)
+                default_thumb_directive['type'] = 'default_thumb'
+                default_thumb_directive['aid'] = account_id
+                stream.write('\n' + json.dumps(default_thumb_directive))
             except KeyError:
-                _log.error('Could not find serving url for thumb %s, which is '
-                           'the default on account %s . Skipping' %
-                           (thumb_id, account_id))
+                _log.error_n('Could not find serving url for thumb %s, '
+                             'which is the default on account %s . Skipping' %
+                             (thumb_id, account_id))
                 missing_account_default_serving += 1
         statemon.state.account_default_serving_url_missing = \
           missing_account_default_serving
@@ -1260,27 +1254,20 @@ class DirectivePublisher(threading.Thread):
         # Now write the directives
         _log.info("Writing directives")
         serving_urls_missing = 0
+        need_full_urls = 0
         for key, directive in self.mastermind.get_directives():
             account_id, video_id = key
             fractions = []
             missing_urls = False
             for thumb_id, frac in directive:
                 try:
-                    fractions.append({
-                        'pct': frac,
-                        'tid': thumb_id,
-                        'default_url': self._get_default_url(account_id,
-                                                             thumb_id),
-                        'imgs': [ 
-                            {
-                                'w': k[0],
-                                'h': k[1],
-                                'url': v
-                            } 
-                            for k, v in 
-                            unpack_obj(self.serving_urls[thumb_id]).iteritems()
-                            ]
-                    })
+                    serving_urls = unpack_obj(self.serving_urls[thumb_id])
+                    frac_obj = self._get_url_fields(account_id, thumb_id)
+                    frac_obj['pct'] = frac
+                    frac_obj['tid'] = thumb_id
+                    fractions.append(frac_obj)
+                    if 'default_url' in frac_obj:
+                        need_full_urls += 1
                 except KeyError:
                     if frac > 1e-7:
                         _log.error_n('Could not find all serving URLs for '
@@ -1311,36 +1298,39 @@ class DirectivePublisher(threading.Thread):
                 written_video_ids.add(video_id)
 
         statemon.state.serving_urls_missing = serving_urls_missing
+        statemon.state.need_full_urls = need_full_urls
         return written_video_ids
 
-    def _get_default_url(self, account_id, thumb_id):
-        '''Returns the default url for this thumbnail id.'''
-        # Figure out the default width for this account
+    def _get_default_size(self, account_id, url_obj):
+        '''Returns the default url size (w,h) for this thumbnail id.'''
         default_size = self.default_sizes.get(account_id, None)
         if default_size is None:
             default_size = (160, 90)
-        
-        serving_urls = unpack_obj(self.serving_urls[thumb_id])
-        if serving_urls is None or len(serving_urls) == 0:
-            _log.error('No serving urls for thumb %s' % thumb_id)
-            raise KeyError('No serving urls for thumb %s' % thumb_id)
-        
-        try:
-            return serving_urls[tuple(default_size)]
-        except KeyError:
-            # We couldn't find that exact size, so pick the one with the minimum 
-            mindiff = min([abs(x[0] - default_size[0]) +
+
+        # Make sure the default size exists
+        if url_obj.is_valid_size(*default_size):
+            return default_size
+
+        # We couldn't find the exact size so pick the one with the
+        # minimum size difference.
+        valid_sizes = url_obj.sizes.union(url_obj.size_map.iterkeys())
+        if len(valid_sizes) == 0:
+            _log.warn('No valid sizes to serve for thumb %s' 
+                      % url_obj.get_id())
+            raise KeyError('No valid sizes to serve')
+        mindiff = min([abs(x[0] - default_size[0]) +
                            abs(x[1] - default_size[1]) 
-                           for x in serving_urls.keys()])
-            closest_size = [x for x in serving_urls.keys() if
-                            (abs(x[0] - default_size[0]) +
-                             abs(x[1] - default_size[1])) == mindiff][0]
-            _log.warn('There is no serving thumb of size (%i, %i) for thumb'
-                      '%s. Using (%i, %i) instead'
-                      % (default_size[0], default_size[1], thumb_id,
-                         closest_size[0], closest_size[1]))
-            statemon.state.increment('default_serving_thumb_size_mismatch')
-            return serving_urls[closest_size]
+                           for x in valid_sizes])
+        closest_size = [x for x in valid_sizes if
+                        (abs(x[0] - default_size[0]) +
+                         abs(x[1] - default_size[1])) == mindiff][0]
+        _log.warn('There is no serving thumb of size (%i, %i) for thumb'
+                  '%s. Using (%i, %i) instead'
+                  % (default_size[0], default_size[1],
+                     url_obj.get_thumbnail_id(),
+                     closest_size[0], closest_size[1]))
+        statemon.state.increment('default_serving_thumb_size_mismatch')
+        return closest_size
 
     def _write_expiry(self, fp):
         '''Writes the expiry line at the beginning of the file point fp.
@@ -1354,6 +1344,38 @@ class DirectivePublisher(threading.Thread):
                   datetime.timedelta(seconds=valid_length))
                  .strftime('%Y-%m-%dT%H:%M:%SZ'))
         fp.flush()
+
+    def _get_url_fields(self, account_id, thumb_id):
+        '''Returns a dictionary of the url fields for a thumbnail.
+
+        Does an older version, where each serving url is specified for
+        each size and a newer version where we just specify the base
+        url and a list of valid sizes.
+        '''
+        urls = self.get_serving_urls(thumb_id)
+        if len(urls.size_map) > 0:
+            # We have some urls with a different base, so it's the old style
+            return {
+                'default_url': urls.get_serving_url(*self._get_default_size(
+                    account_id, urls)),
+                'imgs' : [
+                    {
+                        'w': k[0],
+                        'h': k[1],
+                        'url': v
+                    }
+                    for k, v in urls]
+                    }
+        else:
+            # All the urls can be generated from a single base url and
+            # different sizes so use that for the directive.
+            return {
+                'base_url' : urls.base_url,
+                'default_size': dict(zip(*[('w','h'),
+                                           self._get_default_size(account_id,
+                                                                  urls)])),
+                'img_sizes' : [ { 'h': h, 'w': w} for w, h in urls.sizes]
+                }
 
     def _update_video_serving_state(self, video_ids, new_state):
         '''Updates a list of video ids with a new serving state.'''

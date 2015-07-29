@@ -34,17 +34,21 @@ class Model(object):
         else:
             self.video_searcher = vid_searcher
 
+
     def __setstate__(self, state):
         if 'video_searcher' not in state:
             state['video_searcher'] = video_searcher.BisectSearcher(
                 state['predictor'], state['filt'])
         self.__dict__ = state
 
+
     def __str__(self):
         return utils.obj.full_object_str(self)
 
+
     def reset(self):
         self.predictor.reset()
+
 
     def score(self, image, do_filtering=True):
         '''Scores a single image. 
@@ -72,6 +76,22 @@ class Model(object):
         '''
         return self.video_searcher.choose_thumbnails(video, n, video_name)
 
+
+    def restore_additional_data(self, filename):
+        '''
+        Given filename (which points to the pkl of the restored model), 
+        restores additional data, specifically for filters. New filters
+        (i.e., the closed-eye filter) require access to pickled numpy
+        arrays and scipy objects which are too expensive to pickle
+        using the vanilla implementation. The closed-eye filter has
+        an implementation of restore_additional_data that can find what
+        it requires so long as it knows where model_data is, which it
+        can determine based on where the model pickle is.
+        '''
+        if self.filt is not None:
+            self.filt.restore_additional_data(filename)
+
+
 def save_model(model, filename):
     '''Save the model to a file.'''
     with open(filename, 'wb') as f:
@@ -85,4 +105,8 @@ def load_model(filename):
 
     '''
     with open(filename, 'rb') as f:
-        return pickle.load(f)
+        model = pickle.load(f)
+    model.restore_additional_data(filename)
+    
+    return model 
+
