@@ -29,7 +29,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             self.platform.read_token, self.platform.write_token)
 
     @staticmethod
-    def _get_submit_video_fields():
+    def get_submit_video_fields():
         '''Return a list of brightcove video fields needed to be able to
         submit jobs to our CMSAPI.
         '''
@@ -102,12 +102,13 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
     @tornado.gen.coroutine
     def lookup_and_submit_videos(self, ovp_video_ids):
+        '''Looks up a list of video ids and submits them.'''
         retval = {}
             
         try:
             bc_video_info = yield self.bc_api.find_videos_by_ids(
                 ovp_video_ids,
-                BrightcoveIntegration._get_submit_video_fields(),
+                BrightcoveIntegration.get_submit_video_fields(),
                 async=True)
         except brightcove_api.BrightcoveApiServerError as e:
             statemon.state.increment('bc_api_errors')
@@ -115,31 +116,51 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             raise integrations.ovp.OVPError(e)
 
         for bc_video_id, data in bc_video_info.iteritems():
-            thumb_url, thumb_data = \
-              BrightcoveIntegration._get_best_image_info(data)
-            if thumb_url is None or data['length'] < 0:
-                _log.warn('Brightcove id %s is a live stream' % bc_video_id)
-                continue
-            
             try:
-                response = yield self.submit_video(
-                    bc_video_id,
-                    self._get_video_url_to_download(data),
-                    video_title=data['name'],
-                    default_thumbnail=thumb_url,
-                    external_thumbnail_id=unicode(thumb_data['id']))
-                retval[bc_video_id] = response['job_id']
-
+                retval[bc_video_id] = self.submit_one_video_object(bc_video_id,
+                                                                   data)
             except integrations.ovp.CMSAPIError as e:
                 retval[bc_video_id] = e
-                continue
+
+        raise tornado.gen.Return(retval)
+
+    @tornado.gen.coroutine
+    def submit_one_video_object(self, vid_obj):
+        '''Submits one video object
+
+        Inputs:
+        vid_obj - A video object from the response from the Brightcove API
+
+        Outputs:
+        the job id
+        '''
+        thumb_url, thumb_data = \
+              BrightcoveIntegration._get_best_image_info(vid_obj)
+        if thumb_url is None or vid_obj['length'] < 0:
+            _log.warn('Brightcove id %s is a live stream' % vid_obj['id'])
+            raise tornado.gen.Return(None)
+            
+
+        if not vid_obj['id'] in self.platform.videos:
+            # The video hasn't been submitted before
+            response = yield self.submit_video(
+                vid_obj['id'],
+                self._get_video_url_to_download(vid_obj),
+                video_title=vid_obj['name'],
+                default_thumbnail=thumb_url,
+                external_thumbnail_id=unicode(thumb_data['id']))
 
             # TODO: Move this to the video server for when the
             # video is processed.
-            res = yield tornado.gen.Task(
+            self.platform = yield tornado.gen.Task(
                 neondata.BrightcovePlatform.modify,
                 self.platform.neon_api_key,
                 self.platform.integration_id,
-                lambda x: x.add_video(bc_video_id, response['job_id']))
+            lambda x: x.add_video(vid_obj['id'], response['job_id']))
 
-        raise tornado.gen.Return(retval)
+            job_id = response['job_id']
+        else:
+            job_id = self.platform.videos[vid_obj['id']]
+
+        raise tornado.gen.Return(job_id)
+        

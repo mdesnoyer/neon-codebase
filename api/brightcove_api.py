@@ -889,7 +889,7 @@ class BrightcoveApi(object):
                 'command' : 'search_videos',
                 'token' : self.read_token,
                 'output' : 'json',
-                'media_delivery' : 'media_delivery',
+                'media_delivery' : media_delivery,
                 'page_number' : cur_page,
                 'page_size' : page_size
                 }
@@ -924,7 +924,8 @@ class BrightcoveApi(object):
 
             request = tornado.httpclient.HTTPRequest(
                 '%s?%s' % (self.read_url, urllib.urlencode(url_params)),
-                request_timeout = 60.0)
+                decompress_response=True,
+                request_timeout = 120.0)
 
             response = yield tornado.gen.Task(
                 BrightcoveApi.read_connection.send_request, request)
