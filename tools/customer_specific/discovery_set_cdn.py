@@ -22,11 +22,12 @@ s3cdn = neondata.S3CDNHostingMetadata(
     cdn_prefixes=['http://fusion.ddmcdn.com'],
     folder_prefix='neon', resize=True, 
     update_serving_urls=True,
-    rendition_sizes=[[221,124],[440,248],[640,360],[133,75],[334,223],[336,336],[337,337],[310,465],[280,900],[600,355]])
+    rendition_sizes=[[221,124],[440,248],[640,360],[133,75],[334,223],[336,336],[337,337],[310,465],[280,900],[600,355]],
+    policy='public-read')
 
 
 hoster = cmsdb.cdnhosting.CDNHosting.create(s3cdn)
 
 im = utils.imageutils.PILImageUtils.create_random_image(480,640)
 
-hoster._upload_impl(im, 'testtid')
+print hoster._upload_impl(im, 'testtid2')
