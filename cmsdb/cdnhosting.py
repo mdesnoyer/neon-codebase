@@ -310,9 +310,18 @@ class AWSHosting(CDNHosting):
     def _get_bucket(self):
         '''Connects to the bucket if it's not already done'''
         if self.s3bucket is None:
-            self.s3bucket = yield utils.botoutils.run_async(
-                self.s3conn.get_bucket,
-                self.s3bucket_name)
+            try:
+                self.s3bucket = yield utils.botoutils.run_async(
+                    self.s3conn.get_bucket,
+                    self.s3bucket_name)
+            except S3ResponseError as e:
+                if e.status == 403:
+                    # It's a permissions error so just get the bucket
+                    # and don't validate it
+                    self.s3bucket = self.s3conn.get_bucket(
+                        self.s3bucket_name, validate=False)
+                else:
+                    raise
         raise tornado.gen.Return(self.s3bucket)
 
     @utils.sync.optional_sync
