@@ -1956,7 +1956,7 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
     def __init__(self, key=None, access_key=None, secret_key=None, 
                  bucket_name=None, cdn_prefixes=None, folder_prefix=None,
                  resize=False, update_serving_urls=False, do_salt=True,
-                 make_tid_folders=False, rendition_sizes=None):
+                 make_tid_folders=False, rendition_sizes=None, policy=None):
         '''
         Create the object
         '''
@@ -1974,6 +1974,9 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
         # make folders for easy navigation. This puts the image in the
         # form <api_key>/<video_id>/<thumb_id>.jpg
         self.make_tid_folders = make_tid_folders
+
+        # What aws policy should the images be uploaded with
+        self.policy = policy
 
 class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     '''
@@ -1999,7 +2002,8 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
             update_serving_urls=update_serving_urls,
             do_salt=do_salt,
             make_tid_folders=make_tid_folders,
-            rendition_sizes=rendition_sizes)
+            rendition_sizes=rendition_sizes,
+            policy='public-read')
 
 class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     '''
@@ -2018,7 +2022,8 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
             resize=False,
             update_serving_urls=False,
             do_salt=False,
-            make_tid_folders=True)
+            make_tid_folders=True,
+            policy='public-read')
 
 class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     '''

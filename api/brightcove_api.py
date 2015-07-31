@@ -849,27 +849,119 @@ class BrightcoveApi(object):
             response = yield tornado.gen.Task(
                 BrightcoveApi.read_connection.send_request, request)
 
-            if response.error:
-                _log.error('Error calling find_videos_by_ids: %s' %
-                           response.error)
-                try:
-                    json_data = json.load(response.buffer)
-                    if json_data['code'] >= 200:
-                        raise BrightcoveApiClientError(response.error)
-                except ValueError:
-                    # It's not JSON data so there was some other error
-                    pass    
-                except KeyError:
-                    # It may be valid json but doesn't have a code
-                    pass
-                raise BrightcoveApiServerError(response.error)
-
-            json_data = json.load(response.buffer)
-            for item in json_data['items']:
-                if item is not None:
-                    results[item['id']] = item
+            for vid in self._handle_response(response):
+                results[vid['id']] = vid
 
         raise tornado.gen.Return(results)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def search_videos(self, _all=None, _any=None, none=None, sort_by=None,
+                      exact=False, page_size=100, max_results=None,
+                      video_fields=None, custom_fields=None, 
+                      media_delivery='http'):
+        '''Search for videos based on some criteria.
+
+        For more details on the call, see
+        http://docs.brightcove.com/en/video-cloud/media/guides/search_videos-guide.html
+
+        Inputs:
+        _all - list of (field,value) pairs that MUST be present to be returned
+        _any - list of (field,value) pairs that AT LEAST ONE must be present
+        none - list of (field,value) pairs that MUST NOT be present
+        sort_by - field to sort by and direction. e.g. PUBLISH_DATE:DESC
+        exact - If true requires exact match of search terms
+        page_size - Number of pages to grab on each call
+        max_results - Maximum number of results to return
+        video_fields - list of video fields to populate
+        custom_fields - list of custom fields to populate in the result
+        media_delivery - should urls be http, http_ios or default
+
+        Outputs:
+        List of video objects, which are dictionaries with the
+        requested fields filled out.
+        '''
+        results = []
+        cur_page = 0
+        while max_results is None or len(results) < max_results:
+            # Build the result
+            url_params = {
+                'command' : 'search_videos',
+                'token' : self.read_token,
+                'output' : 'json',
+                'media_delivery' : media_delivery,
+                'page_number' : cur_page,
+                'page_size' : page_size
+                }
+            if _all is not None:
+                url_params['all'] = ','.join(
+                    ['%s:%s' % x if x[0] is not None else str(x[1]) 
+                     for x in _all])
+
+            if _any is not None:
+                url_params['any'] = ','.join(
+                    ['%s:%s' % x if x[0] is not None else str(x[1]) 
+                     for x in _any])
+
+            if none is not None:
+                url_params['none'] = ','.join(
+                    ['%s:%s' % x if x[0] is not None else str(x[1]) 
+                     for x in none])
+
+            if sort_by is not None:
+                url_params['sort_by'] = sort_by
+
+            if exact:
+                url_params['exact'] = 'true'
+                
+                
+            if video_fields is not None:
+                video_fields.append('id')
+                url_params['video_fields'] = ','.join(set(video_fields))
+
+            if custom_fields is not None:
+                url_params['custom_fields'] = ','.join(set(custom_fields))
+
+            request = tornado.httpclient.HTTPRequest(
+                '%s?%s' % (self.read_url, urllib.urlencode(url_params)),
+                decompress_response=True,
+                request_timeout = 120.0)
+
+            response = yield tornado.gen.Task(
+                BrightcoveApi.read_connection.send_request, request)
+
+            new_results = self._handle_response(response)
+            results.extend(new_results)
+
+            if len(new_results) < page_size:
+                break
+
+            cur_page += 1
+
+        raise tornado.gen.Return(results)
+
+    def _handle_response(self, response):
+        '''Handles the response from Brightcove
+
+        Returns: a list of video objects
+        '''
+        if response.error:
+            _log.error('Error calling find_videos_by_ids: %s' %
+                       response.body)
+            try:
+                json_data = json.load(response.buffer)
+                if json_data['code'] >= 200:
+                    raise BrightcoveApiClientError(response.error)
+            except ValueError:
+                # It's not JSON data so there was some other error
+                pass    
+            except KeyError:
+                # It may be valid json but doesn't have a code
+                pass
+            raise BrightcoveApiServerError(response.error)
+
+        json_data = json.load(response.buffer)
+        return [x for x in json_data['items'] if x is not None]
 
 class BrightcoveFeedIterator(object):
     '''An iterator that walks through entries from a Brightcove feed.
