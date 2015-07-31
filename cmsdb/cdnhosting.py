@@ -145,7 +145,6 @@ class CDNHosting(object):
         Returns: list [(cdn_url, width, height)]
         '''
         new_serving_thumbs = [] # (url, width, height)
-        upload_futures = []
         
         # NOTE: if _upload_impl returns None, the image is not added to the 
         # list of serving URLs
@@ -155,27 +154,14 @@ class CDNHosting(object):
                     cv_im = pycvutils.from_pil(image)
                     cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
                     im = pycvutils.to_pil(cv_im_r)
-                    upload_futures.append(self._upload_and_check_image(
-                        im, tid, url, overwrite))
+                    cdn_val = yield self._upload_and_check_image(
+                        im, tid, url, overwrite)
+                    new_serving_thumbs.append(cdn_val)
             else:
-                upload_futures.append(self._upload_and_check_image(
-                        image, tid, url, overwrite))
+                cdn_val = yield self._upload_and_check_image(
+                    image, tid, url, overwrite)
+                new_serving_thumbs.append(cdn_val)
 
-            # TODO: Once we use Tornado 4.2+, just use
-            # tornado.gen.multi_future with quiet exceptions. The
-            # problem here is that if there are multiple errors, our
-            # logging system gets overloaded.
-            exception_found = None
-            for future in upload_futures:
-                try:
-                    cdn_val = yield future
-                    if cdn_val:
-                        new_serving_thumbs.append(cdn_val)
-                except IOError as e:
-                    exception_found = e
-
-            if exception_found is not None:
-                raise exception_found
         except IOError:
             statemon.state.increment('upload_error')
             raise
@@ -289,11 +275,15 @@ class AWSHosting(CDNHosting):
     
     def __init__(self, cdn_metadata):
         super(AWSHosting, self).__init__(cdn_metadata)
-        self.neon_bucket = (isinstance(
-            cdn_metadata, cmsdb.neondata.NeonCDNHostingMetadata)
-            or isinstance(
-                cdn_metadata,
-                cmsdb.neondata.PrimaryNeonHostingMetadata))
+        self.policy = cdn_metadata.policy
+        if self.policy is None:
+            neon_bucket = (isinstance(
+                cdn_metadata, cmsdb.neondata.NeonCDNHostingMetadata)
+                or isinstance(
+                    cdn_metadata,
+                    cmsdb.neondata.PrimaryNeonHostingMetadata))
+            if neon_bucket:
+                self.policy = 'public-read'
         self.s3conn = S3Connection(cdn_metadata.access_key,
                                    cdn_metadata.secret_key)
         self.s3bucket_name = cdn_metadata.bucket_name
@@ -310,9 +300,18 @@ class AWSHosting(CDNHosting):
     def _get_bucket(self):
         '''Connects to the bucket if it's not already done'''
         if self.s3bucket is None:
-            self.s3bucket = yield utils.botoutils.run_async(
-                self.s3conn.get_bucket,
-                self.s3bucket_name)
+            try:
+                self.s3bucket = yield utils.botoutils.run_async(
+                    self.s3conn.get_bucket,
+                    self.s3bucket_name)
+            except S3ResponseError as e:
+                if e.status == 403:
+                    # It's a permissions error so just get the bucket
+                    # and don't validate it
+                    self.s3bucket = self.s3conn.get_bucket(
+                        self.s3bucket_name, validate=False)
+                else:
+                    raise
         raise tornado.gen.Return(self.s3bucket)
 
     @utils.sync.optional_sync
@@ -351,14 +350,14 @@ class AWSHosting(CDNHosting):
         filestream.seek(0)
         imgdata = filestream.read()
 
-        # You may not have permission to do this for
-        # customer bucket, so check if neon bucket 
-        policy = None
-        if self.neon_bucket:
-            policy = 'public-read'
-
         try:
-            key = s3bucket.get_key(key_name)
+            try:
+                key = s3bucket.get_key(key_name)
+            except S3ResponseError as e:
+                if e.status == 403:
+                    key = None
+                else:
+                    raise
             if key is None:
                 key = s3bucket.new_key(key_name)
             elif not overwrite:
@@ -377,7 +376,7 @@ class AWSHosting(CDNHosting):
                 key.set_contents_from_string,
                 imgdata,
                 {'Content-Type':'image/jpeg'},
-                policy=policy,
+                policy=self.policy,
                 replace=overwrite)
         except BotoServerError as e:
             _log.error_n(
