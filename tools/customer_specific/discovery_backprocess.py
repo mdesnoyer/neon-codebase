@@ -62,7 +62,11 @@ def main():
         for video in videos:
             video['id'] = video['customFields']['newmediapaid']
 
-            job_id = yield integration.submit_one_video_object(video)
+            try:
+                job_id = yield integration.submit_one_video_object(video)
+            except Exception as e:
+                _log.exception('Unexpected error submitting video')
+                continue
 
             n_processed += 1
             if n_processed % 100 == 0:
