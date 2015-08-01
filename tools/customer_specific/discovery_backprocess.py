@@ -66,7 +66,8 @@ def main():
 
             n_processed += 1
             if n_processed % 100 == 0:
-                _log.info('Processed %i videos' % n_processed)
+                _log.info('Processed %i videos. Last job %s' % 
+                          (n_processed, job_id))
 
             time.sleep(3600.0/options.max_submit_rate)
 
