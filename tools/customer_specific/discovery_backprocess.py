@@ -62,7 +62,7 @@ def main():
         for video in videos:
             video['id'] = video['customFields']['newmediapaid']
 
-            yield integration.submit_one_video_object(video)
+            job_id = yield integration.submit_one_video_object(video)
 
             n_processed += 1
             if n_processed % 100 == 0:
