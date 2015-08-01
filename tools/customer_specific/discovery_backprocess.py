@@ -30,7 +30,7 @@ _log = logging.getLogger(__name__)
 @tornado.gen.coroutine
 def main():
     plat = neondata.BrightcovePlatform.get('gvs3vytvg20ozp78rolqmdfa', '71')
-    integration = BrightcoveIntegration('gvs3vytvg20ozp78rolqmdfa', plat)
+    integration = BrightcoveIntegration('314', plat)
 
     bc_api = plat.get_api()
 
