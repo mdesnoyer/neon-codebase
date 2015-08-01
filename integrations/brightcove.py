@@ -66,7 +66,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         for rend in renditions:
             f_width = rend["frameWidth"]
             url = rend["url"]
-            video_urls[f_width] = url 
+            if url is not None:
+                video_urls[f_width] = url
+            elif rend['remoteUrl'] is not None:
+                video_urls[f_width] = rend['remoteUrl']
        
         # no renditions
         if len(video_urls.keys()) < 1:
@@ -136,7 +139,11 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         '''
         thumb_url, thumb_data = \
               BrightcoveIntegration._get_best_image_info(vid_obj)
-        if thumb_url is None or vid_obj['length'] < 0:
+        if (thumb_url is None or 
+            vid_obj['length'] < 0 or 
+            thumb_url.endswith('.m3u8') or 
+            thumb_url.startswith('rtmp://') or 
+            thumb_url.endswith('.csmil')):
             _log.warn('Brightcove id %s is a live stream' % vid_obj['id'])
             raise tornado.gen.Return(None)
             
