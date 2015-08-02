@@ -37,7 +37,7 @@ def main():
         to_save.append(thumb_urls)
         if len(to_save) >= 20:
             try:
-                neondata.ThumbnailServingURLs.save_many(to_save)
+                neondata.ThumbnailServingURLs.save_all(to_save)
             except Exception as e:
                 _log.error('Error saving thumbnails %s' % e)
             to_save = []
