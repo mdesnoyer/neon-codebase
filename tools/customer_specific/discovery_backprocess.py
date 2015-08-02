@@ -30,32 +30,52 @@ _log = logging.getLogger(__name__)
 @tornado.gen.coroutine
 def main():
     plat = neondata.BrightcovePlatform.get('gvs3vytvg20ozp78rolqmdfa', '71')
+    integration = BrightcoveIntegration('314', plat)
 
     bc_api = plat.get_api()
 
-    videos = yield bc_api.search_videos(
-        _all=[('network', 'dsc')],
-        exact=True,
-        video_fields=BrightcoveIntegration.get_submit_video_fields(),
-        sort_by='REFERENCE_ID:ASC',
-        async=True)
-
-    videos = [x for x in videos if x['id'] not in plat.videos]
-
-    _log.info('Found %i videos to submit' % len(videos))
-
-    integration = BrightcoveIntegration('gvs3vytvg20ozp78rolqmdfa', plat)
-
+    video_fields = BrightcoveIntegration.get_submit_video_fields()
+    video_fields.append('customFields')
+    
+    cur_page = 0
     n_processed = 0
-    for video in videos:
+    while True:
 
-        yield integration.submit_one_video_object(video)
+        videos = yield bc_api.search_videos(
+            _all=[('network', 'dsc')],
+            exact=True,
+            video_fields=video_fields,
+            sort_by='REFERENCE_ID:ASC',
+            page=cur_page,
+            async=True)
+        if len(videos) == 0:
+            break
 
-        n_processed += 1
-        if n_processed % 100 == 0:
-            _log.info('Processed %i videos' % n_processed)
+        videos = [x for x in videos if 
+                  'newmediapaid' in x['customFields'] and 
+                  x['customFields']['newmediapaid'] 
+                  not in plat.videos]
 
-        time.sleep(3600.0/options.max_submit_rate)
+        _log.info('Found %i videos to submit on this page' % len(videos))
+
+    
+        for video in videos:
+            video['id'] = video['customFields']['newmediapaid']
+
+            try:
+                job_id = yield integration.submit_one_video_object(video)
+            except Exception as e:
+                _log.exception('Unexpected error submitting video')
+                continue
+
+            n_processed += 1
+            if n_processed % 100 == 0:
+                _log.info('Processed %i videos. Last job %s' % 
+                          (n_processed, job_id))
+
+            time.sleep(3600.0/options.max_submit_rate)
+
+        cur_page += 1
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

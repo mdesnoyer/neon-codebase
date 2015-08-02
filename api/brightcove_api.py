@@ -859,7 +859,7 @@ class BrightcoveApi(object):
     def search_videos(self, _all=None, _any=None, none=None, sort_by=None,
                       exact=False, page_size=100, max_results=None,
                       video_fields=None, custom_fields=None, 
-                      media_delivery='http'):
+                      media_delivery='http', page=None):
         '''Search for videos based on some criteria.
 
         For more details on the call, see
@@ -876,13 +876,15 @@ class BrightcoveApi(object):
         video_fields - list of video fields to populate
         custom_fields - list of custom fields to populate in the result
         media_delivery - should urls be http, http_ios or default
+        page - page to return. If set, only one page of results will be
+               returned
 
         Outputs:
         List of video objects, which are dictionaries with the
         requested fields filled out.
         '''
         results = []
-        cur_page = 0
+        cur_page = 0 if page is None else page
         while max_results is None or len(results) < max_results:
             # Build the result
             url_params = {
@@ -933,7 +935,7 @@ class BrightcoveApi(object):
             new_results = self._handle_response(response)
             results.extend(new_results)
 
-            if len(new_results) < page_size:
+            if len(new_results) < page_size or page is not None:
                 break
 
             cur_page += 1

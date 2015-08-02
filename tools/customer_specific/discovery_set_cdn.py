@@ -30,4 +30,4 @@ hoster = cmsdb.cdnhosting.CDNHosting.create(s3cdn)
 
 im = utils.imageutils.PILImageUtils.create_random_image(480,640)
 
-print hoster._upload_impl(im, 'testtid2')
+print hoster._upload_impl(im, 'testtid21')
