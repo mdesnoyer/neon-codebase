@@ -25,6 +25,7 @@ def main():
     shrunken_count = {}
     same_count = {}
     n_processed = 0
+    to_save = []
 
     for thumb_urls in neondata.ThumbnailServingURLs.iterate_all():
         account_id = thumb_urls.get_id().partition('_')[0]
@@ -33,10 +34,13 @@ def main():
         else:
             same_count[account_id] = same_count.get(account_id, 0) + 1
 
-        try:
-            thumb_urls.save()
-        except Exception as e:
-            _log.error('Error saving thumbnail %s' % thumb_urls.get_id())
+        to_save.append(thumb_urls)
+        if len(to_save) >= 20:
+            try:
+                neondata.ThumbnailServingURLs.save_many(to_save)
+            except Exception as e:
+                _log.error('Error saving thumbnails %s' % e)
+            to_save = []
 
         n_processed += 1
         if n_processed % 1000 == 0:
