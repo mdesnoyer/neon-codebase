@@ -76,7 +76,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             return d_url
         
         if self.platform.rendition_frame_width:
-            if video_urls.has_key(fself.platform.rendition_frame_width):
+            if video_urls.has_key(self.platform.rendition_frame_width):
                 return video_urls[self.platform.rendition_frame_width] 
             closest_f_width = min(
                 video_urls.keys(),
