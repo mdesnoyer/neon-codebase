@@ -88,8 +88,8 @@ class Model(object):
         it requires so long as it knows where model_data is, which it
         can determine based on where the model pickle is.
         '''
-        for f in self.filt.filters:
-            f.restore_additional_data(filename)
+        if self.filt is not None:
+            self.filt.restore_additional_data(filename)
 
 
 def save_model(model, filename):

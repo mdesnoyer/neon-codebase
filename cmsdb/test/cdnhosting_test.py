@@ -50,7 +50,9 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
           neondata.CloudinaryCDNHostingMetadata
         self.datamock.NeonCDNHostingMetadata = neondata.NeonCDNHostingMetadata
         self.datamock.PrimaryNeonHostingMetadata = \
-                            neondata.PrimaryNeonHostingMetadata
+          neondata.PrimaryNeonHostingMetadata
+        self.datamock.ThumbnailServingURLs.create_filename = \
+          neondata.ThumbnailServingURLs.create_filename
 
         # Mock out the cdn url check
         self.cdn_check_patcher = patch('cmsdb.cdnhosting.utils.http')
@@ -599,18 +601,17 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
 
         # Check serving URLs
         ts = neondata.ThumbnailServingURLs.get(tid)
-        self.assertGreater(len(ts.size_map), 0)
+        self.assertGreater(ts.get_serving_url_count(), 0)
 
         base_urls = []
 
         # Verify the final image URLs. This should be the account id 
         # followed by 3 sub folders whose name should be a single letter
         # (lower or uppercase) choosen randomly, then the thumbnail file
-        for (w, h), url in ts.size_map.iteritems():
-            url = ts.get_serving_url(w, h)
+        for (w, h), url in ts:
             url_re = ('(http://cdn[12].akamai.com/%s/[a-zA-Z]/[a-zA-Z]/'
                       '[a-zA-Z])/neontn%s_w%s_h%s.jpg' % 
-                      (url_root_folder,tid, w, h))
+                      (url_root_folder, tid, w, h))
                 
             self.assertRegexpMatches(url, url_re)
 
@@ -677,7 +678,7 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
 
         # Check serving URLs
         ts = neondata.ThumbnailServingURLs.get(tid)
-        self.assertGreater(len(ts.size_map), 0)
+        self.assertGreater(len(ts), 0)
 
         # Verify the final image URLs. This should be the account id 
         # followed by 3 sub folders whose name should be a single letter

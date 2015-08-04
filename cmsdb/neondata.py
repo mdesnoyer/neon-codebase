@@ -34,6 +34,7 @@ import copy
 import datetime
 import errno
 import hashlib
+import itertools
 import simplejson as json
 import logging
 import multiprocessing
@@ -127,7 +128,7 @@ def _object_to_classname(otype=None):
     as a string.
     '''
     cname = None
-    if otype:
+    if otype is not None:
         if isinstance(otype, basestring):
             cname = otype
         else:
@@ -774,7 +775,7 @@ class StoredObject(object):
 
     This contains common routines for interacting with the data.
     TODO: Convert all the objects to use this consistent interface.
-    '''
+    ''' 
     def __init__(self, key):
         self.key = str(key)
 
@@ -1103,6 +1104,31 @@ class StoredObject(object):
         db_connection.clear_db()
 
     @classmethod
+    def delete(cls, key, callback=None):
+        '''Delete an object from the database.
+
+        Returns True if the object was successfully deleted
+        '''
+        return StoredObject.delete_many([key], callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        '''Deletes many objects simultaneously
+
+        Inputs:
+        keys - List of keys to delete
+
+        Returns:
+        The number of keys that were removed
+        '''
+        db_connection = DBConnection.get(cls)
+            
+        if callback:
+            db_connection.conn.delete(*keys, callback=callback)
+        else:
+            return db_connection.blocking_conn.delete(*keys)
+        
+    @classmethod
     def _handle_all_changes(cls, msg, func, conn, get_object):
         '''Handles any changes to objects subscribed on pubsub.
 
@@ -1313,6 +1339,18 @@ class NamespacedStoredObject(StoredObject):
             [cls.format_key(x) for x in keys],
             func,
             create_missing=create_missing,
+            callback=callback)
+
+    @classmethod
+    def delete(cls, key, callback=None):
+        return super(NamespacedStoredObject, cls).delete(
+            cls.format_key(key),
+            callback=callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        return super(NamespacedStoredObject, cls).delete_many(
+            [cls.format_key(k) for k in keys],
             callback=callback)
 
 class DefaultedStoredObject(NamespacedStoredObject):
@@ -2134,7 +2172,6 @@ class AbstractPlatform(NamespacedStoredObject):
     @classmethod
     def modify(cls, api_key, i_id, func, create_missing=False, callback=None):
         def _set_parameters(x):
-            _log.warn(x)
             api_key, i_id = x.get_id().split('_')
             x.neon_api_key = api_key
             x.integration_id = i_id
@@ -2157,6 +2194,19 @@ class AbstractPlatform(NamespacedStoredObject):
              api_key, i_id in keys],
             func,
             create_missing=create_missing,
+            callback=callback)
+
+    @classmethod
+    def delete(cls, api_key, i_id, callback=None):
+        return super(AbstractPlatform, cls).delete(
+            cls._generate_subkey(api_key, i_id),
+            callback=callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        return super(AbstractPlatform, cls).delete_many(
+            [cls._generate_subkey(api_key, i_id) for 
+             api_key, i_id in keys],
             callback=callback)
 
     def to_json(self):
@@ -2274,17 +2324,11 @@ class AbstractPlatform(NamespacedStoredObject):
         ''' erase all data ''' 
         db_connection = DBConnection.get(cls)
         db_connection.clear_db()
+ 
 
-    @classmethod
-    def _delete_many_keys(cls, keys):
-        #TODO: (Sunil/ Mark) have individual methods in each
-        # of the stored objects to delete the keys
-        db_connection = DBConnection.get(cls)
-        for key in keys:
-            db_connection.blocking_conn.delete(key) 
-
-    @classmethod
-    def delete_all_video_related_data(cls, platform_instance, platform_vid,
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete_all_video_related_data(self, platform_vid,
             *args, **kwargs):
         '''
         Delete all data related to a given video
@@ -2306,25 +2350,29 @@ class AbstractPlatform(NamespacedStoredObject):
                 _log.error('no such video to delete')
                 return
         
-        i_vid = InternalVideoID.generate(platform_instance.neon_api_key, 
-                                        platform_vid)
-        vm = VideoMetadata.get(i_vid)
-        keys_to_delete = []
-        
-        # get all the keys to delete 
-        keys_to_delete.append("request_%s_%s" % (
-                             platform_instance.neon_api_key, vm.job_id))
-        keys_to_delete.append(vm.key)
-        for tid in vm.thumbnail_ids:
-            keys_to_delete.append(tid)
-            #serving urls
-            keys_to_delete.append("thumbnailservingurls_%s" %tid)
-
-        cls._delete_many_keys(keys_to_delete)
-
+        i_vid = InternalVideoID.generate(self.neon_api_key, 
+                                         platform_vid)
+        vm = yield tornado.gen.Task(VideoMetadata.get, i_vid)
         # update platform instance
-        cls.modify(platform_instance.neon_api_key, '0', _del_video)
+        yield tornado.gen.Task(self.modify,
+                               self.neon_api_key, '0',
+                               _del_video)
 
+        # delete the video object
+        yield tornado.gen.Task(VideoMetadata.delete, i_vid)
+
+        # delete the request object
+        yield tornado.gen.Task(NeonApiRequest.delete, vm.job_id,
+                               self.neon_api_key)
+
+        # delete the thumbnails
+        yield tornado.gen.Task(ThumbnailMetadata.delete_many,
+                               vm.thumbnail_ids)
+
+        # delete the serving urls
+        yield tornado.gen.Task(ThumbnailServingURLs.delete_many,
+                               vm.thumbnail_ids)
+        
 class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
@@ -3048,6 +3096,19 @@ class NeonApiRequest(NamespacedStoredObject):
             func,
             callback=callback)
 
+    @classmethod
+    def delete(cls, job_id, api_key, callback=None):
+        return super(NeonApiRequest, cls).delete(
+            cls._generate_subkey(job_id, api_key),
+            callback=callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        return super(NeonApiRequest, cls).delete_many(
+            [cls._generate_subkey(job_id, api_key) for 
+             job_id, api_key in keys],
+            callback=callback)
+
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def save_default_thumbnail(self, cdn_metadata=None):
@@ -3203,6 +3264,7 @@ class ThumbnailID(AbstractHashGenerator):
 
     Thumbnail ID is: <internal_video_id>_<md5 MD5 hash of image data>
     '''
+    VALID_REGEX = '%s_[0-9A-Za-z]+' % InternalVideoID.VALID_INTERNAL_REGEX
 
     @staticmethod
     def generate(_input, internal_video_id):
@@ -3250,12 +3312,40 @@ class ThumbnailServingURLs(NamespacedStoredObject):
     Specifically, maps:
 
     thumbnail_id -> { (width, height) -> url }
-    '''
 
-    def __init__(self, thumbnail_id, size_map=None):
+    or, instead of a full url map, there can be a base_url and a list of sizes.
+    In that case, the full url would be generated by 
+    <base_url>/FNAME_FORMAT % (thumbnail_id, width, height)
+    '''    
+    FNAME_FORMAT = "neontn%s_w%s_h%s.jpg"
+    FNAME_REGEX = ('neontn(%s)_w([0-9]+)_h([0-9]+)\.jpg' % 
+                   ThumbnailID.VALID_REGEX)
+
+    def __init__(self, thumbnail_id, size_map=None, base_url=None, sizes=None):
         super(ThumbnailServingURLs, self).__init__(thumbnail_id)
         self.size_map = size_map or {}
+        
+        self.base_url = base_url
+        self.sizes = sizes or set([]) # List of (width, height)
 
+    def __eq__(self, other):
+        '''Sets can't do cmp, so we need to overright so that == and != works.
+        '''
+        if ((other is None) or 
+            (type(other) != type(self)) or 
+            (self.__dict__.keys() != other.__dict__.keys())):
+            return False
+        for k, v in self.__dict__.iteritems():
+            if v != other.__dict__[k]:
+                return False
+        return True
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __len__(self):
+        return len(self.size_map) + len(self.sizes)
+    
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
@@ -3264,13 +3354,25 @@ class ThumbnailServingURLs(NamespacedStoredObject):
 
     def get_thumbnail_id(self):
         '''Return the thumbnail id for this mapping.'''
-        return str(self.key.partition('_')[2])
+        return self.get_id()
 
     def add_serving_url(self, url, width, height):
         '''Adds a url to serve for a given width and height.
 
         If there was a previous entry, it is overwritten.
         '''
+        if self.base_url is not None:
+            urlRe = re.compile(
+                '%s/%s' % (re.escape(self.base_url),
+                           ThumbnailServingURLs.FNAME_REGEX))
+            if urlRe.match(url):
+                self.sizes.add((width, height))
+                return
+            else:
+                # TODO(mdesnoyer): once the db is cleaned, make this
+                # raise a ValueError
+                _log.warn_n('url %s does not conform to base %s' %
+                            (url, self.base_url))
         self.size_map[(width, height)] = str(url)
 
     def get_serving_url(self, width, height):
@@ -3278,7 +3380,30 @@ class ThumbnailServingURLs(NamespacedStoredObject):
 
         Raises a KeyError if there isn't one.
         '''
+        if (width, height) in self.sizes:
+            return (self.base_url + '/' + ThumbnailServingURLs.FNAME_FORMAT %
+                    (self.get_thumbnail_id(), width, height))
         return self.size_map[(width, height)]
+
+    def get_serving_url_count(self):
+        '''Return the number of serving urls in this object.'''
+        return len(self.size_map) + len(self.sizes)
+
+    def is_valid_size(self, width, height):
+        '''Returns true if there is a url for this size image.'''
+        sz = (width, height)
+        return sz in self.sizes or sz in self.size_map
+
+    def __iter__(self):
+        '''Iterator of size, url pairs.'''
+        return itertools.chain(
+            self.size_map.iteritems(),
+            ((k, self.get_serving_url(*k)) for k in self.sizes))
+
+    @staticmethod
+    def create_filename(tid, width, height):
+        '''Creates a filename for a given thumbnail id at a specific size.'''
+        return ThumbnailServingURLs.FNAME_FORMAT % (tid, width, height)
 
     def to_dict(self):
         new_dict = {
@@ -3286,15 +3411,26 @@ class ThumbnailServingURLs(NamespacedStoredObject):
             '_data': copy.copy(self.__dict__)
             }
         new_dict['_data']['size_map'] = self.size_map.items()
+        new_dict['_data']['sizes'] = list(self.sizes)
         return new_dict
 
     @classmethod
     def _create(cls, key, obj_dict):
         obj = super(ThumbnailServingURLs, cls)._create(key, obj_dict)
         if obj:
-            # Load in the size map as a dictionary
-            obj.size_map = dict([[tuple(x[0]), str(x[1])] for 
-                                 x in obj.size_map])
+            # Convert the sizes into tuples and a set
+            obj.sizes = set((tuple(x) for x in obj.sizes))
+            
+            # Load in the url entries into the object
+            size_map = obj.size_map
+            obj.size_map = {}
+            # Find the base url to save that way
+            bases = set((os.path.dirname(x[1]) for x in size_map))
+            if len(bases) == 1 and obj.base_url is None:
+                obj.base_url = bases.pop()
+            for k, v in size_map:
+                width, height = k
+                obj.add_serving_url(v, width, height)
             return obj
 
         

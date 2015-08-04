@@ -11,13 +11,13 @@ if sys.path[0] != __base_path__:
 import api.akamai_api
 import base64
 import boto.exception
+import cmsdb.neondata
 import json
 import hashlib
 import random
 import re
 import socket
 import string
-import cmsdb.neondata
 import time
 import tornado.gen
 import urllib
@@ -110,7 +110,6 @@ def create_s3_redirect(dest_key, src_key, dest_bucket=None,
 
 class CDNHosting(object):
     '''Abstract class for hosting images on a CDN.'''
-
     def __init__(self, cdn_metadata):
         '''Abstract CDN hosting class.
 
@@ -287,8 +286,6 @@ class CDNHosting(object):
                              " implement" % cdn_metadata.__class__.__name__)
 
 class AWSHosting(CDNHosting):
-
-    neon_fname_fmt = "neontn%s_w%s_h%s.jpg" 
     
     def __init__(self, cdn_metadata):
         super(AWSHosting, self).__init__(cdn_metadata)
@@ -342,8 +339,9 @@ class AWSHosting(CDNHosting):
         if self.make_tid_folders:
             name_pieces.append("%s.jpg" % re.sub('_', '/', tid))
         else:
-            name_pieces.append(AWSHosting.neon_fname_fmt % 
-                               (tid, image.size[0], image.size[1]))
+            name_pieces.append(
+                cmsdb.neondata.ThumbnailServingURLs.create_filename(
+                tid, image.size[0], image.size[1]))
         key_name = '/'.join(name_pieces)
 
         cdn_url = "%s/%s" % (cdn_prefix, key_name)
@@ -511,8 +509,6 @@ class CloudinaryHosting(CDNHosting):
 
 class AkamaiHosting(CDNHosting):
 
-    neon_fname_fmt = "neontn%s_w%s_h%s.jpg" 
-
     def __init__(self, cdn_metadata):
         super(AkamaiHosting, self).__init__(cdn_metadata)
         if cdn_metadata.folder_prefix:
@@ -557,8 +553,9 @@ class AkamaiHosting(CDNHosting):
             name_pieces.append(rng.choice(string.ascii_letters))
 
         # Add the filename
-        name_pieces.append(AkamaiHosting.neon_fname_fmt % 
-                           (tid, image.size[0], image.size[1]))
+        name_pieces.append(
+            cmsdb.neondata.ThumbnailServingURLs.create_filename(
+                tid, image.size[0], image.size[1]))
 
         image_url = '/'.join(name_pieces)
         
