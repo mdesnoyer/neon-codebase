@@ -767,6 +767,11 @@ class MetricType:
     CLICKS = 'clicks'
     PLAYS = 'plays'
 
+class IntegrationType(object): 
+    BRIGHTCOVE = 'brightcove'
+    OOYALA = 'ooyala'
+    OPTIMIZELY = 'optimizely'
+
 ##############################################################################
 class StoredObject(object):
     '''Abstract class to represent an object that is stored in the database.

@@ -22,8 +22,22 @@ from StringIO import StringIO
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse 
 from tornado.httputil import HTTPServerRequest
 
-import bcove_responses
 #from tornado.testing import AsyncHTTPTestCase
+
+class TestNewAccountHandler(tornado.testing.AsyncHTTPTestCase): 
+    def get_app(self): 
+        return controllers.application
+
+    @tornado.testing.gen_test
+    def test_get_new_acct_not_implemented(self):
+        try: 
+            url = '/api/v2/accounts' 
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    method="GET")
+	except tornado.httpclient.HTTPError as e:
+	    self.assertEquals(e.code, 501) 
+	    pass 
+
 
 class TestAccountHandler(tornado.testing.AsyncHTTPTestCase):
     def get_app(self): 
@@ -37,6 +51,27 @@ class TestAccountHandler(tornado.testing.AsyncHTTPTestCase):
                                                     method="GET")
 	except tornado.httpclient.HTTPError as e:
 	    self.assertEquals(e.code, 400) 
+	    pass
+ 
+    @tornado.testing.gen_test
+    def test_post_acct_not_implemented(self):
+        try: 
+            url = '/api/v2/124abc' 
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    body='abc123', 
+                                                    method="POST")
+	except tornado.httpclient.HTTPError as e:
+	    self.assertEquals(e.code, 501) 
+	    pass 
+    
+    @tornado.testing.gen_test
+    def test_delete_acct_not_implemented(self):
+        try: 
+            url = '/api/v2/124abc' 
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    method='DELETE')
+	except tornado.httpclient.HTTPError as e:
+	    self.assertEquals(e.code, 501) 
 	    pass 
     
     @tornado.testing.gen_test 
@@ -50,7 +85,7 @@ class TestAccountHandler(tornado.testing.AsyncHTTPTestCase):
 	    self.assertEquals(response.code, 200)
             rjson = json.loads(response.body)
             self.assertEquals(rjson['customer_name'], '123abc') 
-            url = '%s%s' % ('/api/v2/', rjson['neon_api_key']) 
+            url = '/api/v2/%s' % (rjson['neon_api_key']) 
             response = yield self.http_client.fetch(self.get_url(url), 
                                                     method="GET")
             rjson2 = json.loads(response.body) 
@@ -73,10 +108,6 @@ class TestAccountHandler(tornado.testing.AsyncHTTPTestCase):
     def test_update_acct(self):  
         self.assertEquals(1,1)
  
-    @tornado.testing.gen_test 
-    def test_not_implemented_methods(self):  
-        self.assertEquals(1,1)
- 
 class TestOoyalaIntegrationHandler(tornado.testing.AsyncHTTPTestCase): 
     def get_app(self): 
         return controllers.application
@@ -90,7 +121,7 @@ class TestOoyalaIntegrationHandler(tornado.testing.AsyncHTTPTestCase):
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
-        url = '%s%s%s' % ('/api/v2/',self.account_id_api_key,'/integrations/ooyala?publisher_id=123123abc')
+        url = '/api/v2/%s/integrations/ooyala?publisher_id=123123abc' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -105,7 +136,7 @@ class TestOoyalaIntegrationHandler(tornado.testing.AsyncHTTPTestCase):
  
     @tornado.testing.gen_test 
     def test_get_integration(self):
-        url = '%s%s%s%s' % ('/api/v2/',self.account_id_api_key,'/integrations/ooyala?integration_id=',self.test_i_id)
+        url = '/api/v2/%s/integrations/ooyala?integration_id=%s' % (self.account_id_api_key, self.test_i_id)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         self.assertEquals(response.code, 200)
@@ -119,12 +150,7 @@ class TestOoyalaIntegrationHandler(tornado.testing.AsyncHTTPTestCase):
     @tornado.testing.gen_test 
     def test_put_integration(self):
         ooyala_api_key = 'testapikey' 
-        url = '%s%s%s%s%s%s' % ('/api/v2/',
-                            self.account_id_api_key,
-                            '/integrations/ooyala?integration_id=',
-                            self.test_i_id, 
-                            '&ooyala_api_key=', 
-                            ooyala_api_key)
+        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&ooyala_api_key=%s' % (self.account_id_api_key, self.test_i_id, ooyala_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='PUT', 
@@ -150,7 +176,7 @@ class TestBrightcoveIntegrationHandler(tornado.testing.AsyncHTTPTestCase):
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
-        url = '%s%s%s' % ('/api/v2/',self.account_id_api_key,'/integrations/brightcove?publisher_id=123123abc')
+        url = '/api/v2/%s/integrations/brightcove?publisher_id=123123abc' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -165,7 +191,7 @@ class TestBrightcoveIntegrationHandler(tornado.testing.AsyncHTTPTestCase):
  
     @tornado.testing.gen_test 
     def test_get_integration(self):
-        url = '%s%s%s%s' % ('/api/v2/',self.account_id_api_key,'/integrations/brightcove?integration_id=',self.test_i_id)
+        url = '/api/v2/%s/integrations/brightcove?integration_id=%s' % (self.account_id_api_key, self.test_i_id)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         self.assertEquals(response.code, 200)
@@ -179,12 +205,7 @@ class TestBrightcoveIntegrationHandler(tornado.testing.AsyncHTTPTestCase):
     @tornado.testing.gen_test 
     def test_put_integration(self):
         read_token = 'readtoken' 
-        url = '%s%s%s%s%s%s' % ('/api/v2/',
-                            self.account_id_api_key,
-                            '/integrations/brightcove?integration_id=',
-                            self.test_i_id, 
-                            '&read_token=', 
-                            read_token)
+        url = '/api/v2/%s/integrations/brightcove?integration_id=%s&read_token=%s' % (self.account_id_api_key, self.test_i_id, read_token)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='PUT', 
@@ -209,11 +230,11 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         defop = neondata.BrightcovePlatform.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
         user.modify(self.account_id_api_key, lambda p: p.add_platform(defop))
     
-    @unittest.skip("do not need a post right now") 
+    @unittest.skip("not implemented yet") 
     @patch('api.brightcove_api.BrightcoveApi.read_connection.send_request') 
     @tornado.testing.gen_test
     def test_post_video(self, http_mock):
-        url = '%s%s%s%s%s' % ('/api/v2/',self.account_id_api_key,'/videos?integration_id=',self.test_i_id,'&external_video_ref=1234ascs')
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
         send_request_mock = self._callback_wrap_mock(http_mock.send_request)
         send_request_mock.fetch().side_effect = [HTTPResponse(HTTPRequest('http://test_bc'), 200, buffer=StringIO('{"job_id":"j123"}'))]
         request = HTTPServerRequest(uri=self.get_url(url), method='POST') 
@@ -227,7 +248,7 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         try: 
             vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
             vm.save()
-            url = '%s%s%s' % ('/api/v2/',self.account_id_api_key,'/videos')
+            url = '/api/v2/%s/videos' % (self.account_id_api_key)
             response = yield self.http_client.fetch(self.get_url(url),
                                                     method='GET')
         except tornado.httpclient.HTTPError as e:
@@ -237,7 +258,7 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
     def test_get_single_video(self):
         vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
         vm.save()
-        url = '%s%s%s' % ('/api/v2/',self.account_id_api_key,'/videos?video_id=vid1')
+        url = '/api/v2/%s/videos?video_id=vid1' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
        
@@ -249,11 +270,11 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         vm.save()
         vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid2'))
         vm.save()
-        url = '%s%s%s' % ('/api/v2/',self.account_id_api_key,'/videos?video_id=vid1,vid2')
+        url = '/api/v2/%s/videos?video_id=vid1,vid2' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
        
-        rjson = json.loads(response.body) 
+        rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
         self.assertEquals(rjson['video_count'], 2)
 
