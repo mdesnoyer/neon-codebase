@@ -22,6 +22,8 @@ import tornado.web
 import tornado.escape
 import tornado.gen
 import tornado.httpclient
+#import tornado_json
+from tornado_json.requesthandlers import APIHandler
 
 import traceback
 
@@ -85,6 +87,26 @@ def send_json_response(request, data, status=200):
     request.set_status(status)
     request.write(data)
     request.finish()
+
+class APIV2Handler(tornado_json.requesthandlers.APIHandler):
+    '''  
+    @tornado.gen.coroutine
+    def post(self, *args):
+        send_not_implemented_msg(self, 'post')
+    
+    @tornado.gen.coroutine
+    def get(self, *args):  
+        send_not_implemented_msg(self, 'get')
+ 
+    @tornado.gen.coroutine
+    def put(self, *args):
+        send_not_implemented_msg(self, 'put')
+
+    @tornado.gen.coroutine
+    def delete(self, *args): 
+        send_not_implemented_msg(self, 'delete')
+    ''' 
+
 
 '''****************************************************************
 NewAccountHandler : class responsible for creating a new account
@@ -633,8 +655,18 @@ VideoHelper      : helper class responsible for creating new video jobs
 *********************************************************************'''
 class VideoHelper():
     @staticmethod 
+    @tornado.gen.coroutine 
+    def filterFields(video, requested_fields): 
+        return video
+
+    @staticmethod 
     @tornado.gen.coroutine
     def addVideo(request, account_id):
+       '''
+        This addition of video jobs will be handled by the integrations code, 
+        there may be something more to do here, but for now I'm going to leave 
+        it empty
+ 
         schema = Schema({
           Required('account_id') : All(str, Length(min=1, max=256)),
           Required('integration_id') : All(str, Length(min=1, max=256)),
@@ -671,6 +703,7 @@ class VideoHelper():
             raise tornado.gen.Return(result) 
         else: 
             raise SaveError('unable to add to video, unable to process')
+        '''
 
 '''*********************************************************************
 VideoHandler     : class responsible for creating/updating/getting a
@@ -713,28 +746,38 @@ class VideoHandler(tornado.web.RequestHandler):
     Video.get 
     **********************'''    
     @tornado.gen.coroutine
-    def get(self, *args):  
+    def get(self, account_id):  
         try: 
             schema = Schema({
               Required('account_id') : All(str, Length(min=1, max=256)),
               Required('video_id') : All(str, Length(min=1, max=4096)),
               'fields': All(str, Length(min=1, max=4096))
             })
-            args = parse_args(request)
+            args = parse_args(self.request)
             args['account_id'] = account_id_api_key = str(account_id)
             schema(args)
+            video_id = args['video_id'] 
             
+            vid_dict = {} 
             output_list = []
+            internal_video_ids = [] 
             video_ids = video_id.split(',')
-            for vid in video_ids: 
-                internal_video_id = neondata.InternalVideoID.generate(self.api_key,args['video_id'])
-                result = yield tornado.gen.Task(neondata.VideoMetadata.get, 
-                                                internal_video_id)
-                #TODO explode fields and only return what was asked for 
-                output_list.append(result)
-             
-            vid_array['videos'] = output_list
-            output = json.dumps(vid_array) 
+            for v_id in video_ids: 
+                internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,v_id)
+                internal_video_ids.append(internal_video_id)
+ 
+            videos = yield tornado.gen.Task(neondata.VideoMetadata.get_many, 
+                                            internal_video_ids) 
+            if videos:  
+               # TODO explode fields check with voluptuous 
+               # and only return what was asked for
+               import pdb; pdb.set_trace()
+               videos = [obj.__dict__ for obj in videos] 
+               vid_dict['videos'] = videos
+               vid_dict['video_count'] = len(videos)
+
+            output = json.dumps(vid_dict)
+            print output
             code = HTTP_OK
 
         except MultipleInvalid as e: 

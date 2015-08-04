@@ -3629,6 +3629,9 @@ class VideoMetadata(StoredObject):
         # after the request state has been changed to SERVING
         self.serving_url = None
 
+        # when was this object created or updated, set to current time on creation
+        self.created = self.updated = str(datetime.datetime.utcnow())
+
     @classmethod
     def is_valid_key(cls, key):
         return len(key.split('_')) == 2
