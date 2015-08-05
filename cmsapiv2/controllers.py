@@ -643,22 +643,20 @@ class VideoHandler(APIV2Handler):
             schema = Schema({
               Required('account_id') : All(str, Length(min=1, max=256)),
               Required('video_id') : All(str, Length(min=1, max=256)),
-              'testing_enabled': All(int, Length(min=0, max=1))
+              'testing_enabled': All(int, Range(min=0, max=1))
             })
-            args = parse_args(request)
+            args = self.parse_args()
             args['account_id'] = account_id_api_key = str(account_id)
             schema(args)
 
             abtest = bool(args['testing_enabled'])
-            internal_video_id = neondata.InternalVideoID.generate(self.api_key,args['video_id']) 
+            internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,args['video_id']) 
             def _update_video(v): 
                 v.testing_enabled = abtest
-
             result = yield tornado.gen.Task(neondata.VideoMetadata.modify, 
                                             internal_video_id, 
                                             _update_video)
-            output = result.to_json()
-            self.success(output)  
+            self.success(result.to_json())
 
         except MultipleInvalid as e:
             self.error('%s %s' % (e.path[0], e.msg)) 

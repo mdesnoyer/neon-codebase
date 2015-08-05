@@ -218,27 +218,27 @@ class TestBrightcoveIntegrationHandler(tornado.testing.AsyncHTTPTestCase):
 
         self.assertEquals(platform.read_token, read_token)  
 
-class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase): 
+class TestVideoHandler(tornado.testing.AsyncHTTPTestCase): 
     def get_app(self): 
         return controllers.application
     def setUp(self):
-        super(TestVideoHandler, self).setUp()
         user = neondata.NeonUserAccount(customer_name='testingme')
         user.save() 
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testvideohiid'
         defop = neondata.BrightcovePlatform.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
         user.modify(self.account_id_api_key, lambda p: p.add_platform(defop))
+        super(TestVideoHandler, self).setUp()
     
     @unittest.skip("not implemented yet") 
     @patch('api.brightcove_api.BrightcoveApi.read_connection.send_request') 
     @tornado.testing.gen_test
     def test_post_video(self, http_mock):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
-        send_request_mock = self._callback_wrap_mock(http_mock.send_request)
-        send_request_mock.fetch().side_effect = [HTTPResponse(HTTPRequest('http://test_bc'), 200, buffer=StringIO('{"job_id":"j123"}'))]
-        request = HTTPServerRequest(uri=self.get_url(url), method='POST') 
-        response = yield controllers.VideoHelper.addVideo(request, self.account_id_api_key)
+        #send_request_mock = self._callback_wrap_mock(http_mock.send_request)
+        #send_request_mock.fetch().side_effect = [HTTPResponse(HTTPRequest('http://test_bc'), 200, buffer=StringIO('{"job_id":"j123"}'))]
+        #request = HTTPServerRequest(uri=self.get_url(url), method='POST') 
+        #response = yield controllers.VideoHelper.addVideo(request, self.account_id_api_key)
         #rv = yield self.http_client.fetch(self.get_url(url),
         #                                   body='',
         #                                   method='POST',
@@ -287,6 +287,17 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                 method='GET')
        
         self.assertEquals(response.code, 200)
+
+    @tornado.testing.gen_test
+    def test_update_video_testing_enabled(self):
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
+        vm.save()
+        url = '/api/v2/%s/videos?video_id=vid1&testing_enabled=0' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='PUT', 
+                                                allow_nonstandard_methods=True)
+        
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
