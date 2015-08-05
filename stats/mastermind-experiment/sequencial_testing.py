@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+'''
+Simulation on various A/B Testing methods.
+
+Author: Wiley Wang (wang@neon-lab.com)
+Copyright 2015 Neon Labs
+'''
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.stats as spstats
@@ -68,11 +74,12 @@ class MultiArmedBandits(object):
             return (winner_index, value_remaining, winner_franctions, False)
 
 class StatsOptimizingSimulator(object):
-    def __init__(self, bin_size = 100):
+    def __init__(self, bin_size = 100, experiment_number = 500, is_display = False):
         self.bin_size = bin_size
         #self.ctr_array = [0.04, 0.05]
-        self.experiment_number = 500
+        self.experiment_number = experiment_number
         self.max_iteration = 10000
+        self.is_display = is_display
 
     def run_sequencial_experiment(self, conversion_simulator_function):
         sequencial_method = Sequencial()
@@ -172,6 +179,18 @@ class StatsOptimizingSimulator(object):
             bandit_avg = bandit_end_count / (self.experiment_number - bandit_inconclusive_count)
 
         return (bandit_avg, bandit_inconclusive_count, bandit_err_count)
+
+def random_walk(total_amount, step_size = 0.01):
+    ctr_start_pt = 0.05
+    steps = np.random.normal(0, step_size, total_amount)
+    walk = ctr_start_pt
+    walks = np.zeros(total_amount)
+    for i in range(total_amount):
+        walks[i] = walk
+        walk = walk + steps[i]
+        walk = 0.01 if walk < 0.01 else walk
+        walk = 0.3 if walk > 0.3 else walk
+    return walks
 
 def simulator_function_simple(bin_size, count):
     ctr_array = [0.04, 0.05]
@@ -308,117 +327,6 @@ def avg(data, bin_size):
         cum = cum + x
         avg_num.append(float(cum)/float(count))
     return avg_num
-
-def get_bandit_fracs(strategy, baseline, editor, candidates):
-    '''Gets the serving fractions for a multi-armed bandit strategy.
-
-    This uses the Thompson Sampling heuristic solution. See
-    https://support.google.com/analytics/answer/2844870?hl=en for
-    more details.
-    
-    '''
-    run_frac = {}
-    valid_bandits = copy.copy(candidates)
-    value_remaining = None
-    winner_tid = None
-    experiment_frac = strategy.exp_frac
-            
-    valid_bandits = list(valid_bandits)
-
-    # Now determine the serving percentages for each valid bandit
-    # based on a prior of its model score and its measured ctr.
-    bandit_ids = [x.id for x in valid_bandits]
-    conv = dict([(x.id, self._get_prior_conversions(x) +
-                  x.get_conversions())
-            for x in valid_bandits])
-    imp = dict([(x.id, Mastermind.PRIOR_IMPRESSION_SIZE * 
-                         (1 - Mastermind.PRIOR_CTR) + 
-                         x.get_impressions() - conv[x.id])
-                         for x in valid_bandits])
-
-    # Run the monte carlo series
-    MC_SAMPLES = 1000.
-    mc_series = [spstats.beta.rvs(max(1, conv[x]),
-                                  max(1, imp[x]),
-                                  size=MC_SAMPLES)
-                                  for x in bandit_ids]
-    if non_exp_thumb is not None:
-        conv = self._get_prior_conversions(non_exp_thumb) + \
-          non_exp_thumb.get_conversions()
-        mc_series.append(
-            spstats.beta.rvs(max(1, conv),
-                             max(1, Mastermind.PRIOR_IMPRESSION_SIZE * 
-                                    (1 - Mastermind.PRIOR_CTR) + 
-                                    non_exp_thumb.get_impressions()-conv),
-                             size=MC_SAMPLES))
-
-    win_frac = np.array(np.bincount(np.argmax(mc_series, axis=0)),
-                        dtype=np.float) / MC_SAMPLES
-    
-    win_frac = np.append(win_frac, [0.0 for x in range(len(mc_series) - 
-                                                       win_frac.shape[0])])
-    winner_idx = np.argmax(win_frac)
-
-    # Determine the number of real impressions for each entry in win_frac
-    impressions = [x.get_impressions() for x in valid_bandits]
-    if non_exp_thumb is not None:
-        impressions.append(non_exp_thumb.get_impressions())
-
-    # Determine the value remaining. This is equivalent to
-    # determing that one of the other arms might beat the winner
-    # by x%
-    lost_value = ((np.max(mc_series, 0) - mc_series[:][winner_idx]) / 
-                  mc_series[:][winner_idx])
-    value_remaining = np.sort(lost_value)[0.95*MC_SAMPLES]
-
-    # For all those thumbs that haven't been seen for 1000 imp,
-    # make sure that they will get some traffic
-    for i in range(len(valid_bandits)):
-        if impressions[i] < 500:
-            win_frac[i] = max(0.1, win_frac[i])
-    win_frac = win_frac / np.sum(win_frac)
-
-    if win_frac[winner_idx] >= 0.95:
-        # There is a winner. See if there were enough imp to call it
-        if (win_frac.shape[0] == 1 or 
-            impressions[winner_idx] >= 500):
-            # The experiment is done
-            experiment_state = neondata.ExperimentState.COMPLETE
-            try:
-                winner = valid_bandits[winner_idx]
-            except IndexError:
-                winner = non_exp_thumb
-            winner_tid = winner.id
-            return (experiment_state,
-                    self._get_experiment_done_fracs(
-                        strategy, baseline, editor, winner),
-                    value_remaining,
-                    winner_tid)
-
-        else:
-            # Only allow the winner to have 90% of the imp
-            # because there aren't enough impressions to make a good
-            # decision.
-            win_frac[winner_idx] = 0.90
-            other_idx = [x for x in range(win_frac.shape[0])
-                         if x != winner_idx]
-            if np.sum(win_frac[other_idx]) < 1e-5:
-                win_frac[other_idx] = 0.1 / len(other_idx)
-            else:
-                win_frac[other_idx] = \
-                  0.1 / np.sum(win_frac[other_idx]) * win_frac[other_idx]
-
-    # The serving fractions for the experiment are just the
-    # fraction of time that each thumb won the Monte Carlo
-    # simulation.
-    if non_exp_thumb is not None:
-        win_frac = np.around(win_frac[:-1], 2)
-        win_frac = win_frac / np.sum(win_frac)
-    for thumb_id, frac in zip(bandit_ids, win_frac):
-        run_frac[thumb_id] = frac * experiment_frac
-
-    return (experiment_state, run_frac, value_remaining, winner_tid)
-
 
 def simulator():
     ctr_array = [0.04, 0.05]
