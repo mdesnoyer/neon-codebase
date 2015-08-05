@@ -660,6 +660,8 @@ class VideoHandler(APIV2Handler):
 
         except MultipleInvalid as e:
             self.error('%s %s' % (e.path[0], e.msg)) 
+        except Exception as e:
+            self.error('unable to update video', {'account_id', account_id})  
 
 '''*********************************************************************
 OptimizelyIntegrationHandler : class responsible for creating/updating/
