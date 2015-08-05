@@ -21,6 +21,27 @@ statemon.define('bc_api_errors', int)
 
 _log = logging.getLogger(__name__)
 
+def _normalize_thumbnail_url(url):
+    '''Returns a thumb url without transport mechanism or query string.'''
+    if url is None:
+        return None
+    parse = urlparse.urlparse(url)
+    if re.compile('(brightcove)|(bcsecure)').search(parse.netloc):
+        # Brightcove can move the image around, but its basename will
+        # remain the same, so if it is a brightcove url, only look at
+        # the basename.
+        return 'brightcove.com/%s' % (os.path.basename(parse.path))
+    return '%s%s' % (parse.netloc, parse.path)
+
+def _get_urls_from_bc_response(response):
+    urls = []
+    for image_type in ['thumbnail', 'videoStill']:
+        urls.append(response.get(image_type + 'URL', None))
+        if response.get(image_type, None) is not None:
+            urls.append(response[image_type].get('remoteUrl', None))
+
+    return [x for x in urls if x is not None]
+
 class BrightcoveIntegration(integrations.ovp.OVPIntegration):
     def __init__(self, account_id, platform):
         super(BrightcoveIntegration, self).__init__(account_id, platform)
@@ -118,7 +139,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             _log.error('Error getting data from Brightcove: %s' % e)
             raise integrations.ovp.OVPError(e)
 
-        for bc_video_id, data in bc_video_info.iteritems():
+        for data in bc_video_info:
+            bc_video_id = data['id']
             try:
                 retval[bc_video_id] = self.submit_one_video_object(bc_video_id,
                                                                    data)
@@ -128,11 +150,12 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         raise tornado.gen.Return(retval)
 
     @tornado.gen.coroutine
-    def submit_one_video_object(self, vid_obj):
+    def submit_one_video_object(self, vid_obj, grab_new_thumb=True):
         '''Submits one video object
 
         Inputs:
         vid_obj - A video object from the response from the Brightcove API
+        grab_new_thumb - True if new thumbnails for the video should be grabbed
 
         Outputs:
         the job id
@@ -168,6 +191,107 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             job_id = response['job_id']
         else:
             job_id = self.platform.videos[vid_obj['id']]
+            if grab_new_thumb:
+                yield self._grab_new_thumb(vid_obj)
 
         raise tornado.gen.Return(job_id)
+
+    @tornado.gen.coroutine
+    def _grab_new_thumb(self, data):
+        '''Grab a new thumbnail from a video object if there is one.
+
+        Inputs:
+        data - A video object from Brightcove
+        '''
+        bc_video_id = data['id']
+
+        thumb_url, thumb_data = \
+          BrightcoveIntegration._get_best_image_info(vid_obj)
+        bc_urls = [_normalize_url(x) for x in _get_urls_from_bc_response(data)]
+
+        # Function that will set the external id in the ThumbnailMetadata
+        external_id = thumb_data.get('id', None)
+        def _set_external_id(obj):
+            obj.external_id = external_id
+
+        # Get the video object from our database
+        video_id = neondata.InternalVideoID.generate(platform.neon_api_key,
+                                                     bc_video_id)
+        vid_meta = yield tornado.gen.Task(neondata.VideoMetadata.get,
+                                          video_id)
+        if not vid_meta:
+            _log.warn('Could not find video %s' % video_id)
+            statemon.state.increment('video_not_found')
+            return
+
+        # Search for the thumbnail already in our database
+        thumbs = yield tornado.gen.Task(neondata.ThumbnailMetadata.get_many,
+                                        vid_meta.thumbnail_ids)
+        found_thumb = False
+        min_rank = 1
+        for thumb in thumbs:
+            if (thumb is None or 
+                thumb.type != neondata.ThumbnailType.BRIGHTCOVE):
+                continue
+
+            if thumb.rank < min_rank:
+                min_rank = thumb.rank
+
+            if thumb.external_id is not None:
+                # We know about this thumb was in Brightcove so see if it
+                # is still there.
+                if thumb.external_id == external_id:
+                    found_thumb = True
+            elif thumb.refid is not None:
+                # For legacy thumbs, we specified a reference id. Look for it
+                if thumb.refid == thumb_data.get('referenceId', None):
+                    found_thumb = True
+
+                    yield tornado.gen.Task(neondata.ThumbnailMetadata.modify,
+                                           thumb.key,
+                                           _set_external_id)
+            else:
+                # We do not have the id for this thumb, so see if we
+                # can match the url.
+                norm_urls = set([normalize_url(x) for x in thumb.urls])
+                if len(norm_urls.intersection(bc_urls)) > 0:
+                    found_thumb = True
+                    
+                    # Now update the external id because we didn't
+                    # know about it before.
+                    yield tornado.gen.Task(neondata.ThumbnailMetadata.modify,
+                                           thumb.key,
+                                           _set_external_id)
+
+        if not found_thumb:
+            # Add the thumbnail to our system
+            urls = _get_urls_from_bc_response(data)
+            added_image = False
+            for url in urls[::-1]:
+                try:
+                    new_thumb = neondata.ThumbnailMetadata(
+                        None,
+                        ttype=neondata.ThumbnailType.BRIGHTCOVE,
+                        rank = min_rank-1,
+                        external_id = external_id
+                        )
+                    yield vid_meta.download_and_add_thumbnail(
+                        new_thumb,
+                        url,
+                        save_objects=True,
+                        async=True)
+            
+                    _log.info(
+                        'Found new thumbnail %s for video %s at Brigthcove.' %
+                        (external_id, vid_meta.key))
+                    statemon.state.increment('new_images_found')
+                    added_image = True
+                    break
+                except IOError:
+                    # Error getting the image, so keep going
+                    pass
+            if not added_image:
+                _log.error('Could not find valid image to add to video %s. '
+                           'Tried urls %s' % (vid_meta.key, urls))
+                statemon.state.increment('cant_get_image')
         

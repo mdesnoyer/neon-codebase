@@ -2406,7 +2406,8 @@ class BrightcovePlatform(AbstractPlatform):
     
     def __init__(self, api_key, i_id=None, a_id='', p_id=None, 
                 rtoken=None, wtoken=None, auto_update=False,
-                last_process_date=None, abtest=False, callback_url=None):
+                last_process_date=None, abtest=False, callback_url=None,
+                uses_batch_provisioning=False):
 
         ''' On every request, the job id is saved '''
         super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)
@@ -2425,6 +2426,11 @@ class BrightcovePlatform(AbstractPlatform):
         self.playlist_feed_ids = []
         # the url that will be called when a video is finished processing 
         self.callback_url = callback_url
+
+        # Does the customer use batch provisioning (i.e. FTP
+        # uploads). If so, we cannot rely on the last modified date of
+        # videos. http://support.brightcove.com/en/video-cloud/docs/finding-videos-have-changed-media-api
+        self.uses_batch_provisioning = False
 
     @classmethod
     def get_ovp(cls):

@@ -71,8 +71,8 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_match_urls(self):
-        self.mock_bc_response.side_effect = [{
-            'v1': { 'id' : 'v1',
+        self.mock_bc_response.side_effect = [[ 
+            { 'id' : 'v1',
                     'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
                     'videoStill' : {
                         'id' : 'still_id',
@@ -86,7 +86,7 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
                         'remoteUrl' : None
                     }
                 }
-            }]
+            ]]
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://bc.com/vid_still.jpg'],
                           ttype=ThumbnailType.BRIGHTCOVE,
@@ -105,8 +105,8 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_match_moved_bc_urls(self):
-        self.mock_bc_response.side_effect = [{
-            'v1': { 'id' : 'v1',
+        self.mock_bc_response.side_effect = [[{
+            'id' : 'v1',
                     'videoStillURL' : 'http://brightcove.com/3/vid_still.jpg?x=5',
                     'videoStill' : {
                         'id' : 'still_id',
@@ -120,7 +120,7 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
                         'remoteUrl' : None
                     }
                 }
-            }]
+            ]]
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://bcsecure01-a.akamaihd.net/4/vid_still.jpg'],
                           ttype=ThumbnailType.BRIGHTCOVE,
@@ -139,22 +139,22 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_match_remote_urls(self):
-        self.mock_bc_response.side_effect = [{
-            'v1': { 'id' : 'v1',
-                    'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
-                    'videoStill' : {
-                        'id' : 'still_id',
-                        'referenceId' : None,
-                        'remoteUrl' : 'http://some_remote_still'
-                    },
-                    'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
-                    'thumbnail' : {
-                        'id' : 'thumb_id',
-                        'referenceId' : None,
-                        'remoteUrl' : None
-                    }
+        self.mock_bc_response.side_effect = [[{
+            'id' : 'v1',
+            'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+            'videoStill' : {
+                'id' : 'still_id',
+                'referenceId' : None,
+                'remoteUrl' : 'http://some_remote_still'
+                },
+            'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
+            'thumbnail' : {
+                'id' : 'thumb_id',
+                'referenceId' : None,
+                'remoteUrl' : None
                 }
-            }]
+            }
+        ]]
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://some_remote_still?c=90'],
                           ttype=ThumbnailType.BRIGHTCOVE,
@@ -173,22 +173,22 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_match_reference_id(self):
-        self.mock_bc_response.side_effect = [{
-            'v1': { 'id' : 'v1',
-                    'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
-                    'videoStill' : {
-                        'id' : 'still_id',
-                        'referenceId' : 'my_still_ref',
-                        'remoteUrl' : None
-                    },
-                    'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
-                    'thumbnail' : {
-                        'id' : 'thumb_id',
-                        'referenceId' : 'my_thumb_ref',
-                        'remoteUrl' : None
-                    }
-                }
-            }]
+        self.mock_bc_response.side_effect = [[{
+            'id' : 'v1',
+            'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+            'videoStill' : {
+                'id' : 'still_id',
+                'referenceId' : 'my_still_ref',
+                'remoteUrl' : None
+            },
+            'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
+            'thumbnail' : {
+                'id' : 'thumb_id',
+                'referenceId' : 'my_thumb_ref',
+                'remoteUrl' : None
+            }
+            }
+        ]]
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://bc.com/some_moved_location'],
                           ttype=ThumbnailType.BRIGHTCOVE,
@@ -208,8 +208,8 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_match_external_id(self):
-        self.mock_bc_response.side_effect = [{
-            'v1': { 'id' : 'v1',
+        self.mock_bc_response.side_effect = [[{
+            'id' : 'v1',
                     'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
                     'videoStill' : {
                         'id' : 'still_id',
@@ -223,7 +223,7 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
                         'remoteUrl' : None
                     }
                 }
-            }]
+            ]]
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://bc.com/some_moved_location'],
                           ttype=ThumbnailType.BRIGHTCOVE,
@@ -240,8 +240,8 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_new_thumb_found(self):
-        self.mock_bc_response.side_effect = [{
-            'v1': { 'id' : 'v1',
+        self.mock_bc_response.side_effect = [[{
+            'id' : 'v1',
                     'videoStillURL' : 'http://bc.com/new_still.jpg?x=8',
                     'videoStill' : {
                         'id' : 'still_id',
@@ -255,7 +255,7 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
                         'remoteUrl' : None
                     }
                 }
-            }]
+            ]]
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://bc.com/some_old_thumb.jpg'],
                           ttype=ThumbnailType.BRIGHTCOVE,
@@ -288,8 +288,8 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
     def test_error_downloading_image(self):
         self.im_download_mock.side_effect = [IOError('Image Download Error')]
 
-        self.mock_bc_response.side_effect = [{
-            'v1': { 'id' : 'v1',
+        self.mock_bc_response.side_effect = [[{
+            'id' : 'v1',
                     'videoStillURL' : None,
                     'videoStill' : None,
                     'thumbnailURL' : 'http://bc.com/new_thumb.jpg?x=8',
@@ -299,7 +299,7 @@ class TestProcessOneAccount(test_utils.neontest.AsyncTestCase):
                         'remoteUrl' : None
                     }
                 }
-            }]
+            ]]
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://bc.com/some_old_thumb.jpg'],
                           ttype=ThumbnailType.BRIGHTCOVE,

@@ -110,7 +110,9 @@ def process_one_account(platform):
         statemon.state.increment('bc_api_servererror')
         return
 
-    for bc_video_id, data in bc_video_info.iteritems():
+    for data in bc_video_info:
+        bc_video_id = data['id']
+        
         # Get information from the response
         bc_thumb_ids = extract_image_info(data, 'id')
         bc_ref_ids = extract_image_info(data, 'referenceId')
