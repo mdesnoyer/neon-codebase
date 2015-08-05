@@ -596,7 +596,8 @@ class VideoHandler(APIV2Handler):
             args = self.parse_args()
             args['account_id'] = account_id_api_key = str(account_id)
             schema(args)
-            video_id = args['video_id'] 
+            video_id = args['video_id']
+            fields = args.get('fields', None) 
             
             vid_dict = {} 
             output_list = []
@@ -609,15 +610,26 @@ class VideoHandler(APIV2Handler):
             videos = yield tornado.gen.Task(neondata.VideoMetadata.get_many, 
                                             internal_video_ids) 
             if videos:  
-               # TODO explode fields check with voluptuous 
-               # and only return what was asked for
-               # import pdb; pdb.set_trace()
-               videos = [obj.__dict__ for obj in videos] 
-               vid_dict['videos'] = videos
-               vid_dict['video_count'] = len(videos)
+               new_videos = [] 
+               if fields:
+                   field_set = set(fields.split(','))
+                   for obj in videos:
+                       obj = obj.__dict__
+                       new_video = {} 
+                       for field in field_set: 
+                           if field == 'thumbnails':
+                               new_video['thumbnails'] = 'TODOthumbnails' 
+                           elif field in obj: 
+                               new_video[field] = obj[field] 
+                       if new_video: 
+                          new_videos.append(new_video)
+               else: 
+                   new_videos = [obj.__dict__ for obj in videos] 
 
-            output = json.dumps(vid_dict)
-            self.success(output) 
+               vid_dict['videos'] = new_videos
+               vid_dict['video_count'] = len(new_videos)
+
+            self.success(json.dumps(vid_dict))
 
         except MultipleInvalid as e:
             self.error('%s %s' % (e.path[0], e.msg))

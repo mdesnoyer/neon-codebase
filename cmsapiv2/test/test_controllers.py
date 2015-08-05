@@ -278,6 +278,16 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(response.code, 200)
         self.assertEquals(rjson['video_count'], 2)
 
+    @tornado.testing.gen_test
+    def test_get_single_video_with_fields(self):
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
+        vm.save()
+        url = '/api/v2/%s/videos?video_id=vid1&fields=created,thumbnails' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+       
+        self.assertEquals(response.code, 200)
+
 if __name__ == "__main__" :
     utils.neon.InitNeon()
     unittest.main()
