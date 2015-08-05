@@ -81,6 +81,8 @@ statemon.define('video_duration_60m', int)
 statemon.define('video_read_error', int)
 statemon.define('extract_frame_error', int)
 statemon.define('running_workers', int)
+statemon.define('workers_processing', int)
+statemon.define('workers_downloading', int)
 statemon.define('workers_cv_processing', int)
 statemon.define('other_worker_completed', int)
 statemon.define('s3url_download_error', int)
@@ -106,6 +108,11 @@ define('extra_workers', default=0,
        help='Number of extra workers to allow downloads to happen in the background')
 define('video_temp_dir', default=None,
        help='Temporary directory to download videos to')
+define('max_bandwidth_per_core', default=15500000.0,
+       help='Max bandwidth in MB/s')
+define('min_load_to_throttle', default=0.50,
+       help=('Fraction of cores currently working to cause the download to '
+             'be throttled'))
 
 class VideoError(Exception):
     '''
@@ -214,7 +221,12 @@ class VideoProcessor(object):
         Actual work done here
         '''
         try:
-            self.download_video_file()
+            statemon.state.increment('workers_downloading')
+            try:
+                self.download_video_file()
+            finally:
+                statemon.state.decrement('workers_downloading')
+                
 
             #Process the video
             n_thumbs = max(self.n_thumbs, 5)
@@ -271,7 +283,17 @@ class VideoProcessor(object):
         '''
         CHUNK_SIZE = 4*1024*1024 # 4MB
         s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws\.com/))([a-zA-Z0-9\-_\.]+)/(.+)')
-        _log.info('Starting download of video %s' % self.video_url)
+
+        # Find out if we should throttle
+        do_throttle = False
+        frac_processing = (float(statemon.state.workers_processing) / 
+                           max(statemon.state.running_workers, 1))
+        if frac_processing > options.min_load_to_throttle:
+            do_throttle=True
+            chunk_time = float(CHUNK_SIZE) / options.max_bandwidth_per_core
+
+        _log.info('Starting download of video %s. Throttled: %s' % 
+                  (self.video_url, do_throttle))
 
         try:
             s3match = s3re.search(self.video_url)
@@ -294,10 +316,16 @@ class VideoProcessor(object):
             # Use urllib2
             req = urllib2.Request(self.video_url, headers=self.headers)
             response = urllib2.urlopen(req, timeout=self.timeout)
+            last_time = time.time()
             data = response.read(CHUNK_SIZE)
             while data != '':
+                if do_throttle:
+                    time_spent = time.time() - last_time
+                    print 'sleep time: %f, %f' % (chunk_time, chunk_time-time_spent)
+                    time.sleep(max(0, chunk_time-time_spent))
                 self.tempfile.write(data)
                 self.tempfile.flush()
+                last_time = time.time()
                 data = response.read(CHUNK_SIZE)
 
             self.tempfile.flush()
@@ -911,7 +939,11 @@ class VideoClient(multiprocessing.Process):
                                         self.model_version,
                                         self.cv_semaphore,
                                         job['reprocess'])
-            vprocessor.start()
+            statemon.state.increment('workers_processing')
+            try:
+                vprocessor.start()
+            finally:
+                statemon.state.decrement('workers_processing')
             self.videos_processed += 1
 
         except Queue.Empty:

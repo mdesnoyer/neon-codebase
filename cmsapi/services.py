@@ -1149,11 +1149,14 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             if i_type == "brightcove":
                 #Sort brightcove videos by video_id, since publish_date 
                 #is not currently set on ingest of videos
-                s_vresult = sorted(vresult, 
-                                   key=lambda k: int(k['video_id']), reverse=True)
+                s_vresult = sorted(
+                    vresult, 
+                    key=lambda k: k.get('submit_time', k['video_id']),
+                    reverse=True)
             else:
                 s_vresult = sorted(vresult, 
-                                   key=lambda k: k['publish_date'], reverse=True)
+                                   key=lambda k: k['publish_date'],
+                                   reverse=True)
            
         #2c Pagination, case: There are more vids than page_size
         if len(s_vresult) > page_size:
