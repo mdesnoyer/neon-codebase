@@ -159,7 +159,6 @@ class StatsOptimizingSimulator(object):
         bandit_end_count = 0
         bandit_err_count = 0
         bandit_inconclusive_count = 0
-        fractions = [0.5, 0.5]
         value_remaining_array = []
         fractions_array = []
         for i in range(self.experiment_number):
@@ -169,6 +168,7 @@ class StatsOptimizingSimulator(object):
             conversion_counter_2 = 0
             is_bandit_reached = False
             iteration_counter = 0
+            fractions = [0.5, 0.5]
             while (not is_bandit_reached) and iteration_counter < self.max_iteration:
                 conversion_1, conversion_2, impression_1, impression_2 = conversion_simulator_function(self.bin_size, iteration_counter, fractions)
 
@@ -261,11 +261,16 @@ def simulator_function_exp_ctr_type1_err(bin_size, count):
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
     return (conversion_1, conversion_2, impression_1, impression_2)
 
-def simulator_function_random_ctr(bin_size, count):
-    ctr_array = np.array([0.04, 0.05])
-    ctr_array = ctr_array**(1.02 * count)
-    if ctr_array[0] < 0.01:
-        ctr_array = np.array([0.04, 0.05])
+def simulator_function_random_walk_preset(bin_size, count, walk_array):
+    ctr_array = [walk_array[count], walk_array[count] * 1.2]
+    impression_1 = bin_size / 2
+    impression_2 = bin_size / 2
+    conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
+    conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
+    return (conversion_1, conversion_2, impression_1, impression_2)
+
+def simulator_function_random_walk_preset_type1_err(bin_size, count, walk_array):
+    ctr_array = [walk_array[count], walk_array[count]]
     impression_1 = bin_size / 2
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
@@ -326,6 +331,22 @@ def simulator_function_bandit_exp_type1_err(bin_size, count, fractions):
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
     return (conversion_1, conversion_2, impression_1, impression_2)
 
+def simulator_function_bandit_random_walk_preset(bin_size, count, fractions, walk_array):
+    ctr_array = [walk_array[count], walk_array[count] * 1.2]
+    impression_1 = bin_size * fractions[0]
+    impression_2 = bin_size - impression_1
+    conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
+    conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
+    return (conversion_1, conversion_2, impression_1, impression_2)
+
+def simulator_function_bandit_random_walk_preset_type1_err(bin_size, count, fractions, walk_array):
+    ctr_array = [walk_array[count], walk_array[count]]
+    impression_1 = bin_size * fractions[0]
+    impression_2 = bin_size - impression_1
+    conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
+    conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
+    return (conversion_1, conversion_2, impression_1, impression_2)
+
 def simulator():
     ctr_array = [0.04, 0.05]
     bin_size = 200
@@ -360,6 +381,7 @@ def avg(data, bin_size):
     return avg_num
 
 def simulator():
+    random_walk_array = random_walk(10000)
     stat_simulator = StatsOptimizingSimulator(bin_size = 200, experiment_number = 500, is_display = False)
     # Start the testing.
     # a = stat_simulator.run_sequencial_experiment(simulator_function_simple)
@@ -370,13 +392,17 @@ def simulator():
     # print a
     # a = stat_simulator.run_sequencial_experiment(simulator_function_exp_ctr_type1_err)
     # print a
+    print stat_simulator.run_sequencial_experiment(lambda x, y: simulator_function_random_walk_preset(x, y, random_walk_array))
+    print stat_simulator.run_sequencial_experiment(lambda x, y: simulator_function_random_walk_preset_type1_err(x, y, random_walk_array))
     
     # print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple)
     # print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple_type1_err)
     # print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant)
     # print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant_type1_err)
-    print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp)
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp)
     # print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp_type1_err)
+    print stat_simulator.run_bandit_experiment(lambda x, y, z: simulator_function_bandit_random_walk_preset(x, y, z, random_walk_array))
+    print stat_simulator.run_bandit_experiment(lambda x, y, z: simulator_function_bandit_random_walk_preset_type1_err(x, y, z, random_walk_array))
 
     # ctr_array = [0.04, 0.05]
     # bin_size = 200
