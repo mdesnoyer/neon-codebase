@@ -1,6 +1,10 @@
 #ifndef _NEON_UPDATER_
 #define _NEON_UPDATER_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
@@ -37,5 +41,8 @@ typedef struct {
 extern ngx_str_t mastermind_file_url_str;
 */
 
+#ifdef __cplusplus
+}
+#endif
 #endif
 

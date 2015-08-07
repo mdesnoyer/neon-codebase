@@ -2,6 +2,7 @@
 #define _NEON_MASTERMIND_C
 
 #include <time.h>
+#include <iostream>
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
@@ -74,14 +75,12 @@ typedef enum  {
     
 } NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR;
     
-    
-NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR
+std::string*
 neon_mastermind_image_url_lookup(const char * accountId,
                                  const char * videoId,
                                  ngx_str_t * ipAddress,
                                  int height,
-                                 int width,
-                                 char ** url);
+                                 int width);
     
 typedef enum  {
     NEON_MASTERMIND_TID_LOOKUP_OK = 0,
@@ -90,18 +89,15 @@ typedef enum  {
     
 } NEON_MASTERMIND_TID_LOOKUP_ERROR;
 
-NEON_MASTERMIND_TID_LOOKUP_ERROR
+std::string*
 neon_mastermind_tid_lookup(const char * accountId,
                             const char * videoId,
-                            ngx_str_t * bucketId,
-                            char ** tid);
+                            ngx_str_t * bucketId);
      
 /*
  * Check if current mastermind has expired
  */
 NEON_BOOLEAN neon_mastermind_expired();
-
-
 
 /*
  *  Get health check status
@@ -113,13 +109,10 @@ NEON_BOOLEAN neon_mastermind_expired();
  *
  */
 int neon_mastermind_healthcheck();
-
-    
     
 #ifdef __cplusplus
 } // extern "C"
 #endif
-    
 
 #endif
 
