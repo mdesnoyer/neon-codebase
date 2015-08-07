@@ -60,10 +60,11 @@ class APIV2Sender(object):
     def error(self, message, extra_data=None, code=ResponseCode.HTTP_BAD_REQUEST): 
         error_json = {} 
         error_json['message'] = message 
-        self.set_status(code) 
+        self.set_status(code)
         if extra_data: 
             error_json['fields'] = extra_data 
-        self.write(error_json) 
+        self.write(error_json)
+        self.finish() 
  
 
 class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
@@ -502,6 +503,19 @@ ThumbnailHandler : class responsible for creating/updating/getting a
 HTTP Verbs       : get, post, put
 *********************************************************************'''
 class ThumbnailHandler(tornado.web.RequestHandler):
+    def post(self, account_id):
+        schema = Schema({
+          Required('account_id') : All(str, Length(min=1, max=256)),
+          Required('video_id') : All(str, Length(min=1, max=256)),
+          Required('thumbnail_location') : All(str, Length(min=1, max=2048))
+        })
+        try:
+            args = self.parse_args()
+            args['account_id'] = account_id_api_key = str(account_id)
+            schema(args)
+            thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.create,  
+        except MultipleInvalid as e: 
+            self.error('%s %s' % (e.path[0], e.msg))
     def put(self, account_id): 
         self.success({'account_id', account_id})  
 
@@ -518,9 +532,6 @@ class VideoHelper():
     @staticmethod 
     @tornado.gen.coroutine
     def addVideo(request, account_id):
-       '''
-        #TODO i need to create a videometadata object, and create a job in 
-        # video server  
         schema = Schema({
           Required('account_id') : All(str, Length(min=1, max=256)),
           Required('external_video_ref') : All(str, Length(min=1, max=512)),
@@ -535,29 +546,31 @@ class VideoHelper():
         args['account_id'] = str(account_id)
         schema(args)
         account_id_api_key = args['account_id'] 
-        integration_id = args['integration_id']
+        integration_id = args.get('integration_id', None) 
  
         user_account = yield tornado.gen.Task(neondata.NeonUserAccount.get, account_id_api_key)
-        integration_type = user_account.integrations[integration_id] 
-        # TODO investigate the data layer to see if we can get a 
-        # top-level platform object that gets rid of having these ifs 
-        if integration_type == neondata.IntegrationType.BRIGHTCOVE:
-            platform = yield tornado.gen.Task(neondata.BrightcovePlatform.get, 
-                                          account_id_api_key, 
-                                          integration_id)  
-        elif integration_type == neondata.IntegrationType.OOYALA:
-            platform = yield tornado.gen.Task(neondata.OoyalaPlatform.get, 
-                                          account_id_api_key, 
-                                          integration_id)  
-        #import pdb; pdb.set_trace()
-        result = yield tornado.gen.Task(platform.create_job, None)
-        import pdb; pdb.set_trace()  
- 
+        if integration_id: 
+            integration_type = user_account.integrations[integration_id] 
+            # TODO investigate the data layer to see if we can get a 
+            # top-level platform object that gets rid of having these ifs
+            if integration_type == neondata.IntegrationType.BRIGHTCOVE:
+                platform = yield tornado.gen.Task(neondata.BrightcovePlatform.get, 
+                                                  account_id_api_key, 
+                                                  integration_id) 
+                # create the proper api request 
+            elif integration_type == neondata.IntegrationType.OOYALA:
+                platform = yield tornado.gen.Task(neondata.OoyalaPlatform.get, 
+                                                  account_id_api_key, 
+                                                  integration_id)  
+                # create the proper api request 
+        #else: 
+            # just create a neon api request 
+           
+        # result = add the job
         if result: 
             raise tornado.gen.Return(result) 
         else: 
             raise SaveError('unable to add to video, unable to process')
-        '''
 
 '''*********************************************************************
 VideoHandler     : class responsible for creating/updating/getting a
@@ -580,7 +593,7 @@ class VideoHandler(APIV2Handler):
         except SaveError as e: 
             self.error(e.msg, code=e.code) 
         except Exception as e:
-            self.error('unable to create video request', {'account_id', account_id})  
+            self.error('unable to create video request', {'account_id': account_id})  
     
     '''**********************
     Video.get 
@@ -656,12 +669,15 @@ class VideoHandler(APIV2Handler):
             result = yield tornado.gen.Task(neondata.VideoMetadata.modify, 
                                             internal_video_id, 
                                             _update_video)
-            self.success(result.to_json())
+            video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
+                                            internal_video_id)
+
+            self.success(json.dumps(video.__dict__))
 
         except MultipleInvalid as e:
             self.error('%s %s' % (e.path[0], e.msg)) 
         except Exception as e:
-            self.error('unable to update video', {'account_id', account_id})  
+            self.error('unable to update video', {'account_id': account_id})  
 
 '''*********************************************************************
 OptimizelyIntegrationHandler : class responsible for creating/updating/

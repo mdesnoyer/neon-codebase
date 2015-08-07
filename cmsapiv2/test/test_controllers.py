@@ -297,6 +297,30 @@ class TestVideoHandler(tornado.testing.AsyncHTTPTestCase):
                                                 body='',
                                                 method='PUT', 
                                                 allow_nonstandard_methods=True)
+        rjson = json.loads(response.body)
+        self.assertFalse(rjson['testing_enabled'])
+        self.assertEquals(response.code, 200)
+
+        url = '/api/v2/%s/videos?video_id=vid1&testing_enabled=1' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='PUT', 
+                                                allow_nonstandard_methods=True)
+        rjson = json.loads(response.body)
+        self.assertTrue(rjson['testing_enabled'])
+        self.assertEquals(response.code, 200)
+
+    @tornado.testing.gen_test
+    def test_update_video_does_not_exist(self):
+        try: 
+            url = '/api/v2/%s/videos?video_id=vid_does_not_exist&testing_enabled=0' % (self.account_id_api_key)
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    body='',
+                                                    method='PUT', 
+                                                    allow_nonstandard_methods=True)
+	except Exception as e:
+            self.assertEquals(e.code, 400)
+             
         
 
 if __name__ == "__main__" :
