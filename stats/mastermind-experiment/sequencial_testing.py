@@ -384,23 +384,19 @@ def simulator():
     random_walk_array = random_walk(10000)
     stat_simulator = StatsOptimizingSimulator(bin_size = 200, experiment_number = 500, is_display = False)
     # Start the testing.
-    # a = stat_simulator.run_sequencial_experiment(simulator_function_simple)
-    # print a
-    # a = stat_simulator.run_sequencial_experiment(simulator_function_type1_err)
-    # print a
-    # a = stat_simulator.run_sequencial_experiment(simulator_function_exp_ctr)
-    # print a
-    # a = stat_simulator.run_sequencial_experiment(simulator_function_exp_ctr_type1_err)
-    # print a
+    print stat_simulator.run_sequencial_experiment(simulator_function_simple)
+    print stat_simulator.run_sequencial_experiment(simulator_function_type1_err)
+    print stat_simulator.run_sequencial_experiment(simulator_function_exp_ctr)
+    print stat_simulator.run_sequencial_experiment(simulator_function_exp_ctr_type1_err)
     print stat_simulator.run_sequencial_experiment(lambda x, y: simulator_function_random_walk_preset(x, y, random_walk_array))
     print stat_simulator.run_sequencial_experiment(lambda x, y: simulator_function_random_walk_preset_type1_err(x, y, random_walk_array))
     
-    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple)
-    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple_type1_err)
-    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant)
-    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant_type1_err)
-    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp)
-    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp_type1_err)
+    print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple)
+    print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple_type1_err)
+    print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant)
+    print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant_type1_err)
+    print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp)
+    print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp_type1_err)
     print stat_simulator.run_bandit_experiment(lambda x, y, z: simulator_function_bandit_random_walk_preset(x, y, z, random_walk_array))
     print stat_simulator.run_bandit_experiment(lambda x, y, z: simulator_function_bandit_random_walk_preset_type1_err(x, y, z, random_walk_array))
 
