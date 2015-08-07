@@ -17,11 +17,11 @@ class Sequencial(object):
 
 
     def get_vn(self, xn, yn, n_x, n_y):
-        vn = xn*(1-xn)/float(n_x) + yn*(1-yn))/float(n_y)
+        vn = xn*(1-xn)/float(n_x) + yn*(1-yn)/float(n_y)
         return vn
 
     def get_new_vn(self, vn):
-        new_vn = np.sqrt((2 * np.log2(1 / self.alpha) - np.log2(vn / (vn + self.tau))) * ((vn * (vn + self.tau)) / self.tau))
+        new_vn = np.sqrt((2 * np.log(1 / self.alpha) - np.log(vn / (vn + self.tau))) * ((vn * (vn + self.tau)) / self.tau))
         return new_vn
 
     def calculate_significance(self, conversions_1, impressions_1, conversions_2, impressions_2):
@@ -34,7 +34,7 @@ class Sequencial(object):
             theta_n = mean_1 - mean_2
 
         vn_experiments = self.get_vn(mean_1, mean_2, impressions_1, impressions_2)
-        vn_new = self.get_new_vn(vn_experiments, 100, 0.05)
+        vn_new = self.get_new_vn(vn_experiments)
 
         threshold_traditional = theta_n - np.sqrt(vn_experiments)*1.65
         threshold_new = theta_n - vn_new
@@ -50,10 +50,16 @@ class MultiArmedBandits(object):
     def get_bandit_fractions(self, impressions, conversions):
         # return the factions, and return the value remained.
         MC_SAMPLES = 2000.
-        mc_series = [spstats.beta.rvs(conversion + 1,
-                                      impression,
-                                      size=MC_SAMPLES)
-                                      for conversion, impression in itertools.izip(conversions, impressions)]
+        try:
+            mc_series = [spstats.beta.rvs(conversion + 1,
+                                          impression - conversion + 1,
+                                          size=MC_SAMPLES)
+                                          for conversion, impression in itertools.izip(conversions, impressions)]
+        except ValueError:
+            print "Value Error:"
+            print conversions
+            print impressions
+
         row_winners = np.argmax(mc_series, axis=0)
         winner_counts = np.array(np.bincount(row_winners), dtype=float)
         winner_fractions = winner_counts / MC_SAMPLES
@@ -71,7 +77,7 @@ class MultiArmedBandits(object):
         if value_remaining <= self.value_threshold:
             return (winner_index, value_remaining, winner_fractions, True)
         else:
-            return (winner_index, value_remaining, winner_franctions, False)
+            return (winner_index, value_remaining, winner_fractions, False)
 
 class StatsOptimizingSimulator(object):
     def __init__(self, bin_size = 100, experiment_number = 500, is_display = False):
@@ -90,6 +96,8 @@ class StatsOptimizingSimulator(object):
         new_err_count = 0
         traditional_inconclusive_count = 0
         new_inconclusive_count = 0
+        threshold_traditional_array = []
+        threshold_new_array = []
         for i in range(self.experiment_number):
             impression_counter_1 = 0
             impression_counter_2 = 0
@@ -99,7 +107,7 @@ class StatsOptimizingSimulator(object):
             is_new_reached = False
             iteration_counter = 0
             while (not is_traditional_reached or not is_new_reached) and iteration_counter < self.max_iteration:
-                conversion_1, conversion_2, impression_1, impression_2 = conversion_simulator_function(bin_size, iteration_counter)
+                conversion_1, conversion_2, impression_1, impression_2 = conversion_simulator_function(self.bin_size, iteration_counter)
                 conversion_counter_1 = conversion_counter_1 + conversion_1
                 conversion_counter_2 = conversion_counter_2 + conversion_2
                 impression_counter_1 = impression_counter_1 + impression_1
@@ -107,6 +115,8 @@ class StatsOptimizingSimulator(object):
                 impression_counter = impression_counter_1 + impression_counter_2
                 mean_diff, threshold_traditional, threshold_new = \
                     sequencial_method.calculate_significance(conversion_counter_1, impression_counter_1, conversion_counter_2, impression_counter_2)
+                threshold_traditional_array.append(threshold_traditional)
+                threshold_new_array.append(threshold_new)
                 if not is_traditional_reached and threshold_traditional > 0:
                     is_traditional_reached = True
                     traditional_end_count = traditional_end_count + impression_counter
@@ -135,6 +145,12 @@ class StatsOptimizingSimulator(object):
         else:
             new_avg = new_end_count / (self.experiment_number - new_inconclusive_count)
 
+        if self.is_display:
+            plt.plot(threshold_traditional_array)
+            plt.plot(threshold_new_array)
+            plt.plot(np.zeros(len(threshold_new_array)))
+            plt.show()
+
         return (traditional_avg, new_avg, traditional_inconclusive_count, new_inconclusive_count, traditional_err_count, new_err_count)
 
     def run_bandit_experiment(self, conversion_simulator_function):
@@ -143,16 +159,21 @@ class StatsOptimizingSimulator(object):
         bandit_end_count = 0
         bandit_err_count = 0
         bandit_inconclusive_count = 0
-        franctions = [0.5, 0.5]
+        fractions = [0.5, 0.5]
+        value_remaining_array = []
+        fractions_array = []
         for i in range(self.experiment_number):
-            impression_counter = 0
+            impression_counter_1 = 0
+            impression_counter_2 = 0
             conversion_counter_1 = 0
             conversion_counter_2 = 0
             is_bandit_reached = False
             iteration_counter = 0
-            while (not is_traditional_reached or not is_new_reached) and iteration_counter < self.max_iteration:
-                impression_counter = impression_counter + bin_size
-                conversion_1, conversion_2, impression_1, impression_2 = conversion_simulator_function(bin_size, iteration_counter, franctions)
+            while (not is_bandit_reached) and iteration_counter < self.max_iteration:
+                conversion_1, conversion_2, impression_1, impression_2 = conversion_simulator_function(self.bin_size, iteration_counter, fractions)
+
+                fractions_array.append(fractions)
+
                 conversion_counter_1 = conversion_counter_1 + conversion_1
                 conversion_counter_2 = conversion_counter_2 + conversion_2
                 impression_counter_1 = impression_counter_1 + impression_1
@@ -169,6 +190,8 @@ class StatsOptimizingSimulator(object):
                         bandit_err_count = bandit_err_count + 1
                 iteration_counter = iteration_counter + 1
 
+                value_remaining_array.append(value_remaining)
+
             # If the condition is not reached then the inconclusive count adds one.
             if not is_bandit_reached:
                 bandit_inconclusive_count = bandit_inconclusive_count + 1
@@ -177,6 +200,14 @@ class StatsOptimizingSimulator(object):
             bandit_avg = 0
         else:
             bandit_avg = bandit_end_count / (self.experiment_number - bandit_inconclusive_count)
+
+        if self.is_display:
+            plt.plot(value_remaining_array)
+            fractions_array = np.array(fractions_array)
+            plt.plot(fractions_array[:, 0])
+            plt.plot(fractions_array[:, 1])
+            plt.plot(np.zeros(len(value_remaining_array)))
+            plt.show()
 
         return (bandit_avg, bandit_inconclusive_count, bandit_err_count)
 
@@ -220,7 +251,7 @@ def simulator_function_exp_ctr(bin_size, count):
     return (conversion_1, conversion_2, impression_1, impression_2)
 
 def simulator_function_exp_ctr_type1_err(bin_size, count):
-    ctr_array = [0.05, 0.05]
+    ctr_array = np.array([0.05, 0.05])
     ctr_array = ctr_array**(1.02 * count)
     if ctr_array[0] < 0.01:
         ctr_array = np.array([0.05, 0.05])
@@ -329,27 +360,45 @@ def avg(data, bin_size):
     return avg_num
 
 def simulator():
-    ctr_array = [0.04, 0.05]
-    bin_size = 200
-    experiment_size = 10000
-    experiments = map(lambda x: np.random.binomial(bin_size, x, experiment_size), ctr_array)
-    cumsum_experiements = map(lambda x: x.cumsum(), experiments)
-    bin_experiments = np.ones(experiment_size) * bin_size
-    cumsum_bin = bin_experiments.cumsum()
-    mean_experiments = map(lambda x: x/cumsum_bin, cumsum_experiements)
-    vn_experiments = get_vn(mean_experiments[0], mean_experiments[1], cumsum_bin)
-    vn_new = get_new_vn(vn_experiments, 100, 0.05)
-    theta_n = get_theta_n(mean_experiments[0], mean_experiments[1])
-    #plt.plot(vn_new[1:1000])
-    diff = theta_n - vn_new
-    diff_old = theta_n - np.sqrt(vn_experiments)*1.65
-    # plt.plot(theta_n[1000:10000])
-    s_size = 500
-    plt.subplot(2,1,1)
-    plt.plot(diff[1:s_size])
-    plt.plot(np.zeros(s_size))
-    plt.plot(diff_old[1:s_size])
-    plt.show()
+    stat_simulator = StatsOptimizingSimulator(bin_size = 200, experiment_number = 500, is_display = False)
+    # Start the testing.
+    # a = stat_simulator.run_sequencial_experiment(simulator_function_simple)
+    # print a
+    # a = stat_simulator.run_sequencial_experiment(simulator_function_type1_err)
+    # print a
+    # a = stat_simulator.run_sequencial_experiment(simulator_function_exp_ctr)
+    # print a
+    # a = stat_simulator.run_sequencial_experiment(simulator_function_exp_ctr_type1_err)
+    # print a
+    
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple)
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple_type1_err)
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant)
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant_type1_err)
+    print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp)
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp_type1_err)
+
+    # ctr_array = [0.04, 0.05]
+    # bin_size = 200
+    # experiment_size = 10000
+    # experiments = map(lambda x: np.random.binomial(bin_size, x, experiment_size), ctr_array)
+    # cumsum_experiements = map(lambda x: x.cumsum(), experiments)
+    # bin_experiments = np.ones(experiment_size) * bin_size
+    # cumsum_bin = bin_experiments.cumsum()
+    # mean_experiments = map(lambda x: x/cumsum_bin, cumsum_experiements)
+    # vn_experiments = get_vn(mean_experiments[0], mean_experiments[1], cumsum_bin)
+    # vn_new = get_new_vn(vn_experiments, 100, 0.05)
+    # theta_n = get_theta_n(mean_experiments[0], mean_experiments[1])
+    # #plt.plot(vn_new[1:1000])
+    # diff = theta_n - vn_new
+    # diff_old = theta_n - np.sqrt(vn_experiments)*1.65
+    # # plt.plot(theta_n[1000:10000])
+    # s_size = 500
+    # plt.subplot(2,1,1)
+    # plt.plot(diff[1:s_size])
+    # plt.plot(np.zeros(s_size))
+    # plt.plot(diff_old[1:s_size])
+    # plt.show()
 
     # value_remainings = np.zeros(experiment_size)
     # stop_markers = np.zeros(experiment_size)
