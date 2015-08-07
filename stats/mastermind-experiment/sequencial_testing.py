@@ -106,6 +106,7 @@ class StatsOptimizingSimulator(object):
             is_traditional_reached = False
             is_new_reached = False
             iteration_counter = 0
+
             while (not is_traditional_reached or not is_new_reached) and iteration_counter < self.max_iteration:
                 conversion_1, conversion_2, impression_1, impression_2 = conversion_simulator_function(self.bin_size, iteration_counter)
                 conversion_counter_1 = conversion_counter_1 + conversion_1
@@ -113,6 +114,7 @@ class StatsOptimizingSimulator(object):
                 impression_counter_1 = impression_counter_1 + impression_1
                 impression_counter_2 = impression_counter_2 + impression_2
                 impression_counter = impression_counter_1 + impression_counter_2
+
                 mean_diff, threshold_traditional, threshold_new = \
                     sequencial_method.calculate_significance(conversion_counter_1, impression_counter_1, conversion_counter_2, impression_counter_2)
                 threshold_traditional_array.append(threshold_traditional)
@@ -229,7 +231,8 @@ def simulator_function_simple(bin_size, count):
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
-    return (conversion_1, conversion_2, impression_1, impression_2)
+    optimal_conversions = bin_size * ctr_array[1]
+    return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_type1_err(bin_size, count):
     ctr_array = [0.05, 0.05]
@@ -237,7 +240,8 @@ def simulator_function_type1_err(bin_size, count):
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
-    return (conversion_1, conversion_2, impression_1, impression_2)
+    optimal_conversions = bin_size * ctr_array[1]
+    return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_exp_ctr(bin_size, count):
     ctr_array = np.array([0.04, 0.05])
@@ -248,7 +252,8 @@ def simulator_function_exp_ctr(bin_size, count):
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
-    return (conversion_1, conversion_2, impression_1, impression_2)
+    optimal_conversions = bin_size * ctr_array[1]
+    return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_exp_ctr_type1_err(bin_size, count):
     ctr_array = np.array([0.05, 0.05])
@@ -259,7 +264,8 @@ def simulator_function_exp_ctr_type1_err(bin_size, count):
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
-    return (conversion_1, conversion_2, impression_1, impression_2)
+    optimal_conversions = bin_size * ctr_array[1]
+    return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_random_walk_preset(bin_size, count, walk_array):
     ctr_array = [walk_array[count], walk_array[count] * 1.2]
@@ -267,7 +273,8 @@ def simulator_function_random_walk_preset(bin_size, count, walk_array):
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
-    return (conversion_1, conversion_2, impression_1, impression_2)
+    optimal_conversions = bin_size * ctr_array[1]
+    return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_random_walk_preset_type1_err(bin_size, count, walk_array):
     ctr_array = [walk_array[count], walk_array[count]]
@@ -275,7 +282,8 @@ def simulator_function_random_walk_preset_type1_err(bin_size, count, walk_array)
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
-    return (conversion_1, conversion_2, impression_1, impression_2)
+    optimal_conversions = bin_size * ctr_array[1]
+    return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_bandit_simple(bin_size, count, fractions):
     ctr_array = [0.04, 0.05]
@@ -283,7 +291,8 @@ def simulator_function_bandit_simple(bin_size, count, fractions):
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
-    return (conversion_1, conversion_2, impression_1, impression_2)
+    optimal_conversions = bin_size * ctr_array[1]
+    return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_bandit_simple_type1_err(bin_size, count, fractions):
     ctr_array = [0.05, 0.05]
@@ -291,7 +300,8 @@ def simulator_function_bandit_simple_type1_err(bin_size, count, fractions):
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
-    return (conversion_1, conversion_2, impression_1, impression_2)
+    optimal_conversions = bin_size * ctr_array[1]
+    return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_bandit_constant(bin_size, count, fractions):
     ctr_array = [0.04, 0.05]
@@ -299,7 +309,8 @@ def simulator_function_bandit_constant(bin_size, count, fractions):
     impression_2 = bin_size - impression_1
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
-    return (conversion_1, conversion_2, impression_1, impression_2)
+    optimal_conversions = bin_size * ctr_array[1]
+    return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_bandit_constant_type1_err(bin_size, count, fractions):
     ctr_array = [0.05, 0.05]
@@ -307,7 +318,8 @@ def simulator_function_bandit_constant_type1_err(bin_size, count, fractions):
     impression_2 = bin_size - impression_1
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
-    return (conversion_1, conversion_2, impression_1, impression_2)
+    optimal_conversions = bin_size * ctr_array[1]
+    return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_bandit_exp(bin_size, count, fractions):
     ctr_array = np.array([0.04, 0.05])
@@ -318,7 +330,8 @@ def simulator_function_bandit_exp(bin_size, count, fractions):
     impression_2 = bin_size - impression_1
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
-    return (conversion_1, conversion_2, impression_1, impression_2)
+    optimal_conversions = bin_size * ctr_array[1]
+    return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_bandit_exp_type1_err(bin_size, count, fractions):
     ctr_array = np.array([0.05, 0.05])
@@ -329,7 +342,8 @@ def simulator_function_bandit_exp_type1_err(bin_size, count, fractions):
     impression_2 = bin_size - impression_1
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
-    return (conversion_1, conversion_2, impression_1, impression_2)
+    optimal_conversions = bin_size * ctr_array[1]
+    return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_bandit_random_walk_preset(bin_size, count, fractions, walk_array):
     ctr_array = [walk_array[count], walk_array[count] * 1.2]
@@ -337,7 +351,8 @@ def simulator_function_bandit_random_walk_preset(bin_size, count, fractions, wal
     impression_2 = bin_size - impression_1
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
-    return (conversion_1, conversion_2, impression_1, impression_2)
+    optimal_conversions = bin_size * ctr_array[1]
+    return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_bandit_random_walk_preset_type1_err(bin_size, count, fractions, walk_array):
     ctr_array = [walk_array[count], walk_array[count]]
@@ -345,40 +360,8 @@ def simulator_function_bandit_random_walk_preset_type1_err(bin_size, count, frac
     impression_2 = bin_size - impression_1
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
     conversion_2 = np.random.binomial(impression_2, ctr_array[1], 1)
-    return (conversion_1, conversion_2, impression_1, impression_2)
-
-def simulator():
-    ctr_array = [0.04, 0.05]
-    bin_size = 200
-    experiment_size = 10000
-    experiments = map(lambda x: np.random.binomial(bin_size, x, experiment_size), ctr_array)
-    cumsum_experiements = map(lambda x: x.cumsum(), experiments)
-    bin_experiments = np.ones(experiment_size) * bin_size
-    cumsum_bin = bin_experiments.cumsum()
-    mean_experiments = map(lambda x: x/cumsum_bin, cumsum_experiements)
-    vn_experiments = get_vn(mean_experiments[0], mean_experiments[1], cumsum_bin)
-    vn_new = get_new_vn(vn_experiments, 100, 0.05)
-    theta_n = get_theta_n(mean_experiments[0], mean_experiments[1])
-    #plt.plot(vn_new[1:1000])
-    diff = theta_n - vn_new
-    diff_old = theta_n - np.sqrt(vn_experiments)*1.65
-    # plt.plot(theta_n[1000:10000])
-    s_size = 500
-    plt.subplot(2,1,1)
-    plt.plot(diff[1:s_size])
-    plt.plot(np.zeros(s_size))
-    plt.plot(diff_old[1:s_size])
-    plt.show()
-
-def avg(data, bin_size):
-    avg_num = []
-    count = 0
-    cum = 0
-    for x in data:
-        count = count + bin_size
-        cum = cum + x
-        avg_num.append(float(cum)/float(count))
-    return avg_num
+    optimal_conversions = bin_size * ctr_array[1]
+    return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator():
     random_walk_array = random_walk(10000)
@@ -399,45 +382,6 @@ def simulator():
     print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp_type1_err)
     print stat_simulator.run_bandit_experiment(lambda x, y, z: simulator_function_bandit_random_walk_preset(x, y, z, random_walk_array))
     print stat_simulator.run_bandit_experiment(lambda x, y, z: simulator_function_bandit_random_walk_preset_type1_err(x, y, z, random_walk_array))
-
-    # ctr_array = [0.04, 0.05]
-    # bin_size = 200
-    # experiment_size = 10000
-    # experiments = map(lambda x: np.random.binomial(bin_size, x, experiment_size), ctr_array)
-    # cumsum_experiements = map(lambda x: x.cumsum(), experiments)
-    # bin_experiments = np.ones(experiment_size) * bin_size
-    # cumsum_bin = bin_experiments.cumsum()
-    # mean_experiments = map(lambda x: x/cumsum_bin, cumsum_experiements)
-    # vn_experiments = get_vn(mean_experiments[0], mean_experiments[1], cumsum_bin)
-    # vn_new = get_new_vn(vn_experiments, 100, 0.05)
-    # theta_n = get_theta_n(mean_experiments[0], mean_experiments[1])
-    # #plt.plot(vn_new[1:1000])
-    # diff = theta_n - vn_new
-    # diff_old = theta_n - np.sqrt(vn_experiments)*1.65
-    # # plt.plot(theta_n[1000:10000])
-    # s_size = 500
-    # plt.subplot(2,1,1)
-    # plt.plot(diff[1:s_size])
-    # plt.plot(np.zeros(s_size))
-    # plt.plot(diff_old[1:s_size])
-    # plt.show()
-
-    # value_remainings = np.zeros(experiment_size)
-    # stop_markers = np.zeros(experiment_size)
-    # winner_indexes = np.zeros(experiment_size)
-    # for i in range(experiment_size):
-    #     winner_index, value_remaining, is_stopped = get_bandit_fractions([cumsum_bin[i], cumsum_bin[i]], [cumsum_experiements[0][i], cumsum_experiements[1][i]])
-    #     value_remainings[i] = value_remaining
-    #     stop_markers[i] = is_stopped
-    #     winner_indexes[i] = winner_index
-
-    # plt.subplot(2,1,2)
-    # arm_size = s_size
-    # plt.plot(value_remainings[1:arm_size])
-    # plt.plot(stop_markers[1:arm_size])
-    # plt.plot(winner_indexes[1:arm_size]/2.0)
-    # plt.ylim(-0.1,1.1)
-    # plt.show()
 
 if __name__ == '__main__':
     simulator()
