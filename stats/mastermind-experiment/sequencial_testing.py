@@ -96,6 +96,8 @@ class StatsOptimizingSimulator(object):
         new_err_count = 0
         traditional_inconclusive_count = 0
         new_inconclusive_count = 0
+        total_missed_traditional_conversion_count = 0
+        total_missed_new_conversion_count = 0
         threshold_traditional_array = []
         threshold_new_array = []
         for i in range(self.experiment_number):
@@ -107,28 +109,41 @@ class StatsOptimizingSimulator(object):
             is_new_reached = False
             iteration_counter = 0
 
+            total_optimal_conversion_count = 0
+            total_conversion_count = 0
+            missed_traditional_conversion_count = 0
+            missed_new_conversion_count = 0
             while (not is_traditional_reached or not is_new_reached) and iteration_counter < self.max_iteration:
-                conversion_1, conversion_2, impression_1, impression_2 = conversion_simulator_function(self.bin_size, iteration_counter)
+                conversion_1, conversion_2, impression_1, impression_2, optimal_conversions = conversion_simulator_function(self.bin_size, iteration_counter)
                 conversion_counter_1 = conversion_counter_1 + conversion_1
                 conversion_counter_2 = conversion_counter_2 + conversion_2
                 impression_counter_1 = impression_counter_1 + impression_1
                 impression_counter_2 = impression_counter_2 + impression_2
                 impression_counter = impression_counter_1 + impression_counter_2
 
+                total_optimal_conversion_count = total_optimal_conversion_count + optimal_conversions
+                total_conversion_count = total_conversion_count + conversion_1[0] + conversion_2[0]
+
                 mean_diff, threshold_traditional, threshold_new = \
                     sequencial_method.calculate_significance(conversion_counter_1, impression_counter_1, conversion_counter_2, impression_counter_2)
                 threshold_traditional_array.append(threshold_traditional)
                 threshold_new_array.append(threshold_new)
+
                 if not is_traditional_reached and threshold_traditional > 0:
                     is_traditional_reached = True
                     traditional_end_count = traditional_end_count + impression_counter
                     if mean_diff < 0:
                         traditional_err_count = traditional_err_count + 1
+                    else: # it is a true winner.
+                        missed_traditional_conversion_count = total_optimal_conversion_count - total_conversion_count
+
                 if not is_new_reached and threshold_new > 0:
                     is_new_reached = True
                     new_end_count = new_end_count + impression_counter
                     if mean_diff < 0:
                         new_err_count = new_err_count + 1
+                    else:
+                        missed_new_conversion_count = total_optimal_conversion_count - total_conversion_count
                 iteration_counter = iteration_counter + 1
 
             # If the condition is not reached then the inconclusive count adds one.
@@ -137,15 +152,22 @@ class StatsOptimizingSimulator(object):
             if not is_new_reached:
                 new_inconclusive_count = new_inconclusive_count + 1
 
+            total_missed_traditional_conversion_count = total_missed_traditional_conversion_count + missed_traditional_conversion_count
+            total_missed_new_conversion_count = total_missed_new_conversion_count + missed_new_conversion_count
+
         if traditional_end_count == 0:
             traditional_avg = 0
+            missed_traditional_conversion_avg = 0
         else:
             traditional_avg = traditional_end_count / (self.experiment_number - traditional_inconclusive_count)
+            missed_traditional_conversion_avg = total_missed_traditional_conversion_count / (self.experiment_number - traditional_inconclusive_count)
 
         if new_end_count == 0:
             new_avg = 0
+            missed_new_conversion_avg = 0
         else:
             new_avg = new_end_count / (self.experiment_number - new_inconclusive_count)
+            missed_new_conversion_avg = total_missed_new_conversion_count / (self.experiment_number - new_inconclusive_count)
 
         if self.is_display:
             plt.plot(threshold_traditional_array)
@@ -153,7 +175,9 @@ class StatsOptimizingSimulator(object):
             plt.plot(np.zeros(len(threshold_new_array)))
             plt.show()
 
-        return (traditional_avg, new_avg, traditional_inconclusive_count, new_inconclusive_count, traditional_err_count, new_err_count)
+        return (traditional_avg, new_avg, traditional_inconclusive_count,
+            new_inconclusive_count, traditional_err_count, new_err_count,
+            missed_traditional_conversion_avg, missed_new_conversion_avg)
 
     def run_bandit_experiment(self, conversion_simulator_function):
         bandit_method = MultiArmedBandits()
@@ -374,14 +398,14 @@ def simulator():
     print stat_simulator.run_sequencial_experiment(lambda x, y: simulator_function_random_walk_preset(x, y, random_walk_array))
     print stat_simulator.run_sequencial_experiment(lambda x, y: simulator_function_random_walk_preset_type1_err(x, y, random_walk_array))
     
-    print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple)
-    print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple_type1_err)
-    print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant)
-    print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant_type1_err)
-    print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp)
-    print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp_type1_err)
-    print stat_simulator.run_bandit_experiment(lambda x, y, z: simulator_function_bandit_random_walk_preset(x, y, z, random_walk_array))
-    print stat_simulator.run_bandit_experiment(lambda x, y, z: simulator_function_bandit_random_walk_preset_type1_err(x, y, z, random_walk_array))
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple)
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple_type1_err)
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant)
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant_type1_err)
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp)
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp_type1_err)
+    # print stat_simulator.run_bandit_experiment(lambda x, y, z: simulator_function_bandit_random_walk_preset(x, y, z, random_walk_array))
+    # print stat_simulator.run_bandit_experiment(lambda x, y, z: simulator_function_bandit_random_walk_preset_type1_err(x, y, z, random_walk_array))
 
 if __name__ == '__main__':
     simulator()
