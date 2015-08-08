@@ -18,6 +18,7 @@ import tornado.gen
 from utils import statemon
 
 statemon.define('bc_api_errors', int)
+statemon.define('unexpected_submition_error', int)
 
 _log = logging.getLogger(__name__)
 
@@ -63,7 +64,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 'renditions',
                 'length',
                 'name',
-                'publishedDate']
+                'publishedDate',
+                'lastModifiedDate']
 
     def _get_video_url_to_download(self, b_json_item):
         '''
@@ -126,9 +128,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
     @tornado.gen.coroutine
     def lookup_and_submit_videos(self, ovp_video_ids):
-        '''Looks up a list of video ids and submits them.'''
-        retval = {}
-            
+        '''Looks up a list of video ids and submits them.
+
+        Returns: dictionary of video_id => job_id
+        '''
         try:
             bc_video_info = yield self.bc_api.find_videos_by_ids(
                 ovp_video_ids,
@@ -139,13 +142,122 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             _log.error('Error getting data from Brightcove: %s' % e)
             raise integrations.ovp.OVPError(e)
 
-        for data in bc_video_info:
-            bc_video_id = data['id']
+        retval = yield self.submit_many_videos(bc_video_info)
+
+        raise tornado.gen.Return(retval)
+
+    @tornado.gen.coroutine
+    def submit_playlist_videos(self):
+        '''Submits any playlist videos for this account.'''
+        retval = {}
+        for playlist_id in self.platform.playlist_feed_ids:
             try:
-                retval[bc_video_id] = self.submit_one_video_object(bc_video_id,
-                                                                   data)
+                cur_results = yield self.bc_api.find_playlist_by_id(
+                    playlist_id,
+                    BrightcoveIntegration.get_submit_video_fields(),
+                    ['videos'],
+                    async=True)
+            except brightcove_api.BrightcoveApiServerError as e:
+                statemon.state.increment('bc_api_errors')
+                _log.error('Error getting playlist from Brightcove: %s' % e)
+                raise integrations.ovp.OVPError(e)
+
+            cur_jobs = yield self.submit_many_videos(cur_results['videos'])
+            retval.update(cur_jobs)
+
+        raise tornado.gen.Return(retval)
+
+    @tornado.gen.coroutine
+    def submit_new_videos(self):
+        '''Submits new videos in the account.'''
+        from_date = 21492000
+        if (self.platform.last_process_date is not None and 
+            not self.platform.uses_batch_provisioning):
+            from_date = self.platform.last_process_date / 60
+
+        custom_fields = None
+        if self.platform.custom_id_field is not None:
+            custom_fields = [self.platform.custom_id_field]
+
+        video_iter = self.bc_api.find_modified_videos_iter(
+            from_date=from_date
+            _filter=['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
+            sort_by='MODIFIED_DATE',
+            sort_order='DESC',
+            video_fields=BrightcoveIntegration.get_submit_video_fields(),
+            custom_fields=custom_fields)
+
+        count = 0
+        last_mod_date = None
+        try:
+            while True:
+                if self.platform.last_process_date is None and count > 100:
+                    # New account, so only process the most recent videos
+                    raise StopIteration
+                
+                item = yield video_iter.next(async=True)
+
+                if (self.platform.last_process_date is not None and 
+                    int(item['lastModifiedDate']) >  
+                    (self.platform.last_process_date * 1000)):
+                    # No new videos
+                    raise StopIteration
+
+                yield self.submit_one_video_object(item)
+
+                count += 1
+                last_mod_date = max(last_mod_date,
+                                    int(item['lastModifiedDate']))
+        except StopIteration:
+            pass
+
+        if last_mod_date is not None:
+            def _set_mod_date(x):
+                x.last_process_date = last_mod_date / 1000
+            self.platform = yield tornado.gen.Task(
+                neondata.BrightcovePlatform.modify,
+                self.platform.neon_api_key,
+                self.platform.integration_id,
+                _set_mod_date)
+
+    @tornado.gen.coroutine
+    def process_publisher_stream(self):
+        yield self.submit_playlist_videos()
+        yield self.submit_new_videos()
+
+    @tornado.gen.coroutine
+    def submit_many_videos(self, vid_objs, grab_new_thumb=True,
+                           continue_on_error=False):
+        '''Submits many video requests.
+
+        Inputs:
+        vid_objs - Iterator of video objects from Brightcove
+        grab_new_thumbs - True if new thumbnails for the video should be
+                          grabbed
+        continue_on_error - If there is an error, do we continue and log
+                            the exception in the return value.
+
+        Returns: dictionary of video_id => job_id or exception
+        
+        '''
+        retval = {}
+        for data in vid_objs:
+            try:
+                retval[data['id']] = yield self.submit_one_video_object(
+                    data['id'],
+                    data)
             except integrations.ovp.CMSAPIError as e:
-                retval[bc_video_id] = e
+                if continue_on_error:
+                    retval[data['id']] = e
+                else:
+                    raise
+            except Exception as e:
+                _log.exception('Unexpected error submiting video %s' % data)
+                statemon.state.increment('unexpected_submition_error')
+                if continue_on_error:
+                    retval[data['id']] = e
+                else:                
+                    raise
 
         raise tornado.gen.Return(retval)
 
@@ -180,8 +292,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 default_thumbnail=thumb_url,
                 external_thumbnail_id=unicode(thumb_data['id']))
 
-            # TODO: Move this to the video server for when the
-            # video is processed.
+            # TODO: Remove this hack once videos aren't attached to
+            # platform objects.
+            # HACK: Add the video to the platform object because our call 
+            # will put it on the NeonPlatform object.
             self.platform = yield tornado.gen.Task(
                 neondata.BrightcovePlatform.modify,
                 self.platform.neon_api_key,

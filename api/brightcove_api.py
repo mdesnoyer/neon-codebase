@@ -889,7 +889,8 @@ class BrightcoveApi(object):
             'output' : 'json',
             'media_delivery' : media_delivery,
             'page_number' : 0 if page is None else page,
-            'page_size' : page_size
+            'page_size' : page_size,
+            'cache_buster' : time.time()
             }
         if _all is not None:
             url_params['all'] = ','.join(
@@ -975,7 +976,8 @@ class BrightcoveApi(object):
             'page_number' : page,
             'page_size' : page_size,
             'sort_order' : sort_order,
-            'from_date' : from_date_mins
+            'from_date' : from_date_mins,
+            'cache_buster' : time.time()
             }
 
         if _filter is not None:
@@ -1012,7 +1014,7 @@ class BrightcoveApi(object):
                                       max_results, **kwargs)
 
     @utils.sync.optional_sync
-    @tornado.gen.coroutne
+    @tornado.gen.coroutine
     def find_playlist_by_id(self, playlist_id, video_fields=None,
                             playlist_fields=None, custom_fields=None,
                             media_delivery='http'):
@@ -1033,7 +1035,8 @@ class BrightcoveApi(object):
             'token' : self.read_token,
             'output' : 'json',
             'media_delivery' : media_delivery,
-            'playlist_id': playlist_id
+            'playlist_id': playlist_id,
+            'cache_buster' : time.time()
             }
 
         if playlist_fields is not None:
@@ -1066,7 +1069,7 @@ def _handle_response(response):
     Returns: a list of video objects
     '''
     if response.error:
-        _log.error('Error calling find_videos_by_ids: %s' %
+        _log.error('Error calling getting video info from brightcove: %s' %
                    response.body)
         try:
             json_data = json.load(response.buffer)

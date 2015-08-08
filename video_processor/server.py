@@ -668,6 +668,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             api_request = None 
             http_callback = params.get(CALLBACK_URL, None)
             default_thumbnail = params.get('default_thumbnail', None)
+            i_id = params.get(INTEGRATION_ID, '0')
             # Verify essential parameters
             try:
                 api_key = params[API_KEY]
@@ -712,7 +713,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 wtoken = params[BCOVE_WRITE_TOKEN]
                 autosync = params["autosync"]
                 request_type = "brightcove"
-                i_id = params[INTEGRATION_ID]
                 api_request = neondata.BrightcoveApiRequest(
                     job_id, api_key, vid, title, url,
                     rtoken, wtoken, pub_id, http_callback, i_id,
@@ -725,7 +725,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 oo_api_key = params["oo_api_key"]
                 oo_secret_key = params["oo_secret_key"]
                 autosync = params["autosync"]
-                i_id = params[INTEGRATION_ID]
                 api_request = neondata.OoyalaApiRequest(
                     job_id,
                     api_key, 
@@ -746,7 +745,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                                                       title, url,
                                                       request_type,
                                                       http_callback,
-                                                      default_thumbnail)
+                                                      default_thumbnail,
+                                                      integration_id=i_id)
                 statemon.state.increment('neon_requests')
             
             # API Method

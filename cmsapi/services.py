@@ -470,7 +470,12 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
             # Create thumbnail API
             elif method == "create_thumbnail_api_request":
-                yield self.create_neon_thumbnail_api_request()
+                if i_id is None:
+                    data = '{"error":"integration id not specified"}'
+                    statemon.state.increment('integration_id_missing')
+                    self.send_json_response(data, 400)
+                    return
+                yield self.create_neon_thumbnail_api_request(i_id)
             elif method == "reprocess_video_request":
                 #TODO(Sunil): Implement this endpoint
                 self.method_not_supported()
@@ -663,7 +668,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     ## Submit a video request to Neon Video Server
     @tornado.gen.coroutine
     def submit_neon_video_request(self, api_key, video_id, video_url, 
-                    video_title, topn, callback_url, default_thumbnail):
+                                  video_title, topn, callback_url, 
+                                  default_thumbnail, integration_id=None):
 
         '''
         Create the call in to the Video Server
@@ -682,6 +688,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         if options.local == 1:
             client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
         request_body["callback_url"] = callback_url 
+        request_body["integration_id"] = integration_id or '0'
         body = tornado.escape.json_encode(request_body)
         http_client = tornado.httpclient.AsyncHTTPClient()
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
@@ -718,7 +725,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         self.send_json_response(result.body, 201)
     
     @tornado.gen.coroutine
-    def create_neon_thumbnail_api_request(self):
+    def create_neon_thumbnail_api_request(self, integration_id):
         '''
         Endpoint for API calls to submit a video request
         '''
@@ -747,7 +754,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         #Create Neon API Request
         yield self.submit_neon_video_request(self.api_key, video_id, video_url,
                                              video_title, topn, callback_url,
-                                             default_thumbnail)
+                                             default_thumbnail, integration_id)
 
     @tornado.gen.coroutine
     def create_neon_video_request_from_ui(self, i_id):

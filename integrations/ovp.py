@@ -20,6 +20,7 @@ from utils import statemon
 import utils.sync
 
 statemon.define('job_submission_error', int)
+statemon.define('new_job_submitted', int)
 
 define('cmsapi_host', default='services.neon-lab.com',
        help='Host where the cmsapi is')
@@ -59,7 +60,7 @@ class OVPIntegration(object):
             }
         headers = {"X-Neon-API-Key" : self.platform.neon_api_key,
                    "Content-Type" : "application/json"}
-        url = ('http://%s:%s/api/v1/accounts/%s/brightcove_integrations/%s/'
+        url = ('http://%s:%s/api/v1/accounts/%s/neon_integrations/%s/'
                'create_thumbnail_api_request') % (
                    options.cmsapi_host,
                    options.cmsapi_port,
@@ -74,7 +75,8 @@ class OVPIntegration(object):
         response = yield tornado.gen.Task(utils.http.send_request, request)
 
         if response.code == 409:
-            _log.warn('Video already exists')
+            _log.warn('Video %s for account %s already exists' % 
+                      (video_id, self.account_id))
             raise tornado.gen.Return(json.loads(response.body))
         elif response.error is not None:
             statemon.state.increment('job_submission_error')
@@ -82,6 +84,7 @@ class OVPIntegration(object):
                                                           response.error))
             raise CMSAPIError('Error submitting video: %s' % response.error)
 
+        statemon.state.increment('new_job_submitted')
         raise tornado.gen.Return(json.loads(response.body))
 
     @tornado.gen.coroutine

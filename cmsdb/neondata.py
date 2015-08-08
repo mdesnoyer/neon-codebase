@@ -2416,7 +2416,7 @@ class BrightcovePlatform(AbstractPlatform):
         self.read_token = rtoken
         self.write_token = wtoken
         self.auto_update = auto_update 
-        #The publish date of the last processed video - UTC timestamp 
+        #The publish date of the last processed video - UTC timestamp in seconds
         self.last_process_date = last_process_date 
         self.linked_youtube_account = False
         self.account_created = time.time() #UTC timestamp of account creation
@@ -2430,7 +2430,10 @@ class BrightcovePlatform(AbstractPlatform):
         # Does the customer use batch provisioning (i.e. FTP
         # uploads). If so, we cannot rely on the last modified date of
         # videos. http://support.brightcove.com/en/video-cloud/docs/finding-videos-have-changed-media-api
-        self.uses_batch_provisioning = False
+        self.uses_batch_provisioning = uses_batch_provisioning
+
+        # Which custom field to use for the video id
+        self.custom_id_field = None
 
     @classmethod
     def get_ovp(cls):
@@ -3756,6 +3759,9 @@ class VideoMetadata(StoredObject):
         # NOTE: This is set by mastermind by calling get_serving_url() method
         # after the request state has been changed to SERVING
         self.serving_url = None
+
+        # An external id for the video
+        self.external_id = None
 
     @classmethod
     def is_valid_key(cls, key):
