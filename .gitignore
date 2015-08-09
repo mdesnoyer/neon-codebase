@@ -75,3 +75,7 @@ CTestResults.xml
 
 #### PyCharm ####
 .idea
+
+#### AirFlow ####
+airflow.cfg
+airflow/logs/*
