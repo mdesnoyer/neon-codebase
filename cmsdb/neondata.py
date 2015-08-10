@@ -2403,11 +2403,15 @@ class NeonPlatform(AbstractPlatform):
 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
+
+    REFERENCE_ID = '_reference_id'
+    BRIGHTCOVE_ID = '_bc_id'
     
     def __init__(self, api_key, i_id=None, a_id='', p_id=None, 
                 rtoken=None, wtoken=None, auto_update=False,
                 last_process_date=None, abtest=False, callback_url=None,
-                uses_batch_provisioning=False):
+                uses_batch_provisioning=False,
+                id_field=BrightcovePlatform.BRIGHTCOVE_ID):
 
         ''' On every request, the job id is saved '''
         super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)
@@ -2432,8 +2436,10 @@ class BrightcovePlatform(AbstractPlatform):
         # videos. http://support.brightcove.com/en/video-cloud/docs/finding-videos-have-changed-media-api
         self.uses_batch_provisioning = uses_batch_provisioning
 
-        # Which custom field to use for the video id
-        self.custom_id_field = None
+        # Which custom field to use for the video id. If it is
+        # BrightcovePlatform.REFERENCE_ID, then the reference_id field
+        # is used. If it is BRIGHTCOVE_ID, the 'id' field is used.
+        self.id_field = id_field
 
     @classmethod
     def get_ovp(cls):
@@ -3732,7 +3738,7 @@ class VideoMetadata(StoredObject):
                  i_id=None, frame_size=None, testing_enabled=True,
                  experiment_state=ExperimentState.UNKNOWN,
                  experiment_value_remaining=None,
-                 serving_enabled=True):
+                 serving_enabled=True, custom_data=None):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
         self.url = video_url 
@@ -3760,8 +3766,8 @@ class VideoMetadata(StoredObject):
         # after the request state has been changed to SERVING
         self.serving_url = None
 
-        # An external id for the video
-        self.external_id = None
+        # A dictionary of extra metadata
+        self.custom_data = custom_data or {}
 
     @classmethod
     def is_valid_key(cls, key):

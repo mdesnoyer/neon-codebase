@@ -14,11 +14,19 @@ from api import brightcove_api
 from cmsdb import neondata
 import integrations.ovp
 import logging
+import re
 import tornado.gen
+import urlparse
+from utils.options import options, define
 from utils import statemon
+
+define('max_vids_for_new_account', default=100, 
+       help='Maximum videos to process for a new account')
 
 statemon.define('bc_api_errors', int)
 statemon.define('unexpected_submition_error', int)
+statemon.define('new_images_found', int)
+statemon.define('cant_get_image', int)
 
 _log = logging.getLogger(__name__)
 
@@ -42,6 +50,16 @@ def _get_urls_from_bc_response(response):
             urls.append(response[image_type].get('remoteUrl', None))
 
     return [x for x in urls if x is not None]
+
+def _extract_image_info_from_bc_response(response, field):
+    '''Extracts a list of fields from the images in the response.'''
+    vals = []
+    for image_type in ['thumbnail', 'videoStill']:
+        fields = response.get(image_type, None)
+        if fields is not None:
+            vals.append(fields.get(field, None))
+
+    return [unicode(x) for x in vals if x is not None]
 
 class BrightcoveIntegration(integrations.ovp.OVPIntegration):
     def __init__(self, account_id, platform):
@@ -180,7 +198,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             custom_fields = [self.platform.custom_id_field]
 
         video_iter = self.bc_api.find_modified_videos_iter(
-            from_date=from_date
+            from_date=from_date,
             _filter=['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
             sort_by='MODIFIED_DATE',
             sort_order='DESC',
@@ -191,7 +209,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         last_mod_date = None
         try:
             while True:
-                if self.platform.last_process_date is None and count > 100:
+                if self(.platform.last_process_date is None and 
+                        count > options.max_vids_for_new_account):
                     # New account, so only process the most recent videos
                     raise StopIteration
                 
@@ -246,14 +265,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 retval[data['id']] = yield self.submit_one_video_object(
                     data['id'],
                     data)
-            except integrations.ovp.CMSAPIError as e:
-                if continue_on_error:
-                    retval[data['id']] = e
-                else:
-                    raise
             except Exception as e:
-                _log.exception('Unexpected error submiting video %s' % data)
-                statemon.state.increment('unexpected_submition_error')
                 if continue_on_error:
                     retval[data['id']] = e
                 else:                
@@ -272,6 +284,20 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         Outputs:
         the job id
         '''
+        try:
+            retval = yield self._submit_one_video_object_impl(vid_obj,
+                                                              grab_new_thumb)
+        except integrations.ovp.CMSAPIError as e:
+            # Error is already logged
+            raise
+        except Exception as e:
+            _log.exception('Unexpected error submiting video %s' % vid_obj)
+            statemon.state.increment('unexpected_submition_error')
+            raise
+        raise tornado.gen.Return(retval)
+
+    @tornado.gen.coroutine
+    def _submit_one_video_object_impl(self, vid_obj, grab_new_thumb=True):
         thumb_url, thumb_data = \
               BrightcoveIntegration._get_best_image_info(vid_obj)
         if (thumb_url is None or 
@@ -320,8 +346,9 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         bc_video_id = data['id']
 
         thumb_url, thumb_data = \
-          BrightcoveIntegration._get_best_image_info(vid_obj)
-        bc_urls = [_normalize_url(x) for x in _get_urls_from_bc_response(data)]
+          BrightcoveIntegration._get_best_image_info(data)
+        bc_urls = [_normalize_thumbnail_url(x) for 
+                   x in _get_urls_from_bc_response(data)]
 
         # Function that will set the external id in the ThumbnailMetadata
         external_id = thumb_data.get('id', None)
@@ -329,8 +356,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             obj.external_id = external_id
 
         # Get the video object from our database
-        video_id = neondata.InternalVideoID.generate(platform.neon_api_key,
-                                                     bc_video_id)
+        video_id = neondata.InternalVideoID.generate(
+            self.platform.neon_api_key, bc_video_id)
         vid_meta = yield tornado.gen.Task(neondata.VideoMetadata.get,
                                           video_id)
         if not vid_meta:
@@ -354,11 +381,13 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             if thumb.external_id is not None:
                 # We know about this thumb was in Brightcove so see if it
                 # is still there.
-                if thumb.external_id == external_id:
+                if thumb.external_id in _extract_image_info_from_bc_response(
+                        data, 'id'):
                     found_thumb = True
             elif thumb.refid is not None:
                 # For legacy thumbs, we specified a reference id. Look for it
-                if thumb.refid == thumb_data.get('referenceId', None):
+                if thumb.refid in _extract_image_info_from_bc_response(
+                        data, 'referenceId'):
                     found_thumb = True
 
                     yield tornado.gen.Task(neondata.ThumbnailMetadata.modify,
@@ -367,7 +396,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             else:
                 # We do not have the id for this thumb, so see if we
                 # can match the url.
-                norm_urls = set([normalize_url(x) for x in thumb.urls])
+                norm_urls = set([_normalize_thumbnail_url(x) 
+                                 for x in thumb.urls])
                 if len(norm_urls.intersection(bc_urls)) > 0:
                     found_thumb = True
                     
