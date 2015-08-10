@@ -805,23 +805,25 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                         return
 
                 # Save the video metadata and the default thumbnail
-                video = yield tornado.gen.Task(
-                    neondata.VideoMetadata.get,
-                    neondata.InternalVideoID.generate(api_key, vid))
-                if video is None:
-                    video = neondata.VideoMetadata(
-                        neondata.InternalVideoID.generate(api_key, vid),
-                        request_id=api_request.job_id,
-                        video_url=url,
-                        i_id=api_request.integration_id,
-                        serving_enabled=False)
-                    yield tornado.gen.Task(video.save)
+                def _merge_video_data(video_obj):
+                    video_obj.job_id = api_request.job_id
+                    video_obj.url = url
+                    video_obj.integration_id = api_request.integration_id
+                    video_obj.serving_enabled = \
+                      len(video_obj.thumbnail_ids) > 0
+                internal_video_id = \
+                  neondata.InternalVideoID.generate(api_key, vid)
+                yield tornado.gen.Task(
+                    neondata.VideoMetadata.modify,
+                    internal_video_id,
+                    _merge_video_data,
+                    create_missing=True)
                 yield api_request.save_default_thumbnail(async=True)
                 def _set_serving_enabled(video_obj):
                     video_obj.serving_enabled = \
                       len(video_obj.thumbnail_ids) > 0
                 yield tornado.gen.Task(neondata.VideoMetadata.modify,
-                                       video.key,
+                                       internal_video_id,
                                        _set_serving_enabled)
                 
                 self.set_status(201)

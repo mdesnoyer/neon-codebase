@@ -2411,7 +2411,7 @@ class BrightcovePlatform(AbstractPlatform):
                 rtoken=None, wtoken=None, auto_update=False,
                 last_process_date=None, abtest=False, callback_url=None,
                 uses_batch_provisioning=False,
-                id_field=BrightcovePlatform.BRIGHTCOVE_ID):
+                id_field=BRIGHTCOVE_ID):
 
         ''' On every request, the job id is saved '''
         super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)
@@ -3742,7 +3742,7 @@ class VideoMetadata(StoredObject):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
         self.url = video_url 
-        self.duration = duration
+        self.duration = duration # in seconds
         self.video_valence = vid_valence 
         self.model_version = model_version
         self.job_id = request_id

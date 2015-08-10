@@ -743,6 +743,15 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         topn = self.get_argument('topn', 1)
         callback_url = self.get_argument('callback_url', None)
         default_thumbnail = self.get_argument('default_thumbnail', None)
+        try:
+            custom_data = InputSanitizer.to_dict(
+                self.get_argument('custom_data', {}))
+        except ValueError:
+            self.send_json_response(
+                '{"error":"custom data must be a dictionary"}', 400)
+            return
+        duration = InputSanitizer.sanitize_float(
+            self.get_argument('duration', None))
         
         if video_id is None or video_url == "": 
             _log.error("key=create_neon_thumbnail_api_request "
@@ -750,6 +759,25 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             statemon.state.increment('malformed_request')
             self.send_json_response('{"error":"missing video_url"}', 400)
             return
+
+        # Create the video metadata object
+        internal_video_id = neondata.InternalVideoID.generate(self.api_key,
+                                                              video_id)
+        video = yield tornado.gen.Task(neondata.VideoMetadata.get,
+                                       internal_video_id)
+        if video is not None:
+            data = {'error' : 'request already processed',
+                    'video_id' : video_id,
+                    'job_id' : video.job_id}
+            self.send_json_response(json.dumps(data), 409)
+            return
+        video = neondata.VideoMetadata(internal_video_id,
+                                       video_url=video_url,
+                                       i_id=integration_id,
+                                       serving_enabled=False,
+                                       custom_data=custom_data,
+                                       duration=duration)
+        yield tornado.gen.Task(video.save)
         
         #Create Neon API Request
         yield self.submit_neon_video_request(self.api_key, video_id, video_url,

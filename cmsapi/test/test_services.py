@@ -187,7 +187,9 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
 
         headers = {'X-Neon-API-Key' : apikey, 
                 'Content-Type':'application/x-www-form-urlencoded'}
-        body = urllib.urlencode(vals)
+        body = urllib.urlencode(
+            dict([(k, v if not isinstance(v, basestring) else 
+                   v.encode('utf-8')) for k, v in vals.iteritems()]))
         
         if jsonheader: 
             headers = {'X-Neon-API-Key' : apikey, 
@@ -372,14 +374,16 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             params = tornado.escape.json_decode(http_request.body)
             job_id = str(random.random())
             self.job_ids.append(job_id)
-            vidmeta = neondata.VideoMetadata(
+            def _mod_video(x):
+                x.job_id = job_id
+                x.video_url = params['video_url']
+                x.integration_id = params.get('integration_id', '0') or '0'
+                serving_enabled = False
+            neondata.VideoMetadata.modify(
                 neondata.InternalVideoID.generate(params['api_key'],
                                                   params['video_id']),
-                request_id = job_id,
-                video_url=params['video_url'],
-                i_id='0',
-                serving_enabled=False)
-            vidmeta.save()
+                _mod_video,
+                create_missing=True)
 
             neondata.NeonApiRequest(job_id,
                                     params['api_key'],
@@ -510,7 +514,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         
         #verify account id added to Neon user account
         nuser = neondata.NeonUserAccount.get(self.api_key)
-        self.assertTrue(self.b_id in nuser.integrations.keys())
+        self.assertIn(self.b_id, nuser.integrations.keys())
         
         reqs = self._create_neon_api_requests()
         self._process_brightcove_neon_api_requests(reqs)
@@ -1032,7 +1036,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         api_key = self.create_neon_account()
         nuser = neondata.NeonUserAccount.get(api_key)
         neon_integration_id = "0"
-        self.assertTrue(neon_integration_id in nuser.integrations.keys()) 
+        self.assertIn(neon_integration_id, nuser.integrations.keys()) 
 
     def test_create_neon_video_request(self):
         ''' verify that video request creation via services  ''' 
@@ -1046,7 +1050,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
           self._success_http_side_effect
 
         response = self.post_request(uri, vals, api_key)
-        self.assertTrue(response.code, 200)
+        self.assertEqual(response.code, 200)
         response = json.loads(response.body)
         self.assertIsNotNone(response["video_id"])  
         self.assertEqual(response["status"], neondata.RequestState.PROCESSING)
@@ -1055,8 +1059,10 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         ''' verify that video request creation via services  ''' 
         
         api_key = self.create_neon_account()
-        vals = { 'video_url' : "http://test.mp4", "video_title": "test_title", 
-                 'video_id'  : "vid1", "callback_url" : "http://callback"
+        vals = { 'video_url' : "http://test.mp4", 
+                 "video_title": "test_title", 
+                 'video_id'  : "vid1", 
+                 "callback_url" : "http://callback"
                 }
         uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/create_thumbnail_api_request'%(self.a_id, "0"))
@@ -1066,7 +1072,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         
         vid = "vid1"
         response = self.post_request(uri, vals, api_key)
-        self.assertTrue(response.code, 201)
+        self.assertEqual(response.code, 201)
         jresponse = json.loads(response.body)
         job_id = jresponse['job_id']
         self.assertIsNotNone(job_id)
@@ -1081,8 +1087,8 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                 buffer=StringIO('{"error":"already processed","video_id":"vid", "job_id":"%s"}' % job_id))
         self.cp_mock_async_client().fetch.side_effect = \
         response = self.post_request(uri, vals, api_key)
-        self.assertTrue(response.code, 409)
-        self.assertTrue(json.loads(response.body)["job_id"], job_id)
+        self.assertEqual(response.code, 409)
+        self.assertEqual(json.loads(response.body)["job_id"], job_id)
 
 
     def test_create_neon_video_request_videoid_size(self):
@@ -1095,9 +1101,108 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/create_thumbnail_api_request'%(self.a_id, "0"))
         response = self.post_request(uri, vals, api_key)
-        self.assertTrue(response.code, 400)
+        self.assertEqual(response.code, 400)
         self.assertEqual(response.body, 
             '{"error":"video id greater than 128 chars"}')
+
+    def test_create_video_request_with_custom_data(self):
+        self.cp_mock_async_client().fetch.side_effect = \
+          self._success_http_side_effect
+        api_key = self.create_neon_account()
+        vals = {
+            'video_url' : "http://test.mp4",
+            "video_title": "test_title", 
+            'video_id'  : "vid1",
+            "callback_url" : "http://callback",
+            'custom_data' : { 'my_id' : 123456, 'my_string': 'string'},
+            'duration' : 123456.5
+            }
+        uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/create_thumbnail_api_request' % (self.a_id, "61"))
+        response = self.post_request(uri, vals, api_key, jsonheader=True)
+        
+        self.assertEqual(response.code, 201)
+
+        # Make sure the video metadata object is created
+        video = neondata.VideoMetadata.get(
+            neondata.InternalVideoID.generate(api_key, 'vid1'))
+        self.assertEquals(video.custom_data, {'my_id' : 123456,
+                                              'my_string' : 'string'})
+        self.assertEquals(video.video_url, "http://test.mp4")
+        self.assertEquals(video.integration_id, "61")
+        self.assertEquals(video.duration, 123456.5)
+
+    def test_create_video_request_custom_data_via_url_string(self):
+        self.cp_mock_async_client().fetch.side_effect = \
+          self._success_http_side_effect
+        api_key = self.create_neon_account()
+        vals = {
+            'video_url' : "http://test.mp4",
+            "video_title": "test_title", 
+            'video_id'  : "vid1",
+            "callback_url" : "http://callback",
+            'custom_data' : json.dumps(
+                { 'my_id' : 123456, 'my_string': 'string'}),
+            'duration' : 123456.5
+            }
+        uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/create_thumbnail_api_request'%(self.a_id, "61"))
+        response = self.post_request(uri, vals, api_key)
+        
+        self.assertEqual(response.code, 201)
+
+        # Make sure the video metadata object is created
+        video = neondata.VideoMetadata.get(
+            neondata.InternalVideoID.generate(api_key, 'vid1'))
+        self.assertEquals(video.custom_data, {'my_id' : 123456,
+                                              'my_string' : 'string'})
+        self.assertEquals(video.video_url, "http://test.mp4")
+        self.assertEquals(video.integration_id, "61")
+        self.assertEquals(video.duration, 123456.5)
+
+    def test_create_video_request_bad_custom_data(self):
+        api_key = self.create_neon_account()
+        vals = {
+            'video_url' : "http://test.mp4",
+            "video_title": "test_title", 
+            'video_id'  : "vid1",
+            "callback_url" : "http://callback",
+            'custom_data' : "mega man",
+            'duration' : 123456.5
+            }
+        uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/create_thumbnail_api_request'%(self.a_id, "61"))
+        response = self.post_request(uri, vals, api_key, jsonheader=True)
+        
+        self.assertEqual(response.code, 400)
+
+        self.assertEqual(response.body, 
+            '{"error":"custom data must be a dictionary"}')
+
+    def test_create_video_request_utf8(self):
+        self.cp_mock_async_client().fetch.side_effect = \
+          self._success_http_side_effect
+        api_key = self.create_neon_account()
+        vals = {
+            'video_url' : "http://%stest.mp4" % unichr(40960),
+            "video_title": unichr(40960) + u'abcd' + unichr(1972), 
+            'video_id'  : "vid1"
+            }
+        uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                '%s/create_thumbnail_api_request'%(self.a_id, "61"))
+        response = self.post_request(uri, vals, api_key, jsonheader=True)
+        
+        self.assertEqual(response.code, 201)
+
+        # Make sure the video metadata object is created
+        video = neondata.VideoMetadata.get(
+            neondata.InternalVideoID.generate(api_key, 'vid1'))
+        self.assertEquals(video.video_url, vals['video_url'])
+        self.assertEquals(video.integration_id, "61")
+
+        job = neondata.NeonApiRequest.get(video.job_id, api_key)
+        self.assertEquals(job.video_title, vals['video_title'])
+        self.assertEquals(job.video_url, vals['video_url'])
 
     def test_video_request_in_submit_state(self):
         '''
@@ -1116,7 +1221,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         
         vid = "vid1"
         response = self.post_request(uri, vals, api_key)
-        self.assertTrue(response.code, 201)
+        self.assertEqual(response.code, 201)
         jresponse = json.loads(response.body)
         job_id = jresponse['job_id']
         self.assertIsNotNone(job_id)
@@ -1145,7 +1250,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.cp_mock_async_client().fetch.side_effect = \
           self._success_http_side_effect
         response = self.post_request(uri, vals, api_key)
-        self.assertTrue(response.code, 200)
+        self.assertEqual(response.code, 400)
         response = json.loads(response.body)
         self.assertEqual(response['error'], 
                 'link given is invalid or not a video file')
@@ -1331,7 +1436,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(vresponse["integration_type"], "neon")
         self.assertEqual(vresponse["status"], "serving")
         self.assertEqual(vresponse["abtest"], True)
-        self.assertTrue(serving_url in vresponse["serving_url"])
+        self.assertIn(serving_url, vresponse["serving_url"])
         self.assertEqual(vresponse["winner_thumbnail"], None)
 
     @unittest.skip('Incomplete test. TODO: fill out when Ooyala is used')

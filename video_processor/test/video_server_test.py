@@ -6,7 +6,7 @@ import os.path
 import sys
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
                                          '..'))
-if sys.path[0] <> __base_path__:
+if sys.path[0] != __base_path__:
         sys.path.insert(0, __base_path__)
 
 from cmsdb import neondata
@@ -412,6 +412,39 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         resp = self.make_api_request(vals)
         resp = self.make_api_request(vals)
         self.assertEqual(resp.code, 409)
+
+    def test_video_object_exists(self):
+        internal_video_id = \
+          neondata.InternalVideoID.generate(self.api_key, 'vid1')
+        neondata.VideoMetadata(
+            internal_video_id,
+            video_url="http://testurl/video.mp4",
+            i_id='iid2',
+            serving_enabled=False,
+            duration=12345.6,
+            custom_data={'some_key': 'some_fun_data'}).save()
+        
+        vals = {
+            "api_key": self.api_key, 
+            "video_url": "http://testurl/video.mp4", 
+            "video_id": 'vid1',
+            "topn":2, 
+            "callback_url": "http://callback_push_url", 
+            "video_title": "test_title",
+            "integration_id" : 'iid2'
+            }
+        resp = self.make_api_request(vals)
+        self.assertEqual(resp.code, 201)
+        job_id = json.loads(resp.body)['job_id']
+        self.assertIsNotNone(job_id)
+
+        video = neondata.VideoMetadata.get(internal_video_id)
+        self.assertEqual(video.integration_id, 'iid2')
+        self.assertEqual(video.url, "http://testurl/video.mp4")
+        self.assertEqual(video.custom_data, {'some_key': 'some_fun_data'})
+        self.assertEqual(video.duration, 12345.6)
+        self.assertFalse(video.serving_enabled)
+        self.assertEqual(video.job_id, job_id)
 
     def test_brightcove_request(self):
 

@@ -27,6 +27,7 @@ statemon.define('bc_api_errors', int)
 statemon.define('unexpected_submition_error', int)
 statemon.define('new_images_found', int)
 statemon.define('cant_get_image', int)
+statemon.define('cant_get_custom_id', int)
 
 _log = logging.getLogger(__name__)
 
@@ -83,7 +84,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 'length',
                 'name',
                 'publishedDate',
-                'lastModifiedDate']
+                'lastModifiedDate',
+                'referenceId']
 
     def _get_video_url_to_download(self, b_json_item):
         '''
@@ -194,8 +196,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             from_date = self.platform.last_process_date / 60
 
         custom_fields = None
-        if self.platform.custom_id_field is not None:
-            custom_fields = [self.platform.custom_id_field]
+        if self.platform.id_field not in [
+                neondata.BrighcovePlatform.REFERENCE_ID, 
+                neondata.BrighcovePlatform.BRIGHTCOVE_ID]:
+            custom_fields = [self.platform.id_field]
 
         video_iter = self.bc_api.find_modified_videos_iter(
             from_date=from_date,
@@ -209,8 +213,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         last_mod_date = None
         try:
             while True:
-                if self(.platform.last_process_date is None and 
-                        count > options.max_vids_for_new_account):
+                if (self.platform.last_process_date is None and 
+                    count > options.max_vids_for_new_account):
                     # New account, so only process the most recent videos
                     raise StopIteration
                 
@@ -290,6 +294,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         except integrations.ovp.CMSAPIError as e:
             # Error is already logged
             raise
+        except integrations.ovp.OVPError as e:
+            raise
         except Exception as e:
             _log.exception('Unexpected error submiting video %s' % vid_obj)
             statemon.state.increment('unexpected_submition_error')
@@ -307,16 +313,43 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             thumb_url.endswith('.csmil')):
             _log.warn('Brightcove id %s is a live stream' % vid_obj['id'])
             raise tornado.gen.Return(None)
+
+        # Build up the custom data we are going to store in our database.
+        # TODO: Determine all the information we want to grab and store
+        custom_data = vid_obj.get('customFields', {})
+        custom_data['_bc_int_data'] = {
+            'bc_id' : vid_obj['id'],
+            'bc_refid' : vid_obj.get('referenceId', None)
+            }
+
+        # Get the video id to use to key this video
+        if self.platform.id_field == neondata.BrightcovePlatform.REFERENCE_ID:
+            video_id = vid_obj['referenceId']
+        elif (self.platform.id_field == 
+              neondata.BrightcovePlatform.BRIGHTCOVE_ID):
+            video_id = vid_obj['id']
+        else:
+            # It's a custom field, so look for it
+            try:
+                video_id = custom_data[self.platform.id_field]
+            except KeyError:
+                mgs = ('Could not find custom field %s in video %s' %
+                       (self.platform.id_field, vid_obj))
+                _log.error_n(msg)
+                statemon.state.increment('cant_get_custom_id')
+                raise integrations.ovp.OVPError(msg)
             
 
-        if not vid_obj['id'] in self.platform.videos:
+        if not video_id in self.platform.videos:
             # The video hasn't been submitted before
             response = yield self.submit_video(
-                vid_obj['id'],
+                video_id,
                 self._get_video_url_to_download(vid_obj),
-                video_title=vid_obj['name'],
+                video_title=unicode(vid_obj['name']),
                 default_thumbnail=thumb_url,
-                external_thumbnail_id=unicode(thumb_data['id']))
+                external_thumbnail_id=unicode(thumb_data['id']),
+                custom_data = custom_data,
+                duration=float(vid_obj['length']) / 1000.0)
 
             # TODO: Remove this hack once videos aren't attached to
             # platform objects.
@@ -326,25 +359,23 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 neondata.BrightcovePlatform.modify,
                 self.platform.neon_api_key,
                 self.platform.integration_id,
-            lambda x: x.add_video(vid_obj['id'], response['job_id']))
+            lambda x: x.add_video(video_id, response['job_id']))
 
             job_id = response['job_id']
         else:
-            job_id = self.platform.videos[vid_obj['id']]
+            job_id = self.platform.videos[video_id]
             if grab_new_thumb:
-                yield self._grab_new_thumb(vid_obj)
+                yield self._grab_new_thumb(vid_obj, video_id)
 
         raise tornado.gen.Return(job_id)
 
     @tornado.gen.coroutine
-    def _grab_new_thumb(self, data):
+    def _grab_new_thumb(self, data, bc_video_id):
         '''Grab a new thumbnail from a video object if there is one.
 
         Inputs:
         data - A video object from Brightcove
         '''
-        bc_video_id = data['id']
-
         thumb_url, thumb_data = \
           BrightcoveIntegration._get_best_image_info(data)
         bc_urls = [_normalize_thumbnail_url(x) for 

@@ -3,6 +3,7 @@ Input sanitizer module to clean up _inputs and convert to particular datatype
 '''
 
 import logging
+import json
 import re
 import tornado.escape
 import tornado.httpclient
@@ -24,6 +25,12 @@ class InputSanitizer(object):
     def to_list(cls, _input):
         if isinstance(_input, basestring):
            pass
+
+    @staticmethod
+    def to_dict(_input):
+        if isinstance(_input, dict):
+            return _input
+        return json.loads(_input)
 
     @classmethod
     def to_bool(cls, _input, is_null_valid=False):
@@ -119,4 +126,11 @@ class InputSanitizer(object):
         if ip is None or ip == "null" or ip == "undefined":
             return None
         return int(ip)
+
+    @classmethod
+    def sanitize_float(cls, fl):
+        '''Sanitize null or undefined strings to float or None.'''
+        if fl is None or fl == 'null' or fl == 'undefined':
+            return None
+        return float(fl)
 

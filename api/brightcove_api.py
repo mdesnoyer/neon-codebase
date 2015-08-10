@@ -816,12 +816,14 @@ class BrightcoveApi(object):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def find_videos_by_ids(self, video_ids, video_fields=None,
+                           custom_fields=None,
                            media_delivery='http'):
         '''Finds many videos by brightcove id.
         
         Inputs:
         video_ids - list of brightcove video ids to get info for
         video_fields - list of video fields to populate
+        custom_fields - list of custom fields to populate in the result
         media_delivery - should urls be http, http_ios or default
 
         Outputs:
@@ -842,6 +844,9 @@ class BrightcoveApi(object):
             if video_fields is not None:
                 video_fields.append('id')
                 url_params['video_fields'] = ','.join(set(video_fields))
+
+            if custom_fields is not None:
+                url_params['custom_fields'] = ','.join(set(custom_fields))
 
             request = tornado.httpclient.HTTPRequest(
                 '%s?%s' % (READ_URL, urllib.urlencode(url_params)),
