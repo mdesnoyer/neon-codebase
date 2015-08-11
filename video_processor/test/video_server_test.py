@@ -446,6 +446,9 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.assertFalse(video.serving_enabled)
         self.assertEqual(video.job_id, job_id)
 
+        job = neondata.NeonApiRequest.get(video.job_id, self.api_key)
+        self.assertEqual(job.integration_id, 'iid2')
+
     def test_brightcove_request(self):
 
         i_id = "i125"

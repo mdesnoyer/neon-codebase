@@ -385,11 +385,13 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                 _mod_video,
                 create_missing=True)
 
-            neondata.NeonApiRequest(job_id,
-                                    params['api_key'],
-                                    params['video_id'],
-                                    params['video_title'],
-                                    params['video_url']).save()
+            neondata.NeonApiRequest(
+                job_id,
+                params['api_key'],
+                params['video_id'],
+                params['video_title'],
+                params['video_url'],
+                integration_id=params.get('integration_id', '0') or '0').save()
             
             response = tornado.httpclient.HTTPResponse(http_request, 200,
                 buffer=StringIO('{"job_id":"%s"}'%job_id))
@@ -1131,6 +1133,9 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(video.video_url, "http://test.mp4")
         self.assertEquals(video.integration_id, "61")
         self.assertEquals(video.duration, 123456.5)
+
+        job = neondata.NeonApiRequest.get(video.job_id, api_key)
+        self.assertEquals(job.integration_id, '61')
 
     def test_create_video_request_custom_data_via_url_string(self):
         self.cp_mock_async_client().fetch.side_effect = \
