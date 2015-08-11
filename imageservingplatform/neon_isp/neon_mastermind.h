@@ -1,17 +1,17 @@
 #ifndef _NEON_MASTERMIND_C
 #define _NEON_MASTERMIND_C
 
-#include <time.h>
 #include <iostream>
-#include <ngx_config.h>
-#include <ngx_core.h>
-#include <ngx_http.h>
-#include "neon_error_codes.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#include <time.h>
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
+#include "neon_error_codes.h"
 
 /*
  *  Contains an error message in case of function call failure

@@ -8,11 +8,6 @@
 #ifndef _NGX_HTTP_CORE_H_INCLUDED_
 #define _NGX_HTTP_CORE_H_INCLUDED_
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
@@ -589,7 +584,4 @@ extern ngx_str_t  ngx_http_core_get_method;
     }
 
 
-#ifdef __cplusplus
-}
-#endif
 #endif /* _NGX_HTTP_CORE_H_INCLUDED_ */

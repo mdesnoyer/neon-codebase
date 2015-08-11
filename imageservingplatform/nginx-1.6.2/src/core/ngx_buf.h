@@ -4,14 +4,8 @@
  * Copyright (C) Nginx, Inc.
  */
 
-
 #ifndef _NGX_BUF_H_INCLUDED_
 #define _NGX_BUF_H_INCLUDED_
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 
 #include <ngx_config.h>
 #include <ngx_core.h>
@@ -162,7 +156,4 @@ ngx_chain_t *ngx_chain_get_free_buf(ngx_pool_t *p, ngx_chain_t **free);
 void ngx_chain_update_chains(ngx_pool_t *p, ngx_chain_t **free,
     ngx_chain_t **busy, ngx_chain_t **out, ngx_buf_tag_t tag);
 
-#ifdef __cplusplus
-}
-#endif
 #endif /* _NGX_BUF_H_INCLUDED_ */

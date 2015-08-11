@@ -8,8 +8,15 @@
 */
 
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <ngx_core.h>
 #include <ngx_http.h>
+#ifdef __cplusplus
+}
+#endif
+
 #include <stdlib.h>
 #include <pthread.h>
 #include <time.h>

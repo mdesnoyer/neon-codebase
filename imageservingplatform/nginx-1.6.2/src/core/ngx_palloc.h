@@ -8,11 +8,6 @@
 #ifndef _NGX_PALLOC_H_INCLUDED_
 #define _NGX_PALLOC_H_INCLUDED_
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-
 #include <ngx_config.h>
 #include <ngx_core.h>
 
@@ -95,7 +90,4 @@ void ngx_pool_run_cleanup_file(ngx_pool_t *p, ngx_fd_t fd);
 void ngx_pool_cleanup_file(void *data);
 void ngx_pool_delete_file(void *data);
 
-#ifdef __cplusplus
-}
-#endif
 #endif /* _NGX_PALLOC_H_INCLUDED_ */

@@ -8,11 +8,6 @@
 #ifndef _NGX_CORE_H_INCLUDED_
 #define _NGX_CORE_H_INCLUDED_
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-
 typedef struct ngx_module_s      ngx_module_t;
 typedef struct ngx_conf_s        ngx_conf_t;
 typedef struct ngx_cycle_s       ngx_cycle_t;
@@ -101,7 +96,4 @@ void ngx_cpuinfo(void);
 #define NGX_DISABLE_SYMLINKS_NOTOWNER   2
 #endif
 
-#ifdef __cplusplus
-}
-#endif
 #endif /* _NGX_CORE_H_INCLUDED_ */
