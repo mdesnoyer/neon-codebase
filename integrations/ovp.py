@@ -42,7 +42,7 @@ class OVPIntegration(object):
                      video_title=None,
                      default_thumbnail=None,
                      external_thumbnail_id=None,
-                     custom_fields=None,
+                     custom_data=None,
                      duration=None):
         '''Submits a single video for processing to the CMSAPI.
 

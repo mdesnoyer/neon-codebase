@@ -306,11 +306,12 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
     def _submit_one_video_object_impl(self, vid_obj, grab_new_thumb=True):
         thumb_url, thumb_data = \
               BrightcoveIntegration._get_best_image_info(vid_obj)
+        video_url = self._get_video_url_to_download(vid_obj)
         if (thumb_url is None or 
             vid_obj['length'] < 0 or 
-            thumb_url.endswith('.m3u8') or 
-            thumb_url.startswith('rtmp://') or 
-            thumb_url.endswith('.csmil')):
+            video_url.endswith('.m3u8') or 
+            video_url.startswith('rtmp://') or 
+            video_url.endswith('.csmil')):
             _log.warn('Brightcove id %s is a live stream' % vid_obj['id'])
             raise tornado.gen.Return(None)
 
@@ -344,7 +345,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             # The video hasn't been submitted before
             response = yield self.submit_video(
                 video_id,
-                self._get_video_url_to_download(vid_obj),
+                video_url,
                 video_title=unicode(vid_obj['name']),
                 default_thumbnail=thumb_url,
                 external_thumbnail_id=unicode(thumb_data['id']),

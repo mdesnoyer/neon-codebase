@@ -18,6 +18,7 @@ import multiprocessing
 import test_utils.redis
 import test_utils.neontest
 import tornado.gen
+import tornado.httpclient
 import tornado.testing
 import unittest
 from utils.imageutils import PILImageUtils
@@ -307,6 +308,80 @@ class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
             'http://bc.com/new_thumb.jpg?x=8', async=True)
         self.assertEquals(self.cdn_mock.call_count, 0)
 
+class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+
+        # Mock out the call to services
+        self.submit_mocker = patch('integrations.ovp.utils.http.send_request')
+        self.submit_mock = self._callback_wrap_mock(self.submit_mocker.start())
+        self.submit_mock.side_effect = \
+          lambda x: tornado.httpclient.HTTPResponse(
+              x, 201, buffer=StringIO('{"job_id": "job1"}'))
+        
+
+        # Create the platform object
+        self.platform = neondata.BrightcovePlatform('acct1', 'i1')
+        self.integration = integrations.brightcove.BrightcoveIntegration(
+            'a1', self.platform)
+
+        super(TestSubmitVideo, self).setUp()
+
+    def tearDown(self):
+        self.submit_mocker.stop()
+        self.redis.stop()
+
+        super(TestSubmitVideo, self).tearDown()
+
+    def _get_video_submission(self):
+        '''Returns, the url, parsed json submition'''
+        cargs, kwargs = self.submit_mock.call_args
+
+        response = cargs[0]
+        return response.url, json.loads(response.body)
+
+    @tornado.testing.gen_test
+    def test_submit_typical_bc_video(self):
+        job_id = yield self.integration.submit_one_video_object(
+            { 'id' : 'v1',
+              'referenceId': None,
+              'name' : 'Some video',
+              'length' : 100,
+              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+              'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : None,
+                  'remoteUrl' : None
+              },
+              'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
+              'thumbnail' : {
+                  'id' : 123456,
+                  'referenceId' : None,
+                  'remoteUrl' : None
+              },
+              'FLVURL' : 'http://video.mp4'
+            })
+
+        self.assertIsNotNone(job_id)
+        
+        url, submission = self._get_video_submission()
+        self.assertEquals(
+            url, ('http://services.neon-lab.com:80/api/v1/accounts/a1/'
+                  'neon_integrations/i1/create_thumbnail_api_request'))
+        self.maxDiff = None
+        self.assertDictEqual(
+            submission,
+            {'video_id': 'v1',
+             'video_url': 'http://video.mp4',
+             'video_title': 'Some video',
+             'callback_url': None,
+             'default_thumbnail': 'http://bc.com/vid_still.jpg?x=5',
+             'external_thumbnail_id': 'still_id',
+             'custom_data': { '_bc_int_data' :
+                              { 'bc_id' : 'v1', 'bc_refid': None }},
+             'duration' : 0.1
+             })
         
             
 if __name__ == '__main__':
