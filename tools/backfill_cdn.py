@@ -36,6 +36,7 @@ define('integration_id', default='0', help='integration id to processes.')
 define('worker_multiplier', default=1.0, 
        help=('Multiplier by the number of cores to figure out how many '
              'workers to use'))
+define('overwrite', default=0)
 
 import logging
 _log = logging.getLogger(__name__)
@@ -57,7 +58,8 @@ def process_thumb(thumb, hoster):
             return False
 
         # Now upload to the cdn
-        hoster.upload(image, thumb.key, overwrite=False,
+        overwrite = options.overwrite > 0
+        hoster.upload(image, thumb.key, overwrite=overwrite,
                       servingurl_overwrite=True)
 
     except Exception as e:
@@ -142,7 +144,7 @@ def main():
 
     proc_slots = max(multiprocessing.cpu_count() * options.worker_multiplier,
                      1)
-    pool = multiprocessing.Pool(proc_slots, init_worker,
+    pool = multiprocessing.Pool(int(proc_slots), init_worker,
                                 maxtasksperchild=50)
 
     try:
