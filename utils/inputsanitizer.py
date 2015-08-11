@@ -17,12 +17,12 @@ class InputSanitizer(object):
     def __init__(self):
         pass
 
-    @classmethod
-    def html_safe(cls, _input):
+    @staticmethod
+    def html_safe(_input):
         return _input.encode('ascii', 'xmlcharrefreplace')
 
-    @classmethod
-    def to_list(cls, _input):
+    @staticmethod
+    def to_list(_input):
         if isinstance(_input, basestring):
            pass
 
@@ -32,8 +32,8 @@ class InputSanitizer(object):
             return _input
         return json.loads(_input)
 
-    @classmethod
-    def to_bool(cls, _input, is_null_valid=False):
+    @staticmethod
+    def to_bool(_input, is_null_valid=False):
 
         if isinstance(_input, bool):
             return _input
@@ -52,8 +52,8 @@ class InputSanitizer(object):
         else:
             raise Exception("Conversion not supported")
 
-    @classmethod
-    def to_string(cls, _input):
+    @staticmethod
+    def to_string(_input):
         if isinstance(_input, basestring):
             return _input
 
@@ -66,8 +66,8 @@ class InputSanitizer(object):
         else:
            raise Exception("Conversion not supported")
 
-    @classmethod
-    def to_alphanumeric(cls, _input):
+    @staticmethod
+    def to_alphanumeric(_input):
         OK_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
         out = ''
         if isinstance(_input, basestring):
@@ -78,8 +78,8 @@ class InputSanitizer(object):
         else:
            raise Exception("Conversion not supported")
 
-    @classmethod
-    def to_urlchars(cls, _input):
+    @staticmethod
+    def to_urlchars(_input):
         OK_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789 .,!?:"
         out = ''
         for x in _input:
@@ -87,12 +87,12 @@ class InputSanitizer(object):
                 out += x
         return out
 
-    @classmethod
-    def to_no_unicode(cls, _input):
+    @staticmethod
+    def to_no_unicode(_input):
         return _input.encode('punycode')
 
-    @classmethod
-    def validate_http_url(cls, _input):
+    @staticmethod
+    def validate_http_url(_input):
         #TO BE FIXED, Dont' use
  
         '''
@@ -108,8 +108,8 @@ class InputSanitizer(object):
             r'(?:/?|[/?]\S+)$', re.IGNORECASE)
         return regex.match(_input)
 
-    @classmethod
-    def sanitize_null(cls, ip):
+    @staticmethod
+    def sanitize_null(ip):
 
         '''
         Sanitize null or undefined strings from tracker to python None
@@ -118,8 +118,14 @@ class InputSanitizer(object):
             return None
         return ip
 
-    @classmethod
-    def sanitize_int(cls, ip):
+    @staticmethod
+    def sanitize_string(ip):
+        if ip == "null" or ip == "undefined" or ip == "":
+            return None
+        return unicode(ip)
+
+    @staticmethod
+    def sanitize_int(ip):
         '''
         Sanitize null or undefined strings from tracker data to INT or None
         '''
@@ -127,8 +133,8 @@ class InputSanitizer(object):
             return None
         return int(ip)
 
-    @classmethod
-    def sanitize_float(cls, fl):
+    @staticmethod
+    def sanitize_float(fl):
         '''Sanitize null or undefined strings to float or None.'''
         if fl is None or fl == 'null' or fl == 'undefined':
             return None

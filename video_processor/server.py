@@ -668,6 +668,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             api_request = None 
             http_callback = params.get(CALLBACK_URL, None)
             default_thumbnail = params.get('default_thumbnail', None)
+            external_thumbnail_id = params.get('external_thumbnail_id', None)
             i_id = params.get(INTEGRATION_ID, '0')
             # Verify essential parameters
             try:
@@ -683,7 +684,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 title = params[VIDEO_TITLE]
                 url = params[VIDEO_DOWNLOAD_URL]
                 if not default_thumbnail:
-                    _log.info("no default image for the video %s" % vid)
+                    _log.debug("no default image for the video %s" % vid)
                 
 
             except KeyError, e:
@@ -707,6 +708,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             job_id = hashlib.md5(intermediate).hexdigest()
           
             # Identify Request Type
+            # TODO: Remove the special treatment for brightcove and ooyala
             if "brightcove" in self.request.uri:
                 pub_id  = params[PUBLISHER_ID] #publisher id
                 rtoken = params[BCOVE_READ_TOKEN]
@@ -741,12 +743,17 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
 
             else:
                 request_type = "neon"
-                api_request = neondata.NeonApiRequest(job_id, api_key, vid,
-                                                      title, url,
-                                                      request_type,
-                                                      http_callback,
-                                                      default_thumbnail,
-                                                      integration_id=i_id)
+                api_request = neondata.NeonApiRequest(
+                    job_id,
+                    api_key,
+                    vid,
+                    title,
+                    url,
+                    request_type,
+                    http_callback,
+                    default_thumbnail,
+                    integration_id=i_id,
+                    external_thumbnail_id=external_thumbnail_id)
                 statemon.state.increment('neon_requests')
             
             # API Method

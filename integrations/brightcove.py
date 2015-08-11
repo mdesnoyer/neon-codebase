@@ -403,8 +403,18 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         found_thumb = False
         min_rank = 1
         for thumb in thumbs:
+            # Change the thumbnail type because the BRIGHTCOVE type is
+            # deprecated
+            if thumb.type == neondata.ThumbnailType.BRIGHTCOVE:
+                def _set_type(obj):
+                    obj.type = neondata.ThumbnailType.DEFAULT
+                thumb = yield tornado.gen.Task(
+                    neondata.ThumbnailMetadata.modify,
+                    thumb.key,
+                    _set_type)
+            
             if (thumb is None or 
-                thumb.type != neondata.ThumbnailType.BRIGHTCOVE):
+                thumb.type != neondata.ThumbnailType.DEFAULT):
                 continue
 
             if thumb.rank < min_rank:

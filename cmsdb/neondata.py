@@ -744,8 +744,8 @@ class ThumbnailType(object):
     ''' Thumbnail type enumeration '''
     NEON        = "neon"
     CENTERFRAME = "centerframe"
-    BRIGHTCOVE  = "brightcove"
-    OOYALA      = "ooyala"
+    BRIGHTCOVE  = "brightcove" # DEPRECATED. Will be DEFAULT instead
+    OOYALA      = "ooyala" # DEPRECATED. Will be DEFAULT instead
     RANDOM      = "random"
     FILTERED    = "filtered"
     DEFAULT     = "default" #sent via api request
@@ -2958,7 +2958,8 @@ class NeonApiRequest(NamespacedStoredObject):
 
     def __init__(self, job_id, api_key=None, vid=None, title=None, url=None, 
             request_type=None, http_callback=None, default_thumbnail=None,
-            integration_type='neon', integration_id='0'):
+            integration_type='neon', integration_id='0',
+            external_thumbnail_id=None):
         super(NeonApiRequest, self).__init__(
             self._generate_subkey(job_id, api_key))
         self.job_id = job_id
@@ -2975,6 +2976,7 @@ class NeonApiRequest(NamespacedStoredObject):
         self.integration_type = integration_type
         self.integration_id = integration_id
         self.default_thumbnail = default_thumbnail # URL of a default thumb
+        self.external_thumbnail_id = external_thumbnail_id
 
         # Save the request response
         self.response = {}  
@@ -3172,7 +3174,8 @@ class NeonApiRequest(NamespacedStoredObject):
         meta = ThumbnailMetadata(
             None,
             ttype=thumb_type,
-            rank=cur_rank)
+            rank=cur_rank,
+            external_id=self.external_thumbnail_id)
         yield video.download_and_add_thumbnail(meta,
                                                thumb_url,
                                                cdn_metadata,

@@ -445,9 +445,38 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(video.duration, 12345.6)
         self.assertFalse(video.serving_enabled)
         self.assertEqual(video.job_id, job_id)
+        self.assertEqual(video.thumbnail_ids, [])
 
         job = neondata.NeonApiRequest.get(video.job_id, self.api_key)
         self.assertEqual(job.integration_id, 'iid2')
+        self.assertEqual(job.callback_url, 'http://callback_push_url')
+        self.assertEqual(job.video_title, 'test_title')
+
+    def test_default_thubmnail(self):
+        internal_video_id = \
+          neondata.InternalVideoID.generate(self.api_key, 'vid1')
+        vals = {
+            "api_key": self.api_key, 
+            "video_url": "http://testurl/video.mp4", 
+            "video_id": 'vid1',
+            "topn":2, 
+            "callback_url": "http://callback_push_url", 
+            "video_title": "test_title",
+            "integration_id" : 'iid2',
+            "default_thumbnail" : 'default_thumb.jpg',
+            "external_thumbnail_id" : 'ext_thumb_id'
+            }
+        resp = self.make_api_request(vals)
+        self.assertEqual(resp.code, 201)
+        job_id = json.loads(resp.body)['job_id']
+        self.assertIsNotNone(job_id)
+
+        video = neondata.VideoMetadata.get(internal_video_id)
+        thumb = neondata.ThumbnailMetadata.get(video.thumbnail_ids[0])
+        self.assertEquals(thumb.type, neondata.ThumbnailType.DEFAULT)
+        self.assertEquals(thumb.external_id, 'ext_thumb_id')
+        self.assertIn('default_thumb.jpg', thumb.urls)
+        
 
     def test_brightcove_request(self):
 

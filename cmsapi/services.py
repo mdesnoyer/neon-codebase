@@ -669,7 +669,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     @tornado.gen.coroutine
     def submit_neon_video_request(self, api_key, video_id, video_url, 
                                   video_title, topn, callback_url, 
-                                  default_thumbnail, integration_id=None):
+                                  default_thumbnail, integration_id=None,
+                                  external_thumbnail_id=None):
 
         '''
         Create the call in to the Video Server
@@ -683,6 +684,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 video_url.split('//')[-1] if video_title is None else video_title 
         request_body["video_url"] = video_url
         request_body["default_thumbnail"] = default_thumbnail 
+        request_body["external_thumbnail_id"] = external_thumbnail_id
         client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
                         % options.video_server 
         if options.local == 1:
@@ -739,10 +741,15 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         video_url = self.get_argument('video_url', "")
         video_url = video_url.replace("www.dropbox.com", 
                                 "dl.dropboxusercontent.com")
-        video_title = self.get_argument('video_title', None)
+        video_title = InputSanitizer.sanitize_string(
+            self.get_argument('video_title', None))
         topn = self.get_argument('topn', 1)
         callback_url = self.get_argument('callback_url', None)
         default_thumbnail = self.get_argument('default_thumbnail', None)
+        external_thumb_id = None
+        if default_thumbnail is not None:
+            external_thumb_id = InputSanitizer.sanitize_string(
+                self.get_argument('external_thumbnail_id', None))
         try:
             custom_data = InputSanitizer.to_dict(
                 self.get_argument('custom_data', {}))
@@ -780,9 +787,16 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         yield tornado.gen.Task(video.save)
         
         #Create Neon API Request
-        yield self.submit_neon_video_request(self.api_key, video_id, video_url,
-                                             video_title, topn, callback_url,
-                                             default_thumbnail, integration_id)
+        yield self.submit_neon_video_request(
+            self.api_key,
+            video_id,
+            video_url,
+            video_title,
+            topn,
+            callback_url,
+            default_thumbnail,
+            integration_id,
+            external_thumb_id)
 
     @tornado.gen.coroutine
     def create_neon_video_request_from_ui(self, i_id):
